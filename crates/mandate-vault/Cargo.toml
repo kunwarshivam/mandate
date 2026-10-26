@@ -11,7 +11,6 @@ workspace = true
 
 [dependencies]
 base64.workspace = true
-mandate-canon.workspace = true
 mandate-connections.workspace = true
 mandate-time.workspace = true
 mandate-vault-local.workspace = true

@@ -6,8 +6,8 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 
 use mandate_api::envelope::{
-    Actor, ApiVersion, Record, StepUpAction, StepUpActionKind, StepUpAssertion, StepUpEvidence,
-    StepUpMethod, StepUpStatus, Watermark,
+    Actor, ApiVersion, Record, StepUpAction, StepUpActionKind, StepUpEvidence, StepUpMethod,
+    StepUpStatus, Watermark,
 };
 use mandate_api::problem::{Problem, Violation};
 use mandate_api::requests::{
@@ -151,7 +151,6 @@ fn every_struct_names_exactly_its_schemas_members() {
     members::<Watermark>(&[watermark], None);
     members::<Record>(&[&defs["Record"]], None);
     members::<StepUpEvidence>(&[&defs["StepUpEvidence"]], None);
-    members::<StepUpAssertion>(&[&defs["StepUpAssertion"]], None);
     members::<StepUpAction>(&[&defs["StepUpAction"]], None);
     members::<Actor>(&[&defs["Actor"]["oneOf"][0]], Some(("kind", "user")));
     members::<Actor>(&[&defs["Actor"]["oneOf"][1]], Some(("kind", "client")));

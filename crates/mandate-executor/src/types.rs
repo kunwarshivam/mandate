@@ -170,20 +170,14 @@ pub enum AccountWide {
 /// private, so nothing outside this crate can construct one, and the field is an
 /// [`AccountWide`], which has no agent variant, so nothing inside it can build one for an agent
 /// either. That is how `AGENTS.md` rule 13 is made unrepresentable rather than merely forbidden
-/// (trading-domain spec §5.5, task brief interpretation 18). The account kill switch builds it
-/// ([`AccountWideScope::new`]); the workspace scope will too.
+/// (trading-domain spec §5.5, task brief interpretation 18). The account and workspace
+/// kill-switch paths construct it in the implementation PR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountWideScope {
     scope: AccountWide,
 }
 
 impl AccountWideScope {
-    /// The witness for an account or workspace kill switch: only `kill.rs`'s account-wide path
-    /// builds one, from the scope its command named.
-    pub(crate) fn new(scope: AccountWide) -> Self {
-        Self { scope }
-    }
-
     /// Which of the two account-wide scopes this is. There is no public constructor.
     pub fn scope(&self) -> &AccountWide {
         &self.scope

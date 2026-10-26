@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). §4.6.1 adds the desk, the cited-record read, and the transcript view, and §4.3's approval read its explanation (E12-5, E19-15; [DEC-2240](../project/decisions/DEC-2240.md), agent readings; the disclaimer is [DEC-2241](../project/decisions/DEC-2241.md)'s placeholder, Proposed). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading). §3.11 item 2 lets a `dev` or `ci` cell point the issuer settings at the local stub issuer (E21-52; [DEC-2100](../project/decisions/DEC-2100.md), an agent reading). §3.11 items 11 and 12 serve versions, confirmation, deployment, resume, Stop, owner exit, acknowledgment, and command status (E10-11, E10-12; [DEC-2101](../project/decisions/DEC-2101.md), [DEC-2102](../project/decisions/DEC-2102.md), agent readings). §4.10 names the caller's principal on one's own session and serves one's own memberships from a hosted deployment's control stream (E10-10; [DEC-2113](../project/decisions/DEC-2113.md), an agent reading). §3.6 adds the passkey registration challenge, enrolment, and list routes (E9-4; [DEC-2108](../project/decisions/DEC-2108.md), [DEC-2115](../project/decisions/DEC-2115.md), agent readings), and settles a retried registration challenge, the passkey id's shape, the step-up pair, and the stale first enrolment ([DEC-2118](../project/decisions/DEC-2118.md), agent readings). §4.10 specifies route 2's reduction-session challenge and opening routes, their limits, the device cookie, and the session's reach (E9-1; [DEC-2117](../project/decisions/DEC-2117.md), an agent reading). §4.10 route 2's challenge limits answer the one 401 and its failure limit only reports, as DEC-653 item 3 says (E9-1; [DEC-2119](../project/decisions/DEC-2119.md), an agent reading). §5.6 says how the executor reads the compromise batch's kill switch itself, applies it agent by agent until the account-wide form lands, and what the owner is told (E7-4; [DEC-2343](../project/decisions/DEC-2343.md), an agent reading). §3.6's passkey routes read one fold of the member's passkeys, answer a broken one `journal_unavailable`, date a passkey by its row's `recorded_at`, and count a first enrolment's 300 s from the session's sign-in (E9-4; [DEC-2124](../project/decisions/DEC-2124.md), agent readings). §3.6 and §4.5 give a connect's start passkey step-up, its `step_up_assertion` beside `step_up` and `StepUpAsserted` in its batch, and say when DEC-2125's `cli_confirm` for a connect ends (E9-4; [DEC-2126](../project/decisions/DEC-2126.md), agent readings). §3.11 item 10 serves a paper grant under `cli_confirm`, recorded as the CLI records it (E9-4; [DEC-2129](../project/decisions/DEC-2129.md), agent readings, item 7 the founder's; whom a reference names, as the runtime resolves it: [DEC-2130](../project/decisions/DEC-2130.md)) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). §4.6.1 adds the desk, the cited-record read, and the transcript view, and §4.3's approval read its explanation (E12-5, E19-15; [DEC-2240](../project/decisions/DEC-2240.md), agent readings; the disclaimer is [DEC-2241](../project/decisions/DEC-2241.md)'s placeholder, Proposed). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading). §3.11 item 2 lets a `dev` or `ci` cell point the issuer settings at the local stub issuer (E21-52; [DEC-2100](../project/decisions/DEC-2100.md), an agent reading). §3.11 items 11 and 12 serve versions, confirmation, deployment, resume, Stop, owner exit, acknowledgment, and command status (E10-11, E10-12; [DEC-2101](../project/decisions/DEC-2101.md), [DEC-2102](../project/decisions/DEC-2102.md), agent readings). §4.10 names the caller's principal on one's own session and serves one's own memberships from a hosted deployment's control stream (E10-10; [DEC-2113](../project/decisions/DEC-2113.md), an agent reading). §3.6 adds the passkey registration challenge, enrolment, and list routes (E9-4; [DEC-2108](../project/decisions/DEC-2108.md), [DEC-2115](../project/decisions/DEC-2115.md), agent readings), and settles a retried registration challenge, the passkey id's shape, the step-up pair, and the stale first enrolment ([DEC-2118](../project/decisions/DEC-2118.md), agent readings). §4.10 specifies route 2's reduction-session challenge and opening routes, their limits, the device cookie, and the session's reach (E9-1; [DEC-2117](../project/decisions/DEC-2117.md), an agent reading). §4.10 route 2's challenge limits answer the one 401 and its failure limit only reports, as DEC-653 item 3 says (E9-1; [DEC-2119](../project/decisions/DEC-2119.md), an agent reading) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -412,20 +412,6 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   - `GET /v1/workspaces/{ws}/passkeys`, operation name `passkeys`: the member's passkeys the
     control stream holds, enrolled and not removed, in enrolment order
     (`read-models/passkeys`), with no step-up: a read of one's own opaque ids grants nothing.
-    Each passkey's `enrolled_at` is its `CredentialEnrolled` row's `recorded_at`, as this API's
-    other reads date a record. That is the journal host's clock, while `cool_off_ends` is the API's
-    at the commit, so the two can differ by the hosts' skew.
-  - All three routes read the member's passkeys from one fold of the control stream,
-    `mandate_passkey::credentials::CredentialFold::passkeys` ([DEC-2124](../project/decisions/DEC-2124.md)):
-    the list serves it, `exclude` is its ids, and `step_up_needed` is true when it is not empty,
-    a passkey still cooling off included. When the member's records break stream rule 251 or 254
-    and the fold refuses them, each route answers `journal_unavailable`, as for a control stream
-    it cannot read: none serves, excludes, or enrols from records it does not trust. So a member
-    whose records are broken cannot enrol a replacement either; an operator repairs the stream
-    (DEC-2124). Route 2's
-    opening (§4.10) reads `CredentialFold::held` and is unchanged. A session is "opened" at the
-    sign-in that opened it (identity spec §6); a later refresh renews its tokens and does not
-    reopen it, so the 300 s of a first enrolment count from that sign-in.
   - Removal, `POST /v1/workspaces/{ws}/passkeys/{passkey_id}/removal` with kind `credential_enrol`
     and `{"op": "remove", "credential": <passkey_id>}` (DEC-2108 item 6), lands with its own story
     slice; until then the route does not exist.
@@ -435,32 +421,14 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   the API's check is a convenience, except that it never forwards evidence bound to another action.
 - Until E9-4 ships, the CLI's only method is `cli_confirm`, paper only (mandate spec §6.1). The API
   refuses every `live` step-up with `live_unavailable`. For a call made in the web app the API
-  verifies `passkey`, and `cli_confirm` only for a paper `approve` grant or, until passkey step-up
-  confirms a connect, a paper OAuth connect's start (DEC-2125, decided by the founder), confirmed
-  in the CLI by the same principal against a challenge this server issued for that action, within
-  its 300 s and once (DEC-2103 item 7, decided by the founder, DEC-2605 row 5); any other
-  `cli_confirm` is `step_up_method`. The web app shows the challenge's code, the first 40 bits of
-  its `webauthn_challenge` as 8 Crockford base-32 characters; the owner confirms it on the host with
-  `mandate step-up confirm` (a connect: `mandate step-up confirm-connect`), which appends
-  `StepUpConfirmed` ([journal spec
+  verifies `passkey`, and `cli_confirm` only for a paper `approve` grant, confirmed in the CLI by
+  the same principal against a challenge this server issued for that action, within its 300 s and
+  once (DEC-2103 item 7, decided by the founder, DEC-2605 row 5); any other `cli_confirm` is
+  `step_up_method`. The web app shows the challenge's code, the first 40 bits of its
+  `webauthn_challenge` as 8 Crockford base-32 characters; the owner confirms it on the host with
+  `mandate step-up confirm`, which appends `StepUpConfirmed` ([journal spec
   §9.29](journal.md#929-the-clis-step-up-confirmation-dec-2104)); and the API verifies the grant's
   evidence against that record in [DEC-2104](../project/decisions/DEC-2104.md) item 6's order.
-- A connect's start takes passkey step-up too ([DEC-2126](../project/decisions/DEC-2126.md)). Its
-  request carries the assertion as `step_up_assertion`, DEC-2108 item 7's object, beside `step_up`.
-  The member is optional, so a `cli_confirm` start under DEC-2125 still decodes. An assertion with
-  a `null` step-up, or beside `cli_confirm`, is `invalid` with one violation at
-  `/step_up_assertion`, code `condition`. A `passkey` step-up with no assertion is
-  `step_up_missing`. The port sends `passkey` evidence to DEC-2108 item 8's verifier and
-  `cli_confirm` to DEC-2104's. The passkey verifier takes the held challenge and reads the member's
-  passkeys and each one's last counter from the same fold of the control stream the passkey routes
-  read ([DEC-2124](../project/decisions/DEC-2124.md)), so it counts no passkey those routes would
-  not list, and the removal route, when it lands, judges by the same fold. A credential enrolled at `CredentialEnrolled` version 1 never counts (DEC-2122 item 3). A
-  fold whose member is broken is `step_up_missing`, never a pass, and a stream the fold cannot
-  read is `journal_unavailable`. A start that passes stores the assertion's canonical bytes as an
-  artifact and appends `ConnectionRequested` and `StepUpAsserted` in one batch, in that order
-  (journal spec §9.32 rules 253 and 254). A refused start appends nothing. DEC-2125's `cli_confirm`
-  for a connect ends for a member once S4 has landed and that member holds a passkey past its
-  cool-off (DEC-2126 item 6). **(planned: E9-4)**
 
 ### 3.7 Roles
 
@@ -713,18 +681,8 @@ per workspace deployment (item 6).
       hold it could not read would stop it at that event, the kill switch behind it included.
     - An approval's Skip (§5.2) is recorded as the CLI records it, as `ApprovalResponseSubmitted`
       with `step_up: null`; the runtime judges the deadline, the state, the content hash, and the
-      approvers. An `approved` in `paper` is served under `cli_confirm` (DEC-2104,
-      [DEC-2129](../project/decisions/DEC-2129.md)): judged through the port's `asserted` with kind
-      `approve` and the content hash as digest, it commits one `ApprovalResponseSubmitted` whose
-      payload is what `mandate approvals approve` writes, its evidence's `authenticated_at`
-      truncated down to the whole second journal spec §9.7 types. An approval already answered or
-      past its deadline is recorded and refused by the runtime, as the CLI's is. A grant from a user
-      the bound mandate version does not list in `autonomy.approval.approvers` is `forbidden`, as
-      §5.2 says, and the runtime's own check 3 still judges it (DEC-2129 item 7, the founder's). The
-      first failing check answers: an unknown approval, the matrix row, the approvers, a grant with
-      a delegation (§5.3), `invalid` at `/delegation` until §5.3 is served, `live`, then step-up.
-      A passkey grant waits for its own change.
-      **(planned: E9-4)**
+      approvers. An `approved` is refused `step_up_required` or `step_up_missing` until step-up
+      is bound (DEC-1007 item 10).
 11. **Versions, confirmation, and deployment** ([DEC-2101](../project/decisions/DEC-2101.md),
     E10-11, E10-12). The server serves five routes of §4.1 and §4.2, with these operation names for
     §3.4: `POST /mandate-versions` (`create_version`), `GET
@@ -969,16 +927,14 @@ restrictions, and the loss carry are planned as optional members. **(planned: E1
 **The connect start** ([DEC-2623](../project/decisions/DEC-2623.md)). `POST
 /connections/oauth/start` takes `commands/oauth-start-request`: `broker` (`alpaca`), `environment`,
 `disclosure` (the token-breadth disclosure's document and version, which the connect digest binds,
-[DEC-2621](../project/decisions/DEC-2621.md) item 4), `step_up`, and, for passkey step-up, its
-`step_up_assertion` (§3.6, [DEC-2126](../project/decisions/DEC-2126.md)). It answers `201` with
+[DEC-2621](../project/decisions/DEC-2621.md) item 4), and `step_up`. It answers `201` with
 `commands/oauth-start-response`: `authorization_url`, `expires_at`, and the pending
 `connection_id`. One code per response, in this order: §3.4's session, CSRF mark, key, and body
 checks; the `BrokerConnection` permission, and `live_unavailable` for a `live` workspace; `invalid`
 at `/disclosure` for a version other than the current one; §3.5's step-up codes; then
 `live_unavailable` for `environment` `live`, `journal_unavailable` for a control-stream fold that
 cannot answer, and `idempotency_conflict` for a request already open, an establishment, or a used
-`account_ref` under the key's derived ids. A refused start appends nothing; a passing one under
-passkey step-up appends `StepUpAsserted` right after `ConnectionRequested` (§3.6). The `connection_id` and
+`account_ref` under the key's derived ids. A refused start appends nothing. The `connection_id` and
 `account_ref` are derived from the key, so a retry names the same pending connection; while its
 `state` is held and unredeemed the retry answers the same `201`, and after that the key is spent
 (`idempotency_conflict`). The redirect URI is the deployment's own, an API setting, and a deployment
@@ -1737,13 +1693,11 @@ id and is used once, so a retried opening asks for a new challenge.
    body, and headers, no cookie set or cleared. Past the challenge, every request runs the same
    steps whatever it names:
    - the passkey lookup reads the whole fold and does not stop at a match;
-   - the signature is verified first, before anything is judged, by exactly one ES256 and one
-     Ed25519 check over the same signature, ES256 first, whatever the request names: the
-     passkey's key for its own algorithm and a fixed decoy key for the other, or both decoys
-     when the passkey is unknown or its key does not resolve, since a check of the wrong shape
-     costs no arithmetic and checking one algorithm alone would tell a held key, and its
-     algorithm, by time ([DEC-2324](../project/decisions/DEC-2324.md)); only the held key's check
-     answers, and a decoy's never does;
+   - the signature is verified first, before anything is judged: against the passkey's key, or,
+     for an unknown passkey, against a fixed decoy key chosen by the signature's encoding, since
+     an assertion's authenticator data names no algorithm: an ECDSA signature's DER structure is
+     verified against the ES256 decoy, 64 raw bytes against the Ed25519 decoy, and any other
+     shape against the ES256 decoy;
    - the membership and provider-refusal lookups always run, against a fixed decoy principal when
      the passkey is unknown;
    - only then are the results judged, together.
@@ -2022,41 +1976,16 @@ The API commits one batch, in this order: `OwnerCommandIssued` with `kill_switch
 connection's scope, then `ConnectionRevoked` with reason `compromised`. Revocation never waits on
 positions, on fills, or on the regular session. The executor processes the batch in `seq` order:
 
-1. **The kill switch first** (trading spec §5.5): every agent on the connection to `stopped`, and,
-   in its account-wide form (DEC-2333's slice A2b), the broker's cancel-all and close-position
-   requests sent with the executor's current lease; until then, agent by agent, as below.
+1. **The kill switch first** (trading spec §5.5): every agent on the connection to `stopped`, the
+   broker's cancel-all and close-position requests sent with the executor's current lease.
    Whatever the broker accepts, queues, or fills stands at the broker after revocation; nothing on
    our side holds or cancels it (rule 13).
-   - **The executor reads it itself** ([DEC-2343](../project/decisions/DEC-2343.md)). The
-     runtime's copy of the kill switch on each agent's stream is written only after the batch, so
-     after the revocation, and a stopped agent has no runtime to copy it at all. The executor
-     therefore reads the control stream's `OwnerCommandIssued` `kill_switch` of connection or
-     workspace scope itself, in `seq` order, for every agent it follows that was deployed before the
-     command and whose connection has a `ConnectionRevoked` at or after the command, or that has an
-     `AgentStopped`; it reads an agent-scope `kill_switch` naming a stopped agent the same way. A
-     revocation never
-     ends the following of an agent whose version-2 deployment named the connection before it: the
-     executor keeps reading that agent's kill switches, exits, and protective re-placements. It
-     hands an agent's openings only while the agent's latest version-2 deployment, on any
-     connection, names a connection whose latest establishment or revocation is a version-2
-     establishment naming this account, so none after the revocation, and none once the agent is
-     deployed on another account. The runtime's copy of a switch already applied this way counts as
-     applied, and is never applied a second time.
-   - **Agent by agent, until the account-wide form lands.** Until DEC-2333's slice A2b, the
-     executor applies the switch as the agent-scoped switch of each agent it follows on the
-     connection: that agent's own orders cancelled by id and its sub-ledger sold (trading spec
-     §5.5), never `cancel-all` or `close-position`. An order the owner placed on the connection
-     outside the platform, or any order no agent's ledger holds, is not cancelled by it until then.
 2. **Then the revocation:** the executor sends nothing more with that credential, the vault
    destroys it and ends every lease (infrastructure §5.4), and, where the broker offers token
    revocation (OAuth), the platform revokes the token there.
 3. **What is left is the owner's, and the owner is told so.** An exit the executor would have
    deferred and re-driven later (equities outside the regular session) is not re-driven, because no
-   credential remains; step 1 asked the broker to cancel the protection. Until A2b, the
-   confirmation and the alert never say or imply that every order on the connection was canceled,
-   nor that any cancel was already confirmed when they are sent: they say that the platform's own
-   orders were asked to cancel, and that any order placed outside the platform stays at the
-   broker. The confirmation and the alert say which
+   credential remains; protection was canceled by step 1. The confirmation and the alert say which
    positions remain at the broker, unprotected, and that the owner must also revoke the leaked key
    at the broker, since revoking it on our side does not stop someone else who holds it. This
    residual is listed for the threat model (#557).

@@ -61,45 +61,6 @@ pub fn connect_check<S: Store, B: Broker>(
         return Err("pii_ref_invalid");
     }
     let pii = AccountPiiRef::new(pii_ref).map_err(|_| "pii_ref_invalid")?;
-    journal_check(store, ids, scope, now, || {
-        let account = match broker.call(&BrokerRequest::GetAccount) {
-            Ok(BrokerOutcome::Account(_)) => AccountRead::Read {
-                pii_ref: pii,
-                dedicated: None,
-            },
-            _ => AccountRead::Unreadable,
-        };
-        run(&CheckInput {
-            connection_id,
-            broker: Venue::Alpaca,
-            environment: Reach::Paper,
-            auth_kind: AuthKind::ApiKey,
-            occasion: Occasion::Connect,
-            granted: Granted::KeyPermissions(None),
-            account,
-            contract: None,
-            pinned_contract: None,
-        })
-        .map_err(|_| "check_refused")
-    })
-}
-
-/// Takes the account stream of `scope`, then has `report` run the checks, and appends
-/// `StreamOpened` (a new stream only) and the `ConnectionChecked` of its report at `now` in one
-/// batch. `report` runs only once the stream is this writer's, so what it reads or writes for the
-/// check happens after any executor already running there is fenced.
-///
-/// # Errors
-/// `stream_unavailable` when the account stream cannot be taken or read, `report`'s own code,
-/// `check_refused` when a record cannot be drafted, and `append_refused` when the journal does not
-/// commit the batch.
-pub(crate) fn journal_check<S: Store>(
-    store: &mut S,
-    ids: &dyn IdGen,
-    scope: &AccountScope,
-    now: UtcNanos,
-    report: impl FnOnce() -> Result<CheckReport, &'static str>,
-) -> Result<Checked, &'static str> {
     let stream = StreamId::parse(&format!("acct:{}:{}", scope.workspace.0, scope.account.0))
         .ok_or("stream_unavailable")?;
     let epoch = store.take_ownership(&stream).ok_or("stream_unavailable")?;
@@ -107,7 +68,25 @@ pub(crate) fn journal_check<S: Store>(
         .rows(&stream)
         .map(|rows| u64::try_from(rows.len()).unwrap_or(u64::MAX))
         .ok_or("stream_unavailable")?;
-    let report = report()?;
+    let account = match broker.call(&BrokerRequest::GetAccount) {
+        Ok(BrokerOutcome::Account(_)) => AccountRead::Read {
+            pii_ref: pii,
+            dedicated: None,
+        },
+        _ => AccountRead::Unreadable,
+    };
+    let report = run(&CheckInput {
+        connection_id,
+        broker: Venue::Alpaca,
+        environment: Reach::Paper,
+        auth_kind: AuthKind::ApiKey,
+        occasion: Occasion::Connect,
+        granted: Granted::KeyPermissions(None),
+        account,
+        contract: None,
+        pinned_contract: None,
+    })
+    .map_err(|_| "check_refused")?;
     let id = |ordinal: u32| ids.event_id(WriterEpoch(epoch), Seq(head), ordinal).0;
     let envelope = Envelope {
         stream: stream.as_str(),

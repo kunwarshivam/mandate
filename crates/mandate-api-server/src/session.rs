@@ -15,8 +15,8 @@ use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard};
 
 use mandate_authn::{
-    EndReason, OrgKind, ProviderAnswer, REDUCTION_ONLY_LIFETIME_S, Reach, RefreshSecret, Refreshed,
-    Request, SessionLimits, SessionPolicy, SessionRecord, SessionRefusal, SubjectStanding,
+    EndReason, OrgKind, ProviderAnswer, Reach, RefreshSecret, Refreshed, Request, SessionLimits,
+    SessionPolicy, SessionRecord, SessionRefusal,
 };
 use mandate_identity::{PrincipalId, SessionKind, SessionRef};
 use mandate_time::UtcNanos;
@@ -24,7 +24,6 @@ use ring::rand::{SecureRandom, SystemRandom};
 use ring::{digest, hmac};
 
 use crate::config::SessionKey;
-use crate::standing::Standings;
 
 /// The session cookie's name (§3.3 item 5): host-only, `Secure`, `HttpOnly`, `SameSite=Strict`.
 pub const COOKIE_NAME: &str = "__Host-mandate_session";
@@ -109,24 +108,14 @@ pub struct Authenticated {
     pub reference: SessionRef,
     /// Full, or reduction-only once an outage narrowed it (identity spec §6.4 route 1).
     pub kind: SessionKind,
-    /// The sign-in that opened the session; a refresh renews its tokens and leaves this
-    /// ([DEC-2124](../../../docs/project/decisions/DEC-2124.md) item 4).
-    pub signed_in: UtcNanos,
 }
 
 struct Entry {
     record: SessionRecord,
     principal: PrincipalId,
-    /// The subject-link digest a sign-in opened it for; `None` for a route-2 session, which no
-    /// subject opened.
-    subject: Option<String>,
-    /// The digest of a route-2 session's cookie secret, which its record keeps no refresh digest
-    /// for; `Some` is also the marker that route 2 opened it, which no answer exposes.
-    passkey: Option<[u8; 32]>,
+    subject: String,
     reference: SessionRef,
     opened: u64,
-    /// When the sign-in opened it, which no refresh moves.
-    signed_in: UtcNanos,
     absolute_until: i64,
     last_active: i64,
     /// The digest of the secret the last granted refresh rotated away, and when.
@@ -158,8 +147,6 @@ pub struct Sessions {
     random: Box<dyn Random>,
     limits: Result<SessionLimits, SessionRefusal>,
     store: Mutex<Store>,
-    /// Each principal's last sign-in, route 2's interim standing (DEC-2319 item 2).
-    standings: Standings,
 }
 
 impl Sessions {
@@ -173,7 +160,6 @@ impl Sessions {
                 opened: 0,
                 entries: BTreeMap::new(),
             }),
-            standings: Standings::new(),
         }
     }
 
@@ -205,86 +191,20 @@ impl Sessions {
         let reference: [u8; 16] = self.fresh()?;
         let record = SessionRecord::open(limits, &RefreshSecret(secret), now)
             .map_err(|_| Unauthenticated)?;
-        let entry = Entry {
-            record,
-            principal,
-            subject: Some(subject),
-            passkey: None,
-            reference: SessionRef(u128::from_be_bytes(reference)),
-            opened: 0,
-            signed_in: now,
-            absolute_until: now.secs().saturating_add(limits.absolute_s()),
-            last_active: now.secs(),
-            previous: None,
-        };
-        self.insert(id, entry, replaced, now)?;
-        self.standings.signed_in(principal, now);
-        Ok(self.encode(&id, &secret))
-    }
-
-    /// Opens a reduction-only session (§4.10 route 2 item 5) for `principal`, whose passkey
-    /// assertion the caller verified, at `now`, unless `standing` shows a deprovision signal at or
-    /// after the subject's last successful sign-in. It lasts
-    /// [`mandate_authn::REDUCTION_ONLY_LIFETIME_S`] from `now`, absolute, is never refreshed,
-    /// reaches only pause, the kill switch, and sign-out, and counts toward `principal`'s
-    /// [`MAX_PER_PRINCIPAL`]. It ends the session `replaced` names, as [`Sessions::open`] does, and
-    /// only once everything that can fail has passed, so a refused open ends nothing.
-    ///
-    /// # Errors
-    /// [`Unauthenticated`] for a deprovisioned subject, a full store, or no randomness.
-    pub fn open_reduction_only(
-        &self,
-        principal: PrincipalId,
-        standing: SubjectStanding,
-        replaced: Option<&str>,
-        now: UtcNanos,
-    ) -> Result<Cookie, Unauthenticated> {
-        let id: Id = self.fresh()?;
-        let secret: Secret = self.fresh()?;
-        let reference: [u8; 16] = self.fresh()?;
-        let record =
-            SessionRecord::open_reduction_only(standing, now).map_err(|_| Unauthenticated)?;
-        let entry = Entry {
-            record,
-            principal,
-            subject: None,
-            passkey: Some(digest_of(&secret)),
-            reference: SessionRef(u128::from_be_bytes(reference)),
-            opened: 0,
-            signed_in: now,
-            absolute_until: now.secs().saturating_add(REDUCTION_ONLY_LIFETIME_S),
-            last_active: now.secs(),
-            previous: None,
-        };
-        self.insert(id, entry, replaced, now)?;
-        Ok(self.encode(&id, &secret))
-    }
-
-    /// Holds `entry` under `id` at `now`, ending the session `replaced` names, if any, and
-    /// `entry`'s principal's oldest when it already holds [`MAX_PER_PRINCIPAL`]. Nothing changes
-    /// when the store is full.
-    fn insert(
-        &self,
-        id: Id,
-        mut entry: Entry,
-        replaced: Option<&str>,
-        now: UtcNanos,
-    ) -> Result<(), Unauthenticated> {
-        let limits = self.limits.map_err(|_| Unauthenticated)?;
         let replaced = replaced.and_then(|cookie| self.decode(cookie));
         let mut store = self.store();
         let idle_s = limits.idle_s();
         store
             .entries
-            .retain(|_, held| live(held, now.secs(), idle_s));
+            .retain(|_, entry| live(entry, now.secs(), idle_s));
         let replaced = replaced
             .map(|(id, _)| id)
             .filter(|id| store.entries.contains_key(id));
         let mut held: Vec<(u64, Id)> = store
             .entries
             .iter()
-            .filter(|(id, held)| held.principal == entry.principal && Some(**id) != replaced)
-            .map(|(id, held)| (held.opened, *id))
+            .filter(|(id, entry)| entry.principal == principal && Some(**id) != replaced)
+            .map(|(id, entry)| (entry.opened, *id))
             .collect();
         held.sort_unstable();
         let evicted = (held.len() >= MAX_PER_PRINCIPAL)
@@ -298,26 +218,21 @@ impl Sessions {
             store.entries.remove(&id);
         }
         store.opened = store.opened.saturating_add(1);
-        entry.opened = store.opened;
-        store.entries.insert(id, entry);
-        Ok(())
-    }
-
-    /// Whether the session `cookie` names is live at `now` and was opened by route 2, the marker
-    /// no answer exposes: `POST /v1/sessions/refresh` answers it `reduction_only` and keeps it
-    /// (§4.10 route 2 item 5). It changes nothing.
-    pub fn opened_by_passkey(&self, cookie: &str, now: UtcNanos) -> bool {
-        let Ok(limits) = self.limits else {
-            return false;
-        };
-        let Some((id, secret)) = self.decode(cookie) else {
-            return false;
-        };
-        self.store().entries.get(&id).is_some_and(|entry| {
-            entry.passkey.is_some()
-                && holds(entry, &secret)
-                && live(entry, now.secs(), limits.idle_s())
-        })
+        let opened = store.opened;
+        store.entries.insert(
+            id,
+            Entry {
+                record,
+                principal,
+                subject,
+                reference: SessionRef(u128::from_be_bytes(reference)),
+                opened,
+                absolute_until: now.secs().saturating_add(limits.absolute_s()),
+                last_active: now.secs(),
+                previous: None,
+            },
+        );
+        Ok(self.encode(&id, &secret))
     }
 
     /// Refreshes the session `cookie` names with `answer` at `now`: a new cookie when its secret
@@ -338,7 +253,7 @@ impl Sessions {
         let entry = store.entries.get_mut(&id).ok_or(Unauthenticated)?;
         let provider = match answer {
             Answer::Granted { subject, principal }
-                if Some(&subject) == entry.subject.as_ref() && principal == entry.principal =>
+                if subject == entry.subject && principal == entry.principal =>
             {
                 ProviderAnswer::Granted
             }
@@ -427,7 +342,6 @@ impl Sessions {
                 Ok(Authenticated {
                     principal: entry.principal,
                     reference: entry.reference,
-                    signed_in: entry.signed_in,
                     kind: match entry.record.reach() {
                         Reach::Full => SessionKind::Full,
                         Reach::Outage | Reach::ReductionOnly => SessionKind::ReductionOnly,
@@ -483,21 +397,6 @@ impl Sessions {
         UtcNanos::from_parts(entry.absolute_until.min(idle), 0).map_err(|_| Unauthenticated)
     }
 
-    /// `member`'s standing for route 2: the last sign-in this store opened a full session for
-    /// at, and no deprovision, which has no source yet: [DEC-2319] item 2's interim, until the
-    /// journaled signal the founder chose lands (backlog E9-13). A reduction-only session is not a
-    /// sign-in, and a refused open records nothing.
-    ///
-    /// The standing has one owner, [`Standings`]: the store holds the process's only instance and
-    /// is its only writer, recording each full sign-in as it opens, and this reads it through, as
-    /// route 2's judge does. Nothing else keeps a sign-in.
-    ///
-    /// [DEC-2319]: ../../../docs/project/decisions/DEC-2319.md
-    /// [`Standings`]: crate::standing::Standings
-    pub fn standing(&self, member: PrincipalId) -> SubjectStanding {
-        self.standings.standing(member)
-    }
-
     /// How many sessions are held, for the tests' independent count.
     pub fn len(&self) -> usize {
         self.store().entries.len()
@@ -519,7 +418,7 @@ impl Sessions {
             .entries
             .get(&id)
             .filter(|entry| holds(entry, &secret))
-            .and_then(|entry| entry.subject.clone())
+            .map(|entry| entry.subject.clone())
             .ok_or(Unauthenticated)
     }
 
@@ -602,10 +501,9 @@ fn admitted_with_outage(
     }
 }
 
-/// Whether `secret` is the session's current one: its refresh token's, or a route-2 session's
-/// cookie secret.
+/// Whether `secret` is the session's current one.
 fn holds(entry: &Entry, secret: &Secret) -> bool {
-    entry.record.refresh_digest().or(entry.passkey) == Some(digest_of(secret))
+    entry.record.refresh_digest() == Some(digest_of(secret))
 }
 
 fn digest_of(secret: &Secret) -> [u8; 32] {

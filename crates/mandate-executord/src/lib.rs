@@ -15,11 +15,7 @@
 //! epoch on its account stream. The runtime is another process, so the journal is the only
 //! channel between them (design §3.1): each pass reads the control stream for the agents that
 //! trade on this account ([`follow::agents_of`]) and each agent's stream for the kill switches the
-//! runtime copied there ([`follow::switches`]). A revocation never hides an agent's kill switch: an
-//! agent deployed before it stays followed, its openings held back, and a connection's or the
-//! workspace's kill-switch command is read from the control stream itself for an agent whose
-//! connection is revoked at or after it ([`follow::Following::commands_for`], DEC-2343). In each
-//! pass:
+//! runtime copied there ([`follow::switches`]). In each pass:
 //! - an input whose append is in doubt is handed again first, as the same bytes, and nothing it
 //!   asked of the broker leaves before it commits (journal spec §5.1, `AGENTS.md` rule 5);
 //! - a reconciliation the core asked for is gathered as one snapshot; until it is clean the
@@ -36,17 +32,12 @@
 pub mod alpaca;
 pub mod connect;
 pub mod credential;
-pub mod establish;
 pub mod fixture;
 pub mod follow;
 pub mod launch;
 pub mod lease;
-pub mod oauth_check;
 pub mod paper;
 mod process;
-pub mod quotes;
-pub mod run;
-pub mod serve;
 
 pub use process::{
     Alert, Broker, Config, ExecutorProcess, Protections, Unplanned, VERSION, Wiring,

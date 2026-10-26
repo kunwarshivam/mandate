@@ -18,7 +18,7 @@ mod common;
 
 use common::{
     FixedInstruments, FixedMandate, Ran, Shell, TestIds, broker_fill, broker_order, clock, config,
-    handoff, ports, price, protected_opening, qty, quote, risk_exit, stream_opened,
+    handoff, ports, price, protected_opening, qty, quote, stream_opened,
 };
 use mandate_accounting::Side;
 use mandate_canon::Value;
@@ -531,109 +531,6 @@ fn a_second_entry_never_ends_the_interval_of_the_first() {
     );
 }
 
-/// A first entry of 5 filled, its stop then answered `first` (or left unanswered with `None`),
-/// an agent's risk exit of 1 that cancels that stop, then a second entry of 5 that fills and ends
-/// while the stop's cancel is unanswered: the second entry's id and what its fill and its end
-/// sent.
-fn a_second_fill_beside_a_stop_being_cancelled(first: Option<&str>) -> (String, [Ran; 2]) {
-    let (ids, mandates, instruments, config) = (
-        TestIds,
-        FixedMandate::covering(&[AAPL]),
-        FixedInstruments,
-        config(),
-    );
-    let ports = ports(&ids, &mandates, &instruments, &config);
-    let mut shell = ready(&ports);
-    shell.run(Input::Market(quote(AAPL, "151", "151.1", 0)), &ports);
-    let entry_id = entry(&mut shell, &ports, "5", None)
-        .client_order_id
-        .as_str()
-        .to_owned();
-    let filled = fill(&mut shell, &ports, "f-1", &entry_id, "5");
-    let [first_stop] = stops(&filled).try_into().expect("the first entry's stop");
-    if let Some(status) = first {
-        report(
-            &mut shell,
-            &ports,
-            broker_order(
-                "s-1",
-                Some(first_stop.client_order_id.as_str()),
-                AAPL,
-                Side::Sell,
-                "5",
-                "0",
-                status,
-            ),
-        );
-    }
-    let exiting = shell.run(
-        handoff(
-            "01JABCDEFGHJKMNPQRSTVWXYZ8",
-            common::AGENT,
-            risk_exit(AAPL, "1", "150"),
-        ),
-        &ports,
-    );
-    assert!(
-        exiting
-            .requests
-            .iter()
-            .any(|r| matches!(r, BrokerRequest::Cancel { client_order_id }
-            if client_order_id == &first_stop.client_order_id)),
-        "the exit asks the first stop's cancel: {:?}",
-        exiting.requests
-    );
-    let second = shell
-        .run(
-            handoff(
-                "01JABCDEFGHJKMNPQRSTVWXYZ1",
-                common::AGENT,
-                protected_opening(AAPL, "5", "150", "140", None),
-            ),
-            &ports,
-        )
-        .submissions()
-        .first()
-        .map(|order| order.client_order_id.as_str().to_owned())
-        .expect("the second entry is sent");
-    let filled = fill(&mut shell, &ports, "f-2", &second, "5");
-    let ended = report(&mut shell, &ports, entry_state(&second, "5", "5", "filled"));
-    (second, [filled, ended])
-}
-
-/// Whether any of `ran` sent a stop named for `entry` (§2.3's `{entry}-p…`).
-fn stops_for(ran: &[Ran], entry: &str) -> bool {
-    let named = format!("{entry}-p");
-    ran.iter()
-        .flat_map(stops)
-        .any(|stop| stop.client_order_id.as_str().starts_with(&named))
-}
-
-/// The independent review of #2395, S5: a fill gets its own stop even while another protective
-/// order's cancel, asked before the broker acknowledged it, is unanswered. Holding the stop back
-/// there would leave the fill to the bound's exit (DEC-966 items 2 and 4).
-#[test]
-fn a_fill_beside_an_unanswered_stop_being_cancelled_gets_its_own_stop() {
-    let (second, ran) = a_second_fill_beside_a_stop_being_cancelled(None);
-    assert!(
-        stops_for(&ran, &second),
-        "{:?}",
-        ran.map(|ran| ran.requests)
-    );
-}
-
-/// The independent review of #2395, S6: the same with the stop being cancelled one the broker
-/// accepted.
-#[test]
-fn a_fill_beside_an_accepted_stop_being_cancelled_gets_its_own_stop() {
-    let (second, ran) = a_second_fill_beside_a_stop_being_cancelled(Some("accepted"));
-    assert!(
-        stops_for(&ran, &second),
-        "{:?}",
-        ran.map(|ran| ran.requests)
-    );
-}
-
 /// The review's round-2 case (DEC-966 item 7): two entries fill and both stops are sent before
 /// the broker accepts either; once both are accepted the whole position rests on its own stops,
 /// so the bound alerts nothing and exits nothing.
@@ -755,9 +652,6 @@ enum Step {
     StopsAccepted,
     /// The broker rejects every protective order it has not answered.
     StopsRejected,
-    /// The broker confirms the cancel of every stop it accepted that the executor asked to
-    /// cancel, so the wait that cancel held ends here.
-    StopCancelConfirmed,
     /// Another protected opening of 4, once the working entry has ended (at most three in all).
     Add,
     /// The clock moves on this many seconds.
@@ -771,7 +665,6 @@ fn step() -> impl Strategy<Value = Step> {
         Just(Step::CancelConfirmed),
         Just(Step::StopsAccepted),
         Just(Step::StopsRejected),
-        Just(Step::StopCancelConfirmed),
         Just(Step::Add),
         (1u8..=40).prop_map(Step::Wait),
     ]
@@ -873,10 +766,9 @@ impl Book {
     }
 
     /// Whether the executor has asked the broker to cancel an order the broker has not answered:
-    /// an opening still working, a stop never acknowledged, or a stop the broker accepted whose
-    /// cancel no `StopCancelConfirmed` step has confirmed yet. An exit waits on that cancel (§5.3
-    /// rule 5, §5.4's marketable sequence), which is the broker's hold `AGENTS.md` rule 13 allows;
-    /// once the broker confirms it, the wait ends and the bound holds the executor to it.
+    /// an opening still working, or a stop never acknowledged. An exit waits on that cancel
+    /// (§5.3 rule 5, §5.4's marketable sequence), which is the broker's hold `AGENTS.md` rule 13
+    /// allows.
     fn waiting_on_broker(&self) -> bool {
         let working = self
             .openings
@@ -884,10 +776,8 @@ impl Book {
             .filter(|opening| !opening.done)
             .map(|opening| opening.id.as_str());
         let unanswered = self.unanswered.iter().map(|(stop, _)| stop.as_str());
-        let resting = self.resting.iter().map(|(stop, _)| stop.as_str());
         working
             .chain(unanswered)
-            .chain(resting)
             .any(|id| self.cancels.iter().any(|asked| asked == id))
     }
 
@@ -915,7 +805,7 @@ proptest! {
     })]
 
     /// Over any sequence of up to three openings, their fills, part fills, ends and cancels, stop
-    /// acceptances, rejects and confirmed cancels, and waits:
+    /// acceptances and rejects, and waits:
     /// - the protective and exit sells the executor sent never exceed the position the test
     ///   itself summed (rule 12, §5.3 rule 4);
     /// - once an opening's shares have been held past `max_unprotected_s` + one wait, they are
@@ -932,29 +822,6 @@ proptest! {
     ) {
         holds(steps)?;
     }
-}
-
-/// A case a random seed drew in CI (#2370's mutants baseline): the bound's exit for the first
-/// opening cancels the second opening's stop of 3 in the step the broker then accepts it, so the
-/// exit waits on that cancel, which no step confirms, while the bound passes for the second
-/// opening's 4 shares. That wait is the broker's hold (rule 13), not an unprotected position.
-#[test]
-fn an_accepted_stop_whose_cancel_is_unanswered_is_the_brokers_hold() {
-    let steps = vec![
-        Step::EntryFill(1),
-        Step::Wait(25),
-        Step::EntryEnds,
-        Step::Wait(35),
-        Step::Add,
-        Step::EntryFill(2),
-        Step::Wait(21),
-        Step::EntryFill(1),
-        Step::EntryFill(1),
-        Step::StopsAccepted,
-        Step::Wait(40),
-        Step::Wait(1),
-    ];
-    assert!(holds(steps).is_ok());
 }
 
 /// The property's run over `steps` (see the property's doc).
@@ -1064,25 +931,6 @@ fn holds(steps: Vec<Step>) -> Result<(), TestCaseError> {
                     if accepted {
                         book.resting.push((stop, shares));
                     }
-                }
-                Ran::default()
-            }
-            Step::StopCancelConfirmed => {
-                let (asked, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut book.resting)
-                    .into_iter()
-                    .partition(|(stop, _)| book.cancels.contains(stop));
-                book.resting = kept;
-                if asked.is_empty() {
-                    continue;
-                }
-                for (stop, _) in asked {
-                    let confirmed = shell.run(
-                        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
-                            client_order_id: stop,
-                        })),
-                        &ports,
-                    );
-                    book.sent(&confirmed);
                 }
                 Ran::default()
             }

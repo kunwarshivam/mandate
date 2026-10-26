@@ -19,21 +19,14 @@
 //!   other than `dev` or `ci` is given (DEC-2633 item 2).
 //! - [`run`] runs the exchange after the start checks: the client secret first, then the take,
 //!   the one request and the token write.
-//! - [`process`] is the process after its settings: exactly `run --vault-address <address>
-//!   --vault-dir <dir>`, one Kubernetes-auth login as the connection's exchange, then [`run`]
-//!   (DEC-2330).
-//! - [`vault`] is the vault, as the connection's exchange: the client secret, the take of the code
-//!   entry, and the token entry's write (DEC-2330).
 //! - `cell` (builds with debug assertions only) admits the token URL of the fixture provider a dev
 //!   or CI cell runs (DEC-2625), never an Alpaca host. A release build contains none of it.
 
 pub mod form;
 pub mod http;
-pub mod process;
 pub mod response;
 pub mod run;
 pub mod startup;
-pub mod vault;
 
 #[cfg(debug_assertions)]
 pub mod cell;

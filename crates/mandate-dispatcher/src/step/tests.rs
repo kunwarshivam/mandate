@@ -6,7 +6,7 @@ use super::{Config, Journal, NoticeWriter, step};
 use crate::DispatchError;
 use mandate_canon::{Value, parse};
 use mandate_journal::{AppendOutcome, Environment, MemoryJournal, StoredEvent, StreamId};
-use mandate_notify::PushChannel::{Email, Phone};
+use mandate_notify::PushChannel::{Email, WebPush};
 use mandate_notify::{
     AddressHandle, FixtureProvider, IdempotencyKey, Notification, NotifyError, Origin, Outcome,
     Provider, PushChannel, Reason, Recipient, SecureRandom,
@@ -34,7 +34,7 @@ const T: &str = "2026-10-09T14:00:00.000000000Z";
 const BUILD: &str = "sha256:3333333333333333333333333333333333333333333333333333333333333333";
 const AUDIENCE: [(&str, PushChannel); 2] = [
     ("founder", PushChannel::Email),
-    ("founder", PushChannel::Phone),
+    ("founder", PushChannel::WebPush),
 ];
 const MARK: &str = r#"{"instrument_id":"inst","price":"1","source":"quote","feed":"iex",
     "risk_clock":"2026-10-09T14:00:00.000000000Z"}"#;
@@ -442,8 +442,8 @@ fn recipients_are_sorted_and_unique_and_each_gets_its_own_channels() -> Checked 
     alerts(&journal, A1, 1, &[(1, "risk_limit")])?;
     let audience = [
         ("u_2", Email),
-        ("u_1", Phone),
-        ("u_2", Phone),
+        ("u_1", WebPush),
+        ("u_2", WebPush),
         ("u_1", Email),
     ];
     let (writer, mut sends) = (writer(&journal)?, provider_for(&journal, &audience)?);
@@ -464,9 +464,9 @@ fn recipients_are_sorted_and_unique_and_each_gets_its_own_channels() -> Checked 
     let (u_1, u_2) = (Recipient::parse("u_1")?, Recipient::parse("u_2")?);
     let want = [
         (u_1.clone(), Email),
-        (u_1, Phone),
+        (u_1, WebPush),
         (u_2.clone(), Email),
-        (u_2, Phone),
+        (u_2, WebPush),
     ];
     assert_eq!(sent, want);
     Ok(())
@@ -485,7 +485,7 @@ fn a_send_that_does_not_go_through_is_journaled_failed_with_its_reason() -> Chec
             },
         ),
         (
-            PushChannel::Phone,
+            PushChannel::WebPush,
             Outcome::Permanent {
                 reason: Reason::TooLarge,
             },
@@ -511,7 +511,11 @@ fn a_send_that_does_not_go_through_is_journaled_failed_with_its_reason() -> Chec
             1,
             true,
         ),
-        (["phone", "failed", "too_large"].map(String::from), 1, true),
+        (
+            ["web_push", "failed", "too_large"].map(String::from),
+            1,
+            true,
+        ),
     ];
     assert_eq!(got, want);
     Ok(())

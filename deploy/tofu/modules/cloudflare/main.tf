@@ -153,15 +153,6 @@ resource "cloudflare_zero_trust_access_application" "api" {
   domain           = var.api_hostname
   session_duration = "24h"
 
-  # The web app (app.owlhead.ai) calls the API across origins with credentials (DEC-2381). A
-  # browser's CORS preflight is an OPTIONS request that never carries cookies, so Access would
-  # answer it with a redirect to its login and the browser would refuse the real call. Access
-  # forwards every unauthenticated OPTIONS on this host to the API, which reads nothing for it: a
-  # preflight gets an empty 204, with CORS headers only for the app's origin, and any other
-  # OPTIONS the API's plain 401. Every other method still needs the Access session. Access sets no
-  # CORS headers of its own, so the API stays the one place that names the allowed origin.
-  options_preflight_bypass = true
-
   destinations = [
     {
       type = "public"

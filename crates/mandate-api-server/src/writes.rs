@@ -31,8 +31,7 @@ use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
 use crate::commands::{
-    Command, Issued, KillScope, Settled, draft, in_workspace, release_warning, same,
-    settle_batch_at,
+    Command, Issued, KillScope, Settled, draft, in_workspace, release_warning, same, settle_at,
 };
 use crate::http::{App, browser, invalid, problem, problem_body};
 use crate::reads::deployed;
@@ -262,32 +261,17 @@ pub(crate) async fn appended_at(
     now: UtcNanos,
     pinned: Option<u64>,
 ) -> Settled {
-    appended_batch_at(app, reader, (id, &[draft]), now, pinned).await
-}
-
-/// [`appended_at`] for `drafts` appended in one batch, all or none, the first of which has the id
-/// `id` and settles it: a retry finds that one stored.
-pub(crate) async fn appended_batch_at(
-    app: &App,
-    reader: &Reader,
-    (id, drafts): (&str, &[&[u8]]),
-    now: UtcNanos,
-    pinned: Option<u64>,
-) -> Settled {
     let stream = format!("ctl:{}", reader.workspace);
-    let Some(first) = drafts.first() else {
-        return Settled::Unavailable;
-    };
-    if let Some(settled) = repeated(&reader.control, id, first) {
+    if let Some(settled) = repeated(&reader.control, id, draft) {
         return settled;
     }
-    match settle_batch_at(app.journal.as_ref(), &stream, id, drafts, now, pinned).await {
+    match settle_at(app.journal.as_ref(), &stream, id, draft, now, pinned).await {
         Settled::Conflict => app
             .journal
             .rows(&stream)
             .await
             .ok()
-            .and_then(|rows| repeated(&rows, id, first))
+            .and_then(|rows| repeated(&rows, id, draft))
             .unwrap_or(Settled::Unknown),
         settled => settled,
     }

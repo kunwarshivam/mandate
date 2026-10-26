@@ -7,25 +7,20 @@ use mandate_canon::{Value, parse};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
-/// The processes the manager runs: an agent deployment's two (infrastructure design §3.1), and an
-/// OAuth connect's one-shot token exchange (DEC-1175).
+/// The two processes of an agent deployment the manager runs (infrastructure design §3.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Process {
     /// The agent's runtime, its agent stream's single writer.
     Runtime,
     /// The account's executor, its account stream's single writer.
     Executor,
-    /// One connection's token exchange, run once and never restarted (DEC-1175 item 2).
-    TokenExchange,
 }
 
 impl Process {
-    /// The journal's spelling (journal spec §9.21).
     pub fn code(self) -> &'static str {
         match self {
             Self::Runtime => "runtime",
             Self::Executor => "executor",
-            Self::TokenExchange => "token_exchange",
         }
     }
 
@@ -33,35 +28,17 @@ impl Process {
         match code {
             "runtime" => Some(Self::Runtime),
             "executor" => Some(Self::Executor),
-            "token_exchange" => Some(Self::TokenExchange),
             _ => None,
         }
     }
-
-    /// The chart's spelling: its process name, template file and `mandate.dev/process` label,
-    /// which the network and admission policies select.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Runtime => "runtime",
-            Self::Executor => "executor",
-            Self::TokenExchange => "token-exchange",
-        }
-    }
-
-    pub fn from_label(label: &str) -> Option<Self> {
-        [Self::Runtime, Self::Executor, Self::TokenExchange]
-            .into_iter()
-            .find(|process| process.label() == label)
-    }
 }
 
-/// One process the manager may run: an agent's runtime, an account's executor, or a connection's
-/// token exchange. Each has at most one live instance.
+/// One process the manager may run: an agent's runtime, or an account's executor. Each writes one
+/// stream, so a slot has at most one live instance.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Slot {
     pub process: Process,
-    /// The agent, for a runtime; the `account_ref`, for an executor; the `connection_id`, for a
-    /// token exchange.
+    /// The agent, for a runtime; the `account_ref`, for an executor.
     pub subject: String,
 }
 
@@ -77,13 +54,6 @@ impl Slot {
         Self {
             process: Process::Executor,
             subject: account.to_owned(),
-        }
-    }
-
-    pub fn token_exchange(connection: &str) -> Self {
-        Self {
-            process: Process::TokenExchange,
-            subject: connection.to_owned(),
         }
     }
 }
@@ -104,10 +74,6 @@ pub enum Cause {
     Deployed,
     Restart,
     KillSwitch,
-    /// A token exchange's one start, for its connection's OAuth request (rule 256).
-    Requested,
-    /// A connect's executor's first start, on its token exchange's success (rule 257).
-    Exchanged,
 }
 
 impl Cause {
@@ -116,8 +82,6 @@ impl Cause {
             Self::Deployed => "deployed",
             Self::Restart => "restart",
             Self::KillSwitch => "kill_switch",
-            Self::Requested => "requested",
-            Self::Exchanged => "exchanged",
         }
     }
 
@@ -126,31 +90,7 @@ impl Cause {
             "deployed" => Some(Self::Deployed),
             "restart" => Some(Self::Restart),
             "kill_switch" => Some(Self::KillSwitch),
-            "requested" => Some(Self::Requested),
-            "exchanged" => Some(Self::Exchanged),
             _ => None,
-        }
-    }
-}
-
-/// Why a stop was journaled (journal spec §9.21).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StopCause {
-    /// An agent's runtime, or the executor of an account whose last deployed agent stopped.
-    AgentStopped,
-    /// A token exchange whose request closed (rule 256).
-    RequestClosed,
-    /// A connect's executor whose connection was refused or revoked, with no deployed agent
-    /// (rule 257).
-    ConnectionClosed,
-}
-
-impl StopCause {
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::AgentStopped => "agent_stopped",
-            Self::RequestClosed => "request_closed",
-            Self::ConnectionClosed => "connection_closed",
         }
     }
 }
@@ -169,36 +109,8 @@ pub enum Fact {
         account: String,
     },
     /// A connection's `ConnectionRevoked`: a deployment on it after this starts nothing until it is
-    /// established again (rule 201); one deployed before keeps running (§9.24). It also closes the
-    /// connection's request (rule 131).
+    /// established again (rule 201); one deployed before keeps running (§9.24).
     Revoked {
-        connection: String,
-    },
-    /// A version-2 `ConnectionRequested` with `credential` `oauth` (§9.8), whose event id is
-    /// `request`: its connection's token exchange runs, once its roles are made, until `deadline`,
-    /// the request's `recorded_at` plus 600 seconds (DEC-2627), and its success starts `account`'s
-    /// executor (DEC-2335).
-    Requested {
-        connection: String,
-        account: String,
-        deadline: UtcNanos,
-        request: String,
-    },
-    /// The role provisioner's `ConnectionRolesMade` (§9.33): `connection`'s Kubernetes-auth roles
-    /// are made for the request whose event id is `request`, its cause, so that request's token
-    /// exchange can log in and may start (§9.21, DEC-2350).
-    RolesMade {
-        connection: String,
-        request: String,
-    },
-    /// A version-1 `ConnectionEstablished`, which closes the connection's request (rule 131) and
-    /// names no account.
-    RequestClosed {
-        connection: String,
-    },
-    /// A `ConnectionRefused` with occasion `connect`: it closes the connection's request (rule 131)
-    /// and ends the connect, so its executor (DEC-2335).
-    Refused {
         connection: String,
     },
     /// A version-2 `AgentDeployed`, which names its connection (§9.24).
@@ -233,9 +145,6 @@ pub enum Fact {
     },
 }
 
-/// How long a connection request stays open: its exchange's deadline (DEC-2627 item 1).
-pub const REQUEST_SECONDS: i64 = 600;
-
 /// The fact `row` records, or `None` for a row the manager does not act on.
 pub fn fact(row: &StoredEvent) -> Option<Fact> {
     let body = parse(&row.body).ok()?;
@@ -252,32 +161,9 @@ pub fn fact(row: &StoredEvent) -> Option<Fact> {
         "StreamOpened" => Some(Fact::Opened {
             environment: row.environment.clone(),
         }),
-        "ConnectionEstablished" => {
-            let connection = text("connection_id")?.to_owned();
-            Some(match text("account_ref") {
-                Some(account) => Fact::Connected {
-                    connection,
-                    account: account.to_owned(),
-                },
-                None => Fact::RequestClosed { connection },
-            })
-        }
-        "ConnectionRequested" if row.schema_version == 2 && text("credential") == Some("oauth") => {
-            let recorded = UtcNanos::parse(&row.recorded_at).ok()?;
-            let deadline = recorded.secs().checked_add(REQUEST_SECONDS)?;
-            Some(Fact::Requested {
-                connection: text("connection_id")?.to_owned(),
-                account: text("account_ref")?.to_owned(),
-                deadline: UtcNanos::from_parts(deadline, recorded.nanos()).ok()?,
-                request: row.event_id.clone(),
-            })
-        }
-        "ConnectionRolesMade" => Some(Fact::RolesMade {
+        "ConnectionEstablished" => Some(Fact::Connected {
             connection: text("connection_id")?.to_owned(),
-            request: body.get("causation_id")?.as_str()?.to_owned(),
-        }),
-        "ConnectionRefused" if text("occasion") == Some("connect") => Some(Fact::Refused {
-            connection: text("connection_id")?.to_owned(),
+            account: text("account_ref")?.to_owned(),
         }),
         "ConnectionRevoked" => Some(Fact::Revoked {
             connection: text("connection_id")?.to_owned(),

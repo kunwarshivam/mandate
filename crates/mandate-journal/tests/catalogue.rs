@@ -1578,17 +1578,6 @@ fn the_credential_records_are_catalogued_and_closed_on_the_control_stream() {
     closed_on_the_control_stream(&["CredentialEnrolled", "CredentialRemoved"]);
 }
 
-/// Journal spec v0.77 §9.33 (DEC-2350): the role provisioner's three records are on the control
-/// stream alone, with no configuration, closed there at schema version 1.
-#[test]
-fn the_connection_role_records_are_catalogued_and_closed_on_the_control_stream() {
-    closed_on_the_control_stream(&[
-        "ConnectionRolesMade",
-        "ConnectionRolesRefused",
-        "ConnectionRolesRemoved",
-    ]);
-}
-
 /// `VerificationRun` version 2 (journal spec v0.36 §9.13, DEC-788, DEC-789) is closed on the
 /// control stream as version 1 is: an unlisted member is refused `schema`, never `unknown_schema`.
 #[test]
@@ -1671,8 +1660,7 @@ fn the_acknowledgment_records_are_closed_on_the_control_and_account_streams() {
 }
 
 /// Each of `event_types` is refused `schema` at an unlisted member on the control stream and
-/// `wrong_stream` on every other, and, but for `VerificationRun` and `CredentialEnrolled` (version
-/// 2 since journal spec v0.71, DEC-2122), has no schema at version 2.
+/// `wrong_stream` on every other, and, but for `VerificationRun`, has no schema at version 2.
 fn closed_on_the_control_stream(event_types: &[&str]) {
     for event_type in event_types {
         for kind in [ACCT, AGENT, CTL, CLOCK] {
@@ -1686,7 +1674,7 @@ fn closed_on_the_control_stream(event_types: &[&str]) {
                 "{event_type} in {kind}"
             );
         }
-        if *event_type == VERIFICATION || *event_type == "CredentialEnrolled" {
+        if *event_type == VERIFICATION {
             continue;
         }
         let version_2 = edit(&draft(event_type, CTL, &[]), "schema_version", Some("2"));

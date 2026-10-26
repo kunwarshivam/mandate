@@ -401,7 +401,7 @@ fn an_approval_notice_is_issued_before_any_send_with_one_attempt_and_key_per_cha
     records.sort();
     let want = [
         ["email", "delivered", "founder"].map(String::from),
-        ["phone", "delivered", "founder"].map(String::from),
+        ["web_push", "delivered", "founder"].map(String::from),
     ];
     assert_eq!(records, want, "one attempt per channel");
     Ok(())
@@ -485,7 +485,7 @@ fn an_approval_notice_retries_with_no_window_while_an_alert_is_abandoned_at_its_
     };
     sends.script = vec![
         (PushChannel::Email, timeout.clone()),
-        (PushChannel::Phone, timeout),
+        (PushChannel::WebPush, timeout),
     ];
     for secs in [0, 90_000, 90_061] {
         step_at(&journal, &writer, &[A1, AG], &mut sends, after(secs)?)??;
@@ -510,7 +510,7 @@ fn an_approval_notice_retries_with_no_window_while_an_alert_is_abandoned_at_its_
             .collect()
     };
     let failed = |n: i64| (n, "failed".to_owned(), "timeout".to_owned());
-    for channel in ["email", "phone"] {
+    for channel in ["email", "web_push"] {
         assert_eq!(
             history(&approval, channel),
             [failed(1), failed(2), failed(3)],

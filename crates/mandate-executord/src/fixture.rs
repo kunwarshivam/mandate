@@ -13,7 +13,6 @@ use mandate_executor::{
 use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Fraction, Price, ShareIncrement};
 use mandate_time::{Date, TradingCalendar};
 
-use crate::quotes::NoQuotes;
 use crate::{Protections, Unplanned, Wiring};
 
 /// The account stream's deterministic event ids: space `1`, then epoch, head, and ordinal, 26
@@ -97,7 +96,6 @@ pub fn wiring() -> Result<Wiring, &'static str> {
         fees: fees().ok_or("fee_config_invalid")?,
         gate: Box::new(NoFacts),
         protections: Box::new(NoProtection),
-        quotes: Box::new(NoQuotes),
     })
 }
 

@@ -7,8 +7,6 @@ pub use research::{ArtifactSink, ResearchParts, ResearchSource, ResearchWiring, 
 use std::time::Duration;
 
 use mandate_canon::{Object, parse};
-
-use crate::production::Facts;
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_process::{Input as Lifecycled, Kind, Lifecycle, State};
 use mandate_runtime::{
@@ -39,9 +37,6 @@ pub struct Wiring {
     pub view: MandateView,
     /// The deployment's research (DEC-2208); `None`, the default, runs none.
     pub research: Option<ResearchWiring>,
-    /// The fold the production ports read (DEC-2378 S2), fed every row the process reads from the
-    /// control, account and clock streams; `None` for the fixture wiring, which reads nothing.
-    pub facts: Option<Facts>,
 }
 
 impl Wiring {
@@ -71,10 +66,6 @@ pub struct Alert {
     pub key: &'static str,
     pub subject: Option<String>,
 }
-
-/// The operator alert a pass raises when the production flatten left a held instrument unplanned
-/// (DEC-2378 item 8): a fixed key, nothing about the instrument (`AGENTS.md` rule 6).
-pub const FLATTEN_UNPLANNED: &str = "flatten_unplanned";
 
 /// How one input's effects ended.
 enum Ran {
@@ -202,10 +193,6 @@ impl<S: Store> RuntimeProcess<S> {
             return false;
         };
         self.account = account_of(&control, self.state.deployment(), self.environment);
-        if let (Some(facts), Some(account)) = (&self.wiring.facts, &self.account) {
-            facts.follow(account.as_str());
-        }
-        self.feed(&control);
         match self.account.clone() {
             Some(account) => matches!(self.fold_account(&account), Account::Folded),
             None => true,
@@ -258,17 +245,6 @@ impl<S: Store> RuntimeProcess<S> {
         {
             self.research_pass(now, &mut alerts);
         }
-        if self
-            .wiring
-            .facts
-            .as_ref()
-            .is_some_and(|facts| facts.take_unplanned() > 0)
-        {
-            alerts.push(Alert {
-                key: FLATTEN_UNPLANNED,
-                subject: None,
-            });
-        }
         alerts
     }
 
@@ -314,7 +290,6 @@ impl<S: Store> RuntimeProcess<S> {
     fn control_pass(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> Option<Vec<StoredEvent>> {
         let control = self.control.clone()?;
         let rows = self.store.rows(&control)?;
-        self.feed(&rows);
         let events = tailed(&rows).ok()?;
         let head = events.last().map_or(0, |e| e.seq.0);
         if self.control_handed == Some(head) {
@@ -365,10 +340,6 @@ impl<S: Store> RuntimeProcess<S> {
         let Some(rows) = self.store.rows(account) else {
             return Account::Unreadable;
         };
-        if let Some(facts) = &self.wiring.facts {
-            facts.follow(account.as_str());
-        }
-        self.feed(&rows);
         let head = self.state.head(account.as_str()).map_or(0, |seq| seq.0);
         let fresh: Vec<StoredEvent> = rows.into_iter().filter(|r| r.seq > head).collect();
         if fresh
@@ -400,7 +371,6 @@ impl<S: Store> RuntimeProcess<S> {
         let Some(rows) = self.store.rows(&clock) else {
             return false;
         };
-        self.feed(&rows);
         let latest = rows
             .iter()
             .filter(|r| r.event_type == "ClockAdvanced")
@@ -414,13 +384,6 @@ impl<S: Store> RuntimeProcess<S> {
                 alerts,
             ),
             None => true,
-        }
-    }
-
-    /// Feeds `rows` to the production ports' fold, which takes each row once (DEC-2378 S2).
-    fn feed(&self, rows: &[StoredEvent]) {
-        if let Some(facts) = &self.wiring.facts {
-            facts.feed(rows);
         }
     }
 

@@ -63,19 +63,15 @@ pub struct CliConfirm {
 
 impl StepUp for CliConfirm {
     /// DEC-2104 item 6's nine checks in order, with DEC-2105's bounds, then the challenge dropped
-    /// so it verifies once, for an approval and, until E9-4's passkey step-up does, an OAuth
-    /// connect (DEC-2125); any other kind is `step_up_method`. Evidence of another method has no
-    /// confirmation to judge and is missing: no passkey is enrolled before E9-4 S3.
+    /// so it verifies once. Evidence of another method has no confirmation to judge and is
+    /// missing: no passkey is enrolled before E9-4 S3.
     fn verify(
         &self,
         evidence: &StepUpEvidence,
         action: &Action,
         judged: &Judged<'_>,
     ) -> Result<(), ProblemCode> {
-        if !matches!(
-            action.kind,
-            StepUpActionKind::Approve | StepUpActionKind::Connection
-        ) {
+        if action.kind != StepUpActionKind::Approve {
             return Err(ProblemCode::StepUpMethod);
         }
         if evidence.method != StepUpMethod::CliConfirm {

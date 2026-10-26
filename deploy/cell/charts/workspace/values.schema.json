@@ -21,8 +21,7 @@
     "artifacts",
     "founding",
     "executor",
-    "alpacaOAuth",
-    "oauthFixture"
+    "alpacaOAuth"
   ],
   "properties": {
     "workspace": {
@@ -60,8 +59,7 @@
         "model-gateway",
         "exporter",
         "data",
-        "deploy-manager",
-        "role-provisioner"
+        "deploy-manager"
       ],
       "properties": {
         "postgres": {
@@ -110,10 +108,6 @@
           "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
         },
         "deploy-manager": {
-          "type": "string",
-          "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
-        },
-        "role-provisioner": {
           "type": "string",
           "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
         }
@@ -445,9 +439,7 @@
         "jwksUrl",
         "appOrigin",
         "subjectLinks",
-        "ingressPeers",
-        "vaultBinding",
-        "connectFinish"
+        "ingressPeers"
       ],
       "properties": {
         "org": {
@@ -493,14 +485,6 @@
             "pattern": "^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$|^[0-9a-f:]*:[0-9a-f:]*$|^[0-9a-f:]*:((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$"
           },
           "description": "MANDATE_API_INGRESS_PEERS: the ingress's own exact addresses, IPv4 (each octet 0 to 255), IPv6, or IPv4-mapped IPv6, from which alone route 2's limits read X-Forwarded-For (workspace API spec §4.10, DEC-2117 item 4); empty reads none"
-        },
-        "vaultBinding": {
-          "type": "boolean",
-          "description": "The API's vault binding (DEC-2338): its AppRole and the vault's CA as owner-only files, and egress to the vault on 8200."
-        },
-        "connectFinish": {
-          "type": "boolean",
-          "description": "The connect finish's Deployment, from the API's image, holding the connection manager's AppRole alone as owner-only files, with egress to the journal and the vault on 8200 (DEC-2348 item 3)."
         }
       }
     },
@@ -568,19 +552,6 @@
           "description": "MANDATE_ALPACA_REDIRECT_URI: the callback on this deployment's API host (DEC-2623 item 2)"
         }
       }
-    },
-    "oauthFixture": {
-      "description": "The fixture OAuth provider's own pod (DEC-1176): dev and ci cells only, and the token exchange's token URL pointed at it. Any other tier refuses it.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "enabled"
-      ],
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        }
-      }
     }
   },
   "allOf": [
@@ -603,38 +574,6 @@
         "properties": {
           "deploymentTier": {
             "const": "staging"
-          }
-        },
-        "required": [
-          "deploymentTier"
-        ]
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "oauthFixture": {
-            "properties": {
-              "enabled": {
-                "const": true
-              }
-            },
-            "required": [
-              "enabled"
-            ]
-          }
-        },
-        "required": [
-          "oauthFixture"
-        ]
-      },
-      "then": {
-        "properties": {
-          "deploymentTier": {
-            "enum": [
-              "dev",
-              "ci"
-            ]
           }
         },
         "required": [

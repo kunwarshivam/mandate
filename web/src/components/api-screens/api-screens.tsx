@@ -8,10 +8,8 @@ import { ModeBadge } from "@/components/domain/mode";
 import { DECISION_KEY, KEY } from "@/components/kumo/key";
 import { PAGE_GRID, Panel, Section, WorkspaceGate } from "@/components/screens/common";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
-import { type ShownChallenge, approvalConfirmCommand } from "@/api/step-up";
-import { HostConfirm } from "./host-confirm";
 import { clock, percent, price, quantity, usd } from "@/lib/format";
-import { type ApprovalRecord, type ApprovalResponse, useRuntime } from "@/lib/mock-runtime";
+import { type ApprovalResponse, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 
@@ -296,7 +294,9 @@ function responseText(response: ApprovalResponse): string {
     case "decided":
       return "Approved: the gate re-ran its checks and allowed it.";
     case "undelivered":
-      return UNDELIVERED[response.reason ?? ""] ?? "Not recorded: your deployment answered that nothing was recorded, so nothing was approved.";
+      return response.reason === "step_up_required"
+        ? "Not recorded: approving needs a passkey check your deployment did not receive, so nothing was approved."
+        : "Not recorded: your deployment answered that nothing was recorded, so nothing was approved.";
     case "unknown":
       return "The result is unknown; we are checking. Until the journal answers, treat the request as not approved.";
     default: {
@@ -306,29 +306,9 @@ function responseText(response: ApprovalResponse): string {
   }
 }
 
-/** Why an answer was not recorded, for the step-up refusals an approve can meet (§3.5, DEC-2104 item 6). */
-const UNDELIVERED: Readonly<Record<string, string>> = {
-  step_up_required: "Not recorded: approving needs a confirmation your deployment did not receive, so nothing was approved.",
-  step_up_missing: "Not recorded: your deployment found no confirmation of this code on the host, so nothing was approved. Run the command, then approve again.",
-  step_up_mismatch: "Not recorded: the confirmation on the host was for another request, so nothing was approved.",
-  step_up_stale: "Not recorded: the code expired before it was used, so nothing was approved. Ask for a new code.",
-  step_up_reused: "Not recorded: this code was already used, so nothing was approved. Ask for a new code.",
-  step_up_method: "Not recorded: your deployment does not take a host confirmation for this, so nothing was approved.",
-};
-
-/** Why no code could be shown; nothing was asked of the host and nothing was approved. */
-function noCode(reason: string): string {
-  if (reason === "live_unavailable") return "No code: a host confirmation is for paper only. Nothing was approved.";
-  if (reason === "forbidden" || reason === "role_forbidden") return "No code: your role cannot approve here. Nothing was approved.";
-  return "No code: your deployment did not answer with one. Nothing was approved; try again.";
-}
-
-type Asking = { phase: "asking" } | { phase: "shown"; shown: ShownChallenge; command: string } | { phase: "failed"; reason: string };
-
 export function ApiApproval({ approvalId }: { approvalId: string }) {
   const view = useView();
-  const { respond, responses, stepUp } = useRuntime();
-  const [asking, setAsking] = useState<Asking | null>(null);
+  const { respond, responses } = useRuntime();
   const canRespond = useCan("approvals.respond");
   const approval = view?.approvals.find((a) => a.approval_id === approvalId);
   const agent = view?.agents.find((a) => a.agent_id === approval?.agent_id);
@@ -347,25 +327,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
   ];
   const shown = [nameOf(agent) ?? "Name not reported", line, ...facts.map(([term, value]) => `${term}: ${value}`)];
   const environment = agent?.environment ?? "unknown";
-  const record: ApprovalRecord = { screen: "D6", environment, shown, modelOutputExpanded: false };
-  const skip = () => {
-    setAsking(null);
-    respond(approval.approval_id, "skip", record);
-  };
-  /** Approve asks for a code first (DEC-2104): one challenge per press, bound to this request's content hash. */
-  const approve = () => {
-    const digest = approval.content_hash;
-    if (!stepUp || !digest) return setAsking({ phase: "failed", reason: "no_step_up" });
-    setAsking({ phase: "asking" });
-    void stepUp({ kind: "approve", digest }).then((answer) => {
-      if (!answer.ok) return setAsking({ phase: "failed", reason: answer.reason });
-      const command = approvalConfirmCommand({ workspaceId: answer.workspaceId, principalId: answer.principalId, agentId: approval.agent_id, approvalId: approval.approval_id, shown: answer.shown });
-      setAsking({ phase: "shown", shown: answer.shown, command });
-    });
-  };
-  const submit = (shownChallenge: ShownChallenge) => respond(approval.approval_id, "approve", record, shownChallenge.challenge);
-  const settled = response && response.phase !== "undelivered";
-  const open = approval.state === "pending" && canRespond && !settled;
+  const answer = (choice: "approve" | "skip") => respond(approval.approval_id, choice, { screen: "D6", environment, shown, modelOutputExpanded: false });
   return (
     <WorkspaceGate api>
       <article className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-6" aria-labelledby="api-request-title">
@@ -393,26 +355,12 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
           <p role="status" data-phase={response.phase} className="text-sm">
             {responseText(response)}
           </p>
-        ) : null}
-        {asking?.phase === "asking" ? (
-          <p role="status" className="text-sm">
-            Asking your deployment for a code. Nothing is approved yet.
-          </p>
-        ) : null}
-        {asking?.phase === "failed" ? (
-          <p role="status" className="text-sm">
-            {noCode(asking.reason)}
-          </p>
-        ) : null}
-        {open && asking?.phase === "shown" && response?.phase !== "sent" ? (
-          <HostConfirm key={asking.shown.challenge.challenge_id} shown={asking.shown} command={asking.command} submitLabel="Approve" onSubmit={() => submit(asking.shown)} onCancel={() => setAsking(null)} />
-        ) : null}
-        {open && asking?.phase !== "shown" && asking?.phase !== "asking" ? (
+        ) : approval.state === "pending" && canRespond ? (
           <div className={cn("grid grid-cols-2 gap-3")}>
-            <button type="button" className={DECISION_KEY} onClick={approve}>
+            <button type="button" className={DECISION_KEY} onClick={() => answer("approve")}>
               Approve
             </button>
-            <button type="button" className={DECISION_KEY} onClick={skip}>
+            <button type="button" className={DECISION_KEY} onClick={() => answer("skip")}>
               Skip
             </button>
           </div>

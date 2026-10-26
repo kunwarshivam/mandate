@@ -321,7 +321,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     const { session, asked } = fakeSession();
     let refusals = 1;
     const wrap = (inner: Fetch): Fetch => (input, init) =>
-      (init.method ?? "GET") === "GET" && refusals > 0 && input.endsWith("/connections")
+      (init.method ?? "GET") === "GET" && refusals > 0 && input.endsWith("/health")
         ? ((refusals -= 1), Promise.resolve(new Response(JSON.stringify({ type: "about:blank", status: 401, title: "Not authenticated", code: "unauthenticated", effect: "none", retryable: false }), { status: 401 })))
         : inner(input, init);
     mount("approvals", wrap, session);

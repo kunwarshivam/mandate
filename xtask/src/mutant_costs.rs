@@ -154,62 +154,16 @@ pub fn record(
             }
         }
     }
-    let fixed_ms = before_ms.saturating_add(baseline_ms);
-    let longest_mutant_ms = if overran {
-        let run_out = STOP_AFTER_MS.saturating_sub(fixed_ms) / u64::try_from(mutants.max(1))?;
-        longest_mutant_ms.max(run_out)
-    } else {
-        longest_mutant_ms
-    };
     Ok(ShardCost {
         run,
         shard,
         packages,
         mutants,
-        fixed_ms,
+        fixed_ms: before_ms.saturating_add(baseline_ms),
         longest_mutant_ms,
         outcome: outcome_for(code).to_owned(),
         overran,
     })
-}
-
-/// The outcome of a record written before cargo-mutants starts, which only a shard that never
-/// wrote its own record leaves behind (DEC-2367 item 2).
-pub const UNFINISHED: &str = "unfinished";
-
-/// The record a shard of `per_shard` mutants writes before cargo-mutants starts, which its real
-/// record replaces (DEC-2367 item 2): it counts as having run out of time, so a shard that GitHub
-/// stops at the job's limit, before xtask can write its record, still sizes its packages' next
-/// plans at one mutant. `None` for a shard of one, which no stop times and no plan sizes smaller.
-pub fn provisional(
-    run: u64,
-    shard: String,
-    packages: Vec<String>,
-    per_shard: usize,
-) -> Option<ShardCost> {
-    (per_shard > 1).then(|| ShardCost {
-        run,
-        shard,
-        packages,
-        mutants: 0,
-        fixed_ms: 0,
-        longest_mutant_ms: 0,
-        outcome: UNFINISHED.to_owned(),
-        overran: true,
-    })
-}
-
-/// The histories `histories`, oldest first, folded into one (DEC-2367 item 1): each `mutants-costs`
-/// job folds its run into the latest history it can read, so two that overlap each upload a
-/// history without the other's records. Reading the recent ones together keeps both, and [`fold`]
-/// counts a record held by several only once, the one from the latest history.
-pub fn merged(histories: impl IntoIterator<Item = History>) -> History {
-    histories
-        .into_iter()
-        .fold(History::default(), |kept, history| {
-            let records: Vec<ShardCost> = history.by_package.into_values().flatten().collect();
-            fold(kept, &records)
-        })
 }
 
 /// `history` with `records` added under each package they mutated: a record already held for the
@@ -361,61 +315,17 @@ fn ids_named(listing: &[u8], prefix: &str) -> Result<Vec<String>> {
         .collect())
 }
 
-/// How many of the most recent `mutant-costs` histories are read together (DEC-2367 item 1).
-pub const HISTORIES_READ: usize = 10;
-
-/// The [`HISTORIES_READ`] latest unexpired `mutant-costs` histories in `repo`, [`merged`], or an
-/// empty one when there is none. One that cannot be read is skipped, as said in the log
-/// ([`readable`]), so the history alone never fails a job; only a listing that fails does.
+/// The latest unexpired `mutant-costs` history in `repo`, or an empty one when there is none.
 pub fn latest_history(repo: &str, dir: &Path) -> Result<History> {
-    latest_from(
-        || {
-            gh_api(&[
-                &format!(
-                    "repos/{repo}/actions/artifacts?name={HISTORY_ARTIFACT}&per_page={HISTORIES_READ}"
-                ),
-                "--jq",
-                ".artifacts[] | select(.expired | not) | \"\\(.id) \\(.name)\"",
-            ])
-        },
-        |id| artifact_text(repo, id, dir),
-    )
-}
-
-/// [`latest_history`] from `list`, the `<id> <name>` listing newest first as the Actions API orders
-/// it, and `read`, one artifact's text: at most [`HISTORIES_READ`] histories, each that cannot be
-/// read skipped, [`merged`] oldest first so that a later record replaces an earlier one for the
-/// same run and shard, as a re-run's clean record replaces its first attempt's `unfinished` one.
-fn latest_from(
-    list: impl FnOnce() -> Result<Vec<u8>>,
-    read: impl Fn(&str) -> Result<String>,
-) -> Result<History> {
-    let mut newest_first: Vec<(String, Result<History>)> = ids_named(&list()?, HISTORY_ARTIFACT)?
-        .into_iter()
-        .take(HISTORIES_READ)
-        .map(|id| {
-            let history = read(&id).and_then(|text| {
-                serde_json::from_str::<History>(&text).context("parsing the cost history")
-            });
-            (id, history)
-        })
-        .collect();
-    newest_first.reverse();
-    Ok(merged(readable(newest_first)))
-}
-
-/// The histories of `read` that could be read, by artifact id; each that could not is said and
-/// skipped (DEC-2367 item 1).
-fn readable(read: impl IntoIterator<Item = (String, Result<History>)>) -> Vec<History> {
-    read.into_iter()
-        .filter_map(|(id, history)| {
-            history
-                .map_err(|err| {
-                    eprintln!("    mutants: skipping cost history {id} ({err:#}) (DEC-2367)");
-                })
-                .ok()
-        })
-        .collect()
+    let listing = gh_api(&[
+        &format!("repos/{repo}/actions/artifacts?name={HISTORY_ARTIFACT}&per_page=10"),
+        "--jq",
+        ".artifacts[] | select(.expired | not) | \"\\(.id) \\(.name)\"",
+    ])?;
+    let Some(id) = ids_named(&listing, HISTORY_ARTIFACT)?.into_iter().next() else {
+        return Ok(History::default());
+    };
+    serde_json::from_str(&artifact_text(repo, &id, dir)?).context("parsing the cost history")
 }
 
 /// `cargo xtask ci mutants-costs`: folds this run's shard records into the latest history and
@@ -528,8 +438,7 @@ mod tests {
         let got = record(1, "all".to_owned(), vec![], 5_000, None, None, true)?;
         assert_eq!(
             (got.mutants, got.fixed_ms, got.longest_mutant_ms),
-            (0, 5_000, 475_000),
-            "having run out of time with no mutant done, its one mutant took what the stop left"
+            (0, 5_000, 0)
         );
         assert!(got.overran);
         assert_eq!(got.outcome, "failed");
@@ -669,227 +578,6 @@ mod tests {
             "a package with no records"
         );
         assert_eq!(per_shard(&history, &names(&[])), 1);
-    }
-
-    /// DEC-2367 item 1, the repeat seen on #2416: a shard of five ran out of time, but another
-    /// pull request's `mutants-costs` job, which read the history before that run was folded in,
-    /// uploaded last. The plan read only that newest history, so it sized the package at five
-    /// again; read together, the recent histories size it at one.
-    #[test]
-    fn a_timed_out_shard_sizes_its_package_at_one_whatever_history_was_uploaded_last() {
-        let base = fold(
-            History::default(),
-            &[
-                sized(75_000, 30_000),
-                ShardCost {
-                    run: 2,
-                    ..sized(75_000, 30_000)
-                },
-                ShardCost {
-                    run: 3,
-                    ..sized(75_000, 30_000)
-                },
-            ],
-        );
-        let packages = ["a".to_owned()];
-        assert!(per_shard(&base, &packages) > 1, "a clean history sizes up");
-        let ran_out = ShardCost {
-            run: 4,
-            shard: "0/2".to_owned(),
-            overran: true,
-            outcome: "failed".to_owned(),
-            ..sized(75_000, 30_000)
-        };
-        let theirs = ShardCost {
-            run: 5,
-            ..sized(75_000, 30_000)
-        };
-        let with_timeout = fold(base.clone(), &[ran_out]);
-        let uploaded_last = fold(base, &[theirs]);
-        assert!(
-            per_shard(&uploaded_last, &packages) > 1,
-            "the newest history alone repeats the plan that ran out of time"
-        );
-        assert_eq!(
-            per_shard(
-                &merged([uploaded_last.clone(), with_timeout.clone()]),
-                &packages
-            ),
-            1
-        );
-        assert_eq!(
-            per_shard(&merged([with_timeout, uploaded_last]), &packages),
-            1,
-            "whichever was uploaded last"
-        );
-    }
-
-    #[test]
-    fn a_history_that_cannot_be_read_is_skipped() {
-        let kept = fold(History::default(), &[cost(1, "0/1", &["a"])]);
-        let read = readable([
-            ("1".to_owned(), Err(anyhow::anyhow!("expired"))),
-            ("2".to_owned(), Ok(kept.clone())),
-            ("3".to_owned(), Err(anyhow::anyhow!("not JSON"))),
-        ]);
-        assert_eq!(read, [kept]);
-    }
-
-    #[test]
-    fn histories_read_together_hold_each_record_once() {
-        let one = fold(
-            History::default(),
-            &[cost(1, "0/1", &["a", "b"]), cost(2, "0/1", &["a"])],
-        );
-        let two = fold(
-            History::default(),
-            &[cost(2, "0/1", &["a"]), cost(3, "0/1", &["b"])],
-        );
-        let both = merged([one, two]);
-        let runs = |p: &str| -> Vec<u64> { both.by_package[p].iter().map(|c| c.run).collect() };
-        assert_eq!(runs("a"), [1, 2], "run 2's record once");
-        assert_eq!(runs("b"), [1, 3]);
-        assert_eq!(merged([]), History::default());
-    }
-
-    /// DEC-2367 item 2: a shard GitHub stops at the job's limit, before xtask writes its record,
-    /// leaves the provisional one, which sizes its package at one; a shard of one leaves none.
-    #[test]
-    fn a_shard_stopped_before_its_record_sizes_its_package_at_one() {
-        let left = provisional(9, "0/2".to_owned(), vec!["a".to_owned()], 5).expect("a record");
-        assert!(left.overran);
-        assert_eq!(left.outcome, UNFINISHED);
-        assert_eq!((left.run, left.shard.as_str(), left.mutants), (9, "0/2", 0));
-        let clean: Vec<ShardCost> = (1..=5)
-            .map(|run| ShardCost {
-                run,
-                ..sized(1_000, 1_000)
-            })
-            .collect();
-        let history = fold(History::default(), &clean);
-        let packages = ["a".to_owned()];
-        assert_eq!(per_shard(&history, &packages), MAX_PER_SHARD);
-        assert_eq!(per_shard(&fold(history, &[left]), &packages), 1);
-        assert_eq!(
-            provisional(9, "0/9".to_owned(), vec!["a".to_owned()], 1),
-            None
-        );
-        assert!(provisional(9, "0/9".to_owned(), vec![], 2).is_some());
-    }
-
-    /// DEC-2367 item 3: a shard that ran out of time counts each mutant it ran at no less than its
-    /// share of what the stop left after the fixed part.
-    #[test]
-    fn a_shard_that_ran_out_of_time_costs_at_least_its_share_of_the_budget() -> Result<()> {
-        let got = record(
-            7,
-            "0/2".to_owned(),
-            vec![],
-            79_000,
-            Some(OUTCOMES),
-            Some(124),
-            true,
-        )?;
-        assert_eq!(got.fixed_ms, 140_750);
-        assert_eq!(got.longest_mutant_ms, (480_000 - 140_750) / 2);
-        let none = record(7, "0/2".to_owned(), vec![], 400_000, None, Some(124), true)?;
-        assert_eq!(
-            none.longest_mutant_ms, 80_000,
-            "no mutant ran: the whole remainder"
-        );
-        let past = record(7, "0/2".to_owned(), vec![], 500_000, None, Some(124), true)?;
-        assert_eq!(
-            past.longest_mutant_ms, 0,
-            "a fixed part past the stop leaves nothing to share"
-        );
-        let on_time = record(
-            7,
-            "0/2".to_owned(),
-            vec![],
-            79_000,
-            Some(OUTCOMES),
-            Some(0),
-            false,
-        )?;
-        assert_eq!(
-            on_time.longest_mutant_ms, 26_000,
-            "a shard on time keeps its measure"
-        );
-        Ok(())
-    }
-
-    /// The listing [`latest_from`] reads for `ids`, newest first.
-    fn listing(ids: &[u64]) -> Vec<u8> {
-        ids.iter()
-            .map(|id| format!("{id} {HISTORY_ARTIFACT}\n"))
-            .collect::<String>()
-            .into_bytes()
-    }
-
-    /// R2's finding on DEC-2367: a run re-run clean keeps its first attempt's provisional record
-    /// unless the newer history wins. The listing is newest first, and the clean record is in the
-    /// newer history, so it replaces the `unfinished` one; the other way round, the `unfinished`
-    /// one stands.
-    #[test]
-    fn a_later_history_replaces_an_earlier_record_of_the_same_run_and_shard() -> Result<()> {
-        let unfinished =
-            provisional(7, "0/2".to_owned(), vec!["a".to_owned()], 5).expect("a record");
-        let clean = ShardCost {
-            run: 7,
-            shard: "0/2".to_owned(),
-            ..cost(7, "0/2", &["a"])
-        };
-        let first = serde_json::to_string(&fold(History::default(), &[unfinished]))?;
-        let rerun = serde_json::to_string(&fold(History::default(), &[clean]))?;
-        let text = |newer: &str, older: &str| {
-            let (newer, older) = (newer.to_owned(), older.to_owned());
-            move |id: &str| -> Result<String> {
-                Ok(if id == "2" {
-                    newer.clone()
-                } else {
-                    older.clone()
-                })
-            }
-        };
-        let got = latest_from(|| Ok(listing(&[2, 1])), text(&rerun, &first))?;
-        assert_eq!(got.by_package["a"].len(), 1);
-        assert_eq!(
-            got.by_package["a"][0].outcome, "caught",
-            "the re-run, the newer, wins"
-        );
-        let got = latest_from(|| Ok(listing(&[2, 1])), text(&first, &rerun))?;
-        assert_eq!(
-            got.by_package["a"][0].outcome, UNFINISHED,
-            "the newer wins either way"
-        );
-        Ok(())
-    }
-
-    /// DEC-2367 item 1 through the real reader: at most [`HISTORIES_READ`] histories, the newest,
-    /// and one that cannot be read is skipped; a listing that fails fails the read.
-    #[test]
-    fn the_reader_takes_the_newest_ten_and_skips_an_unreadable_one() -> Result<()> {
-        let read = |id: &str| -> Result<String> {
-            let run: u64 = id.parse()?;
-            if run == 5 {
-                bail!("expired");
-            }
-            Ok(serde_json::to_string(&fold(
-                History::default(),
-                &[cost(run, "0/1", &["a"])],
-            ))?)
-        };
-        let ids: Vec<u64> = (1..=12).rev().collect();
-        let got = latest_from(|| Ok(listing(&ids)), read)?;
-        let runs: Vec<u64> = got.by_package["a"].iter().map(|c| c.run).collect();
-        assert_eq!(
-            runs,
-            [3, 4, 6, 7, 8, 9, 10, 11, 12],
-            "the ten newest, less the unreadable 5"
-        );
-        assert!(latest_from(|| bail!("no listing"), read).is_err());
-        assert_eq!(latest_from(|| Ok(Vec::new()), read)?, History::default());
-        Ok(())
     }
 
     #[test]

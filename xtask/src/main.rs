@@ -39,12 +39,9 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | openbao | objectstore | stub-release | exchange-release |
-                        provisionerd-release | api-release | mutants |
-                        schema-mutants | cell | cell-seeded | cell-upgrade | cell-demo |
-                        cell-journal | cell-failover |
-                        cell-kill-switch | cell-executor | cell-vault | cell-exchange |
-                        sweep; or
+                        postgres | openbao | objectstore | stub-release | mutants |
+                        schema-mutants | cell | cell-demo | cell-journal | cell-failover |
+                        cell-kill-switch | cell-executor | cell-vault | sweep; or
                         one part of test: test-nextest | test-doc | test-rh-sim | test-python.
                         Tests, pending tests,
                         doctests, the rehearsal, Postgres, OpenBao and object-store runs and
@@ -142,9 +139,7 @@ commands:
 /// reuses the test binaries that `test` has just built. CI shards `mutants` separately and makes
 /// its required `full` verdict depend on every shard (DEC-464); the local `check` command still
 /// runs every entry in [`PR_JOBS`] once, unsharded. `schema-mutants` is CI's own job beside them,
-/// which the required `full` verdict also needs, so `full-checks` stays under ten minutes (DEC-688);
-/// CI splits `full`'s parts between `full-checks`, `full-checks-2` and `full-checks-3` for the same
-/// reason (DEC-2334).
+/// which the required `full` verdict also needs, so `full-checks` stays under ten minutes (DEC-688).
 /// CI runs `fast`'s parts in parallel jobs, `test` split into [`TEST_PARTS`] and its nextest run
 /// partitioned, and its required `fast` verdict is an aggregate over them (DEC-871); `cargo xtask
 /// ci fast` still runs this whole group unsharded. `portable` runs on macOS in CI (DEC-954).
@@ -164,8 +159,6 @@ const FULL_JOB: &[&str] = &[
     "tofu",
     "stub-release",
     "exchange-release",
-    "provisionerd-release",
-    "api-release",
 ];
 const PR_JOBS: &[&str] = &[
     "lint",
@@ -182,19 +175,14 @@ const PR_JOBS: &[&str] = &[
     "objectstore",
     "stub-release",
     "exchange-release",
-    "provisionerd-release",
-    "api-release",
     "mutants",
     "schema-mutants",
     "cell",
-    "cell-seeded",
-    "cell-upgrade",
     "cell-journal",
     "cell-failover",
     "cell-kill-switch",
     "cell-executor",
     "cell-vault",
-    "cell-exchange",
 ];
 
 /// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
@@ -225,14 +213,6 @@ const MUTANT_SHARD_ENV: &str = "MANDATE_MUTANT_SHARD";
 /// The `K/N` shard CI's `schema-mutants` matrix passes to `cargo xtask ci schema-mutants`, through
 /// the environment because the live-feature check refuses cargo words the shell expands (DEC-688).
 const SCHEMA_SHARD_ENV: &str = "MANDATE_SCHEMA_SHARD";
-/// The `K/N` shard, counted from 0, the nightly's `reference-fuzz` matrix passes to `cargo xtask
-/// ci nightly-fuzz`, through the environment as [`SCHEMA_SHARD_ENV`] is (DEC-2638).
-const FUZZ_SHARD_ENV: &str = "MANDATE_FUZZ_SHARD";
-/// The mandate reference's fuzz seeds the nightly runs (DEC-1190 item 5): `1..=` this.
-const NIGHTLY_FUZZ_SEEDS: u32 = 10;
-/// The `K/N` shard, counted from 0, the nightly's `reference-mutants` matrix passes to `cargo
-/// xtask ci nightly-mutants`, which hands it to `reference/mandate/mutants.py --shard` (DEC-2638).
-const REFERENCE_SHARD_ENV: &str = "MANDATE_REFERENCE_SHARD";
 /// The `K/N` partition, counted from 1, CI's `fast-test` matrix passes to `cargo xtask ci
 /// test-nextest`, through the environment for the same reason as [`SCHEMA_SHARD_ENV`] (DEC-871).
 /// `cargo xtask ci test` ignores it and runs every test.
@@ -276,10 +256,8 @@ const E77_ATOMIC_MARKER: &str = "ES-22-atomic-exception: E7-7 PR #598 (DEC-462)"
 /// old reference cases by the new one — cannot be split at all, so it ships whole with a marker
 /// that names its own DEC. The list is finite and each entry is one PR: nothing here is a standing
 /// loosening, and deleting the entry restores the guard for that PR.
-const ATOMIC_EXCEPTIONS: [(u64, &str); 2] = [
-    (2022, "ES-22-atomic-exception: J1 PR #2022 (DEC-2635)"),
-    (2200, "ES-22-atomic-exception: J2 PR #2200 (DEC-2335)"),
-];
+const ATOMIC_EXCEPTIONS: [(u64, &str); 1] =
+    [(2022, "ES-22-atomic-exception: J1 PR #2022 (DEC-2635)")];
 
 /// The verification skill's map of features to code, tests, and commands (AGENTS.md): one Markdown
 /// file a feature, so a PR adding a feature adds a file and one changing a feature edits only
@@ -441,7 +419,6 @@ fn run() -> Result<()> {
                     .chain(cell::KILL_SWITCH_DRILLS)
                     .chain(cell::EXECUTOR_DRILLS)
                     .chain(cell::VAULT_DRILLS)
-                    .chain(cell::EXCHANGE_DRILLS)
                     .collect()
             } else {
                 names
@@ -461,7 +438,7 @@ fn run() -> Result<()> {
 fn ci(job: &str) -> Result<()> {
     eprintln!("==> ci {job}");
     match job {
-        "lint" => ci_lint(Path::new("."), |name| env::var(name).ok(), workspace_lint),
+        "lint" => lint(Path::new("."), workspace_lint),
         "test" => {
             for part in TEST_PARTS {
                 eprintln!("==> ci {part}");
@@ -478,15 +455,12 @@ fn ci(job: &str) -> Result<()> {
         "portable" => portable(),
         "select" => ci_select(),
         "cell" => cell::ci(),
-        "cell-seeded" => cell::ci_seeded(),
-        "cell-upgrade" => cell::ci_upgrade(),
         "cell-demo" => cell::scenario::ci(),
         "cell-journal" => cell::ci_drills(job, &cell::JOURNAL_DRILLS),
         "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
         "cell-kill-switch" => cell::ci_drills(job, &cell::KILL_SWITCH_DRILLS),
         "cell-executor" => cell::ci_drills(job, &cell::EXECUTOR_DRILLS),
         "cell-vault" => cell::ci_drills(job, &cell::VAULT_DRILLS),
-        "cell-exchange" => cell::ci_drills(job, &cell::EXCHANGE_DRILLS),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -540,8 +514,6 @@ fn ci(job: &str) -> Result<()> {
         "tofu" => tofu_checks(),
         "stub-release" => stub_release(),
         "exchange-release" => exchange_release(),
-        "provisionerd-release" => provisionerd_release(),
-        "api-release" => api_release(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "mutants-costs" => mutant_costs::ci(),
         "sweep" => sweep(Path::new(".")),
@@ -558,22 +530,12 @@ fn ci(job: &str) -> Result<()> {
             Ok(())
         }
         "nightly" => {
-            nightly_fuzz(None)?;
+            for seed in 1..=10 {
+                reference(&["mandate/fuzz.py", &seed.to_string()])?;
+            }
             reference(&["mandate/mutants.py"])?;
-            nightly_gitleaks()
+            sh("gitleaks", &["git", "--no-banner", "--redact"])
         }
-        "nightly-fuzz" => {
-            let shard = env::var(FUZZ_SHARD_ENV)
-                .with_context(|| format!("{FUZZ_SHARD_ENV} names the fuzz shard, K/N"))?;
-            nightly_fuzz(Some(&shard))
-        }
-        "nightly-mutants" => {
-            let shard = env::var(REFERENCE_SHARD_ENV).with_context(|| {
-                format!("{REFERENCE_SHARD_ENV} names the reference's mutant shard, K/N")
-            })?;
-            reference(&["mandate/mutants.py", "--shard", &shard])
-        }
-        "nightly-gitleaks" => nightly_gitleaks(),
         other => bail!("unknown CI job: {other}"),
     }
 }
@@ -750,22 +712,12 @@ fn rehearsal_runs(
 /// build: every workspace crate that declares it (DEC-922, DEC-963, DEC-962 item 2).
 const REHEARSAL_TESTED: [&str; 3] = ["mandate-mcp", "mandate-paper", "mandate-cli"];
 
-/// The workspace's nextest settings, under `xtask/` rather than nextest's default `.config/`, a
-/// top-level directory whose name the outside-path scan reads in any `.config` field access
-/// (DEC-2325).
-const NEXTEST_CONFIG: &str = "xtask/nextest.toml";
-
 /// The arguments of the workspace's nextest run over `packages`, or the whole workspace when
 /// there are none to scope it to (DEC-1190): every test of them or, with `partition` (`K/N`, `1
 /// <= K <= N`, plain decimal), nextest's counted `K`th of `N` shards, which together run every
-/// test once (DEC-871). Every run reads [`NEXTEST_CONFIG`], so its longest tests start first
-/// (DEC-2325).
+/// test once (DEC-871).
 fn nextest_args(partition: Option<&str>, packages: Option<&[String]>) -> Result<Vec<String>> {
-    let config = repo_root()?.join(NEXTEST_CONFIG);
-    let mut args: Vec<String> = ["nextest", "run", "--config-file"]
-        .map(String::from)
-        .to_vec();
-    args.push(config.to_string_lossy().into_owned());
+    let mut args: Vec<String> = ["nextest", "run"].map(String::from).to_vec();
     match packages {
         None => args.push("--workspace".to_owned()),
         Some(packages) => {
@@ -939,150 +891,6 @@ fn exchange_release() -> Result<()> {
         })?;
         release_exchange_refused(&output)
             .with_context(|| format!("tier {tier}, token URL {url:?}"))?;
-    }
-    Ok(())
-}
-
-/// The role provisioner's process's crate and binary (E21-33, DEC-2350).
-const PROVISIONERD: &str = "mandate-provisionerd";
-
-/// All the release role provisioner may write, to standard error, when it is asked for its
-/// fixture.
-const FIXTURE_NOT_BUILT: &str = "role_provisioner_start_failed: fixture_not_built\n";
-
-/// A build without debug assertions holds no fixture vault, so it never makes or removes a role
-/// against a vault that keeps nothing. Builds the provisioner with `--release` once, only when the
-/// diff selects its crate (DEC-1190), runs it with `--fixture` and every other flag a start needs,
-/// and requires [`release_provisionerd_refused`]. It first refuses an environment that turns
-/// debug assertions back on in the release profile (DEC-2322).
-fn provisionerd_release() -> Result<()> {
-    if !selection()?.crates.contains(PROVISIONERD) {
-        eprintln!("    provisionerd-release: {PROVISIONERD} is not affected (DEC-1190)");
-        return Ok(());
-    }
-    release_profile_untouched(|name| env::var(name).ok())?;
-    let socket = env::temp_dir().join(format!("provisionerd-release-{}.sock", std::process::id()));
-    let socket = socket
-        .to_str()
-        .context("the probe socket's path is not UTF-8")?;
-    let output = released(
-        PROVISIONERD,
-        &[
-            "run",
-            "--probe",
-            socket,
-            "--workspace",
-            "ws_1",
-            "--namespace",
-            "ws-1",
-            "--fixture",
-        ],
-        &[],
-    )?
-    .with_context(|| {
-        format!(
-            "the release build of {PROVISIONERD} kept running instead of refusing its fixture: \
-             it holds a fixture vault"
-        )
-    })?;
-    release_provisionerd_refused(&output)
-}
-
-/// Whether a release provisioner's run is the fixture's refusal: exit 2, [`FIXTURE_NOT_BUILT`]
-/// alone on standard error, and nothing on standard output.
-fn release_provisionerd_refused(output: &std::process::Output) -> Result<()> {
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if output.status.code() != Some(2) || stderr != FIXTURE_NOT_BUILT || !output.stdout.is_empty() {
-        bail!(
-            "the release build of {PROVISIONERD} must exit 2 writing only \
-             {FIXTURE_NOT_BUILT:?} to standard error; it exited {} with stdout {:?} and stderr \
-             {stderr:?}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout)
-        );
-    }
-    Ok(())
-}
-
-/// The workspace API server's crate and binary (E21-31, DEC-978).
-const API_SERVER: &str = "mandate-api-server";
-
-/// All a release API may write, to standard error, when it is given an authorization page
-/// (DEC-2633 item 3, DEC-2338 item 5).
-const AUTHORIZE_URL_REFUSED: &str = "refused: MANDATE_ALPACA_AUTHORIZE_URL is set outside a dev or ci \
-debug build, or names no cell page\n";
-
-/// The refusal an unsigned release binary meets first in a tier that requires a signature.
-const RELEASE_UNSIGNED: &str = "release_unsigned\n";
-
-/// DEC-2338 item 5: a build without debug assertions refuses to start whenever
-/// `MANDATE_ALPACA_AUTHORIZE_URL` is set, in every tier. Builds the API with `--release` once, only
-/// when the diff selects its crate (DEC-1190), and runs it with a cell's page, a loopback page and
-/// an empty one, in each tier. Each run must be [`release_api_refused`]. The page is judged before
-/// any other setting, so the run needs no database, key or address. An unsigned binary in staging
-/// or production meets `release_unsigned` first, so it also runs the crate's `config` tests built
-/// with `--release`, whose release-only test asserts every tier refuses any set page. Together
-/// they, not a debug unit test, cover `config::authorize_page`'s release arm.
-fn api_release() -> Result<()> {
-    if !selection()?.crates.contains(API_SERVER) {
-        eprintln!("    api-release: {API_SERVER} is not affected (DEC-1190)");
-        return Ok(());
-    }
-    release_profile_untouched(|name| env::var(name).ok())?;
-    sh(
-        "cargo",
-        &[
-            "test",
-            "--locked",
-            "--release",
-            "--package",
-            API_SERVER,
-            "--test",
-            "config",
-        ],
-    )?;
-    for tier in ["dev", "ci", "staging", "production"] {
-        for page in [
-            "http://oauth-fixture:8091/alpaca/oauth/authorize",
-            "http://127.0.0.1:8091/alpaca/oauth/authorize",
-            "",
-        ] {
-            let output = released(
-                API_SERVER,
-                &["--bind", "127.0.0.1:0", "--probe-bind", "127.0.0.1:0"],
-                &[
-                    ("MANDATE_DEPLOYMENT_TIER", tier),
-                    ("MANDATE_ALPACA_AUTHORIZE_URL", page),
-                ],
-            )?
-            .with_context(|| {
-                format!(
-                    "the release build of {API_SERVER} kept running instead of refusing its \
-                     authorization page in tier {tier} (DEC-2338 item 5)"
-                )
-            })?;
-            release_api_refused(&output, matches!(tier, "dev" | "ci"))
-                .with_context(|| format!("tier {tier}, page {page:?}"))?;
-        }
-    }
-    Ok(())
-}
-
-/// Whether a release API's run is the refusal of its authorization page: exit 2, nothing on
-/// standard output, and [`AUTHORIZE_URL_REFUSED`] alone on standard error. Where the tier is not
-/// `lenient`, an unsigned binary is refused [`RELEASE_UNSIGNED`] before any setting is read, and
-/// that refusal is accepted too.
-fn release_api_refused(output: &std::process::Output, lenient: bool) -> Result<()> {
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let refusal_named = stderr == AUTHORIZE_URL_REFUSED || (!lenient && stderr == RELEASE_UNSIGNED);
-    if output.status.code() != Some(2) || !refusal_named || !output.stdout.is_empty() {
-        bail!(
-            "the release build of {API_SERVER} must exit 2 writing only \
-             {AUTHORIZE_URL_REFUSED:?} to standard error (DEC-2338 item 5); it exited {} with \
-             stdout {:?} and stderr {stderr:?}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout)
-        );
     }
     Ok(())
 }
@@ -2127,7 +1935,9 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     let words = vault_provision::vault_provision(
         &vault_provision::Steps {
             kubectl: &in_cluster,
-            provision: &|command, stdin| in_vault_cli(command, stdin),
+            provision: &|stdin| {
+                in_vault_cli(&vault_provision::provision_command(&connections), stdin)
+            },
             put: &|secret, stdin| in_vault_cli(&vault_provision::put_command(secret), stdin),
         },
         &listed,
@@ -2818,11 +2628,10 @@ const KNOWN_OUTSIDE_CRATES: [&str; 17] = [
 /// (DEC-1190 item 2): every spec, `check_planned.py` globbing `docs/specs/*.md` (the journal
 /// spec among them), the backlog it checks planned operations against, and the requirements file
 /// that pins their Python environment ([`pinned_python`]).
-const SCHEMA_SWEEP_INPUTS: [&str; 5] = [
+const SCHEMA_SWEEP_INPUTS: [&str; 4] = [
     "schemas/",
     "docs/specs/",
     "docs/project/06-backlog-v1.md",
-    "docs/project/backlog/",
     "reference/mandate/requirements.txt",
 ];
 
@@ -3396,34 +3205,13 @@ fn output_in(dir: &Path, program: &str, args: &[&str]) -> Result<String> {
     String::from_utf8(out.stdout).context("non-UTF-8 output")
 }
 
-/// `ci lint`: the lint job over the repository at `root`, its backlog check against the diff base
-/// that `var` reads from `MANDATE_BASE_REF` and `GITHUB_EVENT_NAME`, as every diff-based job
-/// resolves it (DEC-2373). `ci` passes the process environment, which a test pins.
-fn ci_lint(
-    root: &Path,
-    var: impl Fn(&str) -> Option<String>,
-    workspace_checks: impl FnOnce() -> Result<()>,
-) -> Result<()> {
-    let base = base_ref_in(
-        root,
-        var("MANDATE_BASE_REF").as_deref(),
-        var("GITHUB_EVENT_NAME").as_deref(),
-    )?;
-    lint(root, base.as_deref(), workspace_checks)
-}
-
 /// The lint job over the repository at `root` (ADR-0001 ES-12): ShellCheck over its
 /// `.github/scripts/` (DEC-329), `deploy/` (the demo host's runbook, DEC-822) and `scripts/` (the
 /// founder's runbooks, R0's rehearsal first), actionlint over its `.github/workflows/` (DEC-330), then
 /// `workspace_checks`, the checks that need the Cargo and uv workspaces, which `ci lint` passes as
 /// [`workspace_lint`]. The job takes the repository it runs in, so a fixture repository drives it
 /// and neither tool's result can be dropped without a test failing (DEC-331, the DEC-139 pattern).
-/// `base` is the diff base the backlog check compares against, `None` to skip it (DEC-2373).
-fn lint(
-    root: &Path,
-    base: Option<&str>,
-    workspace_checks: impl FnOnce() -> Result<()>,
-) -> Result<()> {
+fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()> {
     shellcheck_scripts(&root.join(".github/scripts"))?;
     shellcheck_scripts(&root.join("deploy"))?;
     shellcheck_scripts(&root.join("scripts"))?;
@@ -3432,138 +3220,7 @@ fn lint(
     infra_workflow_in(root)?;
     mail::guard_in(root)?;
     leak::guard_in(root)?;
-    backlog_rows_in(root, base)?;
     workspace_checks()
-}
-
-/// The backlog every story and debt row was written to until DEC-2373.
-const BACKLOG: &str = "docs/project/06-backlog-v1.md";
-
-/// Where a new backlog row goes since DEC-2373: one file each, so two PRs adding rows never touch
-/// the same lines.
-const BACKLOG_ROWS: &str = "docs/project/backlog/";
-
-/// DEC-2373: a change adds no row to [`BACKLOG`]; a new row is a file under [`BACKLOG_ROWS`]. A
-/// row is folded in, not new, only when a row file the change deletes, not moves, held that very
-/// row at `base` under a name that starts with its story. Skipped with no diff base, as on a push
-/// to `main`.
-fn backlog_rows_in(root: &Path, base: Option<&str>) -> Result<()> {
-    eprintln!("    backlog: checking that new rows go one file each under {BACKLOG_ROWS}");
-    let Some(base) = base else {
-        return Ok(());
-    };
-    let before =
-        output_in(root, "git", &["show", &format!("{base}:{BACKLOG}")]).unwrap_or_default();
-    let after = fs::read_to_string(root.join(BACKLOG)).context("reading the backlog")?;
-    let changed = output_in(
-        root,
-        "git",
-        &["diff", "--name-status", "--find-renames", base],
-    )?;
-    let mut folded = Vec::new();
-    for path in changed
-        .lines()
-        .filter_map(|line| line.strip_prefix("D\t"))
-        .filter(|path| is_backlog_row(path))
-    {
-        let held = output_in(root, "git", &["show", &format!("{base}:{path}")])?;
-        folded.push((path.to_owned(), held));
-    }
-    if let Some(problem) = backlog_row_problem(&before, &after, &folded) {
-        bail!("backlog: {problem}");
-    }
-    Ok(())
-}
-
-/// The rows a backlog text holds, each as its key and its trimmed opening line. A row is a bullet
-/// opening in bold at the margin, an indented bold bullet naming a story, or a table row naming
-/// one. Its key is the story it names in bold, else its bold lead, else a table row's first cell,
-/// so editing a row's text keeps its key and only a row new to the text adds one.
-fn backlog_rows(text: &str) -> Vec<(String, String)> {
-    text.lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            let indented = line.starts_with(char::is_whitespace);
-            let key = if let Some(lead) = trimmed
-                .strip_prefix("- **")
-                .or_else(|| trimmed.strip_prefix("* **"))
-            {
-                match story_id(lead) {
-                    Some(story) if lead.starts_with(story.as_str()) => Some(story),
-                    _ if indented => None,
-                    _ => Some(lead.split("**").next().unwrap_or(lead).to_owned()),
-                }
-            } else if trimmed.starts_with('|') && story_id(trimmed).is_some() {
-                trimmed.split('|').nth(1).map(|cell| cell.trim().to_owned())
-            } else {
-                None
-            };
-            key.map(|key| (key, trimmed.to_owned()))
-        })
-        .collect()
-}
-
-/// The first story id, `E<n>-<n>`, that `text` names.
-fn story_id(text: &str) -> Option<String> {
-    let digits = |s: &str| s.len() - s.trim_start_matches(|c: char| c.is_ascii_digit()).len();
-    text.match_indices('E').find_map(|(at, _)| {
-        let rest = &text[at + 1..];
-        let epic = digits(rest);
-        let story = rest[epic..].strip_prefix('-').map(digits)?;
-        let before_ok = !text[..at].ends_with(|c: char| c.is_ascii_alphanumeric());
-        (epic > 0 && story > 0 && before_ok).then(|| text[at..at + 2 + epic + story].to_owned())
-    })
-}
-
-/// Whether `path` is a row file under [`BACKLOG_ROWS`], not its README.
-fn is_backlog_row(path: &str) -> bool {
-    path.strip_prefix(BACKLOG_ROWS)
-        .is_some_and(|name| name.ends_with(".md") && name != "README.md" && !name.contains('/'))
-}
-
-/// The refusal for a backlog that went from `before` to `after` while the change deleted the row
-/// files `folded`, each its path and the text it held at the base, or `None` when every row new
-/// to the backlog is one of those files' rows, each file's row folded once, under a file name
-/// that starts with the row's story.
-fn backlog_row_problem(before: &str, after: &str, folded: &[(String, String)]) -> Option<String> {
-    let mut known: Vec<String> = backlog_rows(before)
-        .into_iter()
-        .map(|(key, _)| key)
-        .collect();
-    let mut files: Vec<(&str, (String, String))> = folded
-        .iter()
-        .flat_map(|(path, held)| {
-            let name = path.rsplit('/').next().unwrap_or(path);
-            backlog_rows(held).into_iter().map(move |row| (name, row))
-        })
-        .collect();
-    let mut unfolded = Vec::new();
-    for (key, line) in backlog_rows(after) {
-        if let Some(at) = known.iter().position(|old| *old == key) {
-            known.swap_remove(at);
-            continue;
-        }
-        let names_story =
-            |name: &str| story_id(&key).is_none_or(|story| name.starts_with(&format!("{story}-")));
-        match files
-            .iter()
-            .position(|(name, (_, held))| *held == line && names_story(name))
-        {
-            Some(at) => {
-                files.swap_remove(at);
-            }
-            None => unfolded.push(key),
-        }
-    }
-    (!unfolded.is_empty()).then(|| {
-        format!(
-            "{BACKLOG} gains {} row(s) no deleted row file held ({}); add a new row as its own \
-             file under {BACKLOG_ROWS}, and fold one in only by deleting the file that holds it \
-             (DEC-2373)",
-            unfolded.len(),
-            unfolded.join(", ")
-        )
-    })
 }
 
 /// The lint job's checks over the Cargo and uv workspaces in the current directory: fmt, clippy
@@ -3722,8 +3379,6 @@ struct Finding {
 /// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone. The
 /// ULID rows prove the API server's process-test exception: a workspace or organization ULID is
 /// allowed in that test file alone, and any other value under the same setting there is reported.
-/// The image rows prove the placeholder API image tag's exception: that exact tag is allowed in the
-/// cell module and the OAuth fixture's chart test alone, and another tag there is reported.
 /// The build-output rows prove the `target/` exception: a key under the workspace root's `target/`
 /// is allowed, and the same key under a crate's own `target` or under `targets/` is reported.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
@@ -3768,14 +3423,6 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let cell = "xtask/src/cell.rs";
     let image = format!("                \"mandate.local/api:{}\",", "0123456789ab");
     let not_image = format!("                \"mandate.local/api:{page}\",");
-    let fixture_test = "deploy/tests/test_oauth_fixture.py";
-    let fixture_image = format!(
-        "        lambda w: fixture_container(w).update(image=\"mandate.local/api:{}\"),",
-        "0123456789ab"
-    );
-    let not_fixture_image = format!(
-        "        lambda w: fixture_container(w).update(image=\"mandate.local/api:{page}\"),"
-    );
     let challenges = "schemas/workspace-api/examples/commands.step-up-challenge.json";
     let challenge = format!(
         "  \"webauthn_challenge\": \"{}\",",
@@ -3797,20 +3444,6 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let not_authenticator_data = format!(
         "  \"authenticator_data\": \"{}\",",
         concat!("TZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzz", "uoMdl2MFAAAABw")
-    );
-    let start_decoder = "crates/mandate-api/tests/step_up_assertion.rs";
-    let start_authenticator = format!(
-        "            authenticator_data: \"{}\".to_owned(),",
-        concat!("SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzz", "uoMdl2MFAAAACQ")
-    );
-    let not_start_authenticator = format!(
-        "            authenticator_data: \"{}\".to_owned(),",
-        concat!("TZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzz", "uoMdl2MFAAAACQ")
-    );
-    let start_example = "schemas/workspace-api/examples/commands.oauth-start-request.valid.json";
-    let start_example_data = format!(
-        "  \"authenticator_data\": \"{}\",",
-        concat!("SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzz", "uoMdl2MFAAAAAQ")
     );
     let journal_yaml = "docs/specs/reference-cases/journal.yaml";
     let credential_line = format!("        credential: {}", "AAECAwQFBgcICQoLDA0ODw");
@@ -3877,9 +3510,6 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (cell.to_owned(), image.clone(), None),
         ("stray-cell.rs".to_owned(), image, generic),
         (cell.to_owned(), not_image, generic),
-        (fixture_test.to_owned(), fixture_image.clone(), None),
-        ("stray-test.py".to_owned(), fixture_image, generic),
-        (fixture_test.to_owned(), not_fixture_image, generic),
         (challenges.to_owned(), challenge.clone(), None),
         ("stray-challenge.json".to_owned(), challenge, generic),
         (challenges.to_owned(), not_challenge, generic),
@@ -3909,19 +3539,6 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (
             passkey_authenticator.to_owned(),
             not_authenticator_data,
-            generic,
-        ),
-        (start_decoder.to_owned(), start_authenticator.clone(), None),
-        (
-            "stray-step-up-assertion.rs".to_owned(),
-            start_authenticator,
-            generic,
-        ),
-        (start_decoder.to_owned(), not_start_authenticator, generic),
-        (start_example.to_owned(), start_example_data.clone(), None),
-        (
-            "stray-oauth-start-request.json".to_owned(),
-            start_example_data,
             generic,
         ),
         (journal_yaml.to_owned(), credential_line.clone(), None),
@@ -6142,8 +5759,6 @@ const READ_ENV_NAMES: &[&str] = &[
     "FAST_RESULT",
     "FLUX_SHA256",
     "FLUX_VERSION",
-    "FULL_CHECKS_2_RESULT",
-    "FULL_CHECKS_3_RESULT",
     "FULL_CHECKS_RESULT",
     "FULL_CHECKS_SELECTED",
     "FULL_RESULT",
@@ -6195,8 +5810,6 @@ const READ_ENV_NAMES: &[&str] = &[
     "TF_VAR_access_allowed_emails",
     "TF_VAR_cloudflare_api_token",
     "MANDATE_SCHEMA_SHARD",
-    "MANDATE_FUZZ_SHARD",
-    "MANDATE_REFERENCE_SHARD",
     "MANDATE_SWEEP_CLOCK",
     "MANDATE_TEST_PARTITION",
     "MERGE_APPROVERS",
@@ -9264,7 +8877,8 @@ fn gate_run(
     let unmutated = UnmutatedSource::read(root, &diff.touched)?;
     let before = launched_after(root, started);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let stop = launch_stop(root, shard, in_shard.clone(), per_shard, before);
+    let stop = (per_shard > 1)
+        .then(|| Duration::from_millis(mutant_costs::STOP_AFTER_MS).saturating_sub(before));
     let status = match stop {
         Some(left) => mutants_job_within(root, &args, left),
         None => mutants_job_cargo(root, &args),
@@ -9333,43 +8947,6 @@ fn launched_after(root: &Path, started: SystemTime) -> Duration {
         .ok()
         .and_then(|launched| launched.duration_since(started).ok())
         .unwrap_or_default()
-}
-
-/// How long a shard of `per_shard` mutants may run from now, `before` having gone since the gate
-/// started, with its provisional record written first (DEC-2607 item 5, DEC-2367 item 2): `None`
-/// for a shard of one, which runs to its end and writes none.
-fn launch_stop(
-    root: &Path,
-    shard: Option<MutantShard>,
-    packages: Vec<String>,
-    per_shard: usize,
-    before: Duration,
-) -> Option<Duration> {
-    record_unfinished(root, shard, packages, per_shard);
-    (per_shard > 1)
-        .then(|| Duration::from_millis(mutant_costs::STOP_AFTER_MS).saturating_sub(before))
-}
-
-/// Writes the record a shard of more than one mutant leaves if GitHub stops its job before
-/// [`record_shard_cost`] replaces it (DEC-2367 item 2). As with that record, one that cannot be
-/// written is said and the gate's verdict stands alone.
-fn record_unfinished(
-    root: &Path,
-    shard: Option<MutantShard>,
-    packages: Vec<String>,
-    per_shard: usize,
-) {
-    let Some(cost) = mutant_costs::provisional(
-        mutant_costs::run_id(),
-        shard.map_or_else(|| "all".to_owned(), |s| s.argument()),
-        packages,
-        per_shard,
-    ) else {
-        return;
-    };
-    if let Err(err) = mutant_costs::write_record(root, &cost) {
-        eprintln!("    mutants: no provisional cost record for this shard ({err:#})");
-    }
 }
 
 /// Writes this shard's [`mutant_costs::ShardCost`] (DEC-2607 item 1). The record only informs
@@ -9574,11 +9151,10 @@ fn gate_diff_whole(root: &Path) -> Result<Option<GateDiff>> {
 }
 
 /// The mutants a shard of the whole-crate sweep tests at most, so a shard stays within ten
-/// minutes (DEC-1190 item 5, DEC-2638): DEC-473 found eight `mandate-executor` mutants fitting,
-/// but at a4986bbe the slowest eight-mutant shard took 9m58s and 25 ran past the cap, so five,
-/// near seven minutes at that rate. Slice sharding over `ceil(n / 5)` shards gives each shard
-/// `ceil(n / ceil(n / 5))` mutants, never more than this.
-const SWEEP_SHARD_MUTANTS: usize = 5;
+/// minutes (DEC-1190 item 5): DEC-473 found fourteen or fifteen `mandate-executor` mutants a shard
+/// reaching the cap and eight fitting. Slice sharding over `ceil(n / 8)` shards gives each shard
+/// `ceil(n / ceil(n / 8))` mutants, never more than this.
+const SWEEP_SHARD_MUTANTS: usize = 8;
 
 /// The fewest days one whole-crate sweep is spread over (DEC-1190 item 5): shard `k` runs on the
 /// days whose index is `k` modulo the rotation, so every mutant is tested once a week, and a
@@ -10845,40 +10421,6 @@ fn pending() -> Result<()> {
     )
 }
 
-/// The fuzz seeds of shard `shard`, `K/N` counted from 0, or every seed without one: seed `s` is
-/// shard `(s - 1) % N`'s, so the `N` shards hold every seed of `1..=`[`NIGHTLY_FUZZ_SEEDS`] once
-/// between them (DEC-2638). A shard that is not `K/N` with `K < N` is refused.
-fn fuzz_seeds(shard: Option<&str>) -> Result<Vec<u32>> {
-    let all = 1..=NIGHTLY_FUZZ_SEEDS;
-    let Some(shard) = shard else {
-        return Ok(all.collect());
-    };
-    let parsed = shard.split_once('/').and_then(|(k, n)| {
-        let plain = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-        if !plain(k) || !plain(n) {
-            return None;
-        }
-        Some((k.parse::<u32>().ok()?, n.parse::<u32>().ok()?))
-    });
-    match parsed {
-        Some((k, n)) if k < n => Ok(all.filter(|seed| (seed - 1) % n == k).collect()),
-        _ => bail!("{FUZZ_SHARD_ENV} must be K/N with K < N, counted from 0; got {shard:?}"),
-    }
-}
-
-/// The mandate reference's fuzz over [`fuzz_seeds`] of `shard`.
-fn nightly_fuzz(shard: Option<&str>) -> Result<()> {
-    for seed in fuzz_seeds(shard)? {
-        reference(&["mandate/fuzz.py", &seed.to_string()])?;
-    }
-    Ok(())
-}
-
-/// Gitleaks over the whole history, the nightly's secret scan.
-fn nightly_gitleaks() -> Result<()> {
-    sh("gitleaks", &["git", "--no-banner", "--redact"])
-}
-
 /// Where a `cargo` child that builds puts what it builds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BuildDir {
@@ -12087,25 +11629,24 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        ATOMIC_EXCEPTIONS, AUTHORIZE_URL_REFUSED, BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, BuildDir,
-        CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB,
-        INFRA_WORKFLOW, Layers, MUTANT_BUILD_PROFILE, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS,
-        MUTANT_TEST_TIMEOUT, MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard,
-        MutatedCrate, PR_JOBS, Package, PendingTest, PendingTestRun, REFCASES, REHEARSAL,
-        REHEARSAL_LIVE_JOB, REHEARSAL_TESTED, RELEASE_UNSIGNED, SCHEMA_CHECKERS, SCHEMA_DIR,
-        SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome, USED_BY_DERIVED,
-        UnmutatedSource, actionlint_workflows, atomic_exception, backticked_paths, base_ref_in,
-        behaviour_only_rows, check_schedule, ci, ci_files, classify, codeowners_problems,
-        contains_dec_id, contains_word, decision_numbers, external_oracles, failure_cause,
-        feature_files, feature_map_problems, files_by_extension, first_panic_line,
-        forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers, has_pending_tests,
-        is_pending_marker, is_stub_function, layer_problems, lint, listed_mutant_counts,
-        live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
-        mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
-        mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
-        per_shard_value, plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems,
-        registry_rows, rehearsal_runs, release_api_refused, release_exchange_refused,
-        release_profile_untouched, release_provisionerd_refused, release_stub_refused, repo_root,
+        ATOMIC_EXCEPTIONS, BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, BuildDir, CARGO_TARGET_DIR,
+        CiFile, CratePolicy, Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB, INFRA_WORKFLOW, Layers,
+        MUTANT_BUILD_PROFILE, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT,
+        MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS,
+        Package, PendingTest, PendingTestRun, REFCASES, REHEARSAL, REHEARSAL_LIVE_JOB,
+        REHEARSAL_TESTED, SCHEMA_CHECKERS, SCHEMA_DIR, SCHEMA_SHARD_ENV, TEST_PARTITION_ENV,
+        TEST_PARTS, TestOrder, TestOutcome, USED_BY_DERIVED, UnmutatedSource, actionlint_workflows,
+        atomic_exception, backticked_paths, base_ref_in, behaviour_only_rows, check_schedule, ci,
+        ci_files, classify, codeowners_problems, contains_dec_id, contains_word, decision_numbers,
+        external_oracles, failure_cause, feature_files, feature_map_problems, files_by_extension,
+        first_panic_line, forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers,
+        has_pending_tests, is_pending_marker, is_stub_function, layer_problems, lint,
+        listed_mutant_counts, live_feature_problems, live_test_counts, metadata_in,
+        mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan,
+        mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_nextest,
+        pending_problems, pending_tests, per_shard_value, plain_comment_lines, preflight_args,
+        proptest_seeds_in, registry_problems, registry_rows, rehearsal_runs,
+        release_exchange_refused, release_profile_untouched, release_stub_refused, repo_root,
         schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
         spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
         test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts,
@@ -12113,7 +11654,7 @@ mod tests {
     };
     use super::{
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
-        SWEEP_SHARD_MUTANTS, SweepPlan, Token, crate_graph, fuzz_seeds, infra_commands,
+        SWEEP_SHARD_MUTANTS, SweepPlan, Token, crate_graph, infra_commands,
         infra_workflow_problems, is_docs_path, literal_paths, nextest_args, normalized_join,
         references_path, select, selection_in, source_references, tokens, withhold_web_demo,
     };
@@ -12124,303 +11665,7 @@ mod tests {
         TOFU_DIR, committed_working_dirs, guarded_word_problems, tofu_committed_working_dirs,
         tofu_forbidden_blocks, tofu_sources, tofu_symlinks,
     };
-    use super::{
-        backlog_row_problem, backlog_rows, backlog_rows_in, ci_lint, is_backlog_row, story_id,
-    };
     use super::{unoptimised_config, unoptimised_packages};
-
-    /// DEC-2373: each row shape counts, keyed so an edit keeps its key; a row new to the backlog
-    /// is refused unless a deleted row file named for its story held that very row, each file's
-    /// row folding once.
-    #[test]
-    fn a_new_backlog_row_goes_in_its_own_file() {
-        let base = "# Backlog\n\n- **E1-1 (Must)** a\n  more of a\n- **A debt row.** b\n";
-        let rows = |text: &str| -> Vec<String> {
-            backlog_rows(text).into_iter().map(|(key, _)| key).collect()
-        };
-        assert_eq!(
-            rows(concat!(
-                "- **E1-1 (Must)** a\n",
-                "* **E1-2** b\n",
-                "  - **E1-3** an indented row naming a story\n",
-                "  - **not a row**, an indented detail\n",
-                "- **A debt row.** c\n",
-                "| E15 Signals | M5 | Must (E15-1) |\n",
-                "|---|---|---|\n",
-                "text - **E1-4** in prose\n",
-                "- **XE1-5** no story\n",
-                "- **Debt from E1-7's review.** d\n",
-            )),
-            [
-                "E1-1",
-                "E1-2",
-                "E1-3",
-                "A debt row.",
-                "E15 Signals",
-                "XE1-5",
-                "Debt from E1-7's review."
-            ]
-        );
-        assert_eq!(story_id("see E21-30's row"), Some("E21-30".to_owned()));
-        assert_eq!(story_id("E21- E-3 XE1-2"), None);
-        let edited = base
-            .replace("(Must)", "(Must, done)")
-            .replace("debt row.** b", "debt row.** b2");
-        assert_eq!(
-            backlog_row_problem(base, &edited, &[]),
-            None,
-            "an edit adds no row"
-        );
-        assert_eq!(
-            backlog_row_problem(base, "# Backlog\n", &[]),
-            None,
-            "a removal adds none"
-        );
-        let added = |row: &str| format!("{base}{row}\n");
-        for row in [
-            "- **E1-2** new",
-            "- **E1-1 (Should)** a second row for one story",
-            "  - **E1-2** indented",
-            "| E2 Epic | M1 | Must (E2-1) |",
-            "- **Another debt row.**",
-        ] {
-            let problem = backlog_row_problem(base, &added(row), &[]);
-            assert!(
-                problem
-                    .as_deref()
-                    .is_some_and(|p| p.contains("gains 1 row(s)")),
-                "{row:?} is a new row, got {problem:?}"
-            );
-        }
-        let file =
-            |name: &str, held: &str| (format!("docs/project/backlog/{name}"), held.to_owned());
-        let row = "- **E1-2 (Must)** new";
-        assert_eq!(
-            backlog_row_problem(
-                base,
-                &added(row),
-                &[file("E1-2-new.md", &format!("{row}\n"))]
-            ),
-            None,
-            "a row folded from its own deleted file"
-        );
-        for (why, folded) in [
-            (
-                "an unrelated file",
-                vec![file("E1-9-other.md", "- **E1-9** other\n")],
-            ),
-            (
-                "a file for another story",
-                vec![file("E1-9-new.md", &format!("{row}\n"))],
-            ),
-            (
-                "other text",
-                vec![file("E1-2-new.md", "- **E1-2 (Must)** changed\n")],
-            ),
-        ] {
-            assert!(
-                backlog_row_problem(base, &added(row), &folded).is_some(),
-                "{why} licenses no row"
-            );
-        }
-        let two = format!("{base}{row}\n{row}\n");
-        assert!(
-            backlog_row_problem(base, &two, &[file("E1-2-new.md", &format!("{row}\n"))]).is_some(),
-            "one file folds its row once"
-        );
-        assert!(is_backlog_row("docs/project/backlog/E7-4-a-row.md"));
-        assert!(!is_backlog_row("docs/project/backlog/README.md"));
-        assert!(!is_backlog_row("docs/project/backlog/nested/E7-4.md"));
-        assert!(!is_backlog_row("docs/project/backlog/E7-4.txt"));
-        assert!(!is_backlog_row("docs/project/06-backlog-v1.md"));
-    }
-
-    /// A fixture git repository at `root` whose committed backlog holds one row, with one row file
-    /// beside it; returns the commit, the diff base the backlog tests compare against.
-    fn backlog_repository(root: &Path) -> Result<String> {
-        fs::create_dir_all(root.join("docs/project/backlog"))?;
-        fs::write(
-            root.join("docs/project/06-backlog-v1.md"),
-            "# Backlog\n\n- **E1-1** a\n",
-        )?;
-        fs::write(
-            root.join("docs/project/backlog/E1-2-new.md"),
-            "- **E1-2** new\n",
-        )?;
-        fs::write(
-            root.join("docs/project/backlog/README.md"),
-            "# New backlog rows\n",
-        )?;
-        for args in [
-            &["init", "-q", "-b", "main"][..],
-            &["add", "-A"],
-            &[
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@t",
-                "commit",
-                "-qm",
-                "base",
-            ],
-            &["update-ref", "refs/remotes/origin/main", "HEAD"],
-        ] {
-            git_in(root, args)?;
-        }
-        git_in(root, &["rev-parse", "HEAD"]).map(|sha| sha.trim().to_owned())
-    }
-
-    fn git_in(root: &Path, args: &[&str]) -> Result<String> {
-        let out = Command::new("git").args(args).current_dir(root).output()?;
-        if !out.status.success() {
-            bail!("git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
-        }
-        Ok(String::from_utf8(out.stdout)?)
-    }
-
-    /// DEC-2373, the git half: against a real diff base, a row added to 06 is refused, a fold
-    /// that deletes the row's file passes, adding two rows while deleting one file is refused, a
-    /// row file moved out of the directory folds nothing, and a push to main, with no diff base,
-    /// skips the check.
-    #[test]
-    fn the_backlog_check_reads_the_change_from_git() -> Result<()> {
-        let root = env::temp_dir().join(format!("mandate-xtask-backlog-{}", std::process::id()));
-        if root.exists() {
-            fs::remove_dir_all(&root)?;
-        }
-        fs::create_dir_all(&root)?;
-        let base = backlog_repository(&root)?;
-        let backlog = root.join("docs/project/06-backlog-v1.md");
-        let check =
-            |base: Option<&str>| backlog_rows_in(&root, base).map_err(|err| format!("{err:#}"));
-        let reset = || -> Result<()> {
-            git_in(&root, &["reset", "-q", "--hard", &base])?;
-            Ok(())
-        };
-        let mut outcomes = Vec::new();
-
-        fs::write(&backlog, "# Backlog\n\n- **E1-1** a\n- **E1-3** added\n")?;
-        outcomes.push(("an added row", check(Some(&base))));
-        let push_base = base_ref_in(&root, None, Some("push"))?;
-        outcomes.push(("a push with no diff base", check(push_base.as_deref())));
-        reset()?;
-
-        fs::write(&backlog, "# Backlog\n\n- **E1-1** a\n- **E1-2** new\n")?;
-        git_in(&root, &["rm", "-q", "docs/project/backlog/E1-2-new.md"])?;
-        outcomes.push(("a fold", check(Some(&base))));
-        fs::write(
-            &backlog,
-            "# Backlog\n\n- **E1-1** a\n- **E1-2** new\n- **E1-3** x\n",
-        )?;
-        outcomes.push(("two added, one folded", check(Some(&base))));
-        reset()?;
-
-        fs::write(&backlog, "# Backlog\n\n- **E1-1** a\n- **E1-2** new\n")?;
-        git_in(
-            &root,
-            &["mv", "docs/project/backlog/E1-2-new.md", "docs/E1-2-new.md"],
-        )?;
-        outcomes.push(("a move out", check(Some(&base))));
-        fs::remove_dir_all(&root).ok();
-
-        let refused = |outcome: &Result<(), String>| {
-            outcome.as_ref().is_err_and(|err| err.contains("backlog:"))
-        };
-        assert_eq!(push_base, None, "a push on main has no diff base");
-        for (case, outcome) in &outcomes {
-            let passes = matches!(*case, "a fold" | "a push with no diff base");
-            assert_eq!(outcome.is_ok(), passes, "{case}: {outcome:?}");
-            assert!(
-                passes || refused(outcome),
-                "{case} is refused by the check: {outcome:?}"
-            );
-        }
-        Ok(())
-    }
-
-    /// `ci lint` runs the backlog check against the diff base it resolves (DEC-2373): a row added
-    /// to 06 fails the job naming the check, before the workspace checks run, whether the base is
-    /// given explicitly or, on a `pull_request` event, is the CI merge commit's first parent.
-    #[test]
-    fn the_lint_job_runs_the_backlog_check_on_its_repository() -> Result<()> {
-        let root =
-            env::temp_dir().join(format!("mandate-xtask-lint-backlog-{}", std::process::id()));
-        if root.exists() {
-            fs::remove_dir_all(&root)?;
-        }
-        fixture_workspace(&root)?;
-        for dir in [".github/workflows", ".github/scripts", "deploy", "scripts"] {
-            fs::create_dir_all(root.join(dir))?;
-        }
-        let base = backlog_repository(&root)?;
-        let explicit = |name: &str| (name == "MANDATE_BASE_REF").then(|| base.clone());
-        let clean = ci_lint(&root, explicit, || Ok(())).map_err(|err| format!("{err:#}"));
-        fs::write(
-            root.join("docs/project/06-backlog-v1.md"),
-            "# Backlog\n\n- **E1-1** a\n- **E1-3** added\n",
-        )?;
-        let reached = Cell::new(false);
-        let planted = ci_lint(&root, explicit, || {
-            reached.set(true);
-            Ok(())
-        })
-        .map_err(|err| format!("{err:#}"))
-        .err();
-        let commit = |args: &[&str]| {
-            let mut all = vec!["-c", "user.name=t", "-c", "user.email=t@t"];
-            all.extend_from_slice(args);
-            git_in(&root, &all)
-        };
-        git_in(&root, &["checkout", "-q", "-b", "pr"])?;
-        git_in(&root, &["add", "-A"])?;
-        commit(&["commit", "-qm", "the change"])?;
-        git_in(&root, &["checkout", "-q", "--detach", "main"])?;
-        commit(&["merge", "-q", "--no-ff", "--no-edit", "pr"])?;
-        let pull_request =
-            |name: &str| (name == "GITHUB_EVENT_NAME").then(|| "pull_request".to_owned());
-        let on_pull_request = ci_lint(&root, pull_request, || Ok(()))
-            .map_err(|err| format!("{err:#}"))
-            .err();
-        fs::remove_dir_all(&root).ok();
-        assert_eq!(clean, Ok(()), "a clean fixture repository passes");
-        assert!(
-            planted
-                .as_deref()
-                .is_some_and(|err| err.contains("backlog:")),
-            "a row added to 06 fails the lint job naming the check, got {planted:?}"
-        );
-        assert!(
-            on_pull_request
-                .as_deref()
-                .is_some_and(|err| err.contains("backlog:")),
-            "on a pull_request event the job compares against the merge's first parent, got \
-             {on_pull_request:?}"
-        );
-        assert!(
-            !reached.get(),
-            "the workspace checks run only after it passes"
-        );
-        Ok(())
-    }
-
-    /// `ci lint` hands [`ci_lint`] the process environment, so the backlog check reads the diff
-    /// base every diff-based job reads; a dispatch that handed it none would skip the check
-    /// everywhere (DEC-2373).
-    #[test]
-    fn ci_lint_reads_the_process_environment() -> Result<()> {
-        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"))?;
-        let arms: Vec<&str> = source
-            .lines()
-            .map(str::trim)
-            .filter(|line| line.starts_with("\"lint\" =>"))
-            .collect();
-        assert_eq!(
-            arms,
-            ["\"lint\" => ci_lint(Path::new(\".\"), |name| env::var(name).ok(), workspace_lint),"],
-            "ci's one lint arm passes the process environment"
-        );
-        Ok(())
-    }
 
     #[test]
     fn finds_plain_comments_but_not_docs_or_literals() {
@@ -12910,8 +12155,6 @@ mod tests {
                 "mandate-cp-site",
                 "mandate-deploy-manager",
                 "mandate-deployd",
-                "mandate-provisioner",
-                "mandate-provisionerd",
                 "mandate-dispatcher",
                 "mandate-gatewayd"
             ]
@@ -13242,7 +12485,7 @@ mod tests {
     fn every_mutation_shard_has_the_database_the_postgres_tests_need() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
         for (job, gate) in [
-            ("full-checks", "run: cargo xtask ci postgres"),
+            ("full-checks", "run: cargo xtask ci full"),
             ("mutants", "run: cargo xtask ci mutants"),
         ] {
             let lines = workflow_job(&workflow, job)
@@ -13280,7 +12523,7 @@ mod tests {
     fn every_mutation_shard_has_the_store_the_objectstore_tests_need() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
         for (job, gate) in [
-            ("full-checks", "run: cargo xtask ci objectstore"),
+            ("full-checks", "run: cargo xtask ci full"),
             ("mutants", "run: cargo xtask ci mutants"),
         ] {
             let lines = workflow_job(&workflow, job)
@@ -13538,44 +12781,6 @@ mod tests {
         assert!(FULL_JOB.contains(&"stub-release") && PR_JOBS.contains(&"stub-release"));
     }
 
-    /// `provisionerd-release` accepts only exit 2 with the fixture's refusal alone on standard
-    /// error, and runs in `full` and in `check`.
-    #[test]
-    fn the_release_provisioner_check_accepts_only_the_lone_refusal() {
-        let run = |code: i32, stdout: &str, stderr: &str| std::process::Output {
-            status: ExitStatus::from_raw(code << 8),
-            stdout: stdout.as_bytes().to_vec(),
-            stderr: stderr.as_bytes().to_vec(),
-        };
-        let refusal = "role_provisioner_start_failed: fixture_not_built\n";
-        assert!(release_provisionerd_refused(&run(2, "", refusal)).is_ok());
-        for (code, stdout, stderr) in [
-            (0, "", refusal),
-            (1, "", refusal),
-            (2, "ready\n", refusal),
-            (
-                2,
-                "",
-                "role_provisioner_start_failed: fixture_not_built\ndrained\n",
-            ),
-            (
-                2,
-                "",
-                "role_provisioner_start_failed: vault_ca_unreadable\n",
-            ),
-            (2, "", "role_provisioner_start_failed: fixture_not_built"),
-            (2, "", ""),
-        ] {
-            assert!(
-                release_provisionerd_refused(&run(code, stdout, stderr)).is_err(),
-                "{code} {stdout:?} {stderr:?}"
-            );
-        }
-        assert!(
-            FULL_JOB.contains(&"provisionerd-release") && PR_JOBS.contains(&"provisionerd-release")
-        );
-    }
-
     /// DEC-2633 item 2: `exchange-release` accepts only exit 2 with
     /// `token_exchange_token_url_in_release` alone on standard error, and runs in `full` and in
     /// `check`.
@@ -13608,45 +12813,6 @@ mod tests {
             );
         }
         assert!(FULL_JOB.contains(&"exchange-release") && PR_JOBS.contains(&"exchange-release"));
-    }
-
-    /// DEC-2338 item 5: `api-release` accepts only exit 2 with the authorization page's refusal
-    /// alone on standard error, or, outside dev and ci, the unsigned binary's; and runs in `full`
-    /// and in `check`.
-    #[test]
-    fn the_release_api_check_accepts_only_the_lone_refusal() {
-        let run = |code: i32, stdout: &str, stderr: &str| std::process::Output {
-            status: ExitStatus::from_raw(code << 8),
-            stdout: stdout.as_bytes().to_vec(),
-            stderr: stderr.as_bytes().to_vec(),
-        };
-        for lenient in [true, false] {
-            assert!(release_api_refused(&run(2, "", AUTHORIZE_URL_REFUSED), lenient).is_ok());
-        }
-        assert!(release_api_refused(&run(2, "", RELEASE_UNSIGNED), false).is_ok());
-        assert!(release_api_refused(&run(2, "", RELEASE_UNSIGNED), true).is_err());
-        let twice = format!("{AUTHORIZE_URL_REFUSED}{AUTHORIZE_URL_REFUSED}");
-        for lenient in [true, false] {
-            for (code, stdout, stderr) in [
-                (0, "", AUTHORIZE_URL_REFUSED),
-                (1, "", AUTHORIZE_URL_REFUSED),
-                (
-                    2,
-                    "listening api=127.0.0.1:1 probes=127.0.0.1:2\n",
-                    AUTHORIZE_URL_REFUSED,
-                ),
-                (2, "", twice.as_str()),
-                (2, "", "refused: --bind is missing or invalid\n"),
-                (2, "", AUTHORIZE_URL_REFUSED.trim_end()),
-                (2, "", ""),
-            ] {
-                assert!(
-                    release_api_refused(&run(code, stdout, stderr), lenient).is_err(),
-                    "{lenient} {code} {stdout:?} {stderr:?}"
-                );
-            }
-        }
-        assert!(FULL_JOB.contains(&"api-release") && PR_JOBS.contains(&"api-release"));
     }
 
     /// DEC-2322: `exchange-release` refuses an environment that turns the release profile's
@@ -13785,69 +12951,6 @@ mod tests {
             "a mutated package is listed even if the tested set omits it, so its live tests are \
              still counted (DEC-139)"
         );
-    }
-
-    /// DEC-2367 item 2: a shard of more than one mutant writes its provisional record before
-    /// cargo-mutants starts, so a job GitHub stops still leaves one; a shard of one writes none.
-    #[test]
-    fn a_shard_of_more_than_one_leaves_a_record_before_cargo_mutants_starts() -> Result<()> {
-        let dir = env::temp_dir().join(format!("mandate-xtask-unfinished-{}", std::process::id()));
-        if dir.exists() {
-            fs::remove_dir_all(&dir)?;
-        }
-        fs::create_dir_all(&dir)?;
-        let shard = crate::MutantShard { index: 0, total: 2 };
-        let one = crate::launch_stop(
-            &dir,
-            Some(shard),
-            vec!["mandate-executor".to_owned()],
-            1,
-            Duration::from_secs(30),
-        );
-        assert_eq!(one, None, "a shard of one runs to its end");
-        assert!(
-            !dir.join(crate::mutant_costs::COST_FILE).exists(),
-            "a shard of one leaves none"
-        );
-        let five = crate::launch_stop(
-            &dir,
-            Some(shard),
-            vec!["mandate-executor".to_owned()],
-            5,
-            Duration::from_secs(30),
-        );
-        assert_eq!(
-            five,
-            Some(Duration::from_secs(450)),
-            "480 s from the gate's start"
-        );
-        let left: crate::mutant_costs::ShardCost = serde_json::from_str(&fs::read_to_string(
-            dir.join(crate::mutant_costs::COST_FILE),
-        )?)?;
-        assert_eq!(
-            (left.shard.as_str(), left.outcome.as_str(), left.overran),
-            ("0/2", crate::mutant_costs::UNFINISHED, true)
-        );
-        assert_eq!(left.packages, ["mandate-executor"]);
-        crate::record_shard_cost(
-            &dir,
-            Some(shard),
-            vec!["mandate-executor".to_owned()],
-            Duration::from_secs(1),
-            Some(0),
-            std::time::UNIX_EPOCH,
-            false,
-        );
-        let finished: crate::mutant_costs::ShardCost = serde_json::from_str(&fs::read_to_string(
-            dir.join(crate::mutant_costs::COST_FILE),
-        )?)?;
-        assert_eq!(
-            (finished.outcome.as_str(), finished.overran),
-            ("caught", false),
-            "a shard that finishes replaces its provisional record"
-        );
-        fs::remove_dir_all(&dir)?;
-        Ok(())
     }
 
     /// DEC-850: an in-place run that ends with a mutant still in the tree has it written back and
@@ -16868,8 +15971,7 @@ mod tests {
         let full = trimmed("full")?;
         assert!(
             full.iter()
-                .any(|l| l
-                    == "needs: [select, full-checks, full-checks-2, full-checks-3, mutants-plan, mutants, schema-mutants]"),
+                .any(|l| l == "needs: [select, full-checks, mutants-plan, mutants, schema-mutants]"),
             "`full` needs the selection and the plan as well as the matrix"
         );
         Ok(())
@@ -16901,9 +16003,7 @@ mod tests {
     /// three jobs' results and the plan's count, against a truth table written out here: the
     /// matrix's skip passes only beside a plan that succeeded and counted zero. DEC-1190 adds the
     /// selection: `full-checks` passes as skipped only when `select` did not select it, and a
-    /// `full-checks` that ran when unselected, or a selection that failed, fails `full`. DEC-2334
-    /// splits it: `full-checks-2` and `full-checks-3` follow the same selection, and any one off its
-    /// verdict fails.
+    /// `full-checks` that ran when unselected, or a selection that failed, fails `full`.
     #[test]
     fn full_accepts_a_skipped_matrix_only_beside_a_plan_of_zero() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
@@ -16936,8 +16036,6 @@ mod tests {
                                     .env("FULL_CHECKS_SELECTED", selected)
                                     .env("SCHEMA_MUTANTS_SELECTED", "true")
                                     .env("FULL_CHECKS_RESULT", checks)
-                                    .env("FULL_CHECKS_2_RESULT", checks)
-                                    .env("FULL_CHECKS_3_RESULT", checks)
                                     .env("PLAN_RESULT", plan)
                                     .env("PLANNED_MUTANTS", planned)
                                     .env("MUTANTS_RESULT", matrix)
@@ -16958,42 +16056,6 @@ mod tests {
             }
         }
         assert_eq!(checked, 3072);
-        for (selected, first, second, third, passes) in [
-            ("true", "success", "success", "success", true),
-            ("true", "success", "failure", "success", false),
-            ("true", "success", "cancelled", "success", false),
-            ("true", "success", "skipped", "success", false),
-            ("true", "failure", "success", "success", false),
-            ("true", "success", "success", "failure", false),
-            ("true", "success", "success", "cancelled", false),
-            ("true", "success", "success", "skipped", false),
-            ("false", "skipped", "skipped", "skipped", true),
-            ("false", "skipped", "success", "skipped", false),
-            ("false", "success", "skipped", "skipped", false),
-            ("false", "skipped", "skipped", "success", false),
-        ] {
-            let status = Command::new("bash")
-                .args(["-e", "-c", &script])
-                .env("GITHUB_STEP_SUMMARY", "/dev/null")
-                .env("SELECT_RESULT", "success")
-                .env("FULL_CHECKS_SELECTED", selected)
-                .env("SCHEMA_MUTANTS_SELECTED", "true")
-                .env("FULL_CHECKS_RESULT", first)
-                .env("FULL_CHECKS_2_RESULT", second)
-                .env("FULL_CHECKS_3_RESULT", third)
-                .env("PLAN_RESULT", "success")
-                .env("PLANNED_MUTANTS", "0")
-                .env("MUTANTS_RESULT", "skipped")
-                .env("SCHEMA_MUTANTS_RESULT", "success")
-                .stdout(Stdio::null())
-                .status()?;
-            assert_eq!(
-                status.success(),
-                passes,
-                "full-checks selected {selected}: {first}, full-checks-2 {second}, \
-                 full-checks-3 {third} (DEC-2334)"
-            );
-        }
         for (selected, result, passes) in [
             ("true", "success", true),
             ("true", "skipped", false),
@@ -17008,8 +16070,6 @@ mod tests {
                 .env("FULL_CHECKS_SELECTED", "true")
                 .env("SCHEMA_MUTANTS_SELECTED", selected)
                 .env("FULL_CHECKS_RESULT", "success")
-                .env("FULL_CHECKS_2_RESULT", "success")
-                .env("FULL_CHECKS_3_RESULT", "success")
                 .env("PLAN_RESULT", "success")
                 .env("PLANNED_MUTANTS", "0")
                 .env("MUTANTS_RESULT", "skipped")
@@ -17029,7 +16089,7 @@ mod tests {
     /// is CI's own `schema-mutants` job, guarded like the others against drafts, capped at ten
     /// minutes (DEC-464), and needed by the required `full` verdict, which fails on any result of
     /// it but success while every other job passed: the matrix's result, a success only when every
-    /// one of its ten shards succeeded. Each shard runs the sweep only after all three checkers
+    /// one of its six shards succeeded. Each shard runs the sweep only after all three checkers
     /// pass on the unmutated tree: a checker failing there fails the job and runs no mutant.
     #[test]
     fn the_workspace_api_schema_jobs_gate_full() -> Result<()> {
@@ -17097,7 +16157,7 @@ mod tests {
             "if: needs.select.outputs.schema_mutants == 'true'",
             "timeout-minutes: 10",
             "fail-fast: false",
-            "shard: [\"0/10\", \"1/10\", \"2/10\", \"3/10\", \"4/10\", \"5/10\", \"6/10\", \"7/10\", \"8/10\", \"9/10\"]",
+            "shard: [\"0/6\", \"1/6\", \"2/6\", \"3/6\", \"4/6\", \"5/6\"]",
             shard_env.as_str(),
             "run: cargo xtask ci schema-mutants",
         ] {
@@ -17115,8 +16175,6 @@ mod tests {
                 .env("FULL_CHECKS_SELECTED", "true")
                 .env("SCHEMA_MUTANTS_SELECTED", "true")
                 .env("FULL_CHECKS_RESULT", "success")
-                .env("FULL_CHECKS_2_RESULT", "success")
-                .env("FULL_CHECKS_3_RESULT", "success")
                 .env("PLAN_RESULT", "success")
                 .env("PLANNED_MUTANTS", "0")
                 .env("MUTANTS_RESULT", "skipped")
@@ -17218,8 +16276,6 @@ mod tests {
             ("fast-rh-sim-live", "needs: select"),
             ("fast", AGGREGATE_GUARD),
             ("full-checks", "needs: select"),
-            ("full-checks-2", "needs: select"),
-            ("full-checks-3", "needs: select"),
             ("schema-mutants", "needs: select"),
             (
                 "mutants-plan",
@@ -17455,90 +16511,6 @@ mod tests {
             .collect()
     }
 
-    /// DEC-2334: the jobs that run `cargo xtask ci full`'s parts, each with its parts in order.
-    /// `full-checks` keeps the parts that need its services (Postgres, OpenBao, the S3 store) and
-    /// `refcases`, which warms the build they share; `full-checks-3` the API server's release
-    /// build (DEC-2338 item 5), about five minutes alone; `full-checks-2` runs the rest.
-    const FULL_CI_JOBS: [(&str, &[&str]); 3] = [
-        (
-            "full-checks",
-            &["refcases", "postgres", "openbao", "objectstore"],
-        ),
-        (
-            "full-checks-2",
-            &[
-                "reference",
-                "schemas",
-                "supply-chain",
-                "tofu",
-                "stub-release",
-                "exchange-release",
-            ],
-        ),
-        ("full-checks-3", &["api-release", "provisionerd-release"]),
-    ];
-
-    /// DEC-2334: CI's full jobs together run exactly what `cargo xtask ci full` runs, each part
-    /// once and in no other job, each capped at ten minutes (DEC-464), each started by the same
-    /// selection, and the required `full` verdict needs both.
-    #[test]
-    fn the_full_jobs_run_exactly_the_full_group() -> Result<()> {
-        let split: Vec<&str> = FULL_CI_JOBS
-            .iter()
-            .flat_map(|(_, parts)| parts.iter().copied())
-            .collect();
-        assert_eq!(
-            split.iter().copied().collect::<BTreeSet<_>>(),
-            FULL_JOB.iter().copied().collect::<BTreeSet<_>>(),
-            "the full jobs' parts are `cargo xtask ci full`'s"
-        );
-        assert_eq!(
-            split.len(),
-            FULL_JOB.len(),
-            "each full part runs in exactly one job: {split:?}"
-        );
-        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
-        let mut elsewhere = Vec::new();
-        for job in workflow_jobs(&workflow) {
-            let lines = workflow_job(&workflow, job)
-                .with_context(|| format!("ci.yml has a `{job}` job"))?;
-            let parts = xtask_parts(&lines);
-            match FULL_CI_JOBS.iter().find(|(name, _)| *name == job) {
-                Some((_, expected)) => {
-                    assert_eq!(&parts, expected, "`{job}` runs {expected:?}, in that order");
-                    let trimmed: Vec<&str> = lines.iter().map(|l| l.trim()).collect();
-                    for line in [
-                        "timeout-minutes: 10",
-                        "needs: select",
-                        "if: needs.select.outputs.full_checks == 'true'",
-                    ] {
-                        assert!(trimmed.contains(&line), "`{job}` has `{line}`");
-                    }
-                }
-                None => elsewhere.extend(
-                    parts
-                        .into_iter()
-                        .filter(|part| FULL_JOB.contains(&part.as_str()) || part == "full")
-                        .map(|part| format!("{job}: {part}")),
-                ),
-            }
-        }
-        assert_eq!(
-            elsewhere,
-            Vec::<String>::new(),
-            "no other job runs a full part"
-        );
-        let full = workflow_job(&workflow, "full").context("ci.yml has `full`")?;
-        for (job, _) in FULL_CI_JOBS {
-            assert!(
-                full.iter()
-                    .any(|l| l.trim().starts_with("needs: [") && l.contains(&format!(" {job},"))),
-                "`full` needs `{job}`"
-            );
-        }
-        Ok(())
-    }
-
     /// DEC-871: CI's fast jobs together run exactly what `cargo xtask ci fast` runs, each part once:
     /// `test` is its three parts, and the nextest part runs in a matrix whose partitions are `1/N`
     /// to `N/N`, each once, so every test runs in exactly one shard. No other job runs a fast part.
@@ -17646,7 +16618,7 @@ mod tests {
             "fail-fast: false",
             partition_env.as_str(),
             "shared-key: fast-test",
-            "save-if: ${{ matrix.shard == '1/6' }}",
+            "save-if: ${{ matrix.shard == '1/3' }}",
         ] {
             assert!(test.contains(&line), "`fast-test` has `{line}`");
         }
@@ -17830,22 +16802,14 @@ mod tests {
     #[test]
     fn the_nextest_partition_is_checked() -> Result<()> {
         let plain = super::nextest_args(None, None)?;
-        let config = repo_root()?.join(super::NEXTEST_CONFIG);
-        assert!(
-            config.is_file(),
-            "{} is the nextest config",
-            config.display()
-        );
         assert_eq!(
             plain,
             [
-                "nextest".to_owned(),
-                "run".to_owned(),
-                "--config-file".to_owned(),
-                config.to_string_lossy().into_owned(),
-                "--workspace".to_owned(),
-                "--locked".to_owned(),
-                "--no-tests=pass".to_owned(),
+                "nextest",
+                "run",
+                "--workspace",
+                "--locked",
+                "--no-tests=pass"
             ]
         );
         for (partition, shard) in [
@@ -17873,19 +16837,15 @@ mod tests {
     }
 
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
-    const SELECT_GATES: [(&str, &str); 20] = [
+    const SELECT_GATES: [(&str, &str); 15] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
         ("fast-python", "python"),
         ("fast-portable", "portable"),
         ("fast-rh-sim-live", "rh_sim_live"),
         ("full-checks", "full_checks"),
-        ("full-checks-2", "full_checks"),
-        ("full-checks-3", "full_checks"),
         ("schema-mutants", "schema_mutants"),
         ("cell", "cell"),
-        ("cell-seeded", "cell"),
-        ("cell-upgrade", "cell"),
         ("cell-demo", "cell"),
         ("cell-demo-web", "cell_web"),
         ("cell-journal", "cell"),
@@ -17893,7 +16853,6 @@ mod tests {
         ("cell-kill-switch", "cell"),
         ("cell-executor", "cell"),
         ("cell-vault", "cell"),
-        ("cell-exchange", "cell"),
     ];
 
     /// DEC-1190 in `ci.yml`: `select` runs `cargo xtask ci select` into its outputs and exposes each
@@ -19935,7 +18894,7 @@ mod tests {
     /// after, and a night's outputs are the matrix GitHub reads.
     #[test]
     fn the_sweep_rotation_runs_every_shard_once_a_week() -> Result<()> {
-        for mutants in [0usize, 1, 4, 5, 6, 99, 12_538, 8_960, 8_961, 40_000] {
+        for mutants in [0usize, 1, 7, 8, 9, 99, 12_538, 14_336, 14_337, 40_000] {
             let total = SweepPlan::shards_for(mutants);
             if mutants > 0 {
                 assert!(
@@ -19979,43 +18938,17 @@ mod tests {
         );
         assert_eq!(SWEEP_ROTATION, 7);
         assert_eq!(
-            SweepPlan::for_night(15, 7)?.tonight,
+            SweepPlan::for_night(25, 7)?.tonight,
             vec![0],
             "night 7 is night 0 again"
         );
-        assert_eq!(SweepPlan::for_night(15, 9)?.tonight, vec![2]);
+        assert_eq!(SweepPlan::for_night(25, 9)?.tonight, vec![2]);
         assert!(
-            SweepPlan::for_night(15, 4)?.tonight.is_empty(),
-            "three shards leave night 4 idle"
+            SweepPlan::for_night(25, 4)?.tonight.is_empty(),
+            "four shards leave night 4 idle"
         );
         let plan = SweepPlan::for_night(30, 1)?;
-        assert_eq!(plan.outputs(), "mutants=30\nshards=[1]\ntotal=6\n");
-        Ok(())
-    }
-
-    /// DEC-2638: the nightly's fuzz shards hold every seed of `1..=10` exactly once between them,
-    /// shard `K` the seeds `s` with `(s - 1) % N == K`; no shard runs them all; and a shard that is
-    /// not `K/N` with `K < N` is refused rather than run as some other shard.
-    #[test]
-    fn the_fuzz_shards_hold_every_seed_once() -> Result<()> {
-        assert_eq!(fuzz_seeds(None)?, (1..=10).collect::<Vec<u32>>());
-        assert_eq!(fuzz_seeds(Some("0/4"))?, [1, 5, 9]);
-        assert_eq!(fuzz_seeds(Some("1/4"))?, [2, 6, 10]);
-        assert_eq!(fuzz_seeds(Some("2/4"))?, [3, 7]);
-        assert_eq!(fuzz_seeds(Some("3/4"))?, [4, 8]);
-        for n in 1..=12u32 {
-            let mut all = Vec::new();
-            for k in 0..n {
-                all.extend(fuzz_seeds(Some(&format!("{k}/{n}")))?);
-            }
-            all.sort_unstable();
-            assert_eq!(all, (1..=10).collect::<Vec<u32>>(), "{n} shards");
-        }
-        for bad in [
-            "4/4", "5/4", "1", "/4", "1/", "a/4", "1/b", "-1/4", "0/0", "",
-        ] {
-            assert!(fuzz_seeds(Some(bad)).is_err(), "{bad:?} is refused");
-        }
+        assert_eq!(plan.outputs(), "mutants=30\nshards=[1]\ntotal=4\n");
         Ok(())
     }
 
@@ -20158,13 +19091,13 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            26,
+            21,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
-             `full-checks`, `full-checks-2`, `full-checks-3` (DEC-2334), the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
-             `schema-mutants`, `cell`, `cell-seeded` and `cell-upgrade` (DEC-464), `cell-demo` (DEC-2002), `cell-demo-web` (DEC-2609), \
+             `full-checks`, the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
+             `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-demo-web` (DEC-2609), \
              `cell-journal`, `cell-failover`, `cell-kill-switch` (DEC-2602), `cell-executor` \
-             (DEC-2615), `cell-vault` (DEC-2616), `cell-exchange` (DEC-2063), and `hosted-k3d` \
+             (DEC-2615), `cell-vault` (DEC-2616), and `hosted-k3d` \
              (E21-51)"
         );
         for checkout in checkouts {
@@ -21024,7 +19957,7 @@ jq -r "$filter" "$src"
             ),
         )?;
         let reached = Cell::new(false);
-        lint(&root, None, || {
+        lint(&root, || {
             reached.set(true);
             Ok(())
         })
@@ -21035,19 +19968,19 @@ jq -r "$filter" "$src"
         );
 
         fs::write(scripts.join("planted.sh"), "#!/usr/bin/env bash\nrm $1\n")?;
-        let shellcheck = lint(&root, None, || Ok(()))
+        let shellcheck = lint(&root, || Ok(()))
             .map_err(|err| format!("{err:#}"))
             .err();
         fs::remove_file(scripts.join("planted.sh"))?;
 
         fs::write(deploy.join("planted.sh"), "#!/usr/bin/env bash\nrm $1\n")?;
-        let deploy_shellcheck = lint(&root, None, || Ok(()))
+        let deploy_shellcheck = lint(&root, || Ok(()))
             .map_err(|err| format!("{err:#}"))
             .err();
         fs::remove_file(deploy.join("planted.sh"))?;
 
         fs::write(runbooks.join("planted.sh"), "#!/usr/bin/env bash\nrm $1\n")?;
-        let runbook_shellcheck = lint(&root, None, || Ok(()))
+        let runbook_shellcheck = lint(&root, || Ok(()))
             .map_err(|err| format!("{err:#}"))
             .err();
         fs::remove_file(runbooks.join("planted.sh"))?;
@@ -21062,7 +19995,7 @@ jq -r "$filter" "$src"
                 "    badopt: 1\n",
             ),
         )?;
-        let actionlint = lint(&root, None, || Ok(()))
+        let actionlint = lint(&root, || Ok(()))
             .map_err(|err| format!("{err:#}"))
             .err();
         fs::remove_dir_all(&root).ok();
@@ -26119,13 +25052,13 @@ jq -r "$filter" "$src"
             )
         };
         fs::write(workflows.join("ci.yml"), workflow("cargo check -p a"))?;
-        let clean = lint(&root, None, || Ok(())).map_err(|err| format!("{err:#}"));
+        let clean = lint(&root, || Ok(())).map_err(|err| format!("{err:#}"));
         fs::write(
             workflows.join("ci.yml"),
             workflow("cargo run -p a --features live"),
         )?;
         let reached = Cell::new(false);
-        let planted = lint(&root, None, || {
+        let planted = lint(&root, || {
             reached.set(true);
             Ok(())
         })
@@ -26159,13 +25092,13 @@ jq -r "$filter" "$src"
         for dir in [".github/workflows", ".github/scripts", "deploy", "scripts"] {
             fs::create_dir_all(root.join(dir))?;
         }
-        let clean = lint(&root, None, || Ok(())).map_err(|err| format!("{err:#}"));
+        let clean = lint(&root, || Ok(())).map_err(|err| format!("{err:#}"));
         fs::write(
             root.join("a/src/lib.rs"),
             "//! A fixture crate.\npub trait MailTransport {}\npub struct Leak;\nimpl MailTransport for Leak {}\n",
         )?;
         let reached = Cell::new(false);
-        let planted = lint(&root, None, || {
+        let planted = lint(&root, || {
             reached.set(true);
             Ok(())
         })

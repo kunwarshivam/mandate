@@ -22,7 +22,7 @@ reading that loosens the spec toward the code still goes to the founder.
 |---|---|
 | How is the system structured? | [docs/HLD.md](docs/HLD.md) |
 | What must v1 do? | [docs/product/04-prd-v1.md](docs/product/04-prd-v1.md) |
-| What should I work on? | [docs/project/06-backlog-v1.md](docs/project/06-backlog-v1.md) and the rows not yet folded into it under [docs/project/backlog/](docs/project/backlog/README.md) (DEC-2373), in milestone order from [docs/project/02-milestones-and-wbs.md](docs/project/02-milestones-and-wbs.md) |
+| What should I work on? | [docs/project/06-backlog-v1.md](docs/project/06-backlog-v1.md), in milestone order from [docs/project/02-milestones-and-wbs.md](docs/project/02-milestones-and-wbs.md) |
 | Where does the work stand, and what is next? | [docs/project/08-work-tracker.md](docs/project/08-work-tracker.md), one page, updated at the end of every session; how the work ran, with every PR, is [docs/project/11-work-log.md](docs/project/11-work-log.md) |
 | What has already been decided? | [docs/project/04-decision-log.md](docs/project/04-decision-log.md) for DEC-01 to DEC-302, and one file per decision under [docs/project/decisions/](docs/project/decisions/README.md) after that (DEC-344) |
 | What are the exact trading rules (accounting, orders, fees, settlement, account rules)? | [docs/specs/trading-domain.md](docs/specs/trading-domain.md) and its [reference cases](docs/specs/reference-cases/trading-domain.yaml), which tests must reproduce exactly |
@@ -131,15 +131,12 @@ agent needs the same correction twice, put the rule on the highest rung that can
    mutants on the diff of safety-critical crates, an `Unimplemented` stub body in a crate whose
    tests are still pending aside, and, while the general email footer is unresolved, the mail
    guard (`cargo xtask mail-guard`: no mail transport but the recorded fixture and the founder's,
-   and no mail-sending crate elsewhere; DEC-2511), and the backlog guard (a new row is its own
-   file under `docs/project/backlog/`, and 06 gains only rows whose files the change deletes;
-   DEC-2373).
+   and no mail-sending crate elsewhere; DEC-2511).
 3. **Guided:** this file, skills under `.cursor/skills/`, and `.cursor/BUGBOT.md`.
 4. **Reviewed:** the PR template and the independent review agent, the last resort, not the plan.
 
 Leave the code in a state you would want the next agent to copy: one paved path per task, no
-workarounds, and debt either fixed or recorded in the backlog, as a new row's own file under
-`docs/project/backlog/` (DEC-2373).
+workarounds, and debt either fixed or recorded in the backlog.
 
 ## Getting it right the first time (specs and safety-critical design)
 
@@ -169,8 +166,7 @@ safety-critical design for review.
    replay, every input listed), risk (loopholes, gap risk, lifecycle), and compliance (who chooses
    what, records, wording).
 
-**Freeze rule:** after an external review, fix only blockers and majors. Minors go to the backlog,
-one file each under `docs/project/backlog/`.
+**Freeze rule:** after an external review, fix only blockers and majors. Minors go to the backlog.
 
 ## Conventions
 
@@ -198,8 +194,7 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
 - **Before proposing any change, run `cargo xtask check`.** It runs every per-PR job: lint
   (shellcheck over `.github/scripts/`, actionlint over `.github/workflows/`, fmt, clippy
   `-D warnings`, crate layering, the `live` feature (only the crate `xtask/layers.toml` marks
-  `live_feature` may declare one, and CI only compiles it; DEC-529), the backlog guard (DEC-2373),
-  markers, saved proptest
+  `live_feature` may declare one, and CI only compiles it; DEC-529), markers, saved proptest
   seeds, the feature map, typos, ruff), test (nextest, doctests, pytest), pending tests, reference-case fixture drift, the reference
   implementation checks, the workspace API schema checks (`schemas`), supply chain (cargo-deny,
   the dependency registry, gitleaks), the spec guard, the Postgres journal tests (skipped unless
@@ -219,7 +214,7 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   crate handed another's binary (`MANDATE_RH_SIM_BIN`) follows that crate.
   `fast-python`, `fast-portable` (the runner's crates), `fast-rh-sim-live`, `full-checks` (any
   path outside the documentation and `web/`), `schema-mutants` (`schemas/`, the specs, the
-  backlog, the pinned Python requirements), the ten cell jobs (`deploy/`, the cell's Python
+  backlog, the pinned Python requirements), the seven cell jobs (`deploy/`, the cell's Python
   pins, and any crate the cell's images hold or are built on; DEC-2609), and `cell-demo-web` (the
   cell jobs' paths, or `web/`; DEC-2609 item 5) start only when the diff needs them. Lint, the spec
   guard and mutants on the diff of safety-critical crates run as always. `Cargo.lock`, any

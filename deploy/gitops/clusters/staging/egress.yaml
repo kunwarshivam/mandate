@@ -63,8 +63,7 @@ spec:
         - ports:
             - {port: "443", protocol: TCP}
 ---
-# executor: Alpaca's paper trading API, never its live one, and its market-data host's latest-quote
-# read until the data service pushes quotes (DEC-2359).
+# executor: Alpaca's paper trading API, never its live one.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -88,7 +87,6 @@ spec:
               - matchPattern: "*"
     - toFQDNs:
         - matchName: paper-api.alpaca.markets
-        - matchName: data.alpaca.markets
       toPorts:
         - ports:
             - {port: "443", protocol: TCP}

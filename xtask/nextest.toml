@@ -1,7 +1,0 @@
-# The workspace's nextest settings (DEC-871, DEC-2325), which `cargo xtask` hands every nextest run
-# with `--config-file`. The longest tests start first, so in a `fast-test` shard or a local run they
-# overlap the rest rather than running alone at the end; priority changes only the order, never
-# which tests run.
-[[profile.default.overrides]]
-filter = 'test(=leak::tests::the_repository_passes_and_every_seeded_line_is_refused) | test(=tests::the_repository_resolves_no_live_build)'
-priority = 100

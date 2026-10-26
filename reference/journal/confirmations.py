@@ -1,7 +1,6 @@
 """Journal spec v0.62 §9.29's reference vectors for `StepUpConfirmed` (DEC-2104): the CLI's record
 that the owner confirmed, on the host, one step-up challenge the workspace API issued for a paper
-grant made in the web app, and from v0.82 for a paper OAuth connect (DEC-2125), in its own
-`connection_drafts` list.
+grant made in the web app.
 
 The schema and rule 242 live in `control.py`, beside §9.2's other control-stream records, so one
 validator judges every closed schema. This module builds the `step_up_confirmations` section: a
@@ -30,7 +29,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.82 §9.29 (DEC-2104, DEC-2125)"
+SPEC = "docs/specs/journal.md v0.62 §9.29 (DEC-2104)"
 AT = "2026-10-18T22:30:05.000000000Z"
 CONFIRMED_AT = 1792362605
 EVENT = "01JAA2P4A000000000000000C1"
@@ -41,8 +40,6 @@ OTHER_CHALLENGE = "01JAA2P0A000000000000000H2"
 PRINCIPAL = "01JAA2N0A000000000000000P1"
 OTHER_PRINCIPAL = "01JAA2N0A000000000000000P2"
 CONTENT_HASH = "sha256:" + "4" * 64
-# The digest of a connect's action object, which the CLI computes and stores (DEC-2125 item 3).
-CONNECT_DIGEST = "sha256:" + "5" * 64
 CODE = "7KXV6BGD"
 BASE = "step_up_confirmed"
 
@@ -130,10 +127,7 @@ def member_drafts() -> list[dict]:
 
 def rule_drafts() -> list[dict]:
     return [
-        invalid("another_kind", "rule 242: the kinds are `approve` and `connection`", [change("payload.action_kind", "confirm_version")], "schema", "payload.action_kind"),
-        invalid("connect", "rule 242: `connection`, not the action's own word", [change("payload.action_kind", "connect")], "schema", "payload.action_kind"),
-        invalid("connection_capitalized", "rule 242: the kind is lower case", [change("payload.action_kind", "Connection")], "schema", "payload.action_kind"),
-        invalid("connection_padded", "rule 242: the kind exactly", [change("payload.action_kind", "connection ")], "schema", "payload.action_kind"),
+        invalid("another_kind", "rule 242: the one kind is `approve`", [change("payload.action_kind", "confirm_version")], "schema", "payload.action_kind"),
         invalid("in_live", "rule 242: a `live` confirmation is never recorded", [change("environment", "live")], "schema", "environment"),
         invalid(
             "by_the_runtime",
@@ -189,31 +183,6 @@ def valid_drafts() -> list[dict]:
     ]
 
 
-def connect(name, clause, changes=()):
-    """A valid draft confirming a connect: kind `connection`, its digest the connect's action object,
-    which `artifact_refs` names as it names every `ref`."""
-    return control_valid(
-        name,
-        clause,
-        BASE,
-        [
-            change("payload.action_kind", "connection"),
-            change("payload.action_digest", CONNECT_DIGEST),
-            change("artifact_refs", [CONNECT_DIGEST]),
-            *changes,
-        ],
-    )
-
-
-def connection_drafts() -> list[dict]:
-    """v0.82 (DEC-2125): a confirmation of a paper OAuth connect, and the members no rule reads."""
-    return [
-        connect("connection", "rule 242: `connection` is the second kind"),
-        connect("connection_by_another_principal", "rule 242: a principal confirms its own connect", [change("payload.principal", OTHER_PRINCIPAL), change("actor.id", OTHER_PRINCIPAL)]),
-        connect("connection_within_its_second", "rule 242: `confirmed_at` is `event_time`'s whole second", [change("event_time", "2026-10-18T22:30:05.500000000Z")]),
-    ]
-
-
 # --------------------------------------------------------------------------- rule 243
 
 def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> int | None:
@@ -264,15 +233,7 @@ def stream_cases() -> list[dict]:
 
 # --------------------------------------------------------------------------- independent oracle
 
-ORACLE_CHECKS = (
-    "drafts.valid",
-    "drafts.confirmation",
-    "invalid_drafts",
-    "valid_drafts",
-    "connection_drafts",
-    "streams.records",
-    "streams.rule",
-)
+ORACLE_CHECKS = ("drafts.valid", "drafts.confirmation", "invalid_drafts", "valid_drafts", "streams.records", "streams.rule")
 
 
 def found(check: str, message: str) -> str:
@@ -311,13 +272,6 @@ def check_section(section: dict) -> list[str]:
         got = violations(draft_for(section, case))
         if got:
             problems.append(found("valid_drafts", f"{case['name']}: expected Valid, got {got}"))
-    for case in section["connection_drafts"]:
-        draft = draft_for(section, case)
-        got = violations(draft)
-        p = draft["payload"]
-        own = p["action_kind"] == "connection" and draft["artifact_refs"] == [p["action_digest"]]
-        if got or not own:
-            problems.append(found("connection_drafts", f"{case['name']}: expected a valid connect's confirmation, got {got}"))
     for case in section["streams"]:
         for i, record in enumerate(case["records"]):
             got = violations(record)
@@ -341,7 +295,6 @@ VALIDATOR_MUTANTS = (
     *(f"nullable.payload.{member}" for member in NULLED if member not in RULE_242_MEMBERS),
     "types.confirm_code_case",
     "rule.242.kind",
-    "rule.242.approve_only",
     "rule.242.paper",
     "rule.242.user",
     "rule.242.principal",
@@ -378,11 +331,6 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             mutated(lambda s: case(s, "valid_drafts", "caused")["changes"].append(change("payload.action_kind", "stop"))),
         ),
         (
-            "a connect's confirmation names another kind",
-            "connection_drafts",
-            mutated(lambda s: case(s, "connection_drafts", "connection")["changes"].append(change("payload.action_kind", "approve"))),
-        ),
-        (
             "a stream record is live",
             "streams.records",
             mutated(lambda s: case(s, "streams", "two_challenges")["records"][1].update(environment="live")),
@@ -400,7 +348,6 @@ def run_mutants(section: dict) -> list[str]:
     escaped = []
     cases = [(copy.deepcopy(d), None) for d in section["drafts"].values()]
     cases += [(draft_for(section, c), None) for c in section["valid_drafts"]]
-    cases += [(draft_for(section, c), None) for c in section["connection_drafts"]]
     cases += [(draft_for(section, c), c["expect"]) for c in section["invalid_drafts"]]
     for mutant in VALIDATOR_MUTANTS:
         skip = frozenset([mutant])
@@ -435,6 +382,5 @@ def build_section() -> dict:
         "drafts": base_drafts(),
         "invalid_drafts": invalid_drafts(),
         "valid_drafts": valid_drafts(),
-        "connection_drafts": connection_drafts(),
         "streams": stream_cases(),
     }

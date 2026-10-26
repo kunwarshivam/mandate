@@ -26,7 +26,6 @@ import {
   type Violation,
   type Watermark,
 } from "./types";
-import { type StepUpAction, type StepUpChallenge, sessionPrincipal, stepUpChallenge } from "./step-up";
 
 export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -84,19 +83,7 @@ export interface WorkspaceClient {
   /** Sends a prepared command; sending it again is a retry with the same key and body. */
   send(command: PreparedCommand): Promise<CommandOutcome>;
   commandStatus(eventId: string): Promise<ReadOutcome<CommandStatus>>;
-  /**
-   * `POST /step-up/challenges` (spec §3.6, DEC-2103): one challenge bound to `action`, under a key of
-   * its own. Nothing is journaled when a challenge is issued, so a failure is `effect: "none"`.
-   */
-  askChallenge(action: StepUpAction): Promise<ReadOutcome<StepUpChallenge>>;
-  /** `GET /v1/me/session` (§4.10, DEC-2113): the session's own principal, outside the workspace prefix. */
-  readSession(): Promise<ReadOutcome<{ principal_id: string }>>;
 }
-
-/** The step-up challenge route under the workspace (§3.6). It is not a command: it records nothing. */
-export const STEP_UP_CHALLENGE_ROUTE = "/step-up/challenges";
-/** One's own session (§4.10). */
-export const SESSION_ROUTE = "/v1/me/session";
 
 /** Each operation's route under the workspace (spec §4.2 to §4.4, §5). */
 export const OPERATIONS: Readonly<Record<Operation, `/${string}`>> = {
@@ -243,14 +230,9 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
   }
 
   async function read<T>(route: `/${string}`, decoder: Decoder<T>): Promise<ReadOutcome<T>> {
-    return answered(() => fetch(baseUrl + path(route), { method: "GET", credentials, headers: { Accept: "application/json" } }), decoder);
-  }
-
-  /** A read's answer, or one of a call that records nothing: every failure is `effect: "none"`. */
-  async function answered<T>(call: () => Promise<Response>, decoder: Decoder<T>): Promise<ReadOutcome<T>> {
     let response: Response;
     try {
-      response = await call();
+      response = await fetch(baseUrl + path(route), { method: "GET", credentials, headers: { Accept: "application/json" } });
     } catch {
       return { ok: false, error: networkError("none") };
     }
@@ -315,15 +297,5 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
 
   const commandStatus = (eventId: string) => read(fillRoute("/commands/{event}", { event: eventId }), commandStatusOf);
 
-  function askChallenge(action: StepUpAction): Promise<ReadOutcome<StepUpChallenge>> {
-    const key = newKey();
-    if (!isIdempotencyKey(key)) throw new Error("not an idempotency key");
-    const body = JSON.stringify({ action: { kind: action.kind, digest: action.digest } });
-    const headers = { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": key, [CSRF_HEADER]: "1" };
-    return answered(() => fetch(baseUrl + path(STEP_UP_CHALLENGE_ROUTE), { method: "POST", credentials, headers, body }), stepUpChallenge(action));
-  }
-
-  const readSession = () => answered(() => fetch(baseUrl + SESSION_ROUTE, { method: "GET", credentials, headers: { Accept: "application/json" } }), sessionPrincipal);
-
-  return Object.freeze({ workspaceId, path, read, prepare, prepareKillSwitch, send, commandStatus, askChallenge, readSession });
+  return Object.freeze({ workspaceId, path, read, prepare, prepareKillSwitch, send, commandStatus });
 }

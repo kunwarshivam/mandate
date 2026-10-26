@@ -2099,23 +2099,6 @@ mod tests {
         read_fixture(&dir, "mandate.json").map(|f| (*f).clone())
     }
 
-    /// A patch's `remove` takes out the array item it names, and refuses an index one past the
-    /// end, or any later one, rather than panic.
-    #[test]
-    fn a_patch_removes_an_array_item_and_refuses_an_index_past_the_end() -> Result<(), String> {
-        let mut items = json!(["a", "b"]);
-        for past in ["2", "3"] {
-            if super::remove(&mut items, past) != Err("index out of range".to_owned()) {
-                return Err(format!("index {past} of two was not refused"));
-            }
-        }
-        super::remove(&mut items, "1")?;
-        if items != json!(["a"]) {
-            return Err(format!("removing index 1 left {items}"));
-        }
-        Ok(())
-    }
-
     /// The two family-W risk-state cases run live while their status rows remain pending.
     #[test]
     fn tripwire_risk_state_cases_pass_as_stated() -> Result<(), String> {

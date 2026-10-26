@@ -97,76 +97,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo xtask ci postgres
 
-  # The mandate reference's ten fuzz seeds, in four shards so each stays well within ten minutes
-  # (DEC-464): about 70 seconds a seed, so ten in one job ran past the bound (DEC-2638). Seed `s`
-  # is shard `(s - 1) % 4`'s (`cargo xtask ci nightly-fuzz`).
-  reference-fuzz:
-    name: reference-fuzz (${{ matrix.shard }})
-    needs: changed
-    if: needs.changed.outputs.run == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: ["0/4", "1/4", "2/4", "3/4"]
-    env:
-      MANDATE_FUZZ_SHARD: ${{ matrix.shard }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: "0.12.19"
-          enable-cache: true
-      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          shared-key: select
-      - run: cargo xtask ci nightly-fuzz
-
-  # The mandate reference's seeded-bug mutation check (`reference/mandate/mutants.py`) in forty
-  # shards, five or six bugs each after the unmutated baselines every shard checks itself: about
-  # forty seconds a bug, so the 214 bugs in one job ran past ten minutes (DEC-2638, DEC-464); at
-  # most eight at a time, as the sweep runs (`cargo xtask ci nightly-mutants`).
-  reference-mutants:
-    name: reference-mutants (${{ matrix.shard }})
-    needs: changed
-    if: needs.changed.outputs.run == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      max-parallel: 8
-      matrix:
-        shard: ["0/40", "1/40", "2/40", "3/40", "4/40", "5/40", "6/40", "7/40", "8/40", "9/40", "10/40", "11/40", "12/40", "13/40", "14/40", "15/40", "16/40", "17/40", "18/40", "19/40", "20/40", "21/40", "22/40", "23/40", "24/40", "25/40", "26/40", "27/40", "28/40", "29/40", "30/40", "31/40", "32/40", "33/40", "34/40", "35/40", "36/40", "37/40", "38/40", "39/40"]
-    env:
-      MANDATE_REFERENCE_SHARD: ${{ matrix.shard }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: "0.12.19"
-          enable-cache: true
-      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          shared-key: select
-      - run: cargo xtask ci nightly-mutants
-
-  # Gitleaks over the whole history (`cargo xtask ci nightly-gitleaks`, DEC-2638).
-  gitleaks-history:
+  # Ten fuzz seeds of the mandate reference, its seeded-bug mutation check, and gitleaks over the
+  # whole history (`cargo xtask ci nightly`).
+  reference:
     needs: changed
     if: needs.changed.outputs.run == 'true'
     runs-on: ubuntu-24.04
@@ -192,13 +125,12 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: select
-      - run: cargo xtask ci nightly-gitleaks
+      - run: cargo xtask ci nightly
 
   # DEC-1190 item 5. Tonight's share of the whole-crate mutation sweep: the gate's own listing of
-  # every safety-critical crate's source, cut into shards of at most five mutants (DEC-2638), of
-  # which the shards whose index is today's (days since the Unix epoch) modulo the rotation run. It
-  # runs even when main is unchanged, so no day's share is skipped and every shard runs once a
-  # rotation.
+  # every safety-critical crate's source, cut into shards of at most eight mutants, of which the
+  # shards whose index is today's (days since the Unix epoch) modulo the rotation run. It runs even
+  # when main is unchanged, so no day's share is skipped and every shard runs once a rotation.
   sweep-plan:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -252,14 +184,6 @@ jobs:
       MANDATE_MUTANTS_PLANNED: ${{ needs.sweep-plan.outputs.mutants }}
       MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
       MANDATE_PG_REQUIRED: "1"
-      MANDATE_OPENBAO_REQUIRED: "1"
-      MANDATE_OPENBAO_ADDR: https://127.0.0.1:8200
-      MANDATE_OPENBAO_CA: /tmp/openbao/ca.pem
-      MANDATE_OPENBAO_OPERATOR_TOKEN_FILE: /tmp/openbao/token
-      MANDATE_S3_URL: http://127.0.0.1:9000
-      MANDATE_S3_ACCESS_KEY_ID: mandate-test
-      MANDATE_S3_SECRET_ACCESS_KEY: mandate-test-only
-      MANDATE_S3_REQUIRED: "1"
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_PROFILE_DEV_OPT_LEVEL: "1"
@@ -271,12 +195,6 @@ jobs:
           persist-credentials: false
       - name: Start PostgreSQL 18 (digest-pinned)
         run: .github/scripts/start-postgres.sh
-      # The vault's and the object store's conformance tests, which the sweep's mutants of
-      # `mandate-vault` and `mandate-objectstore` need to be caught, as ci.yml's mutants shards do.
-      - name: Start OpenBao 2.7.1 (digest-pinned, dev mode)
-        run: .github/scripts/start-openbao.sh
-      - name: Start the S3 test store (digest-pinned)
-        run: .github/scripts/start-minio.sh
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: cargo-nextest@0.9.146
@@ -293,7 +211,7 @@ jobs:
   # Opens an issue when any nightly job fails or is cancelled, naming only the run and the jobs'
   # verdicts, never a log line (DEC-1190 item 5).
   report:
-    needs: [changed, dispatch-ci, postgres-oldest, reference-fuzz, reference-mutants, gitleaks-history, sweep-plan, sweep]
+    needs: [changed, dispatch-ci, postgres-oldest, reference, sweep-plan, sweep]
     if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -303,7 +221,7 @@ jobs:
       - name: Open an issue for the failed nightly (opaque)
         env:
           GH_TOKEN: ${{ github.token }}
-          VERDICTS: changed ${{ needs.changed.result }}, dispatch-ci ${{ needs.dispatch-ci.result }}, postgres-oldest ${{ needs.postgres-oldest.result }}, reference-fuzz ${{ needs.reference-fuzz.result }}, reference-mutants ${{ needs.reference-mutants.result }}, gitleaks-history ${{ needs.gitleaks-history.result }}, sweep-plan ${{ needs.sweep-plan.result }}, sweep ${{ needs.sweep.result }}
+          VERDICTS: changed ${{ needs.changed.result }}, dispatch-ci ${{ needs.dispatch-ci.result }}, postgres-oldest ${{ needs.postgres-oldest.result }}, reference ${{ needs.reference.result }}, sweep-plan ${{ needs.sweep-plan.result }}, sweep ${{ needs.sweep.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" --jq '.[].title' | grep -Fqx "nightly failed at ${GITHUB_SHA}"; then

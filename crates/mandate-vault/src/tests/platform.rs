@@ -52,7 +52,6 @@ fn identity() -> impl Strategy<Value = Identity> {
         Just(Identity::SecretImport),
         Just(Identity::ModelGateway),
         Just(Identity::EmailSender),
-        Just(Identity::Provisioner),
     ]
 }
 
@@ -145,8 +144,7 @@ proptest! {
             );
         }
         let hcl = openbao_policy(&identity, &connections, &Mounts::default());
-        let prefixed = matches!(identity, Identity::Api | Identity::ConnectionManager);
-        prop_assert!(!hcl.contains('*') && (prefixed || !hcl.contains('+')), "{}", hcl);
+        prop_assert!(!hcl.contains('*') && !hcl.contains('+'), "{}", hcl);
         let mut want = Vec::new();
         for secret in PlatformSecret::ALL {
             let path = kv_path(&SecretPath::Platform(secret));

@@ -354,7 +354,6 @@ pub fn wiring_with(research: Option<ResearchWiring>, refs: Box<dyn Refs>) -> Wir
             },
         },
         research,
-        facts: None,
     }
 }
 

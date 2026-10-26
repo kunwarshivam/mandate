@@ -272,35 +272,6 @@ def rule_drafts() -> list[dict]:
             "payload.cause",
         ),
         invalid(
-            "executor_exchanged_twice",
-            "rule 167: a connect's executor is exchanged at generation 1 only",
-            start,
-            [
-                change("payload.process", "executor"),
-                change("payload.subject", ACCOUNT),
-                change("payload.generation", 2),
-                change("payload.cause", "exchanged"),
-            ],
-            "schema",
-            "payload.cause",
-        ),
-        invalid(
-            "runtime_exchanged",
-            "rule 257: only an executor is started on an exchange's success",
-            start,
-            [change("payload.cause", "exchanged")],
-            "schema",
-            "payload.cause",
-        ),
-        invalid(
-            "runtime_stopped_as_connection_closed",
-            "rule 257: only an executor stops as its connection closed",
-            "ProcessStopIssued",
-            [change("payload.cause", "connection_closed")],
-            "schema",
-            "payload.cause",
-        ),
-        invalid(
             "exchange_looped",
             "§9.21 types: a token exchange never crash-loops",
             "ProcessCrashLooped",
@@ -368,27 +339,6 @@ def valid_drafts() -> list[dict]:
                 change("payload.process", "token_exchange"),
                 change("payload.subject", CONNECTION),
                 change("payload.cause", "requested"),
-            ],
-        ),
-        valid(
-            "executor_exchanged",
-            "rule 257: a connect's executor, started on its exchange's success",
-            start,
-            [
-                change("payload.process", "executor"),
-                change("payload.subject", ACCOUNT),
-                change("payload.cause", "exchanged"),
-            ],
-        ),
-        valid(
-            "executor_connection_closed",
-            "rule 257: a connect's executor stopped as its connection closed",
-            "ProcessStopIssued",
-            [
-                change("payload.process", "executor"),
-                change("payload.subject", ACCOUNT),
-                change("payload.generation", 1),
-                change("payload.cause", "connection_closed"),
             ],
         ),
         valid(
@@ -477,8 +427,6 @@ VALIDATOR_MUTANTS = (
     "rule.168.window",
     "rule.256",
     "rule.256.stop",
-    "rule.257",
-    "rule.257.stop",
 )
 
 

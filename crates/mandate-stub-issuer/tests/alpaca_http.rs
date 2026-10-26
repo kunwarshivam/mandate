@@ -12,7 +12,7 @@ use std::sync::Arc;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use common::{Reply, send, serve};
-use mandate_stub_issuer::alpaca::{ACCOUNT_PATH, AUTHORIZE_PATH, Alpaca, Settings, TOKEN_PATH};
+use mandate_stub_issuer::alpaca::{AUTHORIZE_PATH, Alpaca, Settings, TOKEN_PATH};
 use mandate_stub_issuer::issuer::Issuer;
 use mandate_stub_issuer::serve::{MAX_BODY_BYTES, serve_with};
 use ring::digest::{SHA256, digest};
@@ -171,18 +171,6 @@ fn without_a_client_the_provider_is_not_served() {
     let (_, addr) = serve("authenticated");
     assert_eq!(get(addr, &authorize_path("paper")).status, 404);
     assert_eq!(post(addr, &[FORM], b"code=x").status, 404);
-    let account = send(
-        addr,
-        &addr.to_string(),
-        "GET",
-        ACCOUNT_PATH,
-        &[("Authorization", "Bearer x")],
-        b"",
-    );
-    assert_eq!(
-        account.status, 404,
-        "no account is served without the provider"
-    );
 }
 
 #[test]

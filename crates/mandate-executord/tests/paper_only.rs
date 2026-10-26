@@ -3,9 +3,8 @@
 //! of its own but `secrecy` and `tokio`; none of the crates that carry a transport to a host or a
 //! simulator; and no `live` feature, which only the paper runner may declare. `mandate-alpaca`
 //! carries the only paper transport, so the second test pins that one module of the executor,
-//! [`CREDENTIAL_MODULE`], may name it, the credentials and the data client that reads quotes over
-//! it (DEC-2359 item 5), and that no source names the HTTP client or a host. Loosening either
-//! fails here as well as in review.
+//! [`CREDENTIAL_MODULE`], may name it and the credentials, and that no source names the HTTP
+//! client, the data client, or a host. Loosening either fails here as well as in review.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -70,8 +69,7 @@ fn sources(dir: &Path) -> Result<Vec<PathBuf>, Error> {
     Ok(found)
 }
 
-/// The one module that may name the paper transport, the credentials and the data client (DEC-2306
-/// item 1, DEC-2359 item 5).
+/// The one module that may name the paper transport and the credentials (DEC-2306 item 1).
 const CREDENTIAL_MODULE: &str = "credential.rs";
 
 #[test]
@@ -81,13 +79,19 @@ fn only_the_credential_module_names_the_paper_transport() -> Result<(), Error> {
     assert!(!files.is_empty(), "no sources under {}", src.display());
     for file in files {
         let text = fs::read_to_string(&file)?;
-        for name in ["reqwest", "alpaca.markets", "https://", "http://"] {
+        for name in [
+            "reqwest",
+            "DataClient",
+            "alpaca.markets",
+            "https://",
+            "http://",
+        ] {
             assert!(!text.contains(name), "{} names {name}", file.display());
         }
         if file.file_name().is_some_and(|n| n == CREDENTIAL_MODULE) {
             continue;
         }
-        for name in ["AlpacaPaperHttp", "Credentials", "DataClient"] {
+        for name in ["AlpacaPaperHttp", "Credentials"] {
             assert!(!text.contains(name), "{} names {name}", file.display());
         }
     }
@@ -124,23 +128,5 @@ fn only_the_process_sits_above_the_vault() -> Result<(), Error> {
             "{connector} could take the vault"
         );
     }
-    Ok(())
-}
-
-/// DEC-2359 item 9: the binary implements neither broker trait, so it cannot wrap a broker into
-/// one the scripted serve path takes and serve the paper broker with a wiring that reads no quote.
-#[test]
-fn the_binary_implements_no_broker() -> Result<(), Error> {
-    let main = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"))?;
-    let implementations: Vec<&str> = main
-        .lines()
-        .map(str::trim_start)
-        .filter(|line| line.starts_with("impl") && line.contains("Broker"))
-        .collect();
-    assert_eq!(implementations, Vec::<&str>::new());
-    assert!(
-        !main.contains("ScriptedBroker"),
-        "src/main.rs names ScriptedBroker"
-    );
     Ok(())
 }

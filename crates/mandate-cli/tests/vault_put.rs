@@ -9,9 +9,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use mandate_cli::vault::{PutArgs, PutSecret, Terminals, put_path, run_put};
+use mandate_cli::vault::{PutArgs, PutSecret, Terminals, run_put};
 use mandate_time::UtcNanos;
-use mandate_vault::policy::{PlatformSecret, SecretPath};
 
 const CANARY: &str = "canary-9d1e7a40-model-key-do-not-print";
 const ROLE: &str = "canary-role-3f0b";
@@ -173,69 +172,16 @@ fn a_plain_http_address_or_a_bad_ca_is_refused() {
     refused(&output, "config", "a missing CA");
 }
 
-/// Each secret `vault put` names is written at its own path: a platform secret at its platform
-/// path, and the Alpaca OAuth client secret at the client secret's (DEC-2636 item 1).
 #[test]
-fn each_secret_is_put_at_its_own_path() {
-    assert_eq!(
-        put_path(PutSecret::ModelProviderKey),
-        Ok((
-            SecretPath::Platform(PlatformSecret::ModelProviderKey),
-            "model provider's key"
-        ))
-    );
-    assert_eq!(
-        put_path(PutSecret::EmailCredential),
-        Ok((
-            SecretPath::Platform(PlatformSecret::EmailCredential),
-            "email credential"
-        ))
-    );
-    assert_eq!(
-        put_path(PutSecret::AlpacaOauthClientSecret),
-        Ok((SecretPath::ClientSecret, "Alpaca OAuth client secret"))
-    );
-}
-
-/// The client secret's three lines are read and the vault reached, as a platform secret's are.
-#[test]
-fn the_client_secret_is_read_and_the_vault_reached() {
+fn only_a_platform_secret_is_put() {
     let output = put(
         "alpaca-oauth-client-secret",
         NOWHERE,
         &ca(),
         &three(ROLE, SECRET_ID, CANARY),
     );
-    refused(
-        &output,
-        "unavailable",
-        "the client secret to an unreachable vault",
-    );
-}
-
-/// Beside the platform secrets, the client secret is the one entry `vault put` writes: no
-/// connection's code or token, and no other name, is ever put.
-#[test]
-fn only_a_platform_secret_or_the_client_secret_is_put() {
-    for secret in [
-        "code",
-        "token",
-        "connections/c1/code",
-        "connections/c1/token",
-        "client-secret",
-        "alpaca-oauth-client-id",
-        "Alpaca-OAuth-Client-Secret",
-        "",
-    ] {
-        let output = put(secret, NOWHERE, &ca(), &three(ROLE, SECRET_ID, CANARY));
-        assert_eq!(
-            output.status.code(),
-            Some(2),
-            "{secret:?}: {}",
-            stderr(&output)
-        );
-        assert!(!stderr(&output).contains(CANARY), "{secret:?}");
-    }
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert!(!stderr(&output).contains(CANARY));
 }
 
 /// The server the environment names, as `.github/scripts/start-openbao.sh` sets it.
@@ -261,43 +207,13 @@ fn a_put_with_provisioned_credentials_reaches_the_vault() {
         );
         return;
     };
-    put_with_provisioned_credentials(&address, &ca, &operator, "model-provider-key", "cli-put");
-}
-
-/// The client secret's put with provisioned credentials reaches the dev server as a platform
-/// secret's does, so the refusal is `dev_server_refused`, never a stdin or connection refusal.
-#[test]
-fn a_client_secret_put_with_provisioned_credentials_reaches_the_vault() {
-    each_secret_is_put_at_its_own_path();
-    the_client_secret_is_read_and_the_vault_reached();
-    let Some((address, ca, operator)) = server() else {
-        return;
-    };
-    put_with_provisioned_credentials(
-        &address,
-        &ca,
-        &operator,
-        "alpaca-oauth-client-secret",
-        "cli-put-client-secret",
-    );
-}
-
-/// Provisions to files under `name`, then puts `secret` as secret-import with those credentials,
-/// and checks the dev server refused it and nothing of stdin was printed.
-fn put_with_provisioned_credentials(
-    address: &str,
-    ca: &Path,
-    operator: &Path,
-    secret: &str,
-    name: &str,
-) {
-    let out = std::env::temp_dir().join(format!("{name}-{}", std::process::id()));
+    let out = std::env::temp_dir().join(format!("cli-put-{}", std::process::id()));
     let _ = fs::remove_dir_all(&out);
     let provisioned = Command::new(env!("CARGO_BIN_EXE_mandate"))
-        .args(["vault", "provision", "--address", address, "--ca"])
-        .arg(ca)
+        .args(["vault", "provision", "--address", &address, "--ca"])
+        .arg(&ca)
         .arg("--operator-token-file")
-        .arg(operator)
+        .arg(&operator)
         .arg("--out")
         .arg(&out)
         .env_clear()
@@ -310,7 +226,12 @@ fn put_with_provisioned_credentials(
         file("secret-import.secret-id"),
     );
     let _ = fs::remove_dir_all(&out);
-    let output = put(secret, address, ca, &three(&role_id, &secret_id, CANARY));
+    let output = put(
+        "model-provider-key",
+        &address,
+        &ca,
+        &three(&role_id, &secret_id, CANARY),
+    );
     refused(&output, "dev_server_refused", "a put to the dev server");
     for line in [&role_id, &secret_id] {
         assert!(

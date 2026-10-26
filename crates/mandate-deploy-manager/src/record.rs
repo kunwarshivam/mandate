@@ -4,8 +4,8 @@ use mandate_canon::{Digest, Int, Key, Value, encode_ulid, to_canonical};
 use mandate_process::CRASH_LOOP_WINDOW;
 use mandate_time::UtcNanos;
 
-use crate::control::{Cause, Fact, Slot, StopCause};
-use crate::orchestrator::{Effect, OperatorAlert};
+use crate::control::{Cause, Fact, Slot};
+use crate::orchestrator::{CRASH_LOOP, Effect};
 
 /// Who writes the records: the workspace, and the manager as a `system` actor with its build.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,20 +33,13 @@ pub enum Record {
         cause: Cause,
         kill_switch: Option<String>,
     },
-    /// `ProcessStopIssued`: for an agent stopped, a token exchange whose request closed, or a
-    /// connect's executor whose connection closed.
-    Stop {
-        slot: Slot,
-        generation: u64,
-        cause: StopCause,
-    },
-    /// `ProcessCrashLooped`: the pause, and the operator alert it raises, which the journal does
-    /// not carry.
+    /// `ProcessStopIssued`, for an agent stopped.
+    Stop { slot: Slot, generation: u64 },
+    /// `ProcessCrashLooped`: the pause.
     CrashLooped {
         slot: Slot,
         generation: u64,
         restarts: u64,
-        alert: OperatorAlert,
     },
 }
 
@@ -82,7 +75,7 @@ impl Record {
         match self {
             Self::Start { .. } => Effect::Start { slot, generation },
             Self::Stop { .. } => Effect::Stop { slot, generation },
-            Self::CrashLooped { alert, .. } => Effect::Alert(*alert),
+            Self::CrashLooped { .. } => Effect::Alert(CRASH_LOOP),
         }
     }
 
@@ -140,7 +133,7 @@ impl Record {
                     causation = text(id);
                 }
             }
-            Self::Stop { cause, .. } => payload.push(("cause", text(cause.code()))),
+            Self::Stop { .. } => payload.push(("cause", text("agent_stopped"))),
             Self::CrashLooped { restarts, .. } => {
                 payload.push(("restarts", int(*restarts)));
                 payload.push(("window_seconds", int(CRASH_LOOP_WINDOW.as_secs())));

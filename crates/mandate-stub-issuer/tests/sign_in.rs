@@ -48,7 +48,7 @@ impl Journal for NoJournal {
         _: u64,
         _: u64,
         _: mandate_time::UtcNanos,
-        _: &'a [&'a [u8]],
+        _: &'a [u8],
     ) -> Answer<'a, mandate_journal::AppendOutcome> {
         Box::pin(async { Err(JournalUnavailable) })
     }

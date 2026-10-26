@@ -5,9 +5,7 @@ Run from the repository root, in the reference environment:
     python3 -I schemas/workspace-api/check_planned.py
 
 1. Every `(planned: <story>)` in `docs/specs/*.md`, and every story in a schema's `x-planned`
-   object (`{"<value>": "<story>"}`), names a story the backlog lists as a bold bullet,
-   `- **<story> ...` or `* **<story> ...`, indented or not, as `cargo xtask lint` counts rows
-   (DEC-2373).
+   object (`{"<value>": "<story>"}`), names a story the backlog lists as `- **<story> ...`.
 2. For each spec table paired with a schema enum below, the table's codes equal the enum's values,
    and the rows the table marks planned equal the enum's `x-planned`, story for story.
 3. Every `x-planned` value is one of its enum's values.
@@ -21,8 +19,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / "schemas/workspace-api"
 BACKLOG = ROOT / "docs/project/06-backlog-v1.md"
-# New rows, one file each until folded into BACKLOG (DEC-2373).
-BACKLOG_ROWS = ROOT / "docs/project/backlog"
 MARKER = re.compile(r"\(planned: ([^)]+)\)")
 
 # (spec file, section start, section end, schema file, JSON pointer to the enum's object)
@@ -70,10 +66,10 @@ def planned_objects(node, path=""):
 
 def main() -> int:
     problems: list[str] = []
-    texts = [BACKLOG.read_text(encoding="utf-8")]
-    texts += [row.read_text(encoding="utf-8") for row in sorted(BACKLOG_ROWS.glob("*.md"))]
     stories = set(
-        re.findall(r"^\s*[-*] \*\*(E\d+-\d+)\b", "\n".join(texts), re.MULTILINE)
+        re.findall(
+            r"^- \*\*(E\d+-\d+)\b", BACKLOG.read_text(encoding="utf-8"), re.MULTILINE
+        )
     )
     checked = 0
     for spec in sorted((ROOT / "docs/specs").glob("*.md")):

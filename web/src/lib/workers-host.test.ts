@@ -78,8 +78,6 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(broken((c) => (c.assets = { directory: ".open-next/assets" }))).toEqual(only("ASSETS"));
     expect(broken((c) => (c.assets = { directory: "public", binding: "ASSETS" }))).toEqual(only(".open-next/assets"));
     expect(broken((c) => (c.workers_dev = true))).toEqual(only("workers_dev"));
-    expect(broken((c) => delete c.keep_vars)).toEqual(only("keep_vars"));
-    expect(broken((c) => (c.keep_vars = false))).toEqual(only("keep_vars"));
     expect(broken((c) => delete c.workers_dev)).toEqual(only("workers_dev"));
     expect(broken((c) => (c.services = []))).toEqual(only("WORKER_SELF_REFERENCE"));
     expect(broken((c) => (c.services = [{ binding: "WORKER_SELF_REFERENCE", service: "other" }]))).toEqual(only("WORKER_SELF_REFERENCE"));

@@ -18,7 +18,7 @@ use mandate_api::problem::{ProblemCode, Violation};
 use mandate_api::requests::{Environment as Wire, OauthStartRequest};
 use mandate_api::wire::decode;
 use mandate_authn::Request;
-use mandate_canon::{Digest, Int, Value, parse};
+use mandate_canon::{Digest, Value, parse};
 use mandate_connections::ConnectError;
 use mandate_connections::manager::{
     AccountRefFold, IdFold, StartFacts, StartPlan, StartRefusal, StartRequest, StepUpCheck,
@@ -26,32 +26,33 @@ use mandate_connections::manager::{
 };
 use mandate_connections::record::{AccountRef, Broker, ConnectionId, Environment};
 use mandate_connections::start::{
-    Authorizer, Binding, Environment as Bound, PendingStates, PkceVerifier, STATE_LIFETIME_SECS,
+    Binding, Environment as Bound, OAuthClient, PendingStates, PkceVerifier, STATE_LIFETIME_SECS,
 };
 use mandate_connections::vault::AuthorizationCode;
 use mandate_identity::{Permission, StepUpActionKind};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 use secrecy::SecretString;
-use tokio::task::JoinError;
 
 use crate::backtests::paper;
-use crate::commands::{Event, Settled, Writer, caused_envelope, envelope};
+use crate::commands::{Event, Settled, Writer, envelope};
 use crate::http::{App, invalid, problem, problem_body};
 use crate::routes::{
     self, Reader, Refused, Unreadable, authorized, enveloped, path_refused, string,
 };
 use crate::session::{Authenticated, Random};
-use crate::stepup::{Action, Asserted, Judged, Unverified, journaled};
+use crate::stepup::{Action, Judged, journaled};
 use crate::versions::object;
 use crate::writes::{
-    Gate, appended_batch_at, derived_for, id_text, principal_text, repeated, strictly, unknown,
+    Gate, appended_at, derived_for, id_text, principal_text, repeated, strictly, unknown,
 };
 
-/// The token-breadth disclosure's document (DEC-2621 item 5) and its current version; a start
-/// naming another is `invalid` at `/disclosure` (DEC-2623 item 6). They are the connections
-/// crate's, the ones the CLI confirms a connect at (DEC-2125 item 3), so the two never diverge.
-pub use mandate_connections::manager::{DISCLOSURE_DOCUMENT, DISCLOSURE_VERSION};
+/// The token-breadth disclosure's document (DEC-2621 item 5).
+pub const DISCLOSURE_DOCUMENT: &str = "alpaca_oauth_token_breadth";
+
+/// The disclosure's current version; a start naming another is `invalid` at `/disclosure`
+/// (DEC-2623 item 6).
+pub const DISCLOSURE_VERSION: &str = "1";
 
 /// The §3.4 operation the start's `ConnectionRequested` event id is derived under.
 pub const OPERATION: &str = "connect";
@@ -62,9 +63,6 @@ pub const CONNECTION_OPERATION: &str = "connect_connection";
 
 /// The operation the pending connection's `account_ref` ULID is derived under.
 pub const ACCOUNT_OPERATION: &str = "connect_account";
-
-/// The operation a passkey start's `StepUpAsserted` event id is derived under (DEC-2126 item 3).
-pub const ASSERTED_OPERATION: &str = "connect_step_up_asserted";
 
 /// How many bytes the `state` and the PKCE verifier each draw (DEC-2623 item 7).
 pub const RANDOM_BYTES: usize = 32;
@@ -85,9 +83,7 @@ pub trait CodeVault: Send + Sync {
 /// values issued and not yet redeemed, the random source they are drawn from (DEC-2623 items
 /// 2, 4 and 7), and the vault port the callback writes codes through (DEC-2626 item 4).
 pub struct Connect {
-    /// The page the browser is sent to, Alpaca's or a dev or CI cell's (DEC-2633 item 3), and the
-    /// registered OAuth client.
-    pub authorizer: Authorizer,
+    pub client: OAuthClient,
     pub states: Mutex<PendingStates>,
     pub random: Box<dyn Random>,
     pub codes: Arc<dyn CodeVault>,
@@ -108,9 +104,9 @@ struct Answered {
 }
 
 impl Connect {
-    pub fn new(authorizer: Authorizer, random: Box<dyn Random>, codes: Arc<dyn CodeVault>) -> Self {
+    pub fn new(client: OAuthClient, random: Box<dyn Random>, codes: Arc<dyn CodeVault>) -> Self {
         Self {
-            authorizer,
+            client,
             states: Mutex::new(PendingStates::default()),
             random,
             codes,
@@ -185,17 +181,12 @@ async fn redeemed(
     if let Some(code) = code
         && still_open(app, admitted, now, &redeemed.binding).await
     {
-        let codes = Arc::clone(&connect.codes);
-        let (binding, verifier) = (redeemed.binding, redeemed.verifier);
-        let _failed_write_is_closed_by_the_teardown: Result<Result<(), ConnectError>, JoinError> =
-            tokio::task::spawn_blocking(move || {
-                codes.put_code(
-                    &binding,
-                    AuthorizationCode(SecretString::from(code)),
-                    verifier,
-                )
-            })
-            .await;
+        let _failed_write_is_closed_by_the_teardown: Result<(), ConnectError> =
+            connect.codes.put_code(
+                &redeemed.binding,
+                AuthorizationCode(SecretString::from(code)),
+                redeemed.verifier,
+            );
     }
     Some(connection)
 }
@@ -347,30 +338,12 @@ async fn started(
         control: &reader.control,
         now: gate.now,
     };
-    let asserted = app
-        .step_up
-        .asserted(
-            evidence,
-            request.step_up_assertion.as_ref(),
-            &action,
-            &judged,
-        )
-        .map_err(|Unverified::Code(code)| match code {
-            ProblemCode::JournalUnavailable => unavailable(),
-            code => coded(StatusCode::UNAUTHORIZED, code),
-        })?;
+    app.step_up
+        .verify(evidence, &action, &judged)
+        .map_err(|code| coded(StatusCode::UNAUTHORIZED, code))?;
     planned(&reader, &ids, &request, evidence)?;
-    let assertion = match &asserted {
-        Some(asserted) => {
-            Some(assertion_drafted(app, &gate, &reader, &ids, asserted).ok_or_else(unavailable)?)
-        }
-        None => None,
-    };
-    let batch: Vec<&[u8]> = std::iter::once(draft.as_slice())
-        .chain(assertion.as_deref())
-        .collect();
     let judged_head = reader.control.last().map(|row| row.seq);
-    match appended_batch_at(app, &reader, (&ids.event, &batch), gate.now, judged_head).await {
+    match appended_at(app, &reader, (&ids.event, &draft), gate.now, judged_head).await {
         Settled::Stored(_) => {}
         Settled::Conflict => {
             return Err(coded(
@@ -415,46 +388,6 @@ fn coded(status: StatusCode, code: ProblemCode) -> Box<Response> {
 
 fn unavailable() -> Box<Response> {
     Box::new(Refused::JournalUnavailable.response())
-}
-
-/// The `StepUpAsserted` a passkey start appends after its request (journal spec §9.32, DEC-2126
-/// item 3), its raw assertion first stored as an artifact: caused by the request, by the same
-/// user, under an id derived from the key. `None` when the store is absent or refuses the bytes,
-/// or for a value the canonical form cannot hold.
-fn assertion_drafted(
-    app: &App,
-    gate: &Gate,
-    reader: &Reader,
-    ids: &Ids,
-    asserted: &Asserted,
-) -> Option<Vec<u8>> {
-    let stored = app.objects.as_ref()?.put(asserted.assertion()).ok()?;
-    let reference = string(&stored.to_string());
-    let payload = object(vec![
-        ("challenge", string(asserted.challenge())),
-        ("credential", string(asserted.credential())),
-        (
-            "sign_count",
-            Value::Int(Int::new(u64::from(asserted.sign_count()))?),
-        ),
-        ("assertion", reference.clone()),
-    ])?;
-    let (_, event_id) = derived_for(gate, &reader.workspace, ASSERTED_OPERATION)?;
-    let event = Event {
-        event_type: "StepUpAsserted",
-        schema_version: 1,
-        payload,
-        artifact_refs: vec![reference],
-        config_refs: Vec::new(),
-    };
-    let writer = Writer {
-        workspace: &reader.workspace,
-        principal: &ids.principal,
-        event_id: &event_id,
-        environment: "paper",
-        now: gate.now,
-    };
-    caused_envelope(&writer, &event, Some(&ids.event))
 }
 
 /// The `ConnectionRequested` version 2 this start appends (DEC-2621 item 1).
@@ -672,14 +605,7 @@ fn issued(connect: &Connect, reader: &Reader, ids: &Ids, gate: &Gate) -> Option<
         states.prune(now);
         answered.retain(|_, kept| states.holds(&kept.state, now));
         states
-            .begin(
-                &connect.authorizer,
-                binding,
-                &state,
-                verifier,
-                &challenge,
-                now,
-            )
+            .begin(&connect.client, binding, &state, verifier, &challenge, now)
             .ok()?
     };
     let expires_at =

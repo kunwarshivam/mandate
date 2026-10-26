@@ -103,6 +103,5 @@ pub fn wiring_for(approvers: &[String], author: &str) -> Wiring {
             },
         },
         research: None,
-        facts: None,
     }
 }

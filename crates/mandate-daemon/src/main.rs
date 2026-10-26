@@ -40,7 +40,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_daemon::cell::{self, CellDeployment};
 use mandate_daemon::wake::Sleep;
-use mandate_daemon::{Config, RuntimeProcess, Wake, deployment, fixture, launch, production};
+use mandate_daemon::{Config, RuntimeProcess, Wake, deployment, fixture, launch};
 use mandate_journal::{Environment, StreamId};
 use mandate_process::State;
 use mandate_process::probe::{self, Probe, Status};
@@ -207,14 +207,7 @@ fn run(
                 StreamId::parse(&format!("ctl:{workspace}")).ok_or("deployment_missing")?;
             let rows = store.rows(&control).ok_or("journal_unavailable")?;
             let found = deployment::resolved(&rows, &agent, Environment::Paper, &artifacts)?;
-            let (_, document) =
-                deployment::document(&rows, &agent, Environment::Paper, &artifacts)?;
-            let mut wiring = production::wired(
-                fixture::wiring_for(&found.approvers, &found.author),
-                &document,
-                &format!("clock:{workspace}"),
-                &agent,
-            );
+            let mut wiring = fixture::wiring_for(&found.approvers, &found.author);
             if let Some(opted) = opted {
                 let meter = JournalMeter::open(
                     PgStore::connect(&dsn)?,
@@ -260,9 +253,7 @@ fn serve<S: Store>(
             process.drain(host_now());
             continue;
         }
-        for alert in process.step(host_now()) {
-            eprintln!("alert {}", alert.key);
-        }
+        process.step(host_now());
         status.publish(process.lifecycle().snapshot());
         wake.wait(PASS);
     }

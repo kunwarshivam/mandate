@@ -12,7 +12,6 @@
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::num::NonZeroU32;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::body::Bytes;
@@ -23,20 +22,15 @@ use axum::response::Response;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use mandate_api::problem::Violation;
-use mandate_authn::{
-    ClientKey, REDUCTION_ONLY_LIFETIME_S, ReductionGate, ReductionLimits, Unauthenticated,
-};
+use mandate_authn::{ClientKey, ReductionGate, ReductionLimits, Unauthenticated};
 use mandate_canon::{Value, encode_ulid, parse};
-use mandate_passkey::{Challenge, RelyingParty};
 use mandate_time::UtcNanos;
 use ring::digest::{SHA256, digest};
 
 use crate::config::StartRefusal;
-use crate::http::{App, browser, forbidden, invalid, session_cookie, unauthenticated};
-use crate::members::credential_records;
-use crate::opening::{Opened, Presented, Reads, judge};
-use crate::routes::{enveloped, object, string};
-use crate::session::{COOKIE_NAME, OsRandom, Random};
+use crate::http::{App, browser, forbidden, invalid, unauthenticated};
+use crate::routes::{enveloped, string};
+use crate::session::{OsRandom, Random};
 
 /// The device cookie's name (§4.10 route 2 item 3).
 pub const DEVICE_COOKIE: &str = "__Host-mandate_device";
@@ -58,17 +52,13 @@ pub const INGRESS_PEERS: &str = "MANDATE_API_INGRESS_PEERS";
 const FORWARDED_FOR: &str = "x-forwarded-for";
 
 /// DEC-2117 item 3's numbers: 4 challenges per device and 32 per address outstanding, and 10
-/// failures per device and 100 per address kept; DEC-2119's bounds in all: 4,096 outstanding, the
-/// reserve from 3,072, and 65,536 failure keys.
+/// failures per device and 100 per address kept.
 pub fn limits() -> ReductionLimits {
     ReductionLimits {
         challenges_per_address: NonZeroU32::MIN.saturating_add(31),
         challenges_per_device: NonZeroU32::MIN.saturating_add(3),
         failures_per_address: NonZeroU32::MIN.saturating_add(99),
         failures_per_device: NonZeroU32::MIN.saturating_add(9),
-        max_outstanding: NonZeroU32::MIN.saturating_add(4_095),
-        reserve: NonZeroU32::MIN.saturating_add(3_071),
-        max_failure_keys: NonZeroU32::MIN.saturating_add(65_535),
     }
 }
 
@@ -187,11 +177,6 @@ pub fn challenge_id(issued_at: UtcNanos, bytes: &[u8; 32]) -> String {
     encode_ulid(u128::from_be_bytes(raw.try_into().unwrap_or_default()))
 }
 
-/// The bytes a presentation that named no challenge settles with: the gate holds no challenge of
-/// all zeros, which a 32-byte draw from the operating system's generator is never expected to give,
-/// so it counts a failure and consumes nothing.
-const NO_CHALLENGE: [u8; 32] = [0; 32];
-
 /// A challenge the store issued.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Issued {
@@ -212,8 +197,6 @@ pub struct Reduction {
     outstanding: Mutex<BTreeMap<String, Issued>>,
     ingress: Vec<IpAddr>,
     random: Box<dyn Random>,
-    /// How many `reduction_failures_over_limit` alerts this process has raised.
-    alerts: AtomicU64,
 }
 
 impl Reduction {
@@ -224,33 +207,6 @@ impl Reduction {
             outstanding: Mutex::new(BTreeMap::new()),
             ingress,
             random,
-            alerts: AtomicU64::new(0),
-        }
-    }
-
-    /// Raises the operator alert `reduction_failures_over_limit` once: [`alert_line`] on standard
-    /// error, and one more in [`Reduction::alerts_raised`].
-    pub fn alerted(&self) {
-        self.alerts.fetch_add(1, Ordering::Relaxed);
-        eprintln!("{}", alert_line());
-    }
-
-    /// How many `reduction_failures_over_limit` alerts this process has raised, for the tests and
-    /// a future metric.
-    pub fn alerts_raised(&self) -> u64 {
-        self.alerts.load(Ordering::Relaxed)
-    }
-
-    /// The same store over a gate with limits of its own, so a test can loosen the gate and see the
-    /// store's own guard refuse alone (its defence in depth over the gate's equal limits).
-    #[cfg(test)]
-    fn with_gate(random: Box<dyn Random>, gate: ReductionLimits) -> Self {
-        Self {
-            gate: Mutex::new(ReductionGate::new(gate)),
-            outstanding: Mutex::new(BTreeMap::new()),
-            ingress: Vec::new(),
-            random,
-            alerts: AtomicU64::new(0),
         }
     }
 
@@ -306,38 +262,6 @@ impl Reduction {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .contains_key(challenge_id)
-    }
-
-    /// Takes the challenge `challenge_id` out of memory on its first presentation, whatever
-    /// follows, so it is presented at most once (§4.10 route 2 item 1): the challenge, or `None`
-    /// when it is unknown, already taken, or expired at `now`.
-    pub fn take(&self, challenge_id: &str, now: UtcNanos) -> Option<Issued> {
-        let issued = self
-            .outstanding
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(challenge_id)?;
-        (now < issued.expires_at).then_some(issued)
-    }
-
-    /// Settles a presentation from `client` at `now` with the gate: the challenge `taken` is
-    /// consumed there too, and a presentation that `opened` nothing counts one failure against
-    /// `client`'s address and device, a request that named no challenge included. Returns whether
-    /// this failure is the one that brought the address or device to its failure limit, when the
-    /// operator alert `reduction_failures_over_limit` is raised, once (§4.10 route 2 item 3). No
-    /// answer depends on it.
-    pub fn settle(
-        &self,
-        client: &ClientKey,
-        taken: Option<&Issued>,
-        opened: bool,
-        now: UtcNanos,
-    ) -> bool {
-        let mut gate = self.gate.lock().unwrap_or_else(PoisonError::into_inner);
-        let before = gate.failure_limit_reached(client, now);
-        let bytes = taken.map_or(NO_CHALLENGE, |issued| issued.bytes);
-        let _answer = gate.present(client, &bytes, now, |_| opened.then_some(()));
-        !before && gate.failure_limit_reached(client, now)
     }
 
     /// Fresh device cookie bytes, unpadded base64url.
@@ -425,280 +349,4 @@ pub async fn challenge(
         headers.insert(SET_COOKIE, cookie);
     }
     response
-}
-
-/// The runbook `reduction_failures_over_limit` names (infrastructure design §8.2).
-pub const FAILURES_RUNBOOK: &str = "docs/runbooks/RB-20-reduction-failures.md";
-
-/// The one line [`Reduction::alerted`] writes, `operator_alert <code> <runbook>` as the connect
-/// finish writes its own: the opaque code and the runbook's path, and nothing a request carried,
-/// so no address, device, member, passkey, or challenge (rule 6). It takes no argument, so it
-/// cannot name one.
-pub fn alert_line() -> String {
-    format!("operator_alert {FAILURES_OVER_LIMIT} {FAILURES_RUNBOOK}")
-}
-
-/// `POST /v1/reduction-sessions` (§4.10 route 2): 403 `forbidden` without the browser marks;
-/// otherwise the named challenge is taken out first, the assertion judged
-/// ([`crate::opening::judge`]), the presentation settled with the gate, and on an opening `201`
-/// with `commands/reduction-session-opened` and the session cookie, ending a session the call
-/// presented. Every refusal after the browser check, an invalid body included, is the one 401
-/// with the same headers, no cookie set or cleared, and nothing ended. Both answers carry
-/// `Cache-Control: no-store`.
-pub async fn open(
-    State(app): State<Arc<App>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    if !browser(&headers, &app.settings.app_origin) {
-        return forbidden();
-    }
-    let Some(now) = app.clock.now() else {
-        return refused();
-    };
-    let client = ClientKey {
-        address: address(peer.ip(), &headers, app.reduction.ingress()),
-        device: device(&headers).unwrap_or_else(|| hex_digest("")),
-    };
-    let request = Request::parse(&body);
-    let taken = request
-        .as_ref()
-        .and_then(|request| app.reduction.take(&request.challenge_id, now));
-    let judged = match (&request, &taken) {
-        (Some(request), Some(taken)) => judged(&app, request, taken, now).await,
-        _ => None,
-    };
-    if app
-        .reduction
-        .settle(&client, taken.as_ref(), judged.is_some(), now)
-    {
-        app.reduction.alerted();
-    }
-    let opened = judged.and_then(|opened| {
-        let replaced = session_cookie(&headers);
-        let cookie = app
-            .sessions
-            .open_reduction_only(opened.member, opened.standing, replaced.as_deref(), now)
-            .ok()?;
-        let expires_at = app.sessions.expires_at(cookie.value(), now).ok()?;
-        Some((cookie, expires_at))
-    });
-    let workspace = app.hosted.workspace.to_ulid_text();
-    let (Some((cookie, expires_at)), Ok(workspace)) = (opened, workspace) else {
-        return refused();
-    };
-    let mut response = enveloped(
-        StatusCode::CREATED,
-        now,
-        vec![
-            ("kind", string("reduction_only")),
-            ("expires_at", string(&expires_at.to_string())),
-            (
-                "workspaces",
-                Value::Array(vec![object(vec![
-                    ("workspace_id", string(&workspace)),
-                    ("label", Value::Null),
-                    ("agent_ids", Value::Array(Vec::new())),
-                    ("connection_ids", Value::Array(Vec::new())),
-                ])]),
-            ),
-            ("as_of", Value::Array(Vec::new())),
-        ],
-    );
-    let headers = response.headers_mut();
-    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    let set = format!(
-        "{COOKIE_NAME}={}; Path=/; Max-Age={REDUCTION_ONLY_LIFETIME_S}; Secure; HttpOnly; SameSite=Strict",
-        cookie.value()
-    );
-    if let Ok(set) = HeaderValue::from_str(&set) {
-        headers.insert(SET_COOKIE, set);
-    }
-    response
-}
-
-/// The operator alert a client reaching its failure limit raises: an opaque code with no address,
-/// device, member, or passkey (infrastructure design §8.2, rule 6).
-const FAILURES_OVER_LIMIT: &str = "reduction_failures_over_limit";
-
-/// The one 401, with the `Cache-Control: no-store` both route-2 routes answer with.
-fn refused() -> Response {
-    let mut response = unauthenticated();
-    response
-        .headers_mut()
-        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    response
-}
-
-/// `commands/reduction-session-request`, strict: exactly its five members, each a string, the
-/// last three unpadded base64url of at most [`BASE64URL_MAX`] characters.
-struct Request {
-    challenge_id: String,
-    passkey_id: String,
-    authenticator_data: Vec<u8>,
-    client_data_json: Vec<u8>,
-    signature: Vec<u8>,
-}
-
-/// The longest base64url member the schema admits.
-const BASE64URL_MAX: usize = 8_192;
-
-impl Request {
-    /// The request `body` holds, or `None` for anything else.
-    fn parse(body: &[u8]) -> Option<Self> {
-        let Ok(Value::Object(members)) = parse(body) else {
-            return None;
-        };
-        if members.len() != 5 {
-            return None;
-        }
-        let text = |name: &str| match members.get(name) {
-            Some(Value::Str(text)) => Some(text.clone()),
-            _ => None,
-        };
-        let bytes = |name: &str| {
-            text(name)
-                .filter(|text| text.len() <= BASE64URL_MAX)
-                .and_then(|text| URL_SAFE_NO_PAD.decode(text).ok())
-        };
-        Some(Self {
-            challenge_id: text("challenge_id")?,
-            passkey_id: text("passkey_id")?,
-            authenticator_data: bytes("authenticator_data")?,
-            client_data_json: bytes("client_data_json")?,
-            signature: bytes("signature")?,
-        })
-    }
-}
-
-/// The judge's answer for `request` over the challenge `taken` at `now`, after reading the hosted
-/// control stream; `None` for every refusal, a failed read included.
-async fn judged(app: &App, request: &Request, taken: &Issued, now: UtcNanos) -> Option<Opened> {
-    let rp = RelyingParty {
-        rp_id: rp_id(&app.settings.app_origin)?,
-        origin: app.settings.app_origin.clone(),
-    };
-    let challenge = Challenge::new(&taken.bytes).ok()?;
-    let workspace = app.hosted.workspace.to_ulid_text().ok()?;
-    let rows = app.journal.rows(&format!("ctl:{workspace}")).await.ok();
-    let credentials = rows
-        .as_deref()
-        .and_then(|rows| credential_records(app.hosted.workspace, rows).ok());
-    let memberships = rows.as_deref().and_then(|rows| (app.members)(rows).ok());
-    let standing = |member| app.sessions.standing(member);
-    let reads = Reads {
-        hosted: app.hosted,
-        credentials: credentials.as_deref(),
-        memberships: memberships.as_deref(),
-        standing: &standing,
-        keys: app.artifacts.as_deref(),
-    };
-    let presented = Presented {
-        passkey_id: &request.passkey_id,
-        authenticator_data: &request.authenticator_data,
-        client_data_json: &request.client_data_json,
-        signature: &request.signature,
-    };
-    judge(&rp, &challenge, &presented, &reads, now)
-}
-
-#[cfg(test)]
-mod store_guard {
-    //! The store's own guard in `Reduction::issue`, with the gate loosened far past it: the gate
-    //! enforces the same two limits over the same challenges, so only a gate that allows more shows
-    //! the store refusing on its own, on each side of its condition.
-
-    use std::num::NonZeroU32;
-    use std::sync::Mutex;
-
-    use mandate_authn::{ClientKey, ReductionLimits};
-    use mandate_time::UtcNanos;
-
-    use super::{CHALLENGES_IN_ALL, RESERVE_FROM, Reduction};
-    use crate::session::{Random, Unauthenticated};
-
-    type Outcome = Result<(), &'static str>;
-
-    /// Distinct 32-byte draws for as long as a test needs.
-    #[derive(Default)]
-    struct Counting(Mutex<u64>);
-
-    impl Random for Counting {
-        fn fill(&self, out: &mut [u8]) -> Result<(), Unauthenticated> {
-            let mut n = self.0.lock().map_err(|_| Unauthenticated)?;
-            *n = n.wrapping_add(1);
-            out.iter_mut().for_each(|b| *b = 0x3c);
-            out.iter_mut()
-                .zip(n.to_be_bytes())
-                .for_each(|(b, counted)| *b = counted);
-            Ok(())
-        }
-    }
-
-    /// A store over a gate that allows far more than the store does.
-    fn store() -> Result<Reduction, &'static str> {
-        let wide = NonZeroU32::new(1_000_000).ok_or("a non-zero limit")?;
-        let gate = ReductionLimits {
-            challenges_per_address: wide,
-            challenges_per_device: wide,
-            failures_per_address: wide,
-            failures_per_device: wide,
-            max_outstanding: wide,
-            reserve: wide,
-            max_failure_keys: wide,
-        };
-        Ok(Reduction::with_gate(Box::new(Counting::default()), gate))
-    }
-
-    fn client(address: &str) -> ClientKey {
-        ClientKey {
-            address: address.to_owned(),
-            device: format!("device-{address}"),
-        }
-    }
-
-    fn now() -> Result<UtcNanos, &'static str> {
-        UtcNanos::from_parts(1_791_000_000, 0).map_err(|_| "an instant")
-    }
-
-    /// Issues one challenge to each of `count` distinct addresses, `a0` onwards.
-    fn fill(store: &Reduction, count: usize) -> Outcome {
-        for n in 0..count {
-            store
-                .issue(&client(&format!("a{n}")), now()?)
-                .map_err(|_| "each address below the limits is issued one")?;
-        }
-        Ok(())
-    }
-
-    /// With every address holding one, the 4,097th outstanding is refused by the store alone, even
-    /// for an address that holds none.
-    #[test]
-    fn the_store_refuses_past_all_its_challenges_for_an_address_holding_none() -> Outcome {
-        let store = store()?;
-        fill(&store, CHALLENGES_IN_ALL)?;
-        assert!(
-            store.issue(&client("fresh"), now()?).is_err(),
-            "the store holds no more than its challenges in all"
-        );
-        Ok(())
-    }
-
-    /// Past the reserve, an address that holds one is refused by the store alone, while one that
-    /// holds none is still issued.
-    #[test]
-    fn past_the_reserve_the_store_refuses_only_an_address_that_holds_one() -> Outcome {
-        let store = store()?;
-        fill(&store, RESERVE_FROM)?;
-        assert!(
-            store.issue(&client("a0"), now()?).is_err(),
-            "an address holding one gets no more past the reserve"
-        );
-        assert!(
-            store.issue(&client("fresh"), now()?).is_ok(),
-            "an address holding none still gets one from the reserve"
-        );
-        Ok(())
-    }
 }

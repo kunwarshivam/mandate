@@ -20,4 +20,3 @@ xit = "xit"                         # Vitest's skipped-test alias, refused by we
 xtest = "xtest"                     # Vitest's skipped-test alias, refused by web/scripts/pending.mjs (DEC-750)
 cose = "cose"                       # CBOR Object Signing and Encryption (RFC 9052), WebAuthn's key format
 deployd = "deployd"                 # the deployment manager's process crate, mandate-deployd (DEC-1172)
-ervices = "ervices"                 # a deliberate suffix near-miss of "services" in the recorded plane's term-match tests (DEC-2327)

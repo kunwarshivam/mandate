@@ -107,7 +107,6 @@ fn first_pass(case: &Value) -> Pass {
                 let started = match slot.process {
                     Process::Runtime => &mut runtimes,
                     Process::Executor => &mut executors,
-                    Process::TokenExchange => panic!("a deployment starts no token exchange"),
                 };
                 assert!(started.insert(slot.subject), "one start per slot");
             }

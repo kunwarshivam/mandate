@@ -313,16 +313,15 @@ describe("no order ticket (DEC-528)", () => {
    */
   const EXPORTS: Record<string, string[]> = {
     backtest: ["ABSENT", "DISCLOSURES", "LIMITATIONS", "MODES", "OUTCOMES", "PURPOSES", "backtestNotFound", "backtestRead", "readBacktestFrom", "servedBacktest"],
-    client: ["CSRF_HEADER", "OPERATIONS", "SESSION_ROUTE", "STEP_UP_CHALLENGE_ROUTE", "createWorkspaceClient", "isIdempotencyKey", "newIdempotencyKey"],
+    client: ["CSRF_HEADER", "OPERATIONS", "createWorkspaceClient", "isIdempotencyKey", "newIdempotencyKey"],
     commands: ["UI_BUILD", "prepareApprovalResponse", "prepareConfirm", "prepareOwnerCommand", "recordRef"],
     confirm: ["APPLIES", "CLASSIFICATIONS", "confirmAccepted", "confirmStepUpDigest"],
     decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],
-    "mock-server": ["MOCK_PRINCIPAL", "createMockServer"],
-    operations: ["NOT_COMMANDS", "WEB_OPERATIONS", "operationFor"],
+    "mock-server": ["createMockServer"],
+    operations: ["WEB_OPERATIONS", "operationFor"],
     "read-models": ["agentRead", "agentsRead", "approvalRead", "approvalsRead", "deadlineIso", "loadApi"],
     reads: ["emptyWorkspace"],
     session: ["REFRESH_EVERY_MS", "SESSION_LOCK", "createSessionKeeper"],
-    "step-up": ["CLI_CONFIRM_KINDS", "approvalConfirmCommand", "challengeLifetimeMs", "cliConfirmEvidence", "confirmCode", "sessionPrincipal", "stepUpChallenge"],
     types: ["COMMAND_PHASES", "EFFECTS", "STEP_UP_STATUSES"],
     versions: ["prepareCreateVersion", "readConfirmation", "versionCreated"],
   };
@@ -449,44 +448,5 @@ describe("the common-schema seam", () => {
   it("pending E11-9: keeps a default when the schema leaves a member undefined", async () => {
     const { api } = client(conflict, { schema: { problem: undefined, envelope: undefined } });
     expect(await api.send(api.prepare("pause", PARAMS, {}))).toMatchObject({ ok: false, error: { code: "idempotency_conflict", effect: "none" } });
-  });
-});
-
-describe("the step-up challenge (spec §3.6, DEC-2103) and one's own session (§4.10)", () => {
-  const DIGEST = `sha256:${"ab".repeat(32)}` as const;
-  const CHALLENGE = { challenge_id: EVENT, webauthn_challenge: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", action: { kind: "approve", digest: DIGEST }, issued_at: "2026-10-26T14:00:00.000000000Z", expires_at: "2026-10-26T14:05:00.000000000Z" };
-  const created = (patch: Record<string, unknown> = {}) => json(201, { api_version: "v1", as_of: [], ...CHALLENGE, ...patch });
-
-  it("asks once, under its own key, with the CSRF mark and a body of the action alone", async () => {
-    const { api, calls } = client(() => created());
-    const answer = await api.askChallenge({ kind: "approve", digest: DIGEST });
-    expect(answer).toMatchObject({ ok: true, value: CHALLENGE });
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ method: "POST", url: `/v1/workspaces/${WS}/step-up/challenges` });
-    expect(calls[0].headers.get(CSRF_HEADER)).toBe("1");
-    expect(isIdempotencyKey(calls[0].headers.get("Idempotency-Key") ?? "")).toBe(true);
-    expect(calls[0].body).toBe(JSON.stringify({ action: { kind: "approve", digest: DIGEST } }));
-    await api.askChallenge({ kind: "approve", digest: DIGEST });
-    expect(calls[1].headers.get("Idempotency-Key")).not.toBe(calls[0].headers.get("Idempotency-Key"));
-  });
-
-  it("refuses an answer bound to another action as an unreadable answer that recorded nothing", async () => {
-    const { api } = client(() => created({ action: { kind: "approve", digest: `sha256:${"cd".repeat(32)}` } }));
-    expect(await api.askChallenge({ kind: "approve", digest: DIGEST })).toMatchObject({ ok: false, error: { code: "invalid_response", effect: "none" } });
-  });
-
-  it("reports a refusal and a lost answer as effect none: a challenge is never journaled", async () => {
-    const refused = client(() => problem(403, { code: "live_unavailable", effect: "none", retryable: false }));
-    expect(await refused.api.askChallenge({ kind: "approve", digest: DIGEST })).toMatchObject({ ok: false, error: { code: "live_unavailable", effect: "none" } });
-    const lost = client(() => {
-      throw new TypeError("Failed to fetch");
-    });
-    expect(await lost.api.askChallenge({ kind: "connection", digest: DIGEST })).toMatchObject({ ok: false, error: { code: "network", effect: "none" } });
-  });
-
-  it("reads the session's principal outside the workspace prefix", async () => {
-    const { api, calls } = client(() => json(200, { api_version: "v1", as_of: [], principal_id: EVENT, kind: "full", expires_at: "2026-10-26T14:15:00.000000000Z" }));
-    expect(await api.readSession()).toMatchObject({ ok: true, value: { principal_id: EVENT } });
-    expect(calls[0]).toMatchObject({ method: "GET", url: "/v1/me/session", body: null });
   });
 });

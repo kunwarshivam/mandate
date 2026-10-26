@@ -1,5 +1,5 @@
 {
-  "about": "The processes of a workspace deployment (infrastructure design §3.1), the one list the Helm chart and the Compose file are both rendered from (E21-36). A process renders only when values.images names its image, so a lane adds its process by building the image; nothing else changes. `built` says whether the process's image exists yet: the Compose file holds exactly the built processes, less any whose `compose` is false, which have no Compose adapter (the deployment manager drives Kubernetes only, DEC-1172), or none yet (the scheduler, until the Compose drill builds its image, E21-29). A process whose `started_by` names another is not a Deployment of its own once that process renders: the chart renders its pod into that process's templates instead, and that process starts it (DEC-1170), with `run --probe /tmp/process.sock` and its `probe`; its `args` start it only where that process does not render. A `one_shot` process it starts (the token exchange, DEC-1175) runs its `command` and `args`, `{vault}` the vault's address, with no probe, once; the token exchange reads its connection from `MANDATE_SUBJECT`. A `vault_token` process mounts a projected ServiceAccount token for the vault (audience `mandate-vault`, 600 seconds, at `/run/mandate/vault-token/token`), beside its namespace at `/run/mandate/vault-token/namespace`, and no other credential (DEC-2060, DEC-1177), only as a pod the deployment manager starts as its connection's own account, and the executor only where its broker reaches the vault (DEC-2336). A `vault_ca` process mounts the vault chart's CA certificate alone, the ConfigMap `vault-ca`, read-only at `/run/mandate/vault/ca.crt`; the executor only when its broker reaches the vault (DEC-2332 item 5). A service's `args` start it and its `probe` asks it `livez` or `readyz` over its socket on the pod's `/tmp` (DEC-994 item 5); `{workspace}`, `{hosted_workspace}` (`api.workspace`, the workspace the deployment manager hosts), and the `runtime` values' `{agent}`, `{connection}` and `{owner}` fill them (DEC-1013). Edit this file, then run `cargo xtask cell generate --write`, which writes the Compose file and the journal's roles file from it.",
+  "about": "The processes of a workspace deployment (infrastructure design §3.1), the one list the Helm chart and the Compose file are both rendered from (E21-36). A process renders only when values.images names its image, so a lane adds its process by building the image; nothing else changes. `built` says whether the process's image exists yet: the Compose file holds exactly the built processes, less any whose `compose` is false, which have no Compose adapter (the deployment manager drives Kubernetes only, DEC-1172). A process whose `started_by` names another is not a Deployment of its own once that process renders: the chart renders its pod into that process's templates instead, and that process starts it (DEC-1170), with `run --probe /tmp/process.sock` and its `probe`; its `args` start it only where that process does not render. A `one_shot` process it starts (the token exchange, DEC-1175) runs its `command` and `args` as they are, with no probe, once; the token exchange takes none, reading its connection from `MANDATE_SUBJECT`. A `vault_token` process mounts a projected ServiceAccount token for the vault (audience `mandate-vault`, 600 seconds, at `/run/mandate/vault-token/token`), beside its namespace at `/run/mandate/vault-token/namespace`, and no other credential (DEC-2060, DEC-1177). A service's `args` start it and its `probe` asks it `livez` or `readyz` over its socket on the pod's `/tmp` (DEC-994 item 5); `{workspace}` and the `runtime` values' `{agent}`, `{connection}` and `{owner}` fill them (DEC-1013). Edit this file, then run `cargo xtask cell generate --write`, which writes the Compose file and the journal's roles file from it.",
   "processes": [
     {
       "name": "migrate",
@@ -94,38 +94,6 @@
       }
     },
     {
-      "name": "role-provisioner",
-      "row": "Role provisioner, one per workspace (DEC-2350, DEC-2630 item 7): Postgres and the vault only. It makes each OAuth connect's Kubernetes-auth roles and removes the token exchange's, logged in by its own AppRole, and journals each on the control stream; it holds no service-account token and no broker credential. Kubernetes only, since its roles bind the workspace's ServiceAccounts, so it is not in the Compose file",
-      "kind": "service",
-      "image": "role-provisioner",
-      "built": true,
-      "compose": false,
-      "db_role": "mandate_role_provisioner",
-      "guaranteed": false,
-      "colocate": false,
-      "egress": ["postgres", "vault"],
-      "resources": {
-        "requests": {"cpu": "50m", "memory": "32Mi"},
-        "limits": {"cpu": "100m", "memory": "64Mi"}
-      }
-    },
-    {
-      "name": "connect-finish",
-      "row": "Connect finish (`mandate-api-server finish`, DEC-2348 item 3): Postgres and the vault only. It finishes each OAuth connect on the control stream, deletes a closed connect's code and token, and judges and releases its account's fingerprint, logged in by the connection manager's AppRole alone; it listens on nothing. Rendered with `api.connectFinish`, from the API's image. Kubernetes only, so it is not in the Compose file",
-      "kind": "service",
-      "image": "api",
-      "built": true,
-      "compose": false,
-      "db_role": "mandate_connect_finish",
-      "guaranteed": false,
-      "colocate": false,
-      "egress": ["postgres", "vault"],
-      "resources": {
-        "requests": {"cpu": "50m", "memory": "64Mi"},
-        "limits": {"cpu": "100m", "memory": "128Mi"}
-      }
-    },
-    {
       "name": "runtime",
       "row": "Agent runtime, one per agent deployment: no broker credential and no route to a broker (rule 12); on the deny-all wiring until the post-R0 hook (DEC-1013)",
       "kind": "service",
@@ -145,7 +113,7 @@
     },
     {
       "name": "executor",
-      "row": "Account executor, one per broker account: Postgres, the vault, its one connection's broker hosts only, and the market-data host until the data service pushes quotes (DEC-2359)",
+      "row": "Account executor, one per broker account: Postgres, the vault, and its one connection's broker hosts only",
       "kind": "service",
       "image": "executor",
       "built": true,
@@ -153,12 +121,10 @@
       "started_by": "deploy-manager",
       "args": ["run", "--probe", "/tmp/process.sock"],
       "probe": ["/mandate-executord", "probe", "{probe}", "--probe", "/tmp/process.sock"],
-      "vault_token": true,
       "db_role": "mandate_executor",
       "guaranteed": true,
       "colocate": true,
-      "vault_ca": true,
-      "egress": ["postgres", "vault", "broker", "market-data"],
+      "egress": ["postgres", "vault", "broker"],
       "resources": {
         "limits": {"cpu": "250m", "memory": "256Mi"}
       }
@@ -168,14 +134,11 @@
       "row": "Token-exchange process (DEC-821 item 2): the vault and DEC-821's one token host, nothing else",
       "kind": "service",
       "image": "token-exchange",
-      "built": true,
-      "compose": false,
+      "built": false,
       "started_by": "deploy-manager",
       "one_shot": true,
       "vault_token": true,
-      "vault_ca": true,
       "command": ["/mandate-token-exchange"],
-      "args": ["run", "--vault-address", "{vault}", "--vault-dir", "/run/mandate/vault"],
       "db_role": null,
       "guaranteed": false,
       "colocate": false,
@@ -187,13 +150,10 @@
     },
     {
       "name": "scheduler",
-      "row": "Scheduler, one per workspace: the single writer of the hosted workspace's clock stream, whose ticks the runtime and executor the manager starts read (E21-29, DEC-1010); Postgres and time sources, asking none until values.egress.time names one, so every measurement is out of tolerance",
+      "row": "Scheduler, one per workspace: Postgres and time sources",
       "kind": "service",
       "image": "scheduler",
-      "built": true,
-      "compose": false,
-      "args": ["run", "--workspace", "{hosted_workspace}", "--probe", "/tmp/process.sock"],
-      "probe": ["/mandate-scheduler", "probe", "{probe}", "--probe", "/tmp/process.sock"],
+      "built": false,
       "db_role": "mandate_scheduler",
       "guaranteed": true,
       "colocate": false,

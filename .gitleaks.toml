@@ -159,14 +159,13 @@ regexes = [
   '''^auth: "BTBZMqHH6r4Tts7J_aSIgg"$''',
 ]
 
-# The cell tests' placeholder API image tag: `api:` and twelve fixed hex digits, an image
-# reference, not a credential. Allowed only as that exact tag, and only in the cell module and the
-# OAuth fixture's chart test, which plants it as a wrong image.
+# The cell test's placeholder API image tag: `api:` and twelve fixed hex digits, an image
+# reference, not a credential. Allowed only as that exact tag and only in the cell module.
 [[allowlists]]
-description = "Placeholder API image tag in the cell tests"
+description = "Placeholder API image tag in the cell test"
 targetRules = ["generic-api-key"]
 condition = "AND"
-paths = ['''^xtask/src/cell\.rs$''', '''^deploy/tests/test_oauth_fixture\.py$''']
+paths = ['''^xtask/src/cell\.rs$''']
 regexTarget = "match"
 regexes = ['''^api:0123456789ab"$''']
 
@@ -189,21 +188,12 @@ regexes = ['''^webauthn_challenge": "(?:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRW
 # credential bytes, not credentials. A passkey's credential id and public key are public by design
 # (identity spec §7.2). Allowed only as those exact values and only in the files that show a
 # passkey's enrolment, so another value there, or the same value anywhere else, is still reported.
-# A connect start's `step_up_assertion` examples and its decoder's tests carry the same kind of
-# made-up authenticator data (E9-4, DEC-2126; allowlisted as DEC-89 allows a fixture): synthetic
-# WebAuthn test bytes, composed by hand as SHA-256("localhost") as the RP ID hash, the flags 0x05
-# and a 4-byte counter, never taken from a credential. Each file is named by its exact path, in the
-# JSON form and the Rust struct-literal form.
 [[allowlists]]
 description = "Example passkey credentials and authenticator data"
 targetRules = ["generic-api-key"]
 condition = "AND"
 paths = [
   '''^schemas/workspace-api/examples/(?:commands\.passkey-enrol-request(?:\.valid|\.invalid)?|commands\.reduction-session-request(?:\.valid|\.invalid)?|envelope(?:\.valid|\.invalid)?)\.json$''',
-  '''^schemas/workspace-api/examples/commands\.oauth-start-request\.json$''',
-  '''^schemas/workspace-api/examples/commands\.oauth-start-request\.valid\.json$''',
-  '''^schemas/workspace-api/examples/commands\.oauth-start-request\.invalid\.json$''',
-  '''^crates/mandate-api/tests/step_up_assertion\.rs$''',
   '''^docs/specs/reference-cases/journal\.yaml$''',
   '''^fixtures/refcases/journal\.json$''',
   '''^reference/journal/credentials\.py$''',
@@ -212,7 +202,6 @@ regexTarget = "match"
 regexes = [
   '''^authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAABw"$''',
   '''^authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ(?:==)?"$''',
-  '''^authenticator_data"?: "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAACQ"$''',
   '''^credential: (?:AAECAwQFBgcICQoLDA0ODw|EBESExQVFhcYGRobHB0eHw)$''',
   '''^credential": "(?:AAECAwQFBgcICQoLDA0ODw|EBESExQVFhcYGRobHB0eHw)"$''',
   '''^(?:CREDENTIAL|OTHER_CREDENTIAL) = "(?:AAECAwQFBgcICQoLDA0ODw|EBESExQVFhcYGRobHB0eHw)"$''',

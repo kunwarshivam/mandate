@@ -5,10 +5,6 @@ every base passes `semantic()`, so such a probe crashes before any check runs, a
 the crash `ERROR`, which is neither a catch nor a survival. V-047 has two such bugs, an inverted
 policy and an ignored one: each fires V-047 on the bases. Do not add them, and do not read an
 `ERROR` as a catch (#528 round 2, minor 4).
-
-`--shard K/N`, counted from 0, runs the mutants whose index in the combined table is K modulo N,
-after the same unmutated baselines every shard checks itself, so N shards together run every
-mutant once and each stays within CI's ten-minute job bound (DEC-2638, DEC-464).
 """
 import pathlib, shutil, subprocess, sys, tempfile
 
@@ -491,19 +487,7 @@ def verdict(out, clean):
         return "ERROR"
     return "caught" if lines[-1] != clean else "missed"
 
-def shard_of(argv):
-    """`(K, N)` from `--shard K/N` in `argv`, counted from 0, or `(0, 1)` without one: every mutant."""
-    if not argv:
-        return 0, 1
-    if len(argv) != 2 or argv[0] != "--shard":
-        raise SystemExit("usage: mutants.py [--shard K/N]")
-    k, sep, n = argv[1].partition("/")
-    if not (sep and k.isdigit() and n.isdigit() and int(k) < int(n)):
-        raise SystemExit(f"--shard must be K/N with K < N, counted from 0; got {argv[1]!r}")
-    return int(k), int(n)
-
 def main():
-    k, n = shard_of(sys.argv[1:])
     bad = []
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -519,9 +503,7 @@ def main():
         assert verdict(run(work, UNASKED_PROBE), "0") == "missed", "the unasked-dollars fuzz fails on the unmutated model"
         assert verdict(run(work, CASE_PROBE), "same") == "missed", "the MC-W cases differ from the unmutated model's"
         assert verdict(run(work, B_CASE_PROBE), "same") == "missed", "the MC-B cases differ from the unmutated model's"
-        table = list((MUTANTS | TRIPWIRE_MUTANTS | TRIM_MUTANTS | UNASKED_MUTANTS).items())
-        mine = [entry for index, entry in enumerate(table) if index % n == k]
-        for name, (old, new) in mine:
+        for name, (old, new) in (MUTANTS | TRIPWIRE_MUTANTS | TRIM_MUTANTS | UNASKED_MUTANTS).items():
             shutil.rmtree(work, ignore_errors=True)
             shutil.copytree(HERE, work, ignore=shutil.ignore_patterns("__pycache__"))
             ref = work / "ref.py"
@@ -542,7 +524,7 @@ def main():
             print(f"{status:8} {name}", flush=True)
             if status != "caught":
                 bad.append(name)
-    print(f"{len(mine)} of {len(table)} mutants (shard {k}/{n}), {len(bad)} not caught", flush=True)
+    print(f"{len(MUTANTS) + len(TRIPWIRE_MUTANTS) + len(TRIM_MUTANTS) + len(UNASKED_MUTANTS)} mutants, {len(bad)} not caught", flush=True)
     sys.exit(1 if bad else 0)
 
 if __name__ == "__main__":

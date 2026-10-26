@@ -1,11 +1,10 @@
-//! The CLI's step-up confirmation journal spec v0.82 §9.29 closes at schema version 1 (DEC-2104,
-//! DEC-2125; E9-4 S2): `StepUpConfirmed`, on the workspace control stream, the record that the
-//! owner confirmed on the host one step-up challenge the workspace API issued for a paper grant or a
-//! paper OAuth connect's start made in the web app. Rule 242 refuses `schema` at its member: the
-//! kind is one of [`KINDS`], the envelope is `paper`, the writer is a `user` whose `id` is the
-//! record's `principal`, and `confirmed_at` is the envelope's `event_time` in whole seconds. Stream
-//! rule 243 (one confirmation per challenge) is the CLI's own and is not judged here; the API's
-//! verifier counts the confirmations itself.
+//! The CLI's step-up confirmation journal spec v0.62 §9.29 closes at schema version 1 (DEC-2104;
+//! E9-4 S2): `StepUpConfirmed`, on the workspace control stream, the record that the owner
+//! confirmed on the host one step-up challenge the workspace API issued for a paper grant made in
+//! the web app. Rule 242 refuses `schema` at its member: the one kind is `approve`, the envelope is
+//! `paper`, the writer is a `user` whose `id` is the record's `principal`, and `confirmed_at` is the
+//! envelope's `event_time` in whole seconds. Stream rule 243 (one confirmation per challenge) is the
+//! CLI's own and is not judged here; the API's verifier counts the confirmations itself.
 
 use mandate_canon::Value;
 use mandate_time::UtcNanos;
@@ -17,10 +16,6 @@ const CONFIRMED: &str = "StepUpConfirmed";
 
 /// The control-stream event types §9.29 adds to [`crate::control::governs`].
 pub(crate) const CONTROL: [&str; 1] = [CONFIRMED];
-
-/// The action kinds a confirmation may name (rule 242): a grant's `approve`, and a paper OAuth
-/// connect's `connection` (DEC-2125 item 2).
-const KINDS: [&str; 2] = ["approve", "connection"];
 
 /// How many characters a code has (DEC-2104 item 1).
 const CODE_LEN: usize = 8;
@@ -57,7 +52,7 @@ pub(crate) fn rules(
         return Ok(());
     }
     ensure(
-        KINDS.contains(&text(Some(payload), "action_kind")),
+        text(Some(payload), "action_kind") == "approve",
         "payload.action_kind",
     )?;
     ensure(

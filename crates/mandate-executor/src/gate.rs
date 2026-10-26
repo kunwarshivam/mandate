@@ -126,10 +126,9 @@ impl PartialGateDecision {
         }
     }
 
-    /// DEC-2037 item 5: an allowed exit with no limit of its own and nothing to price from is
-    /// **held** `exit_unpriced`, protection resting, and re-evaluated at every tick. One with a
-    /// limit of its own, a discretionary exit included, goes at it instead (DEC-2358, narrowing
-    /// DEC-160 (12)): an exit may be paced, never denied (rule 13).
+    /// DEC-160 (12): an allowed discretionary exit with nothing to price from is **held**
+    /// `exit_unpriced`, protection resting, and re-evaluated at every tick. A discretionary exit
+    /// may be paced, never denied (rule 13); no other exit is held for a price.
     pub(crate) fn unpriced(self) -> Self {
         self.held_for("exit_priceable", UNPRICED)
     }

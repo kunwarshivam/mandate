@@ -28,24 +28,6 @@ pub const REQUIRED_VAR: &str = "MANDATE_PG_REQUIRED";
 /// Serializes role creation across concurrent test processes (roles are cluster-wide).
 const ROLE_LOCK: i64 = 0x4535_3350_4752;
 
-/// Creates `role` unless it exists, and takes a concurrent creation as existing: a migration in
-/// another test makes the same roles without [`ROLE_LOCK`] (`migrate.rs`'s `CREATE_ROLES`), so a
-/// check-then-create can still meet `duplicate_object` or `unique_violation`, as that block does.
-fn create_role_once(role: &str) -> String {
-    format!(
-        "DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{role}') THEN
-        BEGIN
-            CREATE ROLE {role} NOLOGIN;
-        EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
-        END;
-    END IF;
-END
-$$"
-    )
-}
-
 static SCHEMAS: AtomicU64 = AtomicU64::new(0);
 
 /// A migrated schema of its own, with pools for each role, dropped when the value is. The schema is
@@ -106,10 +88,18 @@ impl TestDb {
                 .await
                 .unwrap();
             for role in [OWNER_ROLE, APP_ROLE] {
-                raw_sql(AssertSqlSafe(create_role_once(role)))
-                    .execute(&mut *tx)
-                    .await
-                    .unwrap();
+                let exists: bool =
+                    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)")
+                        .bind(role)
+                        .fetch_one(&mut *tx)
+                        .await
+                        .unwrap();
+                if !exists {
+                    raw_sql(AssertSqlSafe(format!("CREATE ROLE {role} NOLOGIN")))
+                        .execute(&mut *tx)
+                        .await
+                        .unwrap();
+                }
             }
             tx.commit().await.unwrap();
             raw_sql(AssertSqlSafe(format!(

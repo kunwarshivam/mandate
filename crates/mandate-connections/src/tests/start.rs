@@ -3,19 +3,11 @@
 use secrecy::{ExposeSecret, SecretString};
 
 use super::support::{VERIFIER, at, client};
-
-/// Alpaca's page with the fixture's client.
-fn authorizer() -> Authorizer {
-    Authorizer {
-        page: AuthorizePage::alpaca(),
-        client: client(),
-    }
-}
 use crate::ConnectError;
 use crate::record::ConnectionId;
 use crate::start::{
-    AUTHORIZE_URL, AuthorizePage, Authorizer, Binding, ClientId, Environment, OAuthClient,
-    PendingStates, PkceVerifier, RedirectUri, STATE_LIFETIME_SECS,
+    Binding, ClientId, Environment, OAuthClient, PendingStates, PkceVerifier, RedirectUri,
+    STATE_LIFETIME_SECS,
 };
 
 fn connection(id: &str) -> ConnectionId {
@@ -39,7 +31,7 @@ fn issued_at_1000() -> PendingStates {
     let mut states = PendingStates::default();
     states
         .begin(
-            &authorizer(),
+            &client(),
             binding("u1", Environment::Paper),
             "st-1",
             verifier(),
@@ -59,7 +51,7 @@ fn the_authorization_url_asks_for_paper_and_exactly_trading_and_data() {
     let mut states = PendingStates::default();
     let url = states
         .begin(
-            &authorizer(),
+            &client(),
             binding("u1", Environment::Paper),
             "st-1",
             verifier(),
@@ -90,7 +82,7 @@ fn the_authorization_url_asks_for_paper_and_exactly_trading_and_data() {
 fn a_live_connection_is_refused_and_issues_no_state() {
     let mut states = PendingStates::default();
     let started = states.begin(
-        &authorizer(),
+        &client(),
         binding("u1", Environment::Live),
         "st-1",
         verifier(),
@@ -177,7 +169,7 @@ fn begin_with(
     };
     let verifier = PkceVerifier(SecretString::from(verifier));
     states
-        .begin(&authorizer(), binding, state, verifier, "chal", at(secs))
+        .begin(&client(), binding, state, verifier, "chal", at(secs))
         .map(|_| ())
 }
 
@@ -261,12 +253,9 @@ fn reserved_characters_in_the_state_and_client_id_are_percent_encoded() {
     let mut states = PendingStates::default();
     let url = states
         .begin(
-            &Authorizer {
-                page: AuthorizePage::alpaca(),
-                client: OAuthClient {
-                    client_id: ClientId("id&x=y z+w".to_owned()),
-                    redirect_uri: RedirectUri::production(),
-                },
+            &OAuthClient {
+                client_id: ClientId("id&x=y z+w".to_owned()),
+                redirect_uri: RedirectUri::production(),
             },
             binding("u1", Environment::Paper),
             "a&b=c d+e",
@@ -370,10 +359,7 @@ fn the_authorization_url_carries_the_deployments_own_redirect_uri() {
     let mut states = PendingStates::default();
     let url = states
         .begin(
-            &Authorizer {
-                page: AuthorizePage::alpaca(),
-                client: staging,
-            },
+            &staging,
             binding("u1", Environment::Paper),
             "st-1",
             verifier(),
@@ -438,70 +424,4 @@ fn holding_a_state_neither_spends_it_nor_outlives_it() {
         !states.holds("st-a", at(1001)),
         "a redeemed state is not held"
     );
-}
-
-/// Alpaca's page is the constant, and the authorization URL is on the authorizer's page, its query
-/// after one `?` (DEC-2633 item 3).
-#[test]
-#[cfg(debug_assertions)]
-fn the_authorization_url_is_on_the_authorizer_s_page() {
-    assert_eq!(AuthorizePage::alpaca().as_str(), AUTHORIZE_URL);
-    let page = AuthorizePage::for_cell("http://oauth-fixture:8091/alpaca/oauth/authorize").unwrap();
-    let mut states = PendingStates::default();
-    let url = states
-        .begin(
-            &Authorizer {
-                page,
-                client: client(),
-            },
-            binding("u1", Environment::Paper),
-            "st-cell",
-            verifier(),
-            "chal",
-            at(1000),
-        )
-        .unwrap();
-    let (on, query) = url.0.split_once('?').unwrap();
-    assert_eq!(on, "http://oauth-fixture:8091/alpaca/oauth/authorize");
-    assert!(query.contains("state=st-cell"), "{query}");
-}
-
-/// A cell's page is a loopback host, or exactly the fixture pod over plain `http`, with a path and
-/// nothing else, and never an Alpaca host (DEC-2633 items 1 and 3), kept exactly as given.
-#[test]
-#[cfg(debug_assertions)]
-fn a_cell_page_is_loopback_or_exactly_the_fixture_pod() {
-    for admitted in [
-        "http://127.0.0.1:8091/alpaca/oauth/authorize",
-        "https://localhost/oauth/authorize",
-        "http://[::1]:9000/a",
-        "http://oauth-fixture:8091/alpaca/oauth/authorize",
-    ] {
-        assert_eq!(
-            AuthorizePage::for_cell(admitted).map(|page| page.as_str().to_owned()),
-            Some(admitted.to_owned()),
-            "{admitted}"
-        );
-    }
-    for refused in [
-        "",
-        "https://app.alpaca.markets/oauth/authorize",
-        "http://evil.example/oauth/authorize",
-        "https://oauth-fixture:8091/alpaca/oauth/authorize",
-        "http://oauth-fixture/alpaca/oauth/authorize",
-        "http://oauth-fixture:8092/alpaca/oauth/authorize",
-        "http://OAUTH-FIXTURE:8091/alpaca/oauth/authorize",
-        "http://oauth-fixture.:8091/alpaca/oauth/authorize",
-        "http://127.0.0.1:0/a",
-        "http://127.0.0.1:080/a",
-        "http://127.0.0.1:65536/a",
-        "http://127.0.0.1",
-        "http://127.0.0.1/",
-        "http://127.0.0.1/a?x=1",
-        "http://127.0.0.1/a#f",
-        "http://user@127.0.0.1/a",
-        "ftp://127.0.0.1/a",
-    ] {
-        assert_eq!(AuthorizePage::for_cell(refused), None, "{refused}");
-    }
 }

@@ -141,15 +141,12 @@ impl Draft {
                     pii_refs: fields.get("pii_refs"),
                     event_time: fields.get("event_time"),
                     environment: fields.get("environment"),
-                    event_id: fields.get("event_id"),
                 },
             )?
         } else {
             let schema = payload_schema(event_type, int("schema_version"))
                 .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
-            let payload = normalize(schema, written, "payload")?;
-            crate::schema::rules(event_type, int("schema_version"), &payload)?;
-            payload
+            normalize(schema, written, "payload")?
         };
 
         let mut referenced = BTreeSet::new();

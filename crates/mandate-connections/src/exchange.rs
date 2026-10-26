@@ -4,34 +4,17 @@
 //! executor's egress contains no live host (DEC-821 item 4).
 
 use std::fmt;
-use std::time::Duration;
 
-use mandate_time::UtcNanos;
 use secrecy::SecretString;
 
 use crate::ConnectError;
 use crate::grant::{GrantedScopes, check_scope};
 use crate::hosts::LiveTokenRequest;
 use crate::start::{ClientId, Environment, OAuthClient, PkceVerifier};
-use crate::vault::{AccessToken, AuthorizationCode, Vault, VaultKey, WaitingCode};
+use crate::vault::{AccessToken, AuthorizationCode, Vault, VaultKey};
 
 /// The only token type accepted, matched exactly (connections spec §5.2 step 4).
 const BEARER: &str = "bearer";
-
-/// The first pause of the wait for a code (DEC-2363 item 3); each next one doubles.
-pub const FIRST_PAUSE: Duration = Duration::from_secs(1);
-
-/// The longest pause of the wait for a code (DEC-2363 item 3).
-pub const MAX_PAUSE: Duration = Duration::from_secs(15);
-
-/// The clock and the sleep the wait for a code runs on, at the process's edge: the core reads no
-/// clock of its own (DEC-2363 item 3).
-pub trait CodeWait {
-    /// The instant now.
-    fn now(&mut self) -> UtcNanos;
-    /// Sleeps for `pause`.
-    fn pause(&mut self, pause: Duration);
-}
 
 /// The platform's OAuth client secret (infrastructure §5.1).
 pub struct ClientSecret(pub SecretString);
@@ -113,22 +96,8 @@ pub fn exchange_code(
     if pending.environment != Environment::Paper {
         return Err(ConnectError::EnvironmentRefused);
     }
-    let waiting = vault
-        .take_code(&pending.vault_key)?
-        .ok_or(ConnectError::CodeMissing)?;
-    exchange_taken(pending, client, client_secret, vault, endpoint, waiting)
-}
-
-/// Steps 3 to 5 of [`exchange_code`], for the code `waiting` already taken.
-fn exchange_taken(
-    pending: &PendingConnect,
-    client: &OAuthClient,
-    client_secret: &ClientSecret,
-    vault: &mut impl Vault,
-    endpoint: &mut impl TokenEndpoint,
-    waiting: WaitingCode,
-) -> Result<ExchangedGrant, ConnectError> {
     let key = &pending.vault_key;
+    let waiting = vault.take_code(key)?.ok_or(ConnectError::CodeMissing)?;
     let form = ExchangeForm {
         code: &waiting.code,
         code_verifier: &waiting.verifier,
@@ -148,52 +117,6 @@ fn exchange_taken(
         scopes,
         vault_key: key.clone(),
     })
-}
-
-/// [`exchange_code`] once the code waits (DEC-2363 item 3): before each take, `code_missing` once
-/// `wait`'s clock reaches `deadline`, having taken and sent nothing more; a code found is exchanged
-/// as [`exchange_code`] exchanges it; none found, a pause of [`FIRST_PAUSE`], doubling up to
-/// [`MAX_PAUSE`] and never past `deadline`, then another take.
-///
-/// # Errors
-/// [`ConnectError::CodeMissing`] at the deadline; otherwise as [`exchange_code`].
-pub fn exchange_waiting_code(
-    pending: &PendingConnect,
-    client: &OAuthClient,
-    client_secret: &ClientSecret,
-    vault: &mut impl Vault,
-    endpoint: &mut impl TokenEndpoint,
-    wait: &mut impl CodeWait,
-    deadline: UtcNanos,
-) -> Result<ExchangedGrant, ConnectError> {
-    if pending.environment != Environment::Paper {
-        return Err(ConnectError::EnvironmentRefused);
-    }
-    let mut pause = FIRST_PAUSE;
-    loop {
-        let now = wait.now();
-        let Some(left) = left_until(now, deadline) else {
-            return Err(ConnectError::CodeMissing);
-        };
-        if let Some(waiting) = vault.take_code(&pending.vault_key)? {
-            return exchange_taken(pending, client, client_secret, vault, endpoint, waiting);
-        }
-        wait.pause(pause.min(left));
-        pause = pause.saturating_mul(2).min(MAX_PAUSE);
-    }
-}
-
-/// The time from `now` to `deadline`, or `None` once `now` has reached it.
-fn left_until(now: UtcNanos, deadline: UtcNanos) -> Option<Duration> {
-    if now >= deadline {
-        return None;
-    }
-    let secs = deadline.secs().checked_sub(now.secs())?;
-    let whole = Duration::from_secs(u64::try_from(secs).ok()?);
-    let nanos = Duration::from_nanos(u64::from(deadline.nanos()));
-    whole
-        .checked_add(nanos)?
-        .checked_sub(Duration::from_nanos(u64::from(now.nanos())))
 }
 
 /// Accepts a bearer token whose scope is exactly the request; any other response is refused

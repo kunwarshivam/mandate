@@ -306,40 +306,6 @@ fn a_row_the_fold_does_not_read_advances_its_head() {
     assert_eq!(readable_head(fold.view()), 3);
 }
 
-/// A close request of the account kill switch (journal spec v0.75 §9.5, DEC-2337) is a record the
-/// risk fold reads and acts on nowhere: the view stays readable with its snapshot unchanged, only
-/// its head advances, and nothing is appended.
-#[test]
-fn a_close_request_leaves_the_risk_view_readable_and_unchanged() {
-    let mandate = mandate();
-    let mut fold = open(&mandate, &Wall);
-    let RiskView::Readable {
-        snapshot: before, ..
-    } = fold.view().clone()
-    else {
-        panic!("the opened view is readable");
-    };
-    let close = row(
-        2,
-        "AccountCloseRequested",
-        1,
-        r#"{"instrument_id":"AAPL","qty":"10","kill_switch_event":"01J8Z4C0000000000000000000",
-        "attempt":1,"risk_clock":"2026-09-22T14:30:01.000000000Z"}"#,
-    );
-
-    assert_eq!(fold.fold(&close).unwrap(), Vec::<RiskAppend>::new());
-    match fold.view() {
-        RiskView::Readable { snapshot, head } => {
-            assert_eq!(
-                (snapshot, *head),
-                (&before, 2),
-                "unchanged, at the close's seq"
-            );
-        }
-        other => panic!("the view stays readable: {other:?}"),
-    }
-}
-
 #[test]
 fn a_seq_gap_makes_the_view_unreadable() {
     let mandate = mandate();
@@ -708,8 +674,9 @@ fn accepted(base: &Json, append: &RiskAppend) -> bool {
 /// the fold never runs (DEC-2307 item 3), and every member the step states but `AgentModeApplied`'s
 /// `from`, which §9.6's closed payload does not carry. Each record follows from its row at the row's
 /// clock for this agent and is one the journal accepts; a trigger or a lift carries the step's
-/// snapshot, `AgentModeApplied` is the executor's own and names the action of the step's last trigger
-/// before it as its restriction (DEC-2308 item 3), and an instrument restriction names the
+/// snapshot, `AgentModeApplied` is the executor's own and names as its restriction the action of the
+/// step's last trigger before it (DEC-2308 item 3), or with none, the last lift's action or limit,
+/// or `goal_completed` (DEC-2331), and an instrument restriction names the
 /// instrument the marks named (DEC-2307 item 4, DEC-2308 item 2).
 fn check_records(appends: &[RiskAppend], row: &StoredEvent, instrument: &str, step: &Json) {
     let (seq, base) = (row.seq, base_draft());
@@ -723,11 +690,14 @@ fn check_records(appends: &[RiskAppend], row: &StoredEvent, instrument: &str, st
         .map(|e| e["type"].as_str().unwrap())
         .collect();
     assert_eq!(types, wanted, "seq {seq}: the records, in order");
-    let mut action = None;
+    let (mut action, mut cause) = (None, None);
     for (append, entry) in appends.iter().zip(journal) {
         let mode = append.event_type == "AgentModeApplied";
-        if entry["type"] == "RiskLimitTriggered" {
-            action = entry["action"].as_str();
+        match entry["type"].as_str() {
+            Some("RiskLimitTriggered") => action = entry["action"].as_str(),
+            Some("RiskLimitLifted") => cause = entry["action"].as_str().or(entry["limit"].as_str()),
+            Some("GoalCompleted") => cause = Some("goal_completed"),
+            _ => {}
         }
         if !mode && !CLOSED_RECORDS.contains(&append.event_type) {
             continue;
@@ -747,7 +717,12 @@ fn check_records(appends: &[RiskAppend], row: &StoredEvent, instrument: &str, st
             "InstrumentRestrictionChanged" => assert_eq!(text("instrument"), Some(instrument)),
             "AgentModeApplied" => {
                 assert_eq!(append.payload.get("originated"), Some(&Value::Bool(true)));
-                assert_eq!(text("restriction"), action, "seq {seq}: the rung's action");
+                let wanted = action.or(cause);
+                assert_eq!(
+                    text("restriction"),
+                    wanted,
+                    "seq {seq}: DEC-2308 item 3, DEC-2331"
+                );
             }
             _ => {}
         }
@@ -1257,4 +1232,159 @@ fn an_opening_on_an_instrument_that_is_not_a_canonical_asset_id_is_refused() {
         "a flat opening names no symbol either"
     );
     assert_eq!(flat(XYZ), None, "a flat opening on a canonical id");
+}
+
+/// Each `RiskLimitTriggered` of a walk as `limit=breach_time_s`, in the order it was appended.
+fn breach_times(records: &[Vec<RiskAppend>]) -> Vec<String> {
+    let triggers = records.iter().flatten();
+    let triggers = triggers.filter(|append| append.event_type == "RiskLimitTriggered");
+    triggers
+        .map(|append| {
+            let limit = append.payload.get("limit").and_then(Value::as_str).unwrap();
+            let breach = append.payload.get("breach_time_s").map(to_canonical);
+            format!("{limit}={}", String::from_utf8(breach.unwrap()).unwrap())
+        })
+        .collect()
+}
+
+/// MC-R04 (`breach_confirm_s` 60, `at` 0.06 on rung 1): DD is 0.0714 at 14:02:00, so rung 1's breach
+/// time runs from there. At 14:02:05 DD reaches 1.25 × 0.06 on a sane quote, `hard_breach_pending`
+/// with the 5 s accumulated, and at 14:02:15 the hard level holds 10 s later, `hard_trigger` with
+/// 15 s (§5.6, §9.27). The scale rung has no confirmation: 0 s.
+#[test]
+fn mc_r04s_hard_triggers_carry_the_breach_time_they_accumulated() {
+    let case = case("MC-R04");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let mut fold = open_case(&case, &mandate, &calendar);
+    let records = walk(&mut fold, XYZ, case["steps"].as_array().unwrap());
+    let wanted = [
+        "drawdown_ladder[0]=0",
+        "drawdown_ladder[1]=5",
+        "drawdown_ladder[1]=15",
+    ];
+    assert_eq!(breach_times(&records), wanted);
+}
+
+/// MC-R06 (`breach_confirm_s` 60, crypto): the daily loss breaches at 03:59:30, 30 s before the
+/// rollover, and keeps confirming against the previous day's E₀ (§5.4). Its next input is the mark
+/// at 04:30:00, so it latches `resolved_at_rollover` with 30 + 1800 = 1830 s.
+#[test]
+fn mc_r06s_rollover_trigger_carries_the_breach_time_across_midnight() {
+    let case = case("MC-R06");
+    let mandate = case_mandate(&case);
+    let mut fold = open_case(&case, &mandate, &Crypto);
+    let steps = case["steps"].as_array().unwrap();
+    check_snapshot(fold.view(), 1, &steps[0]["expect"]);
+    let records = walk(&mut fold, BTC, &steps[1..]);
+    assert_eq!(breach_times(&records), ["max_daily_loss=1830"]);
+}
+
+/// MC-R07 and MC-R08 set `breach_confirm_s` to 0, so each limit triggers at the first breaching
+/// input with no time in breach before it: the daily loss at 03:50, and MC-R08's new-day breach at
+/// 04:20, whose interval from the 04:00 rollover starts with E = E₀. MC-R07's last step, a lift
+/// whose `AgentModeApplied` follows no trigger, is B2b-2b's.
+#[test]
+fn zero_confirmation_triggers_carry_no_breach_time() {
+    let mut walked = Vec::new();
+    for (id, last) in [("MC-R07", 3), ("MC-R08", 4)] {
+        let case = case(id);
+        let mandate = case_mandate(&case);
+        let mut fold = open_case(&case, &mandate, &Crypto);
+        let steps = case["steps"].as_array().unwrap();
+        walked.push(breach_times(&walk(&mut fold, BTC, &steps[1..=last])));
+    }
+    assert_eq!(walked[0], ["max_daily_loss=0"]);
+    let wanted = [
+        "max_daily_loss=0",
+        "drawdown_ladder[0]=0",
+        "max_daily_loss=0",
+    ];
+    assert_eq!(walked[1], wanted);
+}
+
+/// DEC-2314: a flat opening binds to the first instrument a mark names only when it is a canonical
+/// asset ID, so a first mark on the symbol, or on the asset ID in uppercase, is refused to decide:
+/// openings wait, and exits, protective orders, and the kill switch go on.
+#[test]
+#[ignore = "pending E6-15"]
+fn a_flat_openings_first_mark_on_an_id_that_is_not_canonical_makes_the_view_unreadable() {
+    let mandate = mandate();
+    for written in ["XYZ".to_owned(), XYZ.to_uppercase()] {
+        let mut fold = open(&mandate, &Wall);
+        let first = mark(
+            2,
+            &written,
+            "2026-09-22T14:30:01.000000000Z",
+            "100",
+            true,
+            "regular",
+        );
+        assert_eq!(fold.fold(&first).unwrap(), vec![], "{written}");
+        let cause = (UnreadableCause::RefusedToDecide, 1);
+        assert_eq!(unreadable(fold.view()), cause, "{written}");
+    }
+}
+
+/// MC-R22: a `profit_stop` confirms by time in breach on marks alone and journals `GoalCompleted`
+/// in its second form, `reason` and `then` with no `on_complete` (§9.27 rule 238), then
+/// `AgentModeApplied` to `exits_only`. That mode change follows no trigger, so its restriction is
+/// `goal_completed` (DEC-2331 item 1(b)).
+#[test]
+#[ignore = "pending E6-15"]
+fn mc_r22_profit_stop_completes_the_goal_on_marks() {
+    let case = case("MC-R22");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let mut fold = open_case(&case, &mandate, &calendar);
+    let steps = case["steps"].as_array().unwrap();
+    walk(&mut fold, XYZ, &steps[..3]);
+    let text = |key: &str| steps[3][key].as_str().unwrap();
+    let last = mark(5, XYZ, text("at"), text("bid"), true, "regular");
+    let appends = fold.fold(&last).unwrap();
+    let types: Vec<&str> = appends.iter().map(|append| append.event_type).collect();
+    assert_eq!(types, ["GoalCompleted", "AgentModeApplied"]);
+    let payload = format!(
+        r#"{{"agent_id":"{AGENT}","reason":"profit_stop_reached",
+        "then":"discretionary_exit_all_then_retire","on_complete":null,"risk_clock":"{}"}}"#,
+        text("at")
+    );
+    assert_eq!(appends[0].payload, parse(payload.as_bytes()).unwrap());
+    let base = base_draft();
+    for append in &appends {
+        assert_eq!(append.causation_id.as_deref(), Some(last.event_id.as_str()));
+        assert!(accepted(&base, append), "{append:?}");
+    }
+    let mode = |member: &str| appends[1].payload.get(member).cloned();
+    assert_eq!(mode("to"), Some(Value::Str("exits_only".to_owned())));
+    assert_eq!(mode("originated"), Some(Value::Bool(true)));
+    assert_eq!(
+        mode("restriction"),
+        Some(Value::Str("goal_completed".to_owned()))
+    );
+    check_snapshot(fold.view(), 5, &steps[3]["expect"]);
+}
+
+/// DEC-2331 item 1(a): a mode change with no trigger before it in its step names the step's last
+/// lift: its ladder action, or its limit's journal name when the lift carries none. MC-R07's last
+/// mark lifts `max_daily_loss`, which carries no action, back to `normal`; MC-R19's last mark clears
+/// the flash print's hard breach, and its last lift, `drawdown_ladder[2]` with `hard_breach_cleared`,
+/// carries none either.
+#[test]
+#[ignore = "pending E6-15"]
+fn a_mode_change_after_a_lift_names_the_lifted_limit() {
+    let mut named = Vec::new();
+    for (id, crypto) in [("MC-R07", true), ("MC-R19", false)] {
+        let case = case(id);
+        let (mandate, calendar) = (case_mandate(&case), nyse());
+        let clock: &dyn RiskCalendar = if crypto { &Crypto } else { &calendar };
+        let mut fold = open_case(&case, &mandate, clock);
+        let steps = case["steps"].as_array().unwrap();
+        let steps = if crypto { &steps[1..] } else { &steps[..] };
+        let records = walk(&mut fold, instrument(&case), steps);
+        let last = records.last().unwrap().last().unwrap();
+        assert_eq!(last.event_type, "AgentModeApplied", "{id}");
+        let restriction = last.payload.get("restriction").and_then(Value::as_str);
+        named.push(restriction.map(str::to_owned));
+    }
+    let wanted = ["max_daily_loss", "drawdown_ladder[2]"].map(|name| Some(name.to_owned()));
+    assert_eq!(named, wanted);
 }

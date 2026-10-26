@@ -53,22 +53,6 @@ pub struct StepUpEvidence {
     pub method: StepUpMethod,
 }
 
-/// What a passkey's authenticator returned for the challenge a request's `step_up` names, sent
-/// beside it ([DEC-2108] item 7, `envelope.schema.json#/$defs/StepUpAssertion`): the passkey's id
-/// and the authenticator's three byte strings, each unpadded base64url. The server judges it and
-/// stores its canonical bytes as the raw-assertion artifact (journal spec §9.32); it is never part
-/// of the journaled evidence.
-///
-/// [DEC-2108]: ../../../docs/project/decisions/DEC-2108.md
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(remote = "Self", deny_unknown_fields)]
-pub struct StepUpAssertion {
-    pub passkey_id: String,
-    pub authenticator_data: String,
-    pub client_data_json: String,
-    pub signature: String,
-}
-
 /// How the user verified (identity spec §7.3): `live` takes `passkey` only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -128,47 +112,7 @@ impl Rules for Watermark {
     }
 }
 
-impl Rules for StepUpAssertion {
-    fn rules(&self, at: &str, check: &mut Check) {
-        check.rule(
-            is_passkey_id(&self.passkey_id),
-            &format!("{at}/passkey_id"),
-            "pattern",
-        );
-        for (name, text) in [
-            ("authenticator_data", &self.authenticator_data),
-            ("client_data_json", &self.client_data_json),
-            ("signature", &self.signature),
-        ] {
-            check.rule(is_base64url(text), &format!("{at}/{name}"), "pattern");
-        }
-    }
-}
-
-/// `common.schema.json#/$defs/PasskeyId`: unpadded base64url of 16 to 1023 bytes, so 22 to 1364
-/// characters and never a length whose remainder by 4 is 1.
-fn is_passkey_id(text: &str) -> bool {
-    (22..=1364).contains(&text.len()) && text.len() % 4 != 1 && is_base64url_alphabet(text)
-}
-
-/// `common.schema.json#/$defs/Base64url`: 1 to 8192 characters of the base64url alphabet.
-fn is_base64url(text: &str) -> bool {
-    (1..=8192).contains(&text.len()) && is_base64url_alphabet(text)
-}
-
-fn is_base64url_alphabet(text: &str) -> bool {
-    text.bytes()
-        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-}
-
-crate::wire::rules!(checked: Watermark, StepUpAssertion);
+crate::wire::rules!(checked: Watermark);
 crate::wire::rules!(none: ApiVersion, Actor, Record, StepUpEvidence, StepUpStatus, StepUpAction);
 
-crate::wire::object_only!(
-    Watermark,
-    Actor,
-    Record,
-    StepUpEvidence,
-    StepUpAssertion,
-    StepUpAction
-);
+crate::wire::object_only!(Watermark, Actor, Record, StepUpEvidence, StepUpAction);

@@ -31,12 +31,6 @@ impl<T: TradingTransport + Clone> AlpacaBroker<T> {
         Ok(Self { transport, runtime })
     }
 
-    /// A copy of the transport, with its credential, for a reader beside the broker: the quote
-    /// feed's (DEC-2359 item 2).
-    pub fn transport(&self) -> T {
-        self.transport.clone()
-    }
-
     fn client(&self) -> TradingClient<T, TokioPause> {
         TradingClient::new(self.transport.clone(), TokioPause, RetryPolicy::default())
     }

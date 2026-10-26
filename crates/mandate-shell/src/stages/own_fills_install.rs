@@ -16,7 +16,7 @@ use mandate_executor::{
 use mandate_num::{Price, Qty, Usd};
 use mandate_time::Date;
 
-use super::doubles::{World, account_stream, instrument, seed, setup};
+use super::doubles::{World, account_stream, instrument, setup};
 use super::{Connector, Executor, Stage};
 use crate::error::{Cause, ShellError};
 use crate::tracer::{Booked, ProductionCycle};
@@ -427,115 +427,5 @@ fn a_draft_that_is_not_a_record_stops_the_pass() -> Result<(), String> {
         "{:?}",
         pass.log
     );
-    Ok(())
-}
-
-/// One folded event as its stream, `seq`, id and type.
-type Folded = (String, u64, String, String);
-
-/// An executor that keeps every event it is folded, owes nothing, and refuses its fold when
-/// `refuse` is set.
-struct Folding {
-    folded: Rc<RefCell<Vec<Folded>>>,
-    refuse: bool,
-}
-
-impl Executor for Folding {
-    fn reset(&mut self) -> Result<(), Cause> {
-        Ok(())
-    }
-
-    fn use_profile(&mut self, profile: CapabilityProfile) -> Result<(), Cause> {
-        let _ = profile;
-        Ok(())
-    }
-
-    fn step(&mut self, input: mandate_executor::Input) -> Result<Vec<Effect>, Cause> {
-        let _ = input;
-        Ok(Vec::new())
-    }
-
-    fn protected(&mut self, instrument: &mandate_accounting::InstrumentId) -> Result<bool, Cause> {
-        let _ = instrument;
-        Ok(true)
-    }
-
-    fn committed(&mut self, event: &FoldedEvent) -> Result<(), Cause> {
-        if self.refuse {
-            return Err(Cause::Absent {
-                what: "a fold of the account stream",
-            });
-        }
-        self.folded.borrow_mut().push((
-            event.stream.clone(),
-            event.seq.0,
-            event.event_id.0.clone(),
-            event.event_type.clone(),
-        ));
-        Ok(())
-    }
-
-    fn owed(&self) -> Result<(Vec<ClientOrderId>, ActivityCursor), Cause> {
-        Ok((Vec::new(), ActivityCursor(String::new())))
-    }
-}
-
-/// Every committed row of the account stream is folded into the executor before it is asked what
-/// it owes, in `seq` order, each with its own stream, id and type, so an order the stream owns is
-/// never missed; and an executor that refuses a row stops the pass at Executor, with nothing read
-/// or written.
-#[test]
-fn every_committed_row_is_folded_in_seq_order_before_anything_is_owed() -> Result<(), String> {
-    for refuse in [false, true] {
-        let world = World::default();
-        let stream = account_stream();
-        for (seq, id, kind) in [
-            (1, "00000100000000000000000011", "StreamOpened"),
-            (2, "00000100000000000000000012", "OrderSubmitted"),
-        ] {
-            seed(&world, &stream, seq, id, kind, "executor", "{}")?;
-        }
-        let mut stages = world.stages();
-        let folded = Rc::default();
-        stages.executor = Box::new(Folding {
-            folded: Rc::clone(&folded),
-            refuse,
-        });
-        let log = Rc::default();
-        stages.connector = Box::new(Reads {
-            lookup: Lookup::Filled,
-            pages: 0,
-            log: Rc::clone(&log),
-        });
-        let outcome = ProductionCycle::new(stages, setup()?).book_own_fills();
-        assert!(log.borrow().is_empty(), "{:?}", log.borrow());
-        assert_eq!(world.ledger.borrow().len(&stream), 2);
-        if refuse {
-            assert_eq!(
-                stop(&outcome),
-                Some((Stage::Executor, "a fold of the account stream".to_owned()))
-            );
-            assert!(folded.borrow().is_empty());
-            continue;
-        }
-        assert!(matches!(outcome, Ok(Booked { fills: 0 })), "{outcome:?}");
-        assert_eq!(
-            *folded.borrow(),
-            [
-                (
-                    stream.clone(),
-                    1,
-                    "00000100000000000000000011".to_owned(),
-                    "StreamOpened".to_owned()
-                ),
-                (
-                    stream.clone(),
-                    2,
-                    "00000100000000000000000012".to_owned(),
-                    "OrderSubmitted".to_owned()
-                ),
-            ]
-        );
-    }
     Ok(())
 }

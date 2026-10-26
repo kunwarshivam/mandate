@@ -11,8 +11,7 @@
 use std::ffi::{OsStr, OsString};
 
 use mandate_connections::record::ConnectionId;
-use mandate_connections::start::{ClientId, OAuthClient, RedirectUri, STATE_LIFETIME_SECS};
-use mandate_time::UtcNanos;
+use mandate_connections::start::{ClientId, OAuthClient, RedirectUri};
 
 #[cfg(debug_assertions)]
 use crate::cell::{self, CellTokenUrl};
@@ -27,10 +26,7 @@ pub const PROCESS: &str = "MANDATE_PROCESS";
 pub const TOKEN_EXCHANGE: &str = "token_exchange";
 
 /// The ServiceAccount the pod runs as: `x` and the lowercase hex of the subject's bytes, which the
-/// deployment manager's admission policy pins (DEC-2060, DEC-1177). The value is self-reported:
-/// checking it only catches a misconfigured pod early. What binds the process to its connection
-/// is the vault's Kubernetes-auth login, which admits only that ServiceAccount, together with the
-/// admission policy that pins the ServiceAccount to the subject (DEC-2330 item 4).
+/// deployment manager's admission policy pins (DEC-2060, DEC-1177).
 pub const SUBJECT_ACCOUNT: &str = "MANDATE_SUBJECT_ACCOUNT";
 
 /// The platform's OAuth client id, public (DEC-2636 item 3).
@@ -47,10 +43,6 @@ pub const TIER: &str = "MANDATE_DEPLOYMENT_TIER";
 
 /// A dev or CI cell's token URL (DEC-2629 item 3, DEC-2633 item 1).
 pub const TOKEN_URL: &str = "MANDATE_TOKEN_URL";
-
-/// The request's deadline, which the deployment manager renders from the `ConnectionRequested`
-/// row's `recorded_at` and the pending state's lifetime, the pod's own deadline (DEC-2363 item 1).
-pub const REQUEST_EXPIRES_AT: &str = "MANDATE_REQUEST_EXPIRES_AT";
 
 /// Where the one token request goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,12 +80,6 @@ pub enum StartRefused {
     ClientId,
     /// `MANDATE_ALPACA_REDIRECT_URI` is unset or not a redirect URI `RedirectUri::parse` admits.
     RedirectUri,
-    /// `MANDATE_REQUEST_EXPIRES_AT` is unset (DEC-2363 item 2).
-    RequestDeadlineMissing,
-    /// `MANDATE_REQUEST_EXPIRES_AT` is not the journal's timestamp form (DEC-2363 item 2).
-    RequestDeadlineMalformed,
-    /// `MANDATE_REQUEST_EXPIRES_AT` is at or before the pod's clock (DEC-2363 item 2).
-    RequestExpired,
 }
 
 impl StartRefused {
@@ -108,9 +94,6 @@ impl StartRefused {
             Self::SubjectAccount => "token_exchange_subject_account",
             Self::ClientId => "token_exchange_client_id",
             Self::RedirectUri => "token_exchange_redirect_uri",
-            Self::RequestDeadlineMissing => "request_deadline_missing",
-            Self::RequestDeadlineMalformed => "request_deadline_malformed",
-            Self::RequestExpired => "request_expired",
         }
     }
 }
@@ -149,32 +132,6 @@ pub fn settings(var: impl Fn(&str) -> Option<OsString>) -> Result<Settings, Star
             redirect_uri,
         },
     })
-}
-
-/// The instant the wait for the code ends (DEC-2363 items 2 and 3): `value`, the request's
-/// deadline, read as the journal's timestamp form exactly, when it is after `now`, the pod's
-/// start; but never later than `now` plus `STATE_LIFETIME_SECS`, so a deadline far ahead still ends
-/// within one lifetime.
-///
-/// # Errors
-/// [`StartRefused::RequestDeadlineMissing`], [`StartRefused::RequestDeadlineMalformed`] (a value
-/// that is not UTF-8 included), or [`StartRefused::RequestExpired`] for a deadline at or before
-/// `now`.
-pub fn request_deadline(value: Option<&OsStr>, now: UtcNanos) -> Result<UtcNanos, StartRefused> {
-    let text = value.ok_or(StartRefused::RequestDeadlineMissing)?;
-    let deadline = text
-        .to_str()
-        .and_then(|text| UtcNanos::parse(text).ok())
-        .ok_or(StartRefused::RequestDeadlineMalformed)?;
-    if deadline <= now {
-        return Err(StartRefused::RequestExpired);
-    }
-    let one_lifetime = now
-        .secs()
-        .checked_add(STATE_LIFETIME_SECS)
-        .and_then(|secs| UtcNanos::from_parts(secs, now.nanos()).ok())
-        .unwrap_or(deadline);
-    Ok(deadline.min(one_lifetime))
 }
 
 /// The ServiceAccount name of `connection`'s pod: `x` and its bytes in lowercase hex (DEC-2060).

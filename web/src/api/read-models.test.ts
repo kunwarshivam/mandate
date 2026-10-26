@@ -142,8 +142,8 @@ describe("the workspace from the API's read models (DEC-1096)", () => {
     }
   });
 
-  it("reports health as not reported, and connections as not reported when the API answers 404", async () => {
-    const loaded = await loadApi(served("approvals", (route) => (route === "/connections" ? 404 : null)).client);
+  it("reads health and connections when served, and reports them as not reported when the API answers 404", async () => {
+    const loaded = await loadApi(served("approvals", (route) => (route === "/health" || route === "/connections" ? 404 : null)).client);
     expect(loaded.ok).toBe(true);
     if (!loaded.ok) return;
     expect(loaded.ws.connection.connection_id).toBe("");
@@ -175,17 +175,6 @@ describe("the workspace from the API's read models (DEC-1096)", () => {
     const connected = await loadApi(served("approvals", (route) => (route === "/health" ? 404 : null), live).client);
     expect(connected.ok).toBe(true);
     if (connected.ok) expect(connected.ws.environment, "the connection's environment wins over agents that disagree").toBe("paper");
-  });
-
-  it("never reads the unrouted /health, so the API's 401 for it cannot hide the agents or their details", async () => {
-    const { client, routes } = served("approvals", (route) => (route === "/health" ? 401 : null));
-    const loaded = await loadApi(client);
-    expect(loaded.ok ? null : loaded.error).toBeNull();
-    expect(routes).not.toContain("GET /health");
-    if (!loaded.ok) return;
-    expect(loaded.view.agents.length).toBeGreaterThan(0);
-    for (const agent of loaded.view.agents) expect(routes).toContain(`GET /agents/${agent.agent_id}`);
-    for (const name of ["market_data", "broker", "deployment", "relay"] as const) expect(loaded.ws.health[name]).toEqual({ state: "stale", as_of: null });
   });
 
   it("reads only the documented GET routes, both halves of the inbox, and each id's detail once", async () => {

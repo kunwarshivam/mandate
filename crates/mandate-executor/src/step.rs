@@ -4,10 +4,7 @@ use crate::batch::Batch;
 use crate::error::ExecutorError;
 use crate::ids::{FLATTEN, WATCHDOG};
 use crate::intent::{received, release_held, resume};
-use crate::kill::{
-    cancel_all_answered, closes_due, kill_switch, note_answer, note_read, open_orders_read,
-    reread_due,
-};
+use crate::kill::kill_switch;
 use crate::listing::{listed, query_unknown};
 use crate::orders::{
     absent, account, cancelled, described, duplicate, fill, kill_cancels_due, lookups_due, reject,
@@ -57,7 +54,6 @@ pub fn handle(
     ports: &Ports<'_>,
     binding_gate: &dyn BindingGateSource,
 ) -> Result<Vec<Effect>, ExecutorError> {
-    note_answer(state, &input);
     if let Input::Started(epoch) = input {
         return started(state, epoch, ports, binding_gate);
     }
@@ -97,12 +93,10 @@ pub fn handle(
             .quotes
             .insert(observation.instrument.clone(), observation.clone());
     }
-    note_read(state, &input);
     let head = state.account_head();
     let mut batch = Batch::new(state, ports)?;
     batch.bind(binding_gate);
     step(&mut batch, input.clone())?;
-    closes_due(&mut batch)?;
     settle(&mut batch)?;
     let effects = batch.effects;
     let drafts: Vec<_> = effects
@@ -200,7 +194,6 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
             release_held(batch)?;
             overdue_openings(batch)?;
             bound(batch)?;
-            reread_due(batch);
             ladder_steps(batch)?;
             watchdog(batch)
         }
@@ -214,10 +207,7 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
             })
         }
         Input::Intent(handoff) => received(batch, handoff),
-        Input::Broker(Err(_)) => {
-            cancel_all_answered(batch);
-            silence(batch)
-        }
+        Input::Broker(Err(_)) => silence(batch),
         Input::Broker(Ok(outcome)) => outcome_of(batch, outcome),
         Input::BrokerUpdate(BrokerUpdate::Order(order)) => described(batch, &order),
         Input::BrokerUpdate(BrokerUpdate::Fill(one)) => fill(batch, &one, None).map(|_| ()),
@@ -225,7 +215,6 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
         Input::BrokerUpdate(BrokerUpdate::Reject(refused)) => reject(batch, &refused),
         Input::BrokerSnapshot(snapshot) => {
             run(batch, &snapshot)?;
-            open_orders_read(batch, &snapshot.open_orders, snapshot.taken_at_head)?;
             if snapshot.reason == ReconcileReason::Startup {
                 resume(batch, false)?;
             }
@@ -257,12 +246,6 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
         BrokerOutcome::CancelAccepted { client_order_id } => cancelled(batch, &client_order_id),
         BrokerOutcome::Rejected(refused) => reject(batch, &refused),
         BrokerOutcome::Account(snapshot) => account(batch, &snapshot),
-        BrokerOutcome::AccountWideAccepted if cancel_all_answered(batch) => Ok(()),
-        BrokerOutcome::OpenOrders(orders)
-            if open_orders_read(batch, &orders, batch.view.account_head())? =>
-        {
-            Ok(())
-        }
         BrokerOutcome::OpenOrders(_)
         | BrokerOutcome::Positions(_)
         | BrokerOutcome::Activities { .. }

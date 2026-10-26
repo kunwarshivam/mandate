@@ -1,8 +1,6 @@
 # Playbook: implement a backlog story
 
-1. Read the story in `docs/project/06-backlog-v1.md`, or its own file under `docs/project/backlog/`
-   if it is not yet folded in (DEC-2373), its specs, and the decisions that apply. A new row goes
-   in its own file there, never in 06.
+1. Read the story in `docs/project/06-backlog-v1.md`, its specs, and the decisions that apply.
    Write the task brief from `docs/project/templates/task.md` into `docs/project/tasks/`, including
    the interpretations you made and the decisions you took.
 2. Check the stop conditions (AGENTS.md "How to work", ES-15). For each, record a decision per

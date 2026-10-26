@@ -1,10 +1,10 @@
 //! The protective sequences and the exit price ladder (E7-4, trading-domain spec §5.4 to §5.6).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_domain::MarketSession;
-use mandate_num::{Adverse, Fraction, Price, Qty, Rounding, ShareIncrement, SignedQty, TickRule};
+use mandate_num::{Adverse, Fraction, Price, Qty, ShareIncrement, SignedQty, TickRule};
 
 use mandate_accounting::Side;
 use mandate_canon::Value;
@@ -18,7 +18,7 @@ use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
-use crate::kill::{confirmed_bid, flatten_closes, flatten_room, floor_of, is_flatten, mode_holds};
+use crate::kill::{confirmed_bid, flatten_closes, floor_of, is_flatten, mode_holds};
 use crate::listing::query_unknown;
 use crate::orders::{StateEvidence, legal, transition};
 use crate::payload::{int, text};
@@ -26,7 +26,7 @@ use crate::ports::Ports;
 use crate::session::{
     Venue, closed_hold, extended_hours, same_session, stops_trigger_since, venue,
 };
-use crate::shape::{ProtectiveShape, protective_shape};
+use crate::shape::protective_shape;
 use crate::state::{
     EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome, Ladder, LoneLadder, Replacement,
 };
@@ -203,9 +203,8 @@ pub(crate) enum ExitPrice {
     /// Nothing to price from: the intent's own limit, never below an owner exit's floor,
     /// journaled with an owner alert.
     Fallback(Price),
-    /// Nothing to price from, for an exit with no limit of its own: held, protection resting,
-    /// until a price arrives (DEC-2037 item 5). An exit with a limit of its own, a discretionary
-    /// one included, falls back to it instead (DEC-2358).
+    /// Nothing to price from, for a discretionary exit or an exit with no limit of its own: held,
+    /// protection resting, until a price arrives (DEC-2037 item 5).
     Held,
     /// An exit with no limit, unsequenced, where §5.1 lets a market order go (DEC-2037 item 4).
     Market,
@@ -226,7 +225,9 @@ pub(crate) fn exit_price(
     };
     match (ladder_price(tier, observations, step, now, floor), limit) {
         (Ok(rung), _) => ExitPrice::Laddered(rung.limit),
-        (Err(_), Some(limit)) => ExitPrice::Fallback(floor.map_or(limit, |floor| limit.max(floor))),
+        (Err(_), Some(limit)) if purpose != Purpose::DiscretionaryExit => {
+            ExitPrice::Fallback(floor.map_or(limit, |floor| limit.max(floor)))
+        }
         (Err(_), _) => ExitPrice::Held,
     }
 }
@@ -235,7 +236,7 @@ pub(crate) fn exit_price(
 /// on a fresh, sane latest quote (§4.4: no presumed halt) that shows a bid, so a market order never
 /// goes into a book with no buyer. With no bid the exit is laddered from the last sane bid or
 /// trade, or held with nothing to price from (DEC-2037 items 4 and 5).
-pub(crate) fn market_allowed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> bool {
+fn market_allowed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> bool {
     venue(batch.ports, instrument, batch.at()) == Venue::Regular
         && current_quote(batch, instrument).is_some_and(|quote| quote.bid.is_some())
 }
@@ -545,8 +546,7 @@ fn unsent(state: &ExecutorState, intent: &IntentId, ladder: Ladder) -> Result<Qt
 }
 
 /// DEC-410 item 4: what `intent`'s next rung sends, of the `left` its stepped rung left unsold:
-/// what its remainder counts now ([`remainders`]), and for a switch's flatten no more than the
-/// agent's sub-ledger now (DEC-2360 item 1). A shorter rung is journaled `ProtectionChanged
+/// what its remainder counts now ([`remainders`]). A shorter rung is journaled `ProtectionChanged
 /// rung_short`, with what it does not send and why; with nothing to send, that record ends the
 /// ladder, so it never sends later into a position bought afresh.
 fn sendable(
@@ -555,11 +555,10 @@ fn sendable(
     intent: &IntentId,
     left: Qty,
 ) -> Result<Qty, ExecutorError> {
-    let counts = remainders(&batch.view, instrument)?
+    let sends = remainders(&batch.view, instrument)?
         .into_iter()
         .find(|(owner, _)| owner == intent)
         .map_or(Qty::ZERO, |(_, counts)| counts);
-    let sends = flatten_room(&batch.view, intent, counts)?;
     if sends < left {
         let pairs = vec![
             ("intent_id", text(intent.0.0.clone())),
@@ -1094,7 +1093,7 @@ pub(crate) fn ask_cancel(
 
 /// §9.5's members after `instrument_id` and `action`, each with the actions rules 41 to 44 let
 /// it be non-null or non-empty on.
-const CLOSED_MEMBERS: [(&str, &[&str]); 15] = [
+const CLOSED_MEMBERS: [(&str, &[&str]); 14] = [
     (
         "orders",
         &["placed", "cancelled", "passive_start", "unprotected_start"],
@@ -1126,44 +1125,16 @@ const CLOSED_MEMBERS: [(&str, &[&str]); 15] = [
     ("sent", &["rung_short"]),
     ("uncovered", &["interval_limit", "unprotected_end"]),
     ("acknowledged", &["unprotected_end"]),
-    (
-        "unprotected_fraction",
-        &["unprotected_start", "placed", "unprotected_end"],
-    ),
 ];
 
-/// Journals one `ProtectionChanged` for `instrument` in §9.5's closed form at version 2 (DEC-446
-/// item 4, DEC-859, DEC-2312): every member present, `orders` and `awaiting` as lists, the owner as
-/// `agent_id`. A start or a placement discloses the fraction of a share the position holds beyond
-/// its whole shares ([`unprotected_fraction`]), from the folded position unless the caller names
-/// what it protects.
-pub(crate) fn changed(
+/// Journals one `ProtectionChanged` for `instrument` in §9.5's closed form (DEC-446 item 4,
+/// DEC-859): every member present, `orders` and `awaiting` as lists, the owner as `agent_id`.
+fn changed(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
     action: &str,
     pairs: Vec<(&'static str, Value)>,
 ) -> Result<EventId, ExecutorError> {
-    changed_by(batch, instrument, action, pairs, None)
-}
-
-/// [`changed`], naming `cause` as the record's `causation_id`.
-pub(crate) fn changed_by(
-    batch: &mut Batch<'_, '_>,
-    instrument: &InstrumentId,
-    action: &str,
-    mut pairs: Vec<(&'static str, Value)>,
-    cause: Option<EventId>,
-) -> Result<EventId, ExecutorError> {
-    if !pairs
-        .iter()
-        .any(|(name, _)| *name == "unprotected_fraction")
-    {
-        let held = long(&batch.view, instrument)?;
-        pairs.push((
-            "unprotected_fraction",
-            unprotected_fraction(batch.ports, instrument, held)?,
-        ));
-    }
     let mut closed = vec![
         ("instrument_id", text(instrument.as_str())),
         ("action", text(action)),
@@ -1188,7 +1159,7 @@ pub(crate) fn changed_by(
         };
         closed.push((member, value));
     }
-    batch.journal("ProtectionChanged", cause, closed)
+    batch.journal("ProtectionChanged", None, closed)
 }
 
 /// A protective order's confirmed cancel (§5.4), recorded. Releasing the waiting exits is
@@ -1430,9 +1401,6 @@ fn bracket(
         changed(batch, &instrument, "unprotected_start", named.clone())?;
     }
     if order.state.is_terminal() {
-        if batch.view.closing_all.contains(&instrument) {
-            return Ok(());
-        }
         let unapplied = filled.checked_sub(order.filled_qty)?;
         let committed = covered(&batch.view, &instrument)?
             .checked_add(still_selling(&batch.view, &instrument)?)?;
@@ -1498,15 +1466,19 @@ fn bracket(
     Ok(())
 }
 
-/// The prices a plain entry's protection follows its fill at: a risk-adding entry sent with no
-/// bracket, whose intent carried protective prices. An equity goes so only on a profile that
-/// offers no bracket (`crate::intent::bracket_of`; §5.4, DEC-966 item 2); a crypto entry always
-/// does, since crypto takes simple orders only (§5.4, DEC-36). None for anything else: a bracket
-/// entry, an entry with no prices, or one already protected.
-fn plain_protection(view: &ExecutorState, order: &Order) -> Option<ProtectionPrices> {
+/// The prices a plain entry's protection follows its fill at: a risk-adding equity entry sent
+/// with no bracket, whose intent carried protective prices, which only a profile that offers no
+/// bracket sends (`crate::intent::bracket_of`; §5.4, DEC-966 item 2). None for anything else: a
+/// bracket entry, an entry with no prices, crypto (slice 5's), or one already protected.
+fn plain_protection(
+    view: &ExecutorState,
+    ports: &Ports<'_>,
+    order: &Order,
+) -> Option<ProtectionPrices> {
     let detail = view.details.get(&order.client_order_id)?;
     let request = detail.request.as_ref()?;
     let plain = order.purpose.adds_risk() && request.bracket.is_none() && !detail.bracket_placed;
+    let crypto = ports.instruments.asset_class(&order.instrument) == Some(AssetClass::Crypto);
     let IntentBody::Order {
         protection: Some(prices),
         ..
@@ -1514,19 +1486,18 @@ fn plain_protection(view: &ExecutorState, order: &Order) -> Option<ProtectionPri
     else {
         return None;
     };
-    plain.then_some(*prices)
+    (plain && !crypto).then_some(*prices)
 }
 
-/// §5.4's simple-order protection, after every step: each plain entry, crypto or an equity on a
-/// profile with no OCO or bracket, whose protection follows its fill ([`plain_protection`]) and
-/// that has filled anything ([`stop_after`]).
+/// §5.4's equities on a profile with no OCO or bracket, after every step: each plain entry whose
+/// protection follows its fill ([`plain_protection`]) and that has filled anything ([`stop_after`]).
 fn plain_entries(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let entries: Vec<(ClientOrderId, ProtectionPrices)> = batch
         .view
         .orders
         .values()
         .filter_map(|order| {
-            plain_protection(&batch.view, order)
+            plain_protection(&batch.view, batch.ports, order)
                 .map(|prices| (order.client_order_id.clone(), prices))
         })
         .collect();
@@ -1546,24 +1517,16 @@ fn past_bound(view: &ExecutorState, instrument: &InstrumentId, entry: &ClientOrd
     })
 }
 
-/// One plain entry: crypto (§5.4, DEC-36), an equity on a profile with no OCO or bracket (§5.4,
-/// DEC-529 item 7, DEC-966), or a fractional equity entry, which is never a bracket (§5.2,
-/// DEC-2312). The unprotected interval starts, journaled once and naming the entry, at its first
-/// fill, and discloses the fraction of a share the position then holds beyond its whole shares,
-/// counting the fills the broker reported. Once the entry is terminal — filled completely, or ended
-/// partly filled, its remainder cancelled at `bracket_partial_fill_timeout_s` (or
-/// `max_unprotected_s`, if shorter) or once its venue is no longer the regular session, exactly as
-/// [`bracket`] cancels one — one protective order is journaled and then sent for the whole shares
-/// of its filled quantity, capped at what the position leaves after every live protective order and
-/// every exit still selling (rule 12; DEC-2312 item 2): the strongest form the profile offers for it
-/// ([`protective_shape`]). Where the profile offers an OCO for an equity, that is one OCO at the
-/// intent's prices, whose legs cancel each other; otherwise one GTC stop-limit at the intent's stop
-/// and stop × (1 − `stop_limit_offset`), and its take-profit is never a resting order: beside a stop
-/// for the same shares it would sell them twice (DEC-966 item 3). Crypto is always the one
-/// stop-limit, never an OCO. A crypto entry's stop waits until every fill the broker reported is
-/// applied, and covers what the buy leaves held once each fill's fee posts ([`held_after_fees`];
-/// DEC-349 items 1 and 2), so it never outlasts the position (RC-07). The placement discloses the
-/// fraction as the start does. The interval ends once the broker
+/// One plain entry on a profile with no OCO or bracket (§5.4, DEC-529 item 7, DEC-966). The
+/// unprotected interval starts, journaled once and naming the entry, at its first fill. Once the
+/// entry is terminal — filled completely, or ended partly filled, its remainder cancelled at
+/// `bracket_partial_fill_timeout_s` (or `max_unprotected_s`, if shorter) or once its venue is no
+/// longer the regular session, exactly as [`bracket`] cancels one — one protective order is
+/// journaled and then sent for its filled quantity, capped at what the position leaves after every
+/// live protective order and every exit still selling (rule 12): the strongest form the profile
+/// offers for it ([`protective_shape`]), on this profile one GTC stop-limit at the intent's stop
+/// and stop × (1 − `stop_limit_offset`). Its take-profit is never a resting order: beside a stop
+/// for the same shares it would sell them twice (DEC-966 item 3). The interval ends once the broker
 /// acknowledges the stop ([`acknowledged`]); with no form to place, the shortfall is journaled and
 /// alerted ([`unprotectable`]) and the interval stays open, so [`bound`] exits the position. An
 /// entry that ends only after its interval reached the bound places no stop: what it filled is
@@ -1581,17 +1544,11 @@ fn stop_after(
     let filled = order
         .filled_qty
         .max(detail.reported_filled.unwrap_or(Qty::ZERO));
-    if filled == Qty::ZERO || batch.view.closing_all.contains(&order.instrument) {
+    if filled == Qty::ZERO {
         return Ok(());
     }
+    let named = vec![("bracket", text(entry.as_str()))];
     let instrument = order.instrument.clone();
-    let unapplied = filled.checked_sub(order.filled_qty)?;
-    let held = long(&batch.view, &instrument)?.checked_add(unapplied)?;
-    let fraction = (
-        "unprotected_fraction",
-        unprotected_fraction(batch.ports, &instrument, held)?,
-    );
-    let named = vec![("bracket", text(entry.as_str())), fraction.clone()];
     if detail.bracket_since.is_none() {
         changed(batch, &instrument, "unprotected_start", named.clone())?;
     }
@@ -1620,19 +1577,14 @@ fn stop_after(
         let record = changed(batch, &instrument, "unprotected_end", ended)?;
         return flatten_unprotected(batch, &instrument, entry, &record);
     }
-    if unapplied > Qty::ZERO
-        && batch.ports.instruments.asset_class(&instrument) == Some(AssetClass::Crypto)
-    {
-        return Ok(());
-    }
+    let unapplied = filled.checked_sub(order.filled_qty)?;
     let committed =
         covered(&batch.view, &instrument)?.checked_add(still_selling(&batch.view, &instrument)?)?;
-    let room = held.checked_sub(committed).unwrap_or(Qty::ZERO);
-    let qty = whole_shares(
-        batch.ports,
-        &instrument,
-        held_after_fees(batch.ports, &instrument, filled, &detail.fill_qtys)?.min(room),
-    )?;
+    let room = long(&batch.view, &instrument)?
+        .checked_add(unapplied)?
+        .checked_sub(committed)
+        .unwrap_or(Qty::ZERO);
+    let qty = filled.min(room);
     if qty == Qty::ZERO {
         changed(batch, &instrument, "unprotected_end", named)?;
         return Ok(());
@@ -1641,17 +1593,14 @@ fn stop_after(
         .agent
         .clone()
         .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
+    let stop = ProtectionPrices {
+        stop: prices.stop,
+        take_profit: None,
+    };
     let offset = batch.ports.mandates.crypto_stop_limit_offset(&agent);
     let class = protected_class(batch, &instrument);
-    let shaped = match class {
-        AssetClass::Crypto => ProtectionPrices {
-            stop: prices.stop,
-            take_profit: None,
-        },
-        _ => prices,
-    };
     let shape = match batch.view.profile.as_ref() {
-        Some(profile) => protective_shape(profile, class, UNREAD_CLOCK, qty, shaped, offset)?,
+        Some(profile) => protective_shape(profile, class, UNREAD_CLOCK, qty, stop, offset)?,
         None => None,
     };
     let Some(shape) = shape else {
@@ -1675,39 +1624,12 @@ fn stop_after(
         extended_hours: false,
         purpose: Purpose::Protective,
     };
-    let stop = ProtectionPrices {
-        stop: prices.stop,
-        take_profit: request.oco.as_ref().map(|legs| legs.take_profit),
-    };
-    place_disclosing(batch, &request, (None, &agent), stop, vec![fraction])?;
+    place(batch, &request, None, &agent, stop)?;
     let mut ended = named;
     ended.push(awaiting(&[&request.client_order_id]));
     changed(batch, &instrument, "unprotected_end", ended)?;
     batch.broker(BrokerRequest::Submit(request));
     Ok(())
-}
-
-/// What a buy of `bought` leaves held once its fees post (§5.4, §6.3): a crypto buy withholds
-/// each fill's fee from the asset that fill bought, rounded at the ninth place half up fill by
-/// fill as `mandate-accounting` rounds it, at the maker or the taker rate, so a stop-limit sized
-/// before the rate is known takes the larger one and never outlasts the position (DEC-349 item 2;
-/// RC-07). It counts only the `fills` the fold applied, each net of its own fee: one rounding over
-/// their sum could leave a nano-unit more than is held. An equity keeps what it bought.
-pub(crate) fn held_after_fees(
-    ports: &Ports<'_>,
-    instrument: &InstrumentId,
-    bought: Qty,
-    fills: &[Qty],
-) -> Result<Qty, ExecutorError> {
-    if ports.instruments.asset_class(instrument) != Some(AssetClass::Crypto) {
-        return Ok(bought);
-    }
-    let crypto = &ports.fees.crypto;
-    let rate = crypto.maker.max(crypto.taker);
-    fills.iter().try_fold(Qty::ZERO, |held, fill| {
-        let withheld = fill.times_bps(rate, Rounding::HalfUp)?;
-        Ok(held.checked_add(fill.checked_sub(withheld)?)?)
-    })
 }
 
 /// The `created_on` a protective order placed now records: the trading day the latest copied
@@ -1738,7 +1660,6 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .filter(|(instrument, protection)| {
             !protection.resting.is_empty()
                 && !batch.view.exiting.contains_key(*instrument)
-                && !batch.view.closing_all.contains(*instrument)
                 && !batch.view.replacing.contains_key(*instrument)
                 && protection.resting.iter().any(|id| {
                     batch
@@ -1757,11 +1678,10 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         let Some(first) = protection.resting.first() else {
             continue;
         };
-        let alerted = batch.view.alerted.contains(&instrument);
         if protection.prices.is_none() {
-            if !alerted {
-                kept(batch, &instrument)?;
-            }
+            let pairs = vec![("orders", text(joined(&protection.resting)))];
+            let alerted = changed(batch, &instrument, "expiry_unreplaceable", pairs)?;
+            batch.notify(alerted, "protection_expiring");
             continue;
         }
         let entry = first.protected_entry().unwrap_or_else(|| first.clone());
@@ -1771,12 +1691,6 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             .get(first)
             .and_then(|order| order.agent.clone())
             .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
-        if !replaceable(batch, &instrument, protection.prices, &agent)? {
-            if !alerted {
-                kept(batch, &instrument)?;
-            }
-            continue;
-        }
         let mut pairs = vec![
             ("replacing", Value::Bool(true)),
             ("orders", text(joined(&protection.resting))),
@@ -1799,53 +1713,6 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
     }
     Ok(())
-}
-
-/// Protection due at its buffer day that is kept, for want of prices or of a form to place it
-/// again, is journaled (`expiry_unreplaceable`) and the owner alerted (`protection_expiring`),
-/// once for its resting set: the record names the day's `TradingDayStarted` as its cause, the
-/// fold notes the alert from it, and any change to the set clears the note (DEC-367 item 4 (a′),
-/// DEC-2355).
-fn kept(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(), ExecutorError> {
-    let day = batch.view.day_started.clone();
-    let alerted = changed_by(batch, instrument, "expiry_unreplaceable", Vec::new(), day)?;
-    batch.notify(alerted, "protection_expiring");
-    Ok(())
-}
-
-/// Whether the protection resting in `instrument` could be placed again at `prices` once it is
-/// cancelled: the profile offers a form for the whole shares [`re_place`] would cover, or nothing
-/// is left to cover. An OCO the executor cannot re-place is never the one it cancels: the position
-/// keeps it, and the shortfall is journaled and alerted instead (DEC-2312 item 2).
-///
-/// It sizes as [`re_place`] will: the long position less the working exits and less what other
-/// protection covers. Here that other protection is none. Every non-terminal protective order is
-/// in `protection.resting`, since each placer journals `placed` in its own batch and an order
-/// leaves only on a terminal state or a confirmed `cancelled`, and [`new_day`] cancels all of
-/// them. So `re_place`'s `covered` is zero once those cancels are confirmed, and subtracting the
-/// resting orders here would count the very protection being replaced (DEC-2355).
-fn replaceable(
-    batch: &Batch<'_, '_>,
-    instrument: &InstrumentId,
-    prices: Option<ProtectionPrices>,
-    agent: &AgentId,
-) -> Result<bool, ExecutorError> {
-    let qty = whole_shares(
-        batch.ports,
-        instrument,
-        protectable(&batch.view, instrument)?
-            .checked_sub(working_exits(&batch.view, instrument)?)
-            .unwrap_or(Qty::ZERO),
-    )?;
-    if qty == Qty::ZERO {
-        return Ok(true);
-    }
-    let (Some(prices), Some(profile)) = (prices, batch.view.profile.as_ref()) else {
-        return Ok(false);
-    };
-    let offset = batch.ports.mandates.crypto_stop_limit_offset(agent);
-    let class = protected_class(batch, instrument);
-    Ok(protective_shape(profile, class, UNREAD_CLOCK, qty, prices, offset)?.is_some())
 }
 
 /// Whether every order that ended in `instrument` this step is a rung of one of its lone ladders
@@ -1891,10 +1758,6 @@ fn unprotectable(
 /// at once ([`re_place`]), its interval started first, for what the protection and the exits
 /// still working leave uncovered. The prices are the resting protection's, or else the ended
 /// protective order's own.
-/// Nor is protection in an instrument an account kill switch closes through the broker's
-/// close-position: a stop beside that close would sell the same shares twice (§5.5, rule 12).
-/// Its loss starts the instrument's interval instead, naming no order, so §5.4's bound journals
-/// and alerts it (DEC-2333 item 3).
 /// Protection the broker refuses, or cancels before acknowledging it, is not re-placed here: its
 /// interval stays open and bounded (DEC-348 item 2), so neither loops, nor restarts the bound.
 /// With no prices anywhere to place from, the shortfall is journaled and the owner alerted
@@ -1945,12 +1808,6 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .filter_map(|instrument| InstrumentId::new(instrument).ok())
         .collect();
     for instrument in instruments {
-        if batch.view.closing_all.contains(&instrument) {
-            if !interval_open(&batch.view, &instrument) {
-                changed(batch, &instrument, "unprotected_start", Vec::new())?;
-            }
-            continue;
-        }
         if batch.view.exiting.contains_key(&instrument)
             || batch.view.replacing.contains_key(&instrument)
             || stepping_alone(&batch.view, &instrument, &ended)
@@ -1959,7 +1816,7 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
         let committed = covered(&batch.view, &instrument)?
             .checked_add(working_exits(&batch.view, &instrument)?)?;
-        if committed >= protectable(&batch.view, &instrument)? {
+        if committed >= long(&batch.view, &instrument)? {
             continue;
         }
         let resting = batch
@@ -1984,7 +1841,18 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
                     .get(&order.client_order_id)?
                     .request
                     .as_ref()?;
-                Some((order, request_prices(request)?))
+                let prices = match (&request.oco, request.stop_price) {
+                    (Some(legs), _) => ProtectionPrices {
+                        stop: legs.stop,
+                        take_profit: Some(legs.take_profit),
+                    },
+                    (None, Some(stop)) => ProtectionPrices {
+                        stop,
+                        take_profit: None,
+                    },
+                    (None, None) => return None,
+                };
+                Some((order, prices))
             });
         let Some((from, prices)) = resting.or(lost) else {
             if !alerted.contains(&instrument) {
@@ -2289,62 +2157,6 @@ fn still_selling(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty,
         .map_err(ExecutorError::from)
 }
 
-/// What protection placed in `instrument` may cover (DEC-2362): the long position less the shares
-/// the owner released and still holds, `min(released, long − agents)`, where `agents` is each
-/// agent's filled buys net of what its sells sold ([`sold`]) and of what it released, floored at
-/// zero, summed.
-/// With nothing released it is the long position, so only the owner's released shares leave it.
-fn protectable(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
-    let held = long(view, instrument)?;
-    let released: BTreeMap<&AgentId, Qty> = view
-        .released
-        .iter()
-        .filter(|((_, of), _)| of == instrument)
-        .map(|((agent, _), qty)| (agent, *qty))
-        .collect();
-    if released.is_empty() {
-        return Ok(held);
-    }
-    let mut lots: BTreeMap<&AgentId, SignedQty> = BTreeMap::new();
-    for (id, order) in view
-        .orders
-        .iter()
-        .filter(|(_, order)| &order.instrument == instrument)
-    {
-        let Some(agent) = order.agent.as_ref() else {
-            continue;
-        };
-        let entry = lots.entry(agent).or_insert(SignedQty::ZERO);
-        *entry = entry.checked_add(match order.side {
-            Side::Buy => SignedQty::from(order.filled_qty),
-            Side::Sell => SignedQty::from(sold(view, id, order)).negated(),
-        })?;
-    }
-    let mut agents = Qty::ZERO;
-    for (agent, own) in &lots {
-        let gave = released.get(agent).copied().unwrap_or(Qty::ZERO);
-        let kept = own.checked_add(SignedQty::from(gave).negated())?;
-        agents = agents.checked_add(kept.max(SignedQty::ZERO).abs())?;
-    }
-    let total = released
-        .values()
-        .try_fold(Qty::ZERO, |sum, qty| sum.checked_add(*qty))?;
-    let owners = held.checked_sub(agents).unwrap_or(Qty::ZERO);
-    Ok(held.checked_sub(total.min(owners)).unwrap_or(Qty::ZERO))
-}
-
-/// What a sell of ours has sold as [`long`] reads it: its applied fills, or, once it ended, the
-/// larger fill the broker reported for it that no fill update has applied yet.
-fn sold(view: &ExecutorState, id: &ClientOrderId, order: &Order) -> Qty {
-    let reported = view
-        .details
-        .get(id)
-        .and_then(|detail| detail.reported_filled)
-        .filter(|_| order.state.is_terminal())
-        .unwrap_or(Qty::ZERO);
-    order.filled_qty.max(reported)
-}
-
 /// The long position in `instrument` as the broker holds it (DEC-421, #515): the folded position
 /// less every fill the broker reported on a sell that has ended, in any terminal state, that no
 /// fill update has applied and no unattributed sell fill has already taken off it (`netted`, the
@@ -2378,36 +2190,6 @@ fn long(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, Executor
     Ok(folded.checked_sub(unapplied).unwrap_or(Qty::ZERO))
 }
 
-/// The whole-share part of `qty` in an equity, and in an instrument the snapshot does not classify
-/// (DEC-841 item 1): §5.2 allows no fractional quantity in an OCO or a bracket, so §5.4 protects
-/// only the whole shares (DEC-2312 item 2). A crypto quantity is protected whole (DEC-36).
-pub(crate) fn whole_shares(
-    ports: &Ports<'_>,
-    instrument: &InstrumentId,
-    qty: Qty,
-) -> Result<Qty, ExecutorError> {
-    if ports.instruments.asset_class(instrument) == Some(AssetClass::Crypto) {
-        return Ok(qty);
-    }
-    Ok(qty.portion(Fraction::ONE, ShareIncrement::Whole)?)
-}
-
-/// The fraction of a share `held` holds beyond its whole shares, which protection cannot cover and
-/// a start or a placement discloses as `unprotected_fraction` (§5.4, journal spec v0.72 rule 44,
-/// DEC-2312 item 3); null when `held` is whole shares, or crypto.
-fn unprotected_fraction(
-    ports: &Ports<'_>,
-    instrument: &InstrumentId,
-    held: Qty,
-) -> Result<Value, ExecutorError> {
-    let fraction = held.checked_sub(whole_shares(ports, instrument, held)?)?;
-    Ok(if fraction == Qty::ZERO {
-        Value::Null
-    } else {
-        text(fraction.to_string())
-    })
-}
-
 /// The unfilled quantity every live protective order in `instrument` covers.
 fn covered(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
     view.orders
@@ -2423,7 +2205,7 @@ fn covered(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, Execu
         .map_err(ExecutorError::from)
 }
 
-pub(crate) fn interval_open(view: &ExecutorState, instrument: &InstrumentId) -> bool {
+fn interval_open(view: &ExecutorState, instrument: &InstrumentId) -> bool {
     view.unprotected
         .iter()
         .any(|interval| &interval.instrument == instrument && interval.ended_at.is_none())
@@ -2499,18 +2281,11 @@ fn re_place(
     instrument: &InstrumentId,
     sequence: &Replacement,
 ) -> Result<(), ExecutorError> {
-    if batch.view.closing_all.contains(instrument) {
-        return Ok(());
-    }
     let committed =
         covered(&batch.view, instrument)?.checked_add(working_exits(&batch.view, instrument)?)?;
-    let qty = whole_shares(
-        batch.ports,
-        instrument,
-        protectable(&batch.view, instrument)?
-            .checked_sub(committed)
-            .unwrap_or(Qty::ZERO),
-    )?;
+    let qty = long(&batch.view, instrument)?
+        .checked_sub(committed)
+        .unwrap_or(Qty::ZERO);
     if qty == Qty::ZERO {
         changed(batch, instrument, "unprotected_end", Vec::new())?;
         return Ok(());
@@ -2526,17 +2301,6 @@ fn re_place(
     let Some(shape) = protective_shape(profile, class, UNREAD_CLOCK, qty, prices, offset)? else {
         return uncovered(batch, instrument);
     };
-    send_protection(batch, instrument, sequence, (prices, qty, shape))
-}
-
-/// Journals and sends one protective order for `qty` of `instrument` in `shape`, at `prices`, and
-/// ends the interval awaiting its acknowledgment ([`re_place`], [`protect_at_bound`]).
-fn send_protection(
-    batch: &mut Batch<'_, '_>,
-    instrument: &InstrumentId,
-    sequence: &Replacement,
-    (prices, qty, shape): (ProtectionPrices, Qty, ProtectiveShape),
-) -> Result<(), ExecutorError> {
     let request = SubmitOrder {
         client_order_id: ClientOrderId::for_protection(&sequence.entry, &batch.id_after(2))?,
         instrument: instrument.clone(),
@@ -2612,23 +2376,9 @@ fn place(
     agent: &AgentId,
     prices: ProtectionPrices,
 ) -> Result<(), ExecutorError> {
-    place_disclosing(batch, request, (intent, agent), prices, Vec::new())
-}
-
-/// [`place`], with the `placed` record also carrying `disclosed`: the fraction a plain entry's
-/// protection leaves, counted with the fills the broker reported and the fold has not yet applied
-/// ([`stop_after`], DEC-2312 item 3).
-fn place_disclosing(
-    batch: &mut Batch<'_, '_>,
-    request: &SubmitOrder,
-    (intent, agent): (Option<&IntentId>, &AgentId),
-    prices: ProtectionPrices,
-    disclosed: Vec<(&'static str, Value)>,
-) -> Result<(), ExecutorError> {
     journal_submission(batch, request, intent, agent, 1)?;
     let mut placed = recorded_placement(&request.client_order_id, request.qty, prices);
     placed.extend(created(&batch.view));
-    placed.extend(disclosed);
     changed(batch, &request.instrument, "placed", placed).map(|_| ())
 }
 
@@ -2775,11 +2525,7 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
         let alerted = changed(batch, &instrument, "interval_limit", Vec::new())?;
         batch.notify(alerted.clone(), "unprotected_interval_limit");
-        let closing = batch.view.closing_all.contains(&instrument);
-        if closing {
-            protect_at_bound(batch, &instrument)?;
-        }
-        let Some(entry) = entry.filter(|_| !exiting && !closing) else {
+        let Some(entry) = entry.filter(|_| !exiting) else {
             continue;
         };
         let plain = batch
@@ -2806,135 +2552,6 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
     }
     Ok(())
-}
-
-/// §5.4's bound in an instrument the account kill switch closes, whose close-position has not
-/// gone out (DEC-2333 item 3, DEC-2356): protection is placed again for the held quantity less
-/// every sell not confirmed cancelled. That is every sell of ours not yet terminal, the protection
-/// that rested before the switch and every `Unknown` order included, since a lost cancel-all
-/// confirms nothing, and every sell the last read showed that the fold does not hold. Where that
-/// leaves nothing, or the sum cannot be taken, nothing is placed. Its prices are the resting
-/// protection's, or else the latest protective order's own; with none, nothing is placed, and the
-/// bound's alert has gone. Once the close is requested nothing is placed (item 5). An exit
-/// sequence there does not stop it: the bound ends those exits, nothing else re-places protection
-/// beside the close, and the exits still working count as not confirmed cancelled (DEC-2356
-/// item 6).
-fn protect_at_bound(
-    batch: &mut Batch<'_, '_>,
-    instrument: &InstrumentId,
-) -> Result<(), ExecutorError> {
-    let Some(switch) = batch.view.account_switch.as_ref() else {
-        return Ok(());
-    };
-    if switch.requests.contains_key(instrument) {
-        return Ok(());
-    }
-    let Some(committed) = unconfirmed_sells(&batch.view, instrument) else {
-        return Ok(());
-    };
-    let qty = whole_shares(
-        batch.ports,
-        instrument,
-        long(&batch.view, instrument)?
-            .checked_sub(committed)
-            .unwrap_or(Qty::ZERO),
-    )?;
-    if qty == Qty::ZERO {
-        return Ok(());
-    }
-    let (Some(sequence), Some(profile)) = (
-        bound_sequence(&batch.view, instrument),
-        batch.view.profile.as_ref(),
-    ) else {
-        return Ok(());
-    };
-    let Some(prices) = sequence.prices else {
-        return Ok(());
-    };
-    let class = protected_class(batch, instrument);
-    let offset = batch
-        .ports
-        .mandates
-        .crypto_stop_limit_offset(&sequence.agent);
-    let Some(shape) = protective_shape(profile, class, UNREAD_CLOCK, qty, prices, offset)? else {
-        return Ok(());
-    };
-    send_protection(batch, instrument, &sequence, (prices, qty, shape))
-}
-
-/// What every sell not confirmed cancelled in `instrument` may still sell (DEC-2356): each sell of
-/// ours sent and not terminal, and each sell the account switch's last read showed that is not
-/// ours. `None` when the sum overflows, which reads as covering everything.
-fn unconfirmed_sells(view: &ExecutorState, instrument: &InstrumentId) -> Option<Qty> {
-    let ours = view
-        .orders
-        .values()
-        .filter(|order| {
-            &order.instrument == instrument
-                && order.side == Side::Sell
-                && !order.state.is_terminal()
-                && order.state != OrderState::Intent
-        })
-        .map(|order| order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO));
-    let foreign = view
-        .switch_read
-        .as_ref()
-        .and_then(|read| read.foreign.get(instrument))
-        .into_iter()
-        .flatten()
-        .copied();
-    ours.chain(foreign)
-        .try_fold(Qty::ZERO, |sum, left| sum.checked_add(left).ok())
-}
-
-/// The prices a protective order's own request placed it at: an OCO's stop and take-profit, or a
-/// stop's alone. None for a request that names neither.
-fn request_prices(request: &SubmitOrder) -> Option<ProtectionPrices> {
-    match (&request.oco, request.stop_price) {
-        (Some(legs), _) => Some(ProtectionPrices {
-            stop: legs.stop,
-            take_profit: Some(legs.take_profit),
-        }),
-        (None, Some(stop)) => Some(ProtectionPrices {
-            stop,
-            take_profit: None,
-        }),
-        (None, None) => None,
-    }
-}
-
-/// The entry, agent and prices protection placed at the bound takes (DEC-2356): the resting
-/// protection's, or else those of the protective order in `instrument` whose request recorded
-/// prices, the last by id.
-fn bound_sequence(view: &ExecutorState, instrument: &InstrumentId) -> Option<Replacement> {
-    let resting = view.protection.get(instrument).and_then(|protection| {
-        protection
-            .resting
-            .first()
-            .and_then(|first| view.orders.get(first))
-            .zip(protection.prices)
-    });
-    let recorded = view
-        .orders
-        .values()
-        .rev()
-        .filter(|order| &order.instrument == instrument && order.purpose == Purpose::Protective)
-        .find_map(|order| {
-            let request = view.details.get(&order.client_order_id)?.request.as_ref()?;
-            Some((order, request_prices(request)?))
-        });
-    let (from, prices) = resting.or(recorded)?;
-    Some(Replacement {
-        entry: from
-            .client_order_id
-            .protected_entry()
-            .unwrap_or_else(|| from.client_order_id.clone()),
-        agent: from
-            .agent
-            .clone()
-            .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned())),
-        prices: Some(prices),
-    })
 }
 
 /// §5.4's bound on a profile with no OCO or bracket: "if it is not resting by then, the executor
@@ -3875,25 +3492,6 @@ mod sequence_tests {
         }))
     }
 
-    /// A sell of `qty` `AAPL` for `purpose` with no limit of its own: with nothing to price from it
-    /// is held, whatever its purpose (DEC-2037 item 5, DEC-2358).
-    fn market_sell(intent: &str, qty: &str, purpose: Purpose) -> Result<Input, ExecutorError> {
-        Ok(Input::Intent(IntentHandoff {
-            intent_id: IntentId(EventId(intent.to_owned())),
-            agent: AgentId("agent-a".to_owned()),
-            tif: Some(TimeInForce::Day),
-            body: IntentBody::Order {
-                instrument: aapl()?,
-                side: Side::Sell,
-                qty: Qty::parse(qty)?,
-                limit: None,
-                purpose,
-                protection: None,
-            },
-            confirmation: None,
-        }))
-    }
-
     /// A sane quote whose bid and mark are both `at`.
     fn quote(at: &str) -> Result<Input, ExecutorError> {
         let at = Price::parse(at)?;
@@ -4596,70 +4194,9 @@ mod sequence_tests {
         Ok(())
     }
 
-    /// DEC-2358, narrowing DEC-160 (12): a discretionary exit with a limit of its own and nothing
-    /// to price from falls back to that limit, as a risk exit does, never held: the sequence
-    /// starts, the exit goes at its own limit, and the fallback is journaled and alerted. At the
-    /// next priceable quote the ladder steps it again from that quote, never from the fallback.
-    #[test]
-    fn a_discretionary_exit_with_its_own_limit_and_nothing_to_price_from_goes_at_it()
-    -> Result<(), ExecutorError> {
-        let (config, fees) = (executor_config(), fees()?);
-        let ports = tiered_ports(&config, &fees);
-        let mut executor = protected(&ports)?;
-        executor.run(unpriceable()?, &ports)?;
-        let started = executor.run(sell(EXIT, "5", "150", Purpose::DiscretionaryExit)?, &ports)?;
-        assert_eq!(
-            cancels(&started),
-            vec![OCO],
-            "the sequence starts, never held"
-        );
-        assert_eq!(
-            verdicts_with_reasons(&started),
-            vec![("allow".to_owned(), String::new())]
-        );
-        let sent = executor.run(cancel_accepted(OCO), &ports)?;
-        assert_eq!(
-            submissions(&sent)
-                .iter()
-                .map(|order| order.limit_price)
-                .collect::<Vec<_>>(),
-            vec![Some(Price::parse("150")?)],
-            "at its own limit"
-        );
-        assert!(
-            actions(&sent).contains(&"exit_unpriced"),
-            "the fallback is journaled"
-        );
-        assert_eq!(alerts(&sent), vec!["exit_unpriced"], "and alerted");
-        let rung = submissions(&sent)
-            .first()
-            .map(|order| order.client_order_id.as_str().to_owned())
-            .unwrap_or_default();
-        executor.run(quote("151")?, &ports)?;
-        let stepped = executor.run(Input::Tick(RiskClock::from_secs(10)), &ports)?;
-        assert_eq!(
-            cancels(&stepped),
-            vec![rung.as_str()],
-            "the ladder steps again"
-        );
-        let next = executor.run(cancel_accepted(&rung), &ports)?;
-        let limits: Vec<_> = submissions(&next)
-            .iter()
-            .map(|order| order.limit_price)
-            .collect();
-        assert_eq!(limits.len(), 1, "one next rung: {limits:?}");
-        assert_ne!(
-            limits.first().copied().flatten(),
-            Some(Price::parse("150")?),
-            "priced from the quote, not the fallback"
-        );
-        Ok(())
-    }
-
-    /// DEC-2037 item 5: a discretionary exit with no limit of its own and nothing to price from
-    /// is held with its protection resting, the hold journaled and alerted once; each tick
-    /// re-evaluates it silently, and the first tick after a priceable quote releases it into the
-    /// sequence, laddered. One with a limit of its own goes at it instead (DEC-2358).
+    /// DEC-160 (12): a discretionary exit with nothing to price from is held with its protection
+    /// resting, the hold journaled and alerted once; each tick re-evaluates it silently, and the
+    /// first tick after a priceable quote releases it into the sequence, laddered.
     #[test]
     fn a_discretionary_exit_with_nothing_to_price_from_is_held_then_goes()
     -> Result<(), ExecutorError> {
@@ -4667,7 +4204,7 @@ mod sequence_tests {
         let ports = tiered_ports(&config, &fees);
         let mut executor = protected(&ports)?;
         executor.run(unpriceable()?, &ports)?;
-        let held = executor.run(market_sell(EXIT, "5", Purpose::DiscretionaryExit)?, &ports)?;
+        let held = executor.run(sell(EXIT, "5", "150", Purpose::DiscretionaryExit)?, &ports)?;
         assert!(cancels(&held).is_empty(), "protection stays resting");
         assert_eq!(
             verdicts_with_reasons(&held),
@@ -5084,7 +4621,7 @@ mod sequence_tests {
         let mut executor = protected(&ports)?;
         executor.run(bid_only("150", 0)?, &ports)?;
         executor.run(Input::Tick(RiskClock::from_secs(280)), &ports)?;
-        let started = executor.run(market_sell(EXIT, "5", Purpose::DiscretionaryExit)?, &ports)?;
+        let started = executor.run(sell(EXIT, "5", "150", Purpose::DiscretionaryExit)?, &ports)?;
         assert_eq!(
             cancels(&started),
             vec![OCO],
@@ -5460,7 +4997,7 @@ mod sequence_tests {
         let working = executor.run(cancel_accepted(OCO), &ports)?;
         assert_eq!(submissions(&working).len(), 1, "{:?}", drafted(&working));
         let held = executor.run(
-            market_sell(SECOND, "2", Purpose::DiscretionaryExit)?,
+            sell(SECOND, "2", "150", Purpose::DiscretionaryExit)?,
             &ports,
         )?;
         assert_eq!(verdicts(&held), vec!["hold"]);
@@ -10063,8 +9600,6 @@ mod sequence_tests {
     enum Move {
         Tick(i64),
         Quote(Option<u32>, Option<u32>, bool),
-        /// An exit of `EXIT_PURPOSES[.0]` for `.1` shares at a limit of `.2`, or with no limit of
-        /// its own for a `.2` of 0, which the random scripts never draw.
         Exit(usize, u32, u32),
         Ack,
         Fill(u32),
@@ -11070,12 +10605,10 @@ mod sequence_tests {
                             watchdog: false,
                         },
                     );
-                    let exit = if limit == 0 {
-                        market_sell(&intent, &qty.to_string(), purpose)
-                    } else {
+                    Some(
                         sell(&intent, &qty.to_string(), &limit.to_string(), purpose)
-                    };
-                    Some(exit.map_err(failed)?)
+                            .map_err(failed)?,
+                    )
                 }
                 Move::Ack => {
                     let first = desk.venue.iter_mut().find(|(_, held)| {
@@ -11719,19 +11252,12 @@ mod sequence_tests {
     }
 
     /// #524's claim 2, which already holds on `main`: an exit the gate holds counts nothing
-    /// toward the room later exits are allowed in. Seed 15's arrivals with its discretionary exit
-    /// of 4 given no limit of its own, so it is held `exit_unpriced` (DEC-2037 item 5; one with a
-    /// limit goes at it, DEC-2358), and the two risk exits of 2 beside it are both allowed,
-    /// 3 + 2 + 2 within 10.
+    /// toward the room later exits are allowed in. Seed 15's discretionary exit of 4 is held
+    /// `exit_unpriced`, and the two risk exits of 2 beside it are both allowed, 3 + 2 + 2 within 10.
     #[test]
     fn a_held_exit_counts_nothing_toward_the_gates_room() -> Result<(), String> {
-        let mut prefix = SEED_15.get(..6).ok_or("seed 15's arrivals")?.to_vec();
-        let discretionary = prefix
-            .iter_mut()
-            .find(|step| matches!(step, Move::Exit(2, 4, _)))
-            .ok_or("seed 15's discretionary exit")?;
-        *discretionary = Move::Exit(2, 4, 0);
-        let desk = rule_13_script_with(0, From::Protected, false, &prefix)?;
+        let prefix = SEED_15.get(..6).ok_or("seed 15's arrivals")?;
+        let desk = rule_13_script_with(0, From::Protected, false, prefix)?;
         let mut decided: Vec<(Purpose, u32, &str, &str)> = desk
             .exits
             .values()
@@ -13622,12 +13148,7 @@ mod sequence_tests {
                     Purpose::RiskExit
                 }
             };
-            let exit = if protects {
-                market_sell(EXIT, "10", purpose)?
-            } else {
-                sell(EXIT, "10", "150", purpose)?
-            };
-            let ran = executor.run(exit, &ports)?;
+            let ran = executor.run(sell(EXIT, "10", "150", purpose)?, &ports)?;
             assert_eq!(gate_reasons(&ran), vec![reason]);
             let long = executor.run(Input::Tick(RiskClock::from_secs(start + 121)), &ports)?;
             assert!(!drafted(&long).contains(&"OrderAbandoned"), "{reason}");
@@ -14626,7 +14147,7 @@ mod closed_form {
     use std::collections::BTreeSet;
     use std::panic::catch_unwind;
 
-    use mandate_canon::{Int, Key, Object, Value, parse, to_canonical};
+    use mandate_canon::{Key, Object, Value, parse, to_canonical};
     use mandate_journal::{AppendOutcome, Draft, Invalid, InvalidReason, MemoryJournal, StreamId};
     use mandate_time::UtcNanos;
 
@@ -14693,32 +14214,18 @@ mod closed_form {
         )
     }
 
-    /// Asserts `draft` is §9.5's closed record of `action` on `AAPL`, at the version the executor
-    /// writes (`schema_version`): the members `named` as given, every other list empty and every
-    /// other member null, its own `risk_clock`, and no other member, so no legacy `instrument`,
-    /// `agent`, `limit`, `reason`, or joined `orders`; and that the journal admits it at that
-    /// version. Version 2 adds `unprotected_fraction` before `risk_clock` (journal spec v0.72,
-    /// DEC-2312).
+    /// Asserts `draft` is §9.5's closed version-1 record of `action` on `AAPL`: the members
+    /// `named` as given, every other list empty and every other member null, its own `risk_clock`,
+    /// and no other member, so no legacy `instrument`, `agent`, `limit`, `reason`, or joined
+    /// `orders`; and that the journal admits it.
     pub(super) fn assert_closed(
         draft: &EventDraft,
         action: &str,
         named: &[(&str, Value)],
     ) -> Result<(), ExecutorError> {
         let mut expected = Object::new();
-        let version = crate::batch::schema_version("ProtectionChanged");
-        assert!(
-            matches!(version, 1 | 2),
-            "§9.5 registers `ProtectionChanged` at versions 1 and 2 only, not {version}"
-        );
-        let mut members: Vec<&str> = MEMBERS.split_whitespace().collect();
-        assert_eq!(
-            members.len(),
-            17,
-            "§9.5's version-1 table has seventeen members"
-        );
-        if version == 2 {
-            members.insert(16, "unprotected_fraction");
-        }
+        let members: Vec<&str> = MEMBERS.split_whitespace().collect();
+        assert_eq!(members.len(), 17, "§9.5's table has seventeen members");
         for member in members.iter().copied() {
             let given = named.iter().find(|(name, _)| *name == member);
             let value = match (member, given) {
@@ -14739,10 +14246,10 @@ mod closed_form {
         }
         assert_eq!(
             (draft.schema_version, &draft.payload),
-            (version, &Value::Object(expected)),
+            (1, &Value::Object(expected)),
             "{action}: §9.5's closed record"
         );
-        let refused = Draft::parse(&to_canonical(&envelope(&draft.payload, version)?)).err();
+        let refused = Draft::parse(&to_canonical(&envelope(&draft.payload)?)).err();
         assert!(
             refused.is_none(),
             "{action}: the journal refuses it: {refused:?}"
@@ -14785,7 +14292,7 @@ mod closed_form {
             closed.insert(Key::new(member).map_err(|_| missing(member))?, value);
         }
         let judged = |payload: &Object| -> Result<Option<Invalid>, ExecutorError> {
-            let draft = envelope(&Value::Object(payload.clone()), 1)?;
+            let draft = envelope(&Value::Object(payload.clone()))?;
             Ok(Draft::parse(&to_canonical(&draft)).err())
         };
         assert_eq!(judged(&closed)?, None, "the closed watchdog is admitted");
@@ -14802,16 +14309,13 @@ mod closed_form {
     }
 
     /// The vectors' `placed` chain event, seq 7 (`fixtures/refcases/journal.json`), less what only
-    /// a sealed row carries, with `payload` in place of its own, at `version`.
-    fn envelope(payload: &Value, version: u64) -> Result<Value, ExecutorError> {
+    /// a sealed row carries, with `payload` in place of its own.
+    fn envelope(payload: &Value) -> Result<Value, ExecutorError> {
         let mut body = chain_body(7)?;
+        body.remove(&Key::new("payload").map_err(|_| missing("payload"))?);
         body.insert(
             Key::new("payload").map_err(|_| missing("payload"))?,
             payload.clone(),
-        );
-        body.insert(
-            Key::new("schema_version").map_err(|_| missing("schema_version"))?,
-            Value::Int(Int::new(version).ok_or_else(|| missing("schema_version"))?),
         );
         Ok(Value::Object(body))
     }
@@ -14864,7 +14368,7 @@ mod closed_form {
         }
         let mut bodies = Vec::new();
         for (index, draft) in drafted.iter().enumerate() {
-            let mut body = envelope(&draft.payload, draft.schema_version)?;
+            let mut body = envelope(&draft.payload)?;
             if let Value::Object(fields) = &mut body {
                 let id = Key::new("event_id").map_err(|_| missing("event_id"))?;
                 fields.insert(id, Value::Str(format!("01J8ZQB{index:019}")));
@@ -15206,8 +14710,8 @@ mod ladder_tests {
     proptest! {
         /// DEC-160 (12): `exit_price` answers every purpose, for any observations, step, floor and
         /// limit, and never with a refusal. Its oracle is its own: a sequence's exit prices when
-        /// some sane bid or sane trade is within five minutes (DEC-260 (5)); otherwise every exit,
-        /// a discretionary one included (DEC-2358), falls back to its limit, raised to the floor.
+        /// some sane bid or sane trade is within five minutes (DEC-260 (5)); otherwise a discretionary
+        /// exit is held and every other exit falls back to its limit, raised to the floor.
         #[test]
         fn exit_price_never_refuses_any_purpose(
             purpose in purposes(),
@@ -15260,28 +14764,10 @@ mod ladder_tests {
                     matches!(priced, ExitPrice::Laddered(price) if floor.is_none_or(|floor| price >= floor)),
                     "{:?}", priced
                 ),
+                (true, false, Purpose::DiscretionaryExit) => prop_assert_eq!(priced, ExitPrice::Held),
                 (true, false, _) => prop_assert_eq!(priced, ExitPrice::Fallback(raised)),
             }
         }
-    }
-
-    /// DEC-2358, narrowing DEC-160 (12): with nothing to price from, a discretionary exit with a
-    /// limit of its own falls back to it, as every other exit does, whatever its floor; one with no
-    /// limit of its own is still held (DEC-2037 item 5); an opening keeps its own limit.
-    #[test]
-    fn a_discretionary_exit_with_its_own_limit_falls_back_to_it() -> Result<(), ExecutorError> {
-        let stale = [seen(Some("150"), None, true, 0)?];
-        let now = RiskClock::from_secs(1_000);
-        let limit = Price::parse("150")?;
-        let tier = Some(liquid()?);
-        let priced = |purpose, limit| exit_price(tier, &stale, 0, now, None, purpose, limit);
-        assert_eq!(
-            priced(Purpose::DiscretionaryExit, Some(limit)),
-            ExitPrice::Fallback(limit)
-        );
-        assert_eq!(priced(Purpose::DiscretionaryExit, None), ExitPrice::Held);
-        assert_eq!(priced(Purpose::Open, Some(limit)), ExitPrice::Own(limit));
-        Ok(())
     }
 
     /// An owner exit's floor (§5.5): the rung never prices below it, and a rung above it keeps

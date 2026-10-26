@@ -12,8 +12,7 @@ use mandate_executord::Broker;
 use mandate_executord::alpaca::AlpacaBroker;
 use mandate_executord::connect::connect_check;
 use mandate_executord::credential::{
-    BrokerChoice, broker_choice, checked_connection, own_checked_connection, paper_token,
-    paper_transport, read_token,
+    BrokerChoice, broker_choice, checked_connection, paper_token, paper_transport, read_token,
 };
 use mandate_executord::fixture::Ids;
 use mandate_executord::paper::FixturePaper;
@@ -132,29 +131,6 @@ fn the_connection_is_the_one_the_latest_check_passed_for() -> Result<(), Error> 
     assert_eq!(
         checked_connection(&store, &scope()),
         Err("connection_unchecked")
-    );
-    Ok(())
-}
-
-/// DEC-2339: the run leases only its own connection. A latest check passed for another
-/// connection refuses the start as `connection_mismatch`, and none still leaves it unchecked.
-#[test]
-fn the_run_leases_only_its_own_checked_connection() -> Result<(), Error> {
-    let mut store = MemoryStore::default();
-    let own = ConnectionId::new("conn1")?;
-    assert_eq!(
-        own_checked_connection(&store, &scope(), &own),
-        Err("connection_unchecked")
-    );
-    checked(&mut store, "conn1", true)?;
-    assert_eq!(
-        own_checked_connection(&store, &scope(), &own),
-        Ok(own.clone())
-    );
-    checked(&mut store, "conn2", true)?;
-    assert_eq!(
-        own_checked_connection(&store, &scope(), &own),
-        Err("connection_mismatch")
     );
     Ok(())
 }

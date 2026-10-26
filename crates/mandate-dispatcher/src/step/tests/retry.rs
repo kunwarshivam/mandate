@@ -26,7 +26,7 @@ const LATER_GAP: i64 = 900;
 /// §5.3's windows from attempt 1: `safety` 24 hours, `info` 6 hours.
 const SAFETY_WINDOW: i64 = 86_400;
 const INFO_WINDOW: i64 = 21_600;
-const CHANNELS: [PushChannel; 2] = [PushChannel::Email, PushChannel::Phone];
+const CHANNELS: [PushChannel; 2] = [PushChannel::Email, PushChannel::WebPush];
 
 /// The gap §5.3 puts after attempt `n`.
 fn gap(n: u32) -> i64 {
@@ -196,7 +196,7 @@ fn a_retry_is_the_next_attempt_under_one_key_with_its_own_variants_verdict() -> 
             provider_message_id: "m-2".to_owned(),
         },
     ];
-    let phone = [
+    let web_push = [
         Outcome::Retryable {
             reason: Reason::Timeout,
         },
@@ -205,16 +205,16 @@ fn a_retry_is_the_next_attempt_under_one_key_with_its_own_variants_verdict() -> 
         },
     ];
     sends.answers.insert(PushChannel::Email, email.into());
-    sends.answers.insert(PushChannel::Phone, phone.into());
+    sends.answers.insert(PushChannel::WebPush, web_push.into());
     let mut random = Counter(0);
     for secs in [0, 14, 15, 74, 75, 10_000] {
         step_at(&journal, &writer, &mut sends, &mut random, secs)??;
     }
     let want = vec![
         record("email", 1, "failed", "rate_limited", "retryable", 0),
-        record("phone", 1, "failed", "timeout", "retryable", 0),
+        record("web_push", 1, "failed", "timeout", "retryable", 0),
         record("email", 2, "failed", "provider_error", "retryable", 15),
-        record("phone", 2, "failed", "too_large", "permanent", 15),
+        record("web_push", 2, "failed", "too_large", "permanent", 15),
         record("email", 3, "delivered", "", "", 75),
     ];
     assert_eq!(records(&journal)?, want);
@@ -225,12 +225,16 @@ fn a_retry_is_the_next_attempt_under_one_key_with_its_own_variants_verdict() -> 
         .map(|(c, n, k)| (*c, format!("{n}:{k}")))
         .collect();
     let email_key = format!("{}:{}", notice.hex()?, key_of(&notice, PushChannel::Email)?);
-    let push_key = format!("{}:{}", notice.hex()?, key_of(&notice, PushChannel::Phone)?);
+    let push_key = format!(
+        "{}:{}",
+        notice.hex()?,
+        key_of(&notice, PushChannel::WebPush)?
+    );
     let expected = [
         (PushChannel::Email, email_key.clone()),
-        (PushChannel::Phone, push_key.clone()),
+        (PushChannel::WebPush, push_key.clone()),
         (PushChannel::Email, email_key.clone()),
-        (PushChannel::Phone, push_key),
+        (PushChannel::WebPush, push_key),
         (PushChannel::Email, email_key),
     ];
     assert_eq!(keys, expected, "one key per send, on every attempt");
@@ -254,7 +258,7 @@ fn a_failing_send_is_abandoned_once_at_the_first_step_at_or_after_its_window_end
         };
         sends
             .answers
-            .insert(PushChannel::Phone, VecDeque::from([accepted]));
+            .insert(PushChannel::WebPush, VecDeque::from([accepted]));
         let mut random = Counter(0);
         let mut want = Vec::new();
         let (mut secs, mut n) = (0_i64, 1_u32);
@@ -262,7 +266,7 @@ fn a_failing_send_is_abandoned_once_at_the_first_step_at_or_after_its_window_end
             step_at(&journal, &writer, &mut sends, &mut random, secs)??;
             want.push(record("email", n, "failed", "timeout", "retryable", secs));
             if n == 1 {
-                want.push(record("phone", 1, "delivered", "", "", 0));
+                want.push(record("web_push", 1, "delivered", "", "", 0));
             }
             secs = secs.checked_add(gap(n)).ok_or("secs")?;
             n = n.checked_add(1).ok_or("n")?;
@@ -307,14 +311,14 @@ fn a_step_makes_at_most_one_record_per_send_after_a_lapse() -> Checked {
     };
     sends
         .answers
-        .insert(PushChannel::Phone, VecDeque::from([accepted]));
+        .insert(PushChannel::WebPush, VecDeque::from([accepted]));
     let mut random = Counter(0);
     for secs in [0, 7_200, 7_200, 7_259, 7_260] {
         step_at(&journal, &writer, &mut sends, &mut random, secs)??;
     }
     let want = vec![
         record("email", 1, "failed", "timeout", "retryable", 0),
-        record("phone", 1, "delivered", "", "", 0),
+        record("web_push", 1, "delivered", "", "", 0),
         record("email", 2, "failed", "timeout", "retryable", 7_200),
         record("email", 3, "failed", "timeout", "retryable", 7_260),
     ];
@@ -386,7 +390,7 @@ enum Tick {
 struct Scenario {
     info: bool,
     email: Vec<usize>,
-    phone: Vec<usize>,
+    web_push: Vec<usize>,
     ticks: Vec<(Tick, bool)>,
 }
 
@@ -405,10 +409,10 @@ fn scenarios() -> impl Strategy<Value = Scenario> {
         prop::collection::vec(0_usize..12, 0..10),
         prop::collection::vec((tick, prop::bool::weighted(0.2)), 1..30),
     )
-        .prop_map(|(info, email, phone, ticks)| Scenario {
+        .prop_map(|(info, email, web_push, ticks)| Scenario {
             info,
             email,
-            phone,
+            web_push,
             ticks,
         })
 }
@@ -443,7 +447,7 @@ fn run_scenario(scenario: &Scenario) -> Result<(), String> {
     let mut oracle: BTreeMap<PushChannel, VecDeque<usize>> = BTreeMap::new();
     for (channel, answers) in [
         (PushChannel::Email, &scenario.email),
-        (PushChannel::Phone, &scenario.phone),
+        (PushChannel::WebPush, &scenario.web_push),
     ] {
         sends
             .answers
@@ -600,7 +604,7 @@ fn check_due(
 /// terminal record; at most one `abandoned`, last, with `retry_window_ended`, and never before
 /// the window's end.
 fn whole_run(records: &[Record], window: i64) -> Result<(), String> {
-    for channel in ["email", "phone"] {
+    for channel in ["email", "web_push"] {
         let mine: Vec<&Record> = records.iter().filter(|r| r.channel == channel).collect();
         let first = mine.first().map_or(0, |r| r.secs);
         let mut previous: Option<&Record> = None;

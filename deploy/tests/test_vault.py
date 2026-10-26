@@ -598,14 +598,13 @@ def test_values_refuse_a_secret_a_tag_or_a_server_argument():
 
 def test_the_workspace_reaches_the_vault_it_selects():
     """The workspace chart's vault egress selects this chart's pods on its port, and every workspace
-    pod that may reach the vault carries the label the vault's ingress admits (cross-chart trace).
-    The connect finish renders only with `api.connectFinish` (DEC-2348 item 3), so it is on here."""
+    pod that may reach the vault carries the label the vault's ingress admits (cross-chart trace)."""
     vault = render()
     pod_labels = server(vault)["spec"]["template"]["metadata"]["labels"]
     admitted = one(vault, "NetworkPolicy", "vault")["spec"]["ingress"][0]["from"][0]["podSelector"][
         "matchLabels"
     ]
-    workspace = render_all("--set", "api.connectFinish=true")
+    workspace = render_all()
     reaching = []
     for name, policy in policies(workspace).items():
         for rule in policy["spec"].get("egress", []):

@@ -7,7 +7,6 @@ runbook, and nothing else (no agent, account, instrument or mandate content).
 | Code | Severity | What it means |
 |---|---|---|
 | `crash_loop` | SEV-2 | A runtime or executor restarted five times within ten minutes (design §3.4, Proposed bound). The manager journaled `ProcessCrashLooped` and left it down |
-| `kill_switch_unapplied` | SEV-1 | An executor no agent of its account wants any more was started for a kill switch that covers it, and crash-looped before it ended: the switch is not applied ([DEC-2344](../project/decisions/DEC-2344.md) item 1). Raised in place of `crash_loop` |
 | `deployment_unread` | SEV-3 | A version-1 `AgentDeployed` of an agent not stopped. It names no connection, so the manager starts nothing for it ([DEC-1173](../project/decisions/DEC-1173.md) item 3) |
 | `deployment_unconnected` | SEV-3 | A version-2 `AgentDeployed` that journal spec §9.24 rule 201 refuses, of an agent not stopped: its connection was not established on the control stream before it, or was revoked since. The manager starts nothing for it ([DEC-2038](../project/decisions/DEC-2038.md)) |
 
@@ -15,30 +14,12 @@ Each is raised once per manager process: a restarted manager reads the control s
 raises it again while the condition holds. None of them stops, drains or replaces a running
 process, and none holds back a kill switch (design §3.4, §3.6).
 
-## `kill_switch_unapplied`: a kill switch that did not reach its account
-
-The account's agents are all retired, so nothing else runs on it, but a kill switch still covers
-what the owner holds there (an account- or workspace-scoped switch reaches released holdings). The
-manager started the account's executor for that switch, and it crashed until its crash loop. Treat
-it as a kill switch not yet applied.
-
-- Escalate at once, as for a kill switch not applied. Today only the operator is told: the owner's
-  alert for this condition, with generic text and no ids, lands with E8's notification row
-  ([DEC-2344](../project/decisions/DEC-2344.md) items 1 and 2) and is needed before staging. The
-  operator never trades on an owner's account; the owner can act in the broker's own console, or
-  issue the switch again once the executor can run.
-- Find why the executor could not run: its pod's logs and last exit, as below. A revoked connection
-  whose token is destroyed cannot log in to the broker; that executor cannot apply anything, so the
-  manual step above is the only one.
-- A later covering kill switch still gets its one start; a restart of the manager raises this alert
-  again, once, while the condition holds.
-
 ## `crash_loop`: a process left down
 
 What holds while it is down:
 
-- The manager starts the process again only for a kill switch whose scope covers it, once for the
-  covering switches not yet answered, so a kill switch still reaches it (journal spec §9.21, "Which fact is the pause").
+- The manager starts the process again only for a kill switch whose scope covers it, once per
+  kill switch, so a kill switch still reaches it (journal spec §9.21, "Which fact is the pause").
 - A restart of the manager does not bring it back.
 - An executor stays down while any agent of its account is still deployed.
 

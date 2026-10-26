@@ -7,10 +7,8 @@
 //! window's end, as `NoticeAttempted`. Every
 //! append goes through a [`NoticeWriter`], which holds only an `ntf:` stream id, so the
 //! dispatcher cannot name an agent, account, or control stream. An append that does not commit
-//! stops the step before its next send. Every `NoticeAttempted` is journaled at schema version 3,
-//! its `verdict` the outcome's own variant and never a reading of its reason (DEC-706), and its
-//! `address_ref` `null`, since no web-push send is made until the per-address fan-out exists
-//! (DEC-2504 item 5, DEC-2505).
+//! stops the step before its next send. Every `NoticeAttempted` is journaled at schema version 2,
+//! its `verdict` the outcome's own variant and never a reading of its reason (DEC-706).
 
 use std::collections::BTreeSet;
 
@@ -23,12 +21,11 @@ use mandate_notify::{
 use mandate_time::UtcNanos;
 
 use crate::due::{Pending, pending};
-use crate::{DispatchError, Next, WebPushSwitch};
+use crate::{DispatchError, Next};
 
-/// The `NoticeAttempted` schema version `append` admits (journal spec v0.51 §9.15, DEC-706,
-/// DEC-2505): every attempt is journaled at version 3, its `verdict` and then its `address_ref`
-/// last, so no writer leaves either out.
-const ATTEMPTED_VERSION: u64 = 3;
+/// The `NoticeAttempted` schema version `append` admits (journal spec v0.40 §9.15, DEC-706): every
+/// attempt is journaled at version 2, its `verdict` last, so no writer leaves the verdict out.
+const ATTEMPTED_VERSION: u64 = 2;
 
 /// The one handle the dispatcher appends through: a notice stream `ntf:{workspace_id}` and the
 /// writer epoch the dispatcher took for it (journal spec §5.1).
@@ -153,11 +150,7 @@ pub(crate) struct Notices {
 
 /// One pass of the dispatcher at `now` (spec §5.1 steps 1 to 4, DEC-704 items 2 and 3, DEC-705).
 /// Every new cause's `NoticeIssued` is one batch, opened by `StreamOpened` on an empty stream, that
-/// commits before any send. Every recipient of the audience is listed on each notice, but no
-/// web-push send is made or journaled: a version-3 web-push attempt names the one address it went
-/// to, and the fan-out over a recipient's active addresses is not built yet (journal spec §9.15,
-/// DEC-2504 items 4 and 5, DEC-2506's owed fan-out), so web push stays off whatever the process's
-/// [`WebPushSwitch`] says. Then each send [`crate::due`] lists gets at most one record in this
+/// commits before any send. Then each send [`crate::due`] lists gets at most one record in this
 /// step (DEC-707 item 5): a due attempt is made under the send's one key and its outcome journaled
 /// as that attempt, before the next send; a send whose window has ended is journaled `abandoned`
 /// with `retry_window_ended` and a `null` verdict, with no send; a waiting send gets nothing.
@@ -216,7 +209,7 @@ pub fn step(
     }
     let rows = read(journal, stream)?;
     let mut head = notices_of(&rows).head;
-    for pending in pending(&rows, &WebPushSwitch::Off.sends(config.audience)?, now)? {
+    for pending in pending(&rows, config.audience, now)? {
         let due = &pending.due;
         let record = match &due.next {
             Next::Attempt { attempt, key } => {
@@ -309,7 +302,6 @@ impl Record {
             ),
             ("coalesced_into", Value::Null),
             ("verdict", self.verdict.map_or(Value::Null, text)),
-            ("address_ref", Value::Null),
         ])
     }
 }

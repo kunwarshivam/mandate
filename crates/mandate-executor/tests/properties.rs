@@ -2916,12 +2916,13 @@ proptest! {
             event_type,
             common::with_clock(&[], 10),
         );
-        const OTHER_STREAMS: [&str; 8] = [
+        const OTHER_STREAMS: [&str; 9] = [
             "RelatedAccountsCoordination",
             "MandateVersionApplied",
             "RiskLimitTriggered",
             "RiskLimitLifted",
             "HighWaterMarkReset",
+            "PositionReleased",
             "InstrumentRestrictionChanged",
             "GoalCompleted",
             "UniverseChanged",
@@ -2929,7 +2930,7 @@ proptest! {
         /// The catalogue events a merged slice interprets. Every other event this crate owns
         /// answers its story's stub until the slice that implements it moves it here, in the same
         /// change, with live tests pinning what it does (DEC-137, #184 review finding 4).
-        const INTERPRETED: [&str; 25] = [
+        const INTERPRETED: [&str; 24] = [
             "StreamOpened",
             "IntentReceived",
             "GateDecided",
@@ -2954,7 +2955,6 @@ proptest! {
             "ProtectionChanged",
             "ConductBreachDetected",
             "TradingDayStarted",
-            "PositionReleased",
         ];
         let stubbed = event_type != "NobodyEverWroteThis"
             && !OTHER_STREAMS.contains(&event_type)
@@ -2980,6 +2980,7 @@ proptest! {
                         "RiskLimitTriggered",
                         "RiskLimitLifted",
                         "HighWaterMarkReset",
+                        "PositionReleased",
                         "InstrumentRestrictionChanged",
                         "GoalCompleted",
                     ]

@@ -69,31 +69,6 @@ fn a_process_without_a_template_file_has_none_and_one_present_is_read() {
 }
 
 #[test]
-fn the_exchanges_template_is_read_from_the_charts_file_name() {
-    let dir = dir("exchange");
-    let pod = r#"{"metadata":{"labels":{}},"spec":{"containers":[{"name":"token-exchange"}]}}"#;
-    std::fs::write(dir.join("token_exchange.json"), pod).unwrap();
-    assert!(
-        templates(&dir).unwrap().is_empty(),
-        "the journal's spelling is not the chart's file"
-    );
-    std::fs::write(dir.join("token-exchange.json"), pod).unwrap();
-    assert_eq!(
-        templates(&dir).unwrap().keys().copied().collect::<Vec<_>>(),
-        [Process::TokenExchange]
-    );
-    std::fs::write(dir.join("token-exchange.json"), "[]").unwrap();
-    assert_eq!(
-        templates(&dir),
-        Err(TemplateError::Unreadable(Process::TokenExchange))
-    );
-    assert_eq!(
-        TemplateError::Unreadable(Process::TokenExchange).code(),
-        "token_exchange_template_unreadable"
-    );
-}
-
-#[test]
 fn a_template_that_is_not_a_json_object_refuses_the_start() {
     let dir = dir("bad");
     std::fs::write(dir.join("executor.json"), "[]").unwrap();

@@ -41,7 +41,6 @@ mod cbor;
 mod client_data;
 mod cose;
 pub mod credentials;
-pub mod reduction;
 pub mod stepup;
 
 use base64::Engine as _;

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/passkeys.schema.json",
-  "description": "GET /passkeys (\u00a73.6, DEC-2108): the session's member's passkeys the control stream holds, enrolled and not removed, in enrolment order, from the one fold the passkey routes read (DEC-2124). enrolled_at is the CredentialEnrolled row's recorded_at. as_of names the control stream. References only: never a public key (API-11).",
+  "description": "GET /passkeys (\u00a73.6, DEC-2108): the session's member's passkeys the control stream holds, enrolled and not removed, in enrolment order. as_of names the control stream. References only: never a public key (API-11).",
   "type": "object",
   "allOf": [
     {

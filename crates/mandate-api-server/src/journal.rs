@@ -30,15 +30,15 @@ pub trait Journal: Send + Sync {
     /// The event stored under `event_id` in any stream, or `None` when no stream holds it. The
     /// caller scopes it to a workspace (§4.8.1).
     fn event<'a>(&'a self, event_id: &'a str) -> Answer<'a, Option<StoredEvent>>;
-    /// Appends `drafts`, in order and all or none, at `expected_head` under `writer_epoch`. A
-    /// failure that wrote nothing is [`JournalUnavailable`].
+    /// Appends the one `draft` at `expected_head` under `writer_epoch`. A failure that wrote
+    /// nothing is [`JournalUnavailable`].
     fn append<'a>(
         &'a self,
         stream: &'a str,
         expected_head: u64,
         writer_epoch: u64,
         recorded_at: UtcNanos,
-        drafts: &'a [&'a [u8]],
+        draft: &'a [u8],
     ) -> Answer<'a, AppendOutcome>;
 }
 
@@ -81,12 +81,12 @@ impl Journal for Postgres {
         expected_head: u64,
         writer_epoch: u64,
         recorded_at: UtcNanos,
-        drafts: &'a [&'a [u8]],
+        draft: &'a [u8],
     ) -> Answer<'a, AppendOutcome> {
         Box::pin(async move {
             let id = StreamId::parse(stream).ok_or(JournalUnavailable)?;
             self.0
-                .append(&id, expected_head, writer_epoch, recorded_at, drafts)
+                .append(&id, expected_head, writer_epoch, recorded_at, &[draft])
                 .await
                 .map_err(|_| JournalUnavailable)
         })
