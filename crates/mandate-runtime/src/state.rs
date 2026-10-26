@@ -70,9 +70,6 @@ pub struct RuntimeState {
     /// carried it. Evidence is usable once per workspace (EI-11), so any other event that repeats
     /// an assertion is reusing it, and a re-tail of the first is not.
     assertions: BTreeMap<AssertionId, EventId>,
-    /// The owner's exits of one instrument, by the `OwnerExitRequested` that records each, so that a
-    /// restart can hand one the executor has not taken again (`AGENTS.md` rule 13, DEC-257 item 7).
-    owner_exits: BTreeMap<EventId, OwnerExit>,
     /// The latest `ConnectionChecked` of this deployment's own connection, or `None` while the
     /// account stream holds none (journal spec §9.8, DEC-969).
     connection_check: Option<ConnectionCheck>,
@@ -93,14 +90,6 @@ pub struct RuntimeState {
 struct ConnectionCheck {
     passed: bool,
     at: RiskClock,
-}
-
-/// An owner's exit of one instrument as the fold holds it: what the planner is asked for again.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct OwnerExit {
-    pub(crate) instrument: InstrumentId,
-    pub(crate) confirmation: Option<OwnerConfirmation>,
-    pub(crate) handoff: Handoff,
 }
 
 /// The kill switch the fold remembers. The `event` is the `KillSwitchActivated` that identifies the
@@ -178,7 +167,6 @@ impl RuntimeState {
             marks: BTreeMap::new(),
             copied: BTreeSet::new(),
             assertions: BTreeMap::new(),
-            owner_exits: BTreeMap::new(),
             connection_check: None,
             requests: BTreeMap::new(),
             orders_of: BTreeMap::new(),
@@ -221,14 +209,19 @@ impl RuntimeState {
     /// "the broker's truth is not yet confirmed", which is a reason not to *decide*, while dropping
     /// an exit already journaled would remove protection rather than add it, and trading-domain spec
     /// §5.5 lets only `paused`, `stopped`, an `Unknown` order, or the broker hold an exit. The copied
-    /// account mode and the lifecycle state still govern, so `stopped` re-hands a flatten alone and
-    /// `exits_only` re-hands no opening (DEC-131 item 22).
+    /// account mode and the lifecycle state still govern, so `stopped` re-hands a flatten and an
+    /// owner's exit alone and `exits_only` re-hands no opening (DEC-131 item 22). An owner's exit
+    /// is re-handed in every mode, as the owner's flatten it replaced was (DEC-2387 item 3): the
+    /// owner asked for it, and the executor's mode gate is what may hold it (`AGENTS.md` rule 13).
     pub fn permits_rehand(&self, purpose: Purpose) -> bool {
         match self.rehand_mode() {
             Mode::Normal => true,
             Mode::ExitsOnly => !purpose.adds_risk(),
-            Mode::Paused => matches!(purpose, Purpose::Protective | Purpose::Flatten),
-            Mode::Stopped => purpose == Purpose::Flatten,
+            Mode::Paused => matches!(
+                purpose,
+                Purpose::Protective | Purpose::Flatten | Purpose::OwnerExit
+            ),
+            Mode::Stopped => matches!(purpose, Purpose::Flatten | Purpose::OwnerExit),
         }
     }
 
@@ -474,13 +467,6 @@ impl RuntimeState {
             .collect()
     }
 
-    /// The owner exits the executor has not been seen to take, which a restart hands again.
-    pub(crate) fn untaken_owner_exits(&self) -> impl Iterator<Item = (&EventId, &OwnerExit)> {
-        self.owner_exits
-            .iter()
-            .filter(|(_, exit)| matches!(exit.handoff, Handoff::Pending))
-    }
-
     /// The intent event ids of the intents still live in one instrument: all an owner's exit of
     /// that instrument may cancel (mandate spec §6.1, trading-domain spec §5.5). The plan's
     /// cancels name client order ids, a mapping the exit adapter derives from the journal
@@ -595,18 +581,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         "OwnerExitRequested" => {
             copy_of(state, event);
             let confirmation = payload::honoured_confirmation(&event.payload)?;
-            if payload::str_of(&event.payload, "scope") == Some("instrument") {
-                let subject = payload::str_of(&event.payload, "subject")
-                    .ok_or_else(|| payload::non_canonical("subject"))?;
-                state.owner_exits.insert(
-                    event.event_id.clone(),
-                    OwnerExit {
-                        instrument: payload::instrument_of(subject)?,
-                        confirmation,
-                        handoff: Handoff::Pending,
-                    },
-                );
-            } else {
+            if payload::str_of(&event.payload, "scope") != Some("instrument") {
                 state.shown = confirmation;
             }
         }
@@ -743,9 +718,6 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 let intent = EventId(intent.to_owned());
                 if let Some(live) = state.outstanding.get_mut(&intent) {
                     live.handoff = Handoff::Taken;
-                }
-                if let Some(exit) = state.owner_exits.get_mut(&intent) {
-                    exit.handoff = Handoff::Taken;
                 }
             }
         }

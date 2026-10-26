@@ -21,12 +21,13 @@ use mandate_risk::GateConfig;
 use mandate_runtime::{EventDraft, FlattenLeg, FlattenPlan, FlattenPlanner, FlattenRequest};
 use mandate_spec::document::Mandate;
 
+use crate::bars::BarsReader;
 use crate::runtime::{Refs, Wiring};
 
 mod gate;
 mod plan;
 
-pub use gate::{Gate, UNJOURNALED, verdict};
+pub use gate::{Gate, Liquidity, UNJOURNALED, UNSEEN, verdict};
 pub use plan::Plan;
 
 /// How fresh, in risk-clock seconds, the facts an opening reads must be (DEC-2378 item 4): a mark
@@ -41,7 +42,8 @@ pub const FRESH: Freshness = Freshness {
 /// `base` with the deployment's production ports (DEC-2378 S3): the shared fold for `agent`,
 /// ticked by the scheduler's `clock` stream; the flatten over it with the asset classes of
 /// `document`'s pinned universe; the order plan and the gate's dry run over the stored mandate,
-/// the dry run with the registered rule set's gate configuration `rules` (DEC-2388), which still
+/// the dry run with the registered rule set's gate configuration `rules` (DEC-2388) and the
+/// stored bars `bars` read for the liquidity floor and participation (DEC-2274), which still
 /// denies every opening while any check is deferred; the view and every draft's references naming
 /// the deployed `version`. A document that does not parse, which `deployment::document` has
 /// already refused, keeps `base`'s plan, gate and view.
@@ -49,7 +51,7 @@ pub fn wired(
     mut base: Wiring,
     version: &str,
     document: &Value,
-    rules: Option<GateConfig>,
+    (rules, bars): (Option<GateConfig>, BarsReader),
     clock: &str,
     agent: &str,
 ) -> Wiring {
@@ -65,7 +67,9 @@ pub fn wired(
             .collect();
         base.view.approval.timeout_s = i64::from(mandate.autonomy.approval.timeout_s);
         base.plan = Box::new(Plan::new(facts.clone(), mandate.clone(), FRESH));
-        base.gate = Box::new(Gate::new(facts.clone(), (version, mandate), rules, FRESH));
+        base.gate = Box::new(
+            Gate::new(facts.clone(), (version, mandate), rules, FRESH).reading(Box::new(bars)),
+        );
     }
     base.refs = Box::new(MandateRefs(version.to_owned()));
     base.facts = Some(facts);
@@ -206,7 +210,9 @@ impl Facts {
 /// and the broker holds what it will not take (`AGENTS.md` rule 13). A held instrument it cannot
 /// plan, one with no asset class in the universe or an id that does not parse, is counted for the
 /// process's `flatten_unplanned` alert rather than dropped silently; the executor still flattens
-/// its own sub-ledger of it.
+/// its own sub-ledger of it. A plan asked before the account is followed, when nothing can be read,
+/// is counted the same way, never taken as "nothing held": for an owner's exit of one instrument
+/// the plan is the only seller (DEC-2387 item 1).
 pub struct Flatten {
     facts: Facts,
     classes: BTreeMap<String, AssetClass>,
@@ -228,10 +234,18 @@ impl FlattenPlanner for Flatten {
                 .as_ref()
                 .is_none_or(|named| named.as_str() == instrument)
         };
-        let (held, working) = self
+        let Some((held, working)) = self
             .facts
             .read(|journaled| (journaled.held(), journaled.working()))
-            .unwrap_or_default();
+        else {
+            self.facts.note_unplanned(1);
+            return FlattenPlan {
+                cancel_client_order_ids: Vec::new(),
+                sells: Vec::new(),
+                purpose: request.initiator.sell_purpose(),
+                confirmation: request.confirmation.clone(),
+            };
+        };
         let scoped_held: Vec<_> = held
             .into_iter()
             .filter(|(instrument, _)| scoped(instrument))

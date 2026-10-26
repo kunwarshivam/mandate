@@ -8,18 +8,18 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value, to_canonical};
 use mandate_domain::Environment;
-use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource};
-use mandate_num::Usd;
-use mandate_shell::control::{
+use mandate_gate_inputs::control::{
     Build, Confirmation, ConfirmedVersion, ControlRecord, DeploymentRefusal as Refusal, DoorChecks,
     LiveAdmission, McpHost, Origin, RunFacts, checked_before_credentials, confirmed_version,
 };
+use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource};
+use mandate_num::Usd;
 use mandate_spec::context::{AgentId, Membership};
 use mandate_spec::{Mandate, Violation};
 use mandate_time::Date;
 use proptest::prelude::*;
 
-const MANDATE: &str = include_str!("fixtures/tracer/mandate.json");
+const MANDATE: &str = include_str!("../../mandate-shell/tests/fixtures/tracer/mandate.json");
 const AGENT: &str = "agent_spy";
 const CONNECTION: &str = "conn_alpaca_paper_01";
 /// The four records of a deployed, confirmed version: `@V` is the version, `@P` the provenance list

@@ -38,6 +38,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mandate_artifacts_fs::FsArtifactStore;
+use mandate_daemon::bars::{BARS_ENV, BarsReader};
 use mandate_daemon::cell::{self, CellDeployment};
 use mandate_daemon::wake::Sleep;
 use mandate_daemon::{Config, RuntimeProcess, Wake, deployment, fixture, launch, production};
@@ -214,7 +215,10 @@ fn run(
                 fixture::wiring_for(&found.approvers, &found.author),
                 &version,
                 &document,
-                rules,
+                (
+                    rules,
+                    BarsReader::new(std::env::var(BARS_ENV).ok().as_deref()),
+                ),
                 &format!("clock:{workspace}"),
                 &agent,
             );

@@ -1918,6 +1918,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-accounting",
  "mandate-artifacts-fs",
+ "mandate-bars",
  "mandate-builder",
  "mandate-canon",
  "mandate-domain",
@@ -1925,6 +1926,7 @@ dependencies = [
  "mandate-gateway",
  "mandate-journal",
  "mandate-journal-pg",
+ "mandate-marketdata",
  "mandate-num",
  "mandate-ports",
  "mandate-process",
@@ -2116,9 +2118,14 @@ dependencies = [
  "mandate-domain",
  "mandate-executor",
  "mandate-gate-context",
+ "mandate-identity",
+ "mandate-journal",
  "mandate-num",
  "mandate-risk",
+ "mandate-runtime",
+ "mandate-spec",
  "mandate-time",
+ "proptest",
  "thiserror",
 ]
 
@@ -2626,7 +2633,6 @@ dependencies = [
  "mandate-domain",
  "mandate-executor",
  "mandate-gate-inputs",
- "mandate-identity",
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-liquidity",

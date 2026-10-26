@@ -87,7 +87,7 @@ fn order(id: &str) -> Result<Effect, String> {
             instrument: mandate_accounting::InstrumentId::new("i").map_err(|e| format!("{e:?}"))?,
             side: mandate_accounting::Side::Buy,
             qty: mandate_num::Qty::parse("1").map_err(|e| e.to_string())?,
-            limit: mandate_num::Price::parse("1").map_err(|e| e.to_string())?,
+            limit: Some(mandate_num::Price::parse("1").map_err(|e| e.to_string())?),
             purpose: Purpose::Open,
         },
         execution: None,
@@ -132,8 +132,7 @@ fn every_handoff_follows_its_record() -> Result<(), String> {
     let good = [
         vec![intent(), order("i")?],
         vec![switch.clone(), flatten("k")],
-        vec![exit.clone(), flatten("x")],
-        vec![exit, switch.clone(), flatten("k")],
+        vec![exit.clone(), switch.clone(), flatten("k")],
     ];
     for effects in good {
         let faults = handoffs(&effects);
@@ -146,6 +145,7 @@ fn every_handoff_follows_its_record() -> Result<(), String> {
         vec![switch, order("k")?],
         vec![intent()],
         vec![intent(), order("i")?, order("i")?],
+        vec![exit, flatten("x")],
     ];
     for effects in bad {
         ensure(!handoffs(&effects).is_empty(), || {

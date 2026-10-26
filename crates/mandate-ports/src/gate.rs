@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use mandate_risk::{Advisory, AssetId, Decision, Deferred, GateInput, ProposedOrder};
+use mandate_risk::{Advisory, AssetId, Decision, Deferred, GateError, GateInput, ProposedOrder};
 use mandate_runtime::Proposal;
 
 use crate::context::{AdvisoryGateContext, AdvisoryOrderFacts};
@@ -39,22 +39,38 @@ pub fn proposed_order(
 /// # Errors
 /// As [`proposed_order`], and [`PortError::Gate`] for an order the gate refuses to evaluate.
 pub fn evaluate(proposal: &Proposal, context: &AdvisoryGateContext) -> Result<Decision, PortError> {
-    Ok(evaluate_deferring(proposal, context, &BTreeSet::new())?.decision)
+    with_input(proposal, context, mandate_risk::evaluate)
 }
 
 /// [`mandate_risk::evaluate_deferring`] over `context` for `proposal`: the cell's runtime's
 /// advisory pass, with `deferred` the checks whose facts nothing journals yet (DEC-2378 item 11).
-/// With nothing deferred it is [`evaluate`].
+/// With nothing deferred it answers as [`evaluate`]. Only that dry run may call it: `clippy.toml`
+/// disallows it everywhere else, the executor's binding gate included.
 ///
 /// # Errors
 /// As [`evaluate`].
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the one port over the advisory pass, which only the cell's runtime's dry run calls (DEC-2378 item 11)"
+)]
 pub fn evaluate_deferring(
     proposal: &Proposal,
     context: &AdvisoryGateContext,
     deferred: &BTreeSet<Deferred>,
 ) -> Result<Advisory, PortError> {
+    with_input(proposal, context, |input| {
+        mandate_risk::evaluate_deferring(input, deferred)
+    })
+}
+
+/// `gate` over the gate input `context` and `proposal` make.
+fn with_input<T>(
+    proposal: &Proposal,
+    context: &AdvisoryGateContext,
+    gate: impl FnOnce(&GateInput<'_>) -> Result<T, GateError>,
+) -> Result<T, PortError> {
     let proposed = proposed_order(proposal, &context.order)?;
-    let input = GateInput {
+    Ok(gate(&GateInput {
         now: context.now,
         pass: context.pass,
         config: &context.config,
@@ -67,6 +83,5 @@ pub fn evaluate_deferring(
         conduct: &context.conduct,
         universe: &context.universe,
         proposed: &proposed,
-    };
-    Ok(mandate_risk::evaluate_deferring(&input, deferred)?)
+    })?)
 }

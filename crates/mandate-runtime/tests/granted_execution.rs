@@ -501,7 +501,7 @@ proptest! {
             return Err(TestCaseError::fail("the grant hands an order"));
         };
         prop_assert_eq!(*handed_qty, qty(&q));
-        prop_assert_eq!(*handed_limit, price(&limit));
+        prop_assert_eq!(*handed_limit, Some(price(&limit)));
         let intent = ran.drafts.iter().find(|d| d.event_type == "IntentProposed");
         prop_assert_eq!(
             intent.and_then(|d| d.payload.get("tif")).and_then(Value::as_str),

@@ -116,6 +116,7 @@ impl From<mandate_bars::BarsError> for Cause {
             mandate_bars::BarsError::Dataset(error) => Cause::Dataset(error),
             mandate_bars::BarsError::Model(error) => Cause::Model(error),
             mandate_bars::BarsError::Num(error) => Cause::Num(error),
+            mandate_bars::BarsError::Liquidity(error) => crate::paper::refusal(error),
         }
     }
 }

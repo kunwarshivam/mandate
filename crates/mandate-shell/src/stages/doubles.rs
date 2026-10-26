@@ -778,7 +778,7 @@ impl Sink for ConvertingSink {
                 instrument: instrument.clone(),
                 side: *side,
                 qty: *qty,
-                limit: Some(*limit),
+                limit: *limit,
                 purpose: executor_purpose(*purpose),
                 protection: execution
                     .protection
