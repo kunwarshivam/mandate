@@ -13,7 +13,7 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -1726,24 +1726,29 @@ pub fn run(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Reads `check` with the owner's session every two seconds until it passes, up to
-/// [`APPLIED_POLLS`] times: a runtime applies a kill switch on its next pass after it starts,
-/// which may be after the Job ends. An API that cannot be asked fails it, since the cell ran.
+/// Reads `check` with the owner's session every two seconds until it passes or [`APPLIED_WITHIN`]
+/// has passed: a runtime applies a kill switch on its next pass after it starts, which may be after
+/// the Job ends. The bound is the clock's, not a count of reads, since each read also checks the
+/// forward and signs in (about seven seconds a read on CI, so 45 reads ran past the job's ten
+/// minutes; main run 40281337291). An API that cannot be asked fails it, since the cell ran.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the host-side scenario bounds its wait for a live cell by the host's clock"
+)]
 fn poll_applied(check: &ApiCheck) -> Result<(&'static str, String, bool)> {
-    let mut verdict = ("failed", "never read".to_owned(), true);
-    for _ in 0..APPLIED_POLLS {
+    let deadline = Instant::now() + APPLIED_WITHIN;
+    loop {
         let answer = api_answer(check)?;
-        verdict = api_verdict(&answer, check, true);
-        if !verdict.2 {
-            break;
+        let verdict = api_verdict(&answer, check, true);
+        if !verdict.2 || Instant::now() >= deadline {
+            return Ok(verdict);
         }
         sleep(Duration::from_secs(2));
     }
-    Ok(verdict)
 }
 
-/// How many times [`poll_applied`] reads, two seconds apart.
-const APPLIED_POLLS: u32 = 45;
+/// How long [`poll_applied`] waits for the kill switch to read back applied.
+const APPLIED_WITHIN: Duration = Duration::from_secs(90);
 
 /// Why the cell's API cannot be asked, or `None` when it can: no API in the process list, a cell
 /// that pulled its images and has no API image, or no `kubectl` on this machine to forward with.
