@@ -83,7 +83,7 @@ fn config() -> Config {
     Config {
         deployment: Deployment {
             agent: AgentId("agent-a".into()),
-            connection: ConnectionId("conn_demo_paper_01".into()),
+            connection: ConnectionId("conn_demo_web_paper_01".into()),
             workspace: WorkspaceId("ws1".into()),
         },
         environment: Environment::Paper,

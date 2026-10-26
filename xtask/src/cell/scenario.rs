@@ -104,12 +104,30 @@ pub fn account_of(id: &str) -> String {
     format!("01KDEA{id:0>10.10}000000000A")
 }
 
-/// The demo's paper connection as the executor's connect check left it: the account the
-/// connection binds and the passing `ConnectionChecked` the record names as its cause.
+/// [`WEB_AGENT`]'s own paper connection (V-048: one agent to an account): a second fixture
+/// account of the run's workspace, with its own connect check and its own executor.
+pub const WEB_CONNECTION: &str = "conn_demo_web_paper_01";
+
+/// [`WEB_CONNECTION`]'s account for the run: a ULID of its own, fresh for each run id.
+pub fn web_account_of(id: &str) -> String {
+    format!("01KDEW{id:0>10.10}000000000A")
+}
+
+/// A paper connection as the executor's connect check left it: the connection, the account it
+/// binds, and the passing `ConnectionChecked` the record names as its cause.
 #[derive(Debug, Clone)]
 pub struct Connected {
+    pub connection: &'static str,
     pub account: String,
     pub checked: String,
+}
+
+/// The run's two paper connections, each from its own connect check: the demo agent's, which
+/// step 2 records, and [`WEB_AGENT`]'s, which step 7 records before its envelope.
+#[derive(Debug, Clone)]
+pub struct Connections {
+    pub demo: Connected,
+    pub web: Connected,
 }
 
 /// The run's workspace (DEC-2010): a ULID, since the API hosts only a ULID, fresh for each run id
@@ -476,10 +494,10 @@ pub(super) fn confirm_code(version: &str) -> String {
     ))
 }
 
-/// The code `connection record` shows for the demo's paper connection on `account`, caused by the
-/// connect check `checked`, for the owner `user` (DEC-530 item 4): its record's members, the
-/// cause and the gesture, as canonical JSON.
-pub fn record_code(account: &str, checked: &str, user: &str) -> String {
+/// The code `connection record` shows for the paper connection `connection` on `account`, caused
+/// by the connect check `checked`, for the owner `user` (DEC-530 item 4): its record's members,
+/// the cause and the gesture, as canonical JSON.
+pub fn record_code(connection: &str, account: &str, checked: &str, user: &str) -> String {
     code(&format!(
         concat!(
             r#"{{"account_ref":"{account}","broker":"alpaca","causation_id":"{checked}","#,
@@ -489,7 +507,7 @@ pub fn record_code(account: &str, checked: &str, user: &str) -> String {
         ),
         account = account,
         checked = checked,
-        connection = CONNECTION,
+        connection = connection,
         user = user,
     ))
 }
@@ -580,13 +598,14 @@ pub(super) fn deploy_code(agent: &str, version: &str) -> String {
 }
 
 /// The demo's steps for `workspace`, given the bytes of the demo's mandate, of
-/// [`WEB_AGENT`]'s, and of [`RESEARCH_AGENT`]'s, and the paper connection the executor's connect
-/// check left `connected`.
+/// [`WEB_AGENT`]'s, and of [`RESEARCH_AGENT`]'s, and the paper connections the executor's connect
+/// checks left `connections`.
 pub fn plan(
     workspace: &str,
     (mandate, web_mandate, research_mandate): (&[u8], &[u8], &[u8]),
-    connected: Option<&Connected>,
+    connections: Option<&Connections>,
 ) -> Vec<Step> {
+    let connected = connections.map(|c| &c.demo);
     let version = reference(mandate);
     let web_version = reference(web_mandate);
     let research_version = reference(research_mandate);
@@ -655,7 +674,7 @@ pub fn plan(
                     "--environment",
                     "paper",
                     "--connection",
-                    CONNECTION,
+                    connected.connection,
                     "--broker",
                     "alpaca",
                     "--scope",
@@ -755,7 +774,12 @@ pub fn plan(
             parts: [
                 match connected {
                     Some(connected) => {
-                        let recorded = record_code(&connected.account, &connected.checked, &user);
+                        let recorded = record_code(
+                            connected.connection,
+                            &connected.account,
+                            &connected.checked,
+                            &user,
+                        );
                         vec![
                             gesture(
                                 "the paper connection's record, its code shown (nothing \
@@ -1118,7 +1142,40 @@ pub fn plan(
         Step {
             number: 7,
             title: "the kill switch from the web app stops the agent",
-            parts: vec![
+            parts: [
+                match connections.map(|c| &c.web) {
+                    Some(connected) => {
+                        let recorded = record_code(
+                            connected.connection,
+                            &connected.account,
+                            &connected.checked,
+                            &user,
+                        );
+                        vec![
+                            gesture(
+                                "the second agent's own paper connection's record, its code \
+                                 shown (nothing committed), naming its own connect check: one \
+                                 agent to an account (V-048)",
+                                record_args(connected, &[]),
+                                format!("code {recorded}"),
+                            ),
+                            gesture(
+                                "that connection, recorded with the code shown",
+                                record_args(connected, &["--code", &recorded]),
+                                format!("recorded {WEB_CONNECTION} as event"),
+                            ),
+                        ]
+                    }
+                    None => vec![Part::Gap(Gap {
+                        what: "the second agent's own paper connection, recorded from its \
+                               connect, so its deployment is written at version 2 on an \
+                               account no other agent trades",
+                        on_main: "the executor's connect check and its record in the local cell \
+                                  (#1759, #1763), which step 2 runs for the demo's connection",
+                        waits: vec![DR_CONNECT],
+                    })],
+                },
+                vec![
                 gesture(
                     "QQQ's instrument snapshot, registered, for a second agent's envelope",
                     owner(&[
@@ -1162,6 +1219,18 @@ pub fn plan(
                     ]),
                     "deployed as event".into(),
                 ),
+                ],
+                connections
+                    .map(|c| {
+                        vec![Part::Executor(ExecutorCheck {
+                            shows: "the second agent's account's executor, started by the \
+                                    deployment manager from its version-2 deployment, running \
+                                    and live",
+                            account: c.web.account.clone(),
+                        })]
+                    })
+                    .unwrap_or_default(),
+                vec![
                 Part::Web(WebCheck {
                     shows: "the owner's kill switch for the second agent, pressed in web/ and \
                             recorded through the API on the run's control stream",
@@ -1186,7 +1255,11 @@ pub fn plan(
                         waits: vec![DR_CONNECT],
                     }),
                 },
-            ],
+                ],
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
         },
         Step {
             number: 8,
@@ -1604,12 +1677,36 @@ pub fn run_in(name: &str) -> Result<String> {
         None
     } else {
         let account = account_of(&id);
-        let checked = match connect_check(&format!("{id}c"), &workspace, &account)? {
+        let checked = match connect_check(&format!("{id}c"), &workspace, &account, CONNECTION)? {
             Ok(checked) => checked,
             Err(logs) => bail!("the executor's connect check for the demo did not pass:\n{logs}"),
         };
         eprintln!("    connect check: passed as {checked} for account {account}");
-        Some(Connected { account, checked })
+        let web_account = web_account_of(&id);
+        let web_checked =
+            match connect_check(&format!("{id}w"), &workspace, &web_account, WEB_CONNECTION)? {
+                Ok(checked) => checked,
+                Err(logs) => bail!(
+                    "the executor's connect check for the second agent's connection did not \
+                     pass:\n{logs}"
+                ),
+            };
+        eprintln!(
+            "    connect check: passed as {web_checked} for {WEB_CONNECTION} on account \
+             {web_account}"
+        );
+        Some(Connections {
+            demo: Connected {
+                connection: CONNECTION,
+                account,
+                checked,
+            },
+            web: Connected {
+                connection: WEB_CONNECTION,
+                account: web_account,
+                checked: web_checked,
+            },
+        })
     };
     let steps = plan(&workspace, inputs.envelopes(), connected.as_ref());
     let all = gestures(&steps);
@@ -2388,17 +2485,32 @@ mod tests {
     /// The connect check a run's plan names: run 1's account, and a passing check's event id.
     fn connected() -> Connected {
         Connected {
+            connection: CONNECTION,
             account: account_of("1"),
             checked: "01KDEC0000000000000000000C".into(),
         }
     }
 
-    /// The plan for `workspace` on the demo's three envelopes, after [`connected`]'s check.
+    /// The second agent's connect check a run's plan names: run 1's web account, and a passing
+    /// check's event id.
+    fn web_connected() -> Connected {
+        Connected {
+            connection: WEB_CONNECTION,
+            account: web_account_of("1"),
+            checked: "01KDEC0000000000000000000W".into(),
+        }
+    }
+
+    /// The plan for `workspace` on the demo's three envelopes, after [`connected`]'s and
+    /// [`web_connected`]'s checks.
     fn planned(workspace: &str) -> Vec<Step> {
         plan(
             workspace,
             (&mandate(), &web_mandate(), &research_mandate()),
-            Some(&connected()),
+            Some(&Connections {
+                demo: connected(),
+                web: web_connected(),
+            }),
         )
     }
 
@@ -2505,9 +2617,14 @@ mod tests {
             parsed(INSTRUMENT_FILE)["instrument_id"]
         );
         assert_eq!(web["name"], WEB_ENVELOPE);
-        assert_eq!(web["connection_id"], demo["connection_id"]);
+        assert_eq!(demo["connection_id"], CONNECTION);
+        assert_eq!(
+            web["connection_id"], WEB_CONNECTION,
+            "an account of its own: one agent to an account (V-048)"
+        );
         for m in [&mut demo, &mut web] {
             m["name"] = Value::Null;
+            m["connection_id"] = Value::Null;
             m["behavior"]["description"] = Value::Null;
             m["universe"]["pinned_instruments"] = Value::Null;
         }
@@ -2529,6 +2646,7 @@ mod tests {
     fn the_codes_are_the_first_eight_hex_digits_of_the_gestures_hash() {
         assert_eq!(
             record_code(
+                CONNECTION,
                 "01J0ACC0VNT000000000000000",
                 "10000000000000000000000001",
                 "user-owner"
@@ -3716,7 +3834,7 @@ mod tests {
             .position(|g| g.args[..2] == ["connection", "record"])
             .unwrap();
         let typed = at(&["connection", "record"], "--code");
-        let code = record_code(&c.account, &c.checked, &user);
+        let code = record_code(c.connection, &c.account, &c.checked, &user);
         assert_eq!(all[shown].expect, format!("code {code}"));
         assert!(
             all[typed]
@@ -3757,8 +3875,14 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(executors.len(), 1);
-        assert_eq!(executors[0].account, c.account);
+        assert_eq!(
+            executors
+                .iter()
+                .map(|e| e.account.as_str())
+                .collect::<Vec<_>>(),
+            [c.account.as_str(), web_connected().account.as_str()],
+            "the demo's executor, then the second agent's"
+        );
         assert!(matches!(step2.parts.last(), Some(Part::Executor(_))));
         let dry = unconnected("demo1");
         let dry_all = gestures(&dry);
@@ -3768,6 +3892,74 @@ mod tests {
                 .flat_map(|s| &s.parts)
                 .all(|p| !matches!(p, Part::Executor(_) | Part::Applied(_)))
         );
+    }
+
+    /// Step 7 records the second agent's own connection, from its own connect check on its own
+    /// account, before its envelope is created, so its deployment is written at version 2 on an
+    /// account no other agent trades (V-048); the executor the manager starts for that account is
+    /// checked after the deployment. The dry run names the gap instead.
+    #[test]
+    fn step_seven_records_the_second_agents_own_connection_first() {
+        let steps = planned("demo1");
+        let step7 = &steps[6];
+        assert_eq!(step7.number, 7);
+        let gestures: Vec<&Gesture> = step7
+            .parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Gesture(g) => Some(g),
+                _ => None,
+            })
+            .collect();
+        let web = web_connected();
+        let code = record_code(
+            WEB_CONNECTION,
+            &web.account,
+            &web.checked,
+            &FOUNDER.to_ascii_lowercase(),
+        );
+        assert_eq!(gestures[0].args[..2], ["connection", "record"]);
+        assert_eq!(gestures[0].expect, format!("code {code}"));
+        assert!(
+            gestures[1]
+                .args
+                .windows(2)
+                .any(|w| w == ["--code", code.as_str()])
+        );
+        assert_eq!(
+            gestures[1].expect,
+            format!("recorded {WEB_CONNECTION} as event")
+        );
+        for pair in [
+            ["--connection", WEB_CONNECTION],
+            ["--account-ref", web.account.as_str()],
+            ["--checked", web.checked.as_str()],
+            ["--workspace", "demo1"],
+        ] {
+            assert!(gestures[1].args.windows(2).any(|w| w == pair), "{pair:?}");
+        }
+        let created = gestures
+            .iter()
+            .position(|g| g.args[..2] == ["version", "create"])
+            .unwrap();
+        assert!(created > 1, "recorded before the envelope");
+        let executor = step7
+            .parts
+            .iter()
+            .position(|p| matches!(p, Part::Executor(e) if e.account == web.account))
+            .expect("the second agent's executor is checked");
+        let deployed = step7
+            .parts
+            .iter()
+            .position(|p| {
+                matches!(p, Part::Gesture(g)
+                    if g.args[..3] == ["agent", "deploy", WEB_AGENT]
+                        && g.args.iter().any(|a| a == "--code"))
+            })
+            .unwrap();
+        assert_eq!(executor, deployed + 1, "checked right after its deployment");
+        let dry = unconnected("demo1");
+        assert!(matches!(&dry[6].parts[0], Part::Gap(_)));
     }
 
     /// DEC-2379: step 7's CLI kill switch is followed by the check that the runtime applied it,

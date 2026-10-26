@@ -86,8 +86,9 @@ pub fn account_of(id: &str) -> String {
     format!("01KACT{id:0>10.10}000000000A")
 }
 
-/// The connect check's arguments, for the executor image's `mandate-executord`.
-pub fn check_args(workspace: &str, account: &str) -> Vec<String> {
+/// The connect check's arguments for `connection` on `account`, for the executor image's
+/// `mandate-executord`.
+pub fn check_args(workspace: &str, account: &str, connection: &str) -> Vec<String> {
     [
         "connect-check",
         "--workspace",
@@ -95,7 +96,7 @@ pub fn check_args(workspace: &str, account: &str) -> Vec<String> {
         "--account",
         account,
         "--connection",
-        CONNECTION,
+        connection,
         "--pii-ref",
         "pii_01KDEX0000000000000000000P",
     ]
@@ -137,14 +138,22 @@ pub fn ticking(first: Option<u64>, second: Option<u64>) -> bool {
     matches!((first, second), (Some(a), Some(b)) if a >= 2 && b > a)
 }
 
-/// The executor's connect check for `account` in `workspace`, as the one-off Job run `run`: the
-/// passing `ConnectionChecked`'s event id, or the Job's logs when it did not pass.
-pub fn connect_check(run: &str, workspace: &str, account: &str) -> Result<Result<String, String>> {
+/// The executor's connect check of `connection` for `account` in `workspace`, as the one-off Job
+/// run `run`: the passing `ConnectionChecked`'s event id, or the Job's logs when it did not pass.
+pub fn connect_check(
+    run: &str,
+    workspace: &str,
+    account: &str,
+    connection: &str,
+) -> Result<Result<String, String>> {
     let check = render(
         &[
             format!("run.id=\"{run}\""),
             "run.process=\"connect-check\"".into(),
-            format!("run.args={}", json!(check_args(workspace, account))),
+            format!(
+                "run.args={}",
+                json!(check_args(workspace, account, connection))
+            ),
         ],
         Some("templates/run.yaml"),
     )?;
@@ -402,7 +411,7 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
         }
         None
     } else {
-        let checked = match connect_check(&format!("{id}c"), &workspace, &account)? {
+        let checked = match connect_check(&format!("{id}c"), &workspace, &account, CONNECTION)? {
             Ok(checked) => checked,
             Err(logs) => {
                 return Ok(Verdict::Broken(format!(
