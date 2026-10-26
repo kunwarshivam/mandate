@@ -5,7 +5,7 @@ import { readBacktestFrom } from "@/api/backtest";
 import { type Fetch, createWorkspaceClient } from "@/api/client";
 import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand } from "@/api/commands";
 import { confirmAccepted, confirmStepUpDigest } from "@/api/confirm";
-import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPasskey, browserAuthenticator, deployStepUpDigest, passkeysRead } from "@/api/passkey";
+import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPasskey, browserAuthenticator, deployStepUpDigest, passkeysRead, usablePasskeys } from "@/api/passkey";
 import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
@@ -404,16 +404,21 @@ export function ApiRuntimeProvider({
   );
 
   /**
-   * Passkey step-up for one action (§3.6, DEC-2128): a challenge bound to `kind` and `digest`, and
-   * the member's passkeys, read together; then the authenticator signs the challenge. Each press is
-   * its own challenge, never retried. Nothing reaches the journal here: a refusal means nothing was sent.
+   * Passkey step-up for one action (§3.6, DEC-2128): the member's passkeys are read first, and only
+   * when one can sign is a challenge bound to `kind` and `digest` asked for; then the authenticator
+   * signs it. Each press is its own challenge, never retried. Nothing reaches the journal here: a
+   * refusal means the command was not sent.
    */
   const passkeyStepUp = useCallback(
     async (kind: PasskeyKind, digest: ContentRef): Promise<{ ok: true; value: PasskeyStepUp } | { ok: false; reason: AssertionRefusal | string }> => {
-      const [issued, held] = await Promise.all([client.askChallenge({ kind, digest }), client.read("/passkeys", passkeysRead)]);
-      if (!issued.ok) return { ok: false, reason: issued.error.code };
+      const held = await client.read("/passkeys", passkeysRead);
       if (!held.ok) return { ok: false, reason: held.error.code };
-      return assertPasskey(issued.value, held.value.passkeys, authenticator === undefined ? browserAuthenticator() : authenticator, nowRef.current);
+      const device = authenticator === undefined ? browserAuthenticator() : authenticator;
+      const usable = usablePasskeys(held.value.passkeys, device, nowRef.current);
+      if (!usable.ok) return usable;
+      const issued = await client.askChallenge({ kind, digest });
+      if (!issued.ok) return { ok: false, reason: issued.error.code };
+      return assertPasskey(issued.value, usable.value, device, nowRef.current);
     },
     [client, authenticator],
   );
@@ -441,11 +446,12 @@ export function ApiRuntimeProvider({
         let stepUp: PasskeyStepUp | null = null;
         const digest = confirmStepUpDigest(setUp.version, null, null);
         if (screen.value.step_up_required) {
+          confirmed({ awaitingPasskey: true });
           const asserted = await passkeyStepUp("confirm_version", digest);
           if (!mounted.current) return;
-          if (!asserted.ok) return confirmed({ phase: "undelivered", reason: asserted.reason });
+          if (!asserted.ok) return confirmed({ phase: "undelivered", reason: asserted.reason, awaitingPasskey: false });
           stepUp = asserted.value;
-          confirmed({ stepUp: digest });
+          confirmed({ stepUp: digest, awaitingPasskey: false, sentAt: nowRef.current });
         }
         const delivered = await deliver(prepareConfirm(client, { version: setUp.version, agentId: null, base: null, record, served, stepUp }));
         if (!mounted.current) return;
@@ -472,12 +478,14 @@ export function ApiRuntimeProvider({
       const agentId = setUp.agentId || newAgentId(Date.parse(nowRef.current));
       const deployed = (patch: Partial<NonNullable<SetUp["deployed"]>>) =>
         patchSetUp(setUpId, (s) => ({ ...s, deployed: s.deployed ? { ...s.deployed, ...patch } : null }));
-      patchSetUp(setUpId, (s) => ({ ...s, agentId, deployed: { phase: "sent", sentAt: nowRef.current, record } }));
+      const awaiting = setUp.confirmed?.phase === "recorded";
+      patchSetUp(setUpId, (s) => ({ ...s, agentId, deployed: { phase: "sent", sentAt: nowRef.current, record, awaitingPasskey: awaiting } }));
       void (async () => {
         if (setUp.confirmed?.phase !== "recorded") return deployed({ phase: "undelivered", reason: "not_confirmed" });
         const asserted = await passkeyStepUp("deploy", deployStepUpDigest(agentId, setUp.version));
         if (!mounted.current) return;
-        if (!asserted.ok) return deployed({ phase: "undelivered", reason: asserted.reason });
+        if (!asserted.ok) return deployed({ phase: "undelivered", reason: asserted.reason, awaitingPasskey: false });
+        deployed({ awaitingPasskey: false, sentAt: nowRef.current });
         const delivered = await deliver(prepareDeploy(client, { agentId, version: setUp.version, record, stepUp: asserted.value }));
         if (!mounted.current) return;
         if (delivered.phase === "undelivered") return deployed({ phase: "undelivered", reason: delivered.reason });

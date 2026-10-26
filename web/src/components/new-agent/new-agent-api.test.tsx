@@ -87,6 +87,12 @@ describe("each passkey refusal's words: nothing was sent, and what exists", () =
   };
   const STANDS = " Version 1 was created and is not confirmed, and no agent exists.";
 
+  it("says nothing was sent while the passkey check is open, never 'Sent at'", () => {
+    const view = renderWithRuntime(<StepStatus which="confirm" setUp={{ ...base, confirmed: { ...base.confirmed!, phase: "sent", awaitingPasskey: true } }} />);
+    expect(view.container.textContent).toBe("Waiting for your passkey. Nothing is sent until your browser's passkey check is done.");
+    view.unmount();
+  });
+
   it("names each reason in words, never by its code", () => {
     expect(words("passkey_unavailable")).toBe(`Not sent: this browser can't use a passkey.${STANDS}`);
     expect(words("no_passkey")).toBe(`Not sent: you have no passkey on your deployment yet. Add one, then try again.${STANDS}`);

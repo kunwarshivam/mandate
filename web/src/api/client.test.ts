@@ -321,7 +321,7 @@ describe("no order ticket (DEC-528)", () => {
     decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],
     "mock-server": ["MOCK_AUTHORIZATION_ORIGIN", "MOCK_PASSKEY_ID", "MOCK_PRINCIPAL", "createMockServer"],
     operations: ["NOT_COMMANDS", "WEB_OPERATIONS", "operationFor"],
-    passkey: ["ASSERTION_TIMEOUT_MS", "assertPasskey", "browserAuthenticator", "deployStepUpDigest", "fromBase64url", "passkeysRead", "toBase64url"],
+    passkey: ["ASSERTION_TIMEOUT_MS", "assertPasskey", "browserAuthenticator", "deployStepUpDigest", "fromBase64url", "passkeysRead", "toBase64url", "usablePasskeys"],
     "read-models": ["agentRead", "agentsRead", "approvalRead", "approvalsRead", "deadlineIso", "loadApi"],
     reads: ["emptyWorkspace"],
     session: ["REFRESH_EVERY_MS", "SESSION_LOCK", "createSessionKeeper"],

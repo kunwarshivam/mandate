@@ -20,6 +20,7 @@ const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
  */
 export function newAgentId(nowMs: number, random: (bytes: Uint8Array) => Uint8Array = (b) => crypto.getRandomValues(b)): string {
   let time = "";
+  if (!Number.isSafeInteger(Math.floor(nowMs)) || nowMs < 0) throw new RangeError("an agent id needs the time in milliseconds");
   let t = Math.floor(nowMs);
   for (let i = 0; i < 10; i += 1) {
     time = CROCKFORD[t % 32] + time;

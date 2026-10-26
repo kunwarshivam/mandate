@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { confirmStepUpDigest } from "./confirm";
 import { ASSERTION_TIMEOUT_MS, type Authenticator, type Passkey, assertPasskey, deployStepUpDigest, fromBase64url, passkeysRead, toBase64url } from "./passkey";
 import type { StepUpChallenge } from "./step-up";
 
@@ -47,6 +48,10 @@ describe("unpadded base64url, the encoding of every assertion member", () => {
 describe("the deployment's step-up digest (spec §3.11 item 11)", () => {
   it("is SHA-256 of the canonical {agent_id, mandate_version}, as an independent canonical JSON writer computes it", () => {
     expect(deployStepUpDigest("agt_01JC0000000000000000000000", `sha256:${"ab".repeat(32)}`)).toBe("sha256:1fd9d274f86641c62e68d8823fdab741b99a7fb84d9cc765fa7b373bbf91e4b3");
+  });
+
+  it("matches §5.1's confirm digest for a new mandate, from the same independent writer", () => {
+    expect(confirmStepUpDigest(`sha256:${"ab".repeat(32)}`, null, null)).toBe("sha256:a87530c6f2a2c5d3f0711b0fc06101969e772a3e0a81db33b25be0ddc63c95dd");
   });
 
   it("binds both members: another agent or another version is another digest", () => {
@@ -100,14 +105,17 @@ describe("the passkey ceremony (DEC-2108 item 7, DEC-2128)", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
-  it("asks nothing while every passkey is in its cool-off, and asks once one is past it", async () => {
+  it("asks nothing while every passkey is in its cool-off, and offers only the passkeys past it", async () => {
     const get = vi.fn<Authenticator>(async () => credential());
     const cooling = { ...PASSKEY, cool_off_ends: "2026-10-27T09:00:00.000000000Z" };
     expect(await assertPasskey(CHALLENGE, [cooling], get, NOW)).toEqual({ ok: false, reason: "passkey_cooling_off" });
     expect(get).not.toHaveBeenCalled();
-    const past = { ...PASSKEY, cool_off_ends: "2026-10-26T09:59:59.999999999Z" };
+    const pastId = Uint8Array.from({ length: 16 }, (_, i) => 100 + i);
+    const past = { passkey_id: Buffer.from(pastId).toString("base64url"), cool_off_ends: "2026-10-26T09:59:59.999999999Z" };
     expect((await assertPasskey(CHALLENGE, [cooling, past], get, NOW)).ok).toBe(true);
     expect(get).toHaveBeenCalledTimes(1);
+    const offered = (get.mock.calls[0][0].publicKey as PublicKeyCredentialRequestOptions).allowCredentials ?? [];
+    expect(offered.map((c) => new Uint8Array(c.id as ArrayBuffer))).toEqual([pastId]);
   });
 
   it("reports a dismissed or timed-out authenticator as canceled, and sends nothing", async () => {

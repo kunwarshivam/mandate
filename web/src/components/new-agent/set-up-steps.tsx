@@ -247,6 +247,12 @@ export function StepStatus({ which, setUp }: { which: StepKey; setUp: SetUp }) {
   const at = (iso: string) => `${clock(iso)} ${zoneLabel(iso)}`;
   switch (step.phase) {
     case "sent":
+      if (step.awaitingPasskey)
+        return (
+          <p data-slot="awaiting-passkey">
+            Waiting for your passkey. Nothing is sent until your browser&apos;s passkey check is done.
+          </p>
+        );
       return (
         <p>
           {SENDING[which]} Sent at {at(step.sentAt)}. {UNTIL[which]}

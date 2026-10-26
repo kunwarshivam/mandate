@@ -138,20 +138,31 @@ const bytesOf = (buffer: unknown): Uint8Array | null =>
       : null;
 
 /**
- * Asks the authenticator to sign `challenge` with one of `passkeys`, user verification required. The
- * RP ID is the page's own host, which is the deployment's (the server derives it from the app's
- * origin). A passkey still cooling off is offered too while one is past it, since the server, not
- * this device's clock, judges the cool-off; when every one is cooling off, nothing is asked.
+ * The member's passkeys that can sign now, by this page's clock (which runs on the server's): none
+ * without WebAuthn or a passkey, and none while every one is in its cool-off (DEC-2108 item 5). A
+ * passkey still cooling off is never offered, so the authenticator cannot pick one the server refuses.
  */
-export async function assertPasskey(challenge: StepUpChallenge, passkeys: readonly Passkey[], authenticator: Authenticator | null, now: Timestamp): Promise<AssertionAnswer> {
+export function usablePasskeys(passkeys: readonly Passkey[], authenticator: Authenticator | null, now: Timestamp): { ok: true; value: Passkey[] } | { ok: false; reason: AssertionRefusal } {
   if (!authenticator) return { ok: false, reason: "passkey_unavailable" };
   if (passkeys.length === 0) return { ok: false, reason: "no_passkey" };
   const at = instant(now);
-  if (passkeys.every((p) => p.cool_off_ends !== null && instant(p.cool_off_ends) > at)) return { ok: false, reason: "passkey_cooling_off" };
+  const usable = passkeys.filter((p) => p.cool_off_ends === null || instant(p.cool_off_ends) <= at);
+  return usable.length > 0 ? { ok: true, value: usable } : { ok: false, reason: "passkey_cooling_off" };
+}
+
+/**
+ * Asks the authenticator to sign `challenge` with one of the usable `passkeys`, user verification
+ * required. The RP ID is the page's own host, which is the deployment's (the server derives it from
+ * the app's origin).
+ */
+export async function assertPasskey(challenge: StepUpChallenge, passkeys: readonly Passkey[], authenticator: Authenticator | null, now: Timestamp): Promise<AssertionAnswer> {
+  const usable = usablePasskeys(passkeys, authenticator, now);
+  if (!usable.ok) return usable;
+  if (!authenticator) return { ok: false, reason: "passkey_unavailable" };
   const signed = fromBase64url(challenge.webauthn_challenge);
   if (!signed || signed.length !== 32) return { ok: false, reason: "passkey_failed" };
   const allow: PublicKeyCredentialDescriptor[] = [];
-  for (const p of passkeys) {
+  for (const p of usable.value) {
     const id = fromBase64url(p.passkey_id);
     if (id) allow.push({ type: "public-key", id: id.slice().buffer });
   }

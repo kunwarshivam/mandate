@@ -324,6 +324,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     expect(server.servedDigests()).toHaveLength(1);
     act(() => current().confirmVersion(id, CONFIRM_RECORD, null));
     expect(setUp().confirmed).toMatchObject({ phase: "sent", record: CONFIRM_RECORD, stepUp: null });
+    await waitFor(() => expect(setUp().confirmed?.awaitingPasskey === true || setUp().confirmed?.phase === "recorded").toBe(true));
     const digest = confirmStepUpDigest(setUp().version, null, null);
     await waitFor(() => expect(setUp().confirmed).toMatchObject({ phase: "recorded", classification: "risk_increasing", applies: "now", stepUp: digest }));
     const [challenge] = server.challenges();
@@ -355,6 +356,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
       await waitFor(() => expect(setUp().confirmed).toMatchObject({ phase: "undelivered", reason, stepUp: null }));
       expect(posts().filter((p) => p.url.endsWith("/confirm"))).toHaveLength(0);
       expect(server.recorded().filter((c) => c.path.endsWith("/confirm"))).toHaveLength(0);
+      expect(server.challenges()).toHaveLength(reason === "passkey_unavailable" ? 0 : 1);
       cleanup();
     }
   });

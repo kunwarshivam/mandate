@@ -133,17 +133,17 @@ function EntryView({ entry, c, last, busy, creation, actions }: { entry: Entry; 
 }
 
 /**
- * The conversation (brief A0 to A2 and A5, DEC-476, DEC-477): the log, then the composer. The
- * platform's replies are text, drawn from Markdown with their links shown but never opened, since a
- * model wrote part of them (DEC-481); only deterministic parts carry buttons (PX-18). The composer
- * keeps focus as the log grows, and the newest part of the log is brought into view above it.
- */
-/**
  * Over the API no model reads the owner's words (the compiler is not served, spec §4.1), so the
  * figures-only reader does, in this page; the words reach the deployment only in the version created.
  */
 export const API_NOTE = "Your deployment doesn't serve a model to read your words yet, so figures are read exactly as written, in this page. Nothing is sent until you create the version.";
 
+/**
+ * The conversation (brief A0 to A2 and A5, DEC-476, DEC-477): the log, then the composer. The
+ * platform's replies are text, drawn from Markdown with their links shown but never opened, since a
+ * model wrote part of them (DEC-481); only deterministic parts carry buttons (PX-18). The composer
+ * keeps focus as the log grows, and the newest part of the log is brought into view above it.
+ */
 export function Chat({
   conversation,
   busy,
