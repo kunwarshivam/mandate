@@ -131,6 +131,7 @@ pub enum Part {
     Gesture(Gesture),
     Api(ApiCheck),
     Web(WebCheck),
+    WebSignIn(WebCheck),
     Executor(ExecutorCheck),
     Applied(AppliedCheck),
     Gap(Gap),
@@ -678,10 +679,10 @@ pub fn plan(
                     ask: Ask::Session,
                     body: Body::Lists(AGENT),
                 }),
-                Part::Gap(Gap {
-                    what: "the same sign-in and read in web/",
-                    on_main: "web/'s sign-in to a dev cell (#1588) and the stub issuer (#1591)",
-                    waits: vec![W2_WEB],
+                Part::WebSignIn(WebCheck {
+                    shows: "the demo owner, signed in to web/ through the stub issuer, reading \
+                            the run's workspace's agents through the API",
+                    agent: WEB_AGENT,
                 }),
             ],
         },
@@ -1142,9 +1143,12 @@ pub fn gestures(steps: &[Step]) -> Vec<&Gesture> {
         .flat_map(|s| &s.parts)
         .filter_map(|p| match p {
             Part::Gesture(g) => Some(g),
-            Part::Api(_) | Part::Web(_) | Part::Executor(_) | Part::Applied(_) | Part::Gap(_) => {
-                None
-            }
+            Part::Api(_)
+            | Part::Web(_)
+            | Part::WebSignIn(_)
+            | Part::Executor(_)
+            | Part::Applied(_)
+            | Part::Gap(_) => None,
         })
         .collect()
 }
@@ -1546,6 +1550,7 @@ pub fn run(name: &str) -> Result<()> {
     let codes = exit_codes(&serde_json::from_str(&pods).context("the gestures' pods")?);
     let mut failed = None;
     let mut gaps = 0;
+    let mut browsed: Option<WebOutcome> = None;
     for step in &steps {
         let mut previous: Option<&Gesture> = None;
         let waiting = lanes(step);
@@ -1630,17 +1635,24 @@ pub fn run(name: &str) -> Result<()> {
                         failed.get_or_insert_with(|| format!("GET {}: {said}", check.path));
                     }
                 }
-                Part::Web(check) => {
-                    let outcome = if failed.is_some() {
-                        WebOutcome::AfterFailure
-                    } else {
-                        web_outcome(check, &workspace)?
+                Part::Web(check) | Part::WebSignIn(check) => {
+                    let outcome = match (&failed, &browsed) {
+                        (Some(_), _) => WebOutcome::AfterFailure,
+                        (None, Some(seen)) => seen.clone(),
+                        (None, None) => {
+                            let seen = web_outcome(check, &workspace)?;
+                            browsed = Some(seen.clone());
+                            seen
+                        }
                     };
                     let required = Required {
                         cell: env::var_os(CELL_REQUIRED_ENV).is_some(),
                         web: env::var_os(WEB_REQUIRED_ENV).is_some(),
                     };
-                    let (word, said, fails) = web_verdict(&outcome, check, &workspace, required);
+                    let (word, said, fails) = match part {
+                        Part::WebSignIn(_) => signin_verdict(&outcome, &workspace, required),
+                        _ => web_verdict(&outcome, check, &workspace, required),
+                    };
                     eprintln!("    {word:<8} {}: {said}", check.shows);
                     if fails {
                         failed.get_or_insert_with(|| format!("web/ {}: {said}", check.agent));
@@ -1854,7 +1866,7 @@ pub fn api_verdict(
 /// What became of a [`WebCheck`]: an earlier part failed, so it was not tried; the API could not
 /// be asked; this machine lacks `web/`'s tools; the gesture failed; or it recorded a command,
 /// with the agent and workspace it acted on and the signed-in read of that command.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum WebOutcome {
     AfterFailure,
     Unaskable(String),
@@ -1977,6 +1989,41 @@ pub fn web_verdict(
             let (word, said, fails) = api_verdict(read, &command_read(workspace, command), true);
             let said = format!("command {command}: {said}");
             (if fails { word } else { "ran" }, said, fails)
+        }
+    }
+}
+
+/// How step 1's web sign-in reads from the browser gesture's outcome, which step 7's kill switch
+/// shares (one Playwright run): `ran` once the gesture recorded anything in `workspace`, since it
+/// records only after its page, signed in through the stub issuer, read that workspace's agents
+/// with a 2xx (`web/e2e-cell/kill-switch.spec.ts`); otherwise as [`web_verdict`] reads a run that
+/// did not record.
+pub fn signin_verdict(
+    outcome: &WebOutcome,
+    workspace: &str,
+    required: Required,
+) -> (&'static str, String, bool) {
+    match outcome {
+        WebOutcome::Recorded {
+            workspace: acted, ..
+        } if acted == workspace => (
+            "ran",
+            format!("web/ read GET /v1/workspaces/{workspace}/agents with its own session"),
+            false,
+        ),
+        WebOutcome::Recorded {
+            workspace: acted, ..
+        } => (
+            "failed",
+            format!("web/ read {acted}, not {workspace}"),
+            true,
+        ),
+        other => {
+            let check = WebCheck {
+                shows: "",
+                agent: WEB_AGENT,
+            };
+            web_verdict(other, &check, workspace, required)
         }
     }
 }
@@ -3102,9 +3149,10 @@ mod tests {
         );
     }
 
-    /// Which steps run today: the gestures on `main` make steps 1 to 6 partial, step 3's research
-    /// gestures among them; the kill switch, applied by the runtime step 2's deployment starts,
-    /// and the record run whole. Without a connect check (the staging dry run) step 7 is partial.
+    /// Which steps run today: the sign-in, through the API and web/, runs whole; the gestures on
+    /// `main` make steps 2 to 6 partial, step 3's research gestures among them; the kill switch,
+    /// applied by the runtime step 2's deployment starts, and the record run whole. Without a
+    /// connect check (the staging dry run) step 7 is partial.
     #[test]
     fn each_step_reads_ready_partial_or_skipped_from_its_parts() {
         let steps = planned("demo1");
@@ -3112,14 +3160,14 @@ mod tests {
         assert_eq!(
             read,
             [
-                Partial, Partial, Partial, Partial, Partial, Partial, Ready, Ready
+                Ready, Partial, Partial, Partial, Partial, Partial, Ready, Ready
             ]
         );
         let dry: Vec<Readiness> = unconnected("demo1").iter().map(readiness).collect();
         assert_eq!(
             dry,
             [
-                Partial, Partial, Partial, Partial, Partial, Partial, Partial, Ready
+                Ready, Partial, Partial, Partial, Partial, Partial, Partial, Ready
             ]
         );
         let step = |parts: Vec<Part>| Step {
@@ -3351,6 +3399,69 @@ mod tests {
             None,
             "the web read still accepts any accepted phase"
         );
+    }
+
+    /// DR-3: step 1 reads web/'s sign-in from the browser gesture step 7's kill switch also reads,
+    /// one Playwright run: `ran` for any recorded gesture in the run's workspace, whatever its
+    /// command reads, since the page records only after its signed-in read of the agents; a
+    /// gesture in another workspace fails; and a run that recorded nothing reads as step 7's does.
+    #[test]
+    fn step_one_reads_the_web_sign_in_from_the_shared_browser_gesture() {
+        let steps = planned("demo1");
+        let signins: Vec<(u8, &WebCheck)> = steps
+            .iter()
+            .flat_map(|s| s.parts.iter().map(move |p| (s.number, p)))
+            .filter_map(|(n, p)| match p {
+                Part::WebSignIn(c) => Some((n, c)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(signins.len(), 1);
+        assert_eq!(signins[0].0, 1, "the sign-in is step 1's");
+        let web: Vec<&WebCheck> = steps
+            .iter()
+            .flat_map(|s| &s.parts)
+            .filter_map(|p| match p {
+                Part::Web(c) => Some(c),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(signins[0].1.agent, web[0].agent, "one gesture, one agent");
+        let ws = "01KDEM0000000001000000000D";
+        let recorded = |acted: &str, read: Result<(u16, String), String>| WebOutcome::Recorded {
+            agent: WEB_AGENT.into(),
+            workspace: acted.into(),
+            command: "C1".into(),
+            read,
+        };
+        for cell in [false, true] {
+            for web in [false, true] {
+                let required = Required { cell, web };
+                for read in [Ok((200, "{}".to_owned())), Err("no answer".to_owned())] {
+                    let (word, _, fails) = signin_verdict(&recorded(ws, read), ws, required);
+                    assert_eq!((word, fails), ("ran", false));
+                }
+                let (word, _, fails) =
+                    signin_verdict(&recorded("other", Ok((200, "{}".into()))), ws, required);
+                assert_eq!((word, fails), ("failed", true));
+                let check = WebCheck {
+                    shows: "s",
+                    agent: WEB_AGENT,
+                };
+                for other in [
+                    WebOutcome::AfterFailure,
+                    WebOutcome::Unaskable("no kubectl".into()),
+                    WebOutcome::NoTools("no npm".into()),
+                    WebOutcome::Failed("the run failed".into()),
+                ] {
+                    assert_eq!(
+                        signin_verdict(&other, ws, required),
+                        web_verdict(&other, &check, ws, required),
+                        "{other:?}"
+                    );
+                }
+            }
+        }
     }
 
     /// The closing summary lists every wait of every gap once, under its own lane, with the step it
