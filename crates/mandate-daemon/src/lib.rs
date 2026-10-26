@@ -34,6 +34,7 @@
 #[cfg(test)]
 extern crate self as mandate_daemon;
 
+pub mod bars;
 pub mod cell;
 #[cfg(test)]
 #[allow(

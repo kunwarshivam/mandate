@@ -18,6 +18,16 @@
   `/var/lib/mandate/artifacts/datasets`, with `data.instruments` (SPY and QQQ), which only the
   local cell's values list. The executor drill (`xtask/src/cell/executor.rs` `bars`) inspects
   each instrument's daily and minute datasets.
+- **Liquidity inputs (DEC-2274):** `mandate_bars::liquidity` (`crates/mandate-bars/src/liquidity.rs`)
+  reads the four figures the liquidity floor and participation need from the stored daily and
+  minute datasets at the reader's own clock. The shell's daily half goes through
+  `trusted_daily_liquidity`. The runtime's reader is `mandate_daemon::bars` (`BarsReader::opening`,
+  openings only; `liquidity_deferred`). The chart hands `MANDATE_BARS` to the runtime and the executor
+  only with `images.data`. Tests: `crates/mandate-bars/tests/liquidity.rs` (the figures against an
+  independent oracle, every untrusted input refused, a replay over copied partitions, each clock's
+  own window), `crates/mandate-daemon/tests/bars.rs` (the shared figures for an opening, both
+  checks deferred without trusted bars, no exit reads), and
+  `deploy/tests/test_artifacts.py::test_only_the_gates_read_the_bars_and_only_where_they_are_stored`.
 - **Tests:** `crates/mandate-datad/tests/series.rs`: the sessions end on the last completed session;
   a close is a function of its date (an oracle walking the calendar its own way); closes rise every
   session; an anchor and its reach are checked; the stored dataset passes the trust check's
@@ -29,6 +39,7 @@
   and no symbol, probes, and SIGTERM drain. `deploy/tests/test_cell.py`: the data process's
   launch, mounts and egress, no render without its series, and the local cell lists both demo
   agents' instruments.
-- **Run:** `cargo nextest run -p mandate-datad`; the chart's with
+- **Run:** `cargo nextest run -p mandate-datad -p mandate-bars`, and
+  `cargo nextest run -p mandate-daemon -E 'binary(bars)'`; the chart's with
   `uv run --directory python pytest ../deploy/tests` (helm required), as `cargo xtask ci cell` runs
   them.

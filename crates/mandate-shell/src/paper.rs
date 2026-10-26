@@ -31,6 +31,7 @@ pub use artifacts::{Artifacts, DeploymentInput};
 pub use context::{
     Contexts, GateQuote, PaperClock, load_contexts, load_contexts_with_clock, reconcile_context,
 };
+pub(crate) use facts::refusal;
 pub use facts::{
     BrokerFacts, LiquidityFacts, MarketFacts, PaperFacts, daily_closes, fresh_quote,
     liquidity_facts, market_facts, preflight, robinhood_facts,
