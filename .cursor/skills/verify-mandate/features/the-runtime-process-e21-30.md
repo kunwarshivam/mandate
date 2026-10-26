@@ -14,7 +14,8 @@
   hook), `src/launch.rs` (the deployment from `run`'s flags or the deployment manager's variables,
   DEC-1015), `src/deployment.rs` (the connection, approvers and author from the latest
   `AgentDeployed` and its stored mandate document, DEC-1016; the approvers through
-  `mandate_identity::approvers`, DEC-2388 item 11), and the `mandate-daemon` binary, built by `mandate-runtime-models` (`crates/mandate-runtime-models/src/main.rs`) since DEC-2383 item 7 (`run` over Postgres, or `--fixture` over an in-memory
+  `mandate_identity::approvers`, DEC-2388 item 11, and `ApproverSource`, which each control pass
+  narrows the view's approvers through, DEC-2816), and the `mandate-daemon` binary, built by `mandate-runtime-models` (`crates/mandate-runtime-models/src/main.rs`) since DEC-2383 item 7 (`run` over Postgres, or `--fixture` over an in-memory
   journal, refused `fixture_under_manager` on a pod the manager started, and `probe` for `exec`
   probes; SIGTERM drains). In the cell: the `runtime` image
   (`deploy/cell/images/runtime.Dockerfile`), its `args` and `probe` in
@@ -42,7 +43,8 @@
   another process, and a flag that disagrees with the manager. `tests/deployment.rs`: the latest
   deployment, a stopped agent, a missing, corrupt or invalid document, another environment, the
   approvers DEC-953's owner or the founded workspace's roster resolves, an unreadable membership
-  record resolving no one, and an unknown author. `crates/mandate-runtime-models/tests/pg.rs`: the binary
+  record resolving no one, the admitted approvers narrowing at each read and never growing
+  (DEC-2816), and an unknown author. `crates/mandate-runtime-models/tests/pg.rs`: the binary
   on Postgres opening its agent stream once across two runs and draining. `deploy/tests/test_cell.py`:
   each service started and probed as its process list says, and no runtime rendered for no
   deployment. `mandate-runtime`'s

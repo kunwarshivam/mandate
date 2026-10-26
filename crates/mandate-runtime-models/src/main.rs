@@ -234,6 +234,7 @@ fn run(
                 &agent,
             );
             wiring.models = models;
+            wiring.approvers = Some(found.source);
             if let Some(opted) = opted {
                 let meter = JournalMeter::open(
                     PgStore::connect(&dsn)?,

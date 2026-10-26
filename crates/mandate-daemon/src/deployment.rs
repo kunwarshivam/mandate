@@ -10,7 +10,11 @@
 //! or document that is missing, corrupt, unreadable, or for another environment refuses rather than
 //! guessing, a deployment record that cannot be read is never skipped for an older one, and any
 //! control row the approvers' reading cannot read resolves no approver (`AGENTS.md` rules 3 and 8).
-//! The approvers are read once, when the process resolves its deployment.
+//! The approvers are read when the process resolves its deployment, and narrowed at every later read
+//! of the control stream to those its rows still resolve to; nobody is added while it runs
+//! (DEC-2816).
+
+use std::collections::BTreeSet;
 
 use mandate_canon::{Value, parse};
 use mandate_gate_context::gate_rule_set;
@@ -25,6 +29,8 @@ use mandate_time::UtcNanos;
 pub struct Resolved {
     pub connection: String,
     pub approvers: Vec<String>,
+    /// What the approvers are re-read from at each later read of the control stream.
+    pub source: ApproverSource,
     pub author: String,
 }
 
@@ -54,6 +60,11 @@ pub fn resolved(
         .filter_map(Value::as_str)
         .collect();
     let approvers = approvers(control, &connection, &references);
+    let source = ApproverSource::new(
+        approvers.iter().cloned().collect(),
+        &connection,
+        &references,
+    );
     let author = control
         .iter()
         .filter(|row| row.environment == environment.as_str())
@@ -66,6 +77,7 @@ pub fn resolved(
     Ok(Resolved {
         connection,
         approvers,
+        source,
         author,
     })
 }
@@ -142,6 +154,40 @@ pub fn rule_set(
         .and_then(|bytes| parse(&bytes).ok())
         .and_then(|rules| gate_rule_set(&rules).ok())
         .ok_or("rule_set_unavailable")
+}
+
+/// The approvers a process started with, and what it re-reads them from (DEC-2816): the mandate's
+/// approver references and its connection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApproverSource {
+    admitted: BTreeSet<String>,
+    connection: String,
+    references: Vec<String>,
+}
+
+impl ApproverSource {
+    /// The approvers `admitted` at the start, re-read from `references` resolved on `connection`.
+    #[must_use]
+    pub fn new(admitted: BTreeSet<String>, connection: &str, references: &[&str]) -> Self {
+        Self {
+            admitted,
+            connection: connection.to_owned(),
+            references: references.iter().map(|r| (*r).to_owned()).collect(),
+        }
+    }
+
+    /// The admitted approvers, narrowed to those `control`, a fresh read of the control stream,
+    /// still resolves to: a member deactivated, removed, or stripped of the role since the start
+    /// never approves, a row that cannot be read resolves no one, and nobody is ever added, as the
+    /// shell's `ApproverSource::current` narrows them (DEC-2384 item 6, `AGENTS.md` rule 3).
+    #[must_use]
+    pub fn current(&self, control: &[StoredEvent]) -> BTreeSet<String> {
+        let references: Vec<&str> = self.references.iter().map(String::as_str).collect();
+        let fresh: BTreeSet<String> = approvers(control, &self.connection, &references)
+            .into_iter()
+            .collect();
+        self.admitted.intersection(&fresh).cloned().collect()
+    }
 }
 
 /// The user ids `references` resolve to among the workspace's members, as
