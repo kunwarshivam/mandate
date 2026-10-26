@@ -343,7 +343,7 @@ fn a_lost_credential_with_the_journal_down_restricts_through_the_drain() -> Resu
         }
         Ok(())
     };
-    with_edge_stopping(3, Some((3, "credential_lost")), &each, |edge, _| {
+    let exit = with_edge_stopping(3, Some((3, "credential_lost")), &each, |edge, _| {
         serve(
             journal.clone(),
             broker.clone(),
@@ -353,6 +353,7 @@ fn a_lost_credential_with_the_journal_down_restricts_through_the_drain() -> Resu
             edge,
         )
     })?;
+    assert_eq!(exit, Ok(0), "the drain committed what was in doubt");
     assert_eq!(restriction_causes(&journal), ["connection_unavailable"]);
     Ok(())
 }
