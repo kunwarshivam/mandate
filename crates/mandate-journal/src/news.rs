@@ -78,9 +78,10 @@ pub(crate) fn rules(
     ensure(writer == "system", "actor.kind")
 }
 
-/// Rule 286 (`stream_mismatch`): the news stream's `StreamOpened` names its own stream.
+/// Rule 286 (`stream_mismatch`): the news stream's `StreamOpened` names its own stream. Called
+/// only for a record of the news stream, which [`governs`] answers.
 pub(crate) fn subject(event_type: &str, stream: &StreamId, payload: &Value) -> Result<(), Invalid> {
-    if event_type != OPENED || stream.stream_type() != StreamType::News {
+    if event_type != OPENED {
         return Ok(());
     }
     if format!("news:{}", text(payload, "workspace_id")) == stream.as_str() {
@@ -92,9 +93,9 @@ pub(crate) fn subject(event_type: &str, stream: &StreamId, payload: &Value) -> R
 
 /// Rules 284 and 285 on `draft`, in that order, given `before`, the same stream's earlier records:
 /// no earlier `NewsItemStored` names its `item_id`, and its `knowledge_at` is not before the
-/// previous one's.
+/// previous one's. The catalogue admits `NewsItemStored` on the news stream alone.
 pub(crate) fn stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
-    if draft.event_type() != STORED || draft.stream_id().stream_type() != StreamType::News {
+    if draft.event_type() != STORED {
         return Ok(());
     }
     let mine = payload_of(draft);
