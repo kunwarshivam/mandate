@@ -402,4 +402,28 @@ fn a_monitor_turn_is_answered_with_the_bundle_s_monitor_reply() {
             &parse(invalidation.to_string().as_bytes()).unwrap()
         ))
     );
+    let mut ideate = turn(1, items.len(), Vec::new());
+    ideate.call.call_id = encode_ulid((1 << 100) + 99);
+    worker
+        .turn(&ideate)
+        .unwrap_or_else(|e| panic!("ideate turn: {e:?}"));
+    let answers = worker.answers(RiskClock::from_secs(CUT_OFF + 40));
+    let [ResearchInput::Called { record, .. }] = answers.as_slice() else {
+        panic!("the ideate turn answered one record: {answers:?}");
+    };
+    let asked: Vec<(String, String)> = record
+        .tool_calls
+        .iter()
+        .map(|call| {
+            (
+                call.name.clone(),
+                String::from_utf8(to_canonical(&call.arguments)).unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        asked,
+        scripted_in_file()[0],
+        "an ideate turn on the same bundle takes its script, not the monitor reply"
+    );
 }

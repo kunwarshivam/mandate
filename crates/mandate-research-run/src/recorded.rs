@@ -182,9 +182,6 @@ impl Field<'_> {
     }
 }
 
-/// `research.json`'s `turns` (DEC-2266): refused whole, `Malformed("turns")`, unless the entry
-/// names the agentic loop and every turn is one its gateway would accept, so no recording scripts a
-/// call the entry does not declare.
 /// What a recorded monitor reply writes for the thesis it invalidates: a runtime's thesis ids are
 /// made at admission, so a recording cannot name one, and the double names the thesis the call
 /// showed it instead, as a model answers about what it was shown.
@@ -192,7 +189,9 @@ pub const SHOWN_THESIS: &str = "$THESIS_ID";
 
 /// `output` with [`SHOWN_THESIS`] replaced by the least of `shown`, the thesis ids the call's
 /// `memory` input showed the model; unchanged when it showed none, so an invalidation of no thesis
-/// is judged `unknown_thesis` and ends nothing.
+/// is judged `unknown_thesis` and ends nothing. The id goes into the text unescaped: a journaled
+/// thesis id is an identifier (`[A-Za-z0-9_-]`), and one that broke the JSON would only fail the
+/// gateway's schema, using nothing.
 pub fn shown_thesis(output: &str, shown: &[&str]) -> String {
     match shown.iter().min() {
         Some(thesis) => output.replace(SHOWN_THESIS, thesis),
@@ -230,6 +229,9 @@ fn replayed(reply: &Field<'_>) -> Result<RecordedReply, RecordedError> {
     })
 }
 
+/// `research.json`'s `turns` (DEC-2266): refused whole, `Malformed("turns")`, unless the entry
+/// names the agentic loop and every turn is one its gateway would accept, so no recording scripts a
+/// call the entry does not declare.
 fn scripted(turns: &Value, entry: &ResearchEntry) -> Result<Vec<ScriptedTurn>, RecordedError> {
     let refused = RecordedError::Malformed("turns");
     let content = entry.content();
