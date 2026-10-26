@@ -1234,7 +1234,6 @@ one) and a hold for one order (its quote, the session, a limit) are the gate's v
 order, and the owner's hold and a paused or stopped agent show as `mode`. No exit, protective
 order, or kill switch is held by any of them (`AGENTS.md` rule 13). The read is served once the
 executor binds on the same function (DEC-2819's executor slice), so the two never differ.
-**(planned: E11-9)**
 
 `GET /agents/{id}/orders` and `GET /agents/{id}/positions` return `read-models/orders` and
 `read-models/positions` ([DEC-2111](../project/decisions/DEC-2111.md)), from the account stream of
