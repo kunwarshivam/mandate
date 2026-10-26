@@ -220,13 +220,14 @@ fn a_reconciliation_hold_is_the_executor_s_own_until_the_same_agent_and_restrict
         .expect("readable");
         kinds.push(held[0].reason.clone());
     }
-    assert!(kinds.iter().all(|r| matches!(
-        r,
-        Reason::Reconciliation {
+    assert_eq!(
+        kinds,
+        ["cash", "fees", "external_activity", "incomplete"].map(|kind| Reason::Reconciliation {
+            restriction: format!("reconciliation:{kind}"),
+            kind: kind.to_owned(),
             instrument: None,
-            ..
-        }
-    )));
+        })
+    );
     let unreadable = row(
         13,
         "AgentModeApplied",

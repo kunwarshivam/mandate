@@ -433,8 +433,6 @@ fn run(
     Ok(())
 }
 
-/// Runs `agent status` and prints [`status_lines`].
-///
 /// `mandate agent holds`: [`agent::holds`], printed by [`holds_lines`]. Commits nothing.
 ///
 /// # Errors
@@ -451,9 +449,10 @@ pub fn run_holds(args: &HoldsArgs, report: &mut impl Write) -> anyhow::Result<()
 
 /// The lines `mandate agent holds` prints: whether an independent user must acknowledge, then each
 /// hold on one line (its `event`, subject, holder, what it holds, its mode, since when, and its
-/// unspent request), and under it the command that moves it on, to run with the usual owner and
-/// journal flags: the `agent acknowledge` that lifts it, the `agent request-ack` that asks another
-/// user to where one must, or why none lifts it yet.
+/// unspent request and who made it), and under it the command that moves it on, to run with the
+/// usual owner and journal flags: the `agent acknowledge` that lifts it, the `agent request-ack`
+/// that asks another user to where one must, the answer to a request that another user runs when
+/// the request is the caller's own (rule 239), or why none lifts it yet.
 #[must_use]
 pub fn holds_lines(found: &Holds) -> Vec<String> {
     let mut lines = vec![format!(
@@ -475,12 +474,14 @@ pub fn holds_lines(found: &Holds) -> Vec<String> {
             Reason::Reconciliation { restriction, .. } => restriction.as_str(),
         };
         let request = hold.request.as_ref().map(|r| r.event_id.as_str());
+        let requested_by = hold.request.as_ref().map(|r| r.requested_by.as_str());
         lines.push(format!(
-            "{} subject={subject} holder={holder} held={held} mode={} since={} request={}",
+            "{} subject={subject} holder={holder} held={held} mode={} since={} request={} requested_by={}",
             raised.event,
             raised.mode.unwrap_or("-"),
             raised.raised_at,
             request.unwrap_or("-"),
+            requested_by.unwrap_or("-"),
         ));
         let named = format!("{} {} --subject {subject}", hold.agent_id, raised.event);
         lines.push(match (subject, request) {
@@ -488,6 +489,9 @@ pub fn holds_lines(found: &Holds) -> Vec<String> {
                 "  not yet acknowledgeable: the executor lifts no restriction until E7-2y"
                     .to_owned()
             }
+            (_, Some(request)) if requested_by == Some(found.user.as_str()) => format!(
+                "  another user answers your request: mandate agent acknowledge {named} --request {request}"
+            ),
             (_, Some(request)) => {
                 format!("  mandate agent acknowledge {named} --request {request}")
             }
@@ -498,6 +502,8 @@ pub fn holds_lines(found: &Holds) -> Vec<String> {
     lines
 }
 
+/// Runs `agent status` and prints [`status_lines`].
+///
 /// # Errors
 /// The owner's refusals before the journal is opened, then the journal's.
 pub fn run_status(args: &StatusArgs, report: &mut impl Write) -> anyhow::Result<()> {

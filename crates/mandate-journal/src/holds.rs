@@ -308,7 +308,7 @@ pub fn requests(control: &[StoredEvent]) -> Result<Vec<(Requested, bool)>, Unrea
 }
 
 /// Whether the workspace's policy requires an independent user to acknowledge, from `control`'s
-/// rows of one environment: the latest membership record's `independent_approval_required`,
+/// rows, which the caller gives from one environment, as the fold does not filter them: the latest membership record's `independent_approval_required`,
 /// `false` with none, and `true` while that record does not read, never `false` (the executor
 /// process's overlay, DEC-2830; no effective-policy fold exists yet, backlog E9-6).
 #[must_use]

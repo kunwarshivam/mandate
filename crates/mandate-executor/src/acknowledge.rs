@@ -634,7 +634,7 @@ mod tests {
 
         use mandate_canon::{Digest, Value, to_canonical};
         use mandate_journal::StoredEvent;
-        use mandate_journal::holds::{Reason, standing};
+        use mandate_journal::holds::{Holder, Reason, standing};
         use proptest::prelude::*;
 
         use super::super::{fold, named_stands};
@@ -791,10 +791,16 @@ mod tests {
                 }
                 let listed = standing(&stored).map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
                 let held = &executor.acknowledgments;
-                for (id, agent) in &triggers {
-                    let lifts = named_stands(held, &handoff(id, "limit", agent)).is_none();
-                    let lists = listed.iter().any(|h| h.event == *id && matches!(h.reason, Reason::Limit(_)));
-                    prop_assert_eq!(lifts, lists, "the trigger {} of {}", id, agent);
+                for (id, _) in &triggers {
+                    for agent in AGENTS {
+                        let lifts = named_stands(held, &handoff(id, "limit", agent)).is_none();
+                        let lists = listed.iter().any(|h| {
+                            h.event == *id
+                                && matches!(h.reason, Reason::Limit(_))
+                                && h.holder == Holder::Agent(agent.to_owned())
+                        });
+                        prop_assert_eq!(lifts, lists, "the trigger {} acknowledged as {}", id, agent);
+                    }
                 }
                 for id in &ids {
                     let lifts = named_stands(held, &handoff(id, "reconciliation", "agent_a")).is_none();

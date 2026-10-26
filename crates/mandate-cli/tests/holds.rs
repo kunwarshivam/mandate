@@ -8,7 +8,7 @@ mod common;
 use clap::Parser;
 use common::{
     ACCOUNT, ACCOUNT_STREAM, AGENT, ASKED_AT, CONTROL, FixedIds, Fixture, OTHER_AGENT, at, body,
-    member, member_text, object, owner, text,
+    member_text, object, owner, text,
 };
 use mandate_canon::Value;
 use mandate_cli::agent::{Command, Subject, code, command, holds};
@@ -88,6 +88,7 @@ fn each_standing_hold_is_listed_with_its_subject_and_the_command_that_lifts_it()
         "held=reconciliation:incomplete",
         "mode=exits_only",
         "request=-",
+        "requested_by=-",
     ] {
         assert!(line.contains(part), "{part} in {line}");
     }
@@ -104,6 +105,18 @@ fn each_standing_hold_is_listed_with_its_subject_and_the_command_that_lifts_it()
             "reconciliation"
         ]
     );
+    let limit_line = lines
+        .iter()
+        .find(|l| l.starts_with(&limit))
+        .unwrap_or_else(|| panic!("{lines:#?}"));
+    for part in [
+        "subject=limit",
+        "held=max_daily_loss",
+        "mode=-",
+        &format!("holder={AGENT}"),
+    ] {
+        assert!(limit_line.contains(part), "{part} in {limit_line}");
+    }
     assert_eq!(
         command_for(&lines, &limit),
         [
@@ -143,7 +156,7 @@ fn an_agent_sees_only_what_blocks_it_and_no_agent_sees_every_hold() {
     );
     assert_eq!(
         command_for(&all, &everyone).get(3).map(String::as_str),
-        Some("<agent>")
+        Some("AGENT_ID")
     );
 }
 
@@ -331,7 +344,14 @@ fn a_restriction_is_listed_without_a_command() {
 
 #[test]
 fn no_hold_says_so() {
-    let fx = Fixture::new();
+    let mut fx = Fixture::new();
+    fx.append_in(
+        "paper",
+        ACCOUNT_STREAM,
+        "StreamOpened",
+        None,
+        object(&[("stream_type", text("account"))]),
+    );
     assert_eq!(
         listed(&fx, Some(AGENT)),
         ["independent approval required: no", "no holds"]
@@ -373,7 +393,72 @@ fn an_unreadable_record_is_an_error_not_an_empty_list() {
         holds(&asked.journal, &owner(), ACCOUNT, Some(AGENT)),
         Err(ControlError::Journal(_))
     ));
-    let _ = member;
+}
+
+/// An owner of another environment is refused, as every owner command is, rather than told an
+/// account of holds has none; an account with no stream is an error, not an empty list.
+#[test]
+fn another_environment_or_no_such_account_is_refused_never_an_empty_list() {
+    let mut fx = Fixture::new();
+    hold(&mut fx, "*", "reconciliation:incomplete", "exits_only");
+    let live = Owner {
+        environment: Environment::Live,
+        ..owner()
+    };
+    assert_eq!(
+        holds(&fx.journal, &live, ACCOUNT, Some(AGENT)).err(),
+        Some(ControlError::Refused {
+            reason: "workspace_environment"
+        })
+    );
+    assert!(matches!(
+        holds(
+            &fx.journal,
+            &owner(),
+            "01J0N0SVCHACC0VNT000000000",
+            Some(AGENT)
+        ),
+        Err(ControlError::Journal(_))
+    ));
+}
+
+/// A request is listed with who made it, and the owner's own request is marked as another user's
+/// to answer (rule 239), not printed as a command the owner would be refused.
+#[test]
+fn your_own_request_is_shown_as_another_user_s_to_answer() {
+    let mut fx = Fixture::new();
+    let incomplete = hold(&mut fx, "*", "reconciliation:incomplete", "exits_only");
+    let ask = Command::RequestAcknowledgment {
+        event: incomplete.clone(),
+        subject: Some(Subject::Reconciliation),
+    };
+    let typed = code(&fx.journal, &owner(), AGENT, &ask).ok().flatten();
+    let asked = command(
+        &mut fx.journal,
+        &mut FixedIds::default(),
+        &owner(),
+        AGENT,
+        &ask,
+        typed.as_deref(),
+        at(ASKED_AT),
+    )
+    .unwrap_or_else(|e| panic!("request: {e}"));
+    let lines = listed(&fx, Some(AGENT));
+    let line = lines
+        .iter()
+        .find(|l| l.starts_with(&incomplete))
+        .unwrap_or_else(|| panic!("{lines:#?}"));
+    assert!(
+        line.contains(&format!("requested_by={}", common::OWNER)),
+        "{line}"
+    );
+    let next = command_for(&lines, &incomplete);
+    assert_eq!(
+        next.iter().take(4).map(String::as_str).collect::<Vec<_>>(),
+        ["another", "user", "answers", "your"],
+        "{next:?}"
+    );
+    assert_eq!(next.last(), Some(&asked.event_id));
 }
 
 #[test]

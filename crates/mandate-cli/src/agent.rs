@@ -25,7 +25,7 @@ use crate::approvals;
 use crate::control::{
     Confirmation, ControlError, ControlJournal, Decision, Ids, Now, Owner, Repeat, Submitted,
     account_stream, agent_stream, code_of, commit, commit_kill_switch, control_stream, decide,
-    envelopes, object, text,
+    envelopes, object, same_environment, text,
 };
 
 /// An owner command addressed to one agent.
@@ -100,13 +100,16 @@ impl Subject {
 }
 
 /// The agent `mandate agent holds` posts an account-wide hold to when no agent is named: any agent
-/// deployed on the account, which the owner fills in.
-pub const ANY_AGENT: &str = "<agent>";
+/// deployed on the account, which the owner puts in its place. A plain word, so a pasted command
+/// fails on it rather than a shell reading it as a redirect.
+pub const ANY_AGENT: &str = "AGENT_ID";
 
 /// What `mandate agent holds` lists: whether the workspace's policy requires an independent user,
 /// and the holds standing on one account (E7-4b, DEC-2830, DEC-2144).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Holds {
+    /// The user who asked, whose own request they cannot answer (rule 239).
+    pub user: String,
     pub independent: bool,
     pub holds: Vec<Hold>,
 }
@@ -117,8 +120,10 @@ pub struct Holds {
 /// hold, an account-wide one with no request posted to [`ANY_AGENT`].
 ///
 /// # Errors
-/// [`ControlError::Journal`] when the journal cannot be read, or a record the fold must read does
-/// not read: never an empty list in its place.
+/// [`ControlError::Refused`] with `workspace_environment` when either stream is another
+/// environment's; [`ControlError::Journal`] when the journal cannot be read, the account stream
+/// holds no record (no such account), or a record the fold must read does not read: never an
+/// empty list in its place.
 pub fn holds(
     journal: &dyn ControlJournal,
     owner: &Owner,
@@ -128,15 +133,18 @@ pub fn holds(
     let unreadable = |what: &str| {
         ControlError::Journal(format!("{what} holds a record the holds fold cannot read"))
     };
-    let environment = owner.environment.as_str();
     let stream = account_stream(owner, account)?;
-    let ours = |rows: Vec<mandate_journal::StoredEvent>| {
-        rows.into_iter()
-            .filter(|row| row.environment == environment)
-            .collect::<Vec<_>>()
-    };
-    let rows = ours(journal.rows(&stream)?);
-    let control = ours(journal.rows(&control_stream(owner)?)?);
+    let control_id = control_stream(owner)?;
+    same_environment(journal, &stream, owner)?;
+    same_environment(journal, &control_id, owner)?;
+    let rows = journal.rows(&stream)?;
+    if rows.is_empty() {
+        return Err(ControlError::Journal(format!(
+            "{} holds no record: no such account",
+            stream.as_str()
+        )));
+    }
+    let control = journal.rows(&control_id)?;
     let requested = fold::requests(&control).map_err(|_| unreadable("the control stream"))?;
     let accounts = [(
         stream.as_str().to_owned(),
@@ -149,6 +157,7 @@ pub fn holds(
         listed.retain(|hold| hold.blocks(agent, stream.as_str()));
     }
     Ok(Holds {
+        user: owner.user.clone(),
         independent: fold::independence_required(&control),
         holds: listed,
     })
