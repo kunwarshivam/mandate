@@ -129,6 +129,9 @@ cargo xtask ci cell-vault         # and beside it: up, then vault, plain and see
 Each of these drill jobs runs both variants locally. In CI each runs once per variant, on a runner
 of its own (`MANDATE_CELL_VARIANT=plain` or `seeded`, from the job's matrix), so the cell's own
 bring-up and one variant fit DEC-464's ten minutes; set the variable to run one variant here too.
+`cell-executor` also runs once per drill (`MANDATE_CELL_DRILL=ticks` or `executor`), since one
+variant of both its drills in series still left under a minute (DEC-2641); the variable names one
+drill of the job's own list, and any other value is refused.
 
 `cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one
 in the k3s node: `docker exec k3d-mandate-cell-server-0 kubectl get pods -n ws-ws1`. Behind a

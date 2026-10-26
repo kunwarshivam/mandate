@@ -421,7 +421,8 @@ pub fn ci_upgrade() -> Result<()> {
 
 /// `cargo xtask ci cell-journal`, `ci cell-failover`, `ci cell-kill-switch`, `ci cell-executor` and
 /// `ci cell-vault`: the cell, then `drills`, plain and seeded, or only the variant
-/// [`VARIANT_ENV`] names (E21-41, DEC-2602, DEC-2615, DEC-2616). The chart checks are `ci cell`'s.
+/// [`VARIANT_ENV`] names, and only the drill [`DRILL_ENV`] names (E21-41, DEC-2602, DEC-2615,
+/// DEC-2616, DEC-2641). The chart checks are `ci cell`'s.
 /// Skipped as `ci cell` is.
 pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
     if let Some(reason) = tools_missing() {
@@ -432,14 +433,40 @@ pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
         return Ok(());
     }
     let (plain, seeded) = variants(env::var(VARIANT_ENV).ok().as_deref())?;
+    let drills = shard_drills(job, drills, env::var(DRILL_ENV).ok().as_deref())?;
     up()?;
     if plain {
-        drill(drills, false)?;
+        drill(&drills, false)?;
     }
     if seeded {
-        drill(drills, true)?;
+        drill(&drills, true)?;
     }
     Ok(())
+}
+
+/// One drill of a drill job, by its name, when CI's matrix also splits the job by drill because
+/// one variant of all its drills still runs past DEC-464's ten minutes (DEC-2641); unset or empty,
+/// the job runs every drill of its list.
+pub const DRILL_ENV: &str = "MANDATE_CELL_DRILL";
+
+/// The drills a run of `job` takes: all of `drills`, or the one [`DRILL_ENV`] names, which must be
+/// one of the job's own, so a misspelt matrix entry is refused rather than running nothing.
+fn shard_drills(job: &str, drills: &[Drill], named: Option<&str>) -> Result<Vec<Drill>> {
+    match named.unwrap_or("") {
+        "" => Ok(drills.to_vec()),
+        name => drills
+            .iter()
+            .copied()
+            .find(|d| d.name() == name)
+            .map(|d| vec![d])
+            .with_context(|| {
+                let names: Vec<&str> = drills.iter().map(|d| d.name()).collect();
+                format!(
+                    "{DRILL_ENV}={name} is not one of {job}'s drills: {}",
+                    names.join(", ")
+                )
+            }),
+    }
 }
 
 /// Which of a drill job's variants this run takes, set by CI's matrix so each runs on its own
@@ -1096,7 +1123,7 @@ pub fn up() -> Result<()> {
         create_cluster()?;
     }
     let built = (source == ImageSource::Build).then_some(&image);
-    for image in [
+    let images = [
         built,
         api.as_ref(),
         runtime.as_ref(),
@@ -1110,9 +1137,8 @@ pub fn up() -> Result<()> {
     ]
     .into_iter()
     .flatten()
-    {
-        import_image(image)?;
-    }
+    .collect::<Vec<_>>();
+    import_images(&images)?;
     let config = kubeconfig()?;
     sh(
         "k3d",
@@ -1475,6 +1501,29 @@ fn import_image(image: &str) -> Result<()> {
         eprintln!("xtask: {image} is not in {NODE} after import attempt {attempt}");
     }
     bail!("{image} never reached {NODE} after {IMPORT_ATTEMPTS} imports")
+}
+
+/// Every image into the node in one `k3d image import`, which starts k3d's tools container once
+/// rather than once an image (about 30 seconds of `up` on a CI runner, DEC-2641), then each image
+/// the node does not yet hold through [`import_image`]'s own attempts.
+fn import_images(images: &[&String]) -> Result<()> {
+    if images.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["image", "import", "--cluster", CLUSTER];
+    args.extend(images.iter().map(|image| image.as_str()));
+    if sh("k3d", &args).is_err() {
+        eprintln!(
+            "xtask: the batched image import failed; importing what the node lacks one by one"
+        );
+    }
+    api_server_ready()?;
+    for image in images {
+        if !node_holds(image) {
+            import_image(image)?;
+        }
+    }
+    Ok(())
 }
 
 /// Whether the node's containerd lists `image` by its exact reference; a node it cannot ask holds
@@ -5770,6 +5819,31 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    /// A drill job runs both variants locally, and one each in CI's matrix; any other value is
+    /// refused rather than running nothing.
+    #[test]
+    fn a_drill_job_runs_the_drills_its_matrix_names() -> Result<()> {
+        assert_eq!(
+            shard_drills("cell-executor", &EXECUTOR_DRILLS, None)?,
+            EXECUTOR_DRILLS.to_vec()
+        );
+        assert_eq!(
+            shard_drills("cell-executor", &EXECUTOR_DRILLS, Some(""))?,
+            EXECUTOR_DRILLS.to_vec()
+        );
+        assert_eq!(
+            shard_drills("cell-executor", &EXECUTOR_DRILLS, Some("ticks"))?,
+            vec![Drill::Ticks]
+        );
+        for other in ["exchange", "boot", "Ticks", "nope"] {
+            assert!(
+                shard_drills("cell-executor", &EXECUTOR_DRILLS, Some(other)).is_err(),
+                "{other} is not one of cell-executor's drills"
+            );
+        }
+        Ok(())
+    }
 
     /// A drill job runs both variants locally, and one each in CI's matrix; any other value is
     /// refused rather than running nothing.

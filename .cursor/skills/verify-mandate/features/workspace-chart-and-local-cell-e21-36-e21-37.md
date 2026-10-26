@@ -10,7 +10,7 @@
   seeded bug), `deploy/tests/test_artifacts.py` (the shared artifact store's mode in each pod); the
   drills `boot`, `journal`, `egress` and `compose`, each also run with its bug planted, and
   `kill-switch` and `admission` (DEC-2045) in `cargo xtask ci cell-kill-switch` (DEC-2602), and
-  `executor` (`xtask/src/cell/executor.rs`, DEC-2035) in `cargo xtask ci cell-executor` (DEC-2615),
+  `executor` (`xtask/src/cell/executor.rs`, DEC-2035) in `cargo xtask ci cell-executor` (DEC-2615; CI's shards, DEC-2641),
   and `vault` in `cargo xtask ci cell-vault` (DEC-2616); `restart` runs in
   `cargo xtask ci cell-failover` (E21-41)
   (`cargo xtask cell drill --seeded`).
