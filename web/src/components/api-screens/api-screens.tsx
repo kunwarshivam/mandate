@@ -538,7 +538,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
         {deferred.kind !== "none" ? <DeferredChecksPanel deferred={deferred} /> : null}
         {approval.state !== "pending" ? <p className="text-h3">{ENDED[approval.state]}</p> : null}
         {response ? (
-          <p role="status" data-phase={response.phase} className="text-sm">
+          <p role={response.phase === "refused" || (response.phase === "undelivered" && FINAL_UNDELIVERED.has(response.reason ?? "")) ? "alert" : "status"} data-phase={response.phase} className="text-sm">
             {responseText(response)}
           </p>
         ) : null}

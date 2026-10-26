@@ -47,10 +47,8 @@ describe("a refused grant in words (DEC-2129 item 7, journal spec rule 47)", () 
   });
 
   it("reads the API's refusal of a grant from someone the mandate does not list, and it is final", () => {
-    for (const reason of ["forbidden", "role_forbidden"]) {
-      expect(undeliveredText(reason), reason).toMatch(/^Not recorded: .*not an approver.*nothing was approved\.$/);
-      expect(FINAL_UNDELIVERED.has(reason), reason).toBe(true);
-    }
+    expect(undeliveredText("forbidden")).toMatch(/^Not recorded: .*not an approver.*nothing was approved\.$/);
+    expect([...FINAL_UNDELIVERED]).toEqual(["forbidden"]);
     expect(FINAL_UNDELIVERED.has("step_up_missing"), "a missing confirmation can be confirmed and sent again").toBe(false);
     expect(undeliveredText("network")).toBe("Not recorded: your deployment answered that nothing was recorded, so nothing was approved.");
   });

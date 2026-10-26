@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { Toasty } from "@cloudflare/kumo/components/toast";
 import { afterEach, describe, expect, it } from "vitest";
 import { ApiApproval } from "./api-screens";
 import { responseSteps } from "@/components/approvals/response-progress";
+import { JournalToasts } from "@/components/shell/journal-toasts";
+import { refusedText } from "@/lib/grant-refusals";
 import { type Fetch } from "@/api/client";
 import { createMockServer } from "@/api/mock-server";
 import { buildWorkspace } from "@/fixtures/workspace";
@@ -30,20 +33,28 @@ function mount(answer: Answer) {
   render(
     <RoleProvider>
       <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={fetch} refreshMs={60_000} statusPollMs={5} retryMs={5}>
-        <ApiApproval approvalId={approval.approval_id} />
+        <Toasty>
+          <ApiApproval approvalId={approval.approval_id} />
+          <JournalToasts />
+        </Toasty>
       </ApiRuntimeProvider>
     </RoleProvider>,
   );
   return { posts, answers: () => posts.filter((p) => p.endsWith("/responses")) };
 }
 
-/** The runtime's refusal of the grant, as `GET /commands/{event_id}` folds `ApprovalResponded` refused (spec §5.5). */
+/**
+ * The runtime's refusal of the grant, as `GET /commands/{event_id}` folds `ApprovalResponded` refused
+ * (spec §5.5): the first read still says `recorded`, as the deployment's does before the runtime
+ * copies the answer, and every read after it the refusal.
+ */
 const refusedBy =
   (reason: string): Answer =>
   async (route, init, served) => {
     const answer = await served();
     if (init.method !== "GET" || !route.startsWith("/commands/") || !answer.ok) return answer;
     const body = (await answer.json()) as Record<string, unknown>;
+    if (body.phase === "recorded") return new Response(JSON.stringify(body), { status: 200 });
     const step = { stream_id: "agent", seq: 9, event_type: "ApprovalResponded", recorded_at: "2026-10-26T15:00:00.000000000Z", reason };
     return new Response(JSON.stringify({ ...body, phase: "refused", steps: [step] }), { status: 200 });
   };
@@ -71,17 +82,47 @@ describe("a refused grant on the approval screen (DEC-2129 item 7, DEC-2818)", (
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     await new Promise((settle) => setTimeout(settle, 50));
     expect(answers()).toHaveLength(1);
+    await expect(screen.findByText("Your approval.", {}, { timeout: 500 }), "no toast says the refused grant was journaled").rejects.toThrow();
   });
 
   it("every refusal the runtime journals ends the same way: in words, with no Approve left to press", async () => {
     for (const reason of ["late", "step_up_stale", "a_reason_from_later"]) {
       const { answers } = mount(refusedBy(reason));
       await approve();
-      expect((await screen.findByText(/^Refused/)).textContent, reason).toMatch(/Nothing (more )?was approved|does not count/);
+      expect((await screen.findByText(/^Refused/)).textContent, reason).toBe(refusedText(reason));
       expect(screen.queryByRole("button", { name: "Approve" }), reason).toBeNull();
       expect(answers(), reason).toHaveLength(1);
       cleanup();
     }
+  });
+
+  it("an answer whose delivery was unknown, and which the runtime then refused, reads as refused once the status settles", async () => {
+    const refusing = refusedBy("not_an_approver");
+    const { answers } = mount(async (route, init, served) => {
+      if (init.method !== "POST" || !route.endsWith("/responses")) return refusing(route, init, served);
+      const recorded = (await (await served()).json()) as { response_id: string };
+      const ambiguous = { type: "about:blank", status: 503, title: "Unavailable", code: "unavailable", effect: "unknown", event_id: recorded.response_id, retryable: false };
+      return new Response(JSON.stringify(ambiguous), { status: 503 });
+    });
+    await approve();
+    const status = await screen.findByText(/^Refused: you are not an approver/);
+    expect(status.getAttribute("role")).toBe("alert");
+    expect(screen.queryByText(/^The result is unknown/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(answers()).toHaveLength(1);
+  });
+
+  it("after a refusal the host confirmation is gone too, and a refused Skip reads as refused", async () => {
+    mount(refusedBy("not_pending"));
+    await approve();
+    await screen.findByText(/^Refused: this request was no longer waiting/);
+    expect(screen.queryByRole("region", { name: "Confirm on the host" })).toBeNull();
+    cleanup();
+    const { answers } = mount(refusedBy("late"));
+    fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
+    expect((await screen.findByText(/^Refused: /)).textContent).toBe("Refused: your approval arrived after the request's deadline. Nothing was approved.");
+    expect(screen.queryByRole("button", { name: "Skip" })).toBeNull();
+    expect(answers()).toHaveLength(1);
   });
 
   it("a grant the API refused from someone the mandate does not list says so, and offers nothing to send again", async () => {
@@ -101,6 +142,7 @@ describe("a refused grant on the approval screen (DEC-2129 item 7, DEC-2818)", (
     mount((_route, _init, served) => served());
     await approve();
     expect(await screen.findByText(/^Approved: the gate re-ran its checks/)).toBeTruthy();
+    expect(await screen.findByText("Your approval."), "the toast once the runtime acted on it").toBeTruthy();
     expect(screen.queryByText(/^Refused/)).toBeNull();
   });
 

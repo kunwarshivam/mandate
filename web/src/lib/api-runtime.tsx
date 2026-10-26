@@ -321,19 +321,16 @@ export function ApiRuntimeProvider({
         const [delivered] = await Promise.all(prepared.commands.map(deliver));
         if (!mounted.current) return;
         if (delivered.phase === "undelivered") return update({ phase: "undelivered", reason: delivered.reason });
-        if (delivered.phase === "unknown") {
-          update({ phase: "unknown" });
-          if (delivered.eventId) void follow(delivered.eventId);
-          return;
-        }
-        update({ phase: "recorded", recordedAt: nowRef.current });
+        if (delivered.phase === "unknown") update({ phase: "unknown" });
+        else update({ phase: "recorded", recordedAt: nowRef.current });
+        if (!delivered.eventId) return;
         const settled = await settle(delivered.eventId);
         if (!mounted.current) return;
         if (settled?.phase === "refused") return update({ phase: "refused", reason: refusalOf(settled) ?? undefined });
         if (response === "approve" && settled?.phase === "applied") update({ phase: "decided" });
       })();
     },
-    [client, deliver, follow, settle],
+    [client, deliver, settle],
   );
 
   /**

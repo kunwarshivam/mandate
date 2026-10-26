@@ -27,7 +27,11 @@ export function refusedText(reason: string | null): string {
   return (reason && REFUSED[reason]) || "Refused by your deployment. Nothing was approved.";
 }
 
-/** Why an answer was not recorded: the step-up refusals an approve can meet (§3.5, DEC-2104 item 6), and the API's approver check. */
+/**
+ * Why an answer was not recorded: the step-up refusals an approve can meet (§3.5, DEC-2104 item 6),
+ * and `forbidden`, the API's refusal of a person the request's mandate does not list as an approver
+ * or whose role does not answer requests (DEC-2129 item 7).
+ */
 const UNDELIVERED: Readonly<Record<string, string>> = {
   step_up_required: "Not recorded: approving needs a confirmation your deployment did not receive, so nothing was approved.",
   step_up_missing: "Not recorded: your deployment found no confirmation of this code on the host, so nothing was approved. Run the command, then approve again.",
@@ -36,7 +40,6 @@ const UNDELIVERED: Readonly<Record<string, string>> = {
   step_up_reused: "Not recorded: this code was already used, so nothing was approved. Ask for a new code.",
   step_up_method: "Not recorded: your deployment does not take a host confirmation for this, so nothing was approved.",
   forbidden: "Not recorded: you are not an approver of this request, so nothing was approved.",
-  role_forbidden: "Not recorded: your role makes you not an approver of this request, so nothing was approved.",
 };
 
 /** An answer the API recorded nothing for, for `reason`, the problem's code. */
@@ -45,4 +48,4 @@ export function undeliveredText(reason: string | null | undefined): string {
 }
 
 /** The API's refusals that no answer from this person can get past: the screen offers nothing more to send. */
-export const FINAL_UNDELIVERED: ReadonlySet<string> = new Set(["forbidden", "role_forbidden"]);
+export const FINAL_UNDELIVERED: ReadonlySet<string> = new Set(["forbidden"]);

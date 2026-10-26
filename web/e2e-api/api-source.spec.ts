@@ -72,7 +72,7 @@ test("a grant the runtime refused not_an_approver reads as refused in words, nev
   await page.getByRole("region", { name: /^Needs you/ }).getByRole("link").first().click();
   await page.getByRole("button", { name: "Approve", exact: true }).click();
   await page.getByRole("region", { name: "Confirm on the host" }).getByRole("button", { name: "Approve", exact: true }).click();
-  await expect(page.getByRole("status").filter({ hasText: "Refused: you are not an approver of this request now. Nothing was approved." })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "Refused: you are not an approver of this request now. Nothing was approved." })).toBeVisible();
   await expect(page.getByText("Recorded in the journal: you approved")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
   const answers = () => calls.filter((c) => c.method() === "POST" && new URL(c.url()).pathname.endsWith("/responses"));
