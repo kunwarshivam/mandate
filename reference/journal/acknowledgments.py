@@ -583,7 +583,7 @@ def methods_for(environment: str, founder_connection: bool, skip: frozenset[str]
     identity spec §6.1 and §7.3 allow it, and `cli_confirm` in `paper`, and in `live` only on the
     founder's own connection (DEC-529 item 3, DEC-923), which a case states as an input as it states
     the overlay."""
-    passkey = () if "executor.3.passkey" in skip else ("passkey",)
+    passkey = () if "executor.3.passkey" in skip else LIVE_METHODS
     if environment == "paper" or founder_connection:
         return ("cli_confirm", *passkey)
     return passkey
@@ -999,7 +999,7 @@ def fuzz_streams(rng: random.Random, run: int) -> tuple[list[dict], list[dict], 
         kind = opening[n] if n < len(opening) else rng.choice(("trigger", "trigger", "lift", "request", "request", "ack", "ack", "ack", "command", "copy", "copy", "copy"))
         assertion = rng.choice(assertions) if rng.random() < 0.3 else f"assert_r{run}_{clock}"
         offset = rng.choice((0, 10, 10, 10, 300, 301, -1))
-        step_up = evidence(assertion, clock - offset, "password" if rng.random() < 0.1 else "cli_confirm")
+        step_up = evidence(assertion, clock - offset, "password" if rng.random() < 0.1 else rng.choice(METHODS))
         if kind == "trigger":
             tid = fresh("TG")
             trigger_ids.append(tid)

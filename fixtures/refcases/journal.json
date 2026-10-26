@@ -119576,15 +119576,15 @@
    "seed": 2509,
    "runs": 500,
    "outcomes": {
-    "lift": 85,
-    "trigger_unknown": 194,
-    "trigger_superseded": 249,
-    "step_up_missing": 38,
-    "step_up_stale": 125,
-    "step_up_reused": 9,
-    "step_up_method": 24,
-    "not_independent": 111,
-    "request_invalid": 48
+    "lift": 101,
+    "trigger_unknown": 202,
+    "trigger_superseded": 254,
+    "step_up_missing": 49,
+    "step_up_stale": 126,
+    "step_up_reused": 14,
+    "step_up_method": 18,
+    "not_independent": 105,
+    "request_invalid": 36
    }
   }
  },
