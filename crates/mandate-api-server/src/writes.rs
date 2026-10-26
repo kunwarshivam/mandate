@@ -15,7 +15,7 @@ use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
-use mandate_api::envelope::StepUpEvidence;
+use mandate_api::envelope::{StepUpEvidence, StepUpMethod};
 use mandate_api::idempotency::{Derivation, IdempotencyKey, event_id};
 use mandate_api::lenient::{Api7, ApprovalAnswer, Kept, decode_lenient};
 use mandate_api::problem::Violation;
@@ -40,7 +40,7 @@ use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
 use crate::session::Authenticated;
-use crate::stepup::{Action, Judged, journaled};
+use crate::stepup::{Action, Judged, Unverified, journaled};
 
 /// The `Idempotency-Key` request header (§3.4).
 const IDEMPOTENCY_KEY: &str = "idempotency-key";
@@ -371,8 +371,8 @@ pub(crate) fn unknown(id: EventId) -> Response {
 }
 
 /// `POST /v1/workspaces/{ws}/approvals/{id}/responses` (§5.2, DEC-1007 item 10): a Skip is
-/// recorded; a grant is refused for its step-up, which the server cannot verify yet, once the
-/// approval is found.
+/// recorded; a grant, once the approval is found, carries step-up the port judges (DEC-2104), and
+/// is committed only when E9-4 S6 lands.
 pub async fn respond(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
@@ -412,11 +412,13 @@ pub async fn respond(
     let skip = match &kept.value {
         ApprovalAnswer::Skipped(skip) => skip,
         ApprovalAnswer::Approved(grant) => {
-            let code = match grant.step_up {
-                Some(_) => ProblemCode::StepUpMissing,
-                None => ProblemCode::StepUpRequired,
+            let Some(evidence) = &grant.step_up else {
+                return problem(
+                    StatusCode::UNAUTHORIZED,
+                    problem_body(ProblemCode::StepUpRequired),
+                );
             };
-            return problem(StatusCode::UNAUTHORIZED, problem_body(code));
+            return judged_grant(&app, &reader, gate.now, &grant.content_hash, evidence);
         }
     };
     let Some(content_hash) = ref_text(&skip.content_hash) else {
@@ -428,6 +430,71 @@ pub async fn respond(
         content_hash,
     };
     committed(&app, &gate, &reader, &command, &kept.dropped, None).await
+}
+
+/// A grant's evidence judged by the port as an `approve` bound to the request's content hash
+/// (§3.6, identity spec §7.2 step 1): the port's refusal, else the grant [`granted`] commits. A
+/// `cli_confirm` grant, E9-4 S6's, is [`granted`]'s before any check (DEC-2129 item 1's order).
+fn judged_grant(
+    app: &App,
+    reader: &Reader,
+    now: UtcNanos,
+    content_hash: &Ref,
+    evidence: &StepUpEvidence,
+) -> Response {
+    if evidence.method == StepUpMethod::CliConfirm {
+        return stubbed();
+    }
+    let Some(digest) = ref_text(content_hash)
+        .as_deref()
+        .and_then(|text| text.strip_prefix("sha256:"))
+        .and_then(Digest::from_hex)
+    else {
+        return Refused::Invalid.response();
+    };
+    let action = Action {
+        kind: StepUpActionKind::Approve,
+        digest,
+    };
+    let judged = Judged {
+        tenant: &reader.tenant,
+        control: &reader.control,
+        now,
+    };
+    match app.step_up.asserted(evidence, None, &action, &judged) {
+        Ok(_) => stubbed(),
+        Err(Unverified::Code(ProblemCode::JournalUnavailable)) => {
+            Refused::JournalUnavailable.response()
+        }
+        Err(Unverified::Code(code)) => problem(StatusCode::UNAUTHORIZED, problem_body(code)),
+    }
+}
+
+/// [`granted`]'s answer: nothing is committed, and its report is the one violation, coded
+/// `unimplemented`, whose message names the story.
+fn stubbed() -> Response {
+    match granted() {
+        Ok(response) => response,
+        Err(Unimplemented { story }) => invalid(vec![Violation::Schema {
+            path: String::new(),
+            code: "unimplemented".to_owned(),
+            message: format!("{story} has not been implemented yet"),
+        }]),
+    }
+}
+
+/// A stub's report: the story that implements it (DEC-77).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Unimplemented {
+    story: &'static str,
+}
+
+/// The verified grant committed as the one `ApprovalResponseSubmitted` `mandate approvals approve`
+/// writes (E9-4 S6, DEC-2104 item 6, DEC-2129): not implemented yet, so a verified grant commits
+/// nothing and is refused `invalid` with one violation whose code is `unimplemented` and whose
+/// message names the story.
+fn granted() -> Result<Response, Unimplemented> {
+    Err(Unimplemented { story: "E9-4" })
 }
 
 /// The deployed agent whose stream requested `approval`, found by equality with an
