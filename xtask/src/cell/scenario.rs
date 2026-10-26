@@ -22,10 +22,11 @@ use sha2::{Digest, Sha256};
 use super::executor::{CONNECTION, RESEARCH_CONNECTION, connect_check, executor_live};
 use super::{
     API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_OWNER, DEPLOY_MANAGER_PROCESS,
-    ImageSource, MODEL_GATEWAY_PROCESS, NAMESPACE, NODE, RESEARCH_MANAGER_PROCESS, WORKSPACE_CHART,
-    api_diagnosis, api_image_tag, api_port_forward, helm, host_image_source, http, kubectl,
-    open_session, processes, render, render_with, reply_body, run_id, run_job, session_cookie,
-    signed_in, stub_image_tag, stub_token, template_args, tools_missing, up, web,
+    ImageSource, MODEL_GATEWAY_PROCESS, NAMESPACE, NODE, RESEARCH_MANAGER_PROCESS,
+    RESEARCH_SCHEDULER_PROCESS, SCHEDULER_PROCESS, WORKSPACE_CHART, api_diagnosis, api_image_tag,
+    api_port_forward, helm, host_image_source, http, kubectl, open_session, processes, render,
+    render_with, reply_body, run_id, run_job, session_cookie, signed_in, stub_image_tag,
+    stub_token, template_args, tools_missing, up, web,
 };
 use crate::output;
 
@@ -308,13 +309,6 @@ const W2_WEB: Wait = Wait {
     pr: None,
     lands: "web/ sends the demo's gestures through the API, and `cell demo` drives web/ against \
             the cell (claim #1443)",
-};
-const X_EXECUTOR: Wait = Wait {
-    lane: "X",
-    story: "E21-30",
-    pr: None,
-    lands: "slice X1b-3: paper fills on the fixture; the executor already takes the \
-            runtime's orders (#1736)",
 };
 const P5_HOOK: Wait = Wait {
     lane: "D1",
@@ -1079,9 +1073,21 @@ pub fn plan(
                     what: "the paper fill and the protective stop on a fixture broker",
                     on_main: "the executor process (#1596, binary #1694) and its interim image \
                               in the cell on the fixture paper broker (#1702, DEC-2031), handing \
-                              its agents' orders to the core (#1736), with the runtime proposing \
-                              nothing on the deny-all wiring (DEC-1013)",
-                    waits: vec![X_EXECUTOR, P5_HOOK],
+                              its agents' orders to the core (#1736); the fixture fills, and the \
+                              executor reads each deployment's mandate, gate and protection \
+                              (#2547, #2605) and its broker by asset id, so a deployed opening is \
+                              gated, filled, booked and protected in process (#2624, DEC-2813); \
+                              the cell's daemon asks on a deferring opening (#2538), and, in \
+                              process, the runtime's production wiring decides, asks and \
+                              proposes the opening once granted, on the demo envelope (#2637); \
+                              the cell's runtime is wired by the gap above",
+                    waits: vec![wait(
+                        "E2E",
+                        "E21-54",
+                        None,
+                        "a gesture that shows the granted opening's fill and resting stop in the \
+                         cell, in place of this gap",
+                    )],
                 }),
             ],
         },
@@ -1860,12 +1866,15 @@ fn api_unaskable() -> Result<Option<String>> {
     Ok(None)
 }
 
-/// The Deployments [`point_api`] points at the run and waits on: the API and the first manager on
-/// the run's workspace, the second manager and the model gateway on its research workspace.
-const POINTED: [&str; 4] = [
+/// The Deployments [`point_api`] points at the run and waits on: the API, the first manager and
+/// the first scheduler on the run's workspace, and the second manager, the second scheduler and the
+/// model gateway on its research workspace (DEC-2070, DEC-2071).
+const POINTED: [&str; 6] = [
     API_PROCESS,
     DEPLOY_MANAGER_PROCESS,
+    SCHEDULER_PROCESS,
     RESEARCH_MANAGER_PROCESS,
+    RESEARCH_SCHEDULER_PROCESS,
     MODEL_GATEWAY_PROCESS,
 ];
 
@@ -3573,7 +3582,7 @@ mod tests {
 
     /// The slices a wait has named that are on `main`, with the PR that landed each: a lane that
     /// lands one adds its row here, so no wait can go on saying it is still to come.
-    const LANDED_SLICES: &[(&str, u32)] = &[("X1a", 1596), ("X1b", 1736)];
+    const LANDED_SLICES: &[(&str, u32)] = &[("X1a", 1596), ("X1b", 1736), ("X1b-3", 2624)];
 
     /// The slices `text` names as still to land: each word that follows `slice `, up to the
     /// first character that is not a letter, a digit or a hyphen, so `X1b-3` is not `X1b`.
@@ -3754,7 +3763,9 @@ mod tests {
             [
                 "api",
                 "deploy-manager",
+                "scheduler",
                 "deploy-manager-research",
+                "scheduler-research",
                 "model-gateway"
             ]
         );

@@ -87,8 +87,8 @@ pub fn stream_event_types(stream: StreamType) -> impl Iterator<Item = &'static s
 }
 
 /// The event types the stream rules read: §9.19's rules 153 and 158, the invalidation's rule 187,
-/// the run records' rules 173 to 183, and §9.5's rule 260.
-pub const STREAM_RULE_TYPES: [&str; 12] = [
+/// the run records' rules 173 to 183, and §9.5's rules 260 and 309.
+pub const STREAM_RULE_TYPES: [&str; 13] = [
     "ModelInvocationRecorded",
     "MeterReserved",
     "MeterSettled",
@@ -101,10 +101,11 @@ pub const STREAM_RULE_TYPES: [&str; 12] = [
     "RunSummaryRecorded",
     "RunEnded",
     "AccountCloseRequested",
+    "AccountRestrictionChanged",
 ];
 
 /// Whether a draft of `batch` is judged by a stream rule (journal spec §9.19 rules 153 and 158,
-/// the invalidation's rule 187, the run records' rules 173 to 183, §9.5's rule 260), so `append`
+/// the invalidation's rule 187, the run records' rules 173 to 183, §9.5's rules 260 and 309), so `append`
 /// reads the stream's earlier records of [`STREAM_RULE_TYPES`] to judge it.
 pub fn reads_stream(batch: &[Draft]) -> bool {
     batch.iter().any(|draft| {
@@ -122,7 +123,10 @@ pub fn reads_stream(batch: &[Draft]) -> bool {
             ) | (
                 "MeterReserved" | "MeterSettled",
                 StreamType::Meter | StreamType::DeploymentMeter
-            ) | ("AccountCloseRequested", StreamType::Account)
+            ) | (
+                "AccountCloseRequested" | "AccountRestrictionChanged",
+                StreamType::Account
+            )
         )
     })
 }

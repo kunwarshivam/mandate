@@ -31,7 +31,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md §9.5 `FillApplied` version 2 and rule 299 (DEC-2812)"
+SPEC = "docs/specs/journal.md §9.5 `FillApplied` version 2 and rules 299 and 300 (DEC-2812, DEC-2817)"
 ACCOUNT = f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}"
 AT = "2026-10-26T15:00:00.250000000Z"
 RISK_CLOCK = "2026-10-26T15:00:01.000000000Z"
@@ -48,6 +48,7 @@ UNATTRIBUTED = "unattributed"
 VERSION_1 = "version_1"
 LATE = "late"
 RULE_299 = "rule 299"
+RULE_300 = "rule 300"
 LONGEST = 128
 
 
@@ -146,8 +147,19 @@ def invalid_drafts() -> list[dict]:
             [change(at("agent"), "agenta")], at("agent")),
         bad("v2_no_fee_config", "§9: `FillApplied` requires `fee_config`", UNATTRIBUTED,
             [delete("config_refs.fee_config")], "config_refs.fee_config", "missing_config_ref"),
-        bad("v2_no_instrument_snapshot", "§9: `FillApplied` requires `instrument_snapshot`", UNATTRIBUTED,
+        bad("v2_named_without_instrument_snapshot", f"{RULE_300}: a fill of an order of ours names its snapshot",
+            ATTRIBUTED, [delete("config_refs.instrument_snapshot")], "config_refs.instrument_snapshot",
+            "missing_config_ref"),
+        bad("v1_without_instrument_snapshot", "§9: version 1 requires `instrument_snapshot`", VERSION_1,
             [delete("config_refs.instrument_snapshot")], "config_refs.instrument_snapshot", "missing_config_ref"),
+        bad("late_without_instrument_snapshot", "§9: `LateFillApplied` requires `instrument_snapshot`", LATE,
+            [delete("config_refs.instrument_snapshot")], "config_refs.instrument_snapshot", "missing_config_ref"),
+        bad("v2_unattributed_without_trading_calendar", "§9.5: an unattributed fill still names both calendars",
+            UNATTRIBUTED, [delete("config_refs.trading_calendar"), delete("config_refs.instrument_snapshot")],
+            "config_refs.trading_calendar", "missing_config_ref"),
+        bad("v2_unattributed_without_settlement_calendar", "§9.5: an unattributed fill still names both calendars",
+            UNATTRIBUTED, [delete("config_refs.settlement_calendar")], "config_refs.settlement_calendar",
+            "missing_config_ref"),
         bad("version_3", "§9.5: registered at `schema_version` 1 and 2 only", ATTRIBUTED,
             [change("schema_version", 3)], "payload", "unknown_schema"),
         bad("late_version_2", "§9.5: `LateFillApplied` stays at version 1", LATE, [change("schema_version", 2)],
@@ -190,6 +202,9 @@ def valid_drafts() -> list[dict]:
            [change(coid, "theirs-1")]),
         ok("late_another_form", "§9.5: `LateFillApplied` version 1 is unchanged", LATE, [change(coid, "theirs-1")]),
         ok("live", "§9.5: either environment", UNATTRIBUTED, [change("environment", "live")]),
+        ok("v2_unattributed_without_instrument_snapshot",
+           f"{RULE_300}: an unattributed fill in an instrument the platform holds no snapshot of", UNATTRIBUTED,
+           [delete("config_refs.instrument_snapshot"), change("payload.instrument_id", "us_equity:OWNERPICK")]),
     ]
     return out
 
@@ -254,6 +269,7 @@ def check_section(section: dict) -> list[str]:
 
 VALIDATOR_MUTANTS = (
     "rule.299",
+    "rule.300",
     "boundary.rule_299_length",
 )
 

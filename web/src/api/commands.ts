@@ -73,6 +73,24 @@ export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, k
   }
 }
 
+/** An asset id as the exits route takes it (`common.schema.json#/$defs/AssetId`): a lowercase UUID. */
+const ASSET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export const isAssetId = (instrument: string): boolean => ASSET_ID.test(instrument);
+
+/**
+ * The owner's exit from one instrument (§5.4, `POST /agents/{id}/exits`; rule 13): the asset and the
+ * screen the owner confirmed. The bid confirmation is all `null`: the positions read serves no quote
+ * with its size and time, so there is no bid the owner could have seen, and an equity sell outside the
+ * regular session waits for it, which the screen says. It carries no step-up: the server records an
+ * owner exit without one (§3.11 item 12), and it is never refused for step-up.
+ */
+export function prepareOwnerExit(client: WorkspaceClient, agentId: string, instrument: string, record: CommandRecord): Prepared {
+  if (!agentId) return { ok: false, reason: "no_agent" };
+  if (!isAssetId(instrument)) return { ok: false, reason: "no_asset_id" };
+  return one(client.prepare("owner_exit", { agent: agentId }, { instrument, bid: null, bid_size: null, quoted_at: null, floor: null, record: recordRef(record), step_up: null }));
+}
+
 /**
  * An answer to an approval (§5.2). An approve carries the `cli_confirm` evidence of `challenge`, which
  * must be bound to this approval's content hash; a challenge for anything else is refused here and

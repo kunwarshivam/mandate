@@ -12,10 +12,9 @@ use mandate_gateway::meter::SharedMeter;
 use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
 use mandate_num::Usd;
 use mandate_research::{
-    AdmissionChange, AdmissionDecision, AdmissionFacts, AssetClass, AssetId, AutonomyDecision,
-    GroupId, LineageId, LineageState, MandateEnvelope, PolicyOverlay, RefusalReason,
-    ResearchEnvelope, SourceAllowlist, ThesisId, UniverseEntry, ValidatedMandate, WorkingUniverse,
-    expire_theses,
+    AdmissionFacts, AssetClass, AssetId, AutonomyDecision, GroupId, LineageState, MandateEnvelope,
+    PolicyOverlay, ReplayError, ResearchEnvelope, SourceAllowlist, ThesisRecord, ValidatedMandate,
+    WorkingUniverse, replay_theses,
 };
 use mandate_research_run::{InstrumentFact, ItemKind, RetrievedItem, Symbol};
 use mandate_runtime::{
@@ -146,79 +145,29 @@ pub fn fold_research(
     instruments: &[InstrumentFact],
 ) -> Result<ResearchFold, FoldError> {
     let unreadable = |member| FoldError::Unreadable { member };
-    let mut lineages = LineageState::default();
-    let mut entries: BTreeMap<AssetId, UniverseEntry> = BTreeMap::new();
-    for row in agent {
-        let invalidation = row.event_type == "ThesisInvalidated";
-        if !invalidation && !matches!(row.event_type.as_str(), "ThesisProposed" | "ThesisRevised") {
-            continue;
-        }
-        let body = parse(&row.body).map_err(|_| unreadable("payload"))?;
-        let payload = body.get("payload").ok_or(unreadable("payload"))?;
-        let text = |member| {
-            payload
-                .get(member)
-                .and_then(Value::as_str)
-                .ok_or(unreadable(member))
-        };
-        let thesis = ThesisId::new(text("thesis_id")?).map_err(|_| unreadable("thesis_id"))?;
-        if invalidation {
-            for entry in entries.values_mut() {
-                if entry.thesis_id == thesis {
-                    entry.invalidated = true;
-                }
-            }
-            continue;
-        }
-        let lineage = LineageId::new(text("lineage_id")?).map_err(|_| unreadable("lineage_id"))?;
-        let instrument =
-            AssetId::new(text("instrument_id")?).map_err(|_| unreadable("instrument_id"))?;
-        let revision = payload
-            .get("revision")
-            .and_then(Value::as_int)
-            .and_then(|n| u32::try_from(n).ok())
-            .ok_or(unreadable("revision"))?;
-        let expires_at =
-            UtcNanos::parse_rfc3339(text("expires_at")?).map_err(|_| unreadable("expires_at"))?;
-        let admitted = match payload.get("admitted") {
-            Some(Value::Bool(admitted)) => *admitted,
-            _ => return Err(unreadable("admitted")),
-        };
-        let decision = match (admitted, payload.get("reason")) {
-            (true, Some(Value::Null)) => AdmissionDecision::Admitted {
-                change: AdmissionChange::Admitted,
-            },
-            (false, Some(Value::Str(code))) => AdmissionDecision::Refused {
-                reason: RefusalReason::parse(code).map_err(|_| unreadable("reason"))?,
-            },
-            _ => return Err(unreadable("reason")),
-        };
-        lineages.replay(&lineage, revision, &instrument, decision);
-        if admitted {
-            entries.insert(
-                instrument.clone(),
-                UniverseEntry {
-                    instrument,
-                    thesis_id: thesis,
-                    lineage_id: lineage,
-                    revision,
-                    expires_at,
-                    invalidated: false,
-                },
-            );
-        }
-    }
-    let entries: Vec<UniverseEntry> = entries.into_values().collect();
-    let expiry = expire_theses(at, &entries, &lineages).map_err(|_| unreadable("expires_at"))?;
-    let WorkingUniverse::Known {
-        instruments: kept, ..
-    } = &expiry.universe
-    else {
-        return Err(unreadable("expires_at"));
-    };
-    let active = entries
+    let records = agent
         .iter()
-        .filter(|entry| kept.contains(&entry.instrument))
+        .filter(|row| {
+            matches!(
+                row.event_type.as_str(),
+                "ThesisProposed" | "ThesisRevised" | "ThesisInvalidated"
+            )
+        })
+        .map(|row| {
+            let payload = parse(&row.body)
+                .ok()
+                .and_then(|body| body.get("payload").cloned())
+                .ok_or(ReplayError::Unreadable { member: "payload" })?;
+            Ok(ThesisRecord {
+                event_type: row.event_type.as_str(),
+                payload,
+            })
+        });
+    let replayed = replay_theses(records, at)
+        .map_err(|ReplayError::Unreadable { member }| unreadable(member))?;
+    let active = replayed
+        .active
+        .iter()
         .map(|entry| {
             let symbol = instruments
                 .iter()
@@ -236,8 +185,8 @@ pub fn fold_research(
         })
         .collect::<Result<Vec<_>, FoldError>>()?;
     Ok(ResearchFold {
-        universe: expiry.universe,
-        lineages,
+        universe: replayed.universe,
+        lineages: replayed.lineages,
         active,
     })
 }
