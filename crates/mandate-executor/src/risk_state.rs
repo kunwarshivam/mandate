@@ -731,9 +731,10 @@ impl<'c> AccountRiskFold<'c> {
     /// - `KillSwitchActivated` is never returned. The fold never acts; the cancels and closes a
     ///   `flatten_and_pause` rung asks for are slice C5's (DEC-2307 item 3).
     /// - `AgentModeApplied` is the executor's own, and names as its restriction the action of the
-    ///   step's last `RiskLimitTriggered` before it (DEC-2308 item 3). A mode change with no trigger
-    ///   before it in the step names the limit or event that caused it, which B2b-2b writes; until
-    ///   then it fails closed.
+    ///   step's last `RiskLimitTriggered` before it (DEC-2308 item 3). With no trigger before it in
+    ///   the step, it names the step's last `RiskLimitLifted` (its ladder action, or its limit's
+    ///   journal name when it carries none), or `goal_completed` after `GoalCompleted` (DEC-2331
+    ///   item 1); any other mode change with no cause in its step fails closed.
     /// - `InstrumentRestrictionChanged` names the bound instrument (DEC-2307 item 4, DEC-2308 item 2),
     ///   which `open` and `bind` only ever bind to a canonical asset id or to one a mark named; a
     ///   restriction on an instrument that is not a canonical asset id fails closed as a refusal to
@@ -770,7 +771,8 @@ impl<'c> AccountRiskFold<'c> {
             ]
         };
         let mut appends = Vec::new();
-        let mut last_action = None;
+        let mut last_action: Option<String> = None;
+        let mut cause: Option<String> = None;
         for (index, event) in outcome.journal.iter().enumerate() {
             let (event_type, agent, mut members) = match event {
                 RiskEvent::RiskDayStarted { day_start_equity } => (
@@ -789,7 +791,7 @@ impl<'c> AccountRiskFold<'c> {
                     action,
                     reason,
                 } => {
-                    last_action = Some(*action);
+                    last_action = Some(action.as_str().to_owned());
                     let breach_time_s = outcome
                         .breach_time_s(index)
                         .ok()
@@ -817,6 +819,9 @@ impl<'c> AccountRiskFold<'c> {
                     reason,
                 } => {
                     let reason = reason.map(|r| spelled(&LIFT_REASONS, r)).transpose()?;
+                    cause = Some(
+                        action.map_or_else(|| limit.journal_name(), |a| a.as_str().to_owned()),
+                    );
                     let mut members = figures();
                     members.extend([
                         ("limit", text(limit.journal_name())),
@@ -826,13 +831,16 @@ impl<'c> AccountRiskFold<'c> {
                     ("RiskLimitLifted", "agent_id", members)
                 }
                 RiskEvent::AgentModeApplied { to, .. } => {
-                    let restriction = last_action.ok_or(UnreadableCause::AppendFailed)?;
+                    let restriction = last_action
+                        .clone()
+                        .or_else(|| cause.clone())
+                        .ok_or(UnreadableCause::AppendFailed)?;
                     (
                         "AgentModeApplied",
                         "agent",
                         vec![
                             ("to", text(spelled(&MODES, *to)?)),
-                            ("restriction", text(restriction.as_str())),
+                            ("restriction", text(restriction)),
                             ("originated", Value::Bool(true)),
                         ],
                     )
@@ -862,15 +870,18 @@ impl<'c> AccountRiskFold<'c> {
                     reason,
                     then,
                     on_complete,
-                } => (
-                    "GoalCompleted",
-                    "agent_id",
-                    vec![
-                        ("reason", nullable(reason.map(GoalReason::as_str))),
-                        ("then", nullable(then.map(ThenAction::as_str))),
-                        ("on_complete", nullable(on_complete.map(OnComplete::as_str))),
-                    ],
-                ),
+                } => {
+                    cause = Some("goal_completed".to_owned());
+                    (
+                        "GoalCompleted",
+                        "agent_id",
+                        vec![
+                            ("reason", nullable(reason.map(GoalReason::as_str))),
+                            ("then", nullable(then.map(ThenAction::as_str))),
+                            ("on_complete", nullable(on_complete.map(OnComplete::as_str))),
+                        ],
+                    )
+                }
                 RiskEvent::KillSwitchActivated { .. } => continue,
                 RiskEvent::HighWaterMarkReset { .. }
                 | RiskEvent::PositionReleased { .. }
