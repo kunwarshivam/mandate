@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Button } from "@cloudflare/kumo/components/button";
-import type { AgentHolding } from "@/api/activity";
+import type { AgentHolding, Protection, RiskMark } from "@/api/activity";
 import { isAssetId } from "@/api/commands";
 import type { AgentDetail, ReadPosition } from "@/api/read-models";
 import { PageHeader } from "@/components/kumo/page-header/page-header";
 import { Section, WorkspaceGate } from "@/components/screens/common";
-import { clock, quantity } from "@/lib/format";
+import { clock, price, quantity, signedUsd, usd } from "@/lib/format";
 import { type CommandRecord, type ExitOutcome, type PositionsAnswer, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 
@@ -16,8 +16,9 @@ import { useCan } from "@/lib/roles";
  * Positions over the workspace API (§4.7 D3, DEC-2111, DEC-1096): each agent's own positions, the net
  * quantity its fills hold per instrument, grouped by the account its document names, and beside them
  * what that account held at its last reconciliation, whichever agent bought it, from the same reads. The cost basis, risk
- * mark and protection are served `null` until their folds are (DEC-2111 item 5), so each says "not
- * reported", never a figure computed here. A list that cannot be read is never shown as empty.
+ * mark, market value, unrealized P&L and protection are DEC-2138's, shown as served: each the read
+ * serves `null` says "not reported", a mark that is not sane shows no price, and nothing is computed
+ * here. A list that cannot be read is never shown as empty.
  */
 
 /** How often the positions are read again while the screen is open. */
@@ -227,7 +228,38 @@ function ExitStatuses({ exits }: { exits: Exits }) {
   );
 }
 
-/** One agent's own positions, with the three members its deployment does not report yet. */
+/** A figure the read served, or "Not reported" where it served `null`: never a zero or a figure computed here. */
+function Figure({ text }: { text: string | null }) {
+  return text === null ? <td className={`py-2.5 ${NOT_REPORTED}`}>Not reported</td> : <td className="py-2.5 font-mono tabular">{text}</td>;
+}
+
+/** The latest counted risk mark; one that is not sane shows no price at all (DEC-2138 item 2). */
+function MarkCell({ mark }: { mark: RiskMark | null }) {
+  if (mark === null) return <Figure text={null} />;
+  if (!mark.sane || mark.bid === null) return <td className={`py-2.5 ${NOT_REPORTED}`}>No sane mark</td>;
+  return (
+    <td className="py-2.5">
+      <span className="font-mono tabular">{price(mark.bid)}</span> bid, {clock(mark.marked_at)} UTC
+    </td>
+  );
+}
+
+/** The account's protection in the instrument as the executor folds it (trading spec §5.4, DEC-2138 item 4). */
+function ProtectionCell({ protection }: { protection: Protection | null }) {
+  if (protection === null) return <Figure text={null} />;
+  if (protection.orders.length > 0) {
+    const parts = [protection.stop === null ? null : `stop ${price(protection.stop)}`, protection.take_profit === null ? null : `take-profit ${price(protection.take_profit)}`].filter((p): p is string => p !== null);
+    return (
+      <td className="py-2.5">
+        {parts.length > 0 ? `${parts.join(", ")}; ` : ""}covers {quantity(protection.covered_qty)}
+      </td>
+    );
+  }
+  if (protection.unprotected_since !== null) return <td className="py-2.5 font-medium">Unprotected since {clock(protection.unprotected_since)} UTC</td>;
+  return <td className="py-2.5 text-muted-foreground">No protective order recorded</td>;
+}
+
+/** One agent's own positions, with what its deployment reports of each and "not reported" where it does not. */
 function OwnPositions({
   agent,
   answer,
@@ -271,6 +303,12 @@ function OwnPositions({
                 Risk mark
               </th>
               <th scope="col" className="py-2 font-normal">
+                Market value
+              </th>
+              <th scope="col" className="py-2 font-normal">
+                Unrealized P&amp;L
+              </th>
+              <th scope="col" className="py-2 font-normal">
                 Protection
               </th>
               <th scope="col" className="py-2 font-normal">
@@ -285,9 +323,11 @@ function OwnPositions({
                 <td className="py-2.5 font-mono tabular">
                   {quantity(h.filled_qty)}
                 </td>
-                <td className={`py-2.5 ${NOT_REPORTED}`}>Not reported</td>
-                <td className={`py-2.5 ${NOT_REPORTED}`}>Not reported</td>
-                <td className={`py-2.5 ${NOT_REPORTED}`}>Not reported</td>
+                <Figure text={h.cost_basis ? `${usd(h.cost_basis.basis)} for ${quantity(h.cost_basis.qty)}` : null} />
+                <MarkCell mark={h.risk_mark} />
+                <Figure text={h.market_value === null ? null : usd(h.market_value)} />
+                <Figure text={h.unrealized_pnl === null ? null : signedUsd(h.unrealized_pnl)} />
+                <ProtectionCell protection={h.protection} />
                 <td className="py-2.5">
                   <ExitControl agent={agent} holding={h} name={name} exits={exits} />
                 </td>

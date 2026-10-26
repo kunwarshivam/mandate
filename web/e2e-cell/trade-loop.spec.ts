@@ -149,11 +149,12 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     step("journal", String(await journal.getByRole("listitem").count()));
   });
 
-  await test.step("the positions screen shows the agent's own position from the API, its unserved members as not reported", async () => {
+  await test.step("the positions screen shows the agent's own position from the API, with each figure as served or not reported", async () => {
     const own = page.locator(`[data-slot=agent-positions][data-agent="${AGENT}"]`);
     const shown = await until(page, "/positions", 30_000, async () => (await own.getByRole("row").count()) > 1);
     if (!shown) refuse("the positions screen showed no row of the agent's own position within 30 s");
-    await expect(own.getByRole("cell", { name: "Not reported" }).first()).toBeVisible();
+    await expect(own.getByRole("columnheader", { name: "Cost basis" })).toBeVisible();
+    await expect(own.getByRole("row").nth(1).getByRole("cell")).toHaveCount(8);
     step("positions_screen");
   });
 

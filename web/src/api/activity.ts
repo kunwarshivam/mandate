@@ -32,9 +32,42 @@ export interface AgentOrder {
   updated_at: Timestamp;
 }
 
+/** The agent sub-ledger's signed quantity and cost basis (trading spec §8.1, DEC-2138 item 1). */
+export interface CostBasis {
+  qty: Decimal;
+  basis: Decimal;
+}
+
+/** An instrument's latest counted risk mark (DEC-2138 item 2). A mark that is not sane names no price to show. */
+export interface RiskMark {
+  bid: Decimal | null;
+  sane: boolean;
+  session: "regular" | "crypto";
+  marked_at: Timestamp;
+}
+
+/** The account's protective orders in the instrument and its open unprotected interval (trading spec §5.4, DEC-2138 item 4). */
+export interface Protection {
+  orders: string[];
+  covered_qty: Decimal;
+  stop: Decimal | null;
+  take_profit: Decimal | null;
+  unprotected_since: Timestamp | null;
+}
+
+/**
+ * One instrument the agent's own fills hold (`read-models/positions`). DEC-2138's members are `null`
+ * where the journal does not say, and where a deployment that predates them serves nothing: both
+ * read as "not reported", never as zero.
+ */
 export interface AgentHolding {
   instrument_id: string;
   filled_qty: Decimal;
+  cost_basis: CostBasis | null;
+  risk_mark: RiskMark | null;
+  market_value: Decimal | null;
+  unrealized_pnl: Decimal | null;
+  protection: Protection | null;
 }
 
 export interface Activity {
@@ -66,7 +99,39 @@ const order = object<AgentOrder>({
   updated_at: timestamp,
 });
 
-const holding = object<AgentHolding>({ instrument_id: bounded(200), filled_qty: decimal });
+/** A member a deployment before DEC-2138 does not serve reads as `null`; one it serves must decode. */
+const unservedAsNull =
+  <T,>(decode: Decoder<T>): Decoder<T | null> =>
+  (value, path) =>
+    value === undefined ? { ok: true, value: null } : nullable(decode)(value, path);
+
+const flag: Decoder<boolean> = (value, path) => (typeof value === "boolean" ? { ok: true, value } : fail(path, value === undefined ? "missing" : "wrong_type"));
+
+const riskMark: Decoder<RiskMark> = (value, path) => {
+  const read = object<RiskMark>({ bid: nullable(decimal), sane: flag, session: closedEnum(["regular", "crypto"] as const), marked_at: timestamp })(value, path);
+  return read.ok && read.value.sane && read.value.bid === null ? fail(`${path}/bid`, "wrong_type") : read;
+};
+
+const held = object<Pick<AgentHolding, "instrument_id" | "filled_qty">>({ instrument_id: bounded(200), filled_qty: decimal });
+const figures = {
+  cost_basis: unservedAsNull(object<CostBasis>({ qty: decimal, basis: decimal })),
+  risk_mark: unservedAsNull(riskMark),
+  market_value: unservedAsNull(decimal),
+  unrealized_pnl: unservedAsNull(decimal),
+  protection: unservedAsNull(object<Protection>({ orders: array(bounded(200)), covered_qty: decimal, stop: nullable(decimal), take_profit: nullable(decimal), unprotected_since: nullable(timestamp) })),
+} as const;
+
+const holding: Decoder<AgentHolding> = (value, path) => {
+  const base = held(value, path);
+  if (!base.ok) return base;
+  const out: Record<string, unknown> = { ...base.value };
+  for (const [name, decode] of Object.entries(figures) as Array<[string, Decoder<unknown>]>) {
+    const read = decode((value as Record<string, unknown>)[name], `${path}/${name}`);
+    if (!read.ok) return read;
+    out[name] = read.value;
+  }
+  return { ok: true, value: out as unknown as AgentHolding };
+};
 
 /** `read-models/orders` and `read-models/positions`, each with the agent it names; an answer for another agent is refused. */
 export function activityRead(agentId: string) {
