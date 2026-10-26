@@ -125,6 +125,37 @@ RULE_21_REORDERINGS = {
 }
 RULE_21_PARAMS_FIRST = "order.rule_21_params_first"
 
+
+# §9.2's `AccountSnapshotRecorded`: the broker's account members, then the cash comparison. Version 2
+# (§9.35, DEC-2398) adds the connector's declared account type and day-trading regime, `null` when it
+# declares none, and the broker's prior-close equity and maintenance margin between the two.
+SNAPSHOT_ACCOUNT_MEMBERS = (
+    ("status", STR),
+    ("crypto_status", STR),
+    ("trading_blocked", BOOL),
+    ("account_blocked", BOOL),
+    ("trade_suspended_by_user", BOOL),
+    ("multiplier", INT),
+    ("equity", DEC),
+    ("cash", DEC),
+    ("buying_power", DEC),
+    ("non_marginable_buying_power", DEC),
+    ("accrued_fees", DEC),
+)
+SNAPSHOT_CASH_MEMBERS = (
+    ("model_cash", opt(DEC)),
+    ("cash_band", opt(DEC)),
+    ("cash_in_band", opt(BOOL)),
+)
+SNAPSHOT_ACCOUNT_TYPES = ("cash", "margin")
+SNAPSHOT_REGIMES = ("intraday_margin", "legacy_pdt")
+SNAPSHOT_MARGIN_MEMBERS = (
+    ("account_type", opt(one_of(*SNAPSHOT_ACCOUNT_TYPES))),
+    ("day_trading_regime", opt(one_of(*SNAPSHOT_REGIMES))),
+    ("last_equity", DEC),
+    ("maintenance_margin", DEC),
+)
+
 SCHEMAS: dict[tuple[str, str], T] = {
     ("ctl", "StreamOpened"): rec(("stream_type", one_of("control")), ("workspace_id", IDENT_T)),
     ("ctl", "ConnectionEstablished"): rec(
@@ -162,21 +193,7 @@ SCHEMAS: dict[tuple[str, str], T] = {
         ("loss_added", DEC),
     ),
     ("acct", "AccountSnapshotRecorded"): rec(
-        ("status", STR),
-        ("crypto_status", STR),
-        ("trading_blocked", BOOL),
-        ("account_blocked", BOOL),
-        ("trade_suspended_by_user", BOOL),
-        ("multiplier", INT),
-        ("equity", DEC),
-        ("cash", DEC),
-        ("buying_power", DEC),
-        ("non_marginable_buying_power", DEC),
-        ("accrued_fees", DEC),
-        ("model_cash", opt(DEC)),
-        ("cash_band", opt(DEC)),
-        ("cash_in_band", opt(BOOL)),
-        ("risk_clock", RISK_CLOCK),
+        *SNAPSHOT_ACCOUNT_MEMBERS, *SNAPSHOT_CASH_MEMBERS, ("risk_clock", RISK_CLOCK)
     ),
 }
 REFUSAL = rec(
@@ -1296,6 +1313,8 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "ProtectionChanged"): (1, 2),
     ("acct", "OwnerConfirmationReceived"): (1,),
     ("acct", "AccountCloseRequested"): (1,),
+    ("acct", "AccountRestrictionChanged"): (1,),
+    ("acct", "KillSwitchActivated"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2, 3),
@@ -1306,6 +1325,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("ctl", "AgentDeployed"): (1, 2, 3),
     ("acct", "MarkUpdated"): (1, 2),
     ("ctl", "ConnectionRequested"): (1, 2),
+    ("acct", "AccountSnapshotRecorded"): (1, 2),
 }
 # §9.30 (DEC-2305): `MarkUpdated` version 2 adds the risk mark's bid, its sanity verdict, and its
 # session to version 1's members, with `risk_clock` last; version 1 stays registered.
@@ -1324,6 +1344,12 @@ MARK_UPDATED_V2 = rec(
     ("risk_clock", RISK_CLOCK),
 )
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
+    ("acct", "AccountSnapshotRecorded", 2): rec(
+        *SNAPSHOT_ACCOUNT_MEMBERS,
+        *SNAPSHOT_MARGIN_MEMBERS,
+        *SNAPSHOT_CASH_MEMBERS,
+        ("risk_clock", RISK_CLOCK),
+    ),
     ("acct", "MarkUpdated", 1): rec(*MARK_UPDATED_V1_MEMBERS, ("risk_clock", RISK_CLOCK)),
     ("acct", "MarkUpdated", 2): MARK_UPDATED_V2,
     ("acct", "StreamOpened", 1): rec(
@@ -1350,6 +1376,29 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("floor", DEC),
         ("expires_at", INT),
         ("copied_from", ULID),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # §9.5 (DEC-2139): a kill switch the executor applied on its account, as it writes it.
+    ("acct", "KillSwitchActivated", 1): rec(
+        ("scope", one_of("agent", "account")),
+        ("subject", IDENT_T),
+        ("initiator", one_of("owner", "risk_limit", "platform_operator")),
+        ("purpose", one_of("risk_exit", "owner_exit")),
+        ("cancels", list_of(STR)),
+        ("closes", list_of(STR)),
+        ("deferred", list_of(STR)),
+        ("floor", opt(DEC)),
+        ("bid", opt(DEC)),
+        ("bid_size", opt(DEC)),
+        ("copied_from", opt(ULID)),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # §9.5 (DEC-2137): an account restriction the executor detected, with its closed cause
+    # (trading spec §7.3, DEC-441 item 23), journaled before the modes it applies.
+    ("acct", "AccountRestrictionChanged", 1): rec(
+        ("restriction", one_of("closing_only", "blocked")),
+        ("cause", one_of("broker_reject", "broker_notice", "connection_unavailable")),
+        ("reason_code", one_of("account_trading_blocked", "account_restricted")),
         ("risk_clock", RISK_CLOCK),
     ),
     # v0.75 §9.5 (DEC-2337): one instrument's close-position under an account kill switch,
@@ -1883,6 +1932,21 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
         wrong = next((m for m in prices if not positive(m)), None)
         rule("247", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "KillSwitchActivated" and draft["stream_id"].startswith("acct:"):
+        account_switch_rules(draft, skip, rule)
+    if event_type == "AccountRestrictionChanged":
+        blocked = p["restriction"] == "blocked"
+        if "rule.279.closing_only_any_code" in skip:
+            coded = not blocked or p["reason_code"] == "account_trading_blocked"
+        else:
+            coded = blocked == (p["reason_code"] == "account_trading_blocked")
+        noticed = p["cause"] == "broker_notice" or (
+            "rule.280.any_reject" in skip and p["cause"] == "broker_reject"
+        )
+        if not coded:
+            rule("279", coded, "schema", "payload.reason_code")
+        else:
+            rule("280", not blocked or noticed, "schema", "payload.cause")
     if event_type == "AccountCloseRequested":
         qty = normalize_decimal(p["qty"])
         if qty is None:
@@ -2571,6 +2635,40 @@ def gap_nanos(start, end) -> int | None:
     if not all(isinstance(v, str) and is_timestamp(v) for v in (start, end)):
         return None
     return instant_nanos(end) - instant_nanos(start)
+
+
+KILL_SWITCH_PURPOSE = {"owner": "owner_exit", "risk_limit": "risk_exit", "platform_operator": "risk_exit"}
+CONFIRMED = ("floor", "bid", "bid_size")
+
+
+def account_switch_rules(draft: dict, skip: frozenset[str], rule) -> None:
+    """Rules 281, 282 and 293 to 296 (DEC-2139) on the account stream's `KillSwitchActivated`, in
+    that order, the first that fails reported."""
+    p = draft["payload"]
+    owner = p["initiator"] == "owner"
+    purpose = KILL_SWITCH_PURPOSE[p["initiator"]]
+    if "rule.281.any_exit" in skip:
+        purpose = p["purpose"]
+    confirmed = [m for m in CONFIRMED if p[m] is not None]
+    if "order.rule_282_bid_first" in skip:
+        mixed = next((m for m in ("bid_size", "bid") if (p[m] is None) != (p["floor"] is None)), None)
+    else:
+        mixed = next((m for m in ("bid", "bid_size") if (p[m] is None) != (p["floor"] is None)), None)
+    account = p["scope"] == "account"
+    overlap = set(p["closes"]) & set(p["deferred"])
+    clauses = [
+        ("281", p["purpose"] == purpose, "payload.purpose"),
+        ("282", mixed is None, f"payload.{mixed}"),
+        ("293", owner or not confirmed or "rule.293.any_initiator" in skip, "payload.floor"),
+        ("294.cancels", not account or not p["cancels"], "payload.cancels"),
+        ("294.deferred", not account or not p["deferred"], "payload.deferred"),
+        ("295", draft["causation_id"] is not None, "causation_id"),
+        ("296", not overlap, "payload.deferred"),
+    ]
+    for name, holds, path in clauses:
+        if not holds and f"rule.{name}" not in skip:
+            rule(name, False, "schema", path)
+            return
 
 
 def passkey_step_up(number: str, draft: dict, skip: frozenset[str], rule) -> bool:
@@ -3425,6 +3523,8 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     if event_type in ("MandateConfirmed", "AgentDeployed") and "versions.v3" in skip:
         versions = tuple(v for v in versions if v != 3)
     if event_type == "CredentialEnrolled" and "versions.credential_enrolled_v2" in skip:
+        versions = (1,)
+    if event_type == "AccountSnapshotRecorded" and "versions.snapshot_v2" in skip:
         versions = (1,)
     if event_type == "MarkUpdated" and "versions.mark_updated_v1" in skip:
         versions = (2,)

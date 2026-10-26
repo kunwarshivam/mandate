@@ -387,6 +387,26 @@ pub struct Research {
     pub interval_s: u32,
     pub cost_cap_usd_per_day: SchemaDec,
     pub max_revisions_per_lineage: u32,
+    /// Which allowlisted items may bring a monitoring run forward, with the debounce and the cap per
+    /// risk day (§8.4, DEC-2392); `None` when the member is absent or `null`, which is off.
+    pub event_triggers: Option<EventTriggers>,
+}
+
+/// `behavior.research.event_triggers` (§8.4, DEC-2392, E19-12): the item kinds that may bring a
+/// monitoring run forward, the least time between such runs and the last research call, and the
+/// most such runs a risk day may start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventTriggers {
+    pub sources: BTreeSet<EventTrigger>,
+    pub debounce_s: u32,
+    pub max_runs_per_day: u32,
+}
+
+/// An item kind an event trigger reads, each an allowlist source kind (DEC-1130 item 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum EventTrigger {
+    Filings,
+    News,
 }
 
 /// When the agent evaluates (§3).

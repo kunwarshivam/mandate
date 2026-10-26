@@ -21,6 +21,7 @@
 //! journal, the executor and the connector (FT-5).
 
 mod ma_crossover;
+mod ma_crossover_exit;
 
 use std::collections::BTreeMap;
 
@@ -52,10 +53,13 @@ pub struct DailyCloses {
 /// What an evaluation that passed every check says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Evaluation {
-    /// A `Long` signal, as the one output the model emits (boxed: the output is far larger than a
-    /// signal).
+    /// A `Long` signal's output, conviction 1 (boxed: the output is far larger than a signal).
     Long(Box<ModelOutput>),
-    /// `Flat` or `Undecided`: no output, so no buy (DEC-157 item 4).
+    /// A `Flat` signal's output from a version that answers one (`quant.ma_crossover` 1.1.0,
+    /// DEC-2390): conviction −1, which favors exiting and never buys (mandate spec §8.2, §8.3).
+    Exit(Box<ModelOutput>),
+    /// No output, so no buy: `Undecided`, or `Flat` from a version that answers none (1.0.0,
+    /// DEC-157 item 4).
     NoOutput(Signal),
 }
 
@@ -133,12 +137,18 @@ impl Refusal {
 }
 
 /// The content object the host computes for `model_id` at `model_version`, from the source bytes
-/// it was built with, or [`Refusal::UnknownModel`] for a model it has no compiled content for.
+/// it was built with, or [`Refusal::UnknownModel`] for a model it has no compiled content for:
+/// `quant.ma_crossover` 1.0.0 and 1.1.0 (DEC-2390).
 pub fn content(model_id: &str, model_version: &str) -> Result<Content, Refusal> {
-    if (model_id, model_version) != (ma_crossover::MODEL_ID, ma_crossover::MODEL_VERSION) {
+    if model_id != ma_crossover::MODEL_ID {
         return Err(Refusal::UnknownModel);
     }
-    let canonical = to_canonical(&ma_crossover::content_object()?);
+    let object = match model_version {
+        ma_crossover::MODEL_VERSION => ma_crossover::content_object()?,
+        ma_crossover_exit::MODEL_VERSION => ma_crossover_exit::content_object()?,
+        _ => return Err(Refusal::UnknownModel),
+    };
+    let canonical = to_canonical(&object);
     let hash = Digest::of(&canonical);
     Ok(Content { canonical, hash })
 }
@@ -192,7 +202,12 @@ pub fn evaluate(
     let signal = config
         .signal(&prices)
         .map_err(|_: BacktestError| Refusal::SignalArithmetic)?;
-    let Some((direction, conviction, confidence)) = ma_crossover::opinion(signal)? else {
+    let opinion = match model.version.as_str() {
+        ma_crossover::MODEL_VERSION => ma_crossover::opinion(signal)?,
+        ma_crossover_exit::MODEL_VERSION => ma_crossover_exit::opinion(signal)?,
+        _ => return Err(Refusal::UnknownModel),
+    };
+    let Some((direction, conviction, confidence)) = opinion else {
         return Ok(Evaluation::NoOutput(signal));
     };
     let close = calendar
@@ -206,7 +221,7 @@ pub fn evaluate(
     let expires = as_of
         .checked_add(i64::from(model.max_output_age_s))
         .ok_or(Refusal::ExpiryOverflow)?;
-    Ok(Evaluation::Long(Box::new(ModelOutput {
+    let output = Box::new(ModelOutput {
         model_id: model.id.as_str().to_owned(),
         model_version: model.version.clone(),
         content_hash: host.hash,
@@ -223,7 +238,12 @@ pub fn evaluate(
         thesis_id: None,
         lineage_id: None,
         ignored: None,
-    })))
+    });
+    Ok(match signal {
+        Signal::Long => Evaluation::Long(output),
+        Signal::Flat => Evaluation::Exit(output),
+        Signal::Undecided => Evaluation::NoOutput(signal),
+    })
 }
 
 /// Every close on a regular-session day, each the session after the one before.

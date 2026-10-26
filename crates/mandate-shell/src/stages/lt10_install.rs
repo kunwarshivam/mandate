@@ -99,6 +99,49 @@ impl Pause for Clock {
     }
 }
 
+/// The executor's record of an unprotected interval at its bound, as its `max_unprotected_s`
+/// watchdog journals it (`ProtectionChanged` `interval_limit`, trading-domain spec §5.4): the
+/// record the interval's alert names, which is what makes the alert the interval's own (DEC-2514).
+fn interval_limit(record: &EventId) -> mandate_executor::EventDraft {
+    let null = |name: &'static str| (name, mandate_canon::Value::Null);
+    let members: Vec<(&str, mandate_canon::Value)> = vec![
+        ("instrument_id", mandate_canon::Value::Str(AAPL.to_owned())),
+        (
+            "action",
+            mandate_canon::Value::Str("interval_limit".to_owned()),
+        ),
+        ("orders", mandate_canon::Value::Array(Vec::new())),
+        ("awaiting", mandate_canon::Value::Array(Vec::new())),
+        null("qty"),
+        null("stop"),
+        null("take_profit"),
+        null("intent_id"),
+        null("bracket"),
+        null("entry"),
+        null("agent_id"),
+        null("replacing"),
+        null("created_on"),
+        null("sent"),
+        null("uncovered"),
+        null("acknowledged"),
+        null("unprotected_fraction"),
+    ];
+    let mut payload = mandate_canon::Object::new();
+    for (name, value) in members {
+        if let Ok(key) = mandate_canon::Key::new(name) {
+            payload.insert(key, value);
+        }
+    }
+    mandate_executor::EventDraft {
+        event_id: record.clone(),
+        event_type: "ProtectionChanged".to_owned(),
+        schema_version: 2,
+        config_refs: mandate_canon::Object::new(),
+        causation_id: None,
+        payload: mandate_canon::Value::Object(payload),
+    }
+}
+
 /// The executor edge double of the probes: every step the paper double executor's, beside the
 /// two facts it cannot give — the protection answer, scripted (the covered half of LT-10's first
 /// half, over the instrument the watch names, recorded so the probes can read what was asked),
@@ -142,9 +185,11 @@ impl Executor for Scripted {
         let mut effects = self.inner.step(input)?;
         if self.its_own_key && ticked {
             self.its_own_key = false;
+            let record = EventId("000001000000000000000000".to_owned());
+            effects.push(Effect::Journal(interval_limit(&record)));
             effects.push(Effect::Notify(NotificationRef {
-                subject_event: EventId("000001000000000000000000".to_owned()),
-                message_key: "unprotected_interval_limit",
+                subject_event: record,
+                kind: mandate_executor::OwnerAlertKind::Protection,
             }));
         }
         Ok(effects)

@@ -22,7 +22,9 @@
   `mandate-runtime`'s `src/tail.rs` (`tailed`, shared with the shell). `src/recorded.rs` (the cell's
   recorded research bundle: the entry, its endpoint, the caps, the one recorded reply, and a data
   plane stamped at ages before each read's cut-off, DEC-2210).
-- **Tests:** `crates/mandate-daemon/tests/runtime.rs`: the owner's kill switch journaled on the
+- **Tests:** `crates/mandate-daemon/tests/runtime.rs`: a deferring opening committed through
+  the journal's append as `DecisionMade` version 3 and asked, never proposed (DEC-2388 item 13);
+  the owner's kill switch journaled on the
   agent stream, the control stream read before the clock stream, an unreadable clock stream never
   holding the kill switch, a control stream handed again writing nothing twice, a lost answer
   written once, a hint deciding nothing, a second process fencing the first, paper only, drain, a

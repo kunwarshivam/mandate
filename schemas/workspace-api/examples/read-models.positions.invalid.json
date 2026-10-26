@@ -60,19 +60,19 @@
     }
   },
   {
-    "label": "a cost_basis",
+    "label": "a cost_basis as a bare decimal",
     "set": {
       "/positions/0/cost_basis": "5122.5"
     }
   },
   {
-    "label": "a risk_mark",
+    "label": "a risk_mark as a bare decimal",
     "set": {
       "/positions/0/risk_mark": "512"
     }
   },
   {
-    "label": "a protection",
+    "label": "an empty protection",
     "set": {
       "/positions/0/protection": {}
     }
@@ -135,6 +135,173 @@
     "label": "a missing protection",
     "remove": [
       "/positions/0/protection"
+    ]
+  },
+  {
+    "label": "a missing market_value",
+    "remove": [
+      "/positions/0/market_value"
+    ]
+  },
+  {
+    "label": "a missing unrealized_pnl",
+    "remove": [
+      "/positions/0/unrealized_pnl"
+    ]
+  },
+  {
+    "label": "a null protection",
+    "set": {
+      "/positions/0/protection": null
+    }
+  },
+  {
+    "label": "a cost_basis missing its basis",
+    "remove": [
+      "/positions/0/cost_basis/basis"
+    ]
+  },
+  {
+    "label": "a cost_basis with an average",
+    "set": {
+      "/positions/0/cost_basis/average": "512.25"
+    }
+  },
+  {
+    "label": "a numeric basis",
+    "set": {
+      "/positions/0/cost_basis/basis": 5122.5
+    }
+  },
+  {
+    "label": "a sane mark with no bid",
+    "set": {
+      "/positions/0/risk_mark/bid": null
+    }
+  },
+  {
+    "label": "a pre-market mark",
+    "set": {
+      "/positions/0/risk_mark/session": "pre_market"
+    }
+  },
+  {
+    "label": "a mark with no marked_at",
+    "remove": [
+      "/positions/0/risk_mark/marked_at"
+    ]
+  },
+  {
+    "label": "a malformed marked_at",
+    "set": {
+      "/positions/0/risk_mark/marked_at": "2026-10-19T14:29:45Z"
+    }
+  },
+  {
+    "label": "a string verdict",
+    "set": {
+      "/positions/0/risk_mark/sane": "true"
+    }
+  },
+  {
+    "label": "a numeric market_value",
+    "set": {
+      "/positions/0/market_value": 5151.2
+    }
+  },
+  {
+    "label": "a protection missing covered_qty",
+    "remove": [
+      "/positions/0/protection/covered_qty"
+    ]
+  },
+  {
+    "label": "a protection order listed twice",
+    "set": {
+      "/positions/0/protection/orders": [
+        "cl_a",
+        "cl_a"
+      ]
+    }
+  },
+  {
+    "label": "an empty protection order id",
+    "set": {
+      "/positions/0/protection/orders": [
+        ""
+      ]
+    }
+  },
+  {
+    "label": "an unknown protection member",
+    "set": {
+      "/positions/0/protection/extra": 1
+    }
+  },
+  {
+    "label": "a malformed unprotected_since",
+    "set": {
+      "/positions/0/protection/unprotected_since": "yesterday"
+    }
+  },
+  {
+    "label": "a cost_basis missing its qty",
+    "remove": [
+      "/positions/0/cost_basis/qty"
+    ]
+  },
+  {
+    "label": "an unknown risk_mark member",
+    "set": {
+      "/positions/0/risk_mark/age_s": 15
+    }
+  },
+  {
+    "label": "a mark with no bid member",
+    "remove": [
+      "/positions/0/risk_mark/bid"
+    ]
+  },
+  {
+    "label": "a mark with no verdict",
+    "remove": [
+      "/positions/0/risk_mark/sane"
+    ]
+  },
+  {
+    "label": "a mark with no session",
+    "remove": [
+      "/positions/0/risk_mark/session"
+    ]
+  },
+  {
+    "label": "an unknown session",
+    "set": {
+      "/positions/0/risk_mark/session": "mutant_value"
+    }
+  },
+  {
+    "label": "a protection missing orders",
+    "remove": [
+      "/positions/0/protection/orders"
+    ]
+  },
+  {
+    "label": "a protection missing stop",
+    "remove": [
+      "/positions/0/protection/stop"
+    ]
+  },
+  {
+    "label": "a protection missing take_profit",
+    "remove": [
+      "/positions/0/protection/take_profit"
+    ]
+  },
+  {
+    "label": "a protection missing unprotected_since",
+    "remove": [
+      "/positions/0/protection/unprotected_since"
     ]
   }
 ]

@@ -277,7 +277,9 @@ fn with_transport<T>(sources: Sources<()>, transport: T) -> Sources<T> {
 /// How a run that refused nothing ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
-    /// `Flat` or `Undecided`: nothing stored, handed on or sent (DEC-157 item 4).
+    /// `Flat` or `Undecided`: nothing stored, handed on or sent (DEC-157 item 4). A pinned version
+    /// whose `Flat` is an exit output (`quant.ma_crossover` 1.1.0) ends here too, so the R0
+    /// runner, which DEC-2390 item 2 leaves as it is, runs either version as it runs 1.0.0.
     NoOutput(Signal),
     /// The cycle ran: what it submitted, or the order it would have placed (boxed: it is large),
     /// beside the exportable evidence its report names (DEC-914 item 6).
@@ -679,6 +681,7 @@ pub fn run<P: Ports>(
     let output =
         match evaluate(&pin, &registry, &calendar, &daily, now).map_err(PaperError::Model)? {
             Evaluation::Long(output) => *output,
+            Evaluation::Exit(_) => return Ok(Outcome::NoOutput(Signal::Flat)),
             Evaluation::NoOutput(signal) => return Ok(Outcome::NoOutput(signal)),
         };
     let bytes = mandate_bars::closes_object(&daily.closes, instrument.asset_id.as_str())
