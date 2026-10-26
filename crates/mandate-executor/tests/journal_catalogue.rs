@@ -282,9 +282,9 @@ fn a_blocked_accounts_batch_names_its_cause_and_is_accepted_by_the_journal() {
 }
 
 /// E7-2u (trading spec §7.3 rows 2 and 3, DEC-143): a reject that restricts the account to closing
-/// only, by its message or by the run of 403s, names a broker reject as its cause, and its record
-/// is one the journal accepts. The reject's own `RejectObserved` is still pending its registration
-/// (`PENDING` above), so the restriction is judged alone here.
+/// only, by its message or by the run of 403s, names a broker reject as its cause, and the journal
+/// accepts the restricting reject's whole batch: its `RejectObserved`, the restriction, the modes
+/// and the alert.
 #[test]
 fn a_restricting_reject_names_a_broker_reject_and_is_accepted_by_the_journal() {
     let ids = TestIds;
@@ -305,19 +305,34 @@ fn a_restricting_reject_names_a_broker_reject_and_is_accepted_by_the_journal() {
         ("three 403s", vec!["forbidden"; 3]),
     ] {
         let mut shell = opened(&ports);
-        let mut restricted = None;
+        let mut restricting = None;
         for message in rejects {
             let ran = shell.run(reject(message), &ports);
-            restricted = restricted.or_else(|| ran.draft("AccountRestrictionChanged").cloned());
+            if ran.draft("AccountRestrictionChanged").is_some() {
+                restricting = Some(ran);
+            }
         }
-        let restricted = restricted.unwrap_or_else(|| panic!("{case}: the account is restricted"));
+        let ran = restricting.unwrap_or_else(|| panic!("{case}: the account is restricted"));
+        let restricted = ran
+            .draft("AccountRestrictionChanged")
+            .unwrap_or_else(|| panic!("{case}: the restriction"));
         assert_eq!(
             restricted.payload.get("cause").and_then(Value::as_str),
             Some("broker_reject"),
             "{case}"
         );
-        let ulids = ulids(std::slice::from_ref(&restricted));
-        let judged = Draft::parse(&enveloped_as(&restricted, &ulids));
-        assert!(judged.is_ok(), "{case}: {judged:?}");
+        let ulids = ulids(&ran.drafts);
+        let bytes: Vec<Vec<u8>> = ran
+            .drafts
+            .iter()
+            .map(|draft| enveloped_as(draft, &ulids))
+            .collect();
+        let parsed: Result<Vec<Draft>, _> = bytes.iter().map(|b| Draft::parse(b)).collect();
+        let judged = parsed.map(|drafts| check_batch(&drafts).map_err(|(_, e)| e));
+        assert!(
+            matches!(judged, Ok(Ok(()))),
+            "{case}: {:?}: {judged:?}",
+            ran.draft_types()
+        );
     }
 }
