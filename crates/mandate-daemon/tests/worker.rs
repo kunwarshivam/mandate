@@ -757,7 +757,6 @@ fn remote_worker(shelf: &Shelf, address: std::net::SocketAddr) -> RecordedWorker
 /// model-gateway service for this run's plan, stores the record's prompt and response before the
 /// answer, and answers the record the service sent, stamped at the pass's risk clock.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_remote_worker_calls_the_service_and_answers_its_record() {
     let shelf = Shelf::default();
     let (address, service) = service(Service::Answer);
@@ -796,7 +795,6 @@ fn a_remote_worker_calls_the_service_and_answers_its_record() {
 /// DEC-2397 item 2: an exchange the service does not answer whole is answered
 /// `gateway_unreachable`, and nothing is stored for it.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_remote_worker_answers_a_lost_exchange_gateway_unreachable() {
     let shelf = Shelf::default();
     let (address, service) = service(Service::Drop);

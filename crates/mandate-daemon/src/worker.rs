@@ -1,6 +1,7 @@
-//! The cell's research worker (DEC-2210 item 3): retrieval over the recorded plane, and the one
-//! call through the gateway over its recorded fake, the only transport a constructor outside this
-//! crate's tests can name (DEC-2269). It
+//! The cell's research worker (DEC-2210 item 3): retrieval over the recorded plane, and each call
+//! through the gateway over its recorded fake, the only transport a constructor outside this
+//! crate's tests can name (DEC-2269), or through the model-gateway service (DEC-2397 items 1 and
+//! 6), which meters and calls in its own process. It
 //! stores every artifact an answer names before it keeps the answer, and stamps each answer with
 //! the risk clock of the pass it is handed in.
 
@@ -23,9 +24,9 @@ use mandate_research::{AssetClass as EnvelopeClass, WorkingUniverse};
 use mandate_research_run::agentic::{LoopBounds, RunKind};
 use mandate_research_run::recorded::shown_thesis;
 use mandate_research_run::{
-    Allowlist, Answer, CallContext, CallPlan, DispatchScope, EarlierTurn, MemoryThesis, Readers,
-    RecordedKey, ResearchRunError, Retrieval, RetrievalPlan, RetrievedItem, Scope, SourceId,
-    TurnParts, call, call_turn, dispatch, recorded_reply, retrieve,
+    Allowlist, Answer, CallContext, CallPlan, DispatchScope, EarlierTurn, MemoryThesis, ModelCalls,
+    Readers, RecordedKey, ResearchRunError, Retrieval, RetrievalPlan, RetrievedItem, Scope,
+    SourceId, TurnParts, call, call_turn, dispatch, recorded_reply, retrieve,
 };
 use mandate_runtime::{
     DispatchRequest, DispatchedResult, ResearchInput, ResearchRequest, RetrievedObservation,
@@ -144,13 +145,33 @@ struct Run {
     dispatched: bool,
 }
 
-/// The cell's worker, over the recorded fake. A worker over another transport is built only by
-/// this crate's tests (DEC-2269).
+/// What the worker calls models through (DEC-2397 items 1 and 6).
+enum Models<T: Transport> {
+    /// The gateway in this process, over the recorded fake, its meter the cell's.
+    Local {
+        gateway: Box<Gateway<T, CellMeter, ManualClock>>,
+        /// Hands the transport the recorded reply for the next call alone; a model double that
+        /// writes its own replies ignores it.
+        prime: fn(&mut T, Recorded),
+    },
+    /// The model-gateway service, which renders, guards, meters, calls and validates in its own
+    /// process; nothing is primed or metered here.
+    Remote(RemoteGateway),
+}
+
+impl<T: Transport> Models<T> {
+    fn port(&mut self) -> &mut dyn ModelCalls {
+        match self {
+            Self::Local { gateway, .. } => gateway.as_mut(),
+            Self::Remote(remote) => remote,
+        }
+    }
+}
+
+/// The cell's worker, over the recorded fake or the model-gateway service. A worker over another
+/// transport is built only by this crate's tests (DEC-2269).
 pub struct RecordedWorker<T: Transport = RecordedTransport> {
-    gateway: Gateway<T, CellMeter, ManualClock>,
-    /// Hands the transport the recorded reply for the next call alone; a model double that writes
-    /// its own replies ignores it.
-    prime: fn(&mut T, Recorded),
+    models: Models<T>,
     plane: RecordedPlane,
     plan: RetrievalPlan,
     reply: RecordedReply,
@@ -206,10 +227,6 @@ impl RecordedWorker {
     /// through the model-gateway service at `remote` (DEC-2397 items 1 and 6). It builds no gateway
     /// and holds no meter: the service reserves and settles every call on its own journaled stream,
     /// and holds each research call to its agent's deployed cap.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn remote(
         bundle: &Bundle,
         who: WorkerFor,
@@ -217,8 +234,7 @@ impl RecordedWorker {
         now: Box<dyn FnMut() -> UtcNanos>,
         remote: RemoteGateway,
     ) -> Self {
-        let _ = (bundle, who, sink, now, remote);
-        todo!()
+        Self::over(bundle, who, sink, now, Models::Remote(remote))
     }
 
     /// As [`RecordedWorker::metered`], with the gateway refusing `budget_exhausted` any research call
@@ -291,9 +307,28 @@ impl<T: Transport> RecordedWorker<T> {
             ManualClock::at(start),
             ids(0),
         );
-        Ok(Self {
-            gateway,
-            prime,
+        Ok(Self::over(
+            bundle,
+            who,
+            sink,
+            now,
+            Models::Local {
+                gateway: Box::new(gateway),
+                prime,
+            },
+        ))
+    }
+
+    /// The worker over `bundle` calling models through `models`.
+    fn over(
+        bundle: &Bundle,
+        who: WorkerFor,
+        sink: Box<dyn ArtifactSink>,
+        now: Box<dyn FnMut() -> UtcNanos>,
+        models: Models<T>,
+    ) -> Self {
+        Self {
+            models,
             plane: bundle.plane.clone(),
             plan: bundle.entry.plan,
             reply: bundle.reply.clone(),
@@ -309,7 +344,7 @@ impl<T: Transport> RecordedWorker<T> {
             runs: BTreeMap::new(),
             ready: Vec::new(),
             bounds: bundle.entry.agentic,
-        })
+        }
     }
 
     /// The worker, running a dispatch within `bounds`, the agentic entry's pinned `loop_bounds`
@@ -468,7 +503,7 @@ impl<T: Transport> RecordedWorker<T> {
             context: run.context.clone(),
             transcript,
         };
-        let (_, answer) = call_turn(&mut self.gateway, parts).map_err(TurnError::Unbuilt)?;
+        let (_, answer) = call_turn(self.models.port(), parts).map_err(TurnError::Unbuilt)?;
         run.dispatched = true;
         match answer {
             Answer::Recorded(record) => {
@@ -584,8 +619,12 @@ impl<T: Transport> RecordedWorker<T> {
         let Some(run) = self.runs.get_mut(&plan.run_id) else {
             return;
         };
-        let Ok((_, answer)) = call(&mut self.gateway, plan, &run.retrieval, run.context.clone())
-        else {
+        let Ok((_, answer)) = call(
+            self.models.port(),
+            plan,
+            &run.retrieval,
+            run.context.clone(),
+        ) else {
             return;
         };
         run.dispatched = true;
@@ -607,15 +646,19 @@ impl<T: Transport> RecordedWorker<T> {
         }
     }
 
-    /// Moves the gateway's clock to now and scripts the recorded reply for the next call alone: a
-    /// `monitor` run's turn the bundle's monitor reply, when it has one, naming the least of the
-    /// `shown` theses the run's context showed the model, with no scripted turn
+    /// Moves the in-process gateway's clock to now and scripts the recorded reply for the next call
+    /// alone: a `monitor` run's turn the bundle's monitor reply, when it has one, naming the least of
+    /// the `shown` theses the run's context showed the model, with no scripted turn
     /// (agent harness spec §6.9); else an agentic run's turn n its scripted turn n, and the single
     /// call and every turn past the script the final reply (DEC-2266). A reply left by a call that
-    /// was never sent (one not built, or refused before sending) is cleared first.
+    /// was never sent (one not built, or refused before sending) is cleared first. The
+    /// model-gateway service scripts its own replies, so a remote worker primes nothing.
     fn script_reply(&mut self, turn: Option<(u32, RunKind)>, shown: &[String]) {
         let now = (self.now)();
-        self.gateway.clock_mut().wait_until(now);
+        let Models::Local { gateway, prime } = &mut self.models else {
+            return;
+        };
+        gateway.clock_mut().wait_until(now);
         let monitor = self
             .monitor_reply
             .clone()
@@ -653,8 +696,8 @@ impl<T: Transport> RecordedWorker<T> {
                 recorded_reply(&last.output, &self.slug, &self.provider, last.usage),
             ),
         };
-        (self.prime)(
-            self.gateway.transport_mut(),
+        (*prime)(
+            gateway.transport_mut(),
             Recorded {
                 latency_ms,
                 delivery: Delivery::Response {
@@ -741,8 +784,13 @@ impl<T: Transport> RecordedWorker<T> {
         Self::built(bundle, who, sink, now, meter, caps, (model, |_, _| {}))
     }
 
-    pub(crate) fn transport(&self) -> &T {
-        self.gateway.transport()
+    /// The in-process gateway's transport, for a test to read what was sent; `None` for a remote
+    /// worker.
+    pub(crate) fn transport(&self) -> Option<&T> {
+        match &self.models {
+            Models::Local { gateway, .. } => Some(gateway.transport()),
+            Models::Remote(_) => None,
+        }
     }
 }
 

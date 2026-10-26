@@ -863,3 +863,18 @@ from its environment; it never mounts the Secret itself.
           items:
             - {key: ca.crt, path: ca.crt}
 {{- end -}}
+
+{{- define "mandate.modelGatewayService" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-gateway
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "mandate.selector" . | nindent 4 }}
+  ports:
+    - {name: calls, port: 8080, targetPort: 8080, protocol: TCP}
+{{- end -}}
