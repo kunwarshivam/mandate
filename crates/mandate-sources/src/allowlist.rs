@@ -128,7 +128,8 @@ impl SourceEntry {
         self.licensed
     }
 
-    /// Whether counsel confirmed the source's terms allow what DEC-433 item 20 keeps.
+    /// Whether counsel confirmed the source's terms allow what DEC-433 item 20 keeps. Not whether
+    /// the source is in effect, which [`SourceEntry::in_effect`] answers.
     pub fn counsel_confirmed(&self) -> bool {
         self.counsel_confirmed
     }

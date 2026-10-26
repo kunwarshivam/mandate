@@ -397,3 +397,39 @@ fn an_approval_is_the_founder_s_with_its_decision_or_nothing() {
         );
     }
 }
+
+/// Every approval the checked-in version in use records names a decision that exists and that the
+/// founder accepted: the record can cite only an approval that happened (DEC-2276).
+#[test]
+fn every_recorded_approval_names_a_decision_the_founder_accepted() {
+    let three = checked_in(3);
+    let mut cited = 0;
+    for entry in three.entries() {
+        let Some(approval) = entry.approval() else {
+            continue;
+        };
+        assert_eq!(approval.by, Approver::Founder);
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../docs/project/decisions/{}.md",
+            approval.decision
+        ));
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+            panic!(
+                "{} cites {}, which has no file",
+                entry.id().as_str(),
+                approval.decision
+            )
+        });
+        let status = text
+            .lines()
+            .find(|line| line.starts_with("| **Status** |"))
+            .unwrap_or_else(|| panic!("{} has no status", approval.decision));
+        assert!(
+            status.starts_with("| **Status** | Accepted (founder"),
+            "{}: {status}",
+            approval.decision
+        );
+        cited += 1;
+    }
+    assert_eq!(cited, 1, "Alpaca news, on DEC-2394");
+}
