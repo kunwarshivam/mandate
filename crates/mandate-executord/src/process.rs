@@ -25,6 +25,7 @@ use mandate_time::{ExchangeCalendar, UtcNanos};
 use crate::follow::{
     Proposal, Switch, Unreadable, agents_of, bounded, folded, proposals, switches, theses,
 };
+use crate::health::Health;
 use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
 use crate::robinhood::AccountReads;
@@ -229,6 +230,9 @@ pub struct ExecutorProcess<S, B> {
     /// nothing is marked, so the gate holds (`AGENTS.md` rule 3).
     calendar: Option<ExchangeCalendar>,
     written_at: UtcNanos,
+    /// The connection's health as this process's broker answers show it (DEC-2832): each pass
+    /// tells the core of every trouble it holds, which restricts the account first (DEC-2826).
+    health: Health,
 }
 
 /// What one pass reads from the agents' streams: the kill switches this stream has not applied,
@@ -284,6 +288,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             deployed: BTreeMap::new(),
             max_chain: config.max_chain,
             written_at: now,
+            health: Health::default(),
             polled: QuotePoll::new(Duration::from_secs(
                 u64::try_from(wiring_step).unwrap_or_default(),
             )),
@@ -415,6 +420,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return alerts;
         }
+        if !self.report_troubles(now, &mut alerts) {
+            return alerts;
+        }
         if !self.read_quotes(now, &mut alerts).unwrap_or(true) {
             return alerts;
         }
@@ -434,6 +442,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             } else {
                 Action::RiskExit
             };
+            if !self.report_troubles(now, &mut alerts) {
+                return alerts;
+            }
             if self.lifecycle.permits(action) && !self.take(now, agent, proposal, &mut alerts) {
                 return alerts;
             }
@@ -505,7 +516,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// one of the fold's orders): every status it reports is final. A read that fails, or a status
     /// it does not name, keeps the executor running (DEC-2347 item 3.5).
     fn broker_quiet(&mut self) -> bool {
-        let listed = match self.broker.account_reads() {
+        let listed = match self.account_reads() {
             Some(read) => read
                 .map(|reads| BrokerOutcome::OpenOrders(reads.open_orders))
                 .map_err(read_error),
@@ -1027,7 +1038,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     fn flush(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>, depth: usize) -> bool {
         let next = depth.saturating_add(1);
         while let Some(request) = self.outbox.pop_front() {
-            let answer = match self.broker.call(&request) {
+            let answer = match self.call(&request) {
                 Ok(outcome) => Input::Broker(Ok(outcome)),
                 Err(ConnectorError::Unknown(unknown)) => Input::Broker(Err(unknown)),
                 Err(_) => {
@@ -1101,11 +1112,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             .checkpoint()
             .cloned()
             .unwrap_or_else(|| ActivityCursor(String::new()));
-        if let Some(read) = self.broker.account_reads() {
+        if let Some(read) = self.account_reads() {
             let mut reads = read.map_err(read_error)?;
             if self.list_unlisted(&reads.open_orders, now, alerts, depth)? {
                 reads = self
-                    .broker
                     .account_reads()
                     .ok_or(Read::Unusable)?
                     .map_err(read_error)?;
@@ -1212,8 +1222,41 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         Ok(handed)
     }
 
+    /// A read of the broker. One whose credential the broker refused is an unknown outcome
+    /// (`Unauthorized`, connections spec §5.4), so it is read again on a later pass like a lost
+    /// one, and counted until the connection is `suspended` and the account restricted
+    /// (DEC-2832), never a stop that a restart would repeat with its count lost.
     fn read(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, Read> {
-        self.broker.call(request).map_err(read_error)
+        self.call(request).map_err(read_error)
+    }
+
+    /// Every request to the broker, its answer counted toward the connection's health (DEC-2832).
+    fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
+        let answer = self.broker.call(request);
+        self.health.observe(&answer);
+        answer
+    }
+
+    /// Tells the core of every trouble the connection's health holds (DEC-2832): after the pass's
+    /// kill switches, so none waits on it, and again before each proposal, so a count that crossed
+    /// its threshold earlier in the pass restricts the account before the next opening is taken.
+    /// The core journals each restriction and state change once (DEC-2826). `false` when a handoff
+    /// stopped the pass.
+    fn report_troubles(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> bool {
+        self.health
+            .troubles()
+            .into_iter()
+            .all(|trouble| self.hand(now, now, Input::Connection(trouble), alerts, 0))
+    }
+
+    /// A one-read broker's account reads, counted as one answer (DEC-2832).
+    fn account_reads(&mut self) -> Option<Result<AccountReads, ConnectorError>> {
+        let read = self.broker.account_reads()?;
+        match &read {
+            Ok(_) => self.health.observe_answered(),
+            Err(error) => self.health.observe_error(error),
+        }
+        Some(read)
     }
 
     fn account_head(&self) -> u64 {
@@ -1402,9 +1445,10 @@ fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> 
 }
 
 /// Whether a core error on `input` is held and the process goes on (DEC-2821): the broker's
-/// answers, updates and snapshots, the quotes its feed sends, and an agent's thesis records (DEC-2823),
-/// which the restart would read again, so stopping on one would be a crash loop that also stops every exit, protective order and
-/// kill switch. Any other input's error, the hold's own included, stops the process as before.
+/// answers, updates and snapshots, the quotes its feed sends, an agent's thesis records (DEC-2823),
+/// and the connection's troubles (DEC-2832), which the restart would read or count again, so
+/// stopping on one would be a crash loop that also stops every exit, protective order and kill
+/// switch. Any other input's error, the hold's own included, stops the process as before.
 fn held_on_core_error(input: &Input) -> bool {
     matches!(
         input,
@@ -1413,6 +1457,7 @@ fn held_on_core_error(input: &Input) -> bool {
             | Input::BrokerSnapshot(_)
             | Input::Market(_)
             | Input::Theses { .. }
+            | Input::Connection(_)
     )
 }
 
