@@ -421,6 +421,10 @@ impl Fold {
                 None
             }
             Input::Clock => None,
+            Input::Fee { usd } => {
+                self.charge(*usd)?;
+                None
+            }
             Input::RiskDayStarted => {
                 self.start_day(wall_s, journal)?;
                 None
@@ -583,6 +587,18 @@ impl Fold {
                 self.cash = self.cash.checked_add(notional)?;
             }
         }
+        Ok(())
+    }
+
+    /// A fee charged to the agent's own order lowers its cash, so E is net of fees (§5.1, DEC-2393
+    /// item 3). A negative charge would raise E, so it is refused.
+    fn charge(&mut self, usd: Usd) -> Result<(), SpecError> {
+        if usd.is_negative() {
+            return Err(SpecError::InvalidInput {
+                what: "a negative fee, which would raise agent equity",
+            });
+        }
+        self.cash = self.cash.checked_sub(usd)?;
         Ok(())
     }
 

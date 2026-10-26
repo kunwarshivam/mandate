@@ -15,6 +15,7 @@ import * as closeAll from "@/app/(app)/connections/[connectionId]/close-all/page
 import * as stopAll from "@/app/(app)/connections/[connectionId]/stop-all/page";
 import * as connections from "@/app/(app)/connections/page";
 import * as design from "@/app/(app)/design/page";
+import * as goLive from "@/app/(app)/go-live/page";
 import * as desk from "@/app/(app)/messages/[agentId]/desk/page";
 import * as thread from "@/app/(app)/messages/[agentId]/page";
 import * as messages from "@/app/(app)/messages/page";
@@ -71,6 +72,9 @@ export async function pageFor(path: string): Promise<ReactNode> {
     case "settings":
       if (!second) return <settings.default />;
       return settingsScreen.default(params({ screen: second }));
+    case "go-live":
+      if (second) throw new Error(`no page for ${path}`);
+      return <goLive.default />;
     case "design":
       if (!second) return <design.default />;
       throw new Error(`no page for ${path}`);

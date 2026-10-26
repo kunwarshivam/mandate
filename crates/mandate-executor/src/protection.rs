@@ -7988,6 +7988,35 @@ mod sequence_tests {
             .map(|interval| (interval.started_at.secs(), interval.alerted))
     }
 
+    /// Each `OrderAbandoned` in `effects` that the journal's own `Draft::parse` refuses (X10,
+    /// DEC-2803), with its refusal: none, once §9.5 closes the record.
+    fn abandonments_refused(effects: &[Effect]) -> Vec<String> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "OrderAbandoned" => {
+                    let body = format!(
+                        r#"{{"envelope_version":1,"environment":"paper",
+                        "event_id":"01J8Z3M4000000000000000001","stream_id":"acct:ws_1:ACCT1",
+                        "event_type":"OrderAbandoned","schema_version":{},
+                        "event_time":"2026-09-21T14:00:00.000000000Z","clock_source":"local",
+                        "causation_id":null,"correlation_id":null,
+                        "actor":{{"kind":"system","id":"executor","version":"0.1.0",
+                        "build":"sha256:{}"}},"config_refs":{{}},"payload":{},
+                        "artifact_refs":[],"pii_refs":[]}}"#,
+                        draft.schema_version,
+                        "3".repeat(64),
+                        String::from_utf8_lossy(&mandate_canon::to_canonical(&draft.payload))
+                    );
+                    mandate_journal::Draft::parse(body.as_bytes())
+                        .err()
+                        .map(|refusal| format!("{refusal:?}"))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     fn abandoned_for(effects: &[Effect]) -> Vec<&str> {
         effects
             .iter()
@@ -8015,6 +8044,7 @@ mod sequence_tests {
         );
         let due = executor.run(Input::Tick(RiskClock::from_secs(30)), ports)?;
         assert_eq!(abandoned_for(&due), vec!["unprotected_interval_limit"]);
+        assert_eq!(abandonments_refused(&due), Vec::<String>::new());
         assert_eq!(
             actions(&due),
             vec!["interval_limit", "placed", "unprotected_end"]

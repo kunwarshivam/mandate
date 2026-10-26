@@ -18,11 +18,11 @@ use common::{
     qty, universe,
 };
 use mandate_canon::{Value, to_canonical};
-use mandate_journal::Draft;
+use mandate_journal::{Draft, check_batch};
 use mandate_num::Usd;
 use mandate_runtime::{
-    Autonomy, Deferral, DryRunVerdict, EventDraft, GateDryRun, Input, LiquidityRead, Ports,
-    Proposal,
+    Autonomy, Deferral, DryRunVerdict, EventDraft, GateDryRun, Input, LiquidityRead, MandateView,
+    Ports, Proposal,
 };
 use mandate_time::UtcNanos;
 use proptest::prelude::*;
@@ -67,7 +67,7 @@ fn exiting(autonomy: Autonomy) -> FixedPlan {
 
 /// One started shell's evaluation of `plan` under `gate`.
 fn evaluated(gate: &dyn GateDryRun, plan: &FixedPlan) -> Ran {
-    let (ids, view) = (TestIds, universe(&["AAPL"]));
+    let (ids, view) = (TestIds, versioned(universe(&["AAPL"])));
     let ports = ports(&ids, gate, plan, &view);
     let mut shell = Shell::new(1);
     shell
@@ -93,6 +93,68 @@ fn names(draft: &EventDraft) -> Option<Vec<&str>> {
     member(draft, "deferred_to_binding")
         .and_then(Value::as_array)
         .map(|names| names.iter().filter_map(Value::as_str).collect())
+}
+
+/// The mandate version every draft here names, a digest as the journal's references need.
+fn mandate_version() -> String {
+    format!("sha256:{}", "4".repeat(64))
+}
+
+fn versioned(mut view: MandateView) -> MandateView {
+    view.version = mandate_version();
+    view
+}
+
+fn digest_refs(value: &Value, refs: &mut BTreeSet<String>) {
+    match value {
+        Value::Str(text)
+            if text
+                .strip_prefix("sha256:")
+                .is_some_and(|hex| hex.len() == 64) =>
+        {
+            refs.insert(text.clone());
+        }
+        Value::Array(items) => items.iter().for_each(|item| digest_refs(item, refs)),
+        Value::Object(members) => members
+            .values()
+            .for_each(|member| digest_refs(member, refs)),
+        Value::Null | Value::Bool(_) | Value::Int(_) | Value::Str(_) => {}
+    }
+}
+
+/// Every draft of `ran` as the journal reads it, each at its own `schema_version` and with its
+/// causation, then the batch as `append` judges it: the batch rules 10 and 292 included.
+fn committed(ran: &Ran) -> Result<(), String> {
+    let drafts = ran
+        .drafts
+        .iter()
+        .map(|draft| {
+            let mut refs = BTreeSet::new();
+            digest_refs(&draft.payload, &mut refs);
+            let artifacts = refs.into_iter().map(|r| format!("\"{r}\"")).collect::<Vec<_>>().join(",");
+            let causation = draft
+                .causation_id
+                .as_ref()
+                .map_or_else(|| "null".to_owned(), |id| format!("\"{}\"", id.0));
+            let body = format!(
+                r#"{{"envelope_version":1,"environment":"paper","event_id":"{}","stream_id":"{AGENT_STREAM}","event_type":"{}","schema_version":{},"event_time":"2026-09-21T14:00:00.000000000Z","clock_source":"local","causation_id":{causation},"correlation_id":null,"actor":{{"kind":"agent","id":"a","version":"0.1.0","build":"sha256:{}"}},"config_refs":{{"mandate_version":"{}"}},"payload":{},"artifact_refs":[{artifacts}],"pii_refs":[]}}"#,
+                draft.event_id.0,
+                draft.event_type,
+                draft.schema_version(),
+                "3".repeat(64),
+                mandate_version(),
+                String::from_utf8_lossy(&to_canonical(&draft.payload)),
+            );
+            Draft::parse(body.as_bytes()).map_err(|e| format!("{}: {e}", draft.event_type))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    check_batch(&drafts).map_err(|(i, e)| format!("draft {i}: {e}"))
+}
+
+fn request(ran: &Ran) -> Option<&EventDraft> {
+    ran.drafts
+        .iter()
+        .find(|draft| draft.event_type == "ApprovalRequested")
 }
 
 /// The draft as the journal reads it at `schema_version`, under version 1's references.
@@ -269,6 +331,23 @@ fn an_opening_denied_on_its_figures_records_them_and_defers_nothing() {
     assert!(ran.notifications.contains(&"decision_skipped"));
 }
 
+/// DEC-2515 item 1: a deferring opening the builder produced no plan for has no request version,
+/// so nobody is asked and nothing is proposed; the same opening with nothing deferred is asked at
+/// version 1.
+#[test]
+fn a_deferring_opening_without_a_plan_asks_no_one_and_places_nothing() {
+    let mut plan = FixedPlan::opening(Autonomy::Ask);
+    if let Some(proposal) = plan.proposal.as_mut() {
+        proposal.execution = None;
+    }
+    let ran = evaluated(&FixedGate(deferring(&[Deferral::Halt], None)), &plan);
+    assert!(!asked(&ran) && !proposed(&ran), "{:?}", ran.draft_types());
+    assert_eq!(committed(&ran), Ok(()));
+    let ran = evaluated(&AllowGate, &plan);
+    assert_eq!(request(&ran).map(EventDraft::schema_version), Some(1));
+    assert_eq!(committed(&ran), Ok(()));
+}
+
 /// A granted ask whose dry run still defers at re-validation acts: the executor's binding gate
 /// evaluates every deferred check (DEC-2378 item 11 condition 3).
 #[test]
@@ -377,6 +456,17 @@ proptest! {
             prop_assert!(!proposed(&ran), "{:?}", ran.draft_types());
             prop_assert_eq!(asked(&ran), autonomy != Autonomy::Deny);
         }
+        if let Some(asked) = request(&ran) {
+            let named = asked
+                .payload
+                .get("content")
+                .and_then(|content| content.get("deferred_to_binding"))
+                .and_then(Value::as_array)
+                .map(|names| names.iter().filter_map(Value::as_str).map(str::to_owned).collect::<Vec<_>>());
+            prop_assert_eq!(&named, &want.clone().filter(|names| !names.is_empty()), "the request names the decision's deferrals");
+            prop_assert_eq!(asked.schema_version(), if deferring { 3 } else { 2 });
+        }
+        prop_assert_eq!(committed(&ran), Ok(()), "the journal accepts the batch the runtime writes");
         let overlay = deferring && matches!(verdict, DryRunVerdict::AllowDeferring { .. }) && autonomy == Autonomy::Auto;
         prop_assert_eq!(
             member(made, "decided_by").and_then(Value::as_str) == Some("policy_overlay"),
