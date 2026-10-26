@@ -3417,9 +3417,20 @@ const LAND_CHECK_BASE: &str = "origin/main";
 /// no mutants, so the check stays fast enough to run before every landing (DEC-2642).
 const LAND_CHECK_JOBS: [&str; 3] = ["spec-guard", "lint", "test"];
 
+/// What [`land_check_cmd`]'s builds leave out to fit a lane's disk: incremental artifacts and
+/// debuginfo. A change to `xtask/` or `Cargo.lock` selects every crate (DEC-1190), and with both
+/// on, building the whole workspace's tests filled a 40 GB session disk in lane DR's first run
+/// (2026-10-26). Neither changes what a test checks.
+const LAND_CHECK_BUILD: [(&str, &str); 3] = [
+    ("CARGO_INCREMENTAL", "0"),
+    ("CARGO_PROFILE_DEV_DEBUG", "0"),
+    ("CARGO_PROFILE_TEST_DEBUG", "0"),
+];
+
 /// `cargo xtask land-check [BASE]` (DEC-2642): fetches BASE first when it names a branch of
 /// `origin`, then runs [`land_check`] with each job as `cargo xtask ci <job>` in the merged tree,
-/// diffed against the base it merged (`MANDATE_BASE_REF`), and prints the summary line on stdout.
+/// diffed against the base it merged (`MANDATE_BASE_REF`) and built as [`LAND_CHECK_BUILD`] says,
+/// and prints the summary line on stdout.
 fn land_check_cmd(root: &Path, base: &str) -> Result<()> {
     let fetched = base
         .strip_prefix("origin/")
@@ -3432,6 +3443,7 @@ fn land_check_cmd(root: &Path, base: &str) -> Result<()> {
             .args(["xtask", "ci", job])
             .env("MANDATE_BASE_REF", base_sha)
             .env(CARGO_TARGET_DIR, &target)
+            .envs(LAND_CHECK_BUILD)
             .status()
             .context("starting `cargo xtask`")?;
         if !status.success() {
