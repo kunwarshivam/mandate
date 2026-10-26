@@ -71,12 +71,10 @@ const SEGMENT: &str = "/work/segment.jsonl";
 pub const FOUNDER: &str = DEMO_OWNER;
 /// The `executor` drill's agent, in its own workspace.
 pub const AGENT: &str = "demo-spy";
-/// The instrument the demo's envelope pins (SPY, [`INSTRUMENT_FILE`]'s `instrument_id`), which the
-/// owner's exit names.
+/// The instrument the demo's envelope pins: SPY, under its Alpaca asset id ([`INSTRUMENT_FILE`]'s
+/// `instrument_id`).
+#[cfg(test)]
 pub const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
-/// The bid, bid size and floor the owner's exit confirms, as the CLI's canonical text (DEC-2507
-/// item 1): fixed values the scenario types, since the cell shows no live quote.
-const EXIT_BID: (&str, &str, &str) = ("501.25", "100", "500");
 /// The run's workspace's one agent, on the demo's envelope ([`MANDATE_FILE`]): one agent to an
 /// account (V-048), and one Alpaca paper connection to a workspace until the account fingerprint
 /// tells two apart (DEC-802 item 3). Every step acts on it, the CLI's in the gestures' Job and the
@@ -283,12 +281,12 @@ const DR_CONNECT: Wait = Wait {
     lands: "a connection the dry run can name: staging's comes from the owner's OAuth connect, \
             which the scenario does not run yet",
 };
-const P2_SCHEDULER: Wait = Wait {
-    lane: "P2",
-    story: "E21-29",
+const WB_EXIT: Wait = Wait {
+    lane: "WB",
+    story: "E11-9",
     pr: None,
-    lands: "the scheduler in the cell, whose tick lets the executor start and reconcile, so it \
-            is ready to take an exit; the cell builds no scheduler yet (`processes.json`)",
+    lands: "web/'s owner exit gesture with its bid confirmation, and the trade loop's \
+            `owner_exit` step between the protective stop and the kill switch",
 };
 const W2_WEB: Wait = Wait {
     lane: "W2",
@@ -669,19 +667,6 @@ pub fn plan(
             .concat(),
         )
     };
-    let (bid, bid_size, floor) = EXIT_BID;
-    let exit_args = owner(&[
-        "agent",
-        "exit",
-        WEB_AGENT,
-        SPY,
-        "--confirm-bid",
-        bid,
-        "--bid-size",
-        bid_size,
-        "--floor",
-        floor,
-    ]);
     let steps = vec![
         Step {
             number: 1,
@@ -1090,29 +1075,15 @@ pub fn plan(
         Step {
             number: 6,
             title: "the owner exits the agent's instrument at a confirmed floor",
-            parts: vec![
-                gesture(
-                    "the owner's exit at the confirmed bid, size and floor, committed: a risk \
-                     reduction, which needs no code (AGENTS.md rules 2 and 13)",
-                    exit_args,
-                    format!("owner_exit {WEB_AGENT} {SPY} committed as event"),
-                ),
-                Part::Gap(Gap {
-                    what: "the exit handed to the executor's core, priced at the confirmed floor",
-                    on_main: "the executor process hands its agents' orders to the core and \
-                              prices an owner's exit at the floor it confirmed (#1736, DEC-2033 \
-                              item 4), its image in the cell (#1702), started and live from step \
-                              2's version-2 deployment (#1763)",
-                    waits: vec![P2_SCHEDULER],
-                }),
-                Part::Gap(Gap {
-                    what: "the exit's paper fill on the fixture broker, out of the position \
-                           step 4 filled",
-                    on_main: "the executor's interim image on the fixture paper broker (#1702, \
-                              DEC-2031)",
-                    waits: vec![X_EXECUTOR, P5_HOOK],
-                }),
-            ],
+            parts: vec![Part::Gap(Gap {
+                what: "the owner's exit of the agent's position from web/, at a confirmed bid, \
+                       after the trade loop's fill and its protective stop, so the sale shows in \
+                       its positions and audit before the kill switch",
+                on_main: "the owner's exit over the API (#2501), handed to the executor's core and \
+                          priced at the floor it confirmed (#1736, DEC-2033 item 4); an exit \
+                          before the fill sells nothing, so no gesture of the Job runs one",
+                waits: vec![WB_EXIT],
+            })],
         },
         Step {
             number: 7,
@@ -2893,85 +2864,26 @@ mod tests {
             .collect()
     }
 
-    /// Step 6 commits the owner's exit of the instrument the demo's envelope pins, on the demo's
-    /// agent, at a confirmed bid whose floor is at or below it, its code shown first and then
-    /// typed; after the agent is deployed and before the export, so the closing verify covers it,
-    /// and, as every gesture of the Job, before web/'s kill switch (a stopped agent's exits are
-    /// held, rule 13).
+    /// Step 6 runs no gesture in the Job: an owner's exit before the trade loop's fill sells
+    /// nothing, so it is a gap until web/'s exit runs after the fill, in the browser.
     #[test]
-    fn step_six_exits_the_pinned_instrument_at_a_confirmed_floor_before_the_kill_switch() {
-        let pinned = parsed(INSTRUMENT_FILE);
-        assert_eq!(
-            pinned["instrument_id"], SPY,
-            "the exit names the pinned instrument"
-        );
-        let scaled = |decimal: &str| -> u128 {
-            let (whole, fraction) = decimal.split_once('.').unwrap_or((decimal, ""));
-            assert!(
-                fraction.len() <= 8,
-                "{decimal}: more places than the oracle reads"
-            );
-            format!("{whole}{fraction:0<8}").parse().unwrap()
-        };
-        let (bid, size, floor) = EXIT_BID;
-        assert!(
-            scaled(floor) <= scaled(bid),
-            "the floor is at or below the bid"
-        );
-        assert!(
-            scaled(size) > 0 && scaled(floor) > 0,
-            "a positive size and floor"
-        );
-        assert!(scaled("500") < scaled("501.25") && scaled("0.5") > scaled("0.25"));
+    fn step_six_waits_on_web_s_exit_after_the_fill() {
         let steps = planned("demo1");
-        let all = gestures(&steps);
-        let at = |head: &[&str], last: &str| {
-            all.iter()
-                .position(|g| g.args[..head.len()] == *head && g.args.iter().any(|a| a == last))
-                .unwrap()
-        };
-        let exits: Vec<usize> = all
-            .iter()
-            .enumerate()
-            .filter(|(_, g)| g.args[..2] == ["agent", "exit"])
-            .map(|(n, _)| n)
-            .collect();
-        assert_eq!(exits.len(), 1, "one exit gesture: committed, never shown");
-        let typed = exits[0];
-        assert_eq!(all[typed].args[2..4], [WEB_AGENT, SPY]);
-        for pair in [
-            ["--confirm-bid", EXIT_BID.0],
-            ["--bid-size", EXIT_BID.1],
-            ["--floor", EXIT_BID.2],
-        ] {
-            assert!(all[typed].args.windows(2).any(|w| w == pair), "{pair:?}");
-        }
-        assert!(
-            !all[typed]
-                .args
-                .iter()
-                .any(|a| a == "--code" || a == "--show-code"),
-            "an owner's exit reduces risk and takes no code (AGENTS.md rules 2 and 13)"
-        );
-        assert_eq!(
-            all[typed].expect,
-            format!("owner_exit {WEB_AGENT} {SPY} committed as event")
-        );
-        let deployed = at(&["agent", "deploy", WEB_AGENT], "--code");
-        assert!(deployed < typed);
-        assert!(
-            typed < at(&["journal", "export"], SEGMENT),
-            "before the export"
-        );
         let step6 = &steps[5];
         assert_eq!(step6.number, 6);
         assert!(
-            step6
-                .parts
-                .iter()
-                .any(|p| matches!(p, Part::Gesture(g) if g.container == all[typed].container)),
-            "the exit is step 6's"
+            step6.parts.iter().all(|p| matches!(p, Part::Gap(_))),
+            "no gesture of the Job exits"
         );
+        assert!(
+            gestures(&steps)
+                .iter()
+                .all(|g| g.args[..2] != ["agent", "exit"])
+        );
+        assert_eq!(lanes(step6), ["WB"]);
+        let pinned = parsed(INSTRUMENT_FILE);
+        assert_eq!(pinned["instrument_id"], SPY, "SPY's Alpaca asset id");
+        assert_eq!(pinned["symbol"], "SPY");
     }
 
     /// The run's workspace holds one agent, [`WEB_AGENT`], on the demo's envelope (V-048, DEC-802
@@ -3242,7 +3154,7 @@ mod tests {
         );
         let exit = all
             .iter()
-            .find(|g| g.args[..2] == ["agent", "exit"])
+            .find(|g| g.args[..2] == ["agent", "deploy"])
             .unwrap();
         let user = owner.to_ascii_lowercase();
         assert!(
@@ -3422,7 +3334,8 @@ mod tests {
     }
 
     /// Which steps run today: the sign-in, through the API and web/, runs whole; the gestures on
-    /// `main` make steps 2 to 6 partial, step 3's research gestures among them; the kill switch,
+    /// `main` make steps 2 to 5 partial, step 3's research gestures among them; step 6 is skipped
+    /// until web/'s exit runs after the fill; the kill switch,
     /// applied by the runtime step 2's deployment starts, and the record run whole. Without a
     /// connect check (the staging dry run) step 7 is partial.
     #[test]
@@ -3432,14 +3345,14 @@ mod tests {
         assert_eq!(
             read,
             [
-                Ready, Partial, Partial, Partial, Partial, Partial, Ready, Ready
+                Ready, Partial, Partial, Partial, Partial, Skipped, Ready, Ready
             ]
         );
         let dry: Vec<Readiness> = unconnected("demo1").iter().map(readiness).collect();
         assert_eq!(
             dry,
             [
-                Ready, Partial, Partial, Partial, Partial, Partial, Partial, Ready
+                Ready, Partial, Partial, Partial, Partial, Skipped, Partial, Ready
             ]
         );
         let step = |parts: Vec<Part>| Step {
