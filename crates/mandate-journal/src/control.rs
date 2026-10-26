@@ -123,8 +123,8 @@ const EXTERNAL: &str = "ExternalActivityIngested";
 /// members is a reject a broker may send.
 const REJECT: &str = "RejectObserved";
 
-/// An intent the executor gave up on (§9.5, DEC-2803): no rule, until trading spec §2.3 states the
-/// client order id the executor derives from an intent.
+/// An intent the executor gave up on (§9.5, DEC-2803): rule 303 (DEC-2820) binds its client order
+/// id to the one trading spec §2.3 derives from its intent, `md-` and the intent id.
 const ABANDONED: &str = "OrderAbandoned";
 
 /// The executor's copy of the scheduler's tick on the account stream (§9.5, DEC-2808): rules 301
@@ -438,6 +438,13 @@ pub(crate) fn payload(
         KILL_SWITCH => kill_switch_rules(p, causation_id)?,
         EXTERNAL => external_rules(p)?,
         CLOCK => clock_rules(p, causation_id)?,
+        ABANDONED => ensure(
+            p.text("client_order_id")
+                .strip_prefix("md-")
+                .is_some_and(|intent| intent == p.text("intent_id")),
+            InvalidReason::Schema,
+            "payload.client_order_id",
+        )?,
         FILL if schema_version == 2 => fill_rules(p, config_refs)?,
         "ProtectionChanged" => protection_changed_rules(p)?,
         SNAPSHOT => {
