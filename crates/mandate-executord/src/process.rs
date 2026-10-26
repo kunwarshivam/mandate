@@ -1358,13 +1358,13 @@ fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> 
 }
 
 /// Whether a core error on `input` is held and the process goes on (DEC-2821): the broker's
-/// answers, updates and snapshots, which the restart would read again, so stopping on one would be
-/// a crash loop that also stops every exit, protective order and kill switch. Any other input's
-/// error, the hold's own included, stops the process as before.
+/// answers, updates and snapshots, and the quotes its feed sends, which the restart would read
+/// again, so stopping on one would be a crash loop that also stops every exit, protective order and
+/// kill switch. Any other input's error, the hold's own included, stops the process as before.
 fn failed_on_broker(input: &Input) -> bool {
     matches!(
         input,
-        Input::Broker(_) | Input::BrokerUpdate(_) | Input::BrokerSnapshot(_)
+        Input::Broker(_) | Input::BrokerUpdate(_) | Input::BrokerSnapshot(_) | Input::Market(_)
     )
 }
 

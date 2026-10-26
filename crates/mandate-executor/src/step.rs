@@ -242,7 +242,11 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
             }
             Ok(())
         }
-        Input::BatchRefused | Input::InputFailed => held_on_refusal(batch),
+        Input::BatchRefused => held_on_refusal(batch),
+        Input::InputFailed => {
+            silence(batch)?;
+            held_on_refusal(batch)
+        }
         Input::Command(Command::Reconcile(_)) => {
             batch.request_reconciliation();
             Ok(())
