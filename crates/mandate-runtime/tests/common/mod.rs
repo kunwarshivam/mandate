@@ -495,7 +495,7 @@ impl Shell {
                     }
                     ran.timers.push(request.clone());
                 }
-                Effect::Notify(reference) => ran.notifications.push(reference.message_key),
+                Effect::Notify(reference) => ran.notifications.push(reference.kind.key()),
             }
         }
         Ok(ran)

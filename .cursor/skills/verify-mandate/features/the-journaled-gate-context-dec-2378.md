@@ -37,7 +37,9 @@
   missing or a mark not sane.
 - `crates/mandate-daemon/tests/gate.rs`: the plan's own opening passes the gate's checks, is
   reported deferred on each of the four checks and the ten unseen parts (DEC-2388 item 8), with no check reported passed, and is
-  denied `deferred_to_binding`; each journaled unseen fact that should refuse is named deferred; the gate's own
+  answered `AllowDeferring` with all twelve parts named and both liquidity checks without bars
+  (DEC-2388 item 13), each advisory answer mapped to its verdict, with or without figures, and each
+  deferred part named as the journal's vectors name it; each journaled unseen fact that should refuse is named deferred; the gate's own
   reason first (order and position caps, the collar, a blocked account, the 1x buying power); no
   rule set, a missing fact, or a working order denies; an exit is never denied; a property test
   against the checks computed independently. `crates/mandate-daemon/tests/deployment.rs`: the
