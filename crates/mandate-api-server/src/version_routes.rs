@@ -26,7 +26,7 @@ use mandate_api::requests::ConfirmRequest;
 use mandate_api::responses::Classification;
 use mandate_api::wire::{EventId, Id, Ref, decode, encode};
 use mandate_authn::Request;
-use mandate_canon::{Value, parse, to_canonical};
+use mandate_canon::{Key, Value, parse, to_canonical};
 use mandate_identity::{Permission, StepUpActionKind};
 use mandate_journal::{StoredEvent, StreamId};
 use mandate_spec::Mandate;
@@ -45,12 +45,16 @@ use crate::versions::{
     reference, screen, stopped, stored, text,
 };
 use crate::writes::{
-    Gate, appended_at, derived_for, id_text, one_key, principal_text, ref_text, strict, unknown,
+    Gate, appended_batch_at, derived_for, id_text, one_key, principal_text, ref_text, strict,
+    unknown,
 };
 
 /// The message every violation these routes report carries: the code and the pointer say what and
 /// where, and nothing from the body is echoed (rule 6).
 const MESSAGE: &str = "The request does not meet this rule.";
+/// The operation §3.4 derives a confirmation's `StepUpAsserted` id under, distinct from the
+/// confirmation's own `confirm_version` (DEC-2128 item 3).
+pub const CONFIRM_ASSERTED: &str = "confirm_version_step_up_asserted";
 
 /// A refused request, answered by one problem document.
 enum Answer {
@@ -257,21 +261,54 @@ fn repeat(admitted: &Admitted, drafted: &Drafted) -> Option<Result<StoredEvent, 
     Some(outcome(settled, &drafted.id))
 }
 
-/// Stores the record, then appends the draft (rule 5).
-async fn commit(app: &App, admitted: &Admitted, drafted: Drafted) -> Result<StoredEvent, Answer> {
+/// Stores the record, then appends the draft (rule 5), with the `StepUpAsserted` that authorized
+/// it, when there is one, in the same batch after it (journal spec §9.32, [DEC-2128] item 3).
+///
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
+async fn commit(
+    app: &App,
+    admitted: &Admitted,
+    drafted: Drafted,
+    assertion: Option<&[u8]>,
+) -> Result<StoredEvent, Answer> {
     admitted
         .objects
         .put(&drafted.record)
         .map_err(|_| Refused::JournalUnavailable)?;
-    let settled = appended_at(
+    let batch: Vec<&[u8]> = std::iter::once(drafted.draft.as_slice())
+        .chain(assertion)
+        .collect();
+    let settled = appended_batch_at(
         app,
         &admitted.reader,
-        (&drafted.text, &drafted.draft),
+        (&drafted.text, &batch),
         admitted.gate.now,
         drafted.pinned,
     )
     .await;
     outcome(settled, &drafted.id)
+}
+
+/// The `StepUpAsserted` a step-up `asserted` leaves to append after the event `drafted` names,
+/// under §3.4's id for `operation` (DEC-2128 item 3).
+fn assertion_drafted(
+    admitted: &Admitted,
+    drafted: &Drafted,
+    operation: &str,
+    asserted: &Asserted,
+) -> Result<Vec<u8>, Answer> {
+    let (_, event_id) = derived_for(&admitted.gate, &admitted.reader.workspace, operation)
+        .ok_or(Refused::JournalUnavailable)?;
+    let writer = Writer {
+        workspace: &admitted.reader.workspace,
+        principal: &admitted.principal,
+        event_id: &event_id,
+        environment: &admitted.environment,
+        now: admitted.gate.now,
+    };
+    asserted
+        .drafted(admitted.objects.as_ref(), &writer, &drafted.text)
+        .ok_or(Refused::JournalUnavailable.into())
 }
 
 /// An append's outcome: the stored row, or its problem.
@@ -426,7 +463,7 @@ async fn created(
     objects
         .put(&canonical)
         .map_err(|_| Refused::JournalUnavailable)?;
-    let row = commit(app, &admitted, drafted).await?;
+    let row = commit(app, &admitted, drafted, None).await?;
     Ok(version_created(
         StatusCode::ACCEPTED,
         &admitted,
@@ -606,6 +643,18 @@ async fn confirmed(
         Vec::new(),
     )
     .ok_or(Refused::JournalUnavailable)?;
+    let passkey = request.step_up_assertion.is_some();
+    let event = match (passkey, request.step_up.as_ref()) {
+        (true, Some(evidence)) => {
+            let (record, event) = event;
+            let judged = journaled(Some(evidence)).ok_or(Refused::JournalUnavailable)?;
+            (
+                record,
+                passkey_confirmation(event, judged).ok_or(Refused::JournalUnavailable)?,
+            )
+        }
+        _ => event,
+    };
     let drafted = drafted(&admitted, "confirm_version", event)?;
     if let Some(repeated) = repeat(&admitted, &drafted) {
         return Ok(confirm_accepted(
@@ -665,11 +714,31 @@ async fn confirmed(
         request.step_up_assertion.as_ref(),
         &action,
     )?;
-    if let Some(_refused_until_the_route_commits_its_batch) = asserted {
+    if asserted.is_some() != passkey {
         return Err(Refused::JournalUnavailable.into());
     }
-    let row = commit(app, &admitted, drafted).await?;
+    let assertion = asserted
+        .map(|asserted| assertion_drafted(&admitted, &drafted, CONFIRM_ASSERTED, &asserted))
+        .transpose()?;
+    let row = commit(app, &admitted, drafted, assertion.as_deref()).await?;
     Ok(confirm_accepted(StatusCode::ACCEPTED, &admitted, &row))
+}
+
+/// The confirmation committed under passkey step-up: `MandateConfirmed` version 3 ([DEC-2131]
+/// item 3, journal spec v0.84 §9.9), version 2's members (a new mandate's, so no agent link and no
+/// base), then `step_up`, the evidence the port judged, which the record also holds and §9.32's
+/// rule 253 reads. `None` when the payload is not an object.
+///
+/// [DEC-2131]: ../../../docs/project/decisions/DEC-2131.md
+fn passkey_confirmation(mut event: Event, step_up: Value) -> Option<Event> {
+    let Value::Object(members) = &mut event.payload else {
+        return None;
+    };
+    members.insert(Key::new("agent_id").ok()?, Value::Null);
+    members.insert(Key::new("base_version").ok()?, Value::Null);
+    members.insert(Key::new("step_up").ok()?, step_up);
+    event.schema_version = 3;
+    Some(event)
 }
 
 /// `commands/confirm-accepted` for a first version.
@@ -888,7 +957,7 @@ async fn deployed(
         digest,
     };
     stepped_up(app, &admitted, request.step_up.as_ref(), None, &action)?;
-    let row = commit(app, &admitted, drafted).await?;
+    let row = commit(app, &admitted, drafted, None).await?;
     Ok(command_accepted(StatusCode::ACCEPTED, &admitted, &row))
 }
 
