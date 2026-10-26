@@ -8,7 +8,10 @@
 - **Code:** `mandate-datad` (`crates/mandate-datad`): `src/series.rs` (`sessions`: the last 30
   completed regular sessions, ending on `last_completed_regular_session(now)`; `close_on`: each
   close a function of its date alone, the anchor's close plus 0.1 a trading day; `publish`: one
-  `mandate_marketdata::dataset::Store::put_day` per session under `cell-recorded/`), and the
+  `mandate_marketdata::dataset::Store::put_day` per session under `cell-recorded/`;
+  `session_minutes` and `publish_minutes`: the current trading day's regular-session minute bars,
+  written once), `src/observation.rs` (`put_closes`: the closes object of the trusted closes, in
+  the artifact store), and the
   `mandate-datad` binary (`run`, whose first write is its start-up check, again every 60 s; and
   `probe` for `exec` probes; SIGTERM drains). The chart runs it as `data`, writing
   `/var/lib/mandate/artifacts/datasets`, with `data.symbol` and `data.anchor`, which only the
@@ -16,7 +19,9 @@
 - **Tests:** `crates/mandate-datad/tests/series.rs`: the sessions end on the last completed session;
   a close is a function of its date (an oracle walking the calendar its own way); closes rise every
   session; an anchor and its reach are checked; the stored dataset passes the trust check's
-  conditions under `mandate-marketdata`'s own inspection, and writing again conflicts with nothing.
+  conditions under `mandate-marketdata`'s own inspection, and writing again conflicts with nothing; the closes object is stored for the trusted closes;
+  the minute bars cover the regular session, an early close's included, and the trailing minutes
+  are the complete ones before the clock.
   `tests/process.rs`: ready only once stored, a store it cannot write refuses the start with a code
   and no symbol, probes, and SIGTERM drain. `deploy/tests/test_cell.py`: the data process's
   launch, mounts and egress, and no render without its series.

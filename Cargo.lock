@@ -1802,6 +1802,7 @@ name = "mandate-bars"
 version = "0.0.0"
 dependencies = [
  "mandate-canon",
+ "mandate-liquidity",
  "mandate-marketdata",
  "mandate-num",
  "mandate-time",
@@ -1946,6 +1947,7 @@ dependencies = [
  "mandate-bars",
  "mandate-canon",
  "mandate-journal",
+ "mandate-liquidity",
  "mandate-marketdata",
  "mandate-num",
  "mandate-process",

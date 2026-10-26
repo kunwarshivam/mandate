@@ -22,4 +22,5 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "signal"] }
 
 [dev-dependencies]
+mandate-liquidity.workspace = true
 proptest.workspace = true

@@ -112,7 +112,8 @@ struct Target {
     asset: String,
 }
 
-/// Stores the series and then its closes object; the object's reference, or why not.
+/// Stores the daily series, today's minute bars, and then the closes object; the object's
+/// reference, or why not.
 fn store_once(
     target: &Target,
     anchor: &Anchor,
@@ -120,6 +121,7 @@ fn store_once(
     now: UtcNanos,
 ) -> Result<String, series::SeriesError> {
     let published = series::publish(&target.store, &target.symbol, anchor, calendar, now)?;
+    series::publish_minutes(&target.store, &target.symbol, anchor, calendar, now)?;
     let closes = observation::put_closes(
         &target.artifacts,
         &published.dir,

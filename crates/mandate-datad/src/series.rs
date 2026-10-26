@@ -16,7 +16,9 @@ use mandate_marketdata::model::{
     AssetClass, Bar, DatasetId, Feed, Kind, ModelError, Records, Symbol,
 };
 use mandate_num::{NumError, Price, Usd};
-use mandate_time::{Date, ExchangeCalendar, TimeError, UtcNanos, new_york_midnight};
+use mandate_time::{
+    Date, ExchangeCalendar, Session, TimeError, UtcNanos, new_york_date_and_hour, new_york_midnight,
+};
 
 /// The sessions stored: past the model host's slow window (20) and the liquidity span (20), as
 /// the R0 rehearsal's bars are.
@@ -27,6 +29,12 @@ pub const STEP: &str = "0.1";
 pub const VOLUME: &str = "50000000";
 /// Each session's trade count.
 pub const TRADES: u64 = 400_000;
+/// Each one-minute bar's volume in the recorded minute series.
+pub const MINUTE_VOLUME: &str = "100000";
+/// Each one-minute bar's trade count.
+pub const MINUTE_TRADES: u64 = 1_000;
+/// One minute bar's span, in seconds.
+const MINUTE_S: i64 = 60;
 /// Where the recorded datasets live under the store root.
 pub const RECORDED_ROOT: &str = "cell-recorded";
 /// The farthest a session may be from the anchor, in calendar days: past it the walk is refused
@@ -247,4 +255,85 @@ pub fn publish(
         dir: store.dataset_dir(&dataset),
         outcomes,
     })
+}
+
+/// The minute bars of `day`'s regular session, early closes included, one a minute from its open to
+/// its close, each at the series' close for `day` and [`MINUTE_VOLUME`] shares; none on a closed
+/// day. The whole session is one function of its date, so its partition is written once and never
+/// changes; a reader takes only bars that have ended by its clock (`mandate_bars::trailing_minutes`).
+///
+/// # Errors
+/// [`SeriesError::Calendar`] past the calendar's range, and [`close_on`]'s errors.
+pub fn session_minutes(
+    calendar: &ExchangeCalendar,
+    anchor: &Anchor,
+    day: Date,
+) -> Result<Vec<Bar>, SeriesError> {
+    let Some(regular) = calendar
+        .sessions(day)?
+        .into_iter()
+        .find(|span| span.session() == Session::Regular)
+    else {
+        return Ok(Vec::new());
+    };
+    let price = DecStr::parse(&close_on(calendar, anchor, day)?.to_string())
+        .map_err(|_| SeriesError::Decimal)?;
+    let volume = DecStr::parse(MINUTE_VOLUME).map_err(|_| SeriesError::Decimal)?;
+    let mut bars = Vec::new();
+    let mut start = regular.start();
+    while start < regular.end() {
+        bars.push(Bar {
+            start,
+            open: price.clone(),
+            high: price.clone(),
+            low: price.clone(),
+            close: price.clone(),
+            volume: volume.clone(),
+            vwap: price.clone(),
+            trade_count: MINUTE_TRADES,
+        });
+        let next = start
+            .secs()
+            .checked_add(MINUTE_S)
+            .ok_or(SeriesError::OutOfReach)?;
+        start = UtcNanos::from_parts(next, start.nanos())?;
+    }
+    Ok(bars)
+}
+
+/// Stores today's regular-session minute bars for `symbol` under `root`'s [`RECORDED_ROOT`], today
+/// being `now`'s New York date: `None` on a closed day, which stores nothing. Idempotent: the day's
+/// bars never change, so a second write leaves them as they are.
+///
+/// # Errors
+/// Any [`SeriesError`], the store's conflict included.
+pub fn publish_minutes(
+    root: &Path,
+    symbol: &str,
+    anchor: &Anchor,
+    calendar: &ExchangeCalendar,
+    now: UtcNanos,
+) -> Result<Option<Published>, SeriesError> {
+    let (day, _) = new_york_date_and_hour(now)?;
+    let bars = session_minutes(calendar, anchor, day)?;
+    let Some(first) = bars.first() else {
+        return Ok(None);
+    };
+    let partition = first.start.date();
+    let kind = Kind::Bars("1Min".parse().map_err(|_| SeriesError::Decimal)?);
+    let dataset = DatasetId::new(
+        AssetClass::UsEquity,
+        Feed::Iex,
+        kind,
+        Symbol::parse(symbol)?,
+    )?;
+    let store = Store::new(root.join(RECORDED_ROOT));
+    let outcome = store.put_day(&dataset, partition, &Records::Bars(bars))?;
+    Ok(Some(Published {
+        dir: store.dataset_dir(&dataset),
+        outcomes: vec![Stored {
+            day: partition,
+            written: outcome.status == Status::Written,
+        }],
+    }))
 }

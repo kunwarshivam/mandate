@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use mandate_artifacts_fs::FsArtifactStore;
+use mandate_bars::trailing_minutes;
 use mandate_datad::observation::put_closes;
 use mandate_datad::series::{self, Anchor, SESSIONS};
 use mandate_journal::{ArtifactRef, get_artifact};
@@ -290,5 +291,92 @@ fn the_closes_object_is_stored_for_the_trusted_closes() {
         put_closes(&artifacts, &written.dir, "SPY", asset, later).is_err(),
         "a series that no longer ends on the last completed session is not trusted"
     );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// A regular session's minute bars are one a minute from its open to its close, an early close's
+/// included, each at the day's close and the fixed volume; a closed day has none.
+#[test]
+fn the_minute_bars_cover_the_regular_session() {
+    let calendar = ExchangeCalendar::us_equities().unwrap();
+    for (day, open, count) in [
+        (
+            Date::new(2026, 10, 26).unwrap(),
+            "2026-10-26T13:30:00Z",
+            390,
+        ),
+        (
+            Date::new(2026, 11, 27).unwrap(),
+            "2026-11-27T14:30:00Z",
+            210,
+        ),
+        (Date::new(2026, 10, 25).unwrap(), "", 0),
+    ] {
+        let bars = series::session_minutes(&calendar, &anchor(), day).unwrap();
+        assert_eq!(bars.len(), count, "{day}");
+        if count == 0 {
+            continue;
+        }
+        let mut expected = at(open).secs();
+        let close = series::close_on(&calendar, &anchor(), day)
+            .unwrap()
+            .to_string();
+        for bar in &bars {
+            assert_eq!(bar.start.secs(), expected, "{day}");
+            assert_eq!(bar.close.as_str(), close);
+            assert_eq!(bar.volume.as_str(), series::MINUTE_VOLUME);
+            expected += 60;
+        }
+    }
+}
+
+/// The stored minute bars hand out exactly the complete minutes inside the five before the clock,
+/// counted here minute by minute, so the trailing volume is their sum; on a closed day nothing is
+/// stored, and a second write of the day changes nothing.
+#[test]
+fn the_trailing_minutes_are_the_complete_ones_before_the_clock() {
+    let root = scratch("minutes");
+    let calendar = ExchangeCalendar::us_equities().unwrap();
+    for now in [
+        "2026-10-26T15:00:00Z",
+        "2026-10-26T15:00:30Z",
+        "2026-10-26T13:31:10Z",
+    ] {
+        let now = at(now);
+        let written = series::publish_minutes(&root, "SPY", &anchor(), &calendar, now)
+            .unwrap()
+            .unwrap();
+        let minutes = trailing_minutes(&written.dir, "SPY", now).unwrap();
+        let open = at("2026-10-26T13:30:00Z").secs();
+        let expected: Vec<i64> = (open..now.secs())
+            .step_by(60)
+            .filter(|s| *s >= now.secs() - 300 && s + 60 <= now.secs())
+            .collect();
+        let starts: Vec<i64> = minutes.iter().map(|m| m.start.secs()).collect();
+        assert_eq!(starts, expected, "{now:?}");
+        let volume = mandate_liquidity::trailing_volume(&minutes, now).unwrap();
+        assert_eq!(volume.to_string(), (100_000 * expected.len()).to_string());
+    }
+    let again = series::publish_minutes(
+        &root,
+        "SPY",
+        &anchor(),
+        &calendar,
+        at("2026-10-26T19:00:00Z"),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(
+        again.outcomes.iter().all(|o| !o.written),
+        "the day never changes"
+    );
+    let sunday = series::publish_minutes(
+        &root,
+        "SPY",
+        &anchor(),
+        &calendar,
+        at("2026-10-25T15:00:00Z"),
+    );
+    assert!(sunday.unwrap().is_none());
     fs::remove_dir_all(&root).ok();
 }
