@@ -139,7 +139,7 @@ test("the audit timeline reads the journal's streams from the API, newest first,
 });
 
 test("a screen the API does not serve yet says so, and shows no fixture figures", async ({ page }) => {
-  await page.goto("/alerts?scenario=approvals");
+  await page.goto("/audit/decisions?scenario=approvals");
   await expect(page.getByRole("heading", { name: "Not available from your deployment yet" })).toBeVisible();
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
 });
