@@ -87,7 +87,10 @@ impl OrderPlan for Plan {
     }
 
     /// Mandate spec §6 over the proposal's own figures. A proposal the plan could not have made,
-    /// or one whose facts have gone, is denied, which never adds risk (`AGENTS.md` rule 3).
+    /// or one whose facts have gone, is denied, which never adds risk (`AGENTS.md` rule 3). The
+    /// plan cannot see every fact an autonomy rule may read (drawdown, daily P&L, what the agent
+    /// bought today, gross exposure), so it never answers `auto`: §6.2 step 5c with `auto_allowed`
+    /// false makes an `auto` opening `ask` (DEC-2378 item 10).
     fn classify(&self, _view: &MandateView, proposal: &Proposal) -> Classified {
         let denied = Classified {
             autonomy: Autonomy::Deny,
@@ -121,7 +124,9 @@ impl Plan {
             proposal.qty,
         )
         .ok()?;
-        mandate_ports::classify(&validated, &action, proposal, false).ok()
+        mandate_ports::classify(&validated, &action, proposal, false)
+            .ok()
+            .map(|classified| mandate_ports::auto_not_allowed(classified, proposal))
     }
 }
 

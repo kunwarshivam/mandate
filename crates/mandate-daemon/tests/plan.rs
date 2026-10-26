@@ -12,7 +12,7 @@ use mandate_gate_context::Freshness;
 use mandate_journal::StoredEvent;
 use mandate_num::{Conviction, Price, Qty, Unit};
 use mandate_runtime::{
-    ApprovalSettings, Autonomy, MandateView, ModelDirection, ModelOutput, OrderPlan, Proposal,
+    ApprovalSettings, Autonomy, Classified, MandateView, ModelDirection, ModelOutput, OrderPlan, Proposal,
     Purpose, RiskClock, SignalInputs,
 };
 use mandate_spec::document::Mandate;
@@ -161,6 +161,19 @@ fn inputs(now: &str) -> SignalInputs {
     }
 }
 
+/// The demo mandate with `default: auto` and one rule asking about any opening once the risk
+/// day's buys pass $250: a rule on a fact the plan cannot see (mandate spec §6.3).
+fn auto_with_a_daily_buy_rule() -> Value {
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&mandate_canon::to_canonical(&document())).unwrap();
+    document["autonomy"]["default"] = serde_json::json!("auto");
+    document["autonomy"]["rules"] = serde_json::json!([{
+        "id": "daily_buys", "then": "ask",
+        "when": {"field": "bought_today_usd", "op": "gt", "value": "250"},
+    }]);
+    mandate_canon::parse(&serde_json::to_vec(&document).unwrap()).unwrap()
+}
+
 fn proposed(rows: &Rows, now: &str) -> Option<Proposal> {
     plan_over(rows).plan(&view(), &inputs(now))
 }
@@ -291,4 +304,106 @@ fn a_mark_that_is_not_sane_proposes_nothing() {
         ),
     );
     assert!(proposed(&rows, REGULAR).is_none());
+}
+
+/// An `auto` mandate whose ASK rule reads what the agent bought today, after a buy and a sell
+/// that left it flat: the plan sees none of those buys, so the rule cannot fire on its facts,
+/// and the next opening is asked under the policy overlay rather than placed as the day's first
+/// (§6.2 step 5c, DEC-2378 item 10). Repeated round trips cannot split orders past the rule.
+#[test]
+fn an_auto_mandate_is_asked_about_an_opening_after_a_round_trip_it_cannot_see() {
+    let mut rows = journaled(REGULAR);
+    for (order, side) in [("o1", "buy"), ("o2", "sell")] {
+        rows.push(
+            ACCOUNT,
+            "OrderRequestRecorded",
+            &format!(r#"{{"agent_id":"{AGENT}","purpose":"open","risk_clock":"{REGULAR}"}}"#),
+        );
+        rows.push(
+            ACCOUNT,
+            "OrderSubmitted",
+            &format!(r#"{{"client_order_id":"{order}","instrument_id":"{SPY}","side":"{side}"}}"#),
+        );
+        rows.push(
+            ACCOUNT,
+            "FillApplied",
+            &format!(
+                r#"{{"fill_id":"f-{order}","client_order_id":"{order}","instrument_id":"{SPY}","side":"{side}","qty_gross":"2","price":"99.95","risk_clock":"{REGULAR}"}}"#
+            ),
+        );
+        rows.push(
+            ACCOUNT,
+            "OrderStateChanged",
+            &format!(
+                r#"{{"client_order_id":"{order}","state":"filled","replaced_by":null,"ignored":false}}"#
+            ),
+        );
+    }
+    let facts = Facts::new(CLOCK, AGENT);
+    facts.follow(ACCOUNT);
+    facts.feed(&rows.0);
+    let plan = Plan::new(
+        facts,
+        Mandate::parse(&auto_with_a_daily_buy_rule()).unwrap(),
+        FRESH,
+    );
+    let proposal = plan
+        .plan(&view(), &inputs(REGULAR))
+        .expect("flat again, so an opening is proposed");
+    assert_eq!(
+        plan.classify(&view(), &proposal),
+        Classified {
+            autonomy: Autonomy::Ask,
+            decided_by: Some("policy_overlay".into()),
+        },
+        "never auto: the overlay changed the decision, so it names itself"
+    );
+}
+
+/// The overlay only tightens: an `auto` opening or increase becomes `ask`, while an `ask` or a
+/// `deny` keeps its own label and an exit is never touched (`AGENTS.md` rule 13).
+#[test]
+fn the_overlay_asks_only_about_an_auto_opening_or_increase() {
+    let rows = journaled(REGULAR);
+    let proposal = plan_over(&rows).plan(&view(), &inputs(REGULAR)).unwrap();
+    let decided = |autonomy, by: &str| Classified {
+        autonomy,
+        decided_by: Some(by.into()),
+    };
+    let asked = decided(Autonomy::Ask, "policy_overlay");
+    for purpose in [Purpose::Open, Purpose::Increase] {
+        let mut adds = proposal.clone();
+        adds.purpose = purpose;
+        assert_eq!(
+            mandate_ports::auto_not_allowed(decided(Autonomy::Auto, "default"), &adds),
+            asked,
+            "{purpose:?}"
+        );
+        for kept in [
+            decided(Autonomy::Ask, "rule:large"),
+            decided(Autonomy::Deny, "rule:never"),
+        ] {
+            assert_eq!(
+                mandate_ports::auto_not_allowed(kept.clone(), &adds),
+                kept,
+                "{purpose:?}"
+            );
+        }
+    }
+    for purpose in [
+        Purpose::RiskExit,
+        Purpose::OwnerExit,
+        Purpose::DiscretionaryExit,
+        Purpose::Protective,
+        Purpose::Flatten,
+    ] {
+        let mut exit = proposal.clone();
+        exit.purpose = purpose;
+        let auto = decided(Autonomy::Auto, "builtin_risk_reducing");
+        assert_eq!(
+            mandate_ports::auto_not_allowed(auto.clone(), &exit),
+            auto,
+            "{purpose:?}"
+        );
+    }
 }

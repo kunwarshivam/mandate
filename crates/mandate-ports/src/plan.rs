@@ -343,6 +343,22 @@ pub fn classify(
     })
 }
 
+/// Mandate spec §6.2 step 5c when the effective policy's `auto_allowed` is false: an opening or
+/// an increase `classify` answered `auto` becomes `ask`, naming the overlay (`policy_overlay`)
+/// since it changed the decision. An `ask` or a `deny` keeps its own label, and an exit is never
+/// touched (`AGENTS.md` rule 13), so this only tightens.
+#[must_use]
+pub fn auto_not_allowed(classified: Classified, proposal: &Proposal) -> Classified {
+    if classified.autonomy == Autonomy::Auto && proposal.purpose.adds_risk() {
+        Classified {
+            autonomy: Autonomy::Ask,
+            decided_by: Some(POLICY_OVERLAY.to_owned()),
+        }
+    } else {
+        classified
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use mandate_num::{Price, Qty, Usd};
