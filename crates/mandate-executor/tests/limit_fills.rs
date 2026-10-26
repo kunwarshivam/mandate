@@ -428,6 +428,34 @@ fn a_day_exit_read_a_day_later_is_dated_by_its_submission() {
     );
 }
 
+/// DEC-2395 item 3: a `day` sell sent at 14:00 New York, after an early-close day's close, may
+/// have been queued to the next session, so when it is first read on Wednesday it is dated
+/// Wednesday, never earlier.
+#[test]
+fn a_day_exit_sent_after_the_earliest_close_is_dated_when_booked() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = holding(&ports, "1");
+    tick(&mut shell, &ports, "2026-10-20T18:00:00Z");
+    let exit = sent(
+        &mut shell,
+        &ports,
+        EXIT,
+        risk_exit(AAPL, "1", EXIT_LIMIT),
+        "b-exit",
+    );
+    tick(&mut shell, &ports, WEDNESDAY);
+    let id = exit.client_order_id.as_str().to_owned();
+    reported(&mut shell, &ports, &id, "1", "1", "filled");
+    assert_eq!(
+        derived(&shell, &[]),
+        vec![expected(&id, "1", "1", price(EXIT_LIMIT), wednesday())]
+    );
+}
+
 /// A broker that lists a sold-out position as a row of quantity zero reads as the same zero
 /// (DEC-2390 item 1).
 #[test]
