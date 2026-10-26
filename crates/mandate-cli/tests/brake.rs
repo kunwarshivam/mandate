@@ -75,8 +75,14 @@ fn stopped(fx: &mut Fixture, agent: &str) {
     fx.append_in("paper", CONTROL, "AgentStopped", None, payload);
 }
 
+/// The control stream's events but the owner alerts a kill switch commits beside its command
+/// (E8-9k), which `a_kill_switch_commits_its_owner_alert_in_its_batch` checks.
 fn control(fx: &Fixture) -> Vec<Value> {
-    fx.rows(CONTROL).iter().map(body).collect()
+    fx.rows(CONTROL)
+        .iter()
+        .filter(|row| row.event_type != "OwnerAlertSent")
+        .map(body)
+        .collect()
 }
 
 /// The owner's commands committed after the first `before` control-stream events.
