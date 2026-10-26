@@ -38,7 +38,10 @@
   `tests/mark_writer.rs`'s refused mark dropped and marked again; in `mandate-executor`,
   `reconcile.rs`'s `a_refused_batch_holds_every_agents_openings_once`,
   `a_refused_batch_leaves_the_clocks_as_its_input_found_them` and
-  `every_external_fill_batch_is_refused_at_its_fill_alone`.
+  `an_external_fill_without_its_config_or_its_id_is_refused_at_its_fill_alone`;
+  `tests/external_fill.rs` (DEC-2812): an external fill booked once as `FillApplied` version 2,
+  naming no order, and the activity cursor past it; in `mandate-executor`, `reconcile.rs`'s
+  `an_external_fill_is_booked_to_the_account_and_held_until_the_owner_acknowledges`.
   `crates/mandate-executord/tests/process.rs`: paper only, the stream opened once, the
   start waiting for a tick, readiness only after a clean startup reconciliation, a lost read read
   again without holding the kill switch, a process that is not ready applying the kill switch, a
