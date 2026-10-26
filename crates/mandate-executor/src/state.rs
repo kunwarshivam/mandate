@@ -58,6 +58,9 @@ pub struct ExecutorState {
     /// interval ends (DEC-348 item 2).
     pub(crate) awaiting: BTreeMap<InstrumentId, BTreeSet<ClientOrderId>>,
     pub(crate) copied: BTreeMap<EventId, EventId>,
+    /// Each agent's working universe as the account stream's `UniverseChanged` folds to it, with
+    /// the thesis and lineage that hold each instrument (journal spec §9.3, DEC-2823).
+    pub(crate) universes: BTreeMap<AgentId, BTreeMap<InstrumentId, Holding>>,
     /// What journal spec §9.28's judgment of an owner's acknowledgment reads from the account
     /// stream (DEC-2828).
     pub(crate) acknowledgments: crate::acknowledge::Acknowledgments,
@@ -320,6 +323,15 @@ pub(crate) struct OrderDetail {
     pub(crate) fill_qtys: Vec<Qty>,
 }
 
+/// The thesis and lineage an instrument of an agent's working universe is held by, as its last
+/// `UniverseChanged` (admitted) named them: `None` for an admission with `version_applied`, which
+/// follows from a pinned list (journal spec §9.3 rule 32).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Holding {
+    pub(crate) thesis_id: Option<String>,
+    pub(crate) lineage_id: Option<String>,
+}
+
 /// An adoption on the journal (`OrderStateChanged` with `adopted`) whose `CompensatingEvent` has
 /// not been folded yet: a crash between the two leaves one here, and the next reconciliation
 /// journals the missing compensation before anything else, so no adoption stays silent (§11).
@@ -424,6 +436,7 @@ impl ExecutorState {
             unprotected: Vec::new(),
             awaiting: BTreeMap::new(),
             copied: BTreeMap::new(),
+            universes: BTreeMap::new(),
             acknowledgments: crate::acknowledge::Acknowledgments::default(),
             exiting: BTreeMap::new(),
             replacing: BTreeMap::new(),
@@ -753,6 +766,15 @@ impl ExecutorState {
 
     /// The batch whose append is still unresolved, if any. No new input may be handled at an
     /// unresolved head (journal spec §5.1).
+    /// `agent`'s working universe as the account stream's `UniverseChanged` folds to it, in
+    /// instrument order (journal spec §9.3, DEC-2823).
+    pub fn universe(&self, agent: &AgentId) -> Vec<InstrumentId> {
+        self.universes
+            .get(agent)
+            .map(|held| held.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
     pub fn unresolved(&self) -> Option<&UnresolvedAppend> {
         self.unresolved.as_ref()
     }

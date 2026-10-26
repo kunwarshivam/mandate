@@ -140,9 +140,9 @@ struct Open<'a> {
 /// open, unless a version was applied since its last record: then the open one has ended and the new
 /// one begins from 1. Each record is followed by its `OwnerAlertSent` (`retirement_held`, naming
 /// it), and each such alert follows the record it names; an alert of another kind answers no record
-/// here, which reads §9.34's "its `OwnerAlertSent` (`retirement_held`, `subject` it)" as written, a
-/// check the reference fold leaves to rule 130's one-subject-one-kind (DEC-2831). Another agent's records, another command, and a rejected
-/// version end and move nothing.
+/// here, which reads §9.34's "its `OwnerAlertSent` (`retirement_held`, `subject` it)" as written
+/// (DEC-2831). Another agent's records, another command, and a rejected version end and move
+/// nothing.
 ///
 /// Returns the index of the first record that breaks the rule, or `None`; later records are not read.
 #[must_use]

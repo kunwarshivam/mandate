@@ -163,6 +163,7 @@ fn oracle(records: &[Value]) -> Option<usize> {
         if text(r, "event_type") == "RetirementHeld"
             && !next.is_some_and(|n| {
                 text(n, "event_type") == "OwnerAlertSent"
+                    && text(payload(n), "kind") == "retirement_held"
                     && text(payload(n), "subject") == text(r, "event_id")
             })
         {
@@ -381,8 +382,8 @@ fn record(json: &str) -> Value {
 /// retirement's and is not read; a `retirement_held` alert naming the record before it is refused
 /// unless that record is a `RetirementHeld`; and a held record is answered only by its own alert,
 /// `retirement_held` and naming it, so an alert of another kind or naming another record leaves it
-/// unanswered (§9.34: "its `OwnerAlertSent` (`retirement_held`, `subject` it)", DEC-2831). The fold and the
-/// oracle agree on each.
+/// unanswered (§9.34: "its `OwnerAlertSent` (`retirement_held`, `subject` it)", DEC-2831). The fold
+/// and the oracle agree on each.
 #[test]
 fn a_held_record_is_answered_only_by_its_own_retirement_held_alert() {
     let section = section();
@@ -426,6 +427,11 @@ fn a_held_record_is_answered_only_by_its_own_retirement_held_alert() {
             retirement_failure(AGENT, &unanswered),
             Some(0),
             "a held record followed by an alert {case} is unanswered: {held_id}"
+        );
+        assert_eq!(
+            oracle(&unanswered),
+            Some(0),
+            "and the oracle agrees: {case}"
         );
     }
 }

@@ -244,6 +244,7 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
             Ok(())
         }
         Input::BatchRefused => held_on_refusal(batch),
+        Input::Theses { agent, records } => crate::universe::copy(batch, &agent, &records),
         Input::InputFailed => {
             silence(batch)?;
             held_on_refusal(batch)
