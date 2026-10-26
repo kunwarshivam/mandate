@@ -3,7 +3,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readBacktestFrom } from "@/api/backtest";
 import { type Fetch, createWorkspaceClient } from "@/api/client";
-import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand } from "@/api/commands";
+import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand, prepareOwnerExit } from "@/api/commands";
 import { confirmAccepted, confirmStepUpDigest } from "@/api/confirm";
 import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPasskey, browserAuthenticator, deployStepUpDigest, passkeysRead, usablePasskeys } from "@/api/passkey";
 import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDigest, passkeyList } from "@/api/enrol";
@@ -274,6 +274,22 @@ export function ApiRuntimeProvider({
         for (const d of delivered) if (d.phase !== "undelivered" && d.eventId) void follow(d.eventId);
       })();
       return command;
+    },
+    [client, deliver, follow],
+  );
+
+  /** The owner's exit (§5.4): sent with one key until answered, then followed to its outcome (§5.5). */
+  const ownerExit = useCallback<NonNullable<Runtime["ownerExit"]>>(
+    async (agentId, instrument, record, onRecorded) => {
+      const prepared = prepareOwnerExit(client, agentId, instrument, record);
+      if (!prepared.ok) return { phase: "undelivered", reason: prepared.reason };
+      const delivered = await deliver(prepared.commands[0]);
+      if (delivered.phase === "undelivered") return { phase: "undelivered", reason: delivered.reason };
+      if (delivered.phase === "recorded") onRecorded();
+      if (!delivered.eventId) return { phase: "unknown" };
+      const settled = await follow(delivered.eventId);
+      if (settled === "applied" || settled === "refused" || settled === "ended") return { phase: settled };
+      return delivered.phase === "recorded" ? { phase: "recorded" } : { phase: "unknown" };
     },
     [client, deliver, follow],
   );
@@ -640,8 +656,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, streamTail: journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, streamTail: journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

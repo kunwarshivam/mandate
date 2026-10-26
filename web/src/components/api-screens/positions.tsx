@@ -2,11 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { Button } from "@cloudflare/kumo/components/button";
+import type { AgentHolding } from "@/api/activity";
+import { isAssetId } from "@/api/commands";
 import type { AgentDetail, ReadPosition } from "@/api/read-models";
 import { PageHeader } from "@/components/kumo/page-header/page-header";
 import { Section, WorkspaceGate } from "@/components/screens/common";
 import { clock, quantity } from "@/lib/format";
-import { type PositionsAnswer, useRuntime } from "@/lib/mock-runtime";
+import { type CommandRecord, type ExitOutcome, type PositionsAnswer, useRuntime } from "@/lib/mock-runtime";
+import { useCan } from "@/lib/roles";
 
 /**
  * Positions over the workspace API (§4.7 D3, DEC-2111, DEC-1096): each agent's own positions, the net
@@ -75,6 +79,98 @@ function AgentLink({ agent }: { agent: AgentDetail }) {
   );
 }
 
+/** Where the owner's exit from one instrument stands on this screen. */
+type ExitState = { step: "idle" } | { step: "confirming" } | { step: "sending" } | { step: "recorded" } | { step: "done"; outcome: ExitOutcome };
+
+/** An exit's outcome in words, never by a code: what happened, and what was not sold. */
+function exitWords(state: ExitState): string {
+  if (state.step === "sending") return "Sending your exit…";
+  if (state.step === "recorded") return "Recorded in the journal: your exit. Waiting for the agent's runtime to take it.";
+  if (state.step !== "done") return "";
+  switch (state.outcome.phase) {
+    case "applied":
+      return "Applied: the agent's runtime took your exit. Its sell shows in the agent's orders.";
+    case "refused":
+      return "Refused by the agent's runtime: nothing was sold. Its records say why.";
+    case "ended":
+      return "Ended without a sell: nothing was sold. The agent's records say why.";
+    case "recorded":
+      return "Recorded in the journal: your exit. Its outcome is not reported yet; look at the agent's orders.";
+    case "undelivered":
+      return "Not recorded: your deployment refused your exit. Nothing was sold.";
+    case "unknown":
+      return "The result is unknown; we are checking. Look at the agent's orders before you exit again.";
+  }
+}
+
+/**
+ * The owner's exit from one instrument (§5.4, rule 13): asked first on the screen, then sent once.
+ * The bid confirmation is never sent, since this screen shows no quote with its size and time, so
+ * the confirmation says an equity sell outside the regular session waits for it.
+ */
+function ExitCell({ agent, holding, name }: { agent: AgentDetail; holding: AgentHolding; name: string }) {
+  const { ownerExit, ws } = useRuntime();
+  const allowed = useCan("stop.full");
+  const [state, setState] = useState<ExitState>({ step: "idle" });
+  const sent = useRef(false);
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const instrument = holding.instrument_id;
+  if (!ownerExit || !allowed || holding.filled_qty.startsWith("-") || /^0(\.0*)?$/.test(holding.filled_qty)) return null;
+  if (!isAssetId(instrument)) return <span className={NOT_REPORTED}>{"No exit here: this position names no asset id. The agent's kill switch still sells it."}</span>;
+  const lines = [
+    `Sell ${name}'s whole position in ${instrument}: ${quantity(holding.filled_qty)} held by its fills.`,
+    "Your exit is never denied for the agent's limits or conduct controls; only participation caps pace it.",
+    "In the regular session it is sent at once. Outside the regular session, an equity sell waits for it: this screen has no bid you could confirm.",
+    "The journal records it with what this screen showed.",
+  ];
+  const sell = () => {
+    if (sent.current) return;
+    sent.current = true;
+    const record: CommandRecord = { screen: "D10", environment: ws.environment, title: `Exit ${instrument}`, shown: lines, modes: [{ agent: agent.agent_id, badge: agent.mode ?? "not reported" }] };
+    setState({ step: "sending" });
+    void ownerExit(agent.agent_id, instrument, record, () => {
+      if (live.current) setState({ step: "recorded" });
+    }).then((outcome) => {
+      if (live.current) setState({ step: "done", outcome });
+    });
+  };
+  if (state.step === "idle")
+    return (
+      <Button type="button" variant="secondary" aria-label={`Exit ${instrument}`} onClick={() => setState({ step: "confirming" })}>
+        Exit
+      </Button>
+    );
+  if (state.step === "confirming")
+    return (
+      <div role="group" aria-label={`Exit ${instrument}`} className="grid gap-2">
+        <ul className="grid gap-1">
+          {lines.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+        <div className="flex gap-2">
+          <Button type="button" variant="primary" onClick={sell}>
+            Sell it
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => setState({ step: "idle" })}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  return (
+    <p role="status" aria-label={`Your exit from ${instrument}`}>
+      {exitWords(state)}
+    </p>
+  );
+}
+
 /** One agent's own positions, with the three members its deployment does not report yet. */
 function OwnPositions({
   agent,
@@ -119,6 +215,9 @@ function OwnPositions({
               <th scope="col" className="py-2 font-normal">
                 Protection
               </th>
+              <th scope="col" className="py-2 font-normal">
+                Your exit
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -131,6 +230,9 @@ function OwnPositions({
                 <td className={`py-2.5 ${NOT_REPORTED}`}>Not reported</td>
                 <td className={`py-2.5 ${NOT_REPORTED}`}>Not reported</td>
                 <td className={`py-2.5 ${NOT_REPORTED}`}>Not reported</td>
+                <td className="py-2.5">
+                  <ExitCell agent={agent} holding={h} name={name} />
+                </td>
               </tr>
             ))}
           </tbody>

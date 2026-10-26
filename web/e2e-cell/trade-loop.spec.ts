@@ -57,7 +57,7 @@ async function until(page: Page, path: string, ms: number, ready: () => Promise<
 }
 
 test("the trade loop from web/: approve in the browser, see the fill, the position and the journal, and kill the agent", async ({ page }) => {
-  test.setTimeout(PROPOSAL_MS + CONFIRM_MS + FILL_MS + 120_000);
+  test.setTimeout(PROPOSAL_MS + CONFIRM_MS + 2 * FILL_MS + 120_000);
   for (const [name, value] of Object.entries({ RESULT, WORKSPACE, AGENT, CONFIRM_REQUEST, CONFIRM_DONE })) expect(value, `the driver names ${name}`).not.toBe("");
 
   await test.step("the agent's request shows in the web app", async () => {
@@ -126,6 +126,23 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     if (!shown) refuse("the positions screen showed no row of the agent's own position within 30 s");
     await expect(own.getByRole("cell", { name: "Not reported" }).first()).toBeVisible();
     step("positions_screen");
+  });
+
+  await test.step("the owner's exit from the positions screen is recorded, and its sell fills the agent's position to nothing", async () => {
+    const own = page.locator(`[data-slot=agent-positions][data-agent="${AGENT}"]`);
+    const exit = own.getByRole("button", { name: /^Exit / }).first();
+    await expect(exit).toBeVisible();
+    await exit.click();
+    const confirm = own.getByRole("group", { name: /^Exit / });
+    await expect(confirm).toContainText("only participation caps pace it");
+    const sent = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/agents/${AGENT}/exits`);
+    await confirm.getByRole("button", { name: "Sell it" }).click();
+    const answer = await sent;
+    if (!answer.ok()) refuse(`the API answered ${answer.status()} for the owner exit: ${(await answer.text()).slice(0, 400)}`);
+    await expect(own.getByRole("status", { name: /^Your exit from / })).toContainText(/Recorded in the journal: your exit|Applied: the agent's runtime took your exit/);
+    const sold = await until(page, "/positions", FILL_MS, async () => (await own.getByText("Its own fills net to nothing.").count()) > 0);
+    if (!sold) refuse(`the owner exit was recorded but the agent's position did not fill to nothing within ${FILL_MS} ms`);
+    step("owner_exit", ((await answer.json()) as { command_id?: string }).command_id ?? "");
   });
 
   await test.step("the audit timeline shows the agent's records and its account's, as the journal holds them", async () => {
