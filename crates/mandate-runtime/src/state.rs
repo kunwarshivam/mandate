@@ -1056,6 +1056,15 @@ fn requested(id: &EventId, payload: &Value) -> Result<PendingApproval, RuntimeEr
                 risk_impact: Vec::new(),
                 deadline: mandate_approval::RiskClock(deadline.secs()),
                 execution,
+                deferred_to_binding: payload
+                    .get("content")
+                    .and_then(|content| content.get("deferred_to_binding"))
+                    .and_then(Value::as_array)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect(),
             },
             content_hash,
             delivered: false,
