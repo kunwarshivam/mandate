@@ -5,6 +5,7 @@
 use mandate_api_server::reads::agent_positions;
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_journal::StoredEvent;
+use mandate_num::{Price, SignedQty};
 use proptest::prelude::*;
 use proptest::test_runner::{TestCaseError, TestError, TestRunner};
 
@@ -71,9 +72,16 @@ impl Account {
     }
 }
 
+/// A position every fill of which was at 10 (`Account::fill`'s price), so trading spec §8.1's
+/// basis is the quantity × 10 however it was reached; with no mark there is no value, and with no
+/// `ProtectionChanged` no protection (DEC-2138).
 fn position(instrument: &str, qty: &str) -> Value {
+    let basis = SignedQty::parse(qty)
+        .expect("a quantity")
+        .value_at(Price::parse("10").expect("a price"))
+        .expect("in range");
     let text = format!(
-        r#"{{"instrument_id":"{instrument}","filled_qty":"{qty}","cost_basis":null,"risk_mark":null,"protection":null}}"#
+        r#"{{"instrument_id":"{instrument}","filled_qty":"{qty}","cost_basis":{{"qty":"{qty}","basis":"{basis}"}},"risk_mark":null,"market_value":null,"unrealized_pnl":null,"protection":{{"orders":[],"covered_qty":"0","stop":null,"take_profit":null,"unprotected_since":null}}}}"#
     );
     parse(text.as_bytes()).expect("JSON")
 }
@@ -239,4 +247,28 @@ fn the_fold_matches_an_independent_sum_and_catches_seeded_bugs() {
             "the oracle catches the bug that {name}"
         );
     }
+}
+
+/// A net sale is marked at the ask, which a risk mark does not carry, so neither its value nor its
+/// P&L is served at the bid (DEC-2138 item 3).
+#[test]
+fn a_short_sub_ledger_is_never_valued_at_the_bid() {
+    let mut a = Account::default();
+    a.order("agt_a", "o-1", QQQ, "sell");
+    a.fill("FillApplied", "o-1", QQQ, "sell", "3");
+    a.push(
+        "MarkUpdated",
+        None,
+        &format!(
+            r#"{{"instrument_id":"{QQQ}","price":"11","source":"quote","feed":"iex","bid":"11","sane":true,"session":"regular","risk_clock":"2026-10-19T13:00:05.000000000Z"}}"#
+        ),
+    );
+    let served = agent_positions(&a.rows, "agt_a").expect("readable");
+    assert_eq!(served.len(), 1);
+    assert_eq!(served[0].get("market_value"), Some(&Value::Null));
+    assert_eq!(served[0].get("unrealized_pnl"), Some(&Value::Null));
+    assert_eq!(
+        served[0].get("cost_basis").and_then(|b| b.get("qty")),
+        Some(&Value::Str("-3".to_owned()))
+    );
 }

@@ -13,7 +13,7 @@ use crate::types::{
     Autonomy, Classified, Command, DecisionClip, DryRunVerdict, Effect, EventDraft, EventId,
     ExitOrigin, FlattenRequest, Initiator, Input, IntentBody, IntentHandoff, KillScope,
     LiquidityRead, Mode, ModelOutput, NotificationRef, Observation, OwnerConfirmation, Proposal,
-    Purpose, RiskClock, Seq, TimeInForce, TimerId, TimerRequest, WriterEpoch,
+    Purpose, RiskClock, RuntimeAlert, Seq, TimeInForce, TimerId, TimerRequest, WriterEpoch,
 };
 
 /// One step of the runtime (ADR-0001 ES-06).
@@ -520,13 +520,19 @@ fn decide(
         DryRunVerdict::Deny { .. } | DryRunVerdict::DenyOnFigures { .. } => {
             batch.notify(NotificationRef {
                 subject_event: decision,
-                message_key: "decision_skipped",
+                kind: RuntimeAlert::DecisionSkipped,
             });
             Ok(())
         }
-        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. } => {
-            allowed(state, &proposal, &classified, now, ports, decision, batch)
-        }
+        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. } => allowed(
+            state,
+            &proposal,
+            (&classified, &deferred_names(&verdict)),
+            now,
+            ports,
+            decision,
+            batch,
+        ),
     }
 }
 
@@ -645,7 +651,7 @@ pub(crate) fn dry_run(
 fn allowed(
     state: &RuntimeState,
     proposal: &Proposal,
-    classified: &Classified,
+    (classified, deferred): (&Classified, &[&'static str]),
     now: RiskClock,
     ports: &Ports<'_>,
     decision: EventId,
@@ -656,6 +662,7 @@ fn allowed(
             state,
             proposal,
             classified.decided_by.as_deref(),
+            deferred,
             now,
             ports,
             decision,

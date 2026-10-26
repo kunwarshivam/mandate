@@ -216,9 +216,10 @@ pub fn recorded_fills(state: &ExecutorState, positions: &[BrokerPosition]) -> Ve
 /// booked at the order's journaled limit price, the worst price the order allowed, under the id
 /// `limit:<client order id>:<cumulative filled quantity>`, when the ledger holds the instrument long
 /// at least the increment with no unattributed fill, no other order in the instrument has an
-/// unbooked report, and the broker lists the position reduced by exactly the increment. A `day`
-/// sell is dated by its submission's New York date, a GTC sell by the New York date of the
-/// executor's clock, never earlier. Anything else derives nothing (`AGENTS.md` rule 3).
+/// unbooked report, and the broker lists the position reduced by exactly the increment, no row in
+/// the instrument reading as zero. A `day` sell submitted before the earliest regular close is
+/// dated by its submission's New York date; any other sell by the New York date of the executor's
+/// clock, never earlier than its submission's. Anything else derives nothing (`AGENTS.md` rule 3).
 ///
 /// # Errors
 /// [`ExecutorError::Num`] when a quantity or a date cannot be computed exactly.
@@ -289,8 +290,8 @@ fn limit_fill(
     else {
         return Ok(None);
     };
-    let (submitted_on, _) = new_york_date_and_hour(submitted)?;
-    let trade_date = if request.tif == TimeInForce::Day {
+    let (submitted_on, hour) = new_york_date_and_hour(submitted)?;
+    let trade_date = if request.tif == TimeInForce::Day && hour < EARLIEST_CLOSE_HOUR {
         submitted_on
     } else {
         let now = UtcNanos::from_parts(state.clock().secs(), 0)?;
@@ -312,6 +313,12 @@ fn limit_fill(
         trade_date,
     }))
 }
+
+/// The New York hour of the earliest regular close, an early-close day's 13:00. A `day` sell
+/// submitted before it filled on its submission's date; one submitted later may have been queued
+/// to the next session, so it is dated as a GTC sell is, never earlier than when it is booked,
+/// which keeps its proceeds unsettled longer and adds no buying power (DEC-2395 item 3).
+const EARLIEST_CLOSE_HOUR: u8 = 13;
 
 /// Whether every other order in `order`'s instrument has booked all its broker record reported,
 /// so no other fill can be in the position the broker lists.
@@ -350,16 +357,7 @@ fn recorded_fill(
             .unattributed
             .get(&order.instrument)
             .is_none_or(Vec::is_empty);
-    let alone = state.orders.values().all(|other| {
-        other.client_order_id == order.client_order_id
-            || other.instrument != order.instrument
-            || state
-                .details
-                .get(&other.client_order_id)
-                .and_then(|other_detail| other_detail.reported_filled)
-                .is_none_or(|filled| filled <= other.filled_qty)
-    });
-    if !(entry && flat && alone) {
+    if !(entry && flat && alone(state, order)) {
         return None;
     }
     let mut held = positions

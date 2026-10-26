@@ -13,12 +13,17 @@
  * mandate version from the document (DEC-2101 item 3), serves that version's confirmation screen as a
  * new mandate's (item 4), with a new `screen_digest` at each read. A confirm that does not carry the
  * digest it last served is `classification_changed`; one that does, without step-up, is
- * `step_up_required`, as the server does until E9-4 binds its step-up port (item 2); a version it
- * never created is `not_found`. A backtest
+ * `step_up_required`; a version it never created is `not_found`. A confirm and a deployment take
+ * passkey step-up (DEC-2128): the mock serves its member's passkeys at `GET /passkeys` and judges a
+ * `passkey` evidence and its assertion against the challenge it issued for the action, the
+ * assertion's client data naming that challenge as a `webauthn.get`. It checks no signature, which
+ * only the server's verifier can; a test's authenticator stands in for the member's. A deployment
+ * needs a version the mock recorded as confirmed and an agent id it has not deployed. A backtest
  * is the fixture's served `backtest` member under the mock's own envelope (DEC-2400).
  */
 import { CSRF_HEADER, OPERATIONS, SESSION_ROUTE, STEP_UP_CHALLENGE_ROUTE, isIdempotencyKey, type Fetch } from "./client";
 import { CONNECT_START_ROUTE } from "./connect";
+import { deployStepUpDigest } from "./passkey";
 import { CONNECT_DISCLOSURE, connectStepUpDigest } from "./step-up";
 import type { Watermark } from "./types";
 import { servedBacktestFixture } from "@/fixtures/backtests";
@@ -37,7 +42,17 @@ export interface MockServerOptions {
    * so an approve with that challenge's evidence is `step_up_missing`.
    */
   hostConfirms?: boolean;
+  /**
+   * `DisclosureAccepted` records on the workspace's control stream, in order, which its audit reads
+   * serve with their bodies (journal spec §9.2, DEC-2134). Without it the control stream is not served.
+   */
+  acceptances?: ReadonlyArray<{ document: string; version: string; user: string; method: string | null }>;
+  /** The member's passkeys `GET /passkeys` serves; one past its cool-off by default. */
+  passkeys?: ReadonlyArray<{ passkey_id: string; cool_off_ends: string | null }>;
 }
+
+/** The mock member's one passkey id: 16 bytes as unpadded base64url. */
+export const MOCK_PASSKEY_ID = "bW9jay1wYXNza2V5LWlkLTE";
 
 export interface RecordedCommand {
   event_id: string;
@@ -54,8 +69,12 @@ export interface MockServer {
   servedDigests(): string[];
   /** Every step-up challenge the mock has issued, in order. */
   challenges(): IssuedChallenge[];
+  /** The agent ids a deployment recorded, in order. */
+  deployed(): string[];
   /** The connects the mock has started, by key, in order. */
   started(): Array<{ idempotency_key: string; connection_id: string }>;
+  /** Every agent a real-money request named, in order; the mock refuses each `live_unavailable` (DEC-2134). */
+  goLives(): string[];
 }
 
 /** Where the mock's start sends the browser: no real authorization server is ever named. */
@@ -119,10 +138,15 @@ const ROUTES = Object.entries(OPERATIONS).map(([operation, route]) => ({
 }));
 
 export function createMockServer(options: MockServerOptions): MockServer {
-  const { workspaceId, scenario = "normal", hostConfirms = true } = options;
+  const { workspaceId, scenario = "normal", hostConfirms = true, passkeys = [{ passkey_id: MOCK_PASSKEY_ID, cool_off_ends: null }] } = options;
+  /** Versions a passkey confirm recorded, and agents a deployment recorded, by id. */
+  const confirmedVersions = new Set<string>();
+  const deployedAgents = new Map<string, string>();
   const issued: IssuedChallenge[] = [];
   /** Connects started, each read `connecting` once and `established` after, as a completed paper connect would be. */
   const connects: Array<{ idempotency_key: string; body: string; connection_id: string; reads: number }> = [];
+  /** Every agent a real-money request named, each refused (DEC-2134). */
+  const goLives: string[] = [];
   const workspace = structuredClone(buildWorkspace(scenario));
   const prefix = `/v1/workspaces/${workspaceId}`;
   const commands: RecordedCommand[] = [];
@@ -172,9 +196,9 @@ export function createMockServer(options: MockServerOptions): MockServer {
     };
   }
 
-  /** `read-models/agent`: the row with the account's holdings at its last reconciliation (`account_positions`). */
+  /** `read-models/agent`: the row with the account's holdings at its last reconciliation (`account_positions`), every agent's, as one account's are. */
   function agentDetail(agent: Agent) {
-    const positions = agent.positions.map((p) => ({ instrument: p.instrument.symbol, qty: canon(p.qty), broker_qty: canon(p.broker_qty), mismatch: dec(p.qty) !== dec(p.broker_qty), observed_at: canonical(p.mark_as_of) }));
+    const positions = workspace.agents.flatMap((a) => a.positions).map((p) => ({ instrument: p.instrument.symbol, qty: canon(p.qty), broker_qty: canon(p.broker_qty), mismatch: dec(p.qty) !== dec(p.broker_qty), observed_at: canonical(p.mark_as_of) }));
     return { ...agentRow(agent), account_positions: positions };
   }
 
@@ -198,6 +222,17 @@ export function createMockServer(options: MockServerOptions): MockServer {
     };
   }
 
+  /** The control stream, when the options name acceptances: its opening, then each `DisclosureAccepted` with its body, base64. */
+  function controlStream(streamId: string) {
+    if (streamId !== `ctl:${workspaceId}` || !options.acceptances) return null;
+    const body = (payload: unknown) => btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify({ event_type: "DisclosureAccepted", payload }))));
+    const accepted = options.acceptances.map(({ document, version, user, method }) => ({
+      type: "DisclosureAccepted",
+      body: body({ document, version, user, step_up: method === null ? null : { assertion_id: "cli-1", authenticated_at: workspace.now, method } }),
+    }));
+    return [{ type: "StreamOpened", body: "e30=" }, ...accepted].map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: servedAt, prev_hash: "0".repeat(64), hash: "0".repeat(64), body: e.body }));
+  }
+
   /**
    * An agent stream's events as the mock tells them (`agent:{ws}:{agent}`): the deployment, then each
    * order submitted and each filled, in time order. Types and times only; the body is a stand-in.
@@ -216,7 +251,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const allowed = (name: string) => (route === "/approvals" && name === "state") || (journal !== null && (name === "after_seq" || name === "limit"));
     if ([...query.keys()].some((name) => !allowed(name))) return problem(404, "not_found", "none");
     if (journal) {
-      const lines = agentStream(decodeURIComponent(journal[1]));
+      const lines = agentStream(decodeURIComponent(journal[1])) ?? controlStream(decodeURIComponent(journal[1]));
       if (!lines) return problem(404, "not_found", "none");
       const after = Number(query.get("after_seq") ?? "0");
       const limit = Number(query.get("limit") ?? "100");
@@ -225,7 +260,13 @@ export function createMockServer(options: MockServerOptions): MockServer {
       const head = { seq: lines.length, hash: "0".repeat(64), recorded_at: servedAt };
       return read({ stream_id: decodeURIComponent(journal[1]), head, events, next_after_seq: events.at(-1)?.seq ?? after, at_head: (events.at(-1)?.seq ?? after) >= lines.length });
     }
+    const oneEvent = route.match(/^\/journal\/events\/([^/]+)$/);
+    if (oneEvent) {
+      const event = (controlStream(`ctl:${workspaceId}`) ?? []).find((e) => e.event_id === decodeURIComponent(oneEvent[1]));
+      return event ? read({ ...event, stream_id: `ctl:${workspaceId}`, artifact_refs: [], config_refs: {} }) : problem(404, "not_found", "none");
+    }
     if (route === "/health") return read(healthBody(workspace.health, servedAt));
+    if (route === "/passkeys") return read({ passkeys: passkeys.map((p) => ({ passkey_id: p.passkey_id, alg: "es256", enrolled_at: servedAt, cool_off_ends: p.cool_off_ends })) });
     if (route === "/agents") return read({ agents: workspace.agents.map(agentRow) });
     if (route === "/connections") return read({ connections: connectionRows() });
     const oneConnection = route.match(/^\/connections\/([^/]+)$/);
@@ -339,6 +380,37 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return null;
   }
 
+  /**
+   * `passkey` evidence and its assertion for `kind` and `digest` (DEC-2108 items 7 and 8, DEC-2128
+   * item 1), in the server's order as far as a mock can follow it; `null` when it verifies, and then
+   * the challenge is spent. The signature is not checked.
+   */
+  function judgePasskey(evidence: unknown, assertion: unknown, kind: string, digest: unknown): { status: number; code: string } | null {
+    if (evidence == null) return assertion == null ? { status: 401, code: "step_up_required" } : { status: 422, code: "invalid" };
+    if (typeof evidence !== "object" || Array.isArray(evidence)) return { status: 401, code: "step_up_missing" };
+    const { assertion_id, authenticated_at, method } = evidence as Record<string, unknown>;
+    if (method !== "passkey") return assertion == null ? { status: 401, code: "step_up_method" } : { status: 422, code: "invalid" };
+    if (typeof assertion !== "object" || assertion === null) return { status: 401, code: "step_up_missing" };
+    const { passkey_id, client_data_json, authenticator_data, signature } = assertion as Record<string, unknown>;
+    if (typeof authenticator_data !== "string" || typeof signature !== "string" || typeof client_data_json !== "string") return { status: 422, code: "invalid" };
+    if (!passkeys.some((p) => p.passkey_id === passkey_id && (p.cool_off_ends === null || p.cool_off_ends <= servedAt))) return { status: 401, code: "step_up_missing" };
+    const challenge = issued.find((c) => c.challenge_id === assertion_id);
+    if (!challenge) return { status: 401, code: "step_up_missing" };
+    if (challenge.kind !== kind || challenge.digest !== digest) return { status: 401, code: "step_up_mismatch" };
+    if (authenticated_at !== challenge.issued_at) return { status: 401, code: "step_up_stale" };
+    if (challenge.used) return { status: 401, code: "step_up_reused" };
+    let client: { type?: unknown; challenge?: unknown } = {};
+    try {
+      client = JSON.parse(Buffer.from(client_data_json, "base64url").toString("utf8")) as typeof client;
+    } catch {
+      return { status: 401, code: "step_up_missing" };
+    }
+    const bytes = [...challengeKeys.values()].find((e) => e.challenge === challenge)?.bytes;
+    if (client.type !== "webauthn.get" || client.challenge !== bytes) return { status: 401, code: "step_up_missing" };
+    challenge.used = true;
+    return null;
+  }
+
   /** `POST /step-up/challenges` (§3.6): a challenge bound to the action, never journaled; the same key answers the same challenge. */
   const challengeKeys = new Map<string, { body: string; challenge: IssuedChallenge; bytes: string }>();
   function challenge(headers: Headers, body: string): Response {
@@ -415,6 +487,10 @@ export function createMockServer(options: MockServerOptions): MockServer {
     if (headers.get(CSRF_HEADER) !== "1") return problem(403, "forbidden", "none");
     if (route === STEP_UP_CHALLENGE_ROUTE) return challenge(headers, body);
     if (route === CONNECT_START_ROUTE) return startConnect(headers, body);
+    if (/^\/agents\/[^/]+\/go-live$/.test(route)) {
+      goLives.push(decodeURIComponent(route.split("/")[2] ?? ""));
+      return problem(409, "live_unavailable", "none");
+    }
     const match = ROUTES.find((r) => r.pattern.test(route));
     if (!match) return problem(404, "not_found", "none");
     const key = headers.get("Idempotency-Key") ?? "";
@@ -430,11 +506,25 @@ export function createMockServer(options: MockServerOptions): MockServer {
       const refused = judgeCliConfirm(members.step_up, "approve", members.content_hash);
       if (refused) return problem(401, refused, "none");
     }
-    if (match.operation === "confirm_version") {
+    const repeated = commands.find((c) => c.idempotency_key === key && c.path === prefix + route);
+    if (match.operation === "confirm_version" && !repeated) {
       const version = decodeURIComponent(route.split("/")[2] ?? "");
       if (!versions.has(version)) return problem(404, "not_found", "none");
       if (members.screen_digest !== screens.get(version)) return problem(409, "classification_changed", "none");
-      return members.step_up == null ? problem(401, "step_up_required", "none") : problem(401, "step_up_missing", "none");
+      const refused = judgePasskey(members.step_up, members.step_up_assertion, "confirm_version", `sha256:${sha256Hex(JSON.stringify({ agent_id: null, base_version: null, mandate_version: version }))}`);
+      if (refused) return problem(refused.status, refused.code, "none");
+      confirmedVersions.add(version);
+    }
+    if (match.operation === "deploy" && !repeated) {
+      const agent = typeof members.agent_id === "string" ? members.agent_id : "";
+      const version = typeof members.mandate_version === "string" ? members.mandate_version : "";
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(agent)) return problem(422, "invalid", "none");
+      if (!versions.has(version)) return problem(404, "not_found", "none");
+      if (!confirmedVersions.has(version)) return problem(422, "invalid", "none");
+      if (deployedAgents.has(agent) || agentOf(agent)) return problem(422, "invalid", "none");
+      const refused = judgePasskey(members.step_up, members.step_up_assertion, "deploy", deployStepUpDigest(agent, version as `sha256:${string}`));
+      if (refused) return problem(refused.status, refused.code, "none");
+      deployedAgents.set(agent, version);
     }
     if (match.operation === "create_version" && (typeof members.environment !== "string" || members.environment === "live")) return problem(422, "invalid", "none");
     const path = prefix + route;
@@ -446,6 +536,8 @@ export function createMockServer(options: MockServerOptions): MockServer {
       apply(match.operation, path, members);
     }
     if (match.operation === "approval_response") return respond(202, { response_id: command.event_id, phase: "recorded" });
+    if (match.operation === "confirm_version")
+      return respond(202, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: asOf(), command_id: command.event_id, phase: "recorded", classification: "risk_increasing", applies: "now" });
     if (match.operation === "create_version") {
       const version = mandateVersion(members as unknown as Mandate);
       versions.set(version, members as unknown as Mandate);
@@ -473,5 +565,5 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return problem(404, "not_found", "none");
   };
 
-  return { fetch, recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], challenges: () => issued.map((c) => ({ ...c })), started: () => connects.map(({ idempotency_key, connection_id }) => ({ idempotency_key, connection_id })) };
+  return { fetch, deployed: () => [...deployedAgents.keys()], recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], challenges: () => issued.map((c) => ({ ...c })), goLives: () => [...goLives], started: () => connects.map(({ idempotency_key, connection_id }) => ({ idempotency_key, connection_id })) };
 }

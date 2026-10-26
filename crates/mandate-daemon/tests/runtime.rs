@@ -4,22 +4,22 @@
 //! workspace services, the scheduler, and the account's executor) would have committed them.
 
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::time::Duration;
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Key, Object, Value, parse};
 use mandate_daemon::models::{Evaluated, Models};
 use mandate_daemon::{ArtifactSink, Config, ModelsWiring, Refs, RuntimeProcess, Wiring, fixture};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
-use mandate_num::{Conviction, Unit};
+use mandate_num::{Conviction, Price, Qty, Unit};
 use mandate_process::{Exit, State};
 use mandate_runtime::{
-    AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment, DryRunVerdict,
-    EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest, GateDryRun, IdGen,
-    MandateView, Mode, ModelDirection, ModelOutput, OrderPlan, Proposal, RiskClock, Seq,
-    SignalInputs, WorkspaceId, WriterEpoch,
+    AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deferral, Deployment,
+    DryRunVerdict, EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest, GateDryRun,
+    IdGen, MandateView, Mode, ModelDirection, ModelOutput, OrderExecution, OrderPlan, Proposal,
+    Purpose, RiskClock, Seq, SignalInputs, TimeInForce, WorkspaceId, WriterEpoch,
 };
 use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
@@ -2024,4 +2024,120 @@ fn a_tick_that_moves_on_while_an_observation_is_in_doubt_records_its_output_once
     );
     assert_eq!(risk_clock(&process), Some(NOW + 7));
     assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// A dry run that allows every opening with the halt deferred to the binding gate and no bars read.
+struct Deferring;
+impl GateDryRun for Deferring {
+    fn check(&self, _: &Proposal) -> DryRunVerdict {
+        DryRunVerdict::AllowDeferring {
+            deferred: BTreeSet::from([Deferral::Halt]),
+            liquidity: None,
+        }
+    }
+}
+
+/// A plan that opens one share of AAPL at 155 whatever its inputs, and classifies it `auto`.
+struct Opening;
+impl OrderPlan for Opening {
+    fn plan(&self, _: &MandateView, _: &SignalInputs) -> Option<Proposal> {
+        Some(Proposal {
+            instrument: InstrumentId::new("AAPL").ok()?,
+            asset_class: AssetClass::UsEquity,
+            side: Side::Buy,
+            qty: Qty::parse("1").ok()?,
+            limit: Price::parse("155").ok()?,
+            purpose: Purpose::Open,
+            exit_origin: None,
+            exit_conviction: Some(Value::Str("1".into())),
+            buy_conviction: Some(Value::Str("1".into())),
+            combined_score: Value::Str("0.5".into()),
+            outputs_used: BTreeSet::new(),
+            model_weights: BTreeMap::new(),
+            clips_applied: Vec::new(),
+            execution: Some(OrderExecution {
+                asset_class: AssetClass::UsEquity,
+                tif: TimeInForce::Day,
+                protection_required: false,
+                protection: None,
+            }),
+        })
+    }
+    fn classify(&self, _: &MandateView, _: &Proposal) -> Classified {
+        Classified {
+            autonomy: Autonomy::Auto,
+            decided_by: Some("default".into()),
+        }
+    }
+}
+
+/// DEC-2388 item 13, end to end over the journal's own append: an opening the dry run allows with
+/// a check deferred is committed as `DecisionMade` version 3 naming it, and the owner is asked;
+/// nothing is proposed to the executor.
+#[test]
+fn a_deferring_opening_is_journaled_at_version_3_and_asked_never_proposed() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"AAPL","price":"155","source":"fixture","feed":"sip","risk_clock":{NOW}}}"#
+        ),
+    );
+    let mut wiring = fixture::wiring("user-owner", AGENT_STREAM);
+    wiring.gate = Box::new(Deferring);
+    wiring.plan = Box::new(Opening);
+    wiring.view.version = format!("sha256:{}", Digest::of(b"mandate-daemon fixture").to_hex());
+    wiring.view.working_universe = BTreeSet::from([InstrumentId::new("AAPL").unwrap()]);
+    let mut process = RuntimeProcess::start(rig.clone(), wiring, &config(), at(NOW));
+    for second in 1..4 {
+        tick(&rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+    let rows = agent_rows(&rig);
+    let decision = rows
+        .iter()
+        .find(|row| row.event_type == "DecisionMade")
+        .unwrap_or_else(|| panic!("the opening was decided: {:?}", kinds(&rig)));
+    assert_eq!(decision.schema_version, 3);
+    let body = parse(&decision.body).unwrap();
+    let named: Vec<&str> = body
+        .get("payload")
+        .and_then(|payload| payload.get("deferred_to_binding"))
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(named, vec!["halt", "liquidity_floor", "participation"]);
+    assert_eq!(count(&rig, "ApprovalRequested"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
+    let request = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalRequested")
+        .unwrap();
+    assert_eq!(
+        request.schema_version, 3,
+        "the request names the decision's deferrals (DEC-2515)"
+    );
+    let content = parse(&request.body).unwrap();
+    let asked: Vec<&str> = content
+        .get("payload")
+        .and_then(|payload| payload.get("content"))
+        .and_then(|content| content.get("deferred_to_binding"))
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(asked, named, "rule 292: exactly the decision's");
 }

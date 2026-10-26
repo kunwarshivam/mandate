@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { GoLive } from "@/components/api-screens/go-live";
 import { BacktestReportScreen } from "@/components/backtest/backtest-report";
 import { MessagesScreen } from "@/components/messages/messages-screen";
 import { NewAgentFlow } from "@/components/new-agent/new-agent-flow";
@@ -49,7 +50,7 @@ export function demoScreen(href: string): ReactNode | null {
       if (second === undefined) return <AgentsListScreen />;
       if (second === "new" && rest.length === 0)
         return (
-          <WorkspaceGate>
+          <WorkspaceGate api>
             <NewAgentFlow />
           </WorkspaceGate>
         );
@@ -88,6 +89,8 @@ export function demoScreen(href: string): ReactNode | null {
       if (rest[0] === "stop-all") return <StopRecordScreen kind="stop_all" targetId={second} />;
       return rest[0] === "close-all" ? <StopRecordScreen kind="close_all" targetId={second} /> : null;
     }
+    case "go-live":
+      return second === undefined ? <GoLive /> : null;
     default:
       return null;
   }

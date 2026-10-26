@@ -1,0 +1,31 @@
+[
+  {
+    "label": "no models registered",
+    "set": {
+      "/models": []
+    }
+  },
+  {
+    "label": "a research model that admits instruments and declares no parameters, its content without a quant schema",
+    "set": {
+      "/models/0/model_id": "llm.research_agent",
+      "/models/0/params": [],
+      "/models/0/admits_instruments": true,
+      "/models/0/content": {
+        "authorship": "platform"
+      }
+    }
+  },
+  {
+    "label": "a model whose content the store cannot give",
+    "set": {
+      "/models/0/content": null
+    }
+  },
+  {
+    "label": "content with no member the projection keeps",
+    "set": {
+      "/models/0/content": {}
+    }
+  }
+]

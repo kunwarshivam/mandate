@@ -28,6 +28,8 @@ const AAPL: &str = "7b4a1c2e-2222-4a2b-9c3d-000000000002";
 const MSFT: &str = "7b4a1c2e-3333-4a2b-9c3d-000000000003";
 const ENTRY: &str = "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
 const T: &str = "2026-10-16T14:00:41.250000000Z";
+const OBSERVED: &str = "01J9GZ00A000000000000000Q1";
+const OTHER_OBSERVED: &str = "01J9GZ00A000000000000000Q2";
 
 fn json(text: &str) -> Value {
     parse(text.as_bytes()).unwrap_or_else(|e| panic!("{e:?}: {text}"))
@@ -714,15 +716,7 @@ fn rule_172_a_run_s_start_is_canonical_and_its_kind_fits_its_trigger() {
             |s| put(s, STARTED, "payload.kind", r#""monitor""#),
             None,
         ),
-        (
-            "monitor.on_an_event",
-            |s| {
-                put(s, STARTED, "payload.kind", r#""monitor""#);
-                put(s, STARTED, "payload.trigger.kind", r#""event""#);
-                put(s, STARTED, "payload.trigger.cause", &format!(r#""{ITEM}""#));
-            },
-            None,
-        ),
+        ("monitor.on_an_event", |s| event_first(s, 'a'), None),
         (
             "monitor.on_an_approval",
             |s| {
@@ -852,6 +846,51 @@ fn explain_first(stream: &mut [Vec<Value>], cause: &str) {
     );
 }
 
+/// The triggering item's `ObservationRecorded` (journal spec rule 271, DEC-2392): `id`, of run
+/// `run`, about `instrument`, holding the item `data`.
+fn observed(id: &str, run: &str, instrument: Option<&str>, data: char) -> Value {
+    let mut item = record(
+        "ObservationRecorded",
+        id,
+        None,
+        json(&format!(
+            r#"{{"source":"alpaca.news","instrument_id":null,"as_of":"{T}","data_ref":"{}"}}"#,
+            digest(data)
+        )),
+    );
+    set(&mut item, "correlation_id", Some(Value::Str(run.into())));
+    set(
+        &mut item,
+        "payload.instrument_id",
+        Some(instrument.map_or(Value::Null, |i| Value::Str(i.into()))),
+    );
+    item
+}
+
+/// The first run as a `monitor` run an item triggered: the item's `ObservationRecorded` heads the
+/// start batch and the start names it.
+fn event_first(stream: &mut [Vec<Value>], data: char) {
+    put(stream, STARTED, "payload.kind", r#""monitor""#);
+    put(stream, STARTED, "payload.trigger.kind", r#""event""#);
+    put(
+        stream,
+        STARTED,
+        "payload.trigger.cause",
+        &format!(r#""{OBSERVED}""#),
+    );
+    if let Some(first) = stream.first_mut() {
+        first.insert(0, observed(OBSERVED, RUN, Some(AAPL), data));
+    }
+}
+
+/// A second `monitor` run, of `OTHER_RUN`, that the item `data` triggered, in its own start batch.
+fn second_event_run(stream: &mut Vec<Vec<Value>>, data: char) {
+    second_run(stream, OTHER_RUN, "monitor", "event", Some(OTHER_OBSERVED));
+    if let Some(last) = stream.last_mut() {
+        last.insert(0, observed(OTHER_OBSERVED, OTHER_RUN, Some(MSFT), data));
+    }
+}
+
 #[test]
 fn rule_173_a_run_starts_once_and_an_approval_or_question_starts_one_run() {
     const SECOND: &str = "01J9H006A000000000000000S2";
@@ -893,12 +932,10 @@ fn rule_173_a_run_starts_once_and_an_approval_or_question_starts_one_run() {
             Some((SECOND, "schema", "payload.trigger.cause")),
         ),
         (
-            "monitor.on_one_event_twice",
+            "monitor.on_two_items",
             |s| {
-                put(s, STARTED, "payload.kind", r#""monitor""#);
-                put(s, STARTED, "payload.trigger.kind", r#""event""#);
-                put(s, STARTED, "payload.trigger.cause", &format!(r#""{ITEM}""#));
-                second_run(s, OTHER_RUN, "monitor", "event", Some(ITEM));
+                event_first(s, 'a');
+                second_event_run(s, 'b');
             },
             None,
         ),
@@ -2164,4 +2201,118 @@ fn rule_183_reaches_only_a_run_that_started() {
         Some((0, "schema".to_owned(), "correlation_id".to_owned())),
         "after its run's start and a `done` end, a turn record with verdicts is refused"
     );
+}
+
+/// Rule 271 (DEC-2392): an event run's cause is an earlier `ObservationRecorded` of its own run,
+/// about an instrument, and no earlier event run's cause holds the same item, so one item starts at
+/// most one run. Each refusal is paired with the same stream accepted.
+#[test]
+fn rule_271_an_event_run_names_its_own_item_and_one_item_starts_one_run() {
+    cases(&[
+        ("honest", |s| event_first(s, 'a'), None),
+        (
+            "cause.names_no_record",
+            |s| {
+                event_first(s, 'a');
+                put(s, STARTED, "payload.trigger.cause", &format!(r#""{ITEM}""#));
+            },
+            Some((STARTED, "schema", "payload.trigger.cause")),
+        ),
+        (
+            "cause.names_a_record_that_is_no_observation",
+            |s| {
+                event_first(s, 'a');
+                s.insert(0, vec![single_call()]);
+                let first = single_call()
+                    .get("event_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                put(
+                    s,
+                    STARTED,
+                    "payload.trigger.cause",
+                    &format!(r#""{first}""#),
+                );
+            },
+            Some((STARTED, "schema", "payload.trigger.cause")),
+        ),
+        (
+            "cause.is_another_run_s",
+            |s| {
+                event_first(s, 'a');
+                put(s, OBSERVED, "correlation_id", &format!(r#""{OTHER_RUN}""#));
+            },
+            Some((STARTED, "schema", "payload.trigger.cause")),
+        ),
+        (
+            "cause.names_no_instrument",
+            |s| {
+                event_first(s, 'a');
+                put(s, OBSERVED, "payload.instrument_id", "null");
+            },
+            Some((STARTED, "schema", "payload.trigger.cause")),
+        ),
+        (
+            "cause.comes_after_the_start",
+            |s| {
+                event_first(s, 'a');
+                let item = s[0].remove(0);
+                s.push(vec![item]);
+            },
+            Some((STARTED, "schema", "payload.trigger.cause")),
+        ),
+        (
+            "one_item.two_runs",
+            |s| {
+                event_first(s, 'a');
+                second_event_run(s, 'a');
+            },
+            Some((
+                "01J9H006A000000000000000S2",
+                "schema",
+                "payload.trigger.cause",
+            )),
+        ),
+        (
+            "two_items.two_runs",
+            |s| {
+                event_first(s, 'a');
+                second_event_run(s, 'b');
+            },
+            None,
+        ),
+        (
+            "an_item_a_scheduled_run_saw_may_still_start_an_event_run",
+            |s| {
+                s.insert(
+                    0,
+                    vec![observed(OTHER_OBSERVED, OTHER_RUN, Some(AAPL), 'a'), {
+                        let mut start = started();
+                        set(
+                            &mut start,
+                            "event_id",
+                            Some(Value::Str("01J9GY00A000000000000000S0".into())),
+                        );
+                        set(
+                            &mut start,
+                            "correlation_id",
+                            Some(Value::Str(OTHER_RUN.into())),
+                        );
+                        start
+                    }],
+                );
+                event_first(s, 'a');
+            },
+            None,
+        ),
+        (
+            "a_scheduled_run_after_an_event_run",
+            |s| {
+                event_first(s, 'a');
+                second_run(s, OTHER_RUN, "monitor", "schedule", None);
+            },
+            None,
+        ),
+    ]);
 }

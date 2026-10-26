@@ -13,7 +13,7 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -492,6 +492,85 @@ pub fn record_code(account: &str, checked: &str, user: &str) -> String {
         connection = CONNECTION,
         user = user,
     ))
+}
+
+/// The go-live disclosure the customer journey accepts on the host (DEC-2134), a placeholder
+/// pending counsel, as its file holds it.
+const GO_LIVE_DISCLOSURE: &str = include_str!("../../../fixtures/disclosures/go_live_risk.json");
+
+/// The go-live disclosure's version: `sha256:` over its canonical JSON (sorted keys, no
+/// whitespace), as `mandate disclosure accept` stores it.
+///
+/// # Errors
+/// A file that is not JSON.
+pub fn disclosure_version() -> Result<String> {
+    let parsed: Value =
+        serde_json::from_str(GO_LIVE_DISCLOSURE).context("the go-live disclosure is not JSON")?;
+    Ok(reference(serde_json::to_string(&parsed)?.as_bytes()))
+}
+
+/// The code `mandate disclosure accept go_live_risk` shows for `version` (DEC-530 item 4).
+pub fn disclosure_code(version: &str) -> String {
+    code(&format!(
+        r#"{{"document":"go_live_risk","gesture":"disclosure_accept","version":"{version}"}}"#
+    ))
+}
+
+/// The owner accepts the go-live disclosure on the host in `workspace`, as the go-live screen
+/// asks, by running `mandate disclosure accept` with the code it shows, in a Job of the demo's
+/// image.
+///
+/// # Errors
+/// A Job that did not run, or a CLI that did not print `accepted`.
+pub fn accept_disclosure(workspace: &str) -> Result<()> {
+    let id = run_id()?;
+    let user = FOUNDER.to_ascii_lowercase();
+    let code = disclosure_code(&disclosure_version()?);
+    let args = [
+        "disclosure",
+        "accept",
+        "go_live_risk",
+        "--code",
+        &code,
+        "--workspace",
+        workspace,
+        "--user",
+        &user,
+        "--journal",
+        JOURNAL,
+        "--store",
+        STORE,
+    ];
+    let gesture = Gesture {
+        container: "g98-disclosure-accept".into(),
+        shows: "the owner's acceptance of the go-live disclosure, on the host",
+        command: None,
+        args: args.map(str::to_owned).to_vec(),
+        expect: "accepted ".into(),
+    };
+    let rendered = render(
+        &[
+            format!("run.id=\"{id}d\""),
+            format!("run.args={}", json!(gesture.args)),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    let inputs = demo_inputs()?;
+    let (succeeded, logs) = run_job(gestures_job(
+        rendered,
+        &[&gesture],
+        &format!("demo-in-{id}d"),
+        &inputs.files(),
+        NAMESPACE,
+    )?)?;
+    let accepted = lines_of(&logs, &gesture.container)
+        .iter()
+        .any(|l| l.starts_with("accepted "));
+    if !(succeeded && accepted) {
+        bail!("`mandate disclosure accept` did not accept the go-live disclosure:\n{logs}");
+    }
+    eprintln!("    disclosure: the owner accepted go_live_risk on the host");
+    Ok(())
 }
 
 pub(super) fn deploy_code(agent: &str, version: &str) -> String {
@@ -1492,6 +1571,15 @@ pub fn dry_run(name: &str, args: &[&str]) -> Result<()> {
 
 /// `cargo xtask cell demo --scenario <name>`.
 pub fn run(name: &str) -> Result<()> {
+    run_in(name).map(|_| ())
+}
+
+/// [`run`], answering the workspace the scenario ran in, for a step that follows it there
+/// (`cargo xtask cell journey`).
+///
+/// # Errors
+/// As [`run`].
+pub fn run_in(name: &str) -> Result<String> {
     if !SCENARIOS.contains(&name) {
         bail!(
             "no scenario `{name}`; the scenarios are {}",
@@ -1723,27 +1811,32 @@ pub fn run(name: &str) -> Result<()> {
         all.len(),
         NODE
     );
-    Ok(())
+    Ok(workspace)
 }
 
-/// Reads `check` with the owner's session every two seconds until it passes, up to
-/// [`APPLIED_POLLS`] times: a runtime applies a kill switch on its next pass after it starts,
-/// which may be after the Job ends. An API that cannot be asked fails it, since the cell ran.
+/// Reads `check` with the owner's session every two seconds until it passes or [`APPLIED_WITHIN`]
+/// has passed: a runtime applies a kill switch on its next pass after it starts, which may be after
+/// the Job ends. The bound is the clock's, not a count of reads, since each read also checks the
+/// forward and signs in (about seven seconds a read on CI, so 45 reads ran past the job's ten
+/// minutes; main run 40281337291). An API that cannot be asked fails it, since the cell ran.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the host-side scenario bounds its wait for a live cell by the host's clock"
+)]
 fn poll_applied(check: &ApiCheck) -> Result<(&'static str, String, bool)> {
-    let mut verdict = ("failed", "never read".to_owned(), true);
-    for _ in 0..APPLIED_POLLS {
+    let deadline = Instant::now() + APPLIED_WITHIN;
+    loop {
         let answer = api_answer(check)?;
-        verdict = api_verdict(&answer, check, true);
-        if !verdict.2 {
-            break;
+        let verdict = api_verdict(&answer, check, true);
+        if !verdict.2 || Instant::now() >= deadline {
+            return Ok(verdict);
         }
         sleep(Duration::from_secs(2));
     }
-    Ok(verdict)
 }
 
-/// How many times [`poll_applied`] reads, two seconds apart.
-const APPLIED_POLLS: u32 = 45;
+/// How long [`poll_applied`] waits for the kill switch to read back applied.
+const APPLIED_WITHIN: Duration = Duration::from_secs(90);
 
 /// Why the cell's API cannot be asked, or `None` when it can: no API in the process list, a cell
 /// that pulled its images and has no API image, or no `kubectl` on this machine to forward with.
@@ -2523,6 +2616,23 @@ mod tests {
         assert_eq!(payload["result"], "completed");
         assert_eq!(payload["backtest_id"], BACKTEST_ID);
         assert_eq!(payload["mandate_version"], reference(&mandate()));
+    }
+
+    /// The journey accepts the version `mandate disclosure accept` stores, which its own test pins,
+    /// with the code the CLI shows for it.
+    #[test]
+    fn the_journey_accepts_the_go_live_disclosures_pinned_version_with_its_code() -> Result<()> {
+        let version = disclosure_version()?;
+        assert_eq!(
+            version,
+            "sha256:35ab1cb9c3861954a3d846866198e8b4c801532de56e8b00ee86e51404d541f2"
+        );
+        let gesture = format!(
+            r#"{{"document":"go_live_risk","gesture":"disclosure_accept","version":"{version}"}}"#
+        );
+        assert_eq!(disclosure_code(&version), code(&gesture));
+        assert_eq!(disclosure_code(&version).len(), 8);
+        Ok(())
     }
 
     /// Step 5 runs the runner on the confirmed version in the pod's store and records the payload

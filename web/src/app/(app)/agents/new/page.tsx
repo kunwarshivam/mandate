@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: "New agent" };
 
 export default function NewAgentPage() {
   return (
-    <WorkspaceGate>
+    <WorkspaceGate api>
       <NewAgentFlow />
     </WorkspaceGate>
   );

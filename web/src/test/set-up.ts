@@ -1,6 +1,7 @@
 import { act } from "@testing-library/react";
 import { vi } from "vitest";
 import { confirmStepUpDigest } from "@/api/confirm";
+import type { Authenticator } from "@/api/passkey";
 import type { NewAgent } from "@/lib/fixture-journey";
 import type { ConfirmRecord, DeployToPaperRecord } from "@/lib/mock-runtime";
 import { RECORD_AFTER_MS } from "./harness";
@@ -37,4 +38,20 @@ export function setUpThrough(request: NewAgent): string {
   act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
   act(() => probed().deployVersion(id, DEPLOY_RECORD));
   return id;
+}
+
+/**
+ * A stand-in authenticator for the API runtime (DEC-2128): it answers the mock member's passkey with
+ * client data naming exactly the challenge it was asked to sign, as a browser's does. It signs
+ * nothing, which the mock does not check. `calls` lists each challenge it was asked to sign.
+ */
+export function mockAuthenticator(passkeyId: string) {
+  const calls: string[] = [];
+  const get: Authenticator = async (options) => {
+    const challenge = Buffer.from(new Uint8Array(options.publicKey?.challenge as ArrayBuffer)).toString("base64url");
+    calls.push(challenge);
+    const client = new TextEncoder().encode(JSON.stringify({ type: "webauthn.get", challenge, origin: "https://app.owlhead.ai" }));
+    return { type: "public-key", id: passkeyId, rawId: Uint8Array.from(Buffer.from(passkeyId, "base64url")).buffer, response: { authenticatorData: Uint8Array.of(1).buffer, clientDataJSON: client.buffer, signature: Uint8Array.of(2).buffer } } as unknown as Credential;
+  };
+  return { get, calls };
 }

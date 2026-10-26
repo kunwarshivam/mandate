@@ -1,5 +1,6 @@
 //! The protective sequences and the exit price ladder (E7-4, trading-domain spec §5.4 to §5.6).
 
+use mandate_notify::OwnerAlertKind;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId};
@@ -130,7 +131,7 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             ("qty", text(held.to_string())),
         ];
         let record = changed(batch, &instrument, "watchdog", pairs)?;
-        batch.notify(record.clone(), "stop_watchdog");
+        batch.notify(record.clone(), OwnerAlertKind::Protection);
         let intent_id = IntentId(EventId(format!("{WATCHDOG}{}", record.0)));
         let tif = order_tif(batch, &instrument);
         received(
@@ -699,7 +700,7 @@ fn next_rung(
     journal_rung(batch, &request, Some(intent), &agent, 1, extra)?;
     if at_floor {
         let alerted = changed(batch, instrument, "ladder_floor", Vec::new())?;
-        batch.notify(alerted, "exit_ladder_floor");
+        batch.notify(alerted, OwnerAlertKind::ExitStalled);
     }
     batch.broker(BrokerRequest::Submit(request));
     Ok(())
@@ -775,7 +776,7 @@ pub(crate) fn fallback(
         ("limit", text(limit.to_string())),
     ];
     let alerted = changed(batch, instrument, "exit_unpriced", pairs)?;
-    batch.notify(alerted, "exit_unpriced");
+    batch.notify(alerted, OwnerAlertKind::ExitStalled);
     Ok(())
 }
 
@@ -1263,7 +1264,7 @@ fn park(
         ("evaluation", text("account_stream_only")),
     ];
     let decided = batch.journal("GateDecided", None, pairs)?;
-    batch.notify(decided, reason);
+    batch.notify(decided, OwnerAlertKind::ExitStalled);
     Ok(())
 }
 
@@ -1809,7 +1810,7 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
 fn kept(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(), ExecutorError> {
     let day = batch.view.day_started.clone();
     let alerted = changed_by(batch, instrument, "expiry_unreplaceable", Vec::new(), day)?;
-    batch.notify(alerted, "protection_expiring");
+    batch.notify(alerted, OwnerAlertKind::Protection);
     Ok(())
 }
 
@@ -1878,7 +1879,7 @@ fn unprotectable(
     instrument: &InstrumentId,
 ) -> Result<(), ExecutorError> {
     let alerted = changed(batch, instrument, "expiry_unreplaceable", Vec::new())?;
-    batch.notify(alerted, "protection_expiring");
+    batch.notify(alerted, OwnerAlertKind::Protection);
     Ok(())
 }
 
@@ -2774,7 +2775,7 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             end_exits(batch, &instrument)?;
         }
         let alerted = changed(batch, &instrument, "interval_limit", Vec::new())?;
-        batch.notify(alerted.clone(), "unprotected_interval_limit");
+        batch.notify(alerted.clone(), OwnerAlertKind::Protection);
         let closing = batch.view.closing_all.contains(&instrument);
         if closing {
             protect_at_bound(batch, &instrument)?;
@@ -4273,7 +4274,7 @@ mod sequence_tests {
         let bound = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
         assert!(bound.iter().any(|effect| matches!(
             effect,
-            Effect::Notify(note) if note.message_key == "unprotected_interval_limit"
+            Effect::Notify(note) if note.kind.key() == "protection"
         )));
         Ok(())
     }
@@ -4327,10 +4328,9 @@ mod sequence_tests {
         let due = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
         assert_eq!(cancels(&due), vec![exit.as_str()]);
         assert_eq!(actions(&due), vec!["interval_limit"]);
-        assert!(
-            due.iter()
-                .any(|effect| matches!(effect, Effect::Notify(note) if note.message_key == "unprotected_interval_limit"))
-        );
+        assert!(due.iter().any(
+            |effect| matches!(effect, Effect::Notify(note) if note.kind.key() == "protection")
+        ));
         assert_eq!(
             executor
                 .state
@@ -4529,7 +4529,7 @@ mod sequence_tests {
         effects
             .iter()
             .filter_map(|effect| match effect {
-                Effect::Notify(note) => Some(note.message_key),
+                Effect::Notify(note) => Some(note.kind.key()),
                 _ => None,
             })
             .collect()
@@ -4589,7 +4589,7 @@ mod sequence_tests {
             );
             assert_eq!(
                 alerts(&sent),
-                vec!["exit_unpriced"],
+                vec!["exit_stalled"],
                 "{purpose:?}: and alerted"
             );
         }
@@ -4630,7 +4630,7 @@ mod sequence_tests {
             actions(&sent).contains(&"exit_unpriced"),
             "the fallback is journaled"
         );
-        assert_eq!(alerts(&sent), vec!["exit_unpriced"], "and alerted");
+        assert_eq!(alerts(&sent), vec!["exit_stalled"], "and alerted");
         let rung = submissions(&sent)
             .first()
             .map(|order| order.client_order_id.as_str().to_owned())
@@ -4673,7 +4673,7 @@ mod sequence_tests {
             verdicts_with_reasons(&held),
             vec![("hold".to_owned(), "exit_unpriced".to_owned())]
         );
-        assert_eq!(alerts(&held), vec!["exit_unpriced"]);
+        assert_eq!(alerts(&held), vec!["exit_stalled"]);
         let quiet = executor.run(Input::Tick(RiskClock::from_secs(1)), &ports)?;
         assert!(
             quiet.is_empty(),
@@ -5098,7 +5098,7 @@ mod sequence_tests {
             vec![("hold".to_owned(), "exit_unpriced".to_owned())],
             "the bid is now older than five minutes and there is no trade"
         );
-        assert_eq!(alerts(&vanished), vec!["exit_unpriced"]);
+        assert_eq!(alerts(&vanished), vec!["exit_stalled"]);
         let replaced = submissions(&vanished);
         assert_eq!(
             replaced
@@ -5296,7 +5296,7 @@ mod sequence_tests {
                 vec![(rung_id(1).as_str(), rung)],
                 "{purpose:?}: the later rung goes at the last rung's limit"
             );
-            assert_eq!(alerts(&next), vec!["exit_unpriced"], "{purpose:?}");
+            assert_eq!(alerts(&next), vec!["exit_stalled"], "{purpose:?}");
             assert!(verdicts(&next).is_empty(), "{purpose:?}: never held");
         }
         Ok(())
@@ -5352,7 +5352,7 @@ mod sequence_tests {
                 "{purpose:?}: the later rung goes at the intent's own limit"
             );
             assert_eq!(actions(&next), vec!["exit_unpriced"], "{purpose:?}");
-            assert_eq!(alerts(&next), vec!["exit_unpriced"], "{purpose:?}");
+            assert_eq!(alerts(&next), vec!["exit_stalled"], "{purpose:?}");
             assert!(verdicts(&next).is_empty(), "{purpose:?}: never held");
         }
         Ok(())
@@ -5569,7 +5569,7 @@ mod sequence_tests {
             assert!(watchdog_record(&early).is_none(), "{:?}", drafted(&early));
             let fired = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
             let record = watchdog_record(&fired).ok_or_else(|| missing("the watchdog record"))?;
-            assert!(alerts(&fired).contains(&"stop_watchdog"));
+            assert!(alerts(&fired).contains(&"protection"));
             assert_eq!(
                 watchdog_intents(&fired),
                 vec![(
@@ -5762,7 +5762,7 @@ mod sequence_tests {
                 .collect::<Vec<_>>(),
             vec![Some(Price::parse("139")?)]
         );
-        assert_eq!(alerts(&sent), vec!["exit_unpriced"]);
+        assert_eq!(alerts(&sent), vec!["exit_stalled"]);
         let mut records = 0usize;
         for at in (431..=600).step_by(7) {
             let tick = executor.run(Input::Tick(RiskClock::from_secs(at)), &ports)?;
@@ -6108,7 +6108,7 @@ mod sequence_tests {
             floor_alerts = floor_alerts.saturating_add(
                 alerts(&next)
                     .iter()
-                    .filter(|key| **key == "exit_ladder_floor")
+                    .filter(|key| **key == "exit_stalled")
                     .count(),
             );
             prices.extend(
@@ -6648,7 +6648,7 @@ mod sequence_tests {
             actions(settled),
             vec!["expiry_unreplaceable", "unprotected_end"]
         );
-        assert_eq!(alerts(settled), vec!["protection_expiring"]);
+        assert_eq!(alerts(settled), vec!["protection"]);
         let end = protection_drafts(settled)
             .last()
             .map(|draft| &draft.payload);
@@ -7988,6 +7988,35 @@ mod sequence_tests {
             .map(|interval| (interval.started_at.secs(), interval.alerted))
     }
 
+    /// Each `OrderAbandoned` in `effects` that the journal's own `Draft::parse` refuses (X10,
+    /// DEC-2803), with its refusal: none, once §9.5 closes the record.
+    fn abandonments_refused(effects: &[Effect]) -> Vec<String> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "OrderAbandoned" => {
+                    let body = format!(
+                        r#"{{"envelope_version":1,"environment":"paper",
+                        "event_id":"01J8Z3M4000000000000000001","stream_id":"acct:ws_1:ACCT1",
+                        "event_type":"OrderAbandoned","schema_version":{},
+                        "event_time":"2026-09-21T14:00:00.000000000Z","clock_source":"local",
+                        "causation_id":null,"correlation_id":null,
+                        "actor":{{"kind":"system","id":"executor","version":"0.1.0",
+                        "build":"sha256:{}"}},"config_refs":{{}},"payload":{},
+                        "artifact_refs":[],"pii_refs":[]}}"#,
+                        draft.schema_version,
+                        "3".repeat(64),
+                        String::from_utf8_lossy(&mandate_canon::to_canonical(&draft.payload))
+                    );
+                    mandate_journal::Draft::parse(body.as_bytes())
+                        .err()
+                        .map(|refusal| format!("{refusal:?}"))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     fn abandoned_for(effects: &[Effect]) -> Vec<&str> {
         effects
             .iter()
@@ -8015,13 +8044,14 @@ mod sequence_tests {
         );
         let due = executor.run(Input::Tick(RiskClock::from_secs(30)), ports)?;
         assert_eq!(abandoned_for(&due), vec!["unprotected_interval_limit"]);
+        assert_eq!(abandonments_refused(&due), Vec::<String>::new());
         assert_eq!(
             actions(&due),
             vec!["interval_limit", "placed", "unprotected_end"]
         );
         assert!(due.iter().any(|effect| matches!(
             effect,
-            Effect::Notify(note) if note.message_key == "unprotected_interval_limit"
+            Effect::Notify(note) if note.kind.key() == "protection"
         )));
         assert_eq!(
             ocos(&due)
@@ -8903,7 +8933,7 @@ mod sequence_tests {
         )?;
         let ended = executor.run(lone_ended()?, &ports)?;
         assert_eq!(actions(&ended), vec!["expiry_unreplaceable"]);
-        assert_eq!(alerts(&ended), vec!["protection_expiring"]);
+        assert_eq!(alerts(&ended), vec!["protection"]);
         Ok(())
     }
 
@@ -8927,7 +8957,7 @@ mod sequence_tests {
         "expired".clone_into(&mut order.status);
         let expired = executor.run(Input::BrokerUpdate(BrokerUpdate::Order(order)), &ports)?;
         assert_eq!(actions(&expired), vec!["expiry_unreplaceable"]);
-        assert_eq!(alerts(&expired), vec!["protection_expiring"]);
+        assert_eq!(alerts(&expired), vec!["protection"]);
         Ok(())
     }
 
@@ -8959,7 +8989,7 @@ mod sequence_tests {
             "{:?}",
             drafted(&ended)
         );
-        assert_eq!(alerts(&ended), vec!["protection_expiring"]);
+        assert_eq!(alerts(&ended), vec!["protection"]);
         assert!(executor.state.exiting.is_empty(), "the sequence ends");
         let open: Vec<_> = executor
             .state
@@ -8970,7 +9000,7 @@ mod sequence_tests {
         assert_eq!(open.len(), 1, "the 10 are still uncovered: {open:?}");
         let bound = executor.run(Input::Tick(RiskClock::from_secs(31)), &ports)?;
         assert!(
-            alerts(&bound).contains(&"unprotected_interval_limit"),
+            alerts(&bound).contains(&"protection"),
             "the bound still governs the uncovered interval: {:?}",
             alerts(&bound)
         );
@@ -9015,7 +9045,7 @@ mod sequence_tests {
         assert_eq!(executor.state.unprotected.len(), 1);
         let bound = executor.run(Input::Tick(RiskClock::from_secs(31)), &ports)?;
         assert!(
-            alerts(&bound).contains(&"unprotected_interval_limit"),
+            alerts(&bound).contains(&"protection"),
             "{:?}",
             alerts(&bound)
         );
@@ -9121,7 +9151,7 @@ mod sequence_tests {
         let started = trading_day(&mut executor, &ports, "2026-09-21")?;
         assert!(cancels(&started).is_empty(), "{:?}", drafted(&started));
         assert_eq!(actions(&started), vec!["expiry_unreplaceable"]);
-        assert_eq!(alerts(&started), vec!["protection_expiring"]);
+        assert_eq!(alerts(&started), vec!["protection"]);
         Ok(())
     }
 
@@ -9397,7 +9427,7 @@ mod sequence_tests {
             let due = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
             assert!(due.iter().any(|effect| matches!(
                 effect,
-                Effect::Notify(note) if note.message_key == "unprotected_interval_limit"
+                Effect::Notify(note) if note.kind.key() == "protection"
             )));
             let placement = if waits {
                 assert_eq!(abandoned_for(&due), vec!["unprotected_interval_limit"]);
@@ -9946,7 +9976,7 @@ mod sequence_tests {
                 .collect::<Vec<_>>(),
             vec![Some(Price::parse("151")?)]
         );
-        assert_eq!(alerts(&sent), vec!["exit_unpriced"], "{:?}", drafted(&sent));
+        assert_eq!(alerts(&sent), vec!["exit_stalled"], "{:?}", drafted(&sent));
         Ok(())
     }
 
@@ -9977,7 +10007,7 @@ mod sequence_tests {
             assert_eq!(
                 alerts(&sent),
                 if alerted {
-                    vec!["exit_unpriced"]
+                    vec!["exit_stalled"]
                 } else {
                     Vec::new()
                 },
@@ -10006,7 +10036,7 @@ mod sequence_tests {
                 .collect::<Vec<_>>(),
             vec![Some(Price::parse("151")?)]
         );
-        assert_eq!(alerts(&sent), vec!["exit_unpriced"], "{:?}", drafted(&sent));
+        assert_eq!(alerts(&sent), vec!["exit_stalled"], "{:?}", drafted(&sent));
         Ok(())
     }
 
@@ -11537,7 +11567,7 @@ mod sequence_tests {
         }
         assert_eq!(asked, 0, "the OCO's cancel is asked once, not once a step");
         assert!(busy <= 2, "{busy} steps journaled; only the bound's may");
-        assert_eq!(alerted, vec!["unprotected_interval_limit".to_owned()]);
+        assert_eq!(alerted, vec!["protection".to_owned()]);
         Ok(())
     }
 
@@ -13244,7 +13274,7 @@ mod sequence_tests {
         assert!(submissions(&night).is_empty(), "{:?}", drafted(&night));
         assert_eq!(gate_reasons(&night), vec!["session_closed"]);
         assert!(
-            !alerts(&night).contains(&"session_unknown"),
+            alerts(&night) == vec!["exit_stalled"],
             "{:?}",
             alerts(&night)
         );
@@ -13383,7 +13413,7 @@ mod sequence_tests {
             );
             bounded.extend(alerts(&tick).into_iter().map(str::to_owned));
         }
-        assert_eq!(bounded, vec!["unprotected_interval_limit".to_owned()]);
+        assert_eq!(bounded, vec!["protection".to_owned()]);
         assert_eq!(stop_covered(&executor)?, position(&executor)?);
         Ok(())
     }
@@ -13418,7 +13448,7 @@ mod sequence_tests {
         let mut notes: Vec<(EventId, &str)> = night
             .iter()
             .filter_map(|effect| match effect {
-                Effect::Notify(note) => Some((note.subject_event.clone(), note.message_key)),
+                Effect::Notify(note) => Some((note.subject_event.clone(), note.kind.key())),
                 _ => None,
             })
             .collect();
@@ -13426,7 +13456,7 @@ mod sequence_tests {
             acknowledge_protection(&mut executor, &night, &ports)?
                 .iter()
                 .filter_map(|effect| match effect {
-                    Effect::Notify(note) => Some((note.subject_event.clone(), note.message_key)),
+                    Effect::Notify(note) => Some((note.subject_event.clone(), note.kind.key())),
                     _ => None,
                 }),
         );
@@ -13449,13 +13479,13 @@ mod sequence_tests {
                     "the exit is never abandoned, at {at}"
                 );
                 notes.extend(ran.iter().filter_map(|effect| match effect {
-                    Effect::Notify(note) => Some((note.subject_event.clone(), note.message_key)),
+                    Effect::Notify(note) => Some((note.subject_event.clone(), note.kind.key())),
                     _ => None,
                 }));
             }
             at += 1_800;
         }
-        assert_eq!(notes, vec![(park, "session_closed")]);
+        assert_eq!(notes, vec![(park, "exit_stalled")]);
         assert_eq!(stop_covered(&executor)?, position(&executor)?);
         let mut folded = ExecutorState::new(executor.state.scope.clone());
         for event in &executor.journal {
@@ -13553,11 +13583,7 @@ mod sequence_tests {
             let ran = executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
             assert!(submissions(&ran).is_empty());
             assert_eq!(gate_reasons(&ran), vec!["session_unknown"]);
-            assert!(
-                alerts(&ran).contains(&"session_unknown"),
-                "{:?}",
-                alerts(&ran)
-            );
+            assert!(alerts(&ran).contains(&"exit_stalled"), "{:?}", alerts(&ran));
             let later = executor.run(Input::Tick(RiskClock::from_secs(at + 86_400)), &ports)?;
             assert!(submissions(&later).is_empty());
         }
@@ -13577,11 +13603,11 @@ mod sequence_tests {
         executor.run(sell(EXIT, "10", "150", Purpose::RiskExit)?, &ports)?;
         let long = executor.run(Input::Tick(RiskClock::from_secs(at + 121)), &ports)?;
         assert!(!drafted(&long).contains(&"OrderAbandoned"));
-        assert!(alerts(&long).contains(&"exit_held_long"));
+        assert!(alerts(&long).contains(&"exit_stalled"));
         assert_eq!(gate_reasons(&long), vec!["session_unknown"]);
         let later = executor.run(Input::Tick(RiskClock::from_secs(at + 86_400)), &ports)?;
         assert!(!drafted(&later).contains(&"OrderAbandoned"));
-        assert!(!alerts(&later).contains(&"exit_held_long"));
+        assert!(!alerts(&later).contains(&"exit_stalled"));
         Ok(())
     }
 
@@ -13631,17 +13657,14 @@ mod sequence_tests {
             assert_eq!(gate_reasons(&ran), vec![reason]);
             let long = executor.run(Input::Tick(RiskClock::from_secs(start + 121)), &ports)?;
             assert!(!drafted(&long).contains(&"OrderAbandoned"), "{reason}");
-            assert!(alerts(&long).contains(&"exit_held_long"), "{reason}");
+            assert!(alerts(&long).contains(&"exit_stalled"), "{reason}");
             assert_eq!(
                 gate_reasons(&long),
                 vec![reason],
                 "journaled with its reason"
             );
             let again = executor.run(Input::Tick(RiskClock::from_secs(start + 200)), &ports)?;
-            assert!(
-                !alerts(&again).contains(&"exit_held_long"),
-                "once: {reason}"
-            );
+            assert!(!alerts(&again).contains(&"exit_stalled"), "once: {reason}");
             let clear = if reason == "session_closed" {
                 1_790_064_000
             } else {
@@ -14542,7 +14565,7 @@ mod sequence_tests {
             &uncovered,
         )?;
         assert_closed(record(&bound, "interval_limit")?, "interval_limit", &[])?;
-        assert!(alerts(&bound).contains(&"unprotected_interval_limit"));
+        assert!(alerts(&bound).contains(&"protection"));
         assert_eq!(intervals(&state), vec![(0, None, true, true, None)]);
         Ok(())
     }
