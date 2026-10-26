@@ -5,11 +5,12 @@ mod common;
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_executor::{
-    AgentId, BindingGateConfigRefs, FillConfigRefs, InstrumentSnapshot, MandateVersion,
-    MandateView, ProtectionPrices,
+    AccountFillRefs, AgentId, BindingGateConfigRefs, FillConfigRefs, InstrumentSnapshot,
+    MandateVersion, MandateView, ProtectionPrices,
 };
 use mandate_gate_inputs::{
-    DeployedView, InputError, Reviewed, fill_refs, protection_prices, stop_limit_offset,
+    DeployedView, InputError, Reviewed, account_fill_refs, fill_refs, protection_prices,
+    stop_limit_offset,
 };
 use mandate_num::{Fraction, Price, ShareIncrement};
 use mandate_spec::document::Protection;
@@ -64,6 +65,37 @@ fn fills_name_the_registered_fee_calendar_and_snapshot() {
             _ => short.instrument_snapshot = None,
         }
         assert_eq!(fill_refs(&short), None, "{missing}");
+    }
+}
+
+/// DEC-2817: the account's fill configuration is the registered fee configuration and calendar,
+/// which settles the paper run too, with or without an instrument snapshot; none when either of
+/// the two is missing.
+#[test]
+fn the_accounts_fills_name_the_registered_fee_and_calendar() {
+    let refs = BindingGateConfigRefs::complete(
+        "sha256:fee",
+        "sha256:cal",
+        "sha256:ins",
+        "sha256:set",
+        "sha256:man",
+    );
+    let want = Some(AccountFillRefs {
+        fee_config: "sha256:fee".to_owned(),
+        trading_calendar: "sha256:cal".to_owned(),
+        settlement_calendar: "sha256:cal".to_owned(),
+    });
+    assert_eq!(account_fill_refs(&refs), want);
+    let mut unregistered = refs.clone();
+    unregistered.instrument_snapshot = None;
+    assert_eq!(account_fill_refs(&unregistered), want);
+    for missing in 0..2 {
+        let mut short = refs.clone();
+        match missing {
+            0 => short.fee_config = None,
+            _ => short.trading_calendar = None,
+        }
+        assert_eq!(account_fill_refs(&short), None, "{missing}");
     }
 }
 
@@ -153,6 +185,12 @@ fn the_view_answers_only_the_deployed_agent_on_its_instrument() -> Result<(), St
     assert_eq!(view.fill_refs(&spy), fill_refs(&reviewed.config_refs));
     assert!(view.fill_refs(&spy).is_some());
     assert_eq!(view.fill_refs(&aapl), None);
+    assert_eq!(
+        view.account_fill_refs(),
+        account_fill_refs(&reviewed.config_refs),
+        "the account's whatever the instrument"
+    );
+    assert!(view.account_fill_refs().is_some());
     Ok(())
 }
 

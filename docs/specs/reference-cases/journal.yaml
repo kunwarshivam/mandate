@@ -88662,7 +88662,7 @@ account_activity:
     expect:
       outcome: Valid
 fill_applied:
-  spec: docs/specs/journal.md §9.5 `FillApplied` version 2 and rule 299 (DEC-2812)
+  spec: docs/specs/journal.md §9.5 `FillApplied` version 2 and rules 299 and 300 (DEC-2812, DEC-2817)
   drafts:
     attributed:
       envelope_version: 1
@@ -89040,9 +89040,9 @@ fill_applied:
       outcome: Invalid
       reason: missing_config_ref
       path: config_refs.fee_config
-  - name: v2_no_instrument_snapshot
-    clause: '§9: `FillApplied` requires `instrument_snapshot`'
-    base_draft: unattributed
+  - name: v2_named_without_instrument_snapshot
+    clause: 'rule 300: a fill of an order of ours names its snapshot'
+    base_draft: attributed
     changes:
     - path: config_refs.instrument_snapshot
       delete: true
@@ -89050,6 +89050,48 @@ fill_applied:
       outcome: Invalid
       reason: missing_config_ref
       path: config_refs.instrument_snapshot
+  - name: v1_without_instrument_snapshot
+    clause: '§9: version 1 requires `instrument_snapshot`'
+    base_draft: version_1
+    changes:
+    - path: config_refs.instrument_snapshot
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.instrument_snapshot
+  - name: late_without_instrument_snapshot
+    clause: '§9: `LateFillApplied` requires `instrument_snapshot`'
+    base_draft: late
+    changes:
+    - path: config_refs.instrument_snapshot
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.instrument_snapshot
+  - name: v2_unattributed_without_trading_calendar
+    clause: '§9.5: an unattributed fill still names both calendars'
+    base_draft: unattributed
+    changes:
+    - path: config_refs.trading_calendar
+      delete: true
+    - path: config_refs.instrument_snapshot
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.trading_calendar
+  - name: v2_unattributed_without_settlement_calendar
+    clause: '§9.5: an unattributed fill still names both calendars'
+    base_draft: unattributed
+    changes:
+    - path: config_refs.settlement_calendar
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.settlement_calendar
   - name: version_3
     clause: '§9.5: registered at `schema_version` 1 and 2 only'
     base_draft: attributed
@@ -89181,6 +89223,16 @@ fill_applied:
     changes:
     - path: environment
       value: live
+    expect:
+      outcome: Valid
+  - name: v2_unattributed_without_instrument_snapshot
+    clause: 'rule 300: an unattributed fill in an instrument the platform holds no snapshot of'
+    base_draft: unattributed
+    changes:
+    - path: config_refs.instrument_snapshot
+      delete: true
+    - path: payload.instrument_id
+      value: us_equity:OWNERPICK
     expect:
       outcome: Valid
 account_clock:

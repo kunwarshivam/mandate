@@ -65,8 +65,8 @@ fn draft(section: &Value, case: &Value) -> Vec<u8> {
 #[test]
 fn the_fill_section_holds_every_part() {
     let section = section();
-    assert!(text(&section, "spec").contains("rule 299"));
-    for (part, at_least) in [("invalid_drafts", 28), ("valid_drafts", 12)] {
+    assert!(text(&section, "spec").contains("299 and 300"));
+    for (part, at_least) in [("invalid_drafts", 32), ("valid_drafts", 13)] {
         let n = list(&section, part).len();
         assert!(n >= at_least, "{n} {part}; never fewer than {at_least}");
     }
