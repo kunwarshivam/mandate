@@ -715,13 +715,45 @@ fn fill_rules(p: Payload<'_>) -> Result<(), Invalid> {
 /// The longest client order id of ours, Alpaca's bound (trading spec §2.3).
 const OUR_CLIENT_ORDER_ID_MAX: usize = 128;
 
+/// §9.5's stream rules on the account stream: rule 260 on an `AccountCloseRequested`, rule 309 on
+/// an `AccountRestrictionChanged`.
+pub(crate) fn stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
+    match draft.event_type() {
+        CLOSE => close_stream_rule(before, draft),
+        RESTRICTION => restriction_stream_rule(before, draft),
+        _ => Ok(()),
+    }
+}
+
+/// Rule 309 (v0.96, DEC-2816): an `AccountRestrictionChanged` names a cause no earlier one of its
+/// stream raised at the same restriction or a stricter one, `blocked` over `closing_only`, so each
+/// cause in force is on the stream once per restriction.
+fn restriction_stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
+    let raised = |d: &Draft| {
+        let payload = d.fields().get("payload").cloned().unwrap_or(Value::Null);
+        let p = Payload(&payload);
+        (
+            p.text("cause").to_owned(),
+            p.text("restriction") == "blocked",
+        )
+    };
+    let (cause, blocks) = raised(draft);
+    ensure(
+        !before.iter().any(|d| {
+            d.event_type() == RESTRICTION && {
+                let (earlier, blocked) = raised(d);
+                earlier == cause && (blocked || !blocks)
+            }
+        }),
+        InvalidReason::Schema,
+        "payload.cause",
+    )
+}
+
 /// Rule 260 (DEC-2337 item 2), a stream rule: an `AccountCloseRequested` names a switch,
 /// instrument, and attempt no earlier one of its stream names together, so a duplicate request is
 /// refused and its second send never happens.
-pub(crate) fn stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
-    if draft.event_type() != CLOSE {
-        return Ok(());
-    }
+fn close_stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
     let request = |d: &Draft| {
         let payload = d.fields().get("payload").cloned().unwrap_or(Value::Null);
         let p = Payload(&payload);

@@ -1129,7 +1129,7 @@ fn a_crypto_proposal_is_judged_by_its_symbol_s_quote() -> Result<(), String> {
 }
 
 /// A crypto pair's minimum order is its `min_trade_increment` (DEC-285): an opening below it stops
-/// at §5.3 rule 2's unregistered code, and one at it is decided.
+/// is denied `below_min_order_size` under §5.3 rule 2 (DEC-2815), and one at it is allowed.
 #[test]
 fn a_crypto_pair_s_minimum_order_is_its_increment() -> Result<(), String> {
     let with_increment = |qty: &'static str, decision: Json| -> Edit {
@@ -1145,11 +1145,14 @@ fn a_crypto_pair_s_minimum_order_is_its_increment() -> Result<(), String> {
     };
     expect_eq(
         "below the increment",
-        run_edited("RC-09", with_increment("0.001", json!({ "verdict": "allow" }))),
-        Err(
-            "step 3: `mandate_risk::evaluate`: the reason code of §5.3 rule 2's minimum size is not implemented yet (pending DEC-129 item 27) (unimplemented)"
-                .to_owned(),
+        run_edited(
+            "RC-09",
+            with_increment(
+                "0.001",
+                json!({ "verdict": "deny", "reason_code": "below_min_order_size" }),
+            ),
         ),
+        Ok(()),
     )?;
     expect_eq(
         "at the increment",

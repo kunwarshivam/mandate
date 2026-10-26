@@ -492,26 +492,24 @@ fn the_filled_trailing_volume_is_the_order_size_cap_to_the_share() {
 }
 
 /// The listing's minimum order is one share (DEC-199 item 6): in a fractionable MSFT a day buy of
-/// one share is allowed, and one of 0.999999999 is refused under §5.3 rule 2's minimum size, which
-/// has no registered reason code yet (DEC-129 item 27).
+/// one share is allowed, and one of 0.999999999 is denied `below_min_order_size` under §5.3 rule 2
+/// (DEC-2815).
 #[test]
 fn the_filled_minimum_order_is_one_share_to_the_last_place() {
-    let buy = |qty: &str| {
+    let buy = |qty: &str, decision: Json| {
         scene(
             json!([proposal(
                 TEN_AM,
                 buy_msft(json!({ "qty": qty, "tif": "day" })),
-                allow()
+                decision
             )]),
             |c| c["instruments"]["MSFT"]["fractionable"] = json!(true),
         )
     };
-    assert_eq!(buy("1"), Ok(()));
+    assert_eq!(buy("1", allow()), Ok(()));
     assert_eq!(
-        buy("0.999999999"),
-        err(
-            "step 2: `mandate_risk::evaluate`: the reason code of §5.3 rule 2's minimum size is not implemented yet (pending DEC-129 item 27) (unimplemented)"
-        )
+        buy("0.999999999", stop("deny", "below_min_order_size")),
+        Ok(())
     );
 }
 
@@ -703,7 +701,7 @@ fn the_cases_gate_configuration_is_read() {
 
 #[test]
 fn a_fractional_proposal_needs_a_day_tif_and_a_fractionable_instrument() {
-    let fractional = |tif: Option<&str>, fractionable: bool| {
+    let fractional = |tif: Option<&str>, fractionable: bool, decision: Json| {
         scene(
             json!([proposal(
                 TEN_AM,
@@ -714,27 +712,27 @@ fn a_fractional_proposal_needs_a_day_tif_and_a_fractionable_instrument() {
                     }
                     data
                 },
-                allow()
+                decision
             )]),
             |c| c["instruments"]["MSFT"]["fractionable"] = json!(fractionable),
         )
     };
     assert_eq!(
-        fractional(None, true),
+        fractional(None, true, allow()),
         err("step 2: a fractional proposal states no `tif`")
     );
-    assert_eq!(fractional(Some("day"), true), Ok(()));
+    assert_eq!(fractional(Some("day"), true, allow()), Ok(()));
     assert_eq!(
-        fractional(Some("gtc"), true),
-        err(
-            "step 2: `mandate_risk::evaluate`: the reason code of §5.3 rule 7 is not implemented yet (pending DEC-129 item 27) (unimplemented)"
-        )
+        fractional(
+            Some("gtc"),
+            true,
+            stop("deny", "fractional_order_tif_or_bracket")
+        ),
+        Ok(())
     );
     assert_eq!(
-        fractional(Some("day"), false),
-        err(
-            "step 2: `mandate_risk::evaluate`: the reason code of §5.3 rule 2's increment is not implemented yet (pending DEC-129 item 27) (unimplemented)"
-        )
+        fractional(Some("day"), false, stop("deny", "quantity_off_increment")),
+        Ok(())
     );
     assert_eq!(
         scene(
