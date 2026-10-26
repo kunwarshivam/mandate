@@ -1131,12 +1131,15 @@ first submitted, and `state` and `filled_qty` from the last `OrderStateChanged` 
 `unknown` served as unknown). `positions` is the net `filled_qty` of the agent's own fills per
 instrument, not the ledger's fold (an own fill that cannot be read is `journal_unavailable`, never
 skipped, [DEC-2112](../project/decisions/DEC-2112.md)). Beside it ([DEC-2136](../project/decisions/DEC-2136.md)):
-`cost_basis` is the agent sub-ledger's signed quantity and basis (trading spec §8.1), folded from
-the same fills through the accounting fold's own rule, `null` for an instrument the agent released
+`positions` is read over the agent's orders as the executor attributes them (its requests, their
+replacements, and the broker's legs of its entries); `cost_basis` is the agent sub-ledger's signed
+quantity and basis (trading spec §8.1), folded from the same fills through the accounting fold's
+own rule, `null` for an instrument the agent released
 or a corporate action touched, or where a fill charged a fee in the asset; `risk_mark` is the
 instrument's latest version-2 mark from a counted session, as the gate reads it, with its bid,
 verdict, session, and `marked_at` (its age is `served_at` less `marked_at`); `market_value` and
-`unrealized_pnl` are §8.2's at that bid, `null` unless the basis is served and the mark is sane;
+`unrealized_pnl` are §8.2's at that bid, `null` unless the basis is served and long and the mark
+is sane;
 and `protection` is the account's protective orders in the instrument (resting orders, covered
 quantity, stop and take-profit, and the start of an open unprotected interval), folded from
 `ProtectionChanged` as the executor folds it. `account_positions` is the account's, as on the single agent
