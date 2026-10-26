@@ -205,25 +205,36 @@ fn only_paper_itself_is_not_gated() {
     }
 }
 
-/// No route writes the setting ([DEC-2134] item 3): the only source file of this crate that names
-/// `RealMoneyGateChanged` is the gate's own, which reads it and never builds an event of it.
+/// No route writes the setting ([DEC-2134] item 3): the only source files of this crate that
+/// name `RealMoneyGateChanged` are the gate, which reads it and never builds an event of it, and
+/// the operator command, which no module but the binary's `main.rs` uses.
 #[test]
-fn no_source_of_the_api_writes_the_gates_setting() {
+fn no_source_of_the_api_but_the_operator_command_writes_the_gates_setting() {
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut naming = Vec::new();
+    let mut using_operator = Vec::new();
     for entry in std::fs::read_dir(&src).expect("src") {
         let path = entry.expect("an entry").path();
+        let name = path
+            .file_name()
+            .expect("a name")
+            .to_string_lossy()
+            .into_owned();
         let text = std::fs::read_to_string(&path).expect("UTF-8 source");
         if text.contains("RealMoneyGateChanged") {
-            naming.push(
-                path.file_name()
-                    .expect("a name")
-                    .to_string_lossy()
-                    .into_owned(),
-            );
+            naming.push(name.clone());
+        }
+        if text.contains("operator::") || text.contains("operator::{") {
+            using_operator.push(name);
         }
     }
-    assert_eq!(naming, ["real_money.rs"], "only the gate names its setting");
+    naming.sort();
+    assert_eq!(naming, ["operator.rs", "real_money.rs"]);
+    assert_eq!(
+        using_operator,
+        ["main.rs"],
+        "only the binary runs the operator command"
+    );
     let gate = std::fs::read_to_string(src.join("real_money.rs")).expect("the gate");
     assert!(
         !gate.contains("event_type: CHANGED"),

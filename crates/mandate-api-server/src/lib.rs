@@ -80,6 +80,7 @@ pub mod members;
 pub mod methods;
 pub mod objects;
 pub mod opening;
+pub mod operator;
 pub mod passkeys;
 pub mod reads;
 pub mod real_money;

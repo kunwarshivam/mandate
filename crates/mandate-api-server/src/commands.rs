@@ -339,10 +339,27 @@ pub fn caused_envelope(
     event: &Event,
     causation: Option<&str>,
 ) -> Option<Vec<u8>> {
+    envelope_by(USER, writer, event, causation)
+}
+
+/// The actor kind of every event a workspace route writes.
+const USER: &str = "user";
+
+/// The actor kind of the real-money gate's setting, which only a platform operator writes
+/// (journal spec §9.35 rule 269).
+pub(crate) const PLATFORM_OPERATOR: &str = "platform_operator";
+
+/// [`caused_envelope`] written by an actor of `kind`, whose id is `writer`'s principal.
+pub(crate) fn envelope_by(
+    kind: &str,
+    writer: &Writer<'_>,
+    event: &Event,
+    causation: Option<&str>,
+) -> Option<Vec<u8>> {
     let actor = object(vec![
         ("build", text(BUILD)),
         ("id", text(writer.principal)),
-        ("kind", text("user")),
+        ("kind", text(kind)),
         ("version", text(env!("CARGO_PKG_VERSION"))),
     ])?;
     let one = Value::Int(Int::new(1)?);

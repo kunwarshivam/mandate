@@ -41,7 +41,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mandate_api_server::challenges::Challenges;
-use mandate_api_server::clock::SystemClock;
+use mandate_api_server::clock::{Clock, SystemClock};
 use mandate_api_server::config::SessionKey;
 use mandate_api_server::config::{
     INTERNAL_PAPER_WORKSPACE, StartRefusal, artifact_store, check_bind, check_database_url,
@@ -59,6 +59,7 @@ use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
 use mandate_api_server::members::{self, Hosted};
 use mandate_api_server::methods::{Methods, Passkey};
 use mandate_api_server::objects::{ObjectStore, Objects};
+use mandate_api_server::operator;
 use mandate_api_server::reduction::{self, Reduction, rp_id};
 use mandate_api_server::session::{OsRandom, Sessions};
 use mandate_api_server::subject;
@@ -461,6 +462,61 @@ fn finish() -> ExitCode {
     }
 }
 
+/// `mandate-api-server real-money`: the platform operator's setting of the hosted workspace's
+/// real-money gate ([`operator`], DEC-2134 items 3 and 6), appended with the deployment's own
+/// journal settings. It prints the appended record's id, or `refused: <code>`.
+fn real_money() -> ExitCode {
+    let refused = |code: &str| {
+        eprintln!("refused: {code}");
+        ExitCode::from(2)
+    };
+    let arguments = env::args().skip(2);
+    let command = match operator::command(arguments) {
+        Ok(command) => command,
+        Err(refusal) => return refused(refusal.code()),
+    };
+    if let Err(refusal) = check_environment(env::vars_os()) {
+        return refused(&refusal.to_string());
+    }
+    let (Ok(database_url), Ok(workspace)) = (
+        setting("MANDATE_API_DATABASE_URL"),
+        setting("MANDATE_API_WORKSPACE"),
+    ) else {
+        return refused(operator::Refusal::Arguments.code());
+    };
+    let founder = env::var(operator::FOUNDER_WORKSPACE).ok();
+    let Some(now) = SystemClock.now() else {
+        return refused(operator::Refusal::JournalUnavailable.code());
+    };
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => return refused(operator::Refusal::JournalUnavailable.code()),
+    };
+    let set = runtime.block_on(async {
+        let journal = Postgres(
+            PgJournal::from_dsn(&database_url)
+                .map_err(|_| operator::Refusal::JournalUnavailable)?,
+        );
+        let setting = operator::Setting {
+            workspace: &workspace,
+            operator: &command.operator,
+            key: &command.key,
+            requested: command.requested.clone(),
+        };
+        operator::set(&journal, &setting, founder.as_deref(), now).await
+    });
+    match set {
+        Ok(row) => {
+            println!("{}", row.event_id);
+            ExitCode::SUCCESS
+        }
+        Err(refusal) => refused(refusal.code()),
+    }
+}
+
 fn main() -> ExitCode {
     if let Err(refused) = mandate_release::startup::check_running() {
         eprintln!("{}", refused.code());
@@ -468,6 +524,12 @@ fn main() -> ExitCode {
     }
     if env::args_os().nth(1).is_some_and(|mode| mode == "finish") {
         return finish();
+    }
+    if env::args_os()
+        .nth(1)
+        .is_some_and(|mode| mode == "real-money")
+    {
+        return real_money();
     }
     let (args, start) = match checked() {
         Ok(checked) => checked,
