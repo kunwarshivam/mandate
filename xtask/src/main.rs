@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
-use std::io::{Read as _, Write};
+use std::io::{BufRead as _, BufReader, Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -323,9 +323,14 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     let root = repo_root()?;
-    let invoked = output("git", &["rev-parse", "--show-toplevel"])
+    let invoked = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .output()
         .ok()
-        .map(|top| PathBuf::from(top.trim()));
+        .filter(|out| out.status.success())
+        .map(|out| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()));
     if let Some(why) = root_mismatch(&root, invoked.as_deref()) {
         bail!(why);
     }
@@ -3419,9 +3424,22 @@ fn ci_select() -> Result<()> {
 const LAND_CHECK_BASE: &str = "origin/main";
 
 /// The `ci` jobs [`land_check`] runs on the merged tree, in order: the spec guard (ES-22), lint, and
-/// the test parts, which run over the crates the diff from the base selects (DEC-1190). No cell and
-/// no mutants, so the check stays fast enough to run before every landing (DEC-2642).
-const LAND_CHECK_JOBS: [&str; 3] = ["spec-guard", "lint", "test"];
+/// each part of `ci test`, which run over the crates the diff from the base selects (DEC-1190). The
+/// parts run as jobs of their own, so a failing nextest run never keeps the doctests, the rehearsal
+/// or the Python tests from running. No cell and no mutants, so the check stays fast enough to run
+/// before every landing (DEC-2642).
+const LAND_CHECK_JOBS: [&str; 6] = [
+    "spec-guard",
+    "lint",
+    "test-nextest",
+    "test-doc",
+    "test-rh-sim",
+    "test-python",
+];
+
+/// The user a test that failed as root is run again as (DEC-2644): `nobody`'s uid and gid,
+/// which file permissions apply to, so a test that refuses to run as root can run.
+const UNPRIVILEGED_ID: &str = "65534";
 
 /// Where [`land_check`] keeps its scratch worktree, `work/`, and its builds, `target/`, under the
 /// repository root. Both paths are fixed: cargo names a workspace crate's artifacts by its source
@@ -3465,18 +3483,160 @@ fn land_check_cmd(root: &Path, base: &str) -> Result<()> {
         .strip_prefix("origin/")
         .map(|branch| output_in(root, "git", &["fetch", "-q", "origin", branch]).is_ok());
     let target = root.join(LAND_CHECK_DIR).join("target");
+    let root_user = output("id", &["-u"]).is_ok_and(|uid| uid.trim() == "0");
     let (line, verdict) = land_check(root, base, fetched, |dir, base_sha, job| {
         eprintln!("==> land-check: ci {job}");
-        let status = land_check_job(dir, base_sha, &target, job)
-            .status()
-            .context("starting `cargo xtask`")?;
-        if !status.success() {
+        let mut command = land_check_job(dir, base_sha, &target, job);
+        if job != "test-nextest" {
+            let status = command.status().context("starting `cargo xtask`")?;
+            if !status.success() {
+                bail!("`cargo xtask ci {job}` failed with {status}");
+            }
+            return Ok(Vec::new());
+        }
+        let (status, said) = streamed(&mut command)?;
+        if status.success() {
+            return Ok(Vec::new());
+        }
+        if !root_user {
             bail!("`cargo xtask ci {job}` failed with {status}");
         }
-        Ok(())
+        let failed = nextest_failures(&said).with_context(|| {
+            format!(
+                "`cargo xtask ci {job}` failed with {status}, and not only by failed tests, so \
+                 none is run again"
+            )
+        })?;
+        let scratch = root.join(LAND_CHECK_DIR).join("tmp-unprivileged");
+        fs::create_dir_all(&scratch).context("making the unprivileged run's TMPDIR")?;
+        sh(
+            "chown",
+            &[
+                &format!("{UNPRIVILEGED_ID}:{UNPRIVILEGED_ID}"),
+                &scratch.display().to_string(),
+            ],
+        )?;
+        let mut passed = Vec::new();
+        for (binary, test) in &failed {
+            eprintln!(
+                "==> land-check: {binary} {test} failed as root; once more as uid {UNPRIVILEGED_ID}"
+            );
+            let status = unprivileged_rerun(dir, &target, &scratch, binary, test)
+                .status()
+                .context("starting `cargo nextest`")?;
+            if !status.success() {
+                bail!("{binary} {test} failed as root and again as uid {UNPRIVILEGED_ID}");
+            }
+            passed.push(format!("{binary}:{test}"));
+        }
+        Ok(passed)
     });
     println!("{line}");
     verdict
+}
+
+/// Runs `command` with its stderr read line by line, each echoed as it comes, and returns its
+/// status beside everything it said there: nextest's progress and its `FAIL` lines.
+fn streamed(command: &mut Command) -> Result<(ExitStatus, String)> {
+    let mut child = command
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("starting `cargo xtask`")?;
+    let mut said = String::new();
+    if let Some(stderr) = child.stderr.take() {
+        for line in BufReader::new(stderr).lines() {
+            let line = line.context("reading the job's stderr")?;
+            eprintln!("{line}");
+            said.push_str(&line);
+            said.push('\n');
+        }
+    }
+    Ok((child.wait().context("waiting for `cargo xtask`")?, said))
+}
+
+/// The tests a nextest run reports failed, each as its binary id and test name, read from its
+/// `FAIL` lines, or `None` when that is not the whole of what failed: the run's summary counts a
+/// different number of failures, or names a test that timed out, or the run printed no summary at
+/// all (a build that failed). Only then may a failure be run again (DEC-2644).
+fn nextest_failures(said: &str) -> Option<BTreeSet<(String, String)>> {
+    let plain = |line: &str| {
+        let mut out = String::with_capacity(line.len());
+        let mut chars = line.chars();
+        while let Some(c) = chars.next() {
+            if c == '\u{1b}' {
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    };
+    let mut failed = BTreeSet::new();
+    let mut counted = None;
+    for line in said.lines().map(plain) {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("FAIL [") {
+            let rest = rest.split_once(']')?.1.trim();
+            let rest = match rest.strip_prefix('(') {
+                Some(numbered) => numbered.split_once(')')?.1.trim(),
+                None => rest,
+            };
+            let mut words = rest.split_whitespace();
+            let (binary, test) = (words.next()?, words.next()?);
+            failed.insert((binary.to_owned(), test.to_owned()));
+        } else if let Some(summary) = line.strip_prefix("Summary [") {
+            if summary.contains("timed out") {
+                return None;
+            }
+            counted = Some(
+                summary
+                    .split(',')
+                    .find_map(|part| part.trim().strip_suffix(" failed")?.parse::<usize>().ok())
+                    .unwrap_or(0),
+            );
+        }
+    }
+    (counted? == failed.len() && !failed.is_empty()).then_some(failed)
+}
+
+/// `test` of `binary` run once more through nextest in the merged tree `dir`, built as the job
+/// built it, its process run as uid and gid [`UNPRIVILEGED_ID`] through a target runner with
+/// `scratch` as its TMPDIR: the same test, as the user file permissions apply to. Exactly that
+/// test, or it fails (`--no-tests=fail`). The runner covers the test process alone; the build
+/// stays root's (DEC-2644).
+fn unprivileged_rerun(
+    dir: &Path,
+    target: &Path,
+    scratch: &Path,
+    binary: &str,
+    test: &str,
+) -> Command {
+    let package = binary.split("::").next().unwrap_or(binary);
+    let runner = format!(
+        "CARGO_TARGET_{}_UNKNOWN_LINUX_GNU_RUNNER",
+        std::env::consts::ARCH.to_uppercase()
+    );
+    let mut cargo = Command::new("cargo");
+    cargo
+        .current_dir(dir)
+        .args(["nextest", "run", "--config-file"])
+        .arg(dir.join(NEXTEST_CONFIG))
+        .args(["--package", package, "--locked", "--no-tests=fail", "-E"])
+        .arg(format!("binary_id(={binary}) & test(={test})"))
+        .env(CARGO_TARGET_DIR, target)
+        .env(
+            runner,
+            format!(
+                "setpriv --reuid={UNPRIVILEGED_ID} --regid={UNPRIVILEGED_ID} --clear-groups --"
+            ),
+        )
+        .env("TMPDIR", scratch)
+        .envs(LAND_CHECK_BUILD);
+    cargo
 }
 
 /// `git` in `dir` as a committer with no hooks or signing, so the merge a check makes depends on
@@ -3518,7 +3678,7 @@ fn land_check(
     root: &Path,
     base: &str,
     fetched: Option<bool>,
-    mut run: impl FnMut(&Path, &str, &str) -> Result<()>,
+    mut run: impl FnMut(&Path, &str, &str) -> Result<Vec<String>>,
 ) -> (String, Result<()>) {
     let short = |sha: &str| sha.chars().take(12).collect::<String>();
     let fetched_word = match fetched {
@@ -3541,6 +3701,7 @@ fn land_check(
     land_check_clear(root, &dir);
     let mut results: Vec<(&str, Option<bool>)> =
         LAND_CHECK_JOBS.iter().map(|job| (*job, None)).collect();
+    let mut rerun = Vec::new();
     let made = land_check_git(
         root,
         &[
@@ -3566,11 +3727,16 @@ fn land_check(
             }
             Ok(merged) => {
                 for (job, passed) in &mut results {
-                    let outcome = run(&dir, &base_sha, job);
-                    if let Err(err) = &outcome {
-                        eprintln!("    land-check: {job}: {err:#}");
+                    match run(&dir, &base_sha, job) {
+                        Ok(again) => {
+                            rerun.extend(again);
+                            *passed = Some(true);
+                        }
+                        Err(err) => {
+                            eprintln!("    land-check: {job}: {err:#}");
+                            *passed = Some(false);
+                        }
                     }
-                    *passed = Some(outcome.is_ok());
                 }
                 ("clean", Some(merged))
             }
@@ -3593,11 +3759,12 @@ fn land_check(
         .collect();
     let line = format!(
         "land-check summary: head={} base={base}@{} fetched={fetched_word} merged={} \
-         merge={merge_word} {} verdict={}",
+         merge={merge_word} {} rerun_unprivileged=[{}] verdict={}",
         short(&head),
         short(&base_sha),
         merged.as_deref().map_or_else(|| "none".to_owned(), short),
         jobs.join(" "),
+        rerun.join(","),
         if passed { "pass" } else { "fail" },
     );
     let verdict = if passed {
@@ -4365,8 +4532,9 @@ fn root_mismatch(built: &Path, invoked: Option<&Path>) -> Option<String> {
     (built_real != invoked_real).then(|| {
         format!(
             "this xtask was built from the checkout at {} but runs in {}, so it would check the \
-             other tree: two checkouts share one CARGO_TARGET_DIR; give this one its own (unset \
-             CARGO_TARGET_DIR, or point it at a directory only this checkout uses) and run it again",
+             other tree: two checkouts share one CARGO_TARGET_DIR (give this one its own: unset \
+             CARGO_TARGET_DIR, or point it at a directory only this checkout uses, and run it \
+             again), or this tree sits inside another git repository, which git answered for",
             built_real.display(),
             invoked_real.display()
         )
@@ -12561,7 +12729,8 @@ mod tests {
     use super::{
         CARGO_INCREMENTAL, LAND_CHECK_DIR, LAND_CHECK_JOBS, NO_FAIL_FAST_ENV, TIMED_OUT_MUTANTS,
         conflict_markers_in, incremental_overridden, land_check, land_check_job,
-        mutants_job_within, mutants_summary, root_mismatch, summarised,
+        mutants_job_within, mutants_summary, nextest_failures, root_mismatch, summarised,
+        unprivileged_rerun,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
@@ -13907,7 +14076,7 @@ mod tests {
                 fs::read_to_string(dir.join("b.txt"))?,
                 base_sha.to_owned(),
             ));
-            Ok(())
+            Ok(Vec::new())
         });
         verdict?;
         assert_eq!(
@@ -13928,7 +14097,10 @@ mod tests {
                 "land-check summary: head={} base=base@{} fetched=skipped merged=",
                 &head[..12],
                 &base[..12]
-            )) && line.ends_with(" merge=clean spec-guard=pass lint=pass test=pass verdict=pass"),
+            )) && line.ends_with(
+                " merge=clean spec-guard=pass lint=pass test-nextest=pass test-doc=pass \
+                 test-rh-sim=pass test-python=pass rerun_unprivileged=[] verdict=pass"
+            ),
             "{line}"
         );
         assert_eq!(
@@ -13962,18 +14134,21 @@ mod tests {
     #[test]
     fn land_check_fails_an_unfetched_base_and_passes_one_head_holds() -> Result<()> {
         let (fx, head) = land_check_fixture("land-check-stale", "b.txt", "b from main\n")?;
-        let (line, verdict) = land_check(&fx.0, "base", Some(false), |_, _, _| Ok(()));
+        let (line, verdict) = land_check(&fx.0, "base", Some(false), |_, _, _| Ok(Vec::new()));
         assert!(verdict.is_err(), "an unfetched base is no pass");
         assert!(
             line.contains(" fetched=no ")
-                && line.ends_with(" merge=clean spec-guard=pass lint=pass test=pass verdict=fail"),
+                && line.ends_with(
+                    " merge=clean spec-guard=pass lint=pass test-nextest=pass test-doc=pass \
+                 test-rh-sim=pass test-python=pass rerun_unprivileged=[] verdict=fail"
+                ),
             "{line}"
         );
         let start = fx.git(&["rev-parse", &format!("{head}~1")])?;
         let mut ran = 0;
         let (line, verdict) = land_check(&fx.0, &start, None, |_, _, _| {
             ran += 1;
-            Ok(())
+            Ok(Vec::new())
         });
         verdict?;
         assert_eq!(ran, LAND_CHECK_JOBS.len());
@@ -14025,13 +14200,16 @@ mod tests {
         let mut ran = 0;
         let (line, verdict) = land_check(&fx.0, "base", Some(true), |_, _, _| {
             ran += 1;
-            Ok(())
+            Ok(Vec::new())
         });
         assert!(verdict.is_err(), "a conflict is no landing");
         assert_eq!(ran, 0, "no job runs on a merge that did not happen");
         assert!(
             line.contains(" fetched=yes merged=none merge=conflict ")
-                && line.ends_with("spec-guard=not-run lint=not-run test=not-run verdict=fail"),
+                && line.ends_with(
+                    "spec-guard=not-run lint=not-run test-nextest=not-run test-doc=not-run \
+                 test-rh-sim=not-run test-python=not-run rerun_unprivileged=[] verdict=fail"
+                ),
             "{line}"
         );
         land_check_left_nothing(&fx)?;
@@ -14049,17 +14227,176 @@ mod tests {
             if job == "lint" {
                 bail!("lint failed");
             }
-            Ok(())
+            Ok(Vec::new())
         });
         assert!(verdict.is_err());
         assert_eq!(ran, LAND_CHECK_JOBS);
         assert!(
             line.contains(" fetched=yes ")
-                && line.ends_with(" merge=clean spec-guard=pass lint=fail test=pass verdict=fail"),
+                && line.ends_with(
+                    " merge=clean spec-guard=pass lint=fail test-nextest=pass test-doc=pass \
+                 test-rh-sim=pass test-python=pass rerun_unprivileged=[] verdict=fail"
+                ),
             "{line}"
         );
         land_check_left_nothing(&fx)?;
         Ok(())
+    }
+
+    /// A test that passed only when run again as an unprivileged user is named in the summary,
+    /// never folded silently into a pass (DEC-2644).
+    #[test]
+    fn land_check_names_every_test_that_passed_only_unprivileged() -> Result<()> {
+        let (fx, _) = land_check_fixture("land-check-rerun", "b.txt", "b from main\n")?;
+        let (line, verdict) = land_check(&fx.0, "base", Some(true), |_, _, job| {
+            Ok(if job == "test-nextest" {
+                vec!["fx::files:fx_refuses_root".to_owned()]
+            } else {
+                Vec::new()
+            })
+        });
+        verdict?;
+        assert!(
+            line.ends_with(" rerun_unprivileged=[fx::files:fx_refuses_root] verdict=pass"),
+            "{line}"
+        );
+        Ok(())
+    }
+
+    /// The failures a nextest run reports, read only when they are the whole of what failed: the
+    /// summary's count must match the `FAIL` lines, nothing may have timed out, and a run with no
+    /// summary (its build failed) gives none to run again.
+    #[test]
+    fn only_the_failed_tests_a_whole_nextest_report_names_are_run_again() {
+        let fail = |n: &str, binary: &str, test: &str| {
+            format!("        FAIL [   0.097s] ( {n}/10654) {binary} {test}\n")
+        };
+        let summary = |tail: &str| format!("     Summary [ 609.585s] 10654 tests run: {tail}\n");
+        let report = [
+            fail(
+                "5582",
+                "mandate-marketdata::concurrent_writes",
+                "refuses_root",
+            ),
+            "        PASS [   0.010s] ( 5583/10654) a::b passes\n".to_owned(),
+            fail("8174", "mandate-runtime::account_copies", "has_an_arm"),
+            summary("10652 passed (3 slow), 2 failed, 181 skipped"),
+            fail(
+                "5582",
+                "mandate-marketdata::concurrent_writes",
+                "refuses_root",
+            ),
+            fail("8174", "mandate-runtime::account_copies", "has_an_arm"),
+        ]
+        .concat();
+        let failed = nextest_failures(&report).expect("two failures, both named");
+        assert_eq!(
+            failed.into_iter().collect::<Vec<_>>(),
+            [
+                (
+                    "mandate-marketdata::concurrent_writes".to_owned(),
+                    "refuses_root".to_owned()
+                ),
+                (
+                    "mandate-runtime::account_copies".to_owned(),
+                    "has_an_arm".to_owned()
+                ),
+            ]
+        );
+        let colored = format!(
+            "\u{1b}[31;1m        FAIL\u{1b}[0m [   0.1s] ( 1/2) \u{1b}[35ma::b\u{1b}[0m t\n{}",
+            summary("1 passed, 1 failed")
+        );
+        assert_eq!(
+            nextest_failures(&colored),
+            Some(BTreeSet::from([("a::b".to_owned(), "t".to_owned())])),
+            "colour codes are read through"
+        );
+        let undercounted = [
+            fail("1", "a::b", "t"),
+            summary("1 passed, 2 failed, 0 skipped"),
+        ]
+        .concat();
+        assert_eq!(
+            nextest_failures(&undercounted),
+            None,
+            "a failure the lines do not name"
+        );
+        let timed_out = [
+            fail("1", "a::b", "t"),
+            summary("1 passed, 1 failed, 1 timed out"),
+        ]
+        .concat();
+        assert_eq!(
+            nextest_failures(&timed_out),
+            None,
+            "a timeout is no failed test"
+        );
+        assert_eq!(
+            nextest_failures(&fail("1", "a::b", "t")),
+            None,
+            "no summary: the run did not finish"
+        );
+        assert_eq!(
+            nextest_failures(&summary("2 passed, 0 skipped")),
+            None,
+            "nothing failed, so nothing to run again"
+        );
+    }
+
+    /// The re-run is exactly one test of one package, through nextest, its process run as uid and
+    /// gid 65534 by a target runner, with its own TMPDIR, built as the job built it.
+    #[test]
+    fn a_test_that_failed_as_root_is_run_once_more_as_an_unprivileged_user() {
+        let rerun = unprivileged_rerun(
+            Path::new("/tmp/work"),
+            Path::new("/tmp/target"),
+            Path::new("/tmp/scratch"),
+            "mandate-marketdata::concurrent_writes",
+            "refuses_root",
+        );
+        assert_eq!(rerun.get_program(), "cargo");
+        let args: Vec<String> = rerun
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "nextest",
+                "run",
+                "--config-file",
+                "/tmp/work/xtask/nextest.toml",
+                "--package",
+                "mandate-marketdata",
+                "--locked",
+                "--no-tests=fail",
+                "-E",
+                "binary_id(=mandate-marketdata::concurrent_writes) & test(=refuses_root)",
+            ]
+        );
+        let envs: BTreeMap<&OsStr, Option<&OsStr>> = rerun.get_envs().collect();
+        let runner = format!(
+            "CARGO_TARGET_{}_UNKNOWN_LINUX_GNU_RUNNER",
+            std::env::consts::ARCH.to_uppercase()
+        );
+        for (name, value) in [
+            (
+                runner.as_str(),
+                "setpriv --reuid=65534 --regid=65534 --clear-groups --",
+            ),
+            ("TMPDIR", "/tmp/scratch"),
+            (CARGO_TARGET_DIR, "/tmp/target"),
+            ("CARGO_INCREMENTAL", "0"),
+            ("CARGO_PROFILE_DEV_DEBUG", "0"),
+            ("CARGO_PROFILE_TEST_DEBUG", "0"),
+        ] {
+            assert_eq!(
+                envs.get(OsStr::new(name)),
+                Some(&Some(OsStr::new(value))),
+                "{name}"
+            );
+        }
     }
 
     /// A caller that exported `CARGO_INCREMENTAL=0`, as CI's rust-cache does for every job, is
