@@ -16,7 +16,13 @@
 //! Each function refuses a member it does not use and a value it cannot read (`AGENTS.md` rule 3);
 //! nothing here computes a money or quantity figure (DEC-138 item 3): the fee reservation is
 //! `mandate-accounting`'s and the fee schedule is `mandate-executor`'s.
+//!
+//! The deployment's confirmed mandate, its effective registrations and its approvers are folded
+//! from the control stream here too ([`control`], [`approvers`]), so the executor process finds
+//! its deployment as the shell does without depending on the shell.
 
+pub mod approvers;
+pub mod control;
 mod error;
 mod mandate;
 mod rules;

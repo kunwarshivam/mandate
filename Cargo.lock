@@ -2116,9 +2116,14 @@ dependencies = [
  "mandate-domain",
  "mandate-executor",
  "mandate-gate-context",
+ "mandate-identity",
+ "mandate-journal",
  "mandate-num",
  "mandate-risk",
+ "mandate-runtime",
+ "mandate-spec",
  "mandate-time",
+ "proptest",
  "thiserror",
 ]
 
@@ -2626,7 +2631,6 @@ dependencies = [
  "mandate-domain",
  "mandate-executor",
  "mandate-gate-inputs",
- "mandate-identity",
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-liquidity",
