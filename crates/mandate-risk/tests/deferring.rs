@@ -218,18 +218,48 @@ proptest! {
 /// The parts of a check the cell's runtime cannot see a fact for (DEC-2388 item 8): the gate
 /// evaluates them on what its caller gives, so a refusal still refuses, but never reports them
 /// passed.
-const UNSEEN: [Deferred; 5] = [
+const UNSEEN: [Deferred; 10] = [
+    Deferred::AgentMode,
+    Deferred::AgentEquity,
     Deferred::ReentryCooldown,
     Deferred::Halt,
+    Deferred::OtherOrders,
+    Deferred::QuoteAsk,
     Deferred::ConductHistory,
     Deferred::RelatedAccounts,
     Deferred::FeeReservation,
+    Deferred::AccountExposure,
 ];
 
 /// Changes `s` so that the unseen part `part` refuses it, and the reason the binding gate gives.
 fn refuse_on(s: &mut Scenario, part: Deferred) -> ReasonCode {
     let instrument = s.proposed.instrument.clone();
     match part {
+        Deferred::AgentMode => {
+            s.agent.mode = mandate_risk::AgentMode::ExitsOnly;
+            ReasonCode::AgentExitsOnly
+        }
+        Deferred::AgentEquity => {
+            s.risk.agent_equity = usd("50");
+            ReasonCode::ConcentrationLimit
+        }
+        Deferred::OtherOrders => {
+            s.account.unknown_orders.insert(instrument);
+            ReasonCode::UnknownOrderInFlight
+        }
+        Deferred::QuoteAsk => {
+            if let Some(quote) = s.market.quote.as_mut() {
+                quote.ask = common::price("200");
+            }
+            ReasonCode::PriceOutsideCollar
+        }
+        Deferred::AccountExposure => {
+            let equity = s.account.equity;
+            s.account
+                .market_values
+                .insert(common::asset(common::INSTRUMENT_1), equity);
+            ReasonCode::GrossExposureLimit
+        }
         Deferred::ReentryCooldown => {
             s.agent
                 .last_exit_fill_at
@@ -276,6 +306,13 @@ fn an_unseen_part_deferred_still_refuses_with_the_binding_reason() {
             (binding.verdict, binding.reason),
             "{part:?}"
         );
+        assert!(
+            advisory
+                .decision
+                .checks
+                .contains(&CheckOutcome::Failed(part.check(), reason)),
+            "{part:?}: a refusing part reads Failed on its check, never Deferred: {advisory:?}"
+        );
     }
 }
 
@@ -306,6 +343,14 @@ fn an_unseen_part_that_passes_reads_as_deferred_on_its_check() {
 
 #[test]
 fn each_unseen_part_belongs_to_the_check_that_reads_it() {
+    assert_eq!(Deferred::AgentMode.check(), Check::AccountAndMode);
+    assert_eq!(Deferred::AgentEquity.check(), Check::UniverseAndLimits);
+    assert_eq!(Deferred::OtherOrders.check(), Check::OrderConstraints);
+    assert_eq!(Deferred::QuoteAsk.check(), Check::MarkAndCollar);
+    assert_eq!(
+        Deferred::AccountExposure.check(),
+        Check::BuyingPowerAndExposure
+    );
     assert_eq!(Deferred::ReentryCooldown.check(), Check::UniverseAndLimits);
     assert_eq!(Deferred::Halt.check(), Check::SessionAndHalt);
     assert_eq!(Deferred::ConductHistory.check(), Check::ConductControls);
@@ -316,14 +361,14 @@ fn each_unseen_part_belongs_to_the_check_that_reads_it() {
     );
 }
 
-/// Over every set of the five unseen parts and the four skipped checks together, an allowed
+/// Over every set of the ten unseen parts and the four skipped checks together, an allowed
 /// opening reports each touched check deferred and every other passed.
 #[test]
 fn no_check_an_unseen_part_touches_reads_as_passed() {
     let s = Scenario::allowing();
     let mut every = ALL.to_vec();
     every.extend(UNSEEN);
-    for mask in 0..(1_u16 << every.len()) {
+    for mask in 0..(1_u32 << every.len()) {
         let set: Vec<Deferred> = every
             .iter()
             .enumerate()

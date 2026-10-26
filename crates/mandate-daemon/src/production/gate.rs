@@ -1,6 +1,6 @@
 //! The deployment's gate dry run over the journaled fold (DEC-2388): `mandate-ports`'s advisory
-//! pass over a context built from [`Facts`], with DEC-2378 item 11's four checks deferred to the
-//! executor's binding gate. It can only narrow: every opening it allows is still judged by the
+//! pass over a context built from [`Facts`], with DEC-2378 item 11's four checks and DEC-2388
+//! item 8's unseen parts deferred to the executor's binding gate. It can only narrow: every opening it allows is still judged by the
 //! binding gate on the account stream (`AGENTS.md` rules 1 and 12), and while any check is
 //! deferred it allows none.
 
@@ -33,12 +33,17 @@ pub const UNJOURNALED: [Deferred; 4] = [
 /// The parts of the gate's checks whose facts the fold does not carry (DEC-2388 items 7 and 8):
 /// evaluated on what the context holds, so a refusal still refuses, and named, so none is ever
 /// reported passed. Each leaves this set only once its fact is folded from the journal.
-pub const UNSEEN: [Deferred; 5] = [
+pub const UNSEEN: [Deferred; 10] = [
+    Deferred::AgentMode,
+    Deferred::AgentEquity,
     Deferred::ReentryCooldown,
     Deferred::Halt,
+    Deferred::OtherOrders,
+    Deferred::QuoteAsk,
     Deferred::ConductHistory,
     Deferred::RelatedAccounts,
     Deferred::FeeReservation,
+    Deferred::AccountExposure,
 ];
 
 const DEFERRED_TO_BINDING: &str = "deferred_to_binding";

@@ -33,7 +33,7 @@
   regular session, in its close window from 15:50, while held or working, or with any fact
   missing or a mark not sane.
 - `crates/mandate-daemon/tests/gate.rs`: the plan's own opening passes the gate's checks, is
-  reported deferred on each of the four checks and the five unseen parts (DEC-2388 item 8), and is
+  reported deferred on each of the four checks and the ten unseen parts (DEC-2388 item 8), with no check reported passed, and is
   denied `deferred_to_binding`; each journaled unseen fact that should refuse is named deferred; the gate's own
   reason first (order and position caps, the collar, a blocked account, the 1x buying power); no
   rule set, a missing fact, or a working order denies; an exit is never denied; a property test

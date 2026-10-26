@@ -858,8 +858,12 @@ pub fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
 }
 
 /// A check, or part of one, the cell's runtime's advisory pass may defer to the executor's binding
-/// gate, because nothing journals its facts yet. The first four are skipped (DEC-2378 item 11);
-/// the rest are evaluated but named (DEC-2388 item 8). The binding gate defers none of them.
+/// gate, because nothing journals its facts yet. The binding gate defers none of them.
+///
+/// The first four are skipped (DEC-2378 item 11). The rest are never skipped (DEC-2388 item 8):
+/// the gate evaluates each on whatever its caller gives it, so a refusal still refuses, but a
+/// caller that cannot see the part's fact names it here and the check it belongs to is never
+/// reported passed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Deferred {
     /// §3.2's instrument items: status, exchange, IPO and PTP, the crypto pair's quote currency,
@@ -871,14 +875,22 @@ pub enum Deferred {
     Participation,
     /// §9.2's day-trade budget, check 8.
     DayTradeBudget,
-    /// The parts below are never skipped (DEC-2388 item 8): the gate evaluates each on whatever
-    /// its caller gives it, so a refusal still refuses, but a caller that cannot see the part's
-    /// fact names it here and the check is never reported passed.
-    ///
+    /// The agent's mode and the risk engine's, and the account's `closing_only` restriction
+    /// (check 1).
+    AgentMode,
+    /// The agent's marked equity, which mandate §5.3's position cap scales by, and the agent's
+    /// instrument restrictions (check 2).
+    AgentEquity,
     /// Mandate §5.3's re-entry cooldown, read from the agent's last exit fill (check 2).
     ReentryCooldown,
     /// §4.4's halt, read from the instrument's status (check 3).
     Halt,
+    /// §5.3 rules 5, 6 and 8 and the `Unknown`-order rule, read from every agent's working and
+    /// unknown orders on the account (check 4).
+    OtherOrders,
+    /// The quote's ask, which a buy's collar is measured from, and a `stale_mark` restriction
+    /// (check 5).
+    QuoteAsk,
     /// §9.6's order-to-fill ratio and opposite-fill interval and the mandate's orders per day,
     /// read from the agent's orders and fills today (check 6).
     ConductHistory,
@@ -886,6 +898,9 @@ pub enum Deferred {
     RelatedAccounts,
     /// §9.5's fee reservation in the buying-power comparison (check 7).
     FeeReservation,
+    /// §9.3's gross exposure: every agent's working opening orders on the account, and the agent's
+    /// marked equity in its own limit (check 7).
+    AccountExposure,
 }
 
 impl Deferred {
@@ -893,14 +908,18 @@ impl Deferred {
     #[must_use]
     pub fn check(self) -> Check {
         match self {
-            Self::Eligibility | Self::LiquidityFloor | Self::ReentryCooldown => {
-                Check::UniverseAndLimits
-            }
+            Self::AgentMode => Check::AccountAndMode,
+            Self::Eligibility
+            | Self::LiquidityFloor
+            | Self::AgentEquity
+            | Self::ReentryCooldown => Check::UniverseAndLimits,
             Self::Halt => Check::SessionAndHalt,
+            Self::OtherOrders => Check::OrderConstraints,
+            Self::QuoteAsk => Check::MarkAndCollar,
             Self::Participation | Self::ConductHistory | Self::RelatedAccounts => {
                 Check::ConductControls
             }
-            Self::FeeReservation => Check::BuyingPowerAndExposure,
+            Self::FeeReservation | Self::AccountExposure => Check::BuyingPowerAndExposure,
             Self::DayTradeBudget => Check::DayTradeBudget,
         }
     }
