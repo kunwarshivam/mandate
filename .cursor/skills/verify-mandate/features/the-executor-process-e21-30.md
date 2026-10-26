@@ -31,7 +31,11 @@
   `draft_bytes_with_pii`; `src/launch.rs` (the account from `run`'s flags or the deployment
   manager's variables) and the `mandate-executord` binary (`run`, `connect-check`, `probe`;
   SIGTERM drains, DEC-2007 item 3).
-- **Tests:** `crates/mandate-executord/tests/universe.rs` (DEC-2823): an admitted thesis copied
+- **Tests:** `crates/mandate-executord/tests/connection_health.rs` (DEC-2832, `src/health.rs`):
+  lost answers in a row or `401`s restrict the account to closing with cause
+  `connection_unavailable`, a good answer resets its class, a `403` is not an authorization
+  failure, and the counter fuzzed against an independent oracle.
+  `crates/mandate-executord/tests/universe.rs` (DEC-2823): an admitted thesis copied
   onto the account stream as `UniverseChanged` once, across passes and a restart; in
   `mandate-executor`, `universe.rs`'s copy tests and its property test that the folded universe is
   the one the thesis records derive.
