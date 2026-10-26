@@ -1010,6 +1010,7 @@ EVENT_CHECKS = (
     "held_mismatch",
     "connection_lifecycle_mismatch",
     "connection_cause_mismatch",
+    "approval_deferral_mismatch",
 )
 RANGE_CHECKS = ("anchor_root_mismatch", "tsa_token_invalid", "segment_manifest_mismatch", "segment_gap")
 # v0.38 (DEC-894): version 2's list gains the range-level `segment_rows_mismatch`; version 1's

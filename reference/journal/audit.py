@@ -638,16 +638,22 @@ def invalid_drafts() -> list[dict]:
 # held hold (a range of its own), and the control stream's own checks.
 LATE_EVENT_CHECKS = {
     "held_mismatch": R0,
+    "approval_deferral_mismatch": R0,
     "connection_lifecycle_mismatch": R0,
     "connection_cause_mismatch": R1,
     "break_glass_cause_mismatch": R1,
 }
 LATE_EVENT_SEQ = {
     "held_mismatch": 14,
+    "approval_deferral_mismatch": 21,
     "connection_lifecycle_mismatch": 17,
     "connection_cause_mismatch": 5,
     "break_glass_cause_mismatch": 9,
 }
+
+
+AGENT_STREAM_CHECKS = ("held_mismatch", "approval_deferral_mismatch")
+"""The late codes reported on an agent stream, whose run verifies an agent-stream range."""
 
 
 def failing_on(code: str, seq: int | None) -> list[dict]:
@@ -655,7 +661,7 @@ def failing_on(code: str, seq: int | None) -> list[dict]:
     agent stream's, so its run verifies an agent-stream range instead of the account stream's."""
     where = LATE_EVENT_CHECKS[code]
     out = []
-    if code == "held_mismatch":
+    if code in AGENT_STREAM_CHECKS:
         out.append(change(f"{R0}.stream_id", AGENT_STREAM))
         out.append(change(f"{R0}.from_seq", 12))
         out.append(change(f"{R0}.to_seq", 30))

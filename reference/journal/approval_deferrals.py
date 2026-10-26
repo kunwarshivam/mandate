@@ -22,7 +22,7 @@ from common import DEFERRED_PARTS, Violation, apply_change, change, delete, dige
 from control import check_of, draft_for, reported, violations
 from requests import PLAN, V1, V2, base_drafts, oracle_hash, restated
 
-SPEC = "docs/specs/journal.md v0.92 §9.6 rules 291 and 292 (DEC-2515)"
+SPEC = "docs/specs/journal.md v0.92 §9.6 rules 291 and 292 (DEC-2515), and v0.103 §11's approval_deferral_mismatch (DEC-2522)"
 V3 = "requested_v3"
 DEFERRED = "payload.content.deferred_to_binding"
 NAMED = ["halt", "liquidity_floor", "participation"]
@@ -263,6 +263,96 @@ def batch_violations(
     return out
 
 
+# --------------------------------------------------------------------------- §11's approval_deferral_mismatch
+
+
+def range_mismatches(events: list[dict], from_seq: int, skip: frozenset[str] = frozenset()) -> list[int]:
+    """§11's `approval_deferral_mismatch` over one agent-stream range in `seq` order from `from_seq`:
+    the index of every `ApprovalRequested` that breaks rule 292 across batches. Only events earlier
+    in the range are in hand, so a cause outside them is checked only on a full chain. A request
+    fails when it names no cause; when its cause is an earlier event that is not a `DecisionMade`;
+    when, on a full chain, no earlier event is its cause; and when its deferrals, absent read as
+    none, are not its decision's."""
+    seen: dict[str, dict] = {}
+    out = []
+    for i, event in enumerate(events):
+        if event["event_type"] == "ApprovalRequested":
+            cause_id = event.get("causation_id")
+            cause = seen.get(cause_id) if cause_id is not None else None
+            clauses = {
+                "verify.approval_deferral.uncaused": cause_id is None,
+                "verify.approval_deferral.unresolved": cause_id is not None and cause is None and from_seq == 1,
+                "verify.approval_deferral.event_type": cause is not None and cause["event_type"] != "DecisionMade",
+                "verify.approval_deferral.differs": cause is not None
+                and cause["event_type"] == "DecisionMade"
+                and deferrals(event["payload"]["content"]) != deferrals(cause["payload"]),
+            }
+            if any(broken and clause not in skip for clause, broken in clauses.items()):
+                out.append(i)
+        seen[event["event_id"]] = event
+    return out
+
+
+def range_event(event_id: str, event_type: str, version: int, payload: dict, cause: str | None = None) -> dict:
+    return {"event_id": event_id, "event_type": event_type, "schema_version": version, "causation_id": cause, "payload": payload}
+
+
+RANGE_IDS = {
+    "deferring": "01J8Z3R0A000000000000000D1",
+    "plain": "01J8Z3R0A000000000000000D2",
+    "request": "01J8Z3R0A000000000000000Q1",
+    "other": "01J8Z3R0A000000000000000E1",
+    "elsewhere": "01J8Z3R0A000000000000000Z9",
+}
+
+
+def range_cases() -> list[dict]:
+    """Each range's events, from its `from_seq`, and the index of every request §11 reports."""
+    ids = RANGE_IDS
+    deferring = range_event(ids["deferring"], "DecisionMade", 3, {"deferred_to_binding": list(NAMED)})
+    plain = range_event(ids["plain"], "DecisionMade", 1, {})
+    other = range_event(ids["other"], "AgentModeChanged", 1, {})
+
+    def request(version: int, names: list[str] | None, cause: str | None) -> dict:
+        content = {} if names is None else {"deferred_to_binding": list(names)}
+        return range_event(ids["request"], "ApprovalRequested", version, {"content": content}, cause)
+
+    def case(name, events, expect, from_seq=1):
+        return {"name": name, "from_seq": from_seq, "events": events, "expect": expect}
+
+    return [
+        case("a_deferring_decision_then_its_request", [deferring, other, request(3, NAMED, ids["deferring"])], []),
+        case("a_plain_decision_then_its_version_2_request", [plain, request(2, None, ids["plain"])], []),
+        case("a_version_2_request_hides_its_decisions_deferrals", [deferring, request(2, None, ids["deferring"])], [1]),
+        case("a_version_1_request_hides_its_decisions_deferrals", [deferring, request(1, None, ids["deferring"])], [1]),
+        case(
+            "a_request_names_another_deferral",
+            [deferring, request(3, ["agent_mode", "liquidity_floor", "participation"], ids["deferring"])],
+            [1],
+        ),
+        case("a_request_names_deferrals_its_plain_decision_did_not", [plain, request(3, NAMED, ids["plain"])], [1]),
+        case("a_request_names_no_cause", [deferring, request(3, NAMED, None)], [1]),
+        case("a_request_names_an_event_that_is_not_a_decision", [other, request(2, None, ids["other"])], [1]),
+        case("a_request_before_its_decision_on_a_full_chain", [request(3, NAMED, ids["deferring"]), deferring], [0]),
+        case("a_full_chain_request_names_no_event_in_it", [request(2, None, ids["elsewhere"])], [0]),
+        case("a_later_range_request_whose_decision_is_before_it", [request(2, None, ids["elsewhere"])], [], 40),
+        case("a_later_range_holds_its_decision_and_disagrees", [deferring, request(2, None, ids["deferring"])], [1], 40),
+        case(
+            "two_requests_both_reported",
+            [deferring, request(2, None, ids["deferring"]), request(3, ["halt"], ids["deferring"])],
+            [1, 2],
+        ),
+    ]
+
+
+RANGE_MUTANTS = (
+    "verify.approval_deferral.uncaused",
+    "verify.approval_deferral.unresolved",
+    "verify.approval_deferral.event_type",
+    "verify.approval_deferral.differs",
+)
+
+
 # --------------------------------------------------------------------------- independent oracle
 
 ORACLE_CHECKS = (
@@ -273,6 +363,7 @@ ORACLE_CHECKS = (
     "invalid_drafts",
     "valid_drafts",
     "batches",
+    "ranges",
 )
 
 
@@ -299,6 +390,29 @@ def expected_batch(section: dict, case: dict) -> dict:
     theirs = set(decision["payload"].get("deferred_to_binding") or ())
     mine = set(request["payload"]["content"].get("deferred_to_binding") or ())
     return {"outcome": "Valid"} if theirs == mine else refused(0 if case["order"] == "request_first" else 1)
+
+
+def expected_range(case: dict) -> list[int]:
+    """The oracle's own reading of §11's check: each request's cause looked up among every event
+    before it by index, and the two sides' deferrals compared as sets."""
+    out = []
+    events = case["events"]
+    for i, event in enumerate(events):
+        if event["event_type"] != "ApprovalRequested":
+            continue
+        before = [e for e in events[:i] if e["event_id"] == event["causation_id"]]
+        if event["causation_id"] is None:
+            out.append(i)
+        elif not before:
+            if case["from_seq"] == 1:
+                out.append(i)
+        elif before[-1]["event_type"] != "DecisionMade":
+            out.append(i)
+        elif set(before[-1]["payload"].get("deferred_to_binding") or ()) != set(
+            event["payload"]["content"].get("deferred_to_binding") or ()
+        ):
+            out.append(i)
+    return out
 
 
 def check_section(section: dict, decide: Validator) -> list[str]:
@@ -335,6 +449,10 @@ def check_section(section: dict, decide: Validator) -> list[str]:
         want = case["expect"]
         if got != want or want != expected_batch(section, case):
             problems.append(found("batches", f"{case['name']}: stated {want}, got {got}, oracle {expected_batch(section, case)}"))
+    for case in section["ranges"]:
+        got = range_mismatches(case["events"], case["from_seq"])
+        if got != case["expect"] or case["expect"] != expected_range(case):
+            problems.append(found("ranges", f"{case['name']}: stated {case['expect']}, got {got}, oracle {expected_range(case)}"))
     return problems
 
 
@@ -388,6 +506,11 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             "batches",
             mutated(lambda s: case(s, "batches", "v2_request_hides_a_deferral").update(expect={"outcome": "Valid"})),
         ),
+        (
+            "a range whose request hides its decision's deferrals is stated passing",
+            "ranges",
+            mutated(lambda s: case(s, "ranges", "a_version_2_request_hides_its_decisions_deferrals").update(expect=[])),
+        ),
     ]
 
 
@@ -408,6 +531,10 @@ def run_mutants(section: dict, decide: Validator) -> list[str]:
             caught |= got != c["expect"]
         if not caught:
             escaped.append(f"approval deferral validator mutant {mutant}")
+    for mutant in RANGE_MUTANTS:
+        skip = frozenset([mutant])
+        if all(range_mismatches(c["events"], c["from_seq"], skip) == c["expect"] for c in section["ranges"]):
+            escaped.append(f"approval deferral range mutant {mutant}")
     registered = vector_mutants(section)
     for check in ORACLE_CHECKS:
         if not any(c == check for _, c, _ in registered):
@@ -433,4 +560,5 @@ def build_section(decisions: dict[str, dict]) -> dict:
         "invalid_drafts": invalid_drafts(),
         "valid_drafts": valid_drafts(),
         "batches": batches(),
+        "ranges": range_cases(),
     }
