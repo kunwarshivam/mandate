@@ -11,10 +11,11 @@
  */
 import type { WorkspaceClient } from "./client";
 import type { Classification } from "./confirm";
+import type { PasskeyStepUp } from "./passkey";
 import { type StepUpChallenge, cliConfirmEvidence } from "./step-up";
 import type { JsonObject, PreparedCommand } from "./types";
 import type { AgentMode, ContentRef, ShownEnvironment } from "@/fixtures/types";
-import type { ApprovalRecord, CommandKind, CommandRecord, ConfirmRecord } from "@/lib/mock-runtime";
+import type { ApprovalRecord, CommandKind, CommandRecord, ConfirmRecord, DeployToPaperRecord } from "@/lib/mock-runtime";
 import { sha256Hex } from "@/lib/sha256";
 
 export type Prepared = { ok: true; commands: PreparedCommand[] } | { ok: false; reason: string };
@@ -33,7 +34,7 @@ export const UI_BUILD = "owlhead-web/E11-9";
 const ref = (text: string): ContentRef => `sha256:${sha256Hex(text)}`;
 
 /** The spec §5 `record`: the rendered screen as a content ref, and the build that rendered it. */
-export function recordRef(record: CommandRecord | ApprovalRecord | ConfirmRecord): { artifact: ContentRef; ui_build: ContentRef } {
+export function recordRef(record: CommandRecord | ApprovalRecord | ConfirmRecord | DeployToPaperRecord): { artifact: ContentRef; ui_build: ContentRef } {
   return { artifact: ref(JSON.stringify(record)), ui_build: ref(UI_BUILD) };
 }
 
@@ -113,6 +114,8 @@ export interface ConfirmInput {
   base: ContentRef | null;
   record: ConfirmRecord;
   served: ServedConfirmation;
+  /** The passkey's evidence and assertion (DEC-2128), or `null` when no passkey was asked, which the server answers `step_up_required` for a risk-increasing version. */
+  stepUp: PasskeyStepUp | null;
 }
 
 /**
@@ -120,7 +123,8 @@ export interface ConfirmInput {
  * it: every required member and no other. `screen_digest` and `classification_shown` are the served
  * confirmation's, passed through and never computed here: the digest proves the screen rendered the
  * server's data, which only the server's own value can. `warnings_acknowledged` is empty: the summary
- * shows no warning to acknowledge. `step_up` is `null` until E9-4.
+ * shows no warning to acknowledge. Under passkey step-up the body carries `step_up` and its
+ * `step_up_assertion` (DEC-2128 item 1); without, `step_up` is `null` and no assertion is sent.
  */
 export function prepareConfirm(client: WorkspaceClient, input: ConfirmInput): PreparedCommand {
   const { record, served } = input;
@@ -135,7 +139,35 @@ export function prepareConfirm(client: WorkspaceClient, input: ConfirmInput): Pr
       classification_shown: served.classification,
       screen_digest: served.screen_digest,
       record: recordRef(record),
-      step_up: null,
+      ...(input.stepUp ? { step_up: { ...input.stepUp.step_up }, step_up_assertion: { ...input.stepUp.step_up_assertion } } : { step_up: null }),
+    },
+  );
+}
+
+/** What a deployment binds (spec §3.11 item 11): the agent's id, its confirmed version, the B3 record, and the passkey's step-up. */
+export interface DeployInput {
+  agentId: string;
+  version: ContentRef;
+  record: DeployToPaperRecord;
+  stepUp: PasskeyStepUp;
+}
+
+/**
+ * `POST /agents` (§4.2, §3.11 item 11): exactly `agent_id`, `mandate_version`, `backtest_id`,
+ * `record`, `step_up` and `step_up_assertion`. The backtest is the one B3 showed, or `null`; the
+ * server records it and never reads it. Paper only: the server refuses a `live` document.
+ */
+export function prepareDeploy(client: WorkspaceClient, input: DeployInput): PreparedCommand {
+  return client.prepare(
+    "deploy",
+    {},
+    {
+      agent_id: input.agentId,
+      mandate_version: input.version,
+      backtest_id: input.record.backtestId,
+      record: recordRef(input.record),
+      step_up: { ...input.stepUp.step_up },
+      step_up_assertion: { ...input.stepUp.step_up_assertion },
     },
   );
 }

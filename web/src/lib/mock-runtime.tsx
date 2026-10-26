@@ -83,6 +83,8 @@ export interface SetUpStep {
   recordedAt?: Iso;
   reason?: string;
   rule?: string;
+  /** Over the API, while the owner's passkey check is open: nothing has been sent to the deployment yet. */
+  awaitingPasskey?: boolean;
 }
 
 /** Step 1, `MandateVersionCreated` (spec §4.1): the version, its base, its classification against it, and its validation. */
