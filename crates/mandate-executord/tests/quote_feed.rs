@@ -278,6 +278,14 @@ fn the_paper_serve_path_reads_quotes_over_its_broker() -> Result<(), Error> {
         )
     );
     assert!(fixture::wiring()?.quotes.observe(&aapl, now).is_err());
+    assert_eq!(
+        (
+            paper_wiring(&broker, Fixed(now))?.quotes.feed(),
+            fixture::wiring()?.quotes.feed()
+        ),
+        ("iex", "none"),
+        "a mark names its feed (DEC-2380 item 3)"
+    );
     Ok(())
 }
 

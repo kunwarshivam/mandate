@@ -16,7 +16,7 @@ use mandate_executord::quotes::QuoteFeed;
 use mandate_num::{Price, Qty};
 use mandate_time::UtcNanos;
 use support::{
-    AAPL, ACCOUNT_STREAM, Allowing, Error, Journal, NOON, OPENED, Paper, TwoPercentStop, at,
+    AAPL, ACCOUNT_STREAM, Allowing, Error, Fault, Journal, NOON, OPENED, Paper, TwoPercentStop, at,
     deployed, start_wired, tick, wired,
 };
 
@@ -178,5 +178,50 @@ fn an_instrument_without_a_quote_or_a_class_is_not_marked() -> Result<(), Error>
 fn a_wiring_naming_no_instrument_marks_nothing() -> Result<(), Error> {
     let journal = marked(Vec::new(), vec![AAPL], &[NOON, "2026-09-21T15:00:30Z"])?;
     assert!(marks_of(&journal).is_empty());
+    Ok(())
+}
+
+/// A mark whose append fails holds the pass and raises the journal's one opaque alert for the
+/// outage, none while it goes on; once appends succeed the instrument is marked again.
+#[test]
+fn a_mark_in_doubt_raises_one_alert_an_outage() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    let mut wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    wiring.quotes = Box::new(Quoting(vec![AAPL]));
+    wiring.marked = Box::new(Naming(vec![AAPL]));
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    process.step(at(NOON)?);
+    journal.fail_next(&[Fault::Unavailable; 2]);
+    let mut alerts = Vec::new();
+    for (index, clock) in [
+        "2026-09-21T15:00:15Z",
+        "2026-09-21T15:00:30Z",
+        "2026-09-21T15:00:45Z",
+    ]
+    .iter()
+    .enumerate()
+    {
+        tick(&journal, &format!("d{index}"), clock)?;
+        let raised = process
+            .step(at(clock)?)
+            .iter()
+            .filter(|alert| alert.key == "journal_unavailable" && alert.subject.is_none())
+            .count();
+        alerts.push(raised);
+    }
+    assert_eq!(alerts, vec![1, 0, 0]);
+    let clocks: Vec<Option<String>> = marks_of(&journal)
+        .iter()
+        .map(|(_, payload)| member(payload, "risk_clock"))
+        .collect();
+    assert_eq!(
+        clocks,
+        vec![
+            Some("2026-09-21T15:00:00.000000000Z".to_owned()),
+            Some("2026-09-21T15:00:45.000000000Z".to_owned()),
+        ]
+    );
     Ok(())
 }
