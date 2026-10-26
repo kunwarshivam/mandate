@@ -770,11 +770,7 @@ impl<'c> AccountRiskFold<'c> {
         row: &StoredEvent,
         payload: &Object,
     ) -> Result<Vec<RiskAppend>, UnreadableCause> {
-        let ours = payload
-            .get("client_order_id")
-            .and_then(Value::as_str)
-            .is_some_and(|order| self.own.contains(order));
-        if !ours {
+        if !self.ours(payload) {
             return Ok(Vec::new());
         }
         let fill_id = payload
@@ -843,11 +839,7 @@ impl<'c> AccountRiskFold<'c> {
         row: &StoredEvent,
         payload: &Object,
     ) -> Result<Vec<RiskAppend>, UnreadableCause> {
-        let ours = payload
-            .get("client_order_id")
-            .and_then(Value::as_str)
-            .is_some_and(|order| self.own.contains(order));
-        if !ours {
+        if !self.ours(payload) {
             return Ok(Vec::new());
         }
         let simulated = payload.get("simulated") == Some(&Value::Bool(true))
@@ -928,6 +920,14 @@ impl<'c> AccountRiskFold<'c> {
         self.records(row, clock, &outcome)
     }
 
+    /// Whether the fill or fee `payload` names one of the agent's own orders (DEC-2393 item 1).
+    fn ours(&self, payload: &Object) -> bool {
+        payload
+            .get("client_order_id")
+            .and_then(Value::as_str)
+            .is_some_and(|order| self.own.contains(order))
+    }
+
     /// Whether a mark in `session` counts (mandate spec §5.2): any for crypto, the regular session
     /// for equities.
     fn counts(&self, session: MarketSession) -> bool {
@@ -935,8 +935,10 @@ impl<'c> AccountRiskFold<'c> {
     }
 
     /// Steps `row`, a risk input of kind `kind`, or holds it while the fold is unpriced (DEC-2834
-    /// item 2). A counted sane mark of the bound instrument prices the held inputs instead (item
-    /// 3); a mark naming another instrument is refused at once, as it is when priced (item 4).
+    /// item 2). Whose a fill or fee is, and whether a mark is from before the opening instant, is
+    /// decided where the row is, as a priced fold decides it: another's fill or fee and an earlier
+    /// mark step nothing and are not held. A counted sane mark of the bound instrument prices the
+    /// held inputs (item 3); a mark naming another instrument is refused at once (item 4).
     fn stepped(
         &mut self,
         row: &StoredEvent,
@@ -946,11 +948,17 @@ impl<'c> AccountRiskFold<'c> {
         if self.held.is_none() {
             return self.step_input(row, payload, kind);
         }
+        if matches!(kind, Stepped::Fill | Stepped::Fee) && !self.ours(payload) {
+            return Ok(Vec::new());
+        }
         if let Stepped::Mark = kind {
             let instrument = payload
                 .get("instrument_id")
                 .and_then(Value::as_str)
                 .ok_or(UnreadableCause::Undecodable)?;
+            if whole_second(payload, "risk_clock")? < self.opened_at {
+                return Ok(Vec::new());
+            }
             if self.instrument.as_deref() != Some(instrument) {
                 return Err(UnreadableCause::RefusedToDecide);
             }

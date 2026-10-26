@@ -3377,13 +3377,18 @@ enum Flat {
 }
 
 fn flat_input() -> impl proptest::strategy::Strategy<Value = Flat> {
-    use proptest::prelude::*;
-    prop_oneof![
-        (1_u8..=50).prop_map(Flat::Buy),
-        (1_u8..=50).prop_map(Flat::Sell),
-        Just(Flat::Tick),
-        (20_u16..=180, any::<bool>(), any::<bool>())
-            .prop_map(|(bid, sane, regular)| Flat::Mark(bid, sane, regular)),
+    proptest::prop_oneof![
+        proptest::strategy::Strategy::prop_map(1_u8..=50, Flat::Buy),
+        proptest::strategy::Strategy::prop_map(1_u8..=50, Flat::Sell),
+        proptest::strategy::Just(Flat::Tick),
+        proptest::strategy::Strategy::prop_map(
+            (
+                20_u16..=180,
+                proptest::arbitrary::any::<bool>(),
+                proptest::arbitrary::any::<bool>()
+            ),
+            |(bid, sane, regular)| Flat::Mark(bid, sane, regular)
+        ),
     ]
 }
 
@@ -3433,36 +3438,61 @@ fn flat_rows(inputs: &[Flat], oracle: bool) -> Vec<(String, Flat)> {
     timed
 }
 
-/// Folds `timed` on a flat fold, journaling each step's records right after it, and returns the
-/// records, the view, and whether any step returned a record while the view was unpriced.
-fn fold_flat(timed: &[(String, Flat)]) -> (Vec<(String, Value)>, RiskView, bool) {
+/// `cents` as the canonical decimal dollars `Usd::parse` takes, with no trailing zero.
+fn canonical_cents(cents: i64) -> String {
+    match (cents / 100, cents % 100) {
+        (dollars, 0) => dollars.to_string(),
+        (dollars, part) if part % 10 == 0 => format!("{dollars}.{}", part / 10),
+        (dollars, part) => format!("{dollars}.{part:02}"),
+    }
+}
+
+/// A commission of 0.50 on every generated fill.
+const COMMISSION: &str =
+    r#"[{"kind":"commission","amount":"0.5","asset":"USD","status":"charged"}]"#;
+
+/// What `fold_flat` saw: the records journaled, the view at the end, whether anything was returned,
+/// owed or held beyond `exits_only` while unpriced, and E at the end by its own cents arithmetic:
+/// the allocation, less each buy's cost and each commission, plus each sale's proceeds, plus the
+/// quantity held at the closing mark's 95.
+type Folded = (Vec<(String, Value)>, RiskView, bool, i64);
+
+/// Folds `timed` on a flat fold, journaling each step's records right after it.
+fn fold_flat(timed: &[(String, Flat)]) -> Folded {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
     let (mut seq, mut held, mut orders) = (2_u64, 0_u32, 0_u32);
     let mut records = Vec::new();
     let mut while_unpriced = false;
+    let mut cents = 1_000_000_i64;
     for (clock, input) in timed {
         let mut rows = Vec::new();
         match input {
             Flat::Buy(qty) | Flat::Sell(qty) => {
-                let side = if matches!(input, Flat::Buy(_)) {
-                    "buy"
-                } else {
-                    "sell"
-                };
-                if side == "sell" && u32::from(*qty) > held {
+                let buy = matches!(input, Flat::Buy(_));
+                if !buy && u32::from(*qty) > held {
                     continue;
                 }
-                held = if side == "buy" {
-                    held + u32::from(*qty)
+                let notional = i64::from(*qty) * 10_000;
+                if buy {
+                    held += u32::from(*qty);
+                    cents -= notional + 50;
                 } else {
-                    held - u32::from(*qty)
-                };
+                    held -= u32::from(*qty);
+                    cents += notional - 50;
+                }
                 orders += 1;
                 let order = format!("o-{orders}");
-                let qty = qty.to_string();
+                let (side, qty) = (if buy { "buy" } else { "sell" }, qty.to_string());
                 rows.extend(own_order(seq, AGENT, &order, XYZ, side, &qty));
-                rows.push(fill(seq + 2, &order, XYZ, (side, &qty, "100"), clock, "[]"));
+                rows.push(fill(
+                    seq + 2,
+                    &order,
+                    XYZ,
+                    (side, &qty, "100"),
+                    clock,
+                    COMMISSION,
+                ));
             }
             Flat::Tick => rows.push(tick(seq, clock)),
             Flat::Mark(bid, sane, regular) => {
@@ -3473,14 +3503,15 @@ fn fold_flat(timed: &[(String, Flat)]) -> (Vec<(String, Value)>, RiskView, bool)
         for row in rows {
             let appends = fold.fold(&row).unwrap();
             seq = row.seq + 1;
-            let unpriced = matches!(
-                fold.view(),
-                RiskView::Unreadable {
-                    cause: UnreadableCause::Unpriced,
-                    ..
-                }
-            );
-            while_unpriced |= unpriced && !appends.is_empty();
+            if let RiskView::Unreadable {
+                cause: UnreadableCause::Unpriced,
+                mode,
+                ..
+            } = fold.view()
+            {
+                while_unpriced |=
+                    !appends.is_empty() || fold.owed().count() > 0 || *mode != AgentMode::ExitsOnly;
+            }
             for append in &appends {
                 let record = appended(seq, append);
                 let body = parse(&record.body).unwrap();
@@ -3493,7 +3524,8 @@ fn fold_flat(timed: &[(String, Flat)]) -> (Vec<(String, Value)>, RiskView, bool)
             }
         }
     }
-    (records, fold.view().clone(), while_unpriced)
+    cents += i64::from(held) * 9_500;
+    (records, fold.view().clone(), while_unpriced, cents)
 }
 
 proptest::proptest! {
@@ -3506,9 +3538,9 @@ proptest::proptest! {
     fn an_unpriced_fold_trips_nothing_and_prices_as_the_oracle(
         inputs in proptest::collection::vec(flat_input(), 1..25),
     ) {
-        let (records, view, while_unpriced) = fold_flat(&flat_rows(&inputs, false));
-        let (expected, oracle, _) = fold_flat(&flat_rows(&inputs, true));
-        proptest::prop_assert!(!while_unpriced, "a record while unpriced");
+        let (records, view, while_unpriced, cents) = fold_flat(&flat_rows(&inputs, false));
+        let (expected, oracle, _, _) = fold_flat(&flat_rows(&inputs, true));
+        proptest::prop_assert!(!while_unpriced, "a record, an owed record or a hold while unpriced");
         let (RiskView::Readable { snapshot, .. }, RiskView::Readable { snapshot: want, .. }) =
             (&view, &oracle)
         else {
@@ -3518,5 +3550,77 @@ proptest::proptest! {
         };
         proptest::prop_assert_eq!(snapshot, want);
         proptest::prop_assert_eq!(records, expected);
+        let e = Usd::parse(&canonical_cents(cents)).unwrap();
+        proptest::prop_assert_eq!(snapshot.agent_equity, e, "E by the accumulator");
     }
+}
+
+/// DEC-2834, decided where each row is: while unpriced, a mark from before the opening instant does
+/// not price the fold, a fill of an order whose request and submission come after it is not the
+/// agent's, and a fill read twice is stepped once. The first counted sane mark prices the rest.
+#[test]
+fn an_unpriced_fold_reads_each_held_row_as_a_priced_one_would() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    let mut rows: Vec<StoredEvent> = own_order(2, AGENT, "o-1", XYZ, "buy", "10").into();
+    let filled = fill(4, "o-1", XYZ, ("buy", "10", "100"), AT_1, "[]");
+    rows.push(filled.clone());
+    rows.push(StoredEvent { seq: 5, ..filled });
+    rows.push(mark(
+        6,
+        XYZ,
+        "2026-09-22T14:29:00.000000000Z",
+        "50",
+        true,
+        "regular",
+    ));
+    rows.push(fill(7, "o-2", XYZ, ("buy", "5", "100"), AT_1, "[]"));
+    rows.extend(own_order(8, AGENT, "o-2", XYZ, "buy", "5"));
+    for row in &rows {
+        fold.fold(row).unwrap();
+    }
+    assert_eq!(unreadable(fold.view()), (UnreadableCause::Unpriced, 9));
+    fold.fold(&mark(10, XYZ, AT_2, "90", true, "regular"))
+        .unwrap();
+    assert_eq!(
+        equity(fold.view()),
+        "9900",
+        "10000 − 1000 + 10 × 90: o-1's fill once, o-2's not the agent's where it was read"
+    );
+}
+
+/// DEC-2834 item 3: a held tick that crosses New York midnight starts the risk day when the fold is
+/// priced, with E₀ the priced E.
+#[test]
+fn a_held_midnight_starts_the_day_on_the_priced_equity() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    for row in own_order(2, AGENT, "o-1", XYZ, "buy", "10") {
+        fold.fold(&row).unwrap();
+    }
+    fold.fold(&fill(4, "o-1", XYZ, ("buy", "10", "100"), AT_1, "[]"))
+        .unwrap();
+    assert_eq!(
+        fold.fold(&tick(5, "2026-09-23T04:00:00.000000000Z"))
+            .unwrap(),
+        Vec::new()
+    );
+    let appends = fold
+        .fold(&mark(
+            6,
+            XYZ,
+            "2026-09-23T14:31:00.000000000Z",
+            "90",
+            true,
+            "regular",
+        ))
+        .unwrap();
+    let day = appends
+        .iter()
+        .find(|append| append.event_type == "RiskDayStarted")
+        .expect("the held midnight's day start");
+    assert_eq!(
+        day.payload.get("day_start_equity").and_then(Value::as_str),
+        Some("9900")
+    );
 }
