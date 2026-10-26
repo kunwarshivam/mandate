@@ -99,6 +99,10 @@ crate::wire::rules!(none: PauseRequest, HoldRequest, EndDelegationRequest, LiftH
 crate::wire::rules!(none: ResumeRequest, AcknowledgeRequest, OwnerRequest, StepUpChallengeRequest);
 
 /// `POST /mandate-versions/{mandate_version}/confirm` (§5.1): each confirmed path is a pointer.
+/// `step_up_assertion` is optional, an absent one read as `null`, and is carried only beside
+/// `passkey` evidence ([DEC-2128] item 1).
+///
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(remote = "Self", deny_unknown_fields)]
 pub struct ConfirmRequest {
@@ -108,6 +112,8 @@ pub struct ConfirmRequest {
     pub base_version: Option<Ref>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub step_up: Option<StepUpEvidence>,
+    #[serde(default)]
+    pub step_up_assertion: Option<StepUpAssertion>,
     pub confirmed_paths: Vec<String>,
     pub warnings_acknowledged: Vec<Id>,
     pub classification_shown: Classification,
@@ -311,6 +317,29 @@ impl Rules for ConfirmRequest {
             let at = format!("{at}/confirmed_paths/{index}");
             check.rule(is_pointer(path, false), &at, "pattern");
         }
+        assertion_rules(
+            self.step_up.as_ref(),
+            self.step_up_assertion.as_ref(),
+            at,
+            check,
+        );
+    }
+}
+
+/// DEC-2126 item 1, as DEC-2128 item 1 applies it: an assertion is carried only beside `passkey`
+/// evidence, else one violation at `/step_up_assertion`, and its own members are checked.
+fn assertion_rules(
+    evidence: Option<&StepUpEvidence>,
+    assertion: Option<&StepUpAssertion>,
+    at: &str,
+    check: &mut Check,
+) {
+    if let Some(assertion) = assertion {
+        let rests_on_a_passkey =
+            evidence.is_some_and(|evidence| evidence.method == StepUpMethod::Passkey);
+        let at = format!("{at}/step_up_assertion");
+        check.rule(rests_on_a_passkey, &at, "condition");
+        assertion.rules(&at, check);
     }
 }
 
@@ -358,18 +387,12 @@ impl Rules for OauthStartRequest {
             && version.bytes().all(|b| b.is_ascii_digit())
             && !version.starts_with('0');
         check.rule(holds, &format!("{at}/disclosure/version"), "pattern");
-        if let Some(assertion) = &self.step_up_assertion {
-            let rests_on_a_passkey = self
-                .step_up
-                .as_ref()
-                .is_some_and(|evidence| evidence.method == StepUpMethod::Passkey);
-            check.rule(
-                rests_on_a_passkey,
-                &format!("{at}/step_up_assertion"),
-                "condition",
-            );
-            assertion.rules(&format!("{at}/step_up_assertion"), check);
-        }
+        assertion_rules(
+            self.step_up.as_ref(),
+            self.step_up_assertion.as_ref(),
+            at,
+            check,
+        );
     }
 }
 

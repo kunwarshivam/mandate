@@ -3,8 +3,14 @@
 //! judged as the CLI judges them, step-up through the port last, and recorded on the control
 //! stream, with the record in the store, before the answer. Every expected id, version, digest,
 //! and member below is computed here from the spec's own definitions, not by the server's code.
+//!
+//! A confirm under passkey step-up ([DEC-2128] items 1 to 3) runs against the server's real
+//! binding, its challenge from the challenge route and signed by a software authenticator.
+//!
+//! [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
 
 mod common;
+mod support_passkey;
 
 use std::collections::BTreeSet;
 use std::os::unix::fs::PermissionsExt;
@@ -15,12 +21,16 @@ use mandate_api::envelope::StepUpEvidence;
 use mandate_api::idempotency::{Derivation, IdempotencyKey, event_id};
 use mandate_api::problem::{CurrentBase, Effect, Problem, ProblemCode, Violation};
 use mandate_api::wire::{Id, decode};
+use mandate_api_server::challenges::Challenges;
 use mandate_api_server::config::{SESSION_KEY_FILE, read_session_key};
+use mandate_api_server::confirm::CliConfirm;
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
+use mandate_api_server::methods::{Methods, Passkey};
 use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::{COOKIE_NAME, OsRandom, Sessions};
 use mandate_api_server::stepup::{Action, Judged, StepUp, Unbound};
+use mandate_api_server::subject::{LinkRefusal, NamesPrincipal};
 use mandate_api_server::token::{FixedKeys, Issuer};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_authn::{Algorithm, IssuerConfig};
@@ -33,8 +43,9 @@ use mandate_identity::{
 };
 use mandate_identity_seal::Seal;
 use mandate_identity_testkit::{StaticLookup, membership, session};
-use mandate_journal::{ArtifactRef, Draft, StoredEvent, get_artifact};
+use mandate_journal::{ArtifactRef, ArtifactSource, Draft, StoredEvent, get_artifact};
 use mandate_time::UtcNanos;
+use support_passkey::{CREDENTIAL, Signer, enrol, enrolled, unb64url};
 
 const APP: &str = "https://app.owlhead.test";
 const T0: i64 = 1_791_000_000;
@@ -89,6 +100,16 @@ struct Fixture {
     store: Arc<Objects<FsArtifactStore>>,
     sessions: Arc<Sessions>,
     asked: Arc<Accepting>,
+    challenges: Arc<Challenges>,
+}
+
+/// Subject links that name no one, so no `cli_confirm` evidence counts.
+struct Unlinked;
+
+impl NamesPrincipal for Unlinked {
+    fn names(&self, _who: PrincipalId) -> Result<bool, LinkRefusal> {
+        Ok(false)
+    }
 }
 
 static DIRS: Mutex<u32> = Mutex::new(0);
@@ -98,6 +119,8 @@ static DIRS: Mutex<u32> = Mutex::new(0);
 enum Port {
     Accepting,
     Unbound,
+    /// The server's real binding, as `main.rs` binds it (DEC-2126 item 2).
+    Methods,
 }
 
 fn fixture() -> Fixture {
@@ -135,9 +158,21 @@ fn built(port: Port, with_store: bool) -> Fixture {
     )
     .expect("the issuer");
     let asked = Arc::new(Accepting::default());
+    let challenges: Arc<Challenges> = Arc::default();
     let step_up: Arc<dyn StepUp> = match port {
         Port::Accepting => Arc::clone(&asked) as Arc<dyn StepUp>,
         Port::Unbound => Arc::new(Unbound),
+        Port::Methods => Arc::new(Methods {
+            passkey: Passkey {
+                challenges: Arc::clone(&challenges),
+                rp: support_passkey::rp(),
+                keys: Some(Arc::clone(&store) as Arc<dyn ArtifactSource + Send + Sync>),
+            },
+            cli_confirm: CliConfirm {
+                challenges: Arc::clone(&challenges),
+                links: Arc::new(Unlinked),
+            },
+        }),
     };
     let app = App {
         settings: Settings {
@@ -153,7 +188,7 @@ fn built(port: Port, with_store: bool) -> Fixture {
         artifacts: None,
         objects: with_store.then(|| Arc::clone(&store) as Arc<dyn ObjectStore>),
         step_up,
-        challenges: Arc::default(),
+        challenges: Arc::clone(&challenges),
         connect: None,
         reduction: Arc::default(),
     };
@@ -163,6 +198,7 @@ fn built(port: Port, with_store: bool) -> Fixture {
         store,
         sessions,
         asked,
+        challenges,
     };
     seed(&f);
     f
@@ -1614,4 +1650,293 @@ fn a_version_2_deploy_is_appended_only_at_the_head_it_read() {
     let deployed = events(&f, "AgentDeployed");
     assert_eq!(deployed.len(), 1);
     assert_eq!(deployed[0].schema_version, 2);
+}
+
+const CHALLENGE_KEY: &str = "k3Z-9_challeng01";
+
+/// The real binding's fixture: `v1` created, and Alice's passkey enrolled as [`CREDENTIAL`] at
+/// counter 0, past its cool-off, its key in the store. The binding folds the member's passkeys
+/// from whole envelopes (journal spec §3), so the seeded control rows are written again as such.
+struct Passkeyed {
+    f: Fixture,
+    signer: Signer,
+    cookie: String,
+}
+
+fn passkeyed() -> Passkeyed {
+    let f = built(Port::Methods, true);
+    let signer = Signer::es256();
+    f.store.put(&signer.cose_key()).expect("the key");
+    {
+        let mut streams = f.journal.streams.lock().expect("unpoisoned");
+        let seeded = streams.remove(&ctl()).expect("seeded");
+        let mut rows = common::control::Rows::opened();
+        for row in seeded.iter().skip(1) {
+            let payload: serde_json::Value =
+                serde_json::from_slice(&to_canonical(&payload(row))).expect("JSON");
+            rows.hosted(&row.event_type, T0 - 1_000, payload);
+        }
+        enrol(
+            &mut rows,
+            T0 - 900,
+            enrolled(alice(), CREDENTIAL, &signer, 0, Some(T0 - 800)),
+        );
+        streams.insert(ctl(), rows.rows);
+    }
+    let cookie = signed_in(&f, alice());
+    assert_eq!(create(&f, &cookie, KEY, "v1").status, 202);
+    Passkeyed { f, signer, cookie }
+}
+
+/// A challenge the challenge route issued: its id, the bytes the authenticator signs, and when.
+struct Issued {
+    id: String,
+    bytes: Vec<u8>,
+    issued_at: String,
+}
+
+impl Passkeyed {
+    /// Alice's challenge to confirm `v1`, bound to §3.5's digest of the confirmation.
+    fn challenge(&self) -> Issued {
+        let bound = Digest::of(&to_canonical(&json(&format!(
+            r#"{{"agent_id":null,"base_version":null,"mandate_version":"{}"}}"#,
+            version("v1")
+        ))));
+        let body = format!(
+            r#"{{"action":{{"kind":"confirm_version","digest":"sha256:{}"}}}}"#,
+            bound.to_hex()
+        );
+        let reply = post(
+            &self.f,
+            &ws("/step-up/challenges"),
+            &self.cookie,
+            Some(CHALLENGE_KEY),
+            body.as_bytes(),
+        );
+        assert_eq!(
+            reply.status,
+            201,
+            "{}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        let answer = self::body(&reply);
+        Issued {
+            id: text(&answer, &["challenge_id"]).to_owned(),
+            bytes: unb64url(text(&answer, &["webauthn_challenge"])),
+            issued_at: text(&answer, &["issued_at"]).to_owned(),
+        }
+    }
+
+    /// `v1`'s confirm body under `method` evidence for `issued`, with `assertion` beside it.
+    fn body(&self, issued: &Issued, method: &str, assertion: Option<serde_json::Value>) -> String {
+        let evidence = format!(
+            r#"{{"assertion_id":"{}","authenticated_at":"{}","method":"{method}"}}"#,
+            issued.id, issued.issued_at
+        );
+        with_assertion(&confirm_body(&screen_digest("v1"), &evidence), assertion)
+    }
+
+    fn confirm(&self, body: &str) -> Reply {
+        confirm(&self.f, &self.cookie, KEY, "v1", body)
+    }
+
+    fn held(&self, issued: &Issued) -> bool {
+        self.f.challenges.held(&issued.id).is_some()
+    }
+}
+
+/// `body` with `step_up_assertion` set to `assertion`, or as it is for `None`.
+fn with_assertion(body: &str, assertion: Option<serde_json::Value>) -> String {
+    let mut body: serde_json::Value = serde_json::from_str(body).expect("JSON");
+    if let Some(assertion) = assertion {
+        body["step_up_assertion"] = assertion;
+    }
+    body.to_string()
+}
+
+/// `reply` is `invalid` with one violation, at `/step_up_assertion` (DEC-2128 item 1).
+fn invalid_at_the_assertion(reply: &Reply) {
+    assert_eq!(
+        reply.status,
+        422,
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    assert_eq!(problem(reply).code, ProblemCode::Invalid);
+    let paths: Vec<String> = violations(reply)
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(paths, ["/step_up_assertion"]);
+}
+
+#[test]
+fn an_assertion_beside_cli_confirm_evidence_on_a_confirm_is_invalid_and_confirms_nothing() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    create(&f, &cookie, KEY, "v1");
+    let evidence = EVIDENCE.replace("\"passkey\"", "\"cli_confirm\"");
+    let signed = Signer::es256().assert(b"any challenge", 9);
+    let body = with_assertion(
+        &confirm_body(&screen_digest("v1"), &evidence),
+        Some(signed.json(CREDENTIAL)),
+    );
+    invalid_at_the_assertion(&confirm(&f, &cookie, KEY, "v1", &body));
+    assert!(f.asked.0.lock().expect("unpoisoned").is_empty());
+    assert!(events(&f, "MandateConfirmed").is_empty());
+}
+
+#[test]
+fn an_assertion_beside_null_step_up_on_a_confirm_is_invalid_before_step_up_required() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    create(&f, &cookie, KEY, "v1");
+    let signed = Signer::es256().assert(b"any challenge", 9);
+    let body = with_assertion(
+        &confirm_body(&screen_digest("v1"), "null"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    invalid_at_the_assertion(&confirm(&f, &cookie, KEY, "v1", &body));
+    assert!(f.asked.0.lock().expect("unpoisoned").is_empty());
+    assert!(events(&f, "MandateConfirmed").is_empty());
+}
+
+#[test]
+fn passkey_evidence_without_an_assertion_on_a_confirm_is_step_up_missing() {
+    let w = passkeyed();
+    let issued = w.challenge();
+    refused(
+        &w.confirm(&w.body(&issued, "passkey", None)),
+        401,
+        ProblemCode::StepUpMissing,
+    );
+    assert!(events(&w.f, "MandateConfirmed").is_empty());
+    assert!(w.held(&issued), "nothing is taken");
+}
+
+#[test]
+fn a_refused_passkey_confirm_confirms_nothing_and_keeps_the_challenge() {
+    let w = passkeyed();
+    let issued = w.challenge();
+    let mut signed = w.signer.assert(&issued.bytes, 9);
+    let last = signed.signature.len() - 1;
+    signed.signature[last] ^= 1;
+    refused(
+        &w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL)))),
+        401,
+        ProblemCode::StepUpMissing,
+    );
+    assert!(events(&w.f, "MandateConfirmed").is_empty());
+    assert!(events(&w.f, "StepUpAsserted").is_empty());
+    assert!(
+        get_artifact(
+            w.f.store.as_ref(),
+            &ArtifactRef::of(&signed.canonical(CREDENTIAL))
+        )
+        .is_err(),
+        "no assertion is stored"
+    );
+    assert!(w.held(&issued), "a refused confirm keeps the challenge");
+}
+
+#[test]
+fn a_confirm_whose_passkeys_cannot_be_read_is_journal_unavailable() {
+    let w = passkeyed();
+    {
+        let mut streams = w.f.journal.streams.lock().expect("unpoisoned");
+        let seeded = streams.remove(&ctl()).expect("seeded");
+        let mut rows = common::control::Rows { rows: seeded };
+        rows.hosted(
+            "CredentialEnrolled",
+            T0 - 500,
+            serde_json::json!({"member": ALICE, "credential": CREDENTIAL, "alg": "rs256"}),
+        );
+        streams.insert(ctl(), rows.rows);
+    }
+    let issued = w.challenge();
+    let signed = w.signer.assert(&issued.bytes, 9);
+    refused(
+        &w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL)))),
+        503,
+        ProblemCode::JournalUnavailable,
+    );
+    assert!(events(&w.f, "MandateConfirmed").is_empty());
+    assert!(w.held(&issued), "nothing is taken");
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_passkey_confirm_commits_mandate_confirmed_then_its_assertion_and_stores_the_raw_assertion() {
+    let w = passkeyed();
+    let issued = w.challenge();
+    let signed = w.signer.assert(&issued.bytes, 9);
+    let reply = w.confirm(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+    assert_eq!(
+        reply.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let rows = control(&w.f);
+    let last_two: Vec<&str> = rows
+        .iter()
+        .rev()
+        .take(2)
+        .rev()
+        .map(|row| row.event_type.as_str())
+        .collect();
+    assert_eq!(
+        last_two,
+        ["MandateConfirmed", "StepUpAsserted"],
+        "the confirmation, then its assertion, in one batch (DEC-2128 item 3)"
+    );
+    let confirmed = &rows[rows.len() - 2];
+    let assertion = &rows[rows.len() - 1];
+    assert_eq!(confirmed.event_id, derived("confirm_version", KEY));
+    let canonical = signed.canonical(CREDENTIAL);
+    let expected = format!(
+        r#"{{"assertion":"sha256:{}","challenge":"{}","credential":"{CREDENTIAL}","sign_count":9}}"#,
+        Digest::of(&canonical).to_hex(),
+        issued.id
+    );
+    assert_eq!(to_canonical(&payload(assertion)), expected.into_bytes());
+    let record = parse(&assertion.body).expect("JSON");
+    assert_eq!(
+        record.get("causation_id").and_then(Value::as_str),
+        Some(confirmed.event_id.as_str()),
+        "rule 253: caused by the confirmation it authorized"
+    );
+    assert_eq!(
+        get_artifact(w.f.store.as_ref(), &ArtifactRef::of(&canonical)),
+        Ok(canonical),
+        "the raw assertion is stored under its own digest"
+    );
+    assert!(!w.held(&issued), "the challenge is taken");
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_replayed_passkey_confirm_answers_as_the_first_though_its_challenge_is_gone() {
+    let w = passkeyed();
+    let issued = w.challenge();
+    let signed = w.signer.assert(&issued.bytes, 9);
+    let body = w.body(&issued, "passkey", Some(signed.json(CREDENTIAL)));
+    let first = w.confirm(&body);
+    assert_eq!(
+        first.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&first.body)
+    );
+    let committed = control(&w.f);
+    assert!(!w.held(&issued));
+    let again = w.confirm(&body);
+    assert_eq!(
+        again.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(self::body(&again), self::body(&first), "the same answer");
+    assert_eq!(control(&w.f), committed, "nothing more is appended");
 }

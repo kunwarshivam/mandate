@@ -5,6 +5,7 @@
  * the fixtures or computed in its place (rule 3). The reads the schemas do not define yet (health,
  * connections) are optional: a 404 is "not reported", never the deployment down.
  */
+import { CONNECTION_STATES, type ConnectionState } from "./connect";
 import type { WorkspaceClient } from "./client";
 import { array, closedEnum, contentRef, decimal, integer, isRecord, nullable, object, string, timestamp } from "./decode";
 import { emptyWorkspace } from "./reads";
@@ -187,13 +188,14 @@ export function deadlineIso(deadline: number): string {
 }
 
 /**
- * The read the schemas do not define yet (DEC-975 item 5's provisional body): connections. Health
+ * The connections read (`read-models/connections`, DEC-2620), only the members the workspace needs:
+ * each connection's id, environment and state. Health
  * (`GET /health`, workspace API spec §4.7) is not read until the API routes it: the API answers an
  * unrouted path with its one 401 (API-1), which would read as signed out and hide every agent, so
  * web/ reads routed paths only and the status strip shows health as not reported (backlog E21-63).
  */
-const connections = object<{ connections: Array<{ connection_id: string; environment: Environment }> }>({
-  connections: array(object({ connection_id: string, environment: closedEnum<Environment>(["paper", "live"]) })),
+const connections = object<{ connections: Array<{ connection_id: string; environment: Environment; state: ConnectionState }> }>({
+  connections: array(object({ connection_id: string, environment: closedEnum<Environment>(["paper", "live"]), state: closedEnum(CONNECTION_STATES) })),
 });
 
 /** A read the API may not serve yet: its 404 is "not reported" (`null`), any other failure is the load's. */
@@ -258,7 +260,12 @@ export async function loadApi(client: WorkspaceClient): Promise<LoadedApi> {
 
   const now = new Date().toISOString();
   const unreported = { state: "stale" as const, as_of: null };
-  const connection = held.value?.connections[0] ?? null;
+  /**
+   * The workspace's connection is an established one: a pending, refused or revoked connection is
+   * never the scope of Stop-all or Close-all. With none established the workspace names none, and
+   * those take the workspace scope instead, which covers every connection (spec §5.4).
+   */
+  const connection = held.value?.connections.find((c) => c.state === "established") ?? null;
   const base = emptyWorkspace("ready", now);
   const ws: Workspace = {
     ...base,

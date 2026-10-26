@@ -1,7 +1,8 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import Link from "next/link";
+import type { AgentOrderState } from "@/api/activity";
 import type { AgentDetail, ApprovalDetail, ApprovalState, BoundOrder, MandateSummary } from "@/api/read-models";
 import { deadlineIso } from "@/api/read-models";
 import { ModeBadge } from "@/components/domain/mode";
@@ -11,7 +12,7 @@ import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import { type ShownChallenge, approvalConfirmCommand } from "@/api/step-up";
 import { HostConfirm } from "./host-confirm";
 import { clock, percent, price, quantity, usd } from "@/lib/format";
-import { type ApprovalRecord, type ApprovalResponse, useRuntime } from "@/lib/mock-runtime";
+import { type ActivityAnswer, type ApprovalRecord, type ApprovalResponse, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 
@@ -239,12 +240,127 @@ export function ApiAgent({ agentId }: { agentId: string }) {
             <p className="text-sm text-muted-foreground">What the account held at its last reconciliation, whichever agent bought it.</p>
             <Positions agent={agent} />
           </Section>
+          <AgentActivity agentId={agent.agent_id} />
           <Section title="Limit usage">
             <p className={NOT_REPORTED}>Not reported by your deployment yet.</p>
           </Section>
         </article>
       ) : null}
     </WorkspaceGate>
+  );
+}
+
+/** An order's journaled state in words; `null` is not reported, never assumed (DEC-2111), and unknown stays unknown (trading spec §5.7). */
+const ORDER_STATE: Readonly<Record<AgentOrderState, string>> = {
+  intent: "Recorded, not sent yet",
+  submitting: "Sending",
+  accepted: "Working",
+  partially_filled: "Partly filled",
+  pending_cancel: "Canceling",
+  pending_replace: "Replacing",
+  unknown: "Unknown: being checked with the broker",
+  filled: "Filled",
+  canceled: "Canceled",
+  rejected: "Rejected",
+  expired: "Expired",
+  replaced: "Replaced",
+  abandoned: "Abandoned",
+};
+
+/** How often the agent's activity is read again while its screen is open. */
+const ACTIVITY_POLL_MS = 5000;
+
+/**
+ * The agent's orders and its own positions (§4.7 D3, DEC-2111), newest order first, read when the
+ * screen opens and every few seconds after. A list that cannot be read says not reported, never
+ * none, and a missing account says so: neither is an empty record.
+ */
+function AgentActivity({ agentId }: { agentId: string }) {
+  const { activity } = useRuntime();
+  const [answer, setAnswer] = useState<ActivityAnswer | null>(null);
+  useEffect(() => {
+    if (!activity) return;
+    let live = true;
+    const load = () => void activity(agentId).then((next) => live && setAnswer(next));
+    load();
+    const poll = window.setInterval(load, ACTIVITY_POLL_MS);
+    return () => {
+      live = false;
+      window.clearInterval(poll);
+    };
+  }, [activity, agentId]);
+  const orders = answer?.orders;
+  const holdings = answer?.holdings;
+  const journal = answer?.journal;
+  return (
+    <>
+      <Section title="Orders">
+        {!orders ? (
+          <p className={NOT_REPORTED}>Reading orders.</p>
+        ) : !orders.ok ? (
+          <p className={NOT_REPORTED}>Orders not reported.</p>
+        ) : orders.account_ref === null ? (
+          <p className={NOT_REPORTED}>Orders not reported: the deployment found no account for this agent.</p>
+        ) : orders.items.length === 0 ? (
+          <p className="text-muted-foreground">No order yet.</p>
+        ) : (
+          <ul className="grid" aria-label="Orders">
+            {[...orders.items].reverse().map((o) => (
+              <li key={o.client_order_id} className="grid gap-1 border-b border-border/70 py-3.5 last:border-b-0" data-state={o.state ?? "not_reported"}>
+                <span>
+                  {o.side === "buy" ? "Buy" : "Sell"} {quantity(o.qty)} {o.instrument_id}
+                  {o.limit_price !== null ? ` at a limit of ${price(o.limit_price)}` : ""}
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  {o.state === null ? "State not reported" : ORDER_STATE[o.state]}
+                  {o.filled_qty !== null ? `, ${quantity(o.filled_qty)} filled` : ", filled quantity not reported"}, sent {clock(o.submitted_at)} UTC
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+      <Section title="Journal">
+        <p className="text-sm text-muted-foreground">The latest records on this agent&rsquo;s stream, oldest first.</p>
+        {!journal ? (
+          <p className={NOT_REPORTED}>Reading the journal.</p>
+        ) : !journal.ok ? (
+          <p className={NOT_REPORTED}>{journal.reason === "forbidden" ? "Not available to your role." : "Journal not reported."}</p>
+        ) : journal.items.length === 0 ? (
+          <p className="text-muted-foreground">Nothing recorded yet.</p>
+        ) : (
+          <ol className="grid" aria-label="Journal">
+            {journal.items.map((e) => (
+              <li key={e.event_id} className="flex justify-between gap-3 border-b border-border/70 py-2.5 text-sm last:border-b-0">
+                <span>
+                  <span className="text-muted-foreground tabular-nums">#{e.seq}</span> {e.event_type}
+                </span>
+                <span className="text-muted-foreground tabular-nums">{clock(e.recorded_at)} UTC</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </Section>
+      <Section title="This agent's positions">
+        <p className="text-sm text-muted-foreground">What this agent&rsquo;s own fills hold, net, per instrument.</p>
+        {!holdings ? (
+          <p className={NOT_REPORTED}>Reading positions.</p>
+        ) : !holdings.ok || holdings.account_ref === null ? (
+          <p className={NOT_REPORTED}>Not reported.</p>
+        ) : holdings.items.length === 0 ? (
+          <p className="text-muted-foreground">This agent holds nothing.</p>
+        ) : (
+          <ul className="grid" aria-label="This agent's positions">
+            {holdings.items.map((h) => (
+              <li key={h.instrument_id} className="flex justify-between gap-3 border-b border-border/70 py-3 last:border-b-0">
+                <span>{h.instrument_id}</span>
+                <span className="tabular-nums">{quantity(h.filled_qty)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+    </>
   );
 }
 
