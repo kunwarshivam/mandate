@@ -22,7 +22,7 @@ from common import DEFERRED_PARTS, Violation, apply_change, change, delete, dige
 from control import check_of, draft_for, reported, violations
 from requests import PLAN, V1, V2, base_drafts, oracle_hash, restated
 
-SPEC = "docs/specs/journal.md v0.92 §9.6 rules 291 and 292 (DEC-2515), and v0.103 §11's approval_deferral_mismatch (DEC-2522)"
+SPEC = "docs/specs/journal.md v0.92 §9.6 rules 291 and 292 (DEC-2515), and v0.105 §11's approval_deferral_mismatch (DEC-2522)"
 V3 = "requested_v3"
 DEFERRED = "payload.content.deferred_to_binding"
 NAMED = ["halt", "liquidity_floor", "participation"]
