@@ -7,6 +7,7 @@
  * 5), so the screen shows none of them.
  */
 import { array, closedEnum, decimal, integer, isRecord, nullable, object, string, timestamp } from "./decode";
+import { type ReadPosition, reconciledHolding } from "./read-models";
 import type { Decimal, Decoded, DecodeProblem, Decoder, Timestamp } from "./types";
 
 /** `read-models/orders`' states (journal spec §9.5). Closed. */
@@ -84,6 +85,21 @@ export function activityRead(agentId: string) {
       return items.ok ? { ok: true, value: { ...top.value, items: items.value } } : items;
     };
   return { orders: listed("orders", order), holdings: listed("positions", holding) };
+}
+
+/**
+ * `read-models/positions` whole (DEC-2111): the agent's own positions with the account's holdings at
+ * its last reconciliation (`account_positions`, `null` when its stream is not found), from one read,
+ * so the two the positions screen shows side by side are of one moment.
+ */
+export function holdingsRead(agentId: string): Decoder<Activity & { items: AgentHolding[]; account_positions: ReadPosition[] | null }> {
+  const own = activityRead(agentId).holdings;
+  return (value, path) => {
+    const read = own(value, path);
+    if (!read.ok) return read;
+    const account = nullable(array(reconciledHolding))((value as Record<string, unknown>).account_positions ?? null, `${path}/account_positions`);
+    return account.ok ? { ok: true, value: { ...read.value, account_positions: account.value } } : account;
+  };
 }
 
 /** One event of a journal page, without its body: the screen names what happened and when, and decodes no payload (API-18). */

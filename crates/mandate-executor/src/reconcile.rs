@@ -17,7 +17,7 @@ use crate::orders::{
     EXTERNAL, StateEvidence, account_fields, account_restriction, broker_id, every_agent_alerted,
     fill, record_state_change, status_mapping, transition,
 };
-use crate::payload::{int, text};
+use crate::payload::{broker_text, int, text};
 use crate::ports::Ports;
 use crate::state::{Adoption, EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
@@ -190,15 +190,21 @@ fn orders(
         if ours {
             continue;
         }
-        let mut pairs = vec![
-            ("broker_order_id", text(open.broker_order_id.clone())),
+        let pairs = vec![
+            ("source", text("open_order")),
+            (
+                "broker_order_id",
+                broker_text(Some(open.broker_order_id.as_str())),
+            ),
+            ("fill_id", Value::Null),
+            (
+                "client_order_id",
+                broker_text(open.client_order_id.as_deref()),
+            ),
             ("instrument", text(open.instrument.as_str())),
             ("side", text(side_name(open.side))),
             ("qty", text(open.qty.to_string())),
         ];
-        if let Some(raw) = &open.client_order_id {
-            pairs.push(("client_order_id", text(raw.clone())));
-        }
         let ingested = batch.journal("ExternalActivityIngested", None, pairs)?;
         differences.push(Difference::unexplained(
             Unexplained::ExternalActivity,
@@ -2388,6 +2394,162 @@ pub(crate) mod tests {
             "the leg is in the order set, and no one's"
         );
         Ok(executor)
+    }
+
+    /// X10 (DEC-2803): an open order of no order of ours is journaled as `ExternalActivityIngested`
+    /// with `source` `open_order`, every member present, and the broker's empty ids written as
+    /// `null`, in a draft the journal's own `Draft::parse` accepts.
+    #[test]
+    fn an_external_open_order_is_journaled_in_the_closed_schema() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        for (broker_id, theirs, want_broker, want_theirs) in [
+            (
+                "b-ext",
+                Some("theirs-1"),
+                Value::Str("b-ext".to_owned()),
+                Value::Str("theirs-1".to_owned()),
+            ),
+            ("", Some(""), Value::Null, Value::Null),
+            ("b-ext", None, Value::Str("b-ext".to_owned()), Value::Null),
+        ] {
+            let mut executor = Executor::opened(&ports)?;
+            let mut taken = executor.snapshot(ReconcileReason::Scheduled)?;
+            taken.open_orders = vec![BrokerOrder {
+                broker_order_id: broker_id.to_owned(),
+                client_order_id: theirs.map(str::to_owned),
+                instrument: aapl()?,
+                side: Side::Sell,
+                qty: Qty::parse("3")?,
+                filled_qty: Qty::ZERO,
+                limit_price: Some(Price::parse("170")?),
+                stop_price: None,
+                status: "new".to_owned(),
+                reject_code: None,
+                replaced_by_broker_order_id: None,
+                legs: Vec::new(),
+                created_on: None,
+            }];
+            let run = executor.run(Input::BrokerSnapshot(taken), &ports)?;
+            let ingested = run
+                .iter()
+                .find_map(|effect| match effect {
+                    Effect::Journal(draft) if draft.event_type == "ExternalActivityIngested" => {
+                        Some(draft)
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| missing("ExternalActivityIngested"))?;
+            journal_accepts(ingested)?;
+            let member = |name: &str| ingested.payload.get(name).cloned();
+            assert_eq!(member("source"), Some(Value::Str("open_order".to_owned())));
+            assert_eq!(
+                member("broker_order_id"),
+                Some(want_broker),
+                "{broker_id:?}"
+            );
+            assert_eq!(member("client_order_id"), Some(want_theirs), "{theirs:?}");
+            assert_eq!(member("fill_id"), Some(Value::Null));
+            assert_eq!(member("instrument"), Some(Value::Str("AAPL".to_owned())));
+            assert_eq!(member("side"), Some(Value::Str("sell".to_owned())));
+            assert_eq!(member("qty"), Some(Value::Str("3".to_owned())));
+        }
+        Ok(())
+    }
+
+    /// X10 (DEC-2803): a broker reject is journaled as `RejectObserved` with every member present,
+    /// and a fill that names no order of ours as `ExternalActivityIngested` with `source` `fill`;
+    /// the broker's empty or missing text is `null`, and the journal's own `Draft::parse` accepts
+    /// both, so neither refuses the executor's batch.
+    #[test]
+    fn a_reject_and_an_external_fill_are_journaled_in_the_closed_schemas()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let drafted = |effects: &[Effect], event_type: &str| {
+            effects
+                .iter()
+                .find_map(|effect| match effect {
+                    Effect::Journal(draft) if draft.event_type == event_type => Some(draft.clone()),
+                    _ => None,
+                })
+                .ok_or_else(|| missing(event_type))
+        };
+        for (code, message, theirs) in [
+            (
+                Some("40310000"),
+                "insufficient buying power",
+                Some("theirs-1"),
+            ),
+            (None, "", None),
+            (Some(""), "x", Some("")),
+        ] {
+            let mut executor = Executor::opened(&ports)?;
+            let reject = crate::types::BrokerReject {
+                client_order_id: theirs.map(str::to_owned),
+                http_status: 422,
+                code: code.map(str::to_owned),
+                message: message.to_owned(),
+            };
+            let run = executor.run(Input::BrokerUpdate(BrokerUpdate::Reject(reject)), &ports)?;
+            let observed = drafted(&run, "RejectObserved")?;
+            journal_accepts(&observed)?;
+            let member = |name: &str| observed.payload.get(name).cloned();
+            let text_or_null = |raw: Option<&str>| match raw {
+                Some(t) if !t.is_empty() => Value::Str(t.to_owned()),
+                _ => Value::Null,
+            };
+            assert_eq!(member("code"), Some(text_or_null(code)));
+            assert_eq!(member("message"), Some(text_or_null(Some(message))));
+            assert_eq!(member("client_order_id"), Some(text_or_null(theirs)));
+        }
+        for fill_id in ["f-ext-1", ""] {
+            let mut executor = Executor::opened(&ports)?;
+            let fill = BrokerFill {
+                fill_id: FillId(fill_id.to_owned()),
+                client_order_id: None,
+                broker_order_id: None,
+                instrument: aapl()?,
+                side: Side::Buy,
+                qty: Qty::parse("2")?,
+                price: Price::parse("150")?,
+                fees: Usd::ZERO,
+                trade_date: Date::new(2026, 9, 21)?,
+            };
+            let run = executor.run(Input::BrokerUpdate(BrokerUpdate::Fill(fill)), &ports)?;
+            let ingested = drafted(&run, "ExternalActivityIngested")?;
+            journal_accepts(&ingested)?;
+            let member = |name: &str| ingested.payload.get(name).cloned();
+            assert_eq!(member("source"), Some(Value::Str("fill".to_owned())));
+            let want = if fill_id.is_empty() {
+                Value::Null
+            } else {
+                Value::Str(fill_id.to_owned())
+            };
+            assert_eq!(member("fill_id"), Some(want));
+            for name in [
+                "broker_order_id",
+                "client_order_id",
+                "instrument",
+                "side",
+                "qty",
+            ] {
+                assert_eq!(member(name), Some(Value::Null), "{name}");
+            }
+        }
+        Ok(())
     }
 
     /// #258 round 1, the reviewer's probe (DEC-160 3(c)): a snapshot that lists an ownerless leg

@@ -218,8 +218,9 @@ impl<T: Tools> Reconciler for RobinhoodReconciler<T> {
     /// The run's connector and the executor's requests are not used: the Robinhood connector
     /// offers none of the four reads they name, and the bridge's connector is the run's own.
     /// Robinhood publishes no account activity, so the snapshot leaves the executor's cursor
-    /// where it was, and its only fills are the ones an order record and the position imply on a
-    /// ledger flat in the instrument (DEC-1151, connections spec U-R8); the live run starts only
+    /// where it was, and its only fills are the ones an order record and the position imply: an
+    /// entry's on a ledger flat in the instrument (DEC-1151, connections spec U-R8), and a
+    /// risk-reducing sell's at its limit (DEC-2300, DEC-2395); the live run starts only
     /// on a flat, unspent account (DEC-529 item 3), so none is outstanding when it does.
     fn snapshot(
         &mut self,
@@ -235,11 +236,11 @@ impl<T: Tools> Reconciler for RobinhoodReconciler<T> {
         let snapshot = read.map_err(|_| Cause::Absent {
             what: ACCOUNT_UNREAD,
         })?;
-        Ok(self.executor.without_activities(
+        self.executor.without_activities(
             snapshot.open_orders.clone(),
             snapshot.positions.clone(),
             robinhood_account(&snapshot),
-        ))
+        )
     }
 
     /// The executor's own reconciliation of the snapshot, as for every broker.

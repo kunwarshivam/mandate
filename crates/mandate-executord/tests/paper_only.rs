@@ -6,8 +6,11 @@
 //! [`CREDENTIAL_MODULE`], may name it, the credentials and the data client that reads quotes over
 //! it (DEC-2359 item 5), and that no source names the HTTP client or a host. Loosening either
 //! fails here as well as in review. DEC-2382 replaces DEC-2306 item 1 for the founder's own
-//! Robinhood agentic account: the executor's separate, explicitly gated `live` build may carry the
-//! Robinhood connector, and these pins change in that story, under that decision.
+//! Robinhood agentic account, and DEC-2386 item 1 lets the executor carry the Robinhood connector,
+//! which names no host: `mandate-robinhood` is no longer forbidden, the default build still holds
+//! no `live` feature, and no source names a host, the HTTP client, or the MCP transport that
+//! reaches one. `mandate-mcp` is a dev-dependency only, for the tests' scripted tool seam
+//! (DEC-2800), and never a dependency of the process.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,7 +38,7 @@ fn value(entry: &[String], key: &str) -> Option<String> {
 }
 
 #[test]
-fn the_executor_reaches_no_broker_but_the_fixture_or_the_paper_host() -> Result<(), Error> {
+fn the_executor_carries_no_transport_but_the_paper_hosts() -> Result<(), Error> {
     let entry = entry()?;
     assert!(!entry.is_empty(), "no mandate-executord entry");
     assert_eq!(
@@ -44,15 +47,44 @@ fn the_executor_reaches_no_broker_but_the_fixture_or_the_paper_host() -> Result<
     );
     assert_eq!(value(&entry, "live_feature"), None);
     let forbidden = value(&entry, "forbidden_internal").ok_or("no forbidden_internal")?;
-    for transport in [
-        "mandate-paper",
-        "mandate-shell",
-        "mandate-robinhood",
-        "mandate-rh-sim",
-    ] {
+    for transport in ["mandate-paper", "mandate-shell", "mandate-rh-sim"] {
         assert!(
             forbidden.contains(&format!("\"{transport}\"")),
             "{transport} is reachable"
+        );
+    }
+    Ok(())
+}
+
+/// Every line of the manifest that names `mandate-mcp`, with the table it sits in: a dependency
+/// table's own header (`[dependencies.mandate-mcp]`, `[target.'cfg(unix)'.dependencies]`) or the
+/// header of the table holding its line.
+fn mcp_tables() -> Result<Vec<(String, String)>, Error> {
+    let manifest = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))?;
+    let mut table = String::new();
+    let mut found = Vec::new();
+    for line in manifest.lines().map(str::trim) {
+        if line.starts_with('[') {
+            table = line.to_owned();
+        }
+        if line.contains("mandate-mcp") || line.contains("mandate_mcp") {
+            found.push((table.clone(), line.to_owned()));
+        }
+    }
+    Ok(found)
+}
+
+#[test]
+fn the_process_never_depends_on_the_mcp_transport() -> Result<(), Error> {
+    let tables = mcp_tables()?;
+    assert!(
+        !tables.is_empty(),
+        "the tests' seam takes mandate-mcp as a dev-dependency"
+    );
+    for (table, line) in &tables {
+        assert_eq!(
+            table, "[dev-dependencies]",
+            "mandate-mcp outside the dev-dependencies: {line}"
         );
     }
     Ok(())
@@ -83,7 +115,16 @@ fn only_the_credential_module_names_the_paper_transport() -> Result<(), Error> {
     assert!(!files.is_empty(), "no sources under {}", src.display());
     for file in files {
         let text = fs::read_to_string(&file)?;
-        for name in ["reqwest", "alpaca.markets", "https://", "http://"] {
+        for name in [
+            "reqwest",
+            "alpaca.markets",
+            "robinhood.com",
+            "https://",
+            "http://",
+            "PinnedEndpoint",
+            "McpClient",
+            "mandate_mcp",
+        ] {
             assert!(!text.contains(name), "{} names {name}", file.display());
         }
         if file.file_name().is_some_and(|n| n == CREDENTIAL_MODULE) {

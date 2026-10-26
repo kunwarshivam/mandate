@@ -143,19 +143,66 @@ fn evidence_the_port_refuses_answers_its_code_and_records_nothing() {
     assert_eq!(f.port.asked.lock().expect("unpoisoned").len(), 1);
 }
 
+/// A live connect is judged by the real-money gate after step-up, so a caller learns nothing
+/// before it ([DEC-2134] items 1 and 4): while the gate is off its refusal is the one record, with
+/// the key's id, and while it is on the gate admits it to the check after it, which still refuses
+/// it and records nothing.
+///
+/// [DEC-2134]: ../../../docs/project/decisions/DEC-2134.md
 #[test]
-fn a_live_connection_is_refused_after_step_up_and_records_nothing() {
+fn a_live_connection_is_refused_after_step_up_and_records_only_the_gates_refusal() {
     let f = fixture("paper", true, true);
     assert_eq!(
         admin(&f, &with(&["environment"], r#""live""#)),
         (409, ProblemCode::LiveUnavailable)
     );
-    assert!(appended(&f).is_empty());
+    let rows = appended(&f);
+    assert_eq!(rows.len(), 1, "the refusal alone");
+    assert_eq!(rows[0].event_type, "RealMoneyRefused");
+    assert_eq!(rows[0].event_id, derived("real_money_refused_connect"));
+    let refusal = mandate_canon::parse(&rows[0].body).expect("JSON");
+    for (path, want) in [
+        (&["payload", "action"][..], "connect"),
+        (&["payload", "requested"][..], "live"),
+        (&["payload", "principal"][..], ALICE),
+        (&["payload", "reason"][..], "gate_off"),
+        (&["actor", "kind"][..], "user"),
+        (&["actor", "id"][..], ALICE),
+    ] {
+        assert_eq!(support_connect::text(&refusal, path), want, "{path:?}");
+    }
     assert_eq!(
         f.port.asked.lock().expect("unpoisoned").len(),
         1,
         "step-up first, so a caller learns nothing before it"
     );
+    assert_eq!(
+        admin(&f, &with(&["environment"], r#""live""#)),
+        (409, ProblemCode::LiveUnavailable)
+    );
+    assert_eq!(
+        appended(&f).len(),
+        1,
+        "a retry under its key finds its refusal"
+    );
+}
+
+#[test]
+fn a_live_connection_past_an_open_gate_is_still_refused_and_records_nothing() {
+    let f = fixture("paper", true, true);
+    seed(
+        &f,
+        "RealMoneyGateChanged",
+        1,
+        r#"{"decision":"DEC-2135","enabled":true,"operator":"01JAA3G0A000000000000000P1"}"#,
+    );
+    assert_eq!(
+        admin(&f, &with(&["environment"], r#""live""#)),
+        (409, ProblemCode::LiveUnavailable)
+    );
+    let rows = appended(&f);
+    assert_eq!(rows.len(), 1, "the seeded setting alone");
+    assert_eq!(rows[0].event_type, "RealMoneyGateChanged");
 }
 
 #[test]

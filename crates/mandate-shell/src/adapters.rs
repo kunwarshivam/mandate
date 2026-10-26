@@ -1618,20 +1618,26 @@ impl ExecutorReconciler {
     /// A startup snapshot of a broker that publishes no account activity (DEC-933 item 1): the
     /// broker's open orders, positions and account, the executor's own cursor unmoved, taken at
     /// the executor's head of the account stream. Its fills are the ones the broker's order
-    /// records and positions imply on a ledger flat in the instrument, and no other
-    /// (`mandate_executor::recorded_fills`, DEC-1151): the reconciliation books them before it
-    /// compares positions, and with none the position stays unexplained.
+    /// records and positions imply, and no other: an entry's on a ledger flat in the instrument
+    /// (`mandate_executor::recorded_fills`, DEC-1151), and a risk-reducing sell's at its limit
+    /// (`mandate_executor::limit_fills`, DEC-2300, DEC-2395). The reconciliation books them before
+    /// it compares positions, and with none the position stays unexplained.
+    ///
+    /// # Errors
+    /// [`Cause`] when a sell's increment or date cannot be computed exactly.
     pub(crate) fn without_activities(
         &self,
         open_orders: Vec<mandate_executor::BrokerOrder>,
         positions: Vec<mandate_executor::BrokerPosition>,
         account: mandate_executor::BrokerAccount,
-    ) -> mandate_executor::BrokerSnapshot {
+    ) -> Result<mandate_executor::BrokerSnapshot, Cause> {
         let state = self.state.borrow();
         let scope = state.scope();
         let stream = account_stream(&scope.workspace.0, &scope.account.0);
-        mandate_executor::BrokerSnapshot {
-            fills: mandate_executor::recorded_fills(&state, &positions),
+        let mut fills = mandate_executor::recorded_fills(&state, &positions);
+        fills.extend(mandate_executor::limit_fills(&state, &positions)?);
+        Ok(mandate_executor::BrokerSnapshot {
+            fills,
             open_orders,
             positions,
             account,
@@ -1645,7 +1651,7 @@ impl ExecutorReconciler {
                 Some(head) => head,
                 None => Seq(0),
             },
-        }
+        })
     }
 }
 

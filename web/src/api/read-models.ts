@@ -151,8 +151,8 @@ const agentMembers = {
   mandate: nullable(mandateSummary),
 };
 const agentRow = object<AgentRow>(agentMembers);
-const position = object<ReadPosition>({ instrument, qty: decimal, broker_qty: decimal, mismatch: flag, observed_at: timestamp });
-const agentDetail = object<AgentDetail>({ ...agentMembers, account_positions: nullable(array(position)) });
+export const reconciledHolding = object<ReadPosition>({ instrument, qty: decimal, broker_qty: decimal, mismatch: flag, observed_at: timestamp });
+const agentDetail = object<AgentDetail>({ ...agentMembers, account_positions: nullable(array(reconciledHolding)) });
 
 const boundOrder = object<BoundOrder>({
   instrument,
