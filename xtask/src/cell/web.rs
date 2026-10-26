@@ -94,13 +94,14 @@ const TRADE_LOOP_TIMEOUT_MS: &str = "400000";
 /// The trade loop spec under `web/e2e-cell/` (lane W, #2462).
 const TRADE_LOOP_SPEC: &str = "trade-loop.spec.ts";
 /// The trade loop's steps, in the order the spec reaches them; its result names each one reached.
-pub const TRADE_LOOP_STEPS: [&str; 7] = [
+pub const TRADE_LOOP_STEPS: [&str; 8] = [
     "approval",
     "challenge",
     "approved",
     "order_filled",
     "position",
     "journal",
+    "positions_screen",
     "kill_switch",
 ];
 
