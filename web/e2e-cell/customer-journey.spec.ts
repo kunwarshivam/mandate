@@ -42,17 +42,19 @@ const refuse = (error: string): never => {
 
 /**
  * Opens `path` until its read of `apiPath` is not the one 401: `web/` opens the API session through
- * the stub issuer on its first load, so the first reads may run before the cookie is set. Answers
- * the last response, so a failure names what the API said.
+ * the stub issuer on its first load, so the first reads may run before the cookie is set. Every pass
+ * shares one `PAGE_MS` budget, so the retries cannot eat the rest of the journey's; answers the last
+ * response, so a failure names what the API said.
  */
 async function signedInRead(page: Page, path: string, apiPath: string) {
   const deadline = Date.now() + PAGE_MS;
   for (;;) {
-    const read = page.waitForResponse((r) => r.request().method() === "GET" && new URL(r.url()).pathname === apiPath, { timeout: PAGE_MS }).catch(() => null);
-    await page.goto(path, { timeout: PAGE_MS });
+    const left = Math.max(deadline - Date.now(), 1_000);
+    const read = page.waitForResponse((r) => r.request().method() === "GET" && new URL(r.url()).pathname === apiPath, { timeout: left }).catch(() => null);
+    await page.goto(path, { timeout: left });
     const answer = await read;
     if (!answer) return refuse(`web/ never read ${apiPath}`);
-    if (answer.status() !== 401 || Date.now() > deadline) return answer;
+    if (answer.status() !== 401 || deadline - Date.now() < 5_000) return answer;
     await page.waitForTimeout(2_000);
   }
 }

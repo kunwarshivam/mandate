@@ -518,10 +518,10 @@ fn trade_loop_env(agent: &str, request: &Path, done: &Path) -> [(&'static str, S
 
 /// The customer journey spec under `web/e2e-cell/` (lane GL, DEC-2134).
 const JOURNEY_SPEC: &str = "customer-journey.spec.ts";
-/// Playwright's bound on the journey run (`OWLHEAD_CELL_TIMEOUT_MS`): 300 seconds, past the spec's
-/// own 240 s, which allows `next dev` to compile each route on its first visit, and inside
+/// Playwright's bound on the journey run (`OWLHEAD_CELL_TIMEOUT_MS`): 330 seconds, which holds the
+/// spec's own 240 s and `next dev`'s 60 s start with room to spare, and ends inside
 /// [`TRADE_LOOP_POLLS`]' 500 s, so Playwright writes its result before the driver gives up.
-const JOURNEY_TIMEOUT_MS: &str = "300000";
+const JOURNEY_TIMEOUT_MS: &str = "330000";
 /// The customer journey's steps, in the order the spec reaches them; its result names each one.
 pub const JOURNEY_STEPS: [&str; 5] = [
     "connections",
@@ -762,6 +762,33 @@ mod tests {
             bound >= proposal + TRADE_LOOP_SPEC_WAITS_MS + NEXT_DEV_START_MS,
             "{bound} ms cannot hold the spec's {} ms and next dev's start",
             proposal + TRADE_LOOP_SPEC_WAITS_MS
+        );
+        assert!(bound < polls_ms, "{bound} ms outlasts the driver's polls");
+        Ok(())
+    }
+
+    /// The journey spec's own test timeout, as `customer-journey.spec.ts` defaults `JOURNEY_MS`.
+    const JOURNEY_SPEC_MS: u64 = 240_000;
+
+    /// Playwright's bound on the journey holds the spec's own test timeout and `next dev`'s start,
+    /// with margin, and ends before the driver's polls do, so a slow journey is the spec's named
+    /// failure rather than Playwright's global kill (#2589's review).
+    #[test]
+    fn the_journeys_playwright_bound_holds_the_spec_and_ends_before_the_polls() -> Result<()> {
+        let spec = fs::read_to_string(crate::repo_root()?.join("web/e2e-cell").join(JOURNEY_SPEC))?;
+        assert!(
+            spec.contains(&format!(
+                "?? {}_{:03})",
+                JOURNEY_SPEC_MS / 1000,
+                JOURNEY_SPEC_MS % 1000
+            )),
+            "the spec defaults JOURNEY_MS to {JOURNEY_SPEC_MS} ms"
+        );
+        let bound: u64 = JOURNEY_TIMEOUT_MS.parse()?;
+        let polls_ms = u64::from(TRADE_LOOP_POLLS) * u64::try_from(POLL.as_millis())?;
+        assert!(
+            bound > JOURNEY_SPEC_MS + NEXT_DEV_START_MS,
+            "{bound} ms leaves no margin past the spec's {JOURNEY_SPEC_MS} ms and next dev's start"
         );
         assert!(bound < polls_ms, "{bound} ms outlasts the driver's polls");
         Ok(())
