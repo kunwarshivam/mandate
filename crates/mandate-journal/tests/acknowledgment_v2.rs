@@ -153,3 +153,26 @@ fn every_acknowledgment_of_a_reconciliation_hold_parses() {
     assert!(seen >= 30, "{seen} acknowledgment records");
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// Version 2 is registered on the control and account streams only, as version 1 is: on an agent
+/// stream each record is refused `wrong_stream`.
+#[test]
+fn version_2_is_refused_off_the_control_and_account_streams() {
+    let fixture = fixture();
+    let section = fixture.get("restriction_lifts").cloned().unwrap();
+    for (name, _) in BASES {
+        let mut body = section
+            .get("drafts")
+            .and_then(|d| d.get(name))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap();
+        body.insert(
+            Key::new("stream_id").unwrap(),
+            Value::Str("agent:ws_01J8Z2:agent_a".to_owned()),
+        );
+        let got = Draft::parse(&to_canonical(&Value::Object(body))).err();
+        let got = got.as_ref().map(|e| (e.reason.code(), e.path.as_str()));
+        assert_eq!(got, Some(("wrong_stream", "event_type")), "{name}");
+    }
+}
