@@ -4,10 +4,10 @@
 #
 # Version 2 (DEC-2394): the founder confirmed Alpaca news on 2026-10-26, answering DEC-1130 item 2,
 # which made that confirmation his (DEC-79: legal). Counsel has not separately confirmed its terms
-# on keeping cited items; DEC-433 item 20's retention question stays open. It is read-only and paper-keyed, each item is
-# journaled before use, and research may read it; it gives opinions only, never orders. Its text
-# stays licensed, so readers withhold it until the founder and counsel decide inference spec §13
-# question 6 (DEC-1130 item 6).
+# on keeping cited items; DEC-433 item 20's retention question stays open. It must be read
+# read-only with a paper key, each item journaled before use (wiring follows, DEC-2394), and
+# research may read it; it gives opinions only, never orders. Its text stays licensed, so readers
+# withhold it until the founder and counsel decide inference spec §13 question 6 (DEC-1130 item 6).
 #
 # A source is on the allowlist only while `counsel_confirmed` is true: DEC-433 item 20 allowlists
 # only sources whose terms allow keeping what a thesis cited, as counsel confirms per vendor. An
