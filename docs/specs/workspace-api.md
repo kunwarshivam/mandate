@@ -1168,7 +1168,7 @@ pattern); the answer is the runtime's, from the agent stream.
 | Daily brief | `GET /agents/{id}/briefs/{date}` | D13: counts and sources only; no profit or outcome claims |
 | Scorecards | `GET /agents/{id}/scorecards` | FR-8.4: the user's own results only. Never embedded in an approval, the model picker, or another workspace's view |
 | Forward-paper evaluation | `GET /evaluations/{id}` | E17-8, E15-3: the founder's evaluation of the research agent's theses, one scorecard per signal model beside the baselines. Only in the team's internal paper workspaces (DEC-103); elsewhere `not_found`. Never an owner's scorecard ([DEC-1002](../project/decisions/DEC-1002.md) item 6) |
-| Alerts | `GET /alerts` | G5, from `OwnerAlertSent` and the events it names |
+| Alerts | `GET /alerts` | G5, from `OwnerAlertSent` and the events it names, with each one's notice and the asking member's own deliveries: `read-models/alerts` ([DEC-2140](../project/decisions/DEC-2140.md)) |
 | Health | `GET /health` | The status strip (G1): market data, broker, deployment, relay, each with its last observation time |
 
 The first shapes served are `read-models/agents` and `read-models/agent`
@@ -1221,6 +1221,36 @@ code, never both. `passed` is true only when at least one group was scored and e
 passed. Its one disclosure is the placeholder `NOTE-FORWARD-PAPER-INTERNAL` (DEC-1003). Until
 counsel answers compliance question 35, nothing here reaches an owner, an approval, or the model
 picker.
+
+`GET /alerts` returns `read-models/alerts` ([DEC-2140](../project/decisions/DEC-2140.md)), the
+web inbox's alerts (notifications spec §1.3, §4.1: the pull channel's list is the journal itself).
+It reads the streams the dispatcher follows (DEC-2516 item 1): the control stream, the agent stream
+of every agent `AgentDeployed` names, and the account stream of every account `ConnectionRequested`
+or `ConnectionEstablished` names, in the deployment's environment; and the notice stream,
+`ntf:{workspace_id}`, which is not found until the dispatcher first writes it. Each
+`OwnerAlertSent` on those streams is one alert, most recent first, at most `limit` of them (1 to
+200, default 50; `truncated` says whether older ones were left out):
+
+- `alert_id`, the `OwnerAlertSent` event's id; `kind`, as journaled (journal spec §9.15), and its
+  `class` from notifications spec §3.2 (`safety` or `info`; no alert is `action`); `raised_at`, its
+  `recorded_at`.
+- `stream`: the stream it was recorded on, as `type` (`agent`, `account` or `control`) and the
+  `agent_id` or `account_ref` the stream id names (`null` for the other, and both for the control
+  stream).
+- `subject`: the subject event's id and its `event_type` from the same stream (rule 130 puts it in
+  the alert's own batch; `null` if the stream holds no such event); `owner_command`, as journaled
+  (a user's kill switch only).
+- `notice`: `null` until the dispatcher issues one for the alert (`NoticeIssued` whose `cause` is
+  `alert_id`); then its `issued_at` and `delivery`, the asking member's own latest
+  `NoticeAttempted` per push channel, matched by recipient (`p_` and the member's id in lowercase,
+  notifications spec §5.9): `channel`, `status`, `attempt` and `recorded_at`. Another member's
+  attempts, recipients, addresses and provider message ids are never served. `delivery` is empty
+  while no attempt to the member is recorded.
+
+It needs the view row (§3.8) and serves nothing an alert's own records do not hold: no instrument,
+quantity, price, or text beyond the kind, which the client renders from its own closed table
+(API-10). A read of any of the streams that fails is `journal_unavailable`, never a shorter list;
+`as_of` names every stream read, the notice stream once it exists.
 
 ### 4.8 Journal and audit (audit explorer backend)
 
@@ -2396,7 +2426,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
-| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); the ledger, risk-mark, and protection folds are planned |
+| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); the alerts read is specified (§4.7, [DEC-2140](../project/decisions/DEC-2140.md)) and served once lane EX's route lands; the ledger, risk-mark, and protection folds are planned |
 | Journal queries, trace, exports over the API | **Partly served** (E12-6): a stream's events page and one event (§4.8.1); trace, exports, and verification over the API are planned, their contracts in §4.8.1, served by the pure crate `mandate-audit` |
 | The backtest report (`read-models/backtest`) and `BacktestRunRecorded` | **Specified** (DEC-1000, DEC-1001; journal spec v0.45 §9.18); the run is **planned** (E4-4), the record's registration and the route **planned** (E4-5) |
 | The forward-paper evaluation (`read-models/evaluation`) and `EvaluationRunRecorded` | **Specified** (DEC-1002; journal spec v0.45 §9.18); the pure scorer **exists** (`mandate_research::score`); the harness, the record's registration, and the route **planned** (E17-8) |

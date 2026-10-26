@@ -1,0 +1,3739 @@
+[
+  {
+    "label": "an empty as_of",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "a missing truncated",
+    "remove": [
+      "/truncated"
+    ]
+  },
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "a kind no alert takes",
+    "set": {
+      "/alerts/0/kind": "approval_requested"
+    }
+  },
+  {
+    "label": "channel_lost, which no alert causes",
+    "set": {
+      "/alerts/0/kind": "channel_lost"
+    }
+  },
+  {
+    "label": "a safety kind served as info",
+    "set": {
+      "/alerts/1/class": "info"
+    }
+  },
+  {
+    "label": "an action class",
+    "set": {
+      "/alerts/0/class": "action"
+    }
+  },
+  {
+    "label": "an owner command on a kind other than kill_switch",
+    "set": {
+      "/alerts/1/owner_command": "01JBH3BTZ8K2M4N6P8R0S2T4V6"
+    }
+  },
+  {
+    "label": "an agent stream naming an account",
+    "set": {
+      "/alerts/0/stream/account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+    }
+  },
+  {
+    "label": "an account stream naming no account",
+    "set": {
+      "/alerts/1/stream/account_ref": null
+    }
+  },
+  {
+    "label": "a control stream naming an agent",
+    "set": {
+      "/alerts/1/stream/type": "control",
+      "/alerts/1/stream/account_ref": null,
+      "/alerts/1/stream/agent_id": "agt_x"
+    }
+  },
+  {
+    "label": "a recipient on a delivery",
+    "set": {
+      "/alerts/0/notice/delivery/0/recipient": "p_01jb"
+    }
+  },
+  {
+    "label": "a provider message id on a delivery",
+    "set": {
+      "/alerts/0/notice/delivery/0/provider_message_id": "abc"
+    }
+  },
+  {
+    "label": "a pull channel as a delivery",
+    "set": {
+      "/alerts/0/notice/delivery/0/channel": "web_inbox"
+    }
+  },
+  {
+    "label": "an unknown delivery status",
+    "set": {
+      "/alerts/0/notice/delivery/0/status": "sent"
+    }
+  },
+  {
+    "label": "text on an alert",
+    "set": {
+      "/alerts/0/text": "Your agent was stopped"
+    }
+  },
+  {
+    "label": "a notice id served",
+    "set": {
+      "/alerts/0/notice/notice": "0123456789abcdef0123456789abcdef"
+    }
+  },
+  {
+    "label": "a subject with no event_type member",
+    "remove": [
+      "/alerts/0/subject/event_type"
+    ]
+  },
+  {
+    "label": "a missing notice member",
+    "remove": [
+      "/alerts/1/notice"
+    ]
+  },
+  {
+    "label": "attempt 0",
+    "set": {
+      "/alerts/0/notice/delivery/0/attempt": 0
+    }
+  },
+  {
+    "label": "a missing alerts",
+    "remove": [
+      "/alerts"
+    ]
+  },
+  {
+    "label": "201 alerts",
+    "set": {
+      "/alerts": [
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        },
+        {
+          "alert_id": "01JBH3BTZ8K2M4N6P8R0S2T4V5",
+          "kind": "protection",
+          "class": "safety",
+          "raised_at": "2026-10-08T14:28:00.000000000Z",
+          "stream": {
+            "type": "account",
+            "agent_id": null,
+            "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+          },
+          "subject": {
+            "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V4",
+            "event_type": "ProtectionChanged"
+          },
+          "owner_command": null,
+          "notice": null
+        }
+      ]
+    }
+  },
+  {
+    "label": "an alert with no alert_id",
+    "remove": [
+      "/alerts/1/alert_id"
+    ]
+  },
+  {
+    "label": "an alert with no kind, served as info",
+    "remove": [
+      "/alerts/1/kind"
+    ],
+    "set": {
+      "/alerts/1/class": "info"
+    }
+  },
+  {
+    "label": "an alert with no class",
+    "remove": [
+      "/alerts/1/class"
+    ]
+  },
+  {
+    "label": "an alert with no raised_at",
+    "remove": [
+      "/alerts/1/raised_at"
+    ]
+  },
+  {
+    "label": "an alert with no stream",
+    "remove": [
+      "/alerts/1/stream"
+    ]
+  },
+  {
+    "label": "an alert with no subject",
+    "remove": [
+      "/alerts/1/subject"
+    ]
+  },
+  {
+    "label": "an alert with no owner_command",
+    "remove": [
+      "/alerts/1/owner_command"
+    ]
+  },
+  {
+    "label": "an unknown kind",
+    "set": {
+      "/alerts/1/kind": "mutant_value"
+    }
+  },
+  {
+    "label": "an unknown class",
+    "set": {
+      "/alerts/1/class": "mutant_value"
+    }
+  },
+  {
+    "label": "an info kind served as safety",
+    "set": {
+      "/alerts/1/kind": "daily_brief",
+      "/alerts/1/class": "safety"
+    }
+  },
+  {
+    "label": "a stream with no type",
+    "remove": [
+      "/alerts/0/stream/type"
+    ]
+  },
+  {
+    "label": "a stream with no agent_id",
+    "remove": [
+      "/alerts/0/stream/agent_id"
+    ]
+  },
+  {
+    "label": "a stream with no account_ref",
+    "remove": [
+      "/alerts/0/stream/account_ref"
+    ]
+  },
+  {
+    "label": "an unknown member on the stream",
+    "set": {
+      "/alerts/0/stream/extra": 1
+    }
+  },
+  {
+    "label": "a subject with no event_id",
+    "remove": [
+      "/alerts/0/subject/event_id"
+    ]
+  },
+  {
+    "label": "an unknown member on the subject",
+    "set": {
+      "/alerts/0/subject/extra": 1
+    }
+  },
+  {
+    "label": "a subject event_type that is no event type",
+    "set": {
+      "/alerts/0/subject/event_type": "not a type"
+    }
+  },
+  {
+    "label": "a notice with no issued_at",
+    "remove": [
+      "/alerts/0/notice/issued_at"
+    ]
+  },
+  {
+    "label": "a notice with no delivery",
+    "remove": [
+      "/alerts/0/notice/delivery"
+    ]
+  },
+  {
+    "label": "three deliveries",
+    "set": {
+      "/alerts/0/notice/delivery": [
+        {
+          "channel": "email",
+          "status": "delivered",
+          "attempt": 1,
+          "recorded_at": "2026-10-08T14:29:31.000000000Z"
+        },
+        {
+          "channel": "email",
+          "status": "delivered",
+          "attempt": 1,
+          "recorded_at": "2026-10-08T14:29:31.000000000Z"
+        },
+        {
+          "channel": "email",
+          "status": "delivered",
+          "attempt": 1,
+          "recorded_at": "2026-10-08T14:29:31.000000000Z"
+        }
+      ]
+    }
+  },
+  {
+    "label": "a delivery with no channel",
+    "remove": [
+      "/alerts/0/notice/delivery/0/channel"
+    ]
+  },
+  {
+    "label": "a delivery with no status",
+    "remove": [
+      "/alerts/0/notice/delivery/0/status"
+    ]
+  },
+  {
+    "label": "a delivery with no attempt",
+    "remove": [
+      "/alerts/0/notice/delivery/0/attempt"
+    ]
+  },
+  {
+    "label": "a delivery with no recorded_at",
+    "remove": [
+      "/alerts/0/notice/delivery/0/recorded_at"
+    ]
+  },
+  {
+    "label": "an unknown channel",
+    "set": {
+      "/alerts/0/notice/delivery/0/channel": "mutant_value"
+    }
+  },
+  {
+    "label": "an unknown status (the mutant's)",
+    "set": {
+      "/alerts/0/notice/delivery/0/status": "mutant_value"
+    }
+  },
+  {
+    "label": "attempt 1001",
+    "set": {
+      "/alerts/0/notice/delivery/0/attempt": 1001
+    }
+  }
+]
