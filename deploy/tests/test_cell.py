@@ -2061,6 +2061,77 @@ def deploy_manager_contained(docs: list[dict]) -> list[str]:
     return problems
 
 
+RESEARCH_MANAGER = "deploy-manager-research"
+RESEARCH_WORKSPACE = "01KDEM0000000000000000000Wr"
+
+
+def two_managers(*extra: str) -> list[dict]:
+    """Every process rendered, with the local cell's second manager for the research workspace."""
+    return render_all("--set", f"deployManager.researchWorkspace={RESEARCH_WORKSPACE}", *extra)
+
+
+def test_the_second_manager_is_bound_as_the_first_for_its_own_workspace():
+    """DEC-2070 items 1 and 3: the second manager runs the first's image and launch for the research
+    workspace alone, under its own ServiceAccount, Role and binding with exactly the first's rules,
+    and its own admission and accounts policies, each matching only its own account, with exactly
+    the first's validations; so neither manager can make a pod or an account no policy checks."""
+    docs = two_managers()
+    managers = {w["metadata"]["name"]: w for w in docs if w["kind"] == "Deployment" and w["metadata"]["name"] in (MANAGER, RESEARCH_MANAGER)}
+    assert set(managers) == {MANAGER, RESEARCH_MANAGER}
+    first, second = (first_container(managers[n]) for n in (MANAGER, RESEARCH_MANAGER))
+    assert first["image"] == second["image"]
+    assert second["args"][second["args"].index("--workspace") + 1] == RESEARCH_WORKSPACE
+    assert first["args"][first["args"].index("--workspace") + 1] != RESEARCH_WORKSPACE
+    assert pod_spec(managers[RESEARCH_MANAGER])["serviceAccountName"] == RESEARCH_MANAGER
+
+    def by(kind: str) -> dict[str, dict]:
+        return {d["metadata"]["name"]: d for d in docs if d["kind"] == kind}
+
+    roles, bindings = by("Role"), by("RoleBinding")
+    assert set(roles) == {MANAGER, RESEARCH_MANAGER}
+    assert roles[MANAGER]["rules"] == roles[RESEARCH_MANAGER]["rules"]
+    for name in (MANAGER, RESEARCH_MANAGER):
+        assert [s["name"] for s in bindings[name]["subjects"]] == [name]
+        assert bindings[name]["roleRef"]["name"] == name
+    policies_ = by("ValidatingAdmissionPolicy")
+    policy_bindings = by("ValidatingAdmissionPolicyBinding")
+    for suffix in ("pods", "accounts"):
+        mine = {n: p for n, p in policies_.items() if n.endswith(f"-{suffix}")}
+        names = sorted(mine)
+        assert len(names) == 2, names
+        account = {
+            n: [c["expression"] for c in p["spec"]["matchConditions"]]
+            for n, p in mine.items()
+        }
+        first_name = next(n for n in names if n.endswith(f"-{MANAGER}-{suffix}"))
+        second_name = next(n for n in names if n.endswith(f"-{RESEARCH_MANAGER}-{suffix}"))
+        assert account[first_name] == [f"request.userInfo.username == 'system:serviceaccount:ws-ws1:{MANAGER}'"]
+        assert account[second_name] == [f"request.userInfo.username == 'system:serviceaccount:ws-ws1:{RESEARCH_MANAGER}'"]
+        strip = lambda p: {k: v for k, v in p["spec"].items() if k != "matchConditions"}
+        assert strip(mine[first_name]) == strip(mine[second_name]), suffix
+        for name in names:
+            assert policy_bindings[name]["spec"]["policyName"] == name
+            assert policy_bindings[name]["spec"]["validationActions"] == ["Deny"]
+    first_templates, second_templates = (
+        next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == f"{n}-templates")
+        for n in (MANAGER, RESEARCH_MANAGER)
+    )
+    assert set(first_templates["data"]) == set(second_templates["data"]) == {"executor.json", "runtime.json", f"{EXCHANGE}.json"}
+
+
+def test_the_second_manager_runs_only_in_a_dev_or_ci_cell_and_no_hosted_values_name_it():
+    """DEC-2070 item 4: the chart refuses the second manager at any tier but dev or ci, and no values
+    file names a research workspace."""
+    done = helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+        "--set", "deploymentTier=production", "--set", f"deployManager.researchWorkspace={RESEARCH_WORKSPACE}",
+    )
+    assert done.returncode != 0 and "runs only in a dev or ci cell" in done.stderr, done.stderr
+    for values in sorted((CELL / "values").glob("*.yaml")) + sorted((CELL.parent / "gitops").rglob("*.yaml")):
+        assert "researchWorkspace" not in values.read_text(), values
+    assert not [d for d in render_all() if d["metadata"]["name"].startswith(RESEARCH_MANAGER)]
+
+
 def test_deploy_manager_contained():
     docs = render_all()
     assert deploy_manager_contained(docs) == []
