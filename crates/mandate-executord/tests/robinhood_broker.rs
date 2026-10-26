@@ -43,6 +43,8 @@ use support::{
 const ACCOUNT_NUMBER: &str = "5QR00001";
 const OPEN: &str = "01JINTENT0000000000000000A";
 const OPENING: &str = "md-01JINTENT0000000000000000A";
+/// A risk exit's key, for the broker-level sell.
+const EXIT: &str = "md-01JINTENT0000000000000000B";
 const REF: &str = "sha256:6666666666666666666666666666666666666666666666666666666666666666";
 /// The account's cash before the opening.
 const CASH: &str = "100000";
@@ -51,7 +53,9 @@ const CASH: &str = "100000";
 const AVERAGE: &str = "149.5";
 /// The cash after 10 AAPL bought at [`AVERAGE`]: 100000 − 1495.
 const SPENT: &str = "98505";
-/// The protective stop `TwoPercentStop` gives an entry at 150: 2% below it.
+/// The protective stop `TwoPercentStop` gives an entry at 150: 2% below it. The entry is the
+/// opening's limit, not the fill's average, as the protection policy reads it from the order
+/// (`support::TwoPercentStop`).
 const STOP: &str = "147";
 /// The stop-limit's limit: the stop less the configuration's 0.5% offset, 147 × 0.995.
 const STOP_LIMIT: &str = "146.265";
@@ -73,7 +77,8 @@ type Calls = Rc<RefCell<Vec<(&'static str, Value)>>>;
 
 /// The scripted seam: the account's reads answer what the [`Book`] holds; a review clears; a
 /// place answers the order it was asked for, accepted and unfilled, as the contract's record, and
-/// the broker lists that record from then on, as Robinhood lists an order it has accepted; and
+/// the broker lists that record from then on, as Robinhood lists an order it has accepted; a
+/// cancel by `order_id` answers that record `cancelled`; any other tool fails; and
 /// a listing (a `get_equity_orders` read filtered by `created_at_gte`) goes unanswered while
 /// `listing_lost` is set.
 #[derive(Clone)]
@@ -110,6 +115,18 @@ impl Tools for Scripted {
                 let record = answered(arguments, &format!("rh-{}", book.placed), "confirmed", "0");
                 book.orders.push(record.clone());
                 record
+            }
+            "cancel_equity_order" => {
+                let asked = arguments.get("order_id").and_then(Value::as_str);
+                let record = book
+                    .orders
+                    .iter_mut()
+                    .find(|record| record.get("id").and_then(Value::as_str) == asked)
+                    .ok_or(McpError::Network)?;
+                if let Value::Object(members) = record {
+                    members.insert("state".to_owned(), json!("cancelled"));
+                }
+                record.clone()
             }
             _ => return Err(McpError::Network),
         };
@@ -225,6 +242,37 @@ fn reviewed(place: &Value) -> Value {
     review
 }
 
+/// The only tools the process may call: the account's reads, the order listing, and an order's
+/// review, place and cancel by its own `order_id`. Never a cancel-all or a close-position
+/// (`AGENTS.md` rule 13), which the contract does not offer and the seam would fail.
+const CONTRACT_TOOLS: [&str; 7] = [
+    "get_accounts",
+    "get_portfolio",
+    "get_equity_positions",
+    "get_equity_orders",
+    "review_equity_order",
+    "place_equity_order",
+    "cancel_equity_order",
+];
+
+/// Every call the seam was handed names one of [`CONTRACT_TOOLS`].
+fn only_the_contracts_tools(calls: &Calls) {
+    let called: Vec<&'static str> = calls.borrow().iter().map(|(tool, _)| *tool).collect();
+    assert!(
+        called.iter().all(|tool| CONTRACT_TOOLS.contains(tool)),
+        "{called:?}"
+    );
+}
+
+/// The listings of our own orders the seam was handed: `get_equity_orders` filtered by
+/// `created_at_gte`.
+fn listings(calls: &Calls) -> usize {
+    sent(calls, "get_equity_orders")
+        .iter()
+        .filter(|arguments| arguments.get("created_at_gte").is_some())
+        .count()
+}
+
 /// DEC-2386 item 3: the process's broker declares Robinhood's own profile, the one the executor
 /// reads its protection and its listing fallback from (DEC-531).
 #[test]
@@ -256,7 +304,10 @@ fn a_submit_is_reviewed_then_placed_through_the_connector() -> Result<(), Error>
         ("rh-1", Some(OPENING), order.qty, Qty::ZERO)
     );
     let place = opening_place()?;
-    assert_eq!(sent(&seam.calls, "place_equity_order"), [place.clone()]);
+    assert_eq!(
+        sent(&seam.calls, "place_equity_order"),
+        std::slice::from_ref(&place)
+    );
     assert_eq!(sent(&seam.calls, "review_equity_order"), [reviewed(&place)]);
     let order_calls: Vec<&str> = seam
         .calls
@@ -269,9 +320,64 @@ fn a_submit_is_reviewed_then_placed_through_the_connector() -> Result<(), Error>
     Ok(())
 }
 
+/// A risk-reducing sell goes through as asked: a risk exit of the 10 at the limit 140 is reviewed
+/// and placed as the contract's limit sell, `gfd`, on the recorded account, never turned into a
+/// close-position or anything else (`AGENTS.md` rules 12 and 13).
+#[test]
+fn a_risk_exit_sell_is_placed_as_asked() -> Result<(), Error> {
+    let seam = seam(CASH);
+    let mut broker = broker(seam.tools)?;
+    let exit = SubmitOrder {
+        client_order_id: ClientOrderId::parse(EXIT)?,
+        side: Side::Sell,
+        limit_price: Some(Price::parse("140")?),
+        purpose: Purpose::RiskExit,
+        ..opening(EXIT)?
+    };
+    let answer = broker.call(&BrokerRequest::Submit(exit))?;
+    assert!(
+        matches!(&answer, BrokerOutcome::Submitted(placed) if placed.side == Side::Sell),
+        "{answer:?}"
+    );
+    let place = json!({"account_number": ACCOUNT_NUMBER, "symbol": "AAPL", "side": "sell",
+        "type": "limit", "quantity": "10", "limit_price": "140", "time_in_force": "gfd",
+        "market_hours": "regular_hours", "ref_id": ref_id(&ClientOrderId::parse(EXIT)?)?});
+    assert_eq!(
+        sent(&seam.calls, "place_equity_order"),
+        std::slice::from_ref(&place)
+    );
+    assert_eq!(sent(&seam.calls, "review_equity_order"), [reviewed(&place)]);
+    only_the_contracts_tools(&seam.calls);
+    Ok(())
+}
+
+/// A `Cancel` goes by the broker's `order_id` of the one order placed under the key, on the
+/// recorded account and nothing else, and the broker's `cancelled` record answers it accepted; it
+/// is never a cancel-all (`AGENTS.md` rule 13).
+#[test]
+fn a_cancel_goes_by_the_placed_orders_broker_id() -> Result<(), Error> {
+    let seam = seam(CASH);
+    let mut broker = broker(seam.tools)?;
+    broker.call(&BrokerRequest::Submit(opening(OPENING)?))?;
+    let answer = broker.call(&BrokerRequest::Cancel {
+        client_order_id: ClientOrderId::parse(OPENING)?,
+    })?;
+    assert!(
+        matches!(&answer, BrokerOutcome::CancelAccepted { client_order_id } if client_order_id == OPENING),
+        "{answer:?}"
+    );
+    assert_eq!(
+        sent(&seam.calls, "cancel_equity_order"),
+        [json!({"account_number": ACCOUNT_NUMBER, "order_id": "rh-1"})]
+    );
+    only_the_contracts_tools(&seam.calls);
+    Ok(())
+}
+
 /// DEC-2386 item 2: the account is read once, one read each of the portfolio, the positions and
 /// the orders, and mapped by the shell's own mapping (DEC-933 item 1): buying power above cash
-/// reads as the cash, the equity is the cash, the account active at 1×.
+/// reads as the cash, the equity is the cash, the account active at 1×, and buying power below the
+/// cash is read as itself; the working order the broker lists is the account's open order.
 #[test]
 fn the_account_is_read_once_and_mapped_by_broker_account() -> Result<(), Error> {
     let seam = seam("1000.5");
@@ -279,6 +385,13 @@ fn the_account_is_read_once_and_mapped_by_broker_account() -> Result<(), Error> 
         let mut book = seam.book.borrow_mut();
         book.buying_power = "5000".to_owned();
         book.positions = vec![position("3", "85.12")];
+        book.orders = vec![answered(
+            &json!({"symbol": "AAPL", "side": "sell", "type": "limit", "quantity": "3",
+                "limit_price": "90", "time_in_force": "gtc"}),
+            "rh-9",
+            "confirmed",
+            "0",
+        )];
     }
     let mut broker = broker(seam.tools)?;
     let reads = broker.account_reads()?;
@@ -290,7 +403,19 @@ fn the_account_is_read_once_and_mapped_by_broker_account() -> Result<(), Error> 
             .collect::<Vec<_>>(),
         [("AAPL".to_owned(), SignedQty::parse("3")?)]
     );
-    assert!(reads.open_orders.is_empty());
+    assert_eq!(
+        reads
+            .open_orders
+            .iter()
+            .map(|o| (o.broker_order_id.as_str(), o.side, o.qty, o.limit_price))
+            .collect::<Vec<_>>(),
+        [(
+            "rh-9",
+            Side::Sell,
+            Qty::parse("3")?,
+            Some(Price::parse("90")?)
+        )]
+    );
     let cash = Usd::parse("1000.5")?;
     let account = &reads.account;
     assert_eq!(
@@ -307,6 +432,18 @@ fn the_account_is_read_once_and_mapped_by_broker_account() -> Result<(), Error> 
     for tool in ["get_portfolio", "get_equity_positions", "get_equity_orders"] {
         assert_eq!(sent(&seam.calls, tool).len(), 1, "one read of {tool}");
     }
+    seam.book.borrow_mut().buying_power = "800".to_owned();
+    let below = broker.account_reads()?.account;
+    let power = Usd::parse("800")?;
+    assert_eq!(
+        (
+            below.cash,
+            below.buying_power,
+            below.non_marginable_buying_power
+        ),
+        (cash, power, power),
+        "buying power below the cash is the buying power"
+    );
     Ok(())
 }
 
@@ -577,6 +714,35 @@ fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Err
             "limit_price": STOP_LIMIT, "time_in_force": "gtc", "market_hours": "regular_hours"})
     );
     assert!(Price::parse(STOP_LIMIT)? <= Price::parse(STOP)?);
+    let protective: Vec<String> = journal
+        .payloads("OrderSubmitted")
+        .iter()
+        .filter_map(|p| text(p, "client_order_id"))
+        .filter(|id| *id != OPENING)
+        .map(str::to_owned)
+        .collect();
+    let [protective] = protective.as_slice() else {
+        return Err(format!("one order besides the opening is submitted: {protective:?}").into());
+    };
+    assert_eq!(
+        stop_ref,
+        Value::String(ref_id(&ClientOrderId::parse(protective)?)?),
+        "the stop is placed under its own journaled key"
+    );
+    let mut placed_stop = stop.clone();
+    if let Value::Object(members) = &mut placed_stop {
+        members.insert("ref_id".to_owned(), stop_ref.clone());
+    }
+    assert_eq!(
+        sent(&seam.calls, "place_equity_order"),
+        [opening_place()?, placed_stop],
+        "nothing is placed but the opening and its stop"
+    );
+    assert!(
+        sent(&seam.calls, "cancel_equity_order").is_empty(),
+        "nothing is cancelled"
+    );
+    only_the_contracts_tools(&seam.calls);
     assert!(
         journal
             .payloads("ProtectionChanged")
@@ -628,20 +794,53 @@ fn the_resting_stop_sells_out_and_is_booked_at_its_limit() -> Result<(), Error> 
         text(fill, "fill_id").is_some_and(|id| id.starts_with("limit:") && id.ends_with(":10")),
         "{fill:?}"
     );
+    assert_eq!(
+        stop_places(&seam.calls).len(),
+        1,
+        "the sold-out position is never protected again"
+    );
+    assert_eq!(sent(&seam.calls, "place_equity_order").len(), 2);
+    assert!(sent(&seam.calls, "cancel_equity_order").is_empty());
+    only_the_contracts_tools(&seam.calls);
     reconciled_without_activity(&journal);
     Ok(())
 }
 
-/// DEC-2800 item 2: a listing that goes unanswered holds. The opening filled at the broker, but
-/// while its listing is lost nothing is adopted or booked, nothing mismatches and no agent is
-/// held; once the listing answers, the fill is booked.
+/// DEC-2800 item 3: a listing that goes unanswered holds. The opening filled at the broker, so the
+/// read no longer lists it as working; while its listing fails, every pass asks for it, and
+/// nothing is adopted, booked or marked `Unknown`, no reconciliation runs, nothing mismatches, no
+/// agent is held, and no stop is placed. Once the listing answers, the fill is booked once, by an
+/// adopting run.
 #[test]
 fn an_unanswered_listing_holds_and_never_adopts() -> Result<(), Error> {
     let (journal, mut process, seam) = opened()?;
+    let runs_before = journal.payloads("ReconciliationRun").len();
     filled(&seam)?;
     seam.listing_lost.set(true);
     pass(&journal, &mut process, "t1", 10)?;
+    let first = listings(&seam.calls);
+    assert!(first >= 1, "the pass asks for the listing");
     pass(&journal, &mut process, "t2", 20)?;
+    assert!(
+        listings(&seam.calls) > first,
+        "the next pass asks for it again"
+    );
+    assert_eq!(
+        journal.payloads("ReconciliationRun").len(),
+        runs_before,
+        "no reconciliation runs while the listing is unanswered"
+    );
+    assert!(
+        journal
+            .payloads("OrderStateChanged")
+            .iter()
+            .all(|p| text(p, "state") != Some("unknown")),
+        "nothing is marked Unknown"
+    );
+    assert!(
+        stop_places(&seam.calls).is_empty(),
+        "nothing is protected yet"
+    );
     assert!(
         fills(&journal, "buy").is_empty(),
         "nothing is booked: {:?}",
@@ -673,6 +872,14 @@ fn an_unanswered_listing_holds_and_never_adopts() -> Result<(), Error> {
         1,
         "once answered, the fill is booked"
     );
+    let runs = runs_from_the_fill(&journal, "buy")?;
+    assert_eq!(
+        runs.first().and_then(|run| text(run, "result")),
+        Some("adopted"),
+        "{runs:?}"
+    );
+    only_the_contracts_tools(&seam.calls);
+    reconciled_without_activity(&journal);
     Ok(())
 }
 
