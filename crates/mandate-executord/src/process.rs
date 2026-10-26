@@ -7,11 +7,12 @@ use mandate_accounting::InstrumentId;
 use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
-    BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, EventId,
-    ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot,
-    IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, Ports,
-    ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle,
+    AccountDeclaration, AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome,
+    BrokerRequest, BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft,
+    EventId, ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input,
+    InstrumentSnapshot, IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion,
+    MandateView, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch, fold,
+    handle,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
@@ -37,6 +38,13 @@ pub trait Broker {
     /// The broker's capability profile, set on the state before `Input::Started` (DEC-838 item 5).
     fn profile(&self) -> Result<CapabilityProfile, ProfileError>;
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError>;
+    /// The account type and day-trading regime the broker's connector declares (trading spec
+    /// §7.2, DEC-840), which each `AccountSnapshotRecorded` journals (journal spec §9.35,
+    /// DEC-2398). `None`, the default, declares none: the snapshot journals `null`, and a reader
+    /// holds what depends on it.
+    fn declared(&self) -> Option<AccountDeclaration> {
+        None
+    }
 }
 
 /// The protections port could not answer. The process stops rather than hand an opening without
@@ -143,6 +151,8 @@ enum Read {
 enum Ran {
     Committed,
     InDoubt,
+    /// The journal refused the batch as invalid: nothing of it committed (DEC-2805).
+    Refused,
     Stopped,
 }
 
@@ -187,6 +197,8 @@ pub struct ExecutorProcess<S, B> {
     /// never floods (E21-26, design §2.1 and §8.2, RB-07). Cleared by the next commit, so the
     /// following outage raises it again.
     journal_down: bool,
+    /// Whether a refused batch was already alerted to the operator in this process (DEC-2805).
+    journal_refused: bool,
     /// Each followed agent's deployed mandate version, from its `AgentDeployed`, which the core's
     /// mandate port answers with (DEC-2034 item 1).
     deployed: BTreeMap<AgentId, MandateVersion>,
@@ -245,6 +257,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             unreadable: BTreeSet::new(),
             held: BTreeSet::new(),
             journal_down: false,
+            journal_refused: false,
             deployed: BTreeMap::new(),
             max_chain: config.max_chain,
             written_at: now,
@@ -541,9 +554,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         true
     }
 
-    /// Journals the mark `draft` with the event time `at`; whether it committed. An append in
+    /// Journals the mark `draft` with the event time `at`; whether the pass may go on. An append in
     /// doubt keeps the draft, unchanged, to be offered again first on the next pass, and raises the
-    /// journal's one opaque alert for the outage.
+    /// journal's one opaque alert for the outage. A mark the journal refuses is dropped, alerted to
+    /// the operator once, and the pass goes on (DEC-2805 item 3): a missing mark only leaves the
+    /// risk mark stale, which holds openings at the gate, and never stops an exit.
     fn append_mark(
         &mut self,
         now: UtcNanos,
@@ -552,9 +567,19 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         alerts: &mut Vec<Alert>,
     ) -> bool {
         self.written_at = at;
-        match self.journal(now, std::slice::from_ref(&draft)) {
+        match self.journal_refusable(now, std::slice::from_ref(&draft)) {
             Ran::Committed => {
                 self.journal_down = false;
+                true
+            }
+            Ran::Refused => {
+                if !self.journal_refused {
+                    self.journal_refused = true;
+                    alerts.push(Alert {
+                        key: "journal_refused",
+                        subject: None,
+                    });
+                }
                 true
             }
             Ran::InDoubt => {
@@ -863,10 +888,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             }
         }
         if !drafts.is_empty() {
-            match self.journal(now, &drafts) {
+            match self.journal_refusable(now, &drafts) {
                 Ran::Committed => {
                     self.journal_down = false;
                 }
+                Ran::Refused => return self.refused(now, at, input, alerts, depth),
                 Ran::InDoubt => {
                     if !self.journal_down {
                         self.journal_down = true;
@@ -1001,6 +1027,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             fills,
             cursor,
             reason: ReconcileReason::Startup,
+            declared: self.broker.declared(),
             taken_at_head: Seq(self.account_head()),
         })
     }
@@ -1020,8 +1047,59 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             .map_or(0, |seq| seq.0)
     }
 
-    /// Journals `drafts` as one batch on the account stream and folds what committed.
+    /// DEC-2805: the journal refused the batch `input` drafted. Nothing of it committed and none of
+    /// its requests is sent; the core forgets it and holds every agent's openings, alerting the
+    /// owner once, and the pass goes on, so exits, protection and the kill switch never stop on a
+    /// record the journal cannot take (`AGENTS.md` rule 13). The operator is alerted once per
+    /// process. A refused reconciliation is one that did not pass. Where [`held_on_refusal`] says
+    /// the refusal cannot be held, the process stops.
+    fn refused(
+        &mut self,
+        now: UtcNanos,
+        at: UtcNanos,
+        input: Input,
+        alerts: &mut Vec<Alert>,
+        depth: usize,
+    ) -> bool {
+        if !held_on_refusal(&input) {
+            self.lifecycle.observe(now, Lifecycled::Failed);
+            return false;
+        }
+        if !self.journal_refused {
+            self.journal_refused = true;
+            alerts.push(Alert {
+                key: "journal_refused",
+                subject: None,
+            });
+        }
+        if matches!(input, Input::BrokerSnapshot(_)) {
+            self.lifecycle
+                .observe(now, Lifecycled::Reconciled { passed: false });
+        }
+        self.hand(
+            now,
+            at,
+            Input::BatchRefused,
+            alerts,
+            depth.saturating_add(1),
+        )
+    }
+
+    /// Journals `drafts` as one batch on the account stream and folds what committed; a refused
+    /// batch stops the process.
     fn journal(&mut self, now: UtcNanos, drafts: &[EventDraft]) -> Ran {
+        match self.journal_refusable(now, drafts) {
+            Ran::Refused => {
+                self.lifecycle.observe(now, Lifecycled::Failed);
+                Ran::Stopped
+            }
+            ran => ran,
+        }
+    }
+
+    /// Journals `drafts` as one batch on the account stream and folds what committed, answering
+    /// [`Ran::Refused`] for a batch the journal refused as invalid.
+    fn journal_refusable(&mut self, now: UtcNanos, drafts: &[EventDraft]) -> Ran {
         let Some(account) = self.account.clone() else {
             return Ran::Stopped;
         };
@@ -1070,9 +1148,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 self.lifecycle.observe(now, Lifecycled::Fenced);
                 Ran::Stopped
             }
-            AppendOutcome::HeadMismatch { .. }
-            | AppendOutcome::IdempotencyConflict { .. }
-            | AppendOutcome::Invalid { .. } => {
+            AppendOutcome::Invalid { .. } => Ran::Refused,
+            AppendOutcome::HeadMismatch { .. } | AppendOutcome::IdempotencyConflict { .. } => {
                 self.lifecycle.observe(now, Lifecycled::Failed);
                 Ran::Stopped
             }
@@ -1138,6 +1215,15 @@ fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> 
     };
     let key = if opens { "opening_held" } else { "exit_held" };
     Some((key, handoff.intent_id.0.0.clone()))
+}
+
+/// Whether a refusal of the batch `input` drafted is held and the process goes on (DEC-2805 item
+/// 1), or stops it (item 4). A refused hold leaves nothing safe to record. A refused start has
+/// already marked the core started and lost its recovery, the lookups of orders in doubt, the
+/// resent cancels and the startup reconciliation, which `Input::Started` cannot be handed again
+/// to redo; the restart redoes them, before any trading.
+fn held_on_refusal(input: &Input) -> bool {
+    !matches!(input, Input::BatchRefused | Input::Started(_))
 }
 
 #[cfg(test)]
@@ -1235,6 +1321,17 @@ mod tests {
         );
         assert!(port.covers(&agent("agenta"), &InstrumentId::new("MSFT")?));
         assert!(!port.covers(&agent("agenta"), &InstrumentId::new("AAPL")?));
+        Ok(())
+    }
+
+    /// DEC-2805: a refusal is held for every input but a refused hold and a refused start, which
+    /// stop the process (item 4).
+    #[test]
+    fn a_refusal_is_held_unless_it_is_of_the_hold_or_the_start() -> Result<(), Error> {
+        assert!(!held_on_refusal(&Input::BatchRefused));
+        assert!(!held_on_refusal(&Input::Started(WriterEpoch(1))));
+        assert!(held_on_refusal(&Input::Tick(RiskClock::from_secs(0))));
+        assert!(held_on_refusal(&handoff(Purpose::Open)?));
         Ok(())
     }
 }

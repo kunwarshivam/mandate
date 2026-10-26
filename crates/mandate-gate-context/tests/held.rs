@@ -566,11 +566,23 @@ fn an_unattributed_fill_moves_the_account_and_no_agent() {
     let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
     submitted(&mut state, AGENT, "o1");
     assert!(on(&mut state, "FillApplied", &fill("f1", "o1", "buy", "3")));
-    assert!(on(&mut state, "FillApplied", &unattributed("f2", "buy", "5")));
+    assert!(on(
+        &mut state,
+        "FillApplied",
+        &unattributed("f2", "buy", "5")
+    ));
     assert_eq!(held(&state), BTreeMap::from([(ASSET.to_owned(), qty("3"))]));
-    assert!(on(&mut state, "FillApplied", &unattributed("f3", "sell", "7")));
+    assert!(on(
+        &mut state,
+        "FillApplied",
+        &unattributed("f3", "sell", "7")
+    ));
     assert_eq!(held(&state), BTreeMap::from([(ASSET.to_owned(), qty("1"))]));
-    assert!(on(&mut state, "FillApplied", &unattributed("f3", "sell", "7")));
+    assert!(on(
+        &mut state,
+        "FillApplied",
+        &unattributed("f3", "sell", "7")
+    ));
     assert_eq!(
         held(&state),
         BTreeMap::from([(ASSET.to_owned(), qty("1"))]),

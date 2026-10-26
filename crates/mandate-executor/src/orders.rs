@@ -20,8 +20,8 @@ use crate::payload::{broker_text, int, object, text};
 use crate::protection::{overdue, protection_cancelled};
 use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
-    AccountState, BrokerAccount, BrokerFill, BrokerOrder, BrokerReject, BrokerRequest, EventId,
-    Mode, OrderState, Purpose, RiskClock, Seq, StatusMapping,
+    AccountState, AgentId, BrokerAccount, BrokerFill, BrokerOrder, BrokerReject, BrokerRequest,
+    EventId, Mode, OrderState, Purpose, RiskClock, Seq, StatusMapping,
 };
 
 /// Trading-domain spec §5.7's broker status table. It is **total**: every value the table names
@@ -727,6 +727,33 @@ pub(crate) fn every_agent_alerted(
 /// The subject external activity is recorded and acknowledged under (§7.1).
 pub(crate) const EXTERNAL: &str = "external_activity";
 
+/// The subject a run or batch that could not be recorded whole is held and acknowledged under (§11,
+/// DEC-140's slice-5 amendment, DEC-2805 item 1).
+pub(crate) const INCOMPLETE: &str = "incomplete";
+
+/// DEC-2805 item 1: the journal refused the last batch. Every agent's openings are held under
+/// [`INCOMPLETE`] and the owner alerted, once while the hold is in force, so a batch refused again
+/// adds nothing. Exits, protection and the kill switch go on (`AGENTS.md` rule 13).
+pub(crate) fn held_on_refusal(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let restriction = restriction_for(INCOMPLETE);
+    let held = (AgentId(EVERY_AGENT.to_owned()), restriction.clone());
+    if batch.view.restrictions.contains_key(&held) {
+        return Ok(());
+    }
+    let applied = batch.journal(
+        "AgentModeApplied",
+        None,
+        vec![
+            ("agent", text(EVERY_AGENT)),
+            ("to", text(crate::codec::mode_name(Mode::ExitsOnly))),
+            ("restriction", text(restriction)),
+            ("originated", Value::Bool(true)),
+        ],
+    )?;
+    batch.notify(applied, OwnerAlertKind::Reconciliation);
+    Ok(())
+}
+
 /// The `config_refs` a fill of `instrument` is journaled with (journal spec §9: `fee`, `cal`,
 /// `set`, `ins`), from the instrument snapshot's port; none when the port knows none, which the
 /// journal refuses (DEC-938 item 2).
@@ -884,7 +911,12 @@ pub(crate) fn account_restriction(
         || account.account_blocked
         || account.trade_suspended_by_user;
     if blocked {
-        restrict(batch, Restriction::Blocked, "account_trading_blocked")?;
+        restrict(
+            batch,
+            Restriction::Blocked,
+            Cause::BrokerNotice,
+            "account_trading_blocked",
+        )?;
     }
     Ok(())
 }
@@ -948,12 +980,31 @@ impl Restriction {
     }
 }
 
+/// What detected a restriction, journaled as its closed `cause` (journal spec §9.5, DEC-441 item
+/// 23, DEC-2137): the broker's account report (§7.3 row 1) or its rejects (rows 2 and 3). A lost
+/// connection restricts nothing here yet (E7-2v), so there is no variant for it.
+#[derive(Debug, Clone, Copy)]
+enum Cause {
+    BrokerNotice,
+    BrokerReject,
+}
+
+impl Cause {
+    fn name(self) -> &'static str {
+        match self {
+            Self::BrokerNotice => "broker_notice",
+            Self::BrokerReject => "broker_reject",
+        }
+    }
+}
+
 /// Stores a detected restriction as account state and applies its agent effect to every agent
 /// (§7.3), alerting the owner. A restriction already in force is not journaled again, and the
 /// answer says whether this one was new.
 fn restrict(
     batch: &mut Batch<'_, '_>,
     restriction: Restriction,
+    cause: Cause,
     reason: &'static str,
 ) -> Result<bool, ExecutorError> {
     if batch.view.account_state >= restriction.state() {
@@ -964,6 +1015,7 @@ fn restrict(
         None,
         vec![
             ("restriction", text(restriction.name())),
+            ("cause", text(cause.name())),
             ("reason_code", text(reason)),
         ],
     )?;
@@ -1024,7 +1076,12 @@ pub(crate) fn reject(
     let closing_only = message.contains("closing") || message.contains("restricted");
     let threshold = batch.view.consecutive_403s >= batch.ports.config.restriction_403_threshold;
     if (closing_only || threshold)
-        && restrict(batch, Restriction::ClosingOnly, "account_restricted")?
+        && restrict(
+            batch,
+            Restriction::ClosingOnly,
+            Cause::BrokerReject,
+            "account_restricted",
+        )?
         && threshold
     {
         batch.broker(BrokerRequest::GetAccount);

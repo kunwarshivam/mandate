@@ -20,6 +20,7 @@ import { PasskeysSection } from "@/components/auth/passkeys-section";
 import { PushSection } from "@/components/notifications/push-section";
 import { BySource } from "@/components/api-screens/api-screens";
 import { ApiTimeline } from "@/components/api-screens/audit";
+import { ApiPasskeys } from "@/components/api-screens/passkeys";
 import { ComingSoon } from "./coming-soon";
 import { AllClear, Panel, Section, WorkspaceGate } from "./common";
 
@@ -141,9 +142,20 @@ function AllTimeline() {
 /** A screen from the registry: built ones render their content, the rest say what they will hold. */
 export function RegistryScreen({ screen }: { screen: Screen }) {
   const session = useSession();
+  const { source } = useRuntime();
   const body = (() => {
     switch (screen.key) {
       case "settings-profile":
+        if (source === "api")
+          return (
+            <div className="grid gap-(--section-gap)">
+              <WorkspaceGate api>
+                <ApiPasskeys />
+              </WorkspaceGate>
+              {session ? <PasskeysSection /> : null}
+              <ComingSoon purpose="Your name and sign-in sessions." />
+            </div>
+          );
         return session ? (
           <div className="grid gap-(--section-gap)">
             <PasskeysSection />

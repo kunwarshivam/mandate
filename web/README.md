@@ -208,7 +208,15 @@ cost basis, risk mark and protection shown as not reported until the API serves 
 stream, each agent's stream and each account stream those reads name (`GET
 /journal/streams/{id}/events`, §4.8.1) every ten seconds, and lists them newest first by type,
 stream, sequence and time, never a body re-told; a stream that cannot be read is named as not
-reported. Gate decisions, alerts and messages are not served yet.
+reported. Gate decisions, alerts and messages are not served yet. Settings › Profile lists the member's
+passkeys on the deployment (`GET /passkeys`) and adds one (§3.6, DEC-2108, `src/api/enrol.ts`): a
+registration challenge, then, when the member already holds a passkey, a `credential_enrol` step-up
+with it bound to `{"op": "enrol", "registration": <challenge_id>}`, then
+`navigator.credentials.create` (the deployment's RP ID and user handle, ES256 or Ed25519, user
+verification required, attestation `none`, the member's passkeys excluded), then `POST /passkeys`
+once; a first passkey must be added within five minutes of signing in and confirms after 24 hours.
+These are the passkeys the confirm, the deploy and an approval ask for, not the sign-in passkeys.
+WebAuthn needs a host name, so try it at `localhost`, never `127.0.0.1`.
 
 Stop works over the API too (DEC-2408): the sheet lists the agents the API serves, each with its kill
 switch, and the record screens build from the API's view, with open orders and per-agent positions

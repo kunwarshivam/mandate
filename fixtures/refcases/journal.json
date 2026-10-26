@@ -140765,6 +140765,435 @@
    }
   ]
  },
+ "account_clock": {
+  "spec": "docs/specs/journal.md §9.5 rules 301 and 302 (DEC-2808)",
+  "drafts": {
+   "tick": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01JAE3A0B000000000000000T1",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "ClockAdvanced",
+    "schema_version": 1,
+    "event_time": "2026-10-26T15:00:01.250000000Z",
+    "clock_source": "local",
+    "causation_id": "01JAE3A0B000000000000000C1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "clock": "2026-10-26T15:00:01.000000000Z",
+     "risk_clock": "2026-10-26T15:00:01.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "midnight": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01JAE7F00000000000000000T2",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "ClockAdvanced",
+    "schema_version": 1,
+    "event_time": "2026-10-27T04:00:00.125000000Z",
+    "clock_source": "local",
+    "causation_id": "01JAE7F00000000000000000C2",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "clock": "2026-10-27T04:00:00.000000000Z",
+     "risk_clock": "2026-10-27T04:00:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "clock_missing",
+    "clause": "§9.5: every member present",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "payload.clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.clock"
+    }
+   },
+   {
+    "name": "risk_clock_missing",
+    "clause": "§2, §9.5: every account-stream row the fold reads carries `risk_clock`",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "extra_date",
+    "clause": "§9.5: the schema is closed; the date is `TradingDayStarted`'s",
+    "base_draft": "midnight",
+    "changes": [
+     {
+      "path": "payload.date",
+      "value": "2026-10-27"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.date"
+    }
+   },
+   {
+    "name": "clock_with_nanoseconds",
+    "clause": "§9.2: a `risk_clock` is a whole second",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "payload.clock",
+      "value": "2026-10-26T15:00:01.250000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.clock"
+    }
+   },
+   {
+    "name": "risk_clock_with_nanoseconds",
+    "clause": "§9.2: a `risk_clock` is a whole second",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": "2026-10-26T15:00:01.000000001Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "clock_as_seconds",
+    "clause": "§9.2: a `risk_clock` is a timestamp, never integer seconds",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "payload.clock",
+      "value": 1793026801
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.clock"
+    }
+   },
+   {
+    "name": "clock_null",
+    "clause": "§9.5: `clock` is never null",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "payload.clock",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.clock"
+    }
+   },
+   {
+    "name": "risk_clock_null",
+    "clause": "§9.5: `risk_clock` is never null",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "clock_with_offset",
+    "clause": "§4: a timestamp is UTC, written with `Z`",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "payload.clock",
+      "value": "2026-10-26T11:00:01.000000000-04:00"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.clock"
+    }
+   },
+   {
+    "name": "risk_clock_after_clock",
+    "clause": "rule 301: `risk_clock` equals `clock`",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": "2026-10-26T15:00:02.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "risk_clock_before_clock",
+    "clause": "rule 301: `risk_clock` equals `clock`",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": "2026-10-26T15:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "risk_clock_on_the_eve",
+    "clause": "rule 301: the midnight copy's `risk_clock` is its own tick",
+    "base_draft": "midnight",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": "2026-10-27T03:59:59.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "no_causation",
+    "clause": "rule 302: the copy names the scheduler's tick",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "midnight_no_causation",
+    "clause": "rule 302: the copy names the scheduler's tick",
+    "base_draft": "midnight",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "risk_clock_reported_before_causation",
+    "clause": "rule 301 before rule 302",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     },
+     {
+      "path": "payload.risk_clock",
+      "value": "2026-10-26T15:00:02.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "version_2",
+    "clause": "§9.5: registered at `schema_version` 1 only",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "on_the_control_stream",
+    "clause": "§9.5: an account-stream record",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "on_the_agent_stream",
+    "clause": "§9.5: an account-stream record",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "agent:ws_01J8Z2:agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "causation_not_on_this_stream",
+    "clause": "rule 302: the journal checks presence, not the named event",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": "01JAE3A0B000000000000000C9"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "later_tick",
+    "clause": "rule 301: any whole second, the two equal",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "payload.clock",
+      "value": "2026-10-26T19:59:59.000000000Z"
+     },
+     {
+      "path": "payload.risk_clock",
+      "value": "2026-10-26T19:59:59.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "first_second_of_the_year",
+    "clause": "rule 301: any whole second, the two equal",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "payload.clock",
+      "value": "2027-01-01T05:00:00.000000000Z"
+     },
+     {
+      "path": "payload.risk_clock",
+      "value": "2027-01-01T05:00:00.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "live",
+    "clause": "§9.5: either environment",
+    "base_draft": "midnight",
+    "changes": [
+     {
+      "path": "environment",
+      "value": "live"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "with_correlation",
+    "clause": "§9.5: no rule reads `correlation_id`",
+    "base_draft": "tick",
+    "changes": [
+     {
+      "path": "correlation_id",
+      "value": "01JAE3A0B000000000000000R1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
+ },
  "snapshot_prior_close": {
   "spec": "docs/specs/journal.md v0.89 §9.35 (DEC-2398)",
   "drafts": {

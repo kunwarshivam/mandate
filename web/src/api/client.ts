@@ -27,6 +27,7 @@ import {
   type Watermark,
 } from "./types";
 import { CONNECT_START_ROUTE, type ConnectStartBody, type ConnectStarted, connectStarted } from "./connect";
+import { ENROL_ROUTE, type Enrolled, REGISTRATION_ROUTE, type RegistrationChallenge, enrolled, registrationChallenge } from "./enrol";
 import { type StepUpAction, type StepUpChallenge, sessionPrincipal, stepUpChallenge } from "./step-up";
 
 export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
@@ -106,6 +107,13 @@ export interface WorkspaceClient {
    * reported as unknown, never as live.
    */
   askRealMoney(agentId: string): Promise<GoLiveOutcome>;
+  /** `POST /passkeys/registration-challenges` (§3.6): a registration challenge under a key of its own; it records nothing. */
+  askRegistration(): Promise<ReadOutcome<RegistrationChallenge>>;
+  /**
+   * `POST /passkeys` (§3.6): the made credential. It commits `CredentialEnrolled`, so a lost answer is
+   * `effect: "unknown"`, and the screen reads the member's passkeys again rather than send it twice.
+   */
+  enrolPasskey(body: JsonObject): Promise<ReadOutcome<Enrolled>>;
 }
 
 /** What a go-live request came to: always a refusal, or an answer the client could not read. */
@@ -276,17 +284,17 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
   }
 
   /** A read's answer, or one of a call that records nothing: every failure is `effect: "none"`. */
-  async function answered<T>(call: () => Promise<Response>, decoder: Decoder<T>): Promise<ReadOutcome<T>> {
+  async function answered<T>(call: () => Promise<Response>, decoder: Decoder<T>, lost: Effect = "none"): Promise<ReadOutcome<T>> {
     let response: Response;
     try {
       response = await call();
     } catch {
-      return { ok: false, error: networkError("none") };
+      return { ok: false, error: networkError(lost) };
     }
     const body = await parseBody(response);
     if (!response.ok) {
       const doc = decodeProblem(body);
-      const error = doc ? problemError(response.status, doc, "none") : invalidResponse(response.status, "none", UNREADABLE, null);
+      const error = doc ? problemError(response.status, doc, lost) : invalidResponse(response.status, lost, UNREADABLE, null);
       noteAuth(error);
       return { ok: false, error };
     }
@@ -296,9 +304,9 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
     } catch {
       head = { ok: false, issue: UNREADABLE };
     }
-    if (!head.ok) return { ok: false, error: invalidResponse(response.status, "none", head.issue, null) };
+    if (!head.ok) return { ok: false, error: invalidResponse(response.status, lost, head.issue, null) };
     const value = decoder(body, "");
-    if (!value.ok) return { ok: false, error: invalidResponse(response.status, "none", value.issue, null) };
+    if (!value.ok) return { ok: false, error: invalidResponse(response.status, lost, value.issue, null) };
     return { ok: true, value: value.value, as_of: head.value.as_of, api_version: head.value.api_version };
   }
 
@@ -352,6 +360,16 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
     return answered(() => fetch(baseUrl + path(STEP_UP_CHALLENGE_ROUTE), { method: "POST", credentials, headers, body }), stepUpChallenge(action));
   }
 
+  /** A POST of `body` under a fresh key with the CSRF mark, answered as `decoder` reads it. */
+  function posted<T>(route: `/${string}`, body: JsonObject, decoder: Decoder<T>, lost: Effect): Promise<ReadOutcome<T>> {
+    const key = newKey();
+    if (!isIdempotencyKey(key)) throw new Error("not an idempotency key");
+    const headers = { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": key, [CSRF_HEADER]: "1" };
+    return answered(() => fetch(baseUrl + path(route), { method: "POST", credentials, headers, body: JSON.stringify(body) }), decoder, lost);
+  }
+  const askRegistration = () => posted(REGISTRATION_ROUTE, {}, registrationChallenge, "none");
+  const enrolPasskey = (body: JsonObject) => posted(ENROL_ROUTE, body, enrolled, "unknown");
+
   const readSession = () => answered(() => fetch(baseUrl + SESSION_ROUTE, { method: "GET", credentials, headers: { Accept: "application/json" } }), sessionPrincipal);
 
   function prepareConnect(body: ConnectStartBody): PreparedConnect {
@@ -404,5 +422,5 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
     return { ok: false, error };
   }
 
-  return Object.freeze({ workspaceId, path, read, prepare, prepareKillSwitch, send, commandStatus, askChallenge, readSession, prepareConnect, sendConnect, askRealMoney });
+  return Object.freeze({ workspaceId, path, read, prepare, prepareKillSwitch, send, commandStatus, askChallenge, readSession, prepareConnect, sendConnect, askRealMoney, askRegistration, enrolPasskey });
 }
