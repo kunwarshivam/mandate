@@ -197,7 +197,7 @@ def test_both_managers_admit_the_research_store_for_the_runtime_alone_and_read_o
     assert len(lists) == 2, "both deployment managers' policies"
     for claims in lists:
         holders = {name for name, names in claims.items() if CLAIM in names}
-        assert holders <= {"runtime"}, claims
+        assert holders == {"runtime"}, claims
     runtimes = [w for w in managed_pods(docs) if process_of(w) == "runtime"]
     assert runtimes, "a managed runtime pod"
     for runtime in runtimes:
