@@ -10,7 +10,7 @@ use mandate_builder::{
     RiskContext as BuilderRiskContext, buy_action,
 };
 use mandate_canon::{Digest, Value};
-use mandate_domain::{AssetClass, AutonomyDecision, Environment, MarketSession};
+use mandate_domain::{AssetClass, AssetId, AutonomyDecision, Environment, MarketSession};
 use mandate_gate_context::Freshness;
 use mandate_num::{CostBasis, FeeRate, Fraction, MarkPrice, Qty, Signed, SizeFraction, Unit, Usd};
 use mandate_ports::BuilderContext;
@@ -101,36 +101,52 @@ const BUILTIN_RISK_REDUCING: &str = "builtin_risk_reducing";
 
 impl Plan {
     /// §8.3 step 2's first branch over the fold: the first instrument, in id order, whose thesis
-    /// ended and which the agent's fills still hold, sold by `mandate_ports::size` less the
-    /// runtime's working exits, with its asset class from its thesis record. A pinned universe has
-    /// no theses (V-037), and an instrument with no sane mark cannot be priced, so neither proposes
-    /// one; the instrument is offered again at the next evaluation, and a risk exit or a kill
-    /// switch never waits on this.
+    /// ended and which the agent's fills still hold, sold whole less the runtime's working exits at
+    /// its last sane bid, by `mandate_ports::thesis_exit`, with its asset class from its thesis
+    /// record. Nothing an opening needs is read: no validation against the account's equity, no
+    /// protective stop, no model registry, no snapshot's age, so a drawdown below the allocation
+    /// never holds the exit (`AGENTS.md` rule 13). Only a mark fresh within [`Freshness`]'s mark age
+    /// is needed, because the exit is priced at the bid and the gate's collar reads it; without one
+    /// the exit is held as the binding gate holds one (`exit_unpriced`, trading spec §5.3 rule 4)
+    /// and offered again at the next evaluation, while a risk exit, an owner exit, or a kill switch
+    /// sells without it. A pinned universe has no theses (V-037). One exit is proposed per
+    /// evaluation; the next ended instrument is offered at the next.
     fn thesis_exit(&self, inputs: &SignalInputs) -> Option<Proposal> {
-        if self.mandate.universe.pinned {
-            return None;
-        }
+        let unaged = Freshness {
+            mark_max_age_s: self.fresh.mark_max_age_s,
+            snapshot_max_age_s: u32::MAX,
+        };
         inputs.ended_theses.iter().find_map(|instrument| {
             let class = *inputs.thesis_classes.get(instrument)?;
-            let (held, facts, models) = self.facts.read(|journaled| {
+            let (held, facts) = self.facts.read(|journaled| {
                 (
                     journaled.held().get(instrument.as_str()).copied(),
-                    journaled.facts(instrument.as_str(), self.fresh),
-                    journaled.models(),
+                    journaled.facts(instrument.as_str(), unaged),
                 )
             })?;
-            let (held, facts) = (held?, facts.ok()?);
-            let validation = validation_context(facts.account.equity, facts.now)?;
-            let validated = ValidatedMandate::new(self.mandate.clone(), &validation, &[]).ok()?;
-            let named = InstrumentRef {
-                asset_id: mandate_domain::AssetId::parse(instrument.as_str()).ok()?,
-                symbol: String::new(),
-                asset_class: class,
+            let (held, bid) = (held?, facts.ok()?.mark.bid);
+            let account = BuilderAccountSnapshot {
+                agent_equity: Usd::ZERO,
+                position_qty: held,
+                cost_basis: CostBasis::ZERO,
+                risk_mark: MarkPrice::from(bid),
+                gross_usd: Usd::ZERO,
+                working_opening_cost: Usd::ZERO,
+                goal_spent_usd: Usd::ZERO,
             };
-            let mut builder =
-                builder_context(&self.mandate, &named, &facts, exit_session(class), &models)?;
-            builder.account.position_qty = held;
-            builder.execution = OrderExecution {
+            let market = BuilderMarket {
+                instrument: AssetId::parse(instrument.as_str()).ok()?,
+                asset_class: class,
+                session: exit_session(class),
+                in_close_window: false,
+                bid,
+                ask: bid,
+                increment: Qty::parse("1").ok()?,
+                min_order_usd: Usd::ZERO,
+                fee_rate_cash: FeeRate::parse("0").ok()?,
+                fee_rate_asset: FeeRate::parse("0").ok()?,
+            };
+            let execution = OrderExecution {
                 asset_class: class,
                 tif: match class {
                     AssetClass::UsEquity => TimeInForce::Day,
@@ -139,10 +155,15 @@ impl Plan {
                 protection_required: false,
                 protection: None,
             };
-            mandate_ports::size(&validated, &builder, inputs)
-                .ok()
-                .flatten()
-                .filter(|proposal| !proposal.purpose.adds_risk())
+            mandate_ports::thesis_exit(
+                self.mandate.universe.pinned,
+                &account,
+                &market,
+                execution,
+                inputs,
+            )
+            .ok()
+            .flatten()
         })
     }
 

@@ -469,3 +469,51 @@ fn an_ended_thesis_sells_only_what_no_working_exit_already_sells() {
         "another instrument's working exit takes nothing off"
     );
 }
+
+/// `thesis_exit` on its own: nothing for a pinned universe or another instrument, and an execution
+/// that is not a plain sell of the market's class is refused rather than sent.
+#[test]
+fn thesis_exit_sells_only_a_plain_sell_of_an_ended_instrument() {
+    let b = builder();
+    let exit = |pinned: bool, execution: OrderExecution, inputs: &SignalInputs| {
+        mandate_ports::thesis_exit(pinned, &b.account, &b.market, execution, inputs)
+    };
+    let swing = ended(bullish(), SWING);
+    assert_eq!(
+        exit(false, sell_execution(), &swing)
+            .unwrap()
+            .map(|p| (p.qty, p.exit_origin)),
+        Some((
+            Qty::parse("5").unwrap(),
+            Some(ExitOrigin::RemovedInstrument)
+        ))
+    );
+    assert_eq!(
+        exit(true, sell_execution(), &swing).unwrap(),
+        None,
+        "pinned"
+    );
+    assert_eq!(
+        exit(false, sell_execution(), &ended(bullish(), OTHER)).unwrap(),
+        None,
+        "another instrument's thesis"
+    );
+    let crypto = OrderExecution {
+        asset_class: AssetClass::Crypto,
+        tif: TimeInForce::Gtc,
+        ..sell_execution()
+    };
+    assert!(exit(false, crypto, &swing).is_err(), "another asset class");
+    let protected = OrderExecution {
+        protection_required: true,
+        protection: Some(ProtectionPrices {
+            stop: Price::parse("90").unwrap(),
+            take_profit: None,
+        }),
+        ..sell_execution()
+    };
+    assert!(
+        exit(false, protected, &swing).is_err(),
+        "a sell carries no protection"
+    );
+}

@@ -616,17 +616,21 @@ fn nothing_held_no_ended_thesis_or_no_mark_sells_nothing() {
         held.plan(&view(), &classless).is_none(),
         "no thesis record names its class"
     );
-    let mut stale = holding(journaled(REGULAR), "3", REGULAR);
-    stale.push(
-        CLOCK,
-        "ClockAdvanced",
-        r#"{"clock":"2026-10-26T15:05:00.000000000Z"}"#,
+    let later = "2026-10-26T17:00:00.000000000Z";
+    let mut stale_mark = holding(journaled(REGULAR), "3", REGULAR);
+    stale_mark.push(CLOCK, "ClockAdvanced", &format!(r#"{{"clock":"{later}"}}"#));
+    stale_mark.push(
+        ACCOUNT,
+        "AccountSnapshotRecorded",
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":1,"equity":"100000","cash":"100000","buying_power":"100000","non_marginable_buying_power":"100000","risk_clock":"{later}"}}"#
+        ),
     );
     assert!(
-        research_plan(&stale)
-            .plan(&view(), &ended_inputs("2026-10-26T15:05:00.000000000Z"))
+        research_plan(&stale_mark)
+            .plan(&view(), &ended_inputs(later))
             .is_none(),
-        "no fresh mark to price it at"
+        "a fresh snapshot but no fresh mark to price it at"
     );
 }
 
@@ -660,5 +664,70 @@ fn a_pinned_universe_sells_nothing_for_an_ended_thesis_and_never_denies_an_exit(
         pinned.classify(&view(), &exit).autonomy,
         Autonomy::Auto,
         "an exit is never denied or asked (rule 13)"
+    );
+}
+
+/// Nothing an opening needs holds the exit: an account whose equity fell below the allocation (V-002
+/// would refuse the mandate's validation) and a snapshot two hours old still sell at a fresh mark.
+#[test]
+fn a_drawdown_below_the_allocation_or_an_old_snapshot_never_holds_the_exit() {
+    let mut rows = holding(journaled(REGULAR), "3", REGULAR);
+    rows.push(
+        ACCOUNT,
+        "AccountSnapshotRecorded",
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":1,"equity":"500","cash":"200","buying_power":"200","non_marginable_buying_power":"200","risk_clock":"{REGULAR}"}}"#
+        ),
+    );
+    assert_eq!(
+        research_plan(&rows)
+            .plan(&view(), &ended_inputs(REGULAR))
+            .map(|p| p.qty),
+        Some(Qty::parse("3").unwrap()),
+        "equity 500 under the 1000 allocation"
+    );
+    let later = "2026-10-26T17:00:00.000000000Z";
+    let mut old = holding(journaled(REGULAR), "3", REGULAR);
+    old.push(CLOCK, "ClockAdvanced", &format!(r#"{{"clock":"{later}"}}"#));
+    old.push(
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"{SPY}","price":"101.05","source":"quote","feed":"fixture","bid":"100.95","sane":true,"session":"regular","risk_clock":"{later}"}}"#
+        ),
+    );
+    assert_eq!(
+        research_plan(&old)
+            .plan(&view(), &ended_inputs(later))
+            .map(|p| p.limit),
+        Some(Price::parse("100.95").unwrap()),
+        "a two-hour-old snapshot, a fresh mark: sold at that bid"
+    );
+}
+
+/// A crypto thesis's exit is routed as crypto: its class from the record, good-till-cancelled.
+#[test]
+fn a_crypto_thesis_exit_is_routed_as_crypto() {
+    let spy = InstrumentId::new(SPY).unwrap();
+    let crypto = SignalInputs {
+        thesis_classes: [(spy, mandate_accounting::AssetClass::Crypto)].into(),
+        ..ended_inputs(REGULAR)
+    };
+    let proposal = research_plan(&holding(journaled(REGULAR), "3", REGULAR))
+        .plan(&view(), &crypto)
+        .unwrap();
+    assert_eq!(proposal.asset_class, mandate_accounting::AssetClass::Crypto);
+    let execution = proposal.execution.unwrap();
+    assert_eq!(
+        execution.asset_class,
+        mandate_accounting::AssetClass::Crypto
+    );
+    assert_eq!(execution.tif, mandate_runtime::TimeInForce::Gtc);
+    let equity = research_plan(&holding(journaled(REGULAR), "3", REGULAR))
+        .plan(&view(), &ended_inputs(REGULAR))
+        .unwrap();
+    assert_eq!(
+        equity.execution.map(|e| e.tif),
+        Some(mandate_runtime::TimeInForce::Day)
     );
 }
