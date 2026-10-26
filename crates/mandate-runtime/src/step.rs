@@ -12,8 +12,9 @@ use crate::state::{RuntimeState, UnresolvedAppend};
 use crate::types::{
     Autonomy, Classified, Command, DecisionClip, DryRunVerdict, Effect, EventDraft, EventId,
     ExitOrigin, FlattenRequest, Initiator, Input, IntentBody, IntentHandoff, KillScope,
-    LiquidityRead, Mode, ModelOutput, NotificationRef, Observation, OwnerConfirmation, Proposal,
-    Purpose, RiskClock, RuntimeAlert, Seq, TimeInForce, TimerId, TimerRequest, WriterEpoch,
+    LiquidityRead, MandateView, Mode, ModelOutput, NotificationRef, Observation, OwnerConfirmation,
+    Proposal, Purpose, RiskClock, RuntimeAlert, Seq, TimeInForce, TimerId, TimerRequest,
+    WriterEpoch,
 };
 
 /// One step of the runtime (ADR-0001 ES-06).
@@ -511,7 +512,7 @@ fn decide(
     }
     let verdict = dry_run(state, ports, &proposal, now);
     let classified = overlaid(ports.plan.classify(ports.view, &proposal), &verdict);
-    let (verdict, next) = next(state, &proposal, verdict, &classified, now, ports.view);
+    let (verdict, then) = next(state, &proposal, verdict, &classified, now, ports.view);
     let decision = batch.journal(
         "DecisionMade",
         None,
@@ -526,7 +527,7 @@ fn decide(
             Ok(())
         }
         DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. } => {
-            allowed(&proposal, next, ports, decision, batch)
+            allowed(&proposal, then, ports, decision, batch)
         }
     }
 }
@@ -669,7 +670,7 @@ fn next(
     verdict: DryRunVerdict,
     classified: &Classified,
     now: RiskClock,
-    view: &crate::types::MandateView,
+    view: &MandateView,
 ) -> (DryRunVerdict, Next) {
     if !matches!(
         verdict,
