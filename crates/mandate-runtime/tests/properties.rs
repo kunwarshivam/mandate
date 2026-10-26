@@ -794,7 +794,7 @@ proptest! {
         );
         for effect in &effects {
             if let Effect::Notify(reference) = effect {
-                let rendered = format!("{} {}", reference.subject_event.0, reference.message_key);
+                let rendered = format!("{} {}", reference.subject_event.0, reference.kind.key());
                 for secret in ["AAPL", "150", "buy", "sell"] {
                     prop_assert!(
                         !rendered.contains(secret),

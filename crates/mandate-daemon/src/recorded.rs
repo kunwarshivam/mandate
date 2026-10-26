@@ -76,6 +76,43 @@ pub struct RecordedFiling {
     pub licensed: bool,
 }
 
+/// One recorded feed item (agent harness spec §5.3, DEC-2392, DEC-2275): a news item that arrives
+/// `arrives_s` seconds after its agent's `AgentDeployed`, known and published at its arrival. Its
+/// times hang on the deployment, not on a read, so a restart offers the same item with the same
+/// bytes and the core's one-item-one-run fold holds across it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FeedItem {
+    pub item_id: ItemId,
+    pub source: SourceId,
+    pub symbols: BTreeSet<Symbol>,
+    pub arrives_s: u32,
+    pub headline: String,
+    pub summary: String,
+    pub link: String,
+    pub licensed: bool,
+}
+
+impl FeedItem {
+    /// The item as it arrives for an agent deployed at `deployed_at`, on the whole second, which is
+    /// the observation's `as_of` exactly, or `None` past the representable range.
+    pub fn arrived(&self, deployed_at: UtcNanos) -> Option<NewsItem> {
+        let secs = deployed_at.secs().checked_add(i64::from(self.arrives_s))?;
+        let at = UtcNanos::from_parts(secs, 0).ok()?;
+        Some(NewsItem {
+            item_id: self.item_id.clone(),
+            source: self.source.clone(),
+            symbols: self.symbols.clone(),
+            knowledge_at: at,
+            published_at: at,
+            headline: self.headline.clone(),
+            summary: self.summary.clone(),
+            link: self.link.clone(),
+            content_hash: Digest::of_parts(&[self.headline.as_bytes(), self.summary.as_bytes()]),
+            licensed: self.licensed,
+        })
+    }
+}
+
 /// The recorded data plane. It stamps every item at its age before the cut-off of the read it
 /// answers; `retrieve` filters the answer again. The cell's recording holds no filings (DEC-2210
 /// item 2, DEC-2211).
@@ -107,6 +144,8 @@ pub struct Bundle {
     /// for a bundle with no `turns` (DEC-2266).
     pub turns: Vec<ScriptedTurn>,
     pub plane: RecordedPlane,
+    /// The recorded feed, empty when the bundle holds no `feed.json` (DEC-2275).
+    pub feed: Vec<FeedItem>,
     /// The recorded instruments halted at the bundle's as-of time (DEC-2214 item 1).
     pub halted: BTreeSet<AssetId>,
     /// The source allowlist the bundle's items were recorded under (DEC-2214 item 1).
@@ -118,6 +157,7 @@ const BARS: &str = "bars.json";
 const NEWS: &str = "news.json";
 const FILINGS: &str = "filings.json";
 const INSTRUMENTS: &str = "instruments.json";
+const FEED: &str = "feed.json";
 
 impl Bundle {
     /// The bundle in `dir`.
@@ -159,6 +199,19 @@ impl Bundle {
             allowlist_version: allowlist.version.0,
         };
         let halted = halts(&research, &plane.instruments)?;
+        let present = dir
+            .join(FEED)
+            .try_exists()
+            .map_err(|_| BundleError::Unreadable { file: FEED })?;
+        let feed = if present {
+            Doc::read(dir, FEED)?
+                .rows()?
+                .iter()
+                .map(feed_item)
+                .collect::<Result<_, _>>()?
+        } else {
+            Vec::new()
+        };
         Ok(Self {
             entry: model.entry,
             endpoint: model.endpoint,
@@ -173,6 +226,7 @@ impl Bundle {
             reply: model.reply,
             turns: model.turns,
             plane,
+            feed,
             halted,
             allowlist,
         })
@@ -513,9 +567,21 @@ fn filing(row: &Doc<'_>) -> Result<RecordedFiling, BundleError> {
     })
 }
 
-fn news(row: &Doc<'_>) -> Result<RecordedNews, BundleError> {
-    let symbols = row
-        .value
+fn feed_item(row: &Doc<'_>) -> Result<FeedItem, BundleError> {
+    Ok(FeedItem {
+        item_id: ItemId::new(row.text("item_id")?).map_err(|_| row.malformed("item_id"))?,
+        source: SourceId::new(row.text("source")?).map_err(|_| row.malformed("source"))?,
+        symbols: symbols(row)?,
+        arrives_s: row.small("arrives_s")?,
+        headline: row.text("headline")?.to_owned(),
+        summary: row.text("summary")?.to_owned(),
+        link: row.text("link")?.to_owned(),
+        licensed: row.flag("licensed")?,
+    })
+}
+
+fn symbols(row: &Doc<'_>) -> Result<BTreeSet<Symbol>, BundleError> {
+    row.value
         .get("symbols")
         .and_then(Value::as_array)
         .ok_or_else(|| row.malformed("symbols"))?
@@ -526,11 +592,14 @@ fn news(row: &Doc<'_>) -> Result<RecordedNews, BundleError> {
                 .and_then(|text| Symbol::new(text).ok())
                 .ok_or_else(|| row.malformed("symbols"))
         })
-        .collect::<Result<_, _>>()?;
+        .collect()
+}
+
+fn news(row: &Doc<'_>) -> Result<RecordedNews, BundleError> {
     Ok(RecordedNews {
         item_id: ItemId::new(row.text("item_id")?).map_err(|_| row.malformed("item_id"))?,
         source: SourceId::new(row.text("source")?).map_err(|_| row.malformed("source"))?,
-        symbols,
+        symbols: symbols(row)?,
         age_s: row.small("age_s")?,
         published_age_s: row.small("published_age_s")?,
         headline: row.text("headline")?.to_owned(),

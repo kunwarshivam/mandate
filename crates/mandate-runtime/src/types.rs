@@ -306,6 +306,45 @@ pub struct EventDraft {
     pub payload: Value,
 }
 
+impl EventDraft {
+    /// The schema version this draft is written at under version 1's references, read from the
+    /// members only a later version has, so a host never chooses it apart from the payload:
+    /// - an `ApprovalRequested` whose content names the checks its dry run deferred is version 3
+    ///   (journal spec v0.92, rules 291 and 292; DEC-2515), tested first because version 3's
+    ///   content also binds the plan;
+    /// - an `ApprovalRequested` whose content binds the order builder's `execution` plan is
+    ///   otherwise version 2 (journal spec v0.42, rule 136);
+    /// - a `DecisionMade` that names what its dry run deferred to the binding gate is version 3
+    ///   (journal spec v0.85, DEC-2388 item 13);
+    /// - every other draft is version 1.
+    ///
+    /// A host holding version 2's stricter references writes a `DecisionMade` at 2 instead; one
+    /// that must also defer has no version yet, and the journal refuses it (DEC-2388 item 10).
+    #[must_use]
+    pub fn schema_version(&self) -> u64 {
+        match self.event_type.as_str() {
+            "ApprovalRequested"
+                if self
+                    .payload
+                    .get("content")
+                    .is_some_and(|content| content.get("deferred_to_binding").is_some()) =>
+            {
+                3
+            }
+            "ApprovalRequested"
+                if self
+                    .payload
+                    .get("content")
+                    .is_some_and(|content| content.get("execution").is_some()) =>
+            {
+                2
+            }
+            "DecisionMade" if self.payload.get("deferred_to_binding").is_some() => 3,
+            _ => 1,
+        }
+    }
+}
+
 /// One sell or cancel a flatten plan asks for. The plan itself is `mandate-risk`'s (family F); the
 /// runtime carries it without computing it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -411,12 +450,38 @@ pub enum TimerRequest {
     Cancel { id: TimerId },
 }
 
-/// An owner alert. It carries opaque ids and a message key only: no instrument, quantity, price, or
-/// thesis content ever reaches a notification (`AGENTS.md` rule 6). The type is the enforcement.
+/// An alert the runtime raises. It carries an opaque id and a closed kind only: no instrument,
+/// quantity, price, or thesis content ever reaches a notification (`AGENTS.md` rule 6), and no
+/// alert outside [`RuntimeAlert`] can be raised (DEC-2514). The type is the enforcement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationRef {
     pub subject_event: EventId,
-    pub message_key: &'static str,
+    pub kind: RuntimeAlert,
+}
+
+/// The runtime's alerts. None is an owner notice kind of notifications spec §3.2, so the runtime
+/// journals no `OwnerAlertSent` for them (DEC-2514): a dry run's deny waits on the founder's
+/// DEC-723 and is raised as it was until then, and the two research alerts are the operator's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeAlert {
+    /// The gate's dry run denied a decision (DEC-723, Proposed).
+    DecisionSkipped,
+    /// A model call the research run made was refused.
+    ResearchCallRefused,
+    /// Three research deadlines in a row passed.
+    ResearchDeadlineStreak,
+}
+
+impl RuntimeAlert {
+    /// The alert's fixed key, the only text a process reports for it.
+    #[must_use]
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::DecisionSkipped => "decision_skipped",
+            Self::ResearchCallRefused => "research_call_refused",
+            Self::ResearchDeadlineStreak => "research_deadline_streak",
+        }
+    }
 }
 
 /// What one step asks the shell to do, in order.
@@ -598,6 +663,15 @@ pub struct SignalInputs {
     pub outputs: BTreeMap<String, BTreeMap<InstrumentId, ModelOutput>>,
     pub output_events: BTreeMap<String, BTreeMap<InstrumentId, EventId>>,
     pub now: RiskClock,
+    /// The instruments whose current thesis has ended at `now` (mandate spec §8.6): the plan
+    /// proposes their exit while the agent holds them, whatever the outputs say (§8.3 step 2).
+    pub ended_theses: BTreeSet<InstrumentId>,
+    /// Per instrument, the sells this runtime proposed that are still working, which a plan takes
+    /// off the position before it proposes an exit (§8.3 step 2, "minus working exits").
+    pub working_exits: BTreeMap<InstrumentId, Qty>,
+    /// The asset class of each instrument an admitted thesis named (journal spec §9.4), which a
+    /// plan reads to price and route an exit of an instrument the mandate does not pin.
+    pub thesis_classes: BTreeMap<InstrumentId, mandate_accounting::AssetClass>,
 }
 
 /// Whether the executor is known to hold an intent yet.

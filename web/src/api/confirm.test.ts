@@ -146,7 +146,7 @@ describe("confirm-accepted, decoded as its schema states it (spec §5.1)", () =>
 describe("the confirm's body, exactly as confirm-request.schema.json requires it", () => {
   /** What `GET .../confirmation` would serve: values the client passes through and never computes. */
   const SERVED = { screen_digest: `sha256:${"5d".repeat(32)}` as const, classification: "risk_increasing" as const };
-  const input = (overrides: Partial<ConfirmInput> = {}): ConfirmInput => ({ version: VERSION, agentId: null, base: null, record: RECORD, served: SERVED, ...overrides });
+  const input = (overrides: Partial<ConfirmInput> = {}): ConfirmInput => ({ version: VERSION, agentId: null, base: null, record: RECORD, served: SERVED, stepUp: null, ...overrides });
 
   it("names the version in the route and sends every required member and no other, the served digest and classification as served", () => {
     const prepared = prepareConfirm(client(), input());

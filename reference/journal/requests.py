@@ -345,10 +345,10 @@ def invalid_drafts() -> list[dict]:
             "event_type",
         ),
         invalid(
-            "at_version_3",
-            "§9.6: versions 1 and 2 only",
+            "at_version_4",
+            "§9.6: versions 1 to 3 only (v0.92)",
             V2,
-            [change("schema_version", 3)],
+            [change("schema_version", 4)],
             "unknown_schema",
             "payload",
         ),

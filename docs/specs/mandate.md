@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.11 (a news item or filing may bring a monitoring run forward, [DEC-2392](../project/decisions/DEC-2392.md); v0.10 a thesis that ends sells its position, [DEC-2391](../project/decisions/DEC-2391.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
+| **Status** | v0.13 (fees charged to the agent's own orders lower E, [DEC-2393](../project/decisions/DEC-2393.md), and a trigger's recorded breach time is the whole breached interval, [DEC-2331](../project/decisions/DEC-2331.md); v0.12 an approval names the checks its dry run deferred, and such an opening is always asked, [DEC-2515](../project/decisions/DEC-2515.md); v0.11 a news item or filing may bring a monitoring run forward, [DEC-2392](../project/decisions/DEC-2392.md); v0.10 a thesis that ends sells its position, [DEC-2391](../project/decisions/DEC-2391.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
 | **Implements** | PRD 6.3 (FR-3.1 to FR-3.8), 6.5 (FR-5.2 to FR-5.5), 6.6 (FR-6.1 to FR-6.6); backlog E6, E10, E17 |
 | **Schemas** | [mandate.schema.json](../../schemas/mandate.schema.json), [policy.schema.json](../../schemas/policy.schema.json) (structural rules) |
 | **Reference cases** | [reference-cases/mandate.yaml](reference-cases/mandate.yaml) |
@@ -20,6 +20,13 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.12 ([DEC-2515](../project/decisions/DEC-2515.md), an agent reading under
+  [DEC-176](../project/04-decision-log.md#decisions); E21-30):** the approval content of §6.4 gains
+  `deferred_to_binding`, the checks the cell's runtime's dry run left to the executor's binding
+  gate. The approver is shown a fixed sentence saying they have not been run and may still refuse
+  the order, then each check by name. §6.2 step 5c also turns such an opening's `auto` into `ask`,
+  labelled `policy_overlay` (DEC-2388 item 12). Both only tighten: an opening is asked where it
+  might have run unasked, and an approver is told more, never less.
 - **v0.11 ([DEC-2392](../project/decisions/DEC-2392.md), an agent reading under
   [DEC-176](../project/04-decision-log.md#decisions); E19-12):** `behavior.research` gains one
   optional envelope field, `event_triggers` (§1, §8.4): the allowlisted source kinds (`news`,
@@ -760,6 +767,11 @@ stream** fold (journal spec §2). It belongs to the agent and survives restarts 
   the ex-date per trading spec §8.3), `CashInLieuPosted`, `CompensatingEvent`,
   `MandateVersionApplied`, `UniverseChanged` (§2.3), `RiskDayStarted`, copied `ClockAdvanced`, and
   owner acknowledgments.
+- **Fills and fees are the agent's own** ([DEC-2393](../project/decisions/DEC-2393.md)): a fill of
+  an order whose request names the agent moves Q and cash, and a fee of such an order (a fill's own
+  `USD` fees, and the paper executor's simulated `FeesCharged` naming the order, at its `accrued`)
+  lowers cash, and so E, when it accrues. Another agent's fills and fees on the same account never
+  move E.
 - **Corporate actions** ([DEC-2303](../project/decisions/DEC-2303.md)) are folded at application,
   trading spec §8.5's instant (20:00 New York time on the last trading day before the ex-date). A
   **split** replaces Q, B and realized by §8.5's rule: Q' and the removed residual basis R, and cash
@@ -822,7 +834,9 @@ exits, and the kill switch are never denied by them (MI-1).
   the rollover keeps confirming against the previous day's E₀** (at most `breach_confirm_s`, so at
   most 300 s): it latches (reason `resolved_at_rollover`) if it confirms, and is discarded if the
   condition stays false for `breach_confirm_s`. A flash print just before midnight therefore
-  latches nothing. The action is `daily_loss_action`:
+  latches nothing. The trigger records the whole breached interval as its breach time, which may
+  exceed `breach_confirm_s` ([DEC-2331](../project/decisions/DEC-2331.md) item 3). The action is
+  `daily_loss_action`:
   - `exits_only`: restriction `daily_loss` (mode `exits_only`).
   - `flatten_and_pause`: the agent-scoped kill switch (§5.5), restriction `daily_loss` (mode
     `paused`). Once the agent is flat, owner acknowledgment (step-up) changes it to `exits_only`.
@@ -1054,8 +1068,12 @@ stream with `causation_id` and judges it there; nothing the owner's client check
      `deny`: no opening or increase runs until a conforming version is confirmed (DEC-534 item 2),
      and exits, which step 3 already decided, are untouched. Otherwise, if the effective
      `auto_allowed` is false, the decision becomes the stricter of the result so far and `ask`,
-     including an `auto` a delegation produced. Like the ceilings before it, it names itself
-     (`policy_overlay`) only when it changed the decision.
+     including an `auto` a delegation produced. A dry run that deferred any check of an opening or
+     an increase to the executor's binding gate (journal spec §9.1, `DecisionMade` version 3) does
+     the same after the gate has answered: the decision becomes the stricter of the result so far
+     and `ask`, so no check the dry run could not see is ever passed over unasked ([DEC-2388](../project/decisions/DEC-2388.md)
+     item 12). Like the ceilings before it, it names itself (`policy_overlay`) only when it changed
+     the decision.
 6. `auto` → submit (the gate runs again at submission). `deny` → skip. `ask` → approval (§6.4).
 
 ### 6.3 Condition language
@@ -1098,8 +1116,9 @@ Silence, lateness, a failed check, a restart, a version change, and a tightening
 
 **Content.** The request carries a canonical **content object**; the SHA-256 of its canonical form
 (journal spec §4), written `sha256:` and 64 lowercase hex digits, is the **content hash**. The object
-has exactly these keys, and `execution` when the order builder produced a plan
-([DEC-942](../project/decisions/DEC-942.md)); everything an approver is shown comes from it:
+has exactly these keys, `execution` when the order builder produced a plan
+([DEC-942](../project/decisions/DEC-942.md)), and `deferred_to_binding` when the dry run deferred a
+check ([DEC-2515](../project/decisions/DEC-2515.md)); everything an approver is shown comes from it:
 
 | Key | Content |
 |---|---|
@@ -1113,6 +1132,7 @@ has exactly these keys, and `execution` when the order builder produced a plan
 | `choices` | `approve` and `skip`, with equal weight and neither preselected (PX-10); then, when delegation scopes are offered (below), the names of the §6.5 shapes offered, none preselected (PX-15). These are the only "alternatives" an approval shows; it never shows a platform-authored alternative trade |
 | `approvers` | `required`: 2 when `two_approver_above_usd` is set and `order_usd` exceeds it, else 1; `independent`: `independent_approval_required`, the workspace policy's maker-checker requirement (a §4.3 policy key, not a mandate field). Both are the values at the request; check 7 can only raise them |
 | `execution` | Only when the order builder produced an execution plan: `asset_class`, `tif`, `protection_required`, and `protection` as `{stop, take_profit}` (`take_profit` `null` without one), or `null` when the mandate disables protection. A grant releases exactly this plan; re-validation never re-plans it (journal spec §9.6 version 2) |
+| `deferred_to_binding` | Only when the gate's dry run deferred a check: the checks, or parts of checks, it left to the executor's binding gate, by `DecisionMade` version 3's names, ascending by bytes and never empty (journal spec §9.6 version 3, rules 291 and 292). The approver is shown, exactly, "These checks have not been run yet. They run when the order is placed, and may still refuse it:", then each check by name. The approver is never shown a deferred check as passed (DEC-2378 item 11 condition 4). A request that would defer a check without an `execution` plan has no version, so the runtime asks no one and places no order (journal spec §9.6) |
 
 Decimals are canonical strings (journal spec §4). The owner-written `trigger.rule` is the owner's
 own text, shown as theirs and never as the platform's.

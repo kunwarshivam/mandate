@@ -127,6 +127,12 @@ commands:
   cell demo --scenario demo --dry-run --image <ref@sha256:...> --workspace <ULID> [--namespace <ns>]
                         render the demo's gestures' Job and inputs for staging (ws-ws1 by default)
                         with helm template and print them; reads no kubeconfig, applies nothing
+  cell journey [<workspace> <agent>]
+                        the customer's journey on Alpaca paper: the demo scenario (sign-in,
+                        connect, confirm, deploy, the trade loop), the go-live disclosure
+                        accepted on the host, then from web/ the go-live screen pending counsel
+                        and a real-money request refused and journaled
+                        (DEC-2134); with a workspace, only the web/ part against it
   cell web-kill-switch <workspace> [agent]
                         step 7 from web/ against a running cell with sign-in ready: next dev, then
                         Playwright presses one listed agent's kill switch (DEC-2406)
@@ -419,6 +425,15 @@ fn run() -> Result<()> {
         ["cell", "demo", "--scenario", name] => cell::scenario::run(name),
         ["cell", "demo", "--scenario", name, "--dry-run", target @ ..] => {
             cell::scenario::dry_run(name, target)
+        }
+        ["cell", "journey"] => {
+            let workspace = cell::scenario::run_in("demo")?;
+            cell::scenario::accept_disclosure(&workspace)?;
+            cell::journey(&workspace, cell::scenario::WEB_AGENT)
+        }
+        ["cell", "journey", workspace, agent] => {
+            cell::scenario::accept_disclosure(workspace)?;
+            cell::journey(workspace, agent)
         }
         ["cell", "web-kill-switch", workspace] => {
             cell::web::report(cell::web::kill_switch_from_web(workspace, None))
@@ -6165,6 +6180,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "LINT_RESULT",
     "MANDATE_MUTANTS_PER_SHARD",
     "MANDATE_MUTANTS_PLANNED",
+    "MANDATE_CELL_DRILL",
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
     "MANDATE_CELL_VARIANT",
@@ -6284,6 +6300,14 @@ const READ_ACTIONS: &[(&str, Option<&str>)] = &[
     (
         "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
         None,
+    ),
+    (
+        "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+        Some(".github/workflows/ci.yml"),
+    ),
+    (
+        "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+        Some(".github/workflows/ci.yml"),
     ),
     (
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
@@ -9314,7 +9338,8 @@ fn mutants_job_within(root: &Path, args: &[&str], left: Duration) -> Command {
         .arg(format!("{}s", left.as_secs().max(1)))
         .arg("cargo")
         .args(args)
-        .env_remove(CARGO_TARGET_DIR)
+        .env_remove(CARGO_BUILD_TARGET_DIR)
+        .env(CARGO_TARGET_DIR, mutants_target_dir(root))
         .envs(MUTANT_BUILD_PROFILE);
     timeout
 }
@@ -10168,17 +10193,34 @@ fn unoptimised_config(packages: &BTreeSet<String>) -> Vec<String> {
 }
 
 /// The build directory a caller may export for their own builds. The mutants job's `cargo` children
-/// that build — the pre-flight's test listing and the mutants run — take it out of their
-/// environment: every build of the same package from every source tree writes the same artifact
+/// that build — the pre-flight's test listing and the mutants run — replace it with
+/// [`mutants_target_dir`]: every build of the same package from every source tree writes the same artifact
 /// basename (`<package>-<metadata hash>`) into the target directory it is given, so one directory
 /// shared with the caller's other checkouts or with scratch copies of this tree can have one
 /// tree's binary judge another's source and flip either verdict: #419's review met a caught mutant
 /// reported missed, and `a_callers_cargo_target_dir_cannot_flip_the_mutants_verdict` plants the
 /// opposite, a missed mutant reported caught, the direction a gate must never fail in (#419
-/// review, nit 3). With the variable out of the environment the job builds only in the target
+/// review, nit 3). With the variable pinned to it the job builds only in the target
 /// tree of the repository it was given, one source tree, which [`MUTANTS_IN_PLACE`] mutates and
 /// reverts in turn, so each build sees its own edit's newer mtime (DEC-850).
 const CARGO_TARGET_DIR: &str = "CARGO_TARGET_DIR";
+
+/// Cargo's other way to name a target directory, the environment's form of a config's
+/// `build.target-dir`. A caller's value of it, or a `build.target-dir` in their own cargo config,
+/// shares one directory as [`CARGO_TARGET_DIR`] does, so the mutants job's building children pin
+/// [`CARGO_TARGET_DIR`] to [`mutants_target_dir`], which cargo ranks above both, and drop this
+/// one too (lane NE met a gutted function reported missed from a shared directory, 2026-10-26).
+const CARGO_BUILD_TARGET_DIR: &str = "CARGO_BUILD_TARGET_DIR";
+
+/// The one target directory the mutants job's building children use: `root`'s own `target/`,
+/// absolute, so no caller's [`CARGO_TARGET_DIR`], [`CARGO_BUILD_TARGET_DIR`] or cargo config
+/// `build.target-dir` can point two source trees at one directory, and no child that changes its
+/// working directory reads a relative path differently.
+fn mutants_target_dir(root: &Path) -> PathBuf {
+    std::path::absolute(root)
+        .unwrap_or_else(|_| root.to_path_buf())
+        .join("target")
+}
 
 /// The profile every build of the mutants job runs under: no debuginfo (DEC-519), and optimised at
 /// `opt-level = 1` (DEC-931), for the `dev` profile and for the `test` profile that inherits it,
@@ -10218,8 +10260,9 @@ const MUTANT_BUILD_PROFILE: [(&str, &str); 4] = [
     ("CARGO_PROFILE_TEST_OPT_LEVEL", "1"),
 ];
 
-/// A `cargo` child of the mutants job that builds, with the caller's [`CARGO_TARGET_DIR`] out of its
-/// environment and [`MUTANT_BUILD_PROFILE`] in it: the pre-flight's `cargo nextest list`, which
+/// A `cargo` child of the mutants job that builds, with [`CARGO_TARGET_DIR`] pinned to
+/// [`mutants_target_dir`], the caller's [`CARGO_BUILD_TARGET_DIR`] out of its environment, and
+/// [`MUTANT_BUILD_PROFILE`] in it: the pre-flight's `cargo nextest list`, which
 /// builds the very packages the run is about to judge, and the `cargo mutants` run itself, whose
 /// baseline and mutant builds inherit both. The job's other `cargo` children — `cargo mutants
 /// --list` and `cargo metadata` — build nothing, so they carry none of this state.
@@ -10228,7 +10271,8 @@ fn mutants_job_cargo(root: &Path, args: &[&str]) -> Command {
     cargo
         .current_dir(root)
         .args(args)
-        .env_remove(CARGO_TARGET_DIR)
+        .env_remove(CARGO_BUILD_TARGET_DIR)
+        .env(CARGO_TARGET_DIR, mutants_target_dir(root))
         .envs(MUTANT_BUILD_PROFILE);
     cargo
 }
@@ -12087,18 +12131,19 @@ mod tests {
     use anyhow::{Context, Result, bail};
     use serde_json::{Value, json};
 
+    use super::mutants_job_within;
     use super::{
         ATOMIC_EXCEPTIONS, AUTHORIZE_URL_REFUSED, BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, BuildDir,
-        CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB,
-        INFRA_WORKFLOW, Layers, MUTANT_BUILD_PROFILE, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS,
-        MUTANT_TEST_TIMEOUT, MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard,
-        MutatedCrate, PR_JOBS, Package, PendingTest, PendingTestRun, REFCASES, REHEARSAL,
-        REHEARSAL_LIVE_JOB, REHEARSAL_TESTED, RELEASE_UNSIGNED, SCHEMA_CHECKERS, SCHEMA_DIR,
-        SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome, USED_BY_DERIVED,
-        UnmutatedSource, actionlint_workflows, atomic_exception, backticked_paths, base_ref_in,
-        behaviour_only_rows, check_schedule, ci, ci_files, classify, codeowners_problems,
-        contains_dec_id, contains_word, decision_numbers, external_oracles, failure_cause,
-        feature_files, feature_map_problems, files_by_extension, first_panic_line,
+        CARGO_BUILD_TARGET_DIR, CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency, FAST_JOB,
+        FEATURE_MAP, FULL_JOB, INFRA_WORKFLOW, Layers, MUTANT_BUILD_PROFILE, MUTANT_BUILD_TIMEOUT,
+        MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan,
+        MutantShard, MutatedCrate, PR_JOBS, Package, PendingTest, PendingTestRun, REFCASES,
+        REHEARSAL, REHEARSAL_LIVE_JOB, REHEARSAL_TESTED, RELEASE_UNSIGNED, SCHEMA_CHECKERS,
+        SCHEMA_DIR, SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome,
+        USED_BY_DERIVED, UnmutatedSource, actionlint_workflows, atomic_exception, backticked_paths,
+        base_ref_in, behaviour_only_rows, check_schedule, ci, ci_files, classify,
+        codeowners_problems, contains_dec_id, contains_word, decision_numbers, external_oracles,
+        failure_cause, feature_files, feature_map_problems, files_by_extension, first_panic_line,
         forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers, has_pending_tests,
         is_pending_marker, is_stub_function, layer_problems, lint, listed_mutant_counts,
         live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
@@ -13351,11 +13396,26 @@ mod tests {
                 "the mutants job leaves {name} to cargo's `dev` default, on (DEC-931)"
             );
         }
+        let pinned = std::path::absolute("target")?;
         assert_eq!(
             envs.get(OsStr::new(CARGO_TARGET_DIR)),
-            Some(&None),
-            "the caller's CARGO_TARGET_DIR is still removed (#419 review, nit 3)"
+            Some(&Some(pinned.as_os_str())),
+            "the caller's CARGO_TARGET_DIR is replaced by the repository's own absolute target/ \
+             (#419 review, nit 3), which cargo ranks above a config's build.target-dir"
         );
+        assert_eq!(
+            envs.get(OsStr::new(CARGO_BUILD_TARGET_DIR)),
+            Some(&None),
+            "the caller's CARGO_BUILD_TARGET_DIR is removed"
+        );
+        let within = mutants_job_within(Path::new("."), &["mutants"], Duration::from_secs(60));
+        let within: BTreeMap<&OsStr, Option<&OsStr>> = within.get_envs().collect();
+        assert_eq!(
+            within.get(OsStr::new(CARGO_TARGET_DIR)),
+            Some(&Some(pinned.as_os_str())),
+            "the timed run pins the same directory"
+        );
+        assert_eq!(within.get(OsStr::new(CARGO_BUILD_TARGET_DIR)), Some(&None));
         Ok(())
     }
 
@@ -15635,7 +15695,8 @@ mod tests {
     /// A `CARGO_TARGET_DIR` the caller exported must not flip the gate's verdict (#419 review, nit
     /// 3, the backlog row this change lands). The variable has to be in the environment the gate's
     /// `cargo` children inherit, which is this process's own, so the test re-runs itself as a child
-    /// with the variable pointing at a directory of its own. The child runs the existing test's own
+    /// with the variable pointing at a directory of its own, and [`CARGO_BUILD_TARGET_DIR`] at a
+    /// directory inside it (2026-10-26). The child runs the existing test's own
     /// sequence — every mutant caught once, then the one that survives — and the parent asserts the
     /// child's exit status, and that no build tree of the gate's appears in the caller's directory:
     /// a shared verdict can flip on one run and not the next, but a pass-through always builds
@@ -15654,6 +15715,7 @@ mod tests {
                 .arg("tests::a_callers_cargo_target_dir_cannot_flip_the_mutants_verdict")
                 .env(MUTANTS_TARGET_DIR_CHILD, "1")
                 .env(CARGO_TARGET_DIR, &dir)
+                .env(CARGO_BUILD_TARGET_DIR, dir.join("build"))
                 .status()
                 .context("re-running this test with a caller's CARGO_TARGET_DIR")?;
             let built = fs::read_dir(&dir)?
@@ -17897,6 +17959,65 @@ mod tests {
         ("cell-vault", "cell"),
         ("cell-exchange", "cell"),
     ];
+
+    /// DEC-464, DEC-2641: CI's drill jobs, split into matrix shards, still run every drill of their
+    /// list in both variants: each matrix lists exactly `plain` and `seeded` and hands them to xtask,
+    /// and a job whose matrix also lists drills lists exactly the job's own and hands those on too,
+    /// with every shard run to its end.
+    #[test]
+    fn the_sharded_cell_jobs_run_every_drill_in_both_variants() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let names = |drills: &[crate::cell::Drill]| -> Vec<String> {
+            drills.iter().map(|d| d.name().to_owned()).collect()
+        };
+        for (job, drills) in [
+            ("cell-journal", names(&crate::cell::JOURNAL_DRILLS)),
+            ("cell-failover", names(&crate::cell::FAILOVER_DRILLS)),
+            ("cell-kill-switch", names(&crate::cell::KILL_SWITCH_DRILLS)),
+            ("cell-executor", names(&crate::cell::EXECUTOR_DRILLS)),
+            ("cell-vault", names(&crate::cell::VAULT_DRILLS)),
+            ("cell-exchange", names(&crate::cell::EXCHANGE_DRILLS)),
+        ] {
+            let lines = workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?;
+            let list = |key: &str| -> Option<Vec<String>> {
+                lines.iter().find_map(|line| {
+                    line.trim()
+                        .strip_prefix(&format!("{key}: ["))
+                        .and_then(|rest| rest.strip_suffix(']'))
+                        .map(|items| items.split(',').map(|i| i.trim().to_owned()).collect())
+                })
+            };
+            let has = |want: &str| lines.iter().any(|l| l.trim() == want);
+            assert_eq!(
+                list("variant"),
+                Some(vec!["plain".to_owned(), "seeded".to_owned()]),
+                "{job}'s shards take both variants"
+            );
+            assert!(
+                has("MANDATE_CELL_VARIANT: ${{ matrix.variant }}"),
+                "{job} hands on its variant"
+            );
+            assert!(
+                has("fail-fast: false"),
+                "{job}'s shards each run to the end"
+            );
+            match list("drill") {
+                None => assert!(
+                    !lines.iter().any(|l| l.contains("MANDATE_CELL_DRILL")),
+                    "{job} names no drill without a matrix of them"
+                ),
+                Some(listed) => {
+                    assert_eq!(listed, drills, "{job}'s shards name each of its drills");
+                    assert!(
+                        has("MANDATE_CELL_DRILL: ${{ matrix.drill }}"),
+                        "{job} hands on its drill"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
 
     /// DEC-1190 in `ci.yml`: `select` runs `cargo xtask ci select` into its outputs and exposes each
     /// switch the selection prints, every scoped job needs it and starts only on its own switch,

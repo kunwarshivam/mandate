@@ -580,7 +580,7 @@ fn an_operator_alert_is_opaque_and_follows_the_call_record() {
         })
         .collect();
     assert_eq!(alerts.len(), 1);
-    assert_eq!(alerts[0].message_key, "research_call_refused");
+    assert_eq!(alerts[0].kind.key(), "research_call_refused");
     assert_eq!(alerts[0].subject_event, record);
 }
 
@@ -602,7 +602,7 @@ fn three_deadline_misses_in_a_row_alert_the_operator_once() {
             called
                 .effects
                 .iter()
-                .filter(|effect| matches!(effect, Effect::Notify(r) if r.message_key == "research_deadline_streak"))
+                .filter(|effect| matches!(effect, Effect::Notify(r) if r.kind.key() == "research_deadline_streak"))
                 .count(),
         );
     }

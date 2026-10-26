@@ -2,6 +2,7 @@
 //! DEC-485): the final mode first, then the agent's own orders cancelled by id, then its
 //! sub-ledger sold through the executor's own flatten intents, each step journaled.
 
+use mandate_notify::OwnerAlertKind;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
@@ -104,8 +105,19 @@ pub(crate) fn kill_switch(
             ),
         ],
     )?;
-    batch.notify(switch, KILL_SWITCH);
+    alert(batch, switch, initiator);
     cancel_each(batch, cancels)
+}
+
+/// The switch's owner alert, for every switch but a user's: the API commits a user's
+/// `OwnerAlertSent` with the command's `OwnerCommandIssued`, so one user kill switch is one notice
+/// however many stream owners apply it (notifications spec §3.4, E8-9k). A risk limit's and the
+/// platform operator's switch keep the executor's alert until their own causes are written
+/// (DEC-2514 item 2).
+fn alert(batch: &mut Batch<'_, '_>, switch: EventId, initiator: Initiator) {
+    if initiator != Initiator::Owner {
+        batch.notify(switch, OwnerAlertKind::KillSwitch);
+    }
 }
 
 /// §5.5's account scope where every held instrument may close at the market now (regular session,
@@ -180,7 +192,7 @@ fn account(
             ),
         ],
     )?;
-    batch.notify(switch, KILL_SWITCH);
+    alert(batch, switch, initiator);
     batch.broker(BrokerRequest::CancelAll(AccountWideScope::new(
         AccountWide::Account(reference),
     )));
@@ -587,7 +599,7 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
                         Vec::new(),
                         Some(id.clone()),
                     )?;
-                    batch.notify(alerted, "exit_unpriced");
+                    batch.notify(alerted, OwnerAlertKind::ExitStalled);
                 }
                 continue;
             };
@@ -1013,11 +1025,20 @@ mod tests {
             let alerts: Vec<(&EventId, &str)> = effects
                 .iter()
                 .filter_map(|effect| match effect {
-                    Effect::Notify(alert) => Some((&alert.subject_event, alert.message_key)),
+                    Effect::Notify(alert) => Some((&alert.subject_event, alert.kind.key())),
                     _ => None,
                 })
                 .collect();
-            assert_eq!(alerts, vec![(&record.event_id, "kill_switch")], "{name}");
+            let alerted = if initiator == Initiator::Owner {
+                Vec::new()
+            } else {
+                vec![(&record.event_id, "kill_switch")]
+            };
+            assert_eq!(
+                alerts, alerted,
+                "{name}: the API alerts a user's switch with its command, so the executor alerts \
+                 only the others (E8-9k, notifications spec §3.4)"
+            );
             assert_eq!(
                 raised(&effects),
                 vec![format!("k-{}-0", record.event_id.0)],

@@ -110,6 +110,8 @@ fn parts() -> ResearchParts {
         active: Vec::new(),
         last_reservation: None,
         data_symbols: BTreeSet::from([Symbol::new("AAPL").unwrap(), Symbol::new("MSFT").unwrap()]),
+        event_triggers: None,
+        events: Vec::new(),
     }
 }
 

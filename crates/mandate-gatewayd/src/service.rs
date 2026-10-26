@@ -53,6 +53,11 @@ impl<T: Transport, S: MeterStore, C: Clock> Service<T, S, C> {
         &self.gateway
     }
 
+    /// The gateway's transport, for a recorded service to prime with each call's reply.
+    pub fn transport_mut(&mut self) -> &mut T {
+        self.gateway.transport_mut()
+    }
+
     /// The caps the service holds, one per deployed agent.
     pub fn daily_caps(&self) -> &DailyCaps {
         &self.caps

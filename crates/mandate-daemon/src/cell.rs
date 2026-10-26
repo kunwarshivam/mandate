@@ -85,14 +85,14 @@ pub struct CellResearch {
 }
 
 /// The references every record of a researching deployment carries: its mandate version and the
-/// research entry's model version.
+/// research entry's model version, at the draft's own [`EventDraft::schema_version`].
 struct ResearchRefs {
     mandate_version: String,
     model_version: Digest,
 }
 
 impl Refs for ResearchRefs {
-    fn refs(&self, _: &EventDraft) -> Option<(u64, Object)> {
+    fn refs(&self, draft: &EventDraft) -> Option<(u64, Object)> {
         let mut refs = Object::new();
         refs.insert(
             Key::new("mandate_version").ok()?,
@@ -102,7 +102,7 @@ impl Refs for ResearchRefs {
             Key::new("model_version").ok()?,
             Value::Str(format!("sha256:{}", self.model_version.to_hex())),
         );
-        Some((1, refs))
+        Some((draft.schema_version(), refs))
     }
 }
 

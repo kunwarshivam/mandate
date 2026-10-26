@@ -4,22 +4,22 @@
 //! workspace services, the scheduler, and the account's executor) would have committed them.
 
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::time::Duration;
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Key, Object, Value, parse};
 use mandate_daemon::models::{Evaluated, Models};
 use mandate_daemon::{ArtifactSink, Config, ModelsWiring, Refs, RuntimeProcess, Wiring, fixture};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
-use mandate_num::{Conviction, Unit};
+use mandate_num::{Conviction, Price, Qty, Unit};
 use mandate_process::{Exit, State};
 use mandate_runtime::{
-    AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment, DryRunVerdict,
-    EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest, GateDryRun, IdGen,
-    MandateView, Mode, ModelDirection, ModelOutput, OrderPlan, Proposal, RiskClock, Seq,
-    SignalInputs, WorkspaceId, WriterEpoch,
+    AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deferral, Deployment,
+    DryRunVerdict, EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest, GateDryRun,
+    IdGen, MandateView, Mode, ModelDirection, ModelOutput, OrderExecution, OrderPlan, Proposal,
+    Purpose, RiskClock, Seq, SignalInputs, TimeInForce, WorkspaceId, WriterEpoch,
 };
 use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
@@ -2024,4 +2024,361 @@ fn a_tick_that_moves_on_while_an_observation_is_in_doubt_records_its_output_once
     );
     assert_eq!(risk_clock(&process), Some(NOW + 7));
     assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// A dry run that allows every opening with the halt deferred to the binding gate and no bars read.
+struct Deferring;
+impl GateDryRun for Deferring {
+    fn check(&self, _: &Proposal) -> DryRunVerdict {
+        DryRunVerdict::AllowDeferring {
+            deferred: BTreeSet::from([Deferral::Halt]),
+            liquidity: None,
+        }
+    }
+}
+
+/// A plan that opens one share of AAPL at 155 whatever its inputs, and classifies it `auto`.
+struct Opening;
+impl OrderPlan for Opening {
+    fn plan(&self, _: &MandateView, _: &SignalInputs) -> Option<Proposal> {
+        Some(Proposal {
+            instrument: InstrumentId::new("AAPL").ok()?,
+            asset_class: AssetClass::UsEquity,
+            side: Side::Buy,
+            qty: Qty::parse("1").ok()?,
+            limit: Price::parse("155").ok()?,
+            purpose: Purpose::Open,
+            exit_origin: None,
+            exit_conviction: Some(Value::Str("1".into())),
+            buy_conviction: Some(Value::Str("1".into())),
+            combined_score: Value::Str("0.5".into()),
+            outputs_used: BTreeSet::new(),
+            model_weights: BTreeMap::new(),
+            clips_applied: Vec::new(),
+            execution: Some(OrderExecution {
+                asset_class: AssetClass::UsEquity,
+                tif: TimeInForce::Day,
+                protection_required: false,
+                protection: None,
+            }),
+        })
+    }
+    fn classify(&self, _: &MandateView, _: &Proposal) -> Classified {
+        Classified {
+            autonomy: Autonomy::Auto,
+            decided_by: Some("default".into()),
+        }
+    }
+}
+
+/// DEC-2388 item 13, end to end over the journal's own append: an opening the dry run allows with
+/// a check deferred is committed as `DecisionMade` version 3 naming it, and the owner is asked;
+/// nothing is proposed to the executor.
+#[test]
+fn a_deferring_opening_is_journaled_at_version_3_and_asked_never_proposed() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"AAPL","price":"155","source":"fixture","feed":"sip","risk_clock":{NOW}}}"#
+        ),
+    );
+    let mut wiring = fixture::wiring("user-owner", AGENT_STREAM);
+    wiring.gate = Box::new(Deferring);
+    wiring.plan = Box::new(Opening);
+    wiring.view.version = format!("sha256:{}", Digest::of(b"mandate-daemon fixture").to_hex());
+    wiring.view.working_universe = BTreeSet::from([InstrumentId::new("AAPL").unwrap()]);
+    let mut process = RuntimeProcess::start(rig.clone(), wiring, &config(), at(NOW));
+    for second in 1..4 {
+        tick(&rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+    let rows = agent_rows(&rig);
+    let decision = rows
+        .iter()
+        .find(|row| row.event_type == "DecisionMade")
+        .unwrap_or_else(|| panic!("the opening was decided: {:?}", kinds(&rig)));
+    assert_eq!(decision.schema_version, 3);
+    let body = parse(&decision.body).unwrap();
+    let named: Vec<&str> = body
+        .get("payload")
+        .and_then(|payload| payload.get("deferred_to_binding"))
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(named, vec!["halt", "liquidity_floor", "participation"]);
+    assert_eq!(count(&rig, "ApprovalRequested"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
+    let request = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalRequested")
+        .unwrap();
+    assert_eq!(
+        request.schema_version, 3,
+        "the request names the decision's deferrals (DEC-2515)"
+    );
+    let content = parse(&request.body).unwrap();
+    let asked: Vec<&str> = content
+        .get("payload")
+        .and_then(|payload| payload.get("content"))
+        .and_then(|content| content.get("deferred_to_binding"))
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(asked, named, "rule 292: exactly the decision's");
+}
+
+const RESEARCH_SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+
+/// An admitted thesis on SPY (journal spec §9.4) as of `as_of`, expiring an hour later at
+/// `expires_at`, appended to the agent stream through the journal's own append as the research
+/// writer would leave it. It takes the stream's writer epoch, fencing any process before it.
+fn thesis_at(rig: &Rig, as_of: &str, expires_at: &str) {
+    let stream = StreamId::parse(AGENT_STREAM).unwrap();
+    let mut journal = rig.journal.clone();
+    let head = journal.rows(&stream).unwrap().len();
+    let epoch = journal.take_ownership(&stream).unwrap();
+    let hash = Digest::of(b"x").to_hex();
+    let payload = parse(format!(
+        r#"{{"model_id":"llm.research_agent","model_version":"0.1.0","content_hash":"sha256:{hash}","thesis_id":"01J8Z3MTHE5000000000000001","lineage_id":"01J8Z3MTHE5000000000000001","revision":0,"predecessor_thesis_id":null,"autopsy_ref":null,"instrument_id":"{RESEARCH_SPY}","asset_class":"us_equity","direction":"long","as_of":"{as_of}","expires_at":"{expires_at}","horizon_s":3600,"conviction":"0.6","confidence":"0.7","evidence_ref":null,"evidence_sources":["src.newswire"],"corroboration":"independent_source","invalidation":"a guidance cut","allowlist_version":3,"prompt_ref":"sha256:{hash}","response_ref":"sha256:{hash}","admitted":true,"reason":null}}"#
+    ).as_bytes())
+    .unwrap();
+    let mut refs = Object::new();
+    refs.insert(
+        Key::new("model_version").unwrap(),
+        Value::Str(format!("sha256:{hash}")),
+    );
+    refs.insert(
+        Key::new("mandate_version").unwrap(),
+        Value::Str(format!(
+            "sha256:{}",
+            Digest::of(b"research mandate").to_hex()
+        )),
+    );
+    let bytes = mandate_store::envelope::draft_bytes(
+        &mandate_store::envelope::Envelope {
+            stream: AGENT_STREAM,
+            environment: Environment::Paper,
+            actor_kind: "agent",
+            actor_id: AGENT,
+            build: "mandate-daemon/test",
+            version: "0.1.0",
+            event_time: at(NOW - 3_600),
+        },
+        &mandate_store::envelope::Fields {
+            event_id: "01J8Z3MTHE5000000000000002",
+            event_type: "ThesisProposed",
+            schema_version: 1,
+            causation_id: None,
+            correlation_id: Some("01J8Z3MRVN0000000000000001"),
+            config_refs: &refs,
+            payload: &payload,
+        },
+    )
+    .unwrap();
+    let outcome = journal.append(
+        &stream,
+        u64::try_from(head).unwrap(),
+        epoch,
+        at(NOW - 3_600),
+        &[bytes],
+    );
+    assert!(
+        matches!(outcome, AppendOutcome::Committed(_)),
+        "the journal takes the thesis: {outcome:?}"
+    );
+}
+
+/// The demo's research deployment over the journal's own append, holding 3 SPY from its own filled
+/// buy under a thesis that expires at `expires_at`, ticked three times from `NOW`; the process is
+/// still ready. The first start only opens the stream, so the thesis lands after `StreamOpened`.
+fn held_spy_under_a_thesis_expiring_at(expires_at: i64) -> Rig {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    let document = mandate_canon::parse(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deploy/cell/demo/research-mandate.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let version = format!("sha256:{}", Digest::of(b"research mandate").to_hex());
+    let wire = || {
+        mandate_daemon::production::wired(
+            fixture::wiring("user-owner", AGENT_STREAM),
+            &version,
+            &document,
+            (None, mandate_daemon::bars::BarsReader::default()),
+            CLOCK,
+            AGENT,
+        )
+    };
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    rig.control.borrow_mut().push(row(
+        CONTROL,
+        seq,
+        "AgentDeployed",
+        "user",
+        &format!(r#"{{"agent_id":"{AGENT}","mandate_version":"{version}"}}"#),
+    ));
+    drop(RuntimeProcess::start(
+        rig.clone(),
+        wire(),
+        &config(),
+        at(NOW),
+    ));
+    thesis_at(
+        &rig,
+        &at(expires_at - 3_600).to_string(),
+        &at(expires_at).to_string(),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "AccountSnapshotRecorded",
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":1,"equity":"100000","cash":"100000","buying_power":"100000","non_marginable_buying_power":"100000","risk_clock":"{}"}}"#,
+            at(NOW)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"{RESEARCH_SPY}","price":"100.05","source":"quote","feed":"fixture","bid":"99.95","sane":true,"session":"regular","risk_clock":"{}"}}"#,
+            at(NOW)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderRequestRecorded",
+        &format!(
+            r#"{{"agent_id":"{AGENT}","purpose":"open","risk_clock":"{}"}}"#,
+            at(NOW)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderSubmitted",
+        &format!(r#"{{"client_order_id":"o1","instrument_id":"{RESEARCH_SPY}","side":"buy"}}"#),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "FillApplied",
+        &format!(
+            r#"{{"fill_id":"f1","client_order_id":"o1","instrument_id":"{RESEARCH_SPY}","side":"buy","qty_gross":"3","price":"99.95","risk_clock":"{}"}}"#,
+            at(NOW)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderStateChanged",
+        r#"{"client_order_id":"o1","state":"filled","replaced_by":null,"ignored":false}"#,
+    );
+    reconciled(&rig, ACCOUNT);
+    let mut process = RuntimeProcess::start(rig.clone(), wire(), &config(), at(NOW));
+    for second in 1..4 {
+        tick(&rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+    rig
+}
+
+fn member<'a>(payload: &'a Value, name: &str) -> Option<&'a str> {
+    payload.get(name).and_then(Value::as_str)
+}
+
+/// D1's ask on #2551, end to end over the journal's own append (journal spec rule 8, DEC-2391): a
+/// held instrument whose thesis expired is sold whole at the bid by the deployed plan. The
+/// `DecisionMade`, `exit_origin` `removed_instrument` with no convictions, score, outputs, weights
+/// or clips, decided AUTO by the built-in risk-reducing rule, and the `IntentProposed` it causes
+/// commit, once, with no ask.
+#[test]
+fn a_held_instrument_whose_thesis_ended_is_proposed_for_sale_through_the_journal() {
+    let rig = held_spy_under_a_thesis_expiring_at(NOW - 60);
+    assert_eq!(count(&rig, "DecisionMade"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "ApprovalRequested"), 0, "{:?}", kinds(&rig));
+    let rows = agent_rows(&rig);
+    let row = |event_type: &str| {
+        rows.iter()
+            .find(|row| row.event_type == event_type)
+            .unwrap_or_else(|| panic!("{event_type}: {:?}", kinds(&rig)))
+    };
+    let (decision, intent) = (row("DecisionMade"), row("IntentProposed"));
+    let payload = |row: &StoredEvent| parse(&row.body).unwrap().get("payload").cloned().unwrap();
+    let decided = payload(decision);
+    for (name, want) in [
+        ("instrument_id", RESEARCH_SPY),
+        ("side", "sell"),
+        ("qty", "3"),
+        ("limit_price", "99.95"),
+        ("purpose", "discretionary_exit"),
+        ("exit_origin", "removed_instrument"),
+        ("dry_run", "allow"),
+        ("autonomy", "auto"),
+        ("decided_by", "builtin_risk_reducing"),
+    ] {
+        assert_eq!(member(&decided, name), Some(want), "{name}: {decided:?}");
+    }
+    for name in ["exit_conviction", "buy_conviction", "combined_score"] {
+        assert_eq!(decided.get(name), Some(&Value::Null), "{name}");
+    }
+    for name in ["outputs_used", "model_weights", "clips_applied"] {
+        assert_eq!(
+            decided
+                .get(name)
+                .and_then(Value::as_array)
+                .map(<[Value]>::len),
+            Some(0),
+            "{name}"
+        );
+    }
+    let proposed = payload(intent);
+    for (name, want) in [
+        ("instrument_id", RESEARCH_SPY),
+        ("side", "sell"),
+        ("qty", "3"),
+        ("limit_price", "99.95"),
+        ("purpose", "discretionary_exit"),
+    ] {
+        assert_eq!(member(&proposed, name), Some(want), "{name}: {proposed:?}");
+    }
+    assert_eq!(causation_of(intent), Some(decision.event_id.clone()));
+}
+
+/// The control: the same holding under a thesis still current decides and proposes nothing.
+#[test]
+fn a_held_instrument_whose_thesis_is_current_is_not_sold() {
+    let rig = held_spy_under_a_thesis_expiring_at(NOW + 3_600);
+    assert_eq!(count(&rig, "ThesisProposed"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "DecisionMade"), 0, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
 }

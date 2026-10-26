@@ -40,6 +40,7 @@ mod invalidation;
 mod membership;
 mod merkle;
 mod notices;
+mod real_money;
 mod records;
 mod risk_limits;
 mod runs;

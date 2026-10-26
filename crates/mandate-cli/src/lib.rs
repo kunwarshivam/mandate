@@ -38,6 +38,7 @@ pub mod connection;
 pub mod control;
 pub mod db;
 pub mod deploy;
+pub mod disclosure;
 pub mod download;
 pub mod evaluation;
 pub mod gestures;
@@ -121,4 +122,8 @@ pub enum Command {
     /// (DEC-2104).
     #[command(subcommand)]
     StepUp(step_up::StepUpCommand),
+    /// Show a go-live disclosure's acceptance code, or accept it with that code, in paper; every
+    /// disclosure is a placeholder pending counsel (DEC-2134).
+    #[command(subcommand)]
+    Disclosure(disclosure::DisclosureCommand),
 }

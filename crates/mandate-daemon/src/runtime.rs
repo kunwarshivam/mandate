@@ -554,7 +554,7 @@ impl<S: Store> RuntimeProcess<S> {
             match effect {
                 Effect::Journal(draft) => drafts.push(draft),
                 Effect::Notify(notice) => asked.push(Alert {
-                    key: notice.message_key,
+                    key: notice.kind.key(),
                     subject: Some(notice.subject_event.0),
                 }),
                 Effect::NotifyApproval(_) => asked.push(Alert {
@@ -660,6 +660,9 @@ impl<S: Store> RuntimeProcess<S> {
     fn fold_rows(&mut self, rows: &[StoredEvent]) -> Option<u64> {
         for event in tailed(rows).ok()? {
             fold(&mut self.state, &event).ok()?;
+            if let Some(research) = self.research.as_mut() {
+                research.replay(&event)?;
+            }
         }
         let agent = self.agent.as_ref()?;
         Some(self.state.head(agent.as_str()).map_or(0, |seq| seq.0))

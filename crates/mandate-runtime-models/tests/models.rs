@@ -108,6 +108,46 @@ fn a_falling_or_flat_series_gives_no_output() {
     }
 }
 
+/// A mandate pinning `quant.ma_crossover` 1.1.0 (DEC-2390) gets its exit output on a falling
+/// series, conviction −1, handed on like a `Long`; 1.0.0 gives none on the same closes.
+#[test]
+fn a_pinned_1_1_0_s_exit_output_is_handed_on_on_a_falling_series() {
+    let root = Root::new("exit");
+    let series: Vec<(Date, u32)> = sessions(30, last())
+        .into_iter()
+        .zip((0u32..).map(|n| 20_000 - 10 * n))
+        .collect();
+    store_series(&root.bars(), "QQQ", &series, None);
+    let exit_hash = mandate_modelhost::content(MODEL, "1.1.0")
+        .unwrap()
+        .hash
+        .to_hex();
+    let pinned = edited(|text| {
+        text.replace(PINNED_HASH, &exit_hash)
+            .replace(r#""version":"1.0.0""#, r#""version":"1.1.0""#)
+    });
+    let control = [registration_of(1, "paper", ("1.1.0", &exit_hash), PARAMS)];
+    let answer = composer(&root, &control, &pinned)
+        .unwrap()
+        .evaluate(tick(NOW));
+    let [evaluated] = answer.as_slice() else {
+        panic!("one output: {answer:?}");
+    };
+    assert_eq!(evaluated.output.model_version, "1.1.0");
+    assert_eq!(evaluated.output.conviction.to_string(), "-1");
+    assert_eq!(evaluated.output.as_of, tick(LAST_CLOSE));
+    assert_eq!(
+        String::from_utf8(evaluated.closes.clone()).unwrap(),
+        String::from_utf8(closes_json(&series)).unwrap()
+    );
+    assert_eq!(
+        composer(&root, &registered(), &document())
+            .unwrap()
+            .evaluate(tick(NOW)),
+        Vec::new()
+    );
+}
+
 #[test]
 fn the_registry_is_the_latest_registration_of_each_model_in_the_environment() {
     let other = "b".repeat(64);
