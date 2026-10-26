@@ -6,8 +6,8 @@
   `ConnectionStateChanged` in a later batch, and its fold reads the record (DEC-2826, slice C).
   Slice D (DEC-2832) counts the broker's answers in `mandate-executord` and sends it, and the
   Alpaca connector answers a `401` as an unknown outcome (§5.4). What remains:
-  - the scheduled health probe (§8.2), so an idle executor with nothing to read still notices, and
-    the quote feed's answers, which are not counted;
+  - the quote feed's answers, which are not counted (the scheduled health probe, DEC-2837, reads
+    the account every minute, so an idle executor notices);
   - Robinhood's connector, which folds every account-snapshot error into one `Unreadable`;
   - the rate-limit headroom and contract-drift signals;
   - the failed permission check, and the token's refresh or expiry, as suspending causes;
