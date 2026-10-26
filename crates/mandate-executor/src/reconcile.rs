@@ -2056,7 +2056,7 @@ pub(crate) mod tests {
         ])?;
         assert!(
             executor.commit_one("OwnerAcknowledged", unnamed).is_err(),
-            "an acknowledgment with no user is refused"
+            "an acknowledgment copy that names no original is refused"
         );
         assert_eq!(
             executor

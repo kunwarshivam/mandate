@@ -141,11 +141,11 @@ pub(crate) fn fold(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(),
         }
         ACKNOWLEDGED => {
             let original = origin(event)?;
+            let named = required_text(payload, "event")?;
             held.copied.insert(original.clone());
             if let Some(request) = optional_text(payload, "request") {
                 held.named.insert(request.to_owned());
             }
-            let named = required_text(payload, "event")?;
             let superseded = match held.triggers.get(named).cloned() {
                 Some(trigger) if trigger.stands => {
                     held.supersede(&trigger.agent, &trigger.limit, None)
@@ -314,8 +314,122 @@ mod tests {
 
     use mandate_canon::Value;
 
-    use super::step_up_failure;
+    use super::{fold, step_up_failure};
     use crate::payload::{int, object, text};
+    use crate::state::ExecutorState;
+    use crate::types::{AccountRef, AccountScope, EventId, FoldedEvent, Seq, WorkspaceId};
+
+    fn state() -> ExecutorState {
+        ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        })
+    }
+
+    fn record(
+        id: &str,
+        kind: &str,
+        causation: Option<&str>,
+        pairs: Vec<(&str, Value)>,
+    ) -> FoldedEvent {
+        FoldedEvent {
+            stream: "acct:ws1:acct-1".to_owned(),
+            seq: Seq(1),
+            event_id: EventId(id.to_owned()),
+            event_type: kind.to_owned(),
+            causation_id: causation.map(|c| EventId(c.to_owned())),
+            payload: object(pairs).unwrap_or(Value::Null),
+        }
+    }
+
+    fn trigger(id: &str) -> FoldedEvent {
+        record(
+            id,
+            "RiskLimitTriggered",
+            None,
+            vec![
+                ("agent_id", text("agent_a")),
+                ("limit", text("max_daily_loss")),
+            ],
+        )
+    }
+
+    fn acknowledgment(original: &str, event: &str) -> FoldedEvent {
+        record(
+            &format!("copy-{original}"),
+            "OwnerAcknowledged",
+            Some(original),
+            vec![("event", text(event)), ("request", Value::Null)],
+        )
+    }
+
+    fn refusal(command: &str, causation: &str) -> FoldedEvent {
+        record(
+            "refusal",
+            "OwnerCommandRefused",
+            Some(causation),
+            vec![
+                ("command", text(command)),
+                ("reason", text("step_up_stale")),
+            ],
+        )
+    }
+
+    fn stands(state: &ExecutorState, id: &str) -> bool {
+        state
+            .acknowledgments
+            .triggers
+            .get(id)
+            .is_some_and(|t| t.stands)
+    }
+
+    /// Only the very refusal of the pending copy, `acknowledge` and naming its original, restores
+    /// what the copy superseded: another original's refusal, a refused resume of the same original,
+    /// or any other record leaves the copy accepted.
+    #[test]
+    fn only_the_copys_own_refusal_restores_its_trigger() {
+        for (next, restored) in [
+            (refusal("acknowledge", "ak-1"), true),
+            (refusal("acknowledge", "ak-9"), false),
+            (refusal("resume", "ak-1"), false),
+            (
+                record(
+                    "x",
+                    "AgentModeApplied",
+                    Some("ak-1"),
+                    vec![("command", text("acknowledge"))],
+                ),
+                false,
+            ),
+        ] {
+            let mut state = state();
+            for event in [
+                trigger("tg-1"),
+                acknowledgment("ak-1", "tg-1"),
+                next.clone(),
+            ] {
+                assert!(fold(&mut state, &event).is_ok());
+            }
+            assert_eq!(stands(&state, "tg-1"), restored, "after {next:?}");
+        }
+    }
+
+    /// An acknowledgment of a trigger already superseded supersedes nothing more: the newer
+    /// trigger of the same limit still stands once the copy is settled, refused or not.
+    #[test]
+    fn an_acknowledgment_of_a_superseded_trigger_leaves_the_newer_one_standing() {
+        let mut state = state();
+        for event in [
+            trigger("tg-1"),
+            trigger("tg-2"),
+            acknowledgment("ak-1", "tg-1"),
+            record("x", "ClockAdvanced", None, vec![]),
+        ] {
+            assert!(fold(&mut state, &event).is_ok());
+        }
+        assert!(!stands(&state, "tg-1"));
+        assert!(stands(&state, "tg-2"));
+    }
 
     fn evidence(assertion: &str, at: u64, method: &str) -> Value {
         object(vec![

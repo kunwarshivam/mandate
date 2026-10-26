@@ -94,11 +94,14 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         return Ok(());
     }
     crate::acknowledge::fold(state, event)?;
-    if matches!(
-        kind,
-        "OwnerAcknowledged" | "OwnerAcknowledgmentRequested" | "OwnerCommandRefused"
-    ) {
+    if matches!(kind, "OwnerAcknowledged" | "OwnerAcknowledgmentRequested") {
         return Ok(());
+    }
+    if kind == "OwnerCommandRefused" {
+        return match optional_text(payload, "command") {
+            Some("acknowledge") => Ok(()),
+            _ => not_interpreted(kind, "E7-2"),
+        };
     }
     if let Some(story) = owner_elsewhere(kind) {
         return not_interpreted(kind, story);
@@ -247,8 +250,8 @@ fn connection_checked() -> Result<(), ExecutorError> {
     Ok(())
 }
 
-/// Corporate actions, reconciliation's records and snapshot, recorded broker exchanges, the owner
-/// acknowledgment, the trading and risk days, and the kill switch (trading-domain spec §5.5 to §5.7,
+/// Corporate actions, reconciliation's records and snapshot, recorded broker exchanges, the trading
+/// and risk days, and the kill switch (trading-domain spec §5.5 to §5.7,
 /// §6, §10, §11): the later slices of this stack; the trading day is slice 5's trading-day part,
 /// which owes what a new day starts (GTC re-placement, the copy, the harness's start) together.
 /// An `ExternalActivityIngested` and a `ConductBreachDetected` fold as records only: the

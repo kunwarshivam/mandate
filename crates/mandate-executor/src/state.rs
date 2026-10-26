@@ -920,7 +920,8 @@ pub(crate) struct Ladder {
 }
 
 /// The restriction a reconciliation places for one subject — an instrument, or external activity
-/// on the account — and the only one an owner acknowledgment of that subject lifts (§11).
+/// on the account — which an owner's acknowledgment naming the hold lifts (§11, DEC-2830; backlog
+/// E7-4b, until the executor reads it).
 pub(crate) fn restriction_for(subject: &str) -> String {
     format!("reconciliation:{subject}")
 }
