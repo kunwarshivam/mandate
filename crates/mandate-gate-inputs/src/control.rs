@@ -662,7 +662,7 @@ pub fn admitted_configuration(
 fn configured(
     records: &[ControlRecord],
     store: &dyn ArtifactSource,
-    pinned: &Wanted<'_>,
+    wanted: &Wanted<'_>,
     trade_date: Date,
 ) -> Result<Configuration, ConfigRefusal> {
     let mut ordered: Vec<&ControlRecord> = records.iter().collect();
@@ -681,9 +681,9 @@ fn configured(
             .and_then(ArtifactRef::parse)
             .ok_or(ConfigRefusal::Malformed { kind })?;
         if kind == "model_version"
-            && (text("model_id") != Some(pinned.model_id)
-                || text("model_version") != Some(pinned.model_version)
-                || reference.digest() != pinned.content_hash)
+            && (text("model_id") != Some(wanted.model_id)
+                || text("model_version") != Some(wanted.model_version)
+                || reference.digest() != wanted.content_hash)
         {
             continue;
         }
@@ -696,7 +696,7 @@ fn configured(
             let value =
                 mandate_canon::parse(&bytes).map_err(|_| ConfigRefusal::Malformed { kind })?;
             let object = value.as_object().ok_or(ConfigRefusal::Malformed { kind })?;
-            if snapshot_text(object, "instrument_id")? != pinned.asset_id {
+            if snapshot_text(object, "instrument_id")? != wanted.asset_id {
                 continue;
             }
         }
@@ -718,7 +718,7 @@ fn configured(
     let rule_set = take("rule_set")?;
     let instrument_snapshot = take("instrument_snapshot")?;
     let model_version = take("model_version")?;
-    let instrument = snapshot(&instrument_snapshot.bytes, pinned)?;
+    let instrument = snapshot(&instrument_snapshot.bytes, wanted)?;
     let malformed = ConfigRefusal::Malformed { kind: "fee_config" };
     let fee = mandate_canon::parse(&fee_config.bytes).map_err(|_| malformed.clone())?;
     let effective_from = fee
@@ -763,7 +763,7 @@ fn snapshot_text<'a>(
 }
 
 /// The effective snapshot's `bytes` read exactly as DEC-523 pins them.
-fn snapshot(bytes: &[u8], pinned: &Wanted<'_>) -> Result<InstrumentSnapshot, ConfigRefusal> {
+fn snapshot(bytes: &[u8], wanted: &Wanted<'_>) -> Result<InstrumentSnapshot, ConfigRefusal> {
     let malformed = ConfigRefusal::Malformed {
         kind: "instrument_snapshot",
     };
@@ -776,15 +776,15 @@ fn snapshot(bytes: &[u8], pinned: &Wanted<'_>) -> Result<InstrumentSnapshot, Con
         return Err(ConfigRefusal::SnapshotExtraMember);
     }
     let text = |member: &'static str| snapshot_text(object, member);
-    let pinned_values = [
+    let fixed_values = [
         ("asset_class", "us_equity"),
         ("etp", "plain"),
         ("etp_source", "nasdaq_trader_symbol_directory"),
         ("increment", "whole"),
-        ("instrument_id", pinned.asset_id),
-        ("symbol", pinned.symbol.unwrap_or(text("symbol")?)),
+        ("instrument_id", wanted.asset_id),
+        ("symbol", wanted.symbol.unwrap_or(text("symbol")?)),
     ];
-    for (member, expected) in pinned_values {
+    for (member, expected) in fixed_values {
         if text(member)? != expected {
             return Err(ConfigRefusal::SnapshotValue { member });
         }
@@ -801,7 +801,7 @@ fn snapshot(bytes: &[u8], pinned: &Wanted<'_>) -> Result<InstrumentSnapshot, Con
     let etp_classified_at = UtcNanos::parse_rfc3339(text(member)?)
         .map_err(|_| ConfigRefusal::SnapshotValue { member })?;
     Ok(InstrumentSnapshot {
-        instrument_id: pinned.asset_id.to_owned(),
+        instrument_id: wanted.asset_id.to_owned(),
         symbol: text("symbol")?.to_owned(),
         exchange,
         etp_classified_at,

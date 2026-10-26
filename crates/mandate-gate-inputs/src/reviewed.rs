@@ -101,7 +101,9 @@ impl Reviewed {
     }
 
     /// A research deployment's artifacts for one admitted instrument (DEC-2819 item 3): the
-    /// confirmed version must be unpinned, and its model the one signal model
+    /// confirmed version's model is its one signal model that admits instruments, which only an
+    /// unpinned version has (the confirmed version passed V-036, at most one such model, and
+    /// V-037, none in a pinned version), and
     /// that admits instruments, whose registration `configuration` read under its own hash. The
     /// instrument is the registered snapshot's, a US equity the mandate's asset classes allow. The
     /// fee schedule, calendar and rule set are read as [`Self::from_registered`] reads them, every
@@ -116,15 +118,12 @@ impl Reviewed {
     ) -> Result<Self, InputError> {
         let mandate = confirmed.mandate().clone();
         on_its_own_stream(confirmed, configuration)?;
-        if mandate.universe.pinned {
-            return Err(missing("an unpinned research version"));
-        }
-        let mut admitting = mandate
+        let Some(model) = mandate
             .behavior
             .signal_models
             .iter()
-            .filter(|model| model.admits_instruments);
-        let (Some(model), None) = (admitting.next(), admitting.next()) else {
+            .find(|model| model.admits_instruments)
+        else {
             return Err(missing("the one model that admits instruments"));
         };
         if model.content_hash != configuration.model_version.content_hash {

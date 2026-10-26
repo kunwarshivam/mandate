@@ -162,3 +162,52 @@ fn a_research_version_is_reviewed_for_its_admitted_instrument_only() -> Result<(
     );
     Ok(())
 }
+
+/// The admitted instrument's snapshot is held to DEC-523 as a pinned one is: a leveraged ETP or a
+/// fractional increment refuses; a snapshot of another instrument registered after it is passed
+/// over.
+#[test]
+fn an_admitted_snapshot_is_held_to_dec_523_and_another_after_it_is_passed_over()
+-> Result<(), String> {
+    for (member, from, to) in [
+        ("etp", r#""etp":"plain""#, r#""etp":"leveraged""#),
+        (
+            "increment",
+            r#""increment":"whole""#,
+            r#""increment":"fractional""#,
+        ),
+    ] {
+        let changed = SNAPSHOT.replace(from, to);
+        let (records, store) = research(&[changed.as_str()])?;
+        assert_eq!(
+            admitted_configuration(&records, &store, &admitted(SPY), day()?),
+            Err(ConfigRefusal::SnapshotValue { member }),
+            "{member}"
+        );
+    }
+    let (records, store) = research(&[SNAPSHOT, QQQ_SNAPSHOT])?;
+    let configured = admitted_configuration(&records, &store, &admitted(SPY), day()?)
+        .map_err(|e| e.code().to_owned())?;
+    assert_eq!(configured.instrument.symbol, "SPY");
+    Ok(())
+}
+
+/// A research version is not reviewed for an admitted instrument whose binding was journaled on
+/// another stream, whose asset id is not an asset id, or whose symbol is not a symbol.
+#[test]
+fn an_admitted_instrument_off_its_stream_or_misnamed_is_not_reviewed() -> Result<(), String> {
+    let (records, store) = research(&[SNAPSHOT])?;
+    let version = confirmed(&records, &store)?;
+    let configured = admitted_configuration(&records, &store, &admitted(SPY), day()?)
+        .map_err(|e| e.code().to_owned())?;
+    let mut elsewhere = configured.clone();
+    elsewhere.instrument_snapshot.origin.stream_id = "ctl:ws_other".to_owned();
+    assert!(Reviewed::from_admitted(&version, &elsewhere).is_err());
+    let mut misnamed = configured.clone();
+    misnamed.instrument.instrument_id = "not an asset id".to_owned();
+    assert!(Reviewed::from_admitted(&version, &misnamed).is_err());
+    let mut unsymbolled = configured;
+    unsymbolled.instrument.symbol = String::new();
+    assert!(Reviewed::from_admitted(&version, &unsymbolled).is_err());
+    Ok(())
+}
