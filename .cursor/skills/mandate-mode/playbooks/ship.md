@@ -69,8 +69,10 @@ founder's yes; until then the light lane still takes step 3 before merging.
    merges only on its summary line's `verdict=pass` (DEC-2642). land-check merges `origin/main`
    into the head in a scratch worktree, which also proves the merge-tree clean, and runs
    spec-guard, lint and the diff's tests there: the checks a merge that waits for no CI would
-   otherwise skip. It does not run `full`'s parts (fixtures, reference, schemas, tofu), which a
-   change to those areas still runs locally. The session then squash-merges through the
+   otherwise skip. Run as root, it runs a test that failed once more as an unprivileged user,
+   and names every test that passed only there in the summary's `rerun_unprivileged` (DEC-2644).
+   It does not run `full`'s parts (fixtures, reference, schemas, tofu), which a change to those
+   areas still runs locally. The session then squash-merges through the
    GitHub API with the story ID in the title and an explicit `commit_message` (the PR
    description): GitHub's default squash message copies every commit message, including
    `Co-authored-by` trailers, which must not reach `main`. Never force-push `main`, never label or

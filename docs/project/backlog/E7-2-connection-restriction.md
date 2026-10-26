@@ -10,10 +10,10 @@
     the account every minute, so an idle executor notices);
   - Robinhood's connector, which folds every account-snapshot error into one `Unreadable`;
   - the rate-limit headroom and contract-drift signals;
-  - the suspending causes with no source yet: `check_failed` needs §8.1's checks at every start
-    and daily (executord runs them only at connect), and `credential_expired`/`refresh_failed`
-    need a token lifetime or refresh Alpaca does not document (U-A3); a lost lease already
-    restricts as `lease_expired` (DEC-2839);
+  - `credential_expired` and `refresh_failed`, which stay blocked on U-A3: Alpaca documents no
+    token lifetime or refresh. A lost lease restricts as `lease_expired` (DEC-2839), and a failed
+    later check as `check_failed` (DEC-2840);
+  - Robinhood's later permission checks (DEC-2840 runs Alpaca's only);
   - journal spec §9.5's sentence that leaves this restriction to E7-2z. *Accepted when:* a connection that goes `degraded` or `suspended` journals the restriction
   with that cause before anything else the executor sends (rule 309 admits it beside a broker's), a
   distinct §3.2 kind alerts the owner, and the fold reads it as a cause in force.

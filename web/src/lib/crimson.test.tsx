@@ -162,16 +162,17 @@ describe("crimson on screen", () => {
     }
   });
 
-  it.each(ROUTES.filter(([path]) => /\/(kill-switch|release|stop-all|close-all)$/.test(path)))("on the record screen %s, the passkey check and the recorded result carry no crimson", (path, Page) => {
+  it.each(ROUTES.filter(([path]) => /\/(kill-switch|release|stop-all|close-all)$/.test(path)))("on the record screen %s, its check and the recorded result carry no crimson", (path, Page) => {
     vi.useFakeTimers();
     setPathname(path);
     renderWithRuntime(<Page />);
     const record = document.querySelector<HTMLElement>("[data-slot=record-screen]")!;
     const action = record.querySelector<HTMLElement>("[data-slot=kill-switch], button[data-tone]")!;
     fireEvent.click(action);
-    const stepUp = screen.getByRole("dialog", { name: "Confirm it is you" });
-    expect(Array.from(stepUp.querySelectorAll("*")).filter(paintsCrimson)).toEqual([]);
-    fireEvent.click(within(stepUp).getByRole("button", { name: "Use passkey" }));
+    const stepUp = screen.queryByRole("dialog", { name: "Confirm it is you" });
+    const check = stepUp ?? screen.getByRole("dialog", { name: "Confirm the kill switch" });
+    expect(Array.from(check.querySelectorAll("*")).filter(paintsCrimson)).toEqual([]);
+    fireEvent.click(within(check).getByRole("button", { name: stepUp ? "Use passkey" : "Activate" }));
     act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS + RECORD_AFTER_MS));
     expect(within(record).getByRole("status").querySelector("[data-phase=recorded]")).not.toBeNull();
     expect(strays()).toEqual([]);
