@@ -125,7 +125,10 @@ impl Command {
 
     /// The member of the `202` that names the event: `command_id`, or an answer's `response_id`.
     pub fn id_member(&self) -> &'static str {
-        "xyzzy" /* ~ changed by cargo-mutants ~ */
+        match self {
+            Self::Skip { .. } | Self::Grant { .. } => "response_id",
+            _ => "command_id",
+        }
     }
 
     /// The event it is journaled as.
