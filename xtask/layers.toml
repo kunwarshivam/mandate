@@ -702,6 +702,15 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+# The journaled facts an opening's builder and gate read (DEC-2378 S1): one fold over journal rows,
+# with the risk clock as its only time, shared by the cell's runtime and the executor so the two
+# cannot disagree about a mark or a snapshot. Pure, below both, and reaching no store or broker.
+[crates.mandate-gate-context]
+layer = 5
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
 # The runtime's production ports (DEC-968 item 6, DEC-2605 row 20): the glue between the runtime's
 # ports and the deterministic crates, shared by the shell and the cell's runtime process, which may
 # not depend on the shell. Pure: every fact comes from its caller, and it reaches no executor,
