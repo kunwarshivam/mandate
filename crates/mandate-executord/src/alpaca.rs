@@ -5,9 +5,15 @@
 //! The client's call is async and the process is not, so the adapter owns the runtime that drives
 //! it: one current-thread tokio runtime, built once, that holds nothing a restart would lose.
 
-use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
+use mandate_alpaca::{
+    DeclaredRegime as AlpacaRegime, RetryPolicy, TokioPause, TradingClient, TradingTransport,
+    alpaca_account_rules,
+};
 use mandate_domain::{CapabilityProfile, ProfileError};
-use mandate_executor::{BrokerConnector, BrokerOutcome, BrokerRequest, ConnectorError};
+use mandate_executor::{
+    AccountDeclaration, BrokerConnector, BrokerOutcome, BrokerRequest, ConnectorError,
+    DeclaredRegime,
+};
 use tokio::runtime::Runtime;
 
 use crate::Broker;
@@ -50,5 +56,45 @@ impl<T: TradingTransport + Clone> Broker for AlpacaBroker<T> {
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         let mut client = self.client();
         self.runtime.block_on(client.call(request))
+    }
+
+    /// Alpaca's declaration (trading spec §7.2, DEC-840): always margin, under `intraday_margin`.
+    fn declared(&self) -> Option<AccountDeclaration> {
+        let rules = alpaca_account_rules();
+        Some(AccountDeclaration {
+            account_type: rules.account_type,
+            regime: match rules.regime {
+                AlpacaRegime::IntradayMargin => DeclaredRegime::IntradayMargin,
+                AlpacaRegime::LegacyPdt => DeclaredRegime::LegacyPdt,
+            },
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_accounting::AccountType;
+    use mandate_executor::{AccountDeclaration, DeclaredRegime};
+    use mandate_time::UtcNanos;
+
+    use super::AlpacaBroker;
+    use crate::Broker;
+    use crate::paper::FixturePaper;
+
+    /// Alpaca's broker declares Alpaca's rules (trading spec §7.2: always margin, under
+    /// `intraday_margin`; DEC-840), which every snapshot it reconciles journals (journal spec
+    /// §9.35, DEC-2398), whatever transport it runs over.
+    #[test]
+    fn alpacas_broker_declares_a_margin_account_under_intraday_margin()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let broker = AlpacaBroker::new(FixturePaper::new(UtcNanos::EPOCH))?;
+        assert_eq!(
+            broker.declared(),
+            Some(AccountDeclaration {
+                account_type: AccountType::Margin,
+                regime: DeclaredRegime::IntradayMargin,
+            })
+        );
+        Ok(())
     }
 }

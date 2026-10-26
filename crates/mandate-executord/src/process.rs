@@ -7,7 +7,7 @@ use mandate_accounting::InstrumentId;
 use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
+    AccountDeclaration, AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
     BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, EventId,
     ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot,
     IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, Ports,
@@ -37,6 +37,13 @@ pub trait Broker {
     /// The broker's capability profile, set on the state before `Input::Started` (DEC-838 item 5).
     fn profile(&self) -> Result<CapabilityProfile, ProfileError>;
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError>;
+    /// The account type and day-trading regime the broker's connector declares (trading spec
+    /// §7.2, DEC-840), which each `AccountSnapshotRecorded` journals (journal spec §9.35,
+    /// DEC-2398). `None`, the default, declares none: the snapshot journals `null`, and a reader
+    /// holds what depends on it.
+    fn declared(&self) -> Option<AccountDeclaration> {
+        None
+    }
 }
 
 /// The protections port could not answer. The process stops rather than hand an opening without
@@ -1001,6 +1008,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             fills,
             cursor,
             reason: ReconcileReason::Startup,
+            declared: self.broker.declared(),
             taken_at_head: Seq(self.account_head()),
         })
     }

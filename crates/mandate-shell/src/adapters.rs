@@ -1588,6 +1588,7 @@ impl ExecutorReconciler {
             fills,
             cursor,
             reason: mandate_executor::ReconcileReason::Startup,
+            declared: None,
             taken_at_head: match state.head(&stream) {
                 Some(head) => head,
                 None => Seq(0),
@@ -1634,6 +1635,7 @@ impl ExecutorReconciler {
             open_orders,
             positions,
             account,
+            declared: None,
             cursor: match state.checkpoint() {
                 Some(cursor) => cursor.clone(),
                 None => mandate_executor::ActivityCursor(String::new()),
