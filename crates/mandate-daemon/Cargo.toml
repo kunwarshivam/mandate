@@ -27,6 +27,7 @@ mandate-time.workspace = true
 tokio = { workspace = true, features = ["rt", "signal"] }
 
 [dev-dependencies]
+mandate-accounting.workspace = true
 mandate-journal-pg.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
