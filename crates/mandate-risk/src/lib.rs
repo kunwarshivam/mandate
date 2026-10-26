@@ -376,6 +376,10 @@ pub enum CheckOutcome {
     Failed(Check, ReasonCode),
     /// The gate stopped before this check, so it says nothing about it.
     NotReached(Check),
+    /// The advisory pass skipped part or all of this check (DEC-2378 item 11): what it evaluated
+    /// did not refuse, but it is never reported as passed. The binding gate defers nothing, so it
+    /// never answers this.
+    Deferred(Check),
 }
 
 /// The eight checks of §9.1, in evaluation order.
@@ -866,6 +870,18 @@ pub enum Deferred {
     Participation,
     /// §9.2's day-trade budget, check 8.
     DayTradeBudget,
+}
+
+impl Deferred {
+    /// The check of §9.1 this deferral skips part or all of.
+    #[must_use]
+    pub fn check(self) -> Check {
+        match self {
+            Self::Eligibility | Self::LiquidityFloor => Check::UniverseAndLimits,
+            Self::Participation => Check::ConductControls,
+            Self::DayTradeBudget => Check::DayTradeBudget,
+        }
+    }
 }
 
 /// The advisory pass's answer: the decision over every check not deferred, and the deferred

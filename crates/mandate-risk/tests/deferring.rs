@@ -10,9 +10,10 @@ use std::collections::BTreeSet;
 
 use common::{Scenario, usd};
 use mandate_risk::{
-    DayTradeLedger, DayTradeRegime, Deferred, Origin, ReasonCode, Side, Verdict, evaluate,
-    evaluate_deferring,
+    Check, CheckOutcome, DayTradeLedger, DayTradeRegime, Deferred, Origin, ReasonCode, Side,
+    Verdict, evaluate, evaluate_deferring,
 };
+use proptest::prelude::*;
 
 fn deferring(set: &[Deferred]) -> BTreeSet<Deferred> {
     set.iter().copied().collect()
@@ -22,7 +23,13 @@ fn deferring(set: &[Deferred]) -> BTreeSet<Deferred> {
 /// the binding gate denies with.
 fn failing(check: Deferred) -> (Scenario, ReasonCode) {
     let mut s = Scenario::allowing();
-    let reason = match check {
+    let reason = fail(&mut s, check);
+    (s, reason)
+}
+
+/// Changes `s` so that `check`'s facts fail it, and the reason the binding gate gives for it.
+fn fail(s: &mut Scenario, check: Deferred) -> ReasonCode {
+    match check {
         Deferred::Eligibility => {
             s.instrument.tradable = false;
             ReasonCode::NotInWorkingUniverse
@@ -46,8 +53,7 @@ fn failing(check: Deferred) -> (Scenario, ReasonCode) {
             };
             ReasonCode::LegacyPdtDayTradeBudget
         }
-    };
-    (s, reason)
+    }
 }
 
 const ALL: [Deferred; 4] = [
@@ -128,4 +134,77 @@ fn an_exit_defers_nothing() {
     let advisory = evaluate_deferring(&s.input(), &deferring(&ALL)).unwrap();
     assert!(advisory.deferred.is_empty(), "{advisory:?}");
     assert_eq!(advisory.decision, evaluate(&s.input()).unwrap());
+}
+
+/// Condition (i) in the decision itself: a check the pass skipped part or all of reads
+/// `Deferred`, never `Passed`, for every set of deferrals, and every other check of an allowed
+/// opening reads `Passed`.
+#[test]
+fn no_deferred_check_reads_as_passed() {
+    let s = Scenario::allowing();
+    for mask in 0..(1_u8 << ALL.len()) {
+        let set: Vec<Deferred> = ALL
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| mask & (1 << i) != 0)
+            .map(|(_, d)| d)
+            .collect();
+        let touched: BTreeSet<Check> = set.iter().map(|d| d.check()).collect();
+        let advisory = evaluate_deferring(&s.input(), &deferring(&set)).unwrap();
+        assert_eq!(advisory.decision.verdict, Verdict::Allow, "{set:?}");
+        for outcome in &advisory.decision.checks {
+            match outcome {
+                CheckOutcome::Deferred(check) => assert!(touched.contains(check), "{set:?}"),
+                CheckOutcome::Passed(check) => assert!(!touched.contains(check), "{set:?}"),
+                other => panic!("{set:?}: {other:?}"),
+            }
+        }
+    }
+}
+
+/// Faults the advisory pass may never defer: no quote, so check 5 refuses; and the day's orders at
+/// the cap, which check 6 refuses beside the participation clause it may skip.
+const NO_QUOTE: usize = ALL.len();
+const ORDERS_CAPPED: usize = ALL.len() + 1;
+
+proptest! {
+    /// Deferral only removes the named checks' refusals (DEC-2378 item 11): for any faults and any
+    /// deferrals, the advisory decision is the binding gate's over the same scenario with the
+    /// deferred faults never applied, an oracle that runs no deferral. So a check not deferred
+    /// keeps its own reason, a deferred one never lifts another's, and deny under deferral is
+    /// deny binding.
+    #[test]
+    fn deferral_removes_only_the_deferred_checks_refusals(
+        faults in prop::collection::btree_set(0..=ORDERS_CAPPED, 0..=ORDERS_CAPPED + 1),
+        deferred in prop::collection::btree_set(0..ALL.len(), 0..=ALL.len()),
+    ) {
+        let set: Vec<Deferred> = deferred.iter().map(|i| ALL[*i]).collect();
+        let mut s = Scenario::allowing();
+        let mut oracle = Scenario::allowing();
+        for fault in &faults {
+            if *fault == NO_QUOTE {
+                s.market.quote = None;
+                oracle.market.quote = None;
+            } else if *fault == ORDERS_CAPPED {
+                s.agent.orders_today = common::two_stock_swing_limits().max_orders_per_day;
+                oracle.agent.orders_today = common::two_stock_swing_limits().max_orders_per_day;
+            } else {
+                fail(&mut s, ALL[*fault]);
+                if !deferred.contains(fault) {
+                    fail(&mut oracle, ALL[*fault]);
+                }
+            }
+        }
+        let advisory = evaluate_deferring(&s.input(), &deferring(&set)).unwrap();
+        let expected = evaluate(&oracle.input()).unwrap();
+        prop_assert_eq!(
+            (advisory.decision.verdict, advisory.decision.reason),
+            (expected.verdict, expected.reason),
+            "faults {:?}, deferred {:?}", faults, set
+        );
+        if expected.verdict == Verdict::Deny {
+            let binding = evaluate(&s.input()).unwrap();
+            prop_assert_eq!(binding.verdict, Verdict::Deny, "deny under deferral is deny binding");
+        }
+    }
 }

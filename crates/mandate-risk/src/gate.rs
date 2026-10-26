@@ -93,6 +93,9 @@ pub(crate) fn evaluate_deferring(
                 checks.push(CheckOutcome::Failed(check, reason));
                 stop = Some((verdict, reason));
             }
+            None if skipped.iter().any(|deferred| deferred.check() == check) => {
+                checks.push(CheckOutcome::Deferred(check));
+            }
             None => checks.push(CheckOutcome::Passed(check)),
         }
     }
@@ -548,7 +551,8 @@ mod tests {
             .map(|c| match c {
                 CheckOutcome::Passed(id)
                 | CheckOutcome::Failed(id, _)
-                | CheckOutcome::NotReached(id) => *id,
+                | CheckOutcome::NotReached(id)
+                | CheckOutcome::Deferred(id) => *id,
             })
             .collect();
         assert_eq!(
@@ -1112,7 +1116,9 @@ mod tests {
                                 d.reason,
                                 d.checks.iter().find_map(|c| match c {
                                     CheckOutcome::Failed(check, _) => Some(*check),
-                                    CheckOutcome::Passed(_) | CheckOutcome::NotReached(_) => None,
+                                    CheckOutcome::Passed(_)
+                                    | CheckOutcome::NotReached(_)
+                                    | CheckOutcome::Deferred(_) => None,
                                 }),
                                 d.pacing,
                             )),
