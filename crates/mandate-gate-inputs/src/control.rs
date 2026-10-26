@@ -497,6 +497,27 @@ pub struct Pinned {
     pub content_hash: Digest,
 }
 
+/// An instrument a research agent's admission admitted (DEC-2819 item 3): its asset id, as its
+/// thesis record names it, and the admitting model's registered triple. Its symbol is its
+/// registered snapshot's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Admitted {
+    pub asset_id: String,
+    pub model_id: String,
+    pub model_version: String,
+    pub content_hash: Digest,
+}
+
+/// What a configuration reads: the instrument by asset id, its symbol checked against the snapshot
+/// when one is pinned and read from it when none is, and the model's registered triple.
+struct Wanted<'a> {
+    asset_id: &'a str,
+    symbol: Option<&'a str>,
+    model_id: &'a str,
+    model_version: &'a str,
+    content_hash: Digest,
+}
+
 /// One effective `ConfigSnapshotRegistered`: its `seq`, content hash, re-hashed object bytes, and
 /// the stream it was registered on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -597,6 +618,53 @@ pub fn configuration(
     pinned: &Pinned,
     trade_date: Date,
 ) -> Result<Configuration, ConfigRefusal> {
+    configured(
+        records,
+        store,
+        &Wanted {
+            asset_id: &pinned.asset_id,
+            symbol: Some(&pinned.symbol),
+            model_id: &pinned.model_id,
+            model_version: &pinned.model_version,
+            content_hash: pinned.content_hash,
+        },
+        trade_date,
+    )
+}
+
+/// The configuration of an instrument a research agent's admission admitted, read as
+/// [`configuration`] reads a pinned one, except that the snapshot's symbol is the instrument's
+/// symbol rather than checked against one (DEC-2819 item 3). Only `admitted`'s own snapshot is
+/// read; a snapshot of another instrument is passed over.
+///
+/// # Errors
+/// As [`configuration`].
+pub fn admitted_configuration(
+    records: &[ControlRecord],
+    store: &dyn ArtifactSource,
+    admitted: &Admitted,
+    trade_date: Date,
+) -> Result<Configuration, ConfigRefusal> {
+    configured(
+        records,
+        store,
+        &Wanted {
+            asset_id: &admitted.asset_id,
+            symbol: None,
+            model_id: &admitted.model_id,
+            model_version: &admitted.model_version,
+            content_hash: admitted.content_hash,
+        },
+        trade_date,
+    )
+}
+
+fn configured(
+    records: &[ControlRecord],
+    store: &dyn ArtifactSource,
+    pinned: &Wanted<'_>,
+    trade_date: Date,
+) -> Result<Configuration, ConfigRefusal> {
     let mut ordered: Vec<&ControlRecord> = records.iter().collect();
     ordered.sort_by_key(|record| record.seq);
     let mut latest: BTreeMap<&'static str, Registered> = BTreeMap::new();
@@ -613,8 +681,8 @@ pub fn configuration(
             .and_then(ArtifactRef::parse)
             .ok_or(ConfigRefusal::Malformed { kind })?;
         if kind == "model_version"
-            && (text("model_id") != Some(pinned.model_id.as_str())
-                || text("model_version") != Some(pinned.model_version.as_str())
+            && (text("model_id") != Some(pinned.model_id)
+                || text("model_version") != Some(pinned.model_version)
                 || reference.digest() != pinned.content_hash)
         {
             continue;
@@ -695,7 +763,7 @@ fn snapshot_text<'a>(
 }
 
 /// The effective snapshot's `bytes` read exactly as DEC-523 pins them.
-fn snapshot(bytes: &[u8], pinned: &Pinned) -> Result<InstrumentSnapshot, ConfigRefusal> {
+fn snapshot(bytes: &[u8], pinned: &Wanted<'_>) -> Result<InstrumentSnapshot, ConfigRefusal> {
     let malformed = ConfigRefusal::Malformed {
         kind: "instrument_snapshot",
     };
@@ -713,8 +781,8 @@ fn snapshot(bytes: &[u8], pinned: &Pinned) -> Result<InstrumentSnapshot, ConfigR
         ("etp", "plain"),
         ("etp_source", "nasdaq_trader_symbol_directory"),
         ("increment", "whole"),
-        ("instrument_id", pinned.asset_id.as_str()),
-        ("symbol", pinned.symbol.as_str()),
+        ("instrument_id", pinned.asset_id),
+        ("symbol", pinned.symbol.unwrap_or(text("symbol")?)),
     ];
     for (member, expected) in pinned_values {
         if text(member)? != expected {
@@ -733,8 +801,8 @@ fn snapshot(bytes: &[u8], pinned: &Pinned) -> Result<InstrumentSnapshot, ConfigR
     let etp_classified_at = UtcNanos::parse_rfc3339(text(member)?)
         .map_err(|_| ConfigRefusal::SnapshotValue { member })?;
     Ok(InstrumentSnapshot {
-        instrument_id: pinned.asset_id.clone(),
-        symbol: pinned.symbol.clone(),
+        instrument_id: pinned.asset_id.to_owned(),
+        symbol: text("symbol")?.to_owned(),
         exchange,
         etp_classified_at,
     })
