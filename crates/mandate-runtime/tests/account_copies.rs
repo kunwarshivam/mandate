@@ -14,7 +14,8 @@ mod common;
 
 use common::{ACCOUNT_STREAM, event, int, object, text};
 use mandate_canon::Value;
-use mandate_runtime::{RuntimeState, fold};
+use mandate_journal::{StreamType, stream_event_types};
+use mandate_runtime::{RuntimeError, RuntimeState, fold};
 
 /// The state after `StreamOpened` and then `event_type` with `payload` at sequence 2.
 fn folded(event_type: &str, payload: Value) -> RuntimeState {
@@ -89,5 +90,55 @@ fn an_unknown_account_record_is_still_refused() {
             &event(ACCOUNT_STREAM, 2, "NoSuchRecord", object(&[("n", int(1))]))
         )
         .is_err()
+    );
+}
+
+/// The account-stream types the journal admits that no writer emits there yet, which the runtime
+/// still refuses until a story decides what they mean to it: whether a suspended connection or a
+/// rotated credential should hold its openings, say (connection_checked.rs pins two of them).
+const REFUSED_UNTIL_INTERPRETED: [&str; 4] = [
+    "ConnectionCredentialRefreshed",
+    "ConnectionCredentialRotated",
+    "ConnectionStateChanged",
+    "OwnerAcknowledgmentRequested",
+];
+
+/// Every type the journal admits on the streams the runtime folds, its account and agent streams,
+/// has an arm in its fold (DEC-85), but [`REFUSED_UNTIL_INTERPRETED`]: none other is refused as not
+/// interpreted. A type a writer adds to the catalogue without an arm here would stop every runtime
+/// following that stream at its start, so this reads the catalogue's own list
+/// (`mandate_journal::stream_event_types`). A malformed payload may still be refused; only "not
+/// interpreted" fails it, and each named refusal is checked to be refused still.
+#[test]
+fn every_type_the_runtime_folds_a_stream_of_has_an_arm() {
+    let mut missing = Vec::new();
+    for (stream, kind) in [
+        (ACCOUNT_STREAM, StreamType::Account),
+        (common::AGENT_STREAM, StreamType::Agent),
+    ] {
+        for event_type in stream_event_types(kind) {
+            if event_type == "StreamOpened" {
+                continue;
+            }
+            let mut state = RuntimeState::new(common::deployment());
+            let opened = object(&[("stream_type", text("account"))]);
+            fold(&mut state, &event(stream, 1, "StreamOpened", opened))
+                .unwrap_or_else(|e| panic!("{e}"));
+            if let Err(RuntimeError::NotInterpreted { .. }) =
+                fold(&mut state, &event(stream, 2, event_type, object(&[])))
+            {
+                missing.push(format!("{stream}: {event_type}"));
+            }
+        }
+    }
+    let mut expected: Vec<String> = REFUSED_UNTIL_INTERPRETED
+        .iter()
+        .map(|event_type| format!("{ACCOUNT_STREAM}: {event_type}"))
+        .collect();
+    expected.sort();
+    missing.sort();
+    assert_eq!(
+        missing, expected,
+        "the runtime's fold refuses exactly the named account types"
     );
 }
