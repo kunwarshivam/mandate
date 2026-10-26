@@ -40,8 +40,10 @@ const MEMBERSHIP: [&str; 3] = ["MemberActivated", "MemberRoleChanged", "MemberRe
 /// the account alike, so it is the strictest across them. No effective-policy fold exists yet
 /// (backlog E9-6).
 ///
-/// `methods` is `cli_confirm` in paper and nothing elsewhere: live step-up is the founder's own
-/// connection's (DEC-529 item 3), which no executor here serves.
+/// `methods` are journal spec v0.106 §9.28 check 3's (DEC-2523): `passkey` everywhere and
+/// `cli_confirm` in paper. Check 3 also admits `cli_confirm` on the founder's own live connection
+/// (DEC-529 item 3, DEC-923), which this process cannot tell from another, so it admits only
+/// `passkey` in live.
 ///
 /// # Errors
 /// [`Unreadable`] for an acknowledgment, request or spending record whose members do not read: the
@@ -58,11 +60,10 @@ pub fn acknowledgments(
     let mut spent_before_request: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut overlay = false;
     let mut out = Vec::new();
-    let methods: BTreeSet<String> = if environment == Environment::Paper {
-        BTreeSet::from(["cli_confirm".to_owned()])
-    } else {
-        BTreeSet::new()
-    };
+    let mut methods = BTreeSet::from(["passkey".to_owned()]);
+    if environment == Environment::Paper {
+        methods.insert("cli_confirm".to_owned());
+    }
     for row in control
         .iter()
         .filter(|row| row.environment == environment.as_str())
@@ -315,7 +316,10 @@ mod tests {
         assert_eq!(ack.request_spent, Some(BTreeSet::from(["c1".to_owned()])));
         assert_eq!(request.request_spent, None);
         assert_eq!(ack.processed_at, RiskClock::from_secs(100));
-        assert_eq!(ack.methods, BTreeSet::from(["cli_confirm".to_owned()]));
+        assert_eq!(
+            ack.methods,
+            BTreeSet::from(["cli_confirm".to_owned(), "passkey".to_owned()])
+        );
         assert_eq!(ack.original.event_id, EventId("ak".to_owned()));
         assert_eq!(ack.schema_version, 2);
     }
@@ -398,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn only_paper_allows_cli_confirm() {
+    fn passkey_is_allowed_everywhere_and_cli_confirm_only_in_paper() {
         let control = [row_in(
             "live",
             1,
@@ -409,7 +413,7 @@ mod tests {
         let handed = handed_in(&control, Environment::Live).unwrap_or_default();
         assert_eq!(
             handed.iter().map(|h| h.methods.clone()).collect::<Vec<_>>(),
-            [BTreeSet::new()]
+            [BTreeSet::from(["passkey".to_owned()])]
         );
     }
 
