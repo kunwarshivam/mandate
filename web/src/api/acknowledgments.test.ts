@@ -98,6 +98,7 @@ describe("the hold in words", () => {
     const words = (reason: Hold["reason"], mode: Hold["mode"] = "exits_only") => holdWords({ ...HOLD, reason, mode });
     expect(words({ restriction: "reconciliation:incomplete", kind: "incomplete", instrument: null }).what).toMatch(/could not be recorded whole/);
     expect(words({ restriction: "reconciliation:cash", kind: "cash", instrument: null }).what).toMatch(/cash/);
+    expect(words({ restriction: "reconciliation:fees", kind: "fees", instrument: null }).what).toMatch(/fees/);
     expect(words({ restriction: "reconciliation:external_activity", kind: "external_activity", instrument: null }).what).toMatch(/outside the platform/);
     expect(words({ restriction: "reconciliation:SPY", kind: "instrument", instrument: "SPY" }).what).toMatch(/SPY/);
     expect(words({ restriction: "reconciliation:x", kind: "incomplete", instrument: null }).blocks).toMatch(/new openings/);

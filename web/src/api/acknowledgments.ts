@@ -15,7 +15,7 @@ import { sha256Hex } from "@/lib/sha256";
 export const HOLD_SUBJECTS = ["limit", "restriction", "reconciliation"] as const;
 export type HoldSubject = (typeof HOLD_SUBJECTS)[number];
 
-export const RECONCILIATION_KINDS = ["instrument", "cash", "external_activity", "incomplete"] as const;
+export const RECONCILIATION_KINDS = ["instrument", "cash", "fees", "external_activity", "incomplete"] as const;
 export type ReconciliationKind = (typeof RECONCILIATION_KINDS)[number];
 
 /** What holds: a limit's code, a restriction's cause, or a reconciliation hold's restriction, its kind, and the instrument it holds. */
@@ -125,7 +125,9 @@ function reconciliationWords(kind: ReconciliationKind | undefined, instrument: s
     case "instrument":
       return `The broker's position${instrument ? ` in ${instrument}` : ""} did not match the journal's.`;
     case "cash":
-      return "The broker's cash or fees did not match the journal's.";
+      return "The broker's cash did not match the journal's.";
+    case "fees":
+      return "The broker's fees did not match the journal's.";
     case "external_activity":
       return "Activity on the account came from outside the platform.";
     case "incomplete":
