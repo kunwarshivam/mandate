@@ -590,7 +590,9 @@ fn replaced(
 /// `LateFillApplied` that triggers a reconciliation. A fill that cannot be one of our orders' —
 /// not our id, another instrument or side, or more than the order has left — is still applied to
 /// accounting, unattributed, as external activity: every agent goes `exits_only` and the owner is
-/// alerted (§7.1), so filled quantity never exceeds an order's quantity.
+/// alerted (§7.1), so filled quantity never exceeds an order's quantity. Its `FillApplied` is
+/// version 2's, naming no order (`null`), and moves the account's position and cash, no agent's
+/// (journal spec §9.5, DEC-2812).
 ///
 /// `before` is the state a reconciliation began from, when the fill is one it found missing: an
 /// order the same reconciliation adopted as terminal was not terminal when the fill happened, so
@@ -652,6 +654,7 @@ pub(crate) fn fill(
                 ("qty", Value::Null),
             ],
         )?;
+        pairs.push(("client_order_id", Value::Null));
         batch.journal_with_refs("FillApplied", None, refs, pairs)?;
         every_agent_alerted(
             batch,

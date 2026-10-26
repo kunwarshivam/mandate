@@ -548,3 +548,44 @@ fn an_account_is_untraded_until_any_order_or_fill() {
     ));
     assert!(!filled.untraded(), "a fill of an order the fold never saw");
 }
+
+/// `fill` naming no order: `FillApplied` version 2's `null` (DEC-2812).
+fn unattributed(id: &str, side: &str, qty: &str) -> Value {
+    let mut payload = fill(id, "unused", side, qty);
+    if let Value::Object(members) = &mut payload {
+        members.insert(Key::new("client_order_id").unwrap(), Value::Null);
+    }
+    payload
+}
+
+/// A fill that names no order is the account's, no agent's (DEC-2812, trading spec §7.1): it never
+/// adds to what the agent holds, and a sale of it caps what the agent holds at what the account
+/// still holds.
+#[test]
+fn an_unattributed_fill_moves_the_account_and_no_agent() {
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+    submitted(&mut state, AGENT, "o1");
+    assert!(on(&mut state, "FillApplied", &fill("f1", "o1", "buy", "3")));
+    assert!(on(
+        &mut state,
+        "FillApplied",
+        &unattributed("f2", "buy", "5")
+    ));
+    assert_eq!(held(&state), BTreeMap::from([(ASSET.to_owned(), qty("3"))]));
+    assert!(on(
+        &mut state,
+        "FillApplied",
+        &unattributed("f3", "sell", "7")
+    ));
+    assert_eq!(held(&state), BTreeMap::from([(ASSET.to_owned(), qty("1"))]));
+    assert!(on(
+        &mut state,
+        "FillApplied",
+        &unattributed("f3", "sell", "7")
+    ));
+    assert_eq!(
+        held(&state),
+        BTreeMap::from([(ASSET.to_owned(), qty("1"))]),
+        "each fill once"
+    );
+}

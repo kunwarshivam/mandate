@@ -35,11 +35,15 @@
   journaled is proposed an opening never above the bid and asked about it; no opening outside the
   regular session, in its close window from 15:50, while held or working, or with any fact
   missing or a mark not sane.
+- `crates/mandate-gate-context/tests/snapshot_figures.rs`: `AccountSnapshotRecorded` version 2's
+  declared account type, regime, prior-close equity and maintenance excess folded exactly as the
+  vectors' `snapshot_prior_close` readings and streams state, a version 1 snapshot carrying none
+  (DEC-2811).
 - `crates/mandate-daemon/tests/gate.rs`: the plan's own opening passes the gate's checks, is
   reported deferred on each of the four checks and the ten unseen parts (DEC-2388 item 8), with no check reported passed, and is
   answered `AllowDeferring` with all twelve parts named and both liquidity checks without bars
   (DEC-2388 item 13), each advisory answer mapped to its verdict, with or without figures, and each
-  deferred part named as the journal's vectors name it; each journaled unseen fact that should refuse is named deferred; the gate's own
+  deferred part named as the journal's vectors name it; the day-trade budget evaluated exactly when a version 2 snapshot's declared facts mean it cannot refuse, and deferred otherwise or after a later version 1 snapshot (DEC-2811); each journaled unseen fact that should refuse is named deferred; the gate's own
   reason first (order and position caps, the collar, a blocked account, the 1x buying power); no
   rule set, a missing fact, or a working order denies; an exit is never denied; a property test
   against the checks computed independently. `crates/mandate-daemon/tests/deployment.rs`: the

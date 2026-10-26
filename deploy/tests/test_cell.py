@@ -78,6 +78,8 @@ HOOK = "pre-install,pre-upgrade"
 # The model gateway's workspace and deployment, which its image requires (E21-62); no budget, so a
 # rendering names none unless a test sets one (DEC-2326 item 2).
 GATEWAY = {"workspace": "01KDEM0000000000000000000W", "deployment": "cell-test"}
+# What a researching runtime of the gateway's workspace is handed (DEC-2397 item 6).
+GATEWAY_ARGS = ["--gateway", "model-gateway:8080"]
 # Where the interim runtime image carries the recorded research bundle (DEC-2246).
 RESEARCH = "/usr/local/share/mandate/research"
 
@@ -161,8 +163,13 @@ def managed_pod(name: str, pod: dict) -> dict:
 
 
 def managed_pods(docs: list[dict]) -> list[dict]:
-    """The pods the deployment manager starts: its ConfigMap's `<process>.json` entries (DEC-1170)."""
-    maps = [d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == TEMPLATES]
+    """The pods the deployment managers start: each one's ConfigMap's `<process>.json` entries
+    (DEC-1170), the first manager's first, then the local cell's second's (DEC-2070)."""
+    names = (TEMPLATES, "deploy-manager-research-templates")
+    maps = sorted(
+        (d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] in names),
+        key=lambda m: names.index(m["metadata"]["name"]),
+    )
     return [
         managed_pod(key.removesuffix(".json"), json.loads(text))
         for m in maps
@@ -675,7 +682,7 @@ the processes it starts render as Deployments of their own; its pod templates ar
 
 
 HOSTED = "01KDEM0000000000000000000W"
-SPY_ASSET = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"
+SPY_ASSET = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb"
 QQQ_ASSET = "eb82ffb0-efd6-4f4e-9307-8fead28e04f6"
 # The cell's two recorded instruments: the demo agent's SPY and the second agent's QQQ, which the
 # trade loop runs on (`demo/instrument.json`, `demo/web-instrument.json`).
@@ -880,6 +887,52 @@ def test_the_model_gateway_serves_the_recording_and_names_no_budget_of_its_own()
         assert done.returncode != 0 and "is required with images.model-gateway" in done.stderr, unset
     hosted = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", "localImages=false")
     assert hosted.returncode != 0 and "named only by the local cell's values" in hosted.stderr, hosted.stderr
+
+
+def test_a_researching_runtime_calls_the_gateway_of_its_own_workspace_alone():
+    """DEC-2397 item 6, DEC-2265 items 1 and 7: with the gateway's image named, a researching
+    runtime of the workspace it serves is handed `--gateway model-gateway:8080`, which the gateway's
+    ClusterIP Service answers on 8080; a runtime of another workspace, or one with no gateway, keeps
+    its in-process fake; and no Service but that one renders."""
+    def runtime_args(docs: list[dict]) -> list[str]:
+        runtime = next(p for p in managed_pods(docs) if p["metadata"]["name"] == "runtime")
+        return first_container(runtime)["args"]
+
+    docs = render_all()
+    assert runtime_args(docs)[-2:] == GATEWAY_ARGS
+    services = [d for d in docs if d["kind"] == "Service"]
+    assert [d["metadata"]["name"] for d in services] == ["model-gateway"]
+    assert is_gateway_service(services[0])
+    other = render_all("--set", "modelGateway.workspace=01KDEM0000000000000000000Z")
+    assert "--gateway" not in runtime_args(other), "another workspace's runtime keeps its fake"
+    without = render_all("--set", "images.model-gateway=")
+    assert "--gateway" not in runtime_args(without)
+    assert not [d for d in without if d["kind"] == "Service"]
+    seeded = copy.deepcopy(services[0])
+    seeded["spec"]["type"] = "NodePort"
+    assert not is_gateway_service(seeded), "a NodePort is an ingress"
+
+
+def test_the_gateway_follows_the_research_workspace_to_its_manager_s_runtime():
+    """DEC-2397 item 5, DEC-2070 item 5: with the gateway pointed at the research workspace, only the
+    runtime the second manager starts for it is handed `--gateway`; the first manager's, of the
+    hosted workspace, keeps its in-process fake, and every pod either manager starts keeps every pod
+    invariant."""
+    hosted = "01KDEM0000000000000000000W"
+    docs = render_all(
+        "--set", f"api.workspace={hosted}",
+        "--set", f"deployManager.researchWorkspace={hosted}r",
+        "--set", f"modelGateway.workspace={hosted}r",
+    )
+    templates = {
+        d["metadata"]["name"]: json.loads(d["data"]["runtime.json"])
+        for d in docs
+        if d["kind"] == "ConfigMap" and d["metadata"]["name"] in (TEMPLATES, "deploy-manager-research-templates")
+    }
+    args = {name: pod["spec"]["containers"][0]["args"] for name, pod in templates.items()}
+    assert args["deploy-manager-research-templates"][-2:] == GATEWAY_ARGS
+    assert "--gateway" not in args[TEMPLATES]
+    assert len(managed_pods(docs)) == 2 * len(managed_pods(render_all("--set", f"api.workspace={hosted}")))
 
 
 def test_only_the_local_cell_names_the_model_gateway_s_budgets():
@@ -2074,8 +2127,10 @@ def test_the_second_manager_is_bound_as_the_first_for_its_own_workspace():
     """DEC-2070 items 1 and 3: the second manager runs the first's image and launch for the research
     workspace alone, under its own ServiceAccount, Role and binding with exactly the first's rules,
     and its own admission and accounts policies, each matching only its own account, with exactly
-    the first's validations; so neither manager can make a pod or an account no policy checks."""
-    docs = two_managers()
+    the first's validations; so neither manager can make a pod or an account no policy checks. With
+    no model gateway both start the same pods; with one, only the runtime of the workspace it serves
+    differs, by its `--gateway` (DEC-2397 item 6, checked below)."""
+    docs = two_managers("--set", "images.model-gateway=")
     managers = {w["metadata"]["name"]: w for w in docs if w["kind"] == "Deployment" and w["metadata"]["name"] in (MANAGER, RESEARCH_MANAGER)}
     assert set(managers) == {MANAGER, RESEARCH_MANAGER}
     first, second = (first_container(managers[n]) for n in (MANAGER, RESEARCH_MANAGER))
@@ -2208,7 +2263,7 @@ def test_deploy_manager_contained():
             assert "serviceAccountName" not in spec
             continue
         assert "command" not in container, container.get("command")
-        research = ["--research", RESEARCH] if pod["metadata"]["name"] == "runtime" else []
+        research = ["--research", RESEARCH, *GATEWAY_ARGS] if pod["metadata"]["name"] == "runtime" else []
         assert container["args"] == ["run", "--probe", "/tmp/process.sock", *research], container["args"]
         assert spec["restartPolicy"] == "Never" and spec["automountServiceAccountToken"] is False
         assert "serviceAccountName" not in spec
@@ -2259,7 +2314,7 @@ def test_the_executor_runs_on_alpaca_paper_where_staging_names_it():
     args = {p["metadata"]["name"]: first_container(p)["args"] for p in managed_pods(docs) if p["metadata"]["name"] != EXCHANGE}
     assert args == {
         "executor": ["run", "--probe", "/tmp/process.sock", *PAPER_ARGS],
-        "runtime": ["run", "--probe", "/tmp/process.sock", "--research", RESEARCH],
+        "runtime": ["run", "--probe", "/tmp/process.sock", "--research", RESEARCH, *GATEWAY_ARGS],
     }, args
     assert helm(CHART, *paper_without_manager()).returncode != 0, "a paper executor needs the manager (DEC-2365)"
 
@@ -3618,11 +3673,29 @@ def test_portable_across_k3d_k3s_and_managed():
     assert without_ingress(renders[0]) == without_ingress(renders[1]), "k3d differs only by the tunnel"
 
 
+def is_gateway_service(doc: dict) -> bool:
+    """The model gateway's in-cluster name (DEC-2397 item 6): exactly a ClusterIP on 8080 selecting
+    the gateway's pods, which nothing outside the cluster reaches, so it is no ingress."""
+    spec = doc.get("spec", {})
+    return (
+        doc["kind"] == "Service"
+        and doc["metadata"]["name"] == "model-gateway"
+        and spec.get("type") == "ClusterIP"
+        and spec.get("selector", {}).get("mandate.dev/process") == "model-gateway"
+        and [(p["port"], p["targetPort"], p["protocol"]) for p in spec.get("ports", [])] == [(8080, 8080, "TCP")]
+        and not spec.get("externalIPs")
+    )
+
+
 def ingress_only_by_tunnel(docs: list[dict]) -> list[str]:
     """The cell's one ingress is cloudflared dialing out (DEC-967 item 6): no Service, NodePort,
     LoadBalancer or Ingress object; the tunnel token a mounted file, never a value or an
     environment variable; and its egress DNS and the tunnel edge on port 7844 only."""
-    problems = [f"{d['kind']} {d['metadata']['name']}" for d in docs if d["kind"] in ("Service", "Ingress")]
+    problems = [
+        f"{d['kind']} {d['metadata']['name']}"
+        for d in docs
+        if d["kind"] in ("Service", "Ingress") and not is_gateway_service(d)
+    ]
     tunnels = [d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "cloudflared"]
     for t in tunnels:
         c = pod_spec(t)["containers"][0]
@@ -3728,7 +3801,7 @@ def test_the_tunnel_runs_beside_the_api():
     api = owner_workload(docs)
     assert [c["name"] for c in pod_spec(api)["containers"]] == ["api", "cloudflared"]
     assert api_contained(docs) == [], "the API still listens on its pod's loopback only"
-    assert not [d for d in docs if d["kind"] in ("Service", "Ingress")]
+    assert not [d for d in docs if d["kind"] in ("Service", "Ingress") and not is_gateway_service(d)]
     alone = render("-f", str(CELL / "values" / "k3s.yaml"))
     assert tunnel_route(alone) == []
     assert [d["metadata"]["name"] for d in alone if d["kind"] == "Deployment"] == ["cloudflared"]

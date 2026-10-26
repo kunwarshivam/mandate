@@ -20,7 +20,7 @@ const BOUND: Duration = Duration::from_secs(20);
 /// The demo instruments' series, as the chart starts the process.
 const SERIES: [&str; 2] = [
     "--instruments",
-    "SPY:b0b6dd9d-8b9b-48a9-ba46-b9d54906e415:2026-01-02=600,\
+    "SPY:b28f4066-5c6d-479b-a2af-85dc1a8f16fb:2026-01-02=600,\
      QQQ:eb82ffb0-efd6-4f4e-9307-8fead28e04f6:2026-01-02=500",
 ];
 /// The symbols [`SERIES`] names, in its order.
@@ -96,7 +96,7 @@ fn without_its_arguments_the_process_refuses() {
                 "--artifacts",
                 "/a",
                 "--instruments",
-                "SPY:b0b6dd9d-8b9b-48a9-ba46-b9d54906e415:2026-01-02",
+                "SPY:b28f4066-5c6d-479b-a2af-85dc1a8f16fb:2026-01-02",
             ],
             "instruments_malformed\n",
         ),

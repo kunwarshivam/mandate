@@ -27,7 +27,39 @@
           "type": "null"
         }
       ]
+    },
+    "step_up_assertion": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpAssertion"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
-  "description": "POST /agents/{agent_id}/resume (\u00a75.4): missing step-up is forwarded and refused by the runtime (OwnerCommandRefused)."
+  "if": {
+    "properties": {
+      "step_up_assertion": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "step_up_assertion"
+    ]
+  },
+  "then": {
+    "properties": {
+      "step_up": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "const": "passkey"
+          }
+        }
+      }
+    }
+  },
+  "description": "POST /agents/{agent_id}/resume (\u00a75.4): missing step-up is forwarded and refused by the runtime (OwnerCommandRefused). step_up_assertion is DEC-2108 item 7's object beside passkey step-up, optional so a body written before it still decodes; set only beside a step_up whose method is passkey (DEC-2140)."
 }
