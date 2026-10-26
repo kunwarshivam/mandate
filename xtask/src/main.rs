@@ -9244,7 +9244,9 @@ fn backticked_paths(text: &str) -> impl Iterator<Item = &str> {
 /// disagrees with that plan (DEC-538).
 fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
     let (line, verdict) = summarised(root, base, || {
-        incremental_refused(env::var_os(CARGO_INCREMENTAL).as_deref())?;
+        if let Some(notice) = incremental_overridden(env::var_os(CARGO_INCREMENTAL).as_deref()) {
+            eprintln!("    mutants: {notice}");
+        }
         mutants_from_env(root, base)
     });
     println!("{line}");
@@ -10349,23 +10351,25 @@ const CARGO_BUILD_TARGET_DIR: &str = "CARGO_BUILD_TARGET_DIR";
 
 /// Turns incremental compilation off when it is `0`, which a mutant's rebuild cannot afford: each
 /// one then builds its crate from scratch, every mutant reaches [`MUTANT_BUILD_TIMEOUT`], and the
-/// run reports timeouts rather than a verdict (lane GL, 2026-10-26). [`mutants`] refuses a caller
-/// that exported `0` ([`incremental_refused`]), and the job's building children run with it at
-/// `1`, which cargo ranks above `build.incremental` and the profiles' `incremental`, so no other
-/// setting turns it off either.
+/// run reports timeouts rather than a verdict (lane GL, 2026-10-26). The job's building children
+/// run with it at `1`, which cargo ranks above the caller's value, `build.incremental` and the
+/// profiles' `incremental`, so nothing turns it off; [`mutants`] says so when the caller exported
+/// `0` ([`incremental_overridden`]). It does not refuse that caller: CI's `Swatinem/rust-cache`
+/// exports `CARGO_INCREMENTAL=0` into every job after it, the mutants job's included, so a refusal
+/// failed every shard (#2648's own landing).
 const CARGO_INCREMENTAL: &str = "CARGO_INCREMENTAL";
 
-/// Refuses a mutants run whose caller exported [`CARGO_INCREMENTAL`] as `0`, loudly rather than
-/// silently overridden, so a session that turned incremental builds off learns it before a run.
-fn incremental_refused(value: Option<&std::ffi::OsStr>) -> Result<()> {
-    if value.is_some_and(|value| value == "0") {
-        bail!(
-            "{CARGO_INCREMENTAL}=0 is set: every mutant would rebuild its crate from scratch and \
-             reach the {MUTANT_BUILD_TIMEOUT}-second build timeout, so the run would report \
-             timeouts, not a verdict; unset it for `cargo xtask ci mutants`"
-        );
-    }
-    Ok(())
+/// What [`mutants`] says when its caller exported [`CARGO_INCREMENTAL`] as `0`: that the job's
+/// building children override it with `1`, so the run never silently differs from the caller's
+/// setting; `None` for any other value.
+fn incremental_overridden(value: Option<&std::ffi::OsStr>) -> Option<String> {
+    value.is_some_and(|value| value == "0").then(|| {
+        format!(
+            "{CARGO_INCREMENTAL}=0 is set, and the mutants job builds with {CARGO_INCREMENTAL}=1 \
+             instead: with it off every mutant would rebuild its crate from scratch and reach the \
+             {MUTANT_BUILD_TIMEOUT}-second build timeout"
+        )
+    })
 }
 
 /// The one target directory the mutants job's building children use: `root`'s own `target/`,
@@ -12329,7 +12333,7 @@ mod tests {
         references_path, select, selection_in, source_references, tokens, withhold_web_demo,
     };
     use super::{
-        CARGO_INCREMENTAL, TIMED_OUT_MUTANTS, conflict_markers_in, incremental_refused,
+        CARGO_INCREMENTAL, TIMED_OUT_MUTANTS, conflict_markers_in, incremental_overridden,
         mutants_job_within, mutants_summary, summarised,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
@@ -13615,21 +13619,37 @@ mod tests {
         );
     }
 
-    /// A caller that exported `CARGO_INCREMENTAL=0` is refused before the run, by name; unset or
-    /// any other value runs.
+    /// A caller that exported `CARGO_INCREMENTAL=0`, as CI's rust-cache does for every job, is
+    /// told the children override it, and runs; unset or any other value says nothing.
     #[test]
-    fn a_mutants_run_with_incremental_builds_off_is_refused() {
-        let refused = incremental_refused(Some(OsStr::new("0")))
-            .expect_err("CARGO_INCREMENTAL=0 makes every mutant's build time out");
+    fn a_mutants_run_with_incremental_builds_off_says_they_are_overridden() {
+        let said = incremental_overridden(Some(OsStr::new("0")))
+            .expect("CARGO_INCREMENTAL=0 is named, never silently overridden");
         assert!(
-            format!("{refused:#}").contains("CARGO_INCREMENTAL=0 is set"),
-            "{refused:#}"
+            said.contains("CARGO_INCREMENTAL=0 is set") && said.contains("CARGO_INCREMENTAL=1"),
+            "{said}"
         );
-        assert!(incremental_refused(None).is_ok(), "unset runs");
+        assert_eq!(incremental_overridden(None), None, "unset");
+        assert_eq!(incremental_overridden(Some(OsStr::new("1"))), None, "on");
+    }
+
+    /// CI's `Swatinem/rust-cache` exports `CARGO_INCREMENTAL=0` into every later step, the
+    /// mutants job's `cargo xtask ci mutants` included, so the job must run under it.
+    #[test]
+    fn the_mutants_job_runs_after_rust_cache_s_incremental_off() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let job = workflow_job(&workflow, "mutants").context("ci.yml has a `mutants` job")?;
+        let at = |needle: &str| job.iter().position(|line| line.contains(needle));
         assert!(
-            incremental_refused(Some(OsStr::new("1"))).is_ok(),
-            "on runs"
+            at("Swatinem/rust-cache") < at("cargo xtask ci mutants")
+                && at("Swatinem/rust-cache").is_some(),
+            "the mutants job restores rust-cache before it runs, so it inherits CARGO_INCREMENTAL=0"
         );
+        assert!(
+            incremental_overridden(Some(OsStr::new("0"))).is_some(),
+            "which the job names and overrides rather than refuses"
+        );
+        Ok(())
     }
 
     /// The summary line counts this run's mutants by how each ended, leaves the baseline out, and
