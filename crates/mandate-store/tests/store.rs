@@ -4,7 +4,9 @@
 
 use mandate_canon::{Digest, Object, Value, parse};
 use mandate_journal::{AppendOutcome, Environment, StreamId};
-use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
+use mandate_store::envelope::{
+    Envelope, Fields, draft_bytes, draft_bytes_with_clock, object, text,
+};
 use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
 
@@ -134,4 +136,34 @@ fn the_envelope_lists_every_digest_the_payload_names_once_in_order() {
         body.get("actor").and_then(|a| a.get("build")),
         Some(&Value::Str(build))
     );
+}
+
+/// A writer that times its records by another clock names it as `clock_source`, and the rest of
+/// the envelope is the scheduler-timed draft's (the news reader's `local`, DEC-2278).
+#[test]
+fn a_draft_with_its_own_clock_names_it_and_changes_nothing_else() {
+    let payload = object(vec![(
+        "item_ref",
+        text(&format!("sha256:{}", Digest::of(b"x").to_hex())),
+    )])
+    .unwrap();
+    let fields = Fields {
+        event_id: "200001000000000000000000",
+        event_type: "StreamOpened",
+        schema_version: 1,
+        causation_id: None,
+        correlation_id: None,
+        config_refs: &Object::new(),
+        payload: &payload,
+    };
+    let scheduled = parse(&draft_bytes(&envelope(), &fields).unwrap()).unwrap();
+    let local = parse(&draft_bytes_with_clock(&envelope(), &fields, "local").unwrap()).unwrap();
+    assert_eq!(local.get("clock_source"), Some(&text("local")));
+    let (Value::Object(mut scheduled), Value::Object(mut local)) = (scheduled, local) else {
+        panic!("a draft is an object")
+    };
+    for body in [&mut scheduled, &mut local] {
+        body.remove("clock_source");
+    }
+    assert_eq!(local, scheduled);
 }

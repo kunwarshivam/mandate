@@ -52,6 +52,26 @@ pub fn draft_bytes_with_pii(
     fields: &Fields<'_>,
     pii_refs: &[&str],
 ) -> Option<Vec<u8>> {
+    body_bytes(envelope, fields, pii_refs, "scheduler")
+}
+
+/// [`draft_bytes`] for a writer that times its records by another clock than the scheduler's
+/// ticks, named as journal spec §3's `clock_source` names it: the news reader times each record by
+/// its receipt of the item, the host clock, `local` (DEC-2278).
+pub fn draft_bytes_with_clock(
+    envelope: &Envelope<'_>,
+    fields: &Fields<'_>,
+    clock_source: &str,
+) -> Option<Vec<u8>> {
+    body_bytes(envelope, fields, &[], clock_source)
+}
+
+fn body_bytes(
+    envelope: &Envelope<'_>,
+    fields: &Fields<'_>,
+    pii_refs: &[&str],
+    clock_source: &str,
+) -> Option<Vec<u8>> {
     let pii: BTreeSet<&str> = pii_refs.iter().copied().collect();
     let build = format!("sha256:{}", Digest::of(envelope.build.as_bytes()).to_hex());
     let actor = object(vec![
@@ -72,7 +92,7 @@ pub fn draft_bytes_with_pii(
             "causation_id",
             fields.causation_id.map_or(Value::Null, text),
         ),
-        ("clock_source", text("scheduler")),
+        ("clock_source", text(clock_source)),
         ("config_refs", Value::Object(fields.config_refs.clone())),
         (
             "correlation_id",
