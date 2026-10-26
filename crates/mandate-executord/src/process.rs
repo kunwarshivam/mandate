@@ -1077,8 +1077,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// books an order that filled between two reads before its position is compared: without it,
     /// every fill would read as an unexplained position and pause the agent (DEC-2800).
     ///
-    /// The orders to list are taken once; one an earlier answer's effects settled (a nested
-    /// reconciliation that booked it) is skipped, so a terminal order is never listed.
+    /// Whether an order may still work is read as each is reached, so one an earlier answer's
+    /// effects settled (a nested reconciliation that booked it) is skipped, and a terminal order
+    /// is never listed.
     ///
     /// Returns whether any answer was handed: its effects may have journaled and sent more (a
     /// protective order placed on the fill), so the snapshot then reads the account again, and its
@@ -1098,24 +1099,24 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             .iter()
             .filter_map(|order| order.client_order_id.as_deref())
             .collect();
-        let listings: Vec<_> = self
+        let unlisted: Vec<_> = self
             .state
             .orders()
             .values()
-            .filter(|order| !order.state.is_terminal() && order.state != OrderState::Intent)
+            .filter(|order| order.state != OrderState::Intent)
             .filter(|order| !listed.contains(order.client_order_id.as_str()))
-            .filter_map(|order| self.state.listing(&order.client_order_id))
+            .map(|order| order.client_order_id.clone())
             .collect();
-        let handed = !listings.is_empty();
-        for listing in listings {
-            let settled = self
+        let mut handed = false;
+        for id in unlisted {
+            let open = self
                 .state
                 .orders()
-                .get(&listing.client_order_id)
-                .is_none_or(|order| order.state.is_terminal());
-            if settled {
+                .get(&id)
+                .is_some_and(|order| !order.state.is_terminal());
+            let Some(listing) = open.then(|| self.state.listing(&id)).flatten() else {
                 continue;
-            }
+            };
             let answer = self.read(&BrokerRequest::ListOrders(listing))?;
             if !self.hand(
                 now,
@@ -1126,6 +1127,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             ) {
                 return Err(Read::Halted);
             }
+            handed = true;
         }
         Ok(handed)
     }
