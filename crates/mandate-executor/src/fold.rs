@@ -17,14 +17,14 @@ use crate::payload::{
 };
 use crate::protection::climbs;
 use crate::state::{
-    AccountSwitch, Adoption, Confirmed, EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome,
-    IntentRecord, Ladder, LoneLadder, ObservedAccount, OrderDetail, PendingRequest, PriorBase,
-    Replacement, Switch,
+    AccountSwitch, Adoption, Confirmed, ConnectionView, EVERY_AGENT, ExecutorState, ExitSequence,
+    IntentOutcome, IntentRecord, Ladder, LoneLadder, ObservedAccount, OrderDetail, PendingRequest,
+    PriorBase, Replacement, Switch,
 };
 use crate::types::{
-    AccountRef, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent,
-    IntentBody, Mode, OcoLegs, Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose,
-    RiskClock, Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
+    AccountRef, AccountState, ActivityCursor, AgentId, BracketLegs, ConnectionHealth, EventId,
+    FillId, FoldedEvent, IntentBody, Mode, OcoLegs, Order, OrderState, OrderType, Protection,
+    ProtectionPrices, Purpose, RiskClock, Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
 };
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
@@ -165,7 +165,9 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload, event.seq),
         "FeesCharged" => fees_charged(state, payload),
         "ExternalActivityIngested" => Ok(()),
-        "ConnectionChecked" | "ConnectionEstablished" => connection_checked(),
+        "ConnectionChecked" => connection_checked(),
+        "ConnectionEstablished" => connection_established(state, payload),
+        "ConnectionStateChanged" => connection_state_changed(state, payload),
         "AccountRestrictionChanged" => {
             let restriction = match required_text(payload, "restriction")? {
                 "closing_only" => AccountState::ClosingOnly,
@@ -241,6 +243,63 @@ fn connection_checked() -> Result<(), ExecutorError> {
     Ok(())
 }
 
+/// The copy of `ConnectionEstablished` names the stream's connection (rule 68). A reconnect's
+/// second copy names the same one and keeps the state the stream last recorded (CN-12): a
+/// connection revoked while `suspended` is still `suspended` when it is established again.
+/// The stream's copy of the establishment (journal spec §9.8, rule 68): the connection whose state
+/// later records change, `active` with no cause. A copy for the connection already held keeps its
+/// state, since a reconnect is the same connection.
+fn connection_established(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let id = required_text(payload, "connection_id")?;
+    if state.connection.as_ref().is_none_or(|view| view.id != id) {
+        state.connection = Some(ConnectionView {
+            id: id.to_owned(),
+            ..ConnectionView::default()
+        });
+    }
+    Ok(())
+}
+
+fn health_of(payload: &Value, member: &str) -> Result<ConnectionHealth, ExecutorError> {
+    match required_text(payload, member)? {
+        "active" => Ok(ConnectionHealth::Active),
+        "degraded" => Ok(ConnectionHealth::Degraded),
+        "suspended" => Ok(ConnectionHealth::Suspended),
+        _ => Err(refused(member)),
+    }
+}
+
+/// The connection's state as `ConnectionStateChanged` records it (journal spec §9.8, DEC-2826):
+/// its `to`, with the reasons journaled since it entered that state. `condition_cleared` and
+/// `acknowledged` record no cause. A state change before the stream's copy of the establishment is
+/// refused, as rule 68 refuses it, and so is one whose `from` is not the state the stream holds.
+fn connection_state_changed(
+    state: &mut ExecutorState,
+    payload: &Value,
+) -> Result<(), ExecutorError> {
+    let to = health_of(payload, "to")?;
+    let from = health_of(payload, "from")?;
+    let reason = required_text(payload, "reason")?;
+    let view = state
+        .connection
+        .as_mut()
+        .ok_or_else(|| refused("connection_id"))?;
+    if view.id != required_text(payload, "connection_id")? {
+        return Err(refused("connection_id"));
+    }
+    if view.health != from {
+        return Err(refused("from"));
+    }
+    if view.health != to {
+        view.reasons.clear();
+    }
+    view.health = to;
+    if !matches!(reason, "condition_cleared" | "acknowledged") && to != ConnectionHealth::Active {
+        view.reasons.insert(reason.to_owned());
+    }
+    Ok(())
+}
+
 /// Corporate actions, reconciliation's records and snapshot, recorded broker exchanges, the owner
 /// acknowledgment, the trading and risk days, and the kill switch (trading-domain spec §5.5 to §5.7,
 /// §6, §10, §11): the later slices of this stack; the trading day is slice 5's trading-day part,
@@ -293,6 +352,7 @@ fn owner_elsewhere(kind: &str) -> Option<&'static str> {
         | "AccountCloseRequested"
         | "ConnectionChecked"
         | "ConnectionEstablished"
+        | "ConnectionStateChanged"
         | "PositionReleased"
         | "RiskLimitTriggered"
         | "RiskLimitLifted"

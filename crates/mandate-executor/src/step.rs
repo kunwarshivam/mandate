@@ -10,8 +10,8 @@ use crate::kill::{
 };
 use crate::listing::{listed, query_unknown};
 use crate::orders::{
-    absent, account, cancelled, described, duplicate, fill, held_on_refusal, kill_cancels_due,
-    lookups_due, reject, silence,
+    absent, account, cancelled, connection, described, duplicate, fill, held_on_refusal,
+    kill_cancels_due, lookups_due, reject, silence,
 };
 use crate::payload::optional_text;
 use crate::ports::{BindingGateSource, Ports};
@@ -260,6 +260,7 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
         Input::Command(Command::CancelOpenings { agent, instrument }) => {
             cancel_openings(batch, Some(&agent), Some(&instrument))
         }
+        Input::Connection(trouble) => connection(batch, trouble),
     }
 }
 

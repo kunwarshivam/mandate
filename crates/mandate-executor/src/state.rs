@@ -109,6 +109,10 @@ pub struct ExecutorState {
     /// Each account-restriction cause in force, by its `cause`, at the strictest restriction its
     /// records set. Nothing lifts one yet (backlog E7-2y), so a cause stays once raised.
     pub(crate) causes: BTreeMap<String, AccountState>,
+    /// The connection this account stream names, once its copy of `ConnectionEstablished` folds
+    /// (rule 68), with the state its `ConnectionStateChanged` records last set and the reasons
+    /// journaled since it entered that state (DEC-2826). `None` before the copy.
+    pub(crate) connection: Option<ConnectionView>,
     pub(crate) consecutive_403s: u32,
     pub(crate) observed: Option<ObservedAccount>,
     /// The account-stream `seq` of the report `observed` holds: the base the model's cash moves
@@ -387,6 +391,16 @@ pub(crate) struct PriorBase {
     pub(crate) fill_notional: Usd,
 }
 
+/// The account's connection as its stream records it (journal spec §9.8, DEC-2826).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct ConnectionView {
+    pub(crate) id: String,
+    pub(crate) health: crate::types::ConnectionHealth,
+    /// The reasons journaled since the connection entered [`Self::health`], so a cause is recorded
+    /// once per stay (connections spec §8.2, DEC-687).
+    pub(crate) reasons: BTreeSet<String>,
+}
+
 impl ExecutorState {
     /// An empty state for one broker account, before any event is folded. Reads nothing: there is
     /// no constructor that touches a clock, a file, or a random number.
@@ -422,6 +436,7 @@ impl ExecutorState {
             modes: BTreeMap::new(),
             account_state: AccountState::Active,
             causes: BTreeMap::new(),
+            connection: None,
             consecutive_403s: 0,
             observed: None,
             observed_at: None,
