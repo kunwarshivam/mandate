@@ -250,10 +250,34 @@ fn a_resolved_deployment_is_wired_with_the_fold_and_the_flatten_over_its_univers
         mandate_daemon::fixture::wiring("user-owner"),
         version,
         &document,
+        None,
         CLOCK,
         AGENT,
     );
     assert_eq!(wiring.view.version, version);
+    let opening = mandate_runtime::Proposal {
+        instrument: InstrumentId::new(SPY).unwrap(),
+        asset_class: AssetClass::UsEquity,
+        side: mandate_accounting::Side::Buy,
+        qty: mandate_num::Qty::parse("1").unwrap(),
+        limit: mandate_num::Price::parse("99.95").unwrap(),
+        purpose: Purpose::Open,
+        exit_origin: None,
+        exit_conviction: None,
+        buy_conviction: None,
+        combined_score: mandate_canon::Value::Null,
+        outputs_used: Default::default(),
+        model_weights: Default::default(),
+        clips_applied: Vec::new(),
+        execution: None,
+    };
+    assert_eq!(
+        wiring.gate.check(&opening),
+        mandate_runtime::DryRunVerdict::Deny {
+            reason_code: "rule_set_unavailable".into()
+        },
+        "the gate is the fold's, not the fixture's"
+    );
     assert_eq!(
         wiring.view.working_universe,
         [InstrumentId::new(SPY).unwrap()].into()

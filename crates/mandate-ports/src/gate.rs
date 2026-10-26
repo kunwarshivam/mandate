@@ -1,6 +1,8 @@
 //! The gate's dry run over the runtime's proposal (E6-3, E6-6 to E6-8).
 
-use mandate_risk::{AssetId, Decision, GateInput, ProposedOrder};
+use std::collections::BTreeSet;
+
+use mandate_risk::{Advisory, AssetId, Decision, Deferred, GateInput, ProposedOrder};
 use mandate_runtime::Proposal;
 
 use crate::context::{AdvisoryGateContext, AdvisoryOrderFacts};
@@ -37,8 +39,22 @@ pub fn proposed_order(
 /// # Errors
 /// As [`proposed_order`], and [`PortError::Gate`] for an order the gate refuses to evaluate.
 pub fn evaluate(proposal: &Proposal, context: &AdvisoryGateContext) -> Result<Decision, PortError> {
+    Ok(evaluate_deferring(proposal, context, &BTreeSet::new())?.decision)
+}
+
+/// [`mandate_risk::evaluate_deferring`] over `context` for `proposal`: the cell's runtime's
+/// advisory pass, with `deferred` the checks whose facts nothing journals yet (DEC-2378 item 11).
+/// With nothing deferred it is [`evaluate`].
+///
+/// # Errors
+/// As [`evaluate`].
+pub fn evaluate_deferring(
+    proposal: &Proposal,
+    context: &AdvisoryGateContext,
+    deferred: &BTreeSet<Deferred>,
+) -> Result<Advisory, PortError> {
     let proposed = proposed_order(proposal, &context.order)?;
-    Ok(mandate_risk::evaluate(&GateInput {
+    let input = GateInput {
         now: context.now,
         pass: context.pass,
         config: &context.config,
@@ -51,5 +67,6 @@ pub fn evaluate(proposal: &Proposal, context: &AdvisoryGateContext) -> Result<De
         conduct: &context.conduct,
         universe: &context.universe,
         proposed: &proposed,
-    })?)
+    };
+    Ok(mandate_risk::evaluate_deferring(&input, deferred)?)
 }

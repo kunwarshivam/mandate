@@ -1931,6 +1931,7 @@ dependencies = [
  "mandate-research",
  "mandate-research-driver",
  "mandate-research-run",
+ "mandate-risk",
  "mandate-runtime",
  "mandate-spec",
  "mandate-store",
@@ -2100,6 +2101,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-canon",
  "mandate-num",
+ "mandate-risk",
  "mandate-time",
  "proptest",
  "thiserror",
@@ -2113,6 +2115,7 @@ dependencies = [
  "mandate-canon",
  "mandate-domain",
  "mandate-executor",
+ "mandate-gate-context",
  "mandate-identity",
  "mandate-journal",
  "mandate-num",

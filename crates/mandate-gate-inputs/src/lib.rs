@@ -28,7 +28,7 @@ mod mandate;
 mod rules;
 
 pub use error::InputError;
-pub use mandate::{gate_mandate, reservation};
+pub use mandate::reservation;
 pub use rules::{
     Artifact, CALENDAR_MEMBERS, RULE_MEMBERS, artifact_from, environment_text, fee_artifact, fees,
     reference, required_positive_u64, required_text, rule_set,
