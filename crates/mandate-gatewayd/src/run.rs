@@ -284,6 +284,18 @@ pub fn answer_recorded<S: Store, C: Clock>(
     service.answer(request)
 }
 
+/// The id sources a service started at `started` for `config` draws from, in [`Parts::ids`]'s
+/// order: its calls (lane 0), its workspace meter stream's and its deployment meter stream's
+/// `StreamOpened`, each from its own stream's name, and the deployment meter's copies (lane 1).
+pub fn ids(config: &Config, started: UtcNanos) -> [Box<dyn IdSource>; 4] {
+    [
+        Box::new(started_ids(started, 0)),
+        Box::new(opened_ids(&format!("meter:{}", config.workspace))),
+        Box::new(opened_ids(&format!("dmeter:{}", config.deployment))),
+        Box::new(started_ids(started, 1)),
+    ]
+}
+
 /// The ids a meter stream's writer opens `stream` with, its `StreamOpened` the one record it gives
 /// an id of its own (DEC-2258 item 2): drawn from the stream's own name, as the cell's runtime
 /// draws them, so no two streams open with one id and a restart reopens with the same one.
@@ -339,11 +351,12 @@ impl<W: Write + Send> Log for WriteLog<W> {
     }
 }
 
-/// Reports `lifecycle` live on `status` every `every`, at `now()`, while `serving` holds, on a
-/// thread of its own, so the liveness probe fails within the lifecycle's bound of the serve loop
-/// ending.
+/// Reports the shared `lifecycle` live on `status` every `every`, at `now()`, while `serving`
+/// holds, on a thread of its own, from the start's first step, so a slow start stays live and the
+/// liveness probe fails within the lifecycle's bound of the serve loop ending. It observes and
+/// publishes under the lifecycle's one lock, so a lifecycle the process has exited stays exited.
 pub fn heartbeat(
-    mut lifecycle: Lifecycle,
+    lifecycle: Arc<Mutex<Lifecycle>>,
     status: Status,
     serving: Arc<AtomicBool>,
     every: Duration,
@@ -351,9 +364,15 @@ pub fn heartbeat(
 ) {
     thread::spawn(move || {
         while serving.load(Ordering::SeqCst) {
-            lifecycle.observe(now(), Input::Heartbeat);
-            status.publish(lifecycle.snapshot());
+            observe(&lifecycle, &status, now(), Input::Heartbeat);
             thread::sleep(every);
         }
     });
+}
+
+/// Folds `input` at `at` into the shared `lifecycle` and publishes its snapshot, under its lock.
+pub fn observe(lifecycle: &Mutex<Lifecycle>, status: &Status, at: UtcNanos, input: Input) {
+    let mut lifecycle = lifecycle.lock().unwrap_or_else(PoisonError::into_inner);
+    lifecycle.observe(at, input);
+    status.publish(lifecycle.snapshot());
 }

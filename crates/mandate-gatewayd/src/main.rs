@@ -21,8 +21,8 @@
 use std::net::TcpListener;
 use std::process::ExitCode;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mandate_artifacts_fs::FsArtifactStore;
@@ -31,13 +31,14 @@ use mandate_gatewayd::config::Config;
 use mandate_gatewayd::control::StoreControl;
 use mandate_gatewayd::recorded::Replies;
 use mandate_gatewayd::run::{
-    self, Command, Parts, RunArgs, WriteLog, answer_recorded, heartbeat, host_now, opened_ids,
-    recorded_service, started_ids,
+    self, Command, Parts, RunArgs, WriteLog, answer_recorded, heartbeat, host_now, observe,
+    recorded_service,
 };
 use mandate_gatewayd::serve::{Limits, Server};
 use mandate_process::lifecycle::{Input, Kind, Lifecycle};
 use mandate_process::probe::{self, Status};
 use mandate_store::PgStore;
+use mandate_time::UtcNanos;
 
 /// How long the process stays live without a heartbeat.
 const LIVENESS: Duration = Duration::from_secs(10);
@@ -71,9 +72,31 @@ fn refuse(code: &str) -> ExitCode {
 /// Starts the recorded service and serves it until the listener stops.
 fn serve(args: &RunArgs) -> Result<(), &'static str> {
     let started = host_now();
-    let mut lifecycle = Lifecycle::new(Kind::Service, LIVENESS, started);
+    let lifecycle = Lifecycle::new(Kind::Service, LIVENESS, started);
     let status = Status::new(lifecycle.snapshot());
+    let lifecycle = Arc::new(Mutex::new(lifecycle));
     probe::serve(&args.probe, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
+    let serving = Arc::new(AtomicBool::new(true));
+    heartbeat(
+        Arc::clone(&lifecycle),
+        status.clone(),
+        Arc::clone(&serving),
+        HEARTBEAT,
+        host_now,
+    );
+    let served = serve_started(args, started, &lifecycle, &status);
+    serving.store(false, Ordering::SeqCst);
+    observe(&lifecycle, &status, host_now(), Input::Failed);
+    served
+}
+
+/// The start's steps after the probe socket, then the serve loop until the listener stops.
+fn serve_started(
+    args: &RunArgs,
+    started: UtcNanos,
+    lifecycle: &Mutex<Lifecycle>,
+    status: &Status,
+) -> Result<(), &'static str> {
     let config = Config::from_env(&|name| std::env::var(name).ok()).map_err(|e| e.code())?;
     let model = run::read_recorded(&args.recorded).map_err(|e| e.code())?;
     let artifacts = FsArtifactStore::open_existing(&config.artifacts)
@@ -85,12 +108,7 @@ fn serve(args: &RunArgs) -> Result<(), &'static str> {
         deployment_store: PgStore::connect(config.journal_dsn())?,
         clock: SystemClock,
         now: Rc::new(host_now),
-        ids: [
-            Box::new(started_ids(started, 0)),
-            Box::new(opened_ids(&format!("meter:{}", config.workspace))),
-            Box::new(opened_ids(&format!("dmeter:{}", config.deployment))),
-            Box::new(started_ids(started, 1)),
-        ],
+        ids: run::ids(&config, started),
         control: Box::new(control),
         artifacts: Box::new(artifacts),
     };
@@ -105,19 +123,7 @@ fn serve(args: &RunArgs) -> Result<(), &'static str> {
         },
         Arc::new(WriteLog::new(std::io::stderr())),
     );
-    lifecycle.observe(host_now(), Input::StartupPassed);
-    status.publish(lifecycle.snapshot());
-    let serving = Arc::new(AtomicBool::new(true));
-    heartbeat(
-        lifecycle.clone(),
-        status.clone(),
-        Arc::clone(&serving),
-        HEARTBEAT,
-        host_now,
-    );
+    observe(lifecycle, status, host_now(), Input::StartupPassed);
     server.run(|request| answer_recorded(&mut service, &replies, &request));
-    serving.store(false, Ordering::SeqCst);
-    lifecycle.observe(host_now(), Input::Failed);
-    status.publish(lifecycle.snapshot());
     Err("listener_stopped")
 }

@@ -5,12 +5,12 @@
 //! stream or a deployed agent's cap does not read. The oracle reads the journal's own rows.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mandate_canon::{Digest, decode_ulid, parse};
@@ -22,7 +22,8 @@ use mandate_gatewayd::config::Config;
 use mandate_gatewayd::recorded::Replies;
 use mandate_gatewayd::run::{
     self, ArgsError, Command, Parts, RecordedService, RunArgs, StartFailure, WriteLog,
-    answer_recorded, heartbeat, host_now, opened_ids, read_recorded, recorded_service, started_ids,
+    answer_recorded, heartbeat, host_now, observe, opened_ids, read_recorded, recorded_service,
+    started_ids,
 };
 use mandate_gatewayd::serve::Log;
 use mandate_gatewayd::service::Control;
@@ -177,6 +178,10 @@ fn demo() -> RecordedModel {
 }
 
 fn config(workspace_monthly: &str) -> Config {
+    config_with(workspace_monthly, "20")
+}
+
+fn config_with(workspace_monthly: &str, deployment_monthly: &str) -> Config {
     let vars = BTreeMap::from([
         ("MANDATE_GATEWAY_WORKSPACE", WORKSPACE.to_owned()),
         ("MANDATE_GATEWAY_DEPLOYMENT", DEPLOYMENT.to_owned()),
@@ -186,7 +191,10 @@ fn config(workspace_monthly: &str) -> Config {
             "MANDATE_GATEWAY_WORKSPACE_MONTHLY_USD",
             workspace_monthly.to_owned(),
         ),
-        ("MANDATE_GATEWAY_DEPLOYMENT_MONTHLY_USD", "20".to_owned()),
+        (
+            "MANDATE_GATEWAY_DEPLOYMENT_MONTHLY_USD",
+            deployment_monthly.to_owned(),
+        ),
     ]);
     Config::from_env(&|name| vars.get(name).cloned()).unwrap()
 }
@@ -285,17 +293,16 @@ impl Store for Blind {
 const NOW: &str = "2026-10-16T14:00:00.000000000Z";
 
 fn parts<S: Store + Clone>(store: S, world: &World) -> Parts<S, ManualClock> {
+    parts_at(store, world, NOW)
+}
+
+fn parts_at<S: Store + Clone>(store: S, world: &World, now: &'static str) -> Parts<S, ManualClock> {
     Parts {
         workspace_store: store.clone(),
         deployment_store: store,
-        clock: ManualClock::at(at(NOW)),
-        now: Rc::new(|| at(NOW)),
-        ids: [
-            Box::new(started_ids(at(NOW), 0)),
-            Box::new(opened_ids(&format!("meter:{WORKSPACE}"))),
-            Box::new(opened_ids(&format!("dmeter:{DEPLOYMENT}"))),
-            Box::new(started_ids(at(NOW), 1)),
-        ],
+        clock: ManualClock::at(at(now)),
+        now: Rc::new(move || at(now)),
+        ids: run::ids(&config("50"), at(now)),
         control: Box::new(world.clone()),
         artifacts: Box::new(world.clone()),
     }
@@ -530,9 +537,10 @@ fn the_heartbeat_moves_liveness_while_serving_and_stops_after() {
         UtcNanos::from_parts(1_792_159_200 + tick, 0).unwrap()
     }
     let start = at("2026-10-16T14:00:00.000000000Z");
-    let mut lifecycle = Lifecycle::new(Kind::Service, Duration::from_secs(10), start);
-    lifecycle.observe(start, Input::StartupPassed);
+    let lifecycle = Lifecycle::new(Kind::Service, Duration::from_secs(10), start);
     let status = Status::new(lifecycle.snapshot());
+    let lifecycle = Arc::new(Mutex::new(lifecycle));
+    observe(&lifecycle, &status, start, Input::StartupPassed);
     let live_at = |secs: i64| {
         let when = UtcNanos::from_parts(1_792_159_200 + secs, 0).unwrap();
         probe::answer(Probe::Live, status.snapshot(), when).ok
@@ -540,7 +548,7 @@ fn the_heartbeat_moves_liveness_while_serving_and_stops_after() {
     assert!(!live_at(15), "the start's bound alone ends before");
     let serving = Arc::new(AtomicBool::new(true));
     heartbeat(
-        lifecycle,
+        Arc::clone(&lifecycle),
         status.clone(),
         Arc::clone(&serving),
         Duration::from_millis(5),
@@ -556,4 +564,184 @@ fn the_heartbeat_moves_liveness_while_serving_and_stops_after() {
     let stopped = status.snapshot();
     std::thread::sleep(Duration::from_millis(50));
     assert_eq!(status.snapshot(), stopped, "it stops with the loop");
+}
+
+/// Design §3.4: a heartbeat after the process exited leaves it exited, so the probe never reads a
+/// stopped service as live.
+#[test]
+fn a_heartbeat_after_the_exit_leaves_the_process_stopped() {
+    let start = at("2026-10-16T14:00:00.000000000Z");
+    let lifecycle = Lifecycle::new(Kind::Service, Duration::from_secs(10), start);
+    let status = Status::new(lifecycle.snapshot());
+    let lifecycle = Mutex::new(lifecycle);
+    observe(&lifecycle, &status, start, Input::StartupPassed);
+    assert!(probe::answer(Probe::Ready, status.snapshot(), start).ok);
+    observe(&lifecycle, &status, start, Input::Failed);
+    observe(&lifecycle, &status, start, Input::Heartbeat);
+    let live = probe::answer(Probe::Live, status.snapshot(), start);
+    assert_eq!((live.ok, live.word), (false, "stopped"));
+}
+
+/// The ids a stream is opened with: the first of the stream name's digest, as DEC-2258 item 2 has
+/// the cell's runtime draw them, computed here from the digest itself.
+fn opened_id(stream: &str) -> String {
+    let digest = Digest::of(stream.as_bytes());
+    let (high, _) = digest.as_bytes().split_at(16);
+    mandate_canon::encode_ulid(u128::from_be_bytes(high.try_into().unwrap()))
+}
+
+fn payload(row: &StoredEvent) -> mandate_canon::Value {
+    parse(&row.body).unwrap().get("payload").unwrap().clone()
+}
+
+/// DEC-2258, DEC-2207, journal spec §9.19: each meter stream opens once with its own name's id
+/// and its own type, in paper; the deployment stream's copies carry the deployment meter's own ids,
+/// lane 1 at the start's millisecond, never a call's.
+#[test]
+fn each_meter_stream_opens_with_its_own_name_s_id_and_type() {
+    let store = MemoryStore::default();
+    let world = World::default();
+    world.deploy(AGENT, &world.version("5"));
+    let model = demo();
+    let mut service = started(&store, &world, "50");
+    answer_recorded(
+        &mut service,
+        &Replies::new(&model),
+        &request(&model, WORKSPACE, 1),
+    )
+    .unwrap();
+    for (stream, stream_type, member, id) in [
+        (
+            format!("meter:{WORKSPACE}"),
+            "meter",
+            "workspace_id",
+            WORKSPACE,
+        ),
+        (
+            format!("dmeter:{DEPLOYMENT}"),
+            "deployment_meter",
+            "deployment_id",
+            DEPLOYMENT,
+        ),
+    ] {
+        let rows = stream_rows(&store, &stream);
+        assert!(
+            rows.iter().all(|row| row.environment == "paper"),
+            "{stream}"
+        );
+        let opened: Vec<&StoredEvent> = rows
+            .iter()
+            .filter(|row| row.event_type == "StreamOpened")
+            .collect();
+        assert_eq!(opened.len(), 1, "{stream}");
+        assert_eq!(opened[0].event_id, opened_id(&stream));
+        let opened = payload(opened[0]);
+        assert_eq!(
+            opened.get("stream_type").and_then(|v| v.as_str()),
+            Some(stream_type)
+        );
+        assert_eq!(opened.get(member).and_then(|v| v.as_str()), Some(id));
+    }
+    let lane = |id: &str| (decode_ulid(id).unwrap() >> 72) & 0xff;
+    let ms = |id: &str| decode_ulid(id).unwrap() >> 80;
+    for row in stream_rows(&store, &format!("dmeter:{DEPLOYMENT}"))
+        .iter()
+        .filter(|row| row.event_type != "StreamOpened")
+    {
+        assert_eq!(lane(&row.event_id), 1, "{}", row.event_type);
+        assert_eq!(ms(&row.event_id), 1_792_159_200_000);
+    }
+}
+
+/// DEC-2258 item 2, journal spec §5.1: a restart over the same journal reopens neither stream, and
+/// no event id on either stream repeats across the two starts.
+#[test]
+fn a_restart_reopens_no_stream_and_repeats_no_id() {
+    let store = MemoryStore::default();
+    let world = World::default();
+    world.deploy(AGENT, &world.version("5"));
+    let model = demo();
+    for (n, now) in [(1, NOW), (2, "2026-10-16T14:00:30.000000000Z")] {
+        let mut service =
+            recorded_service(&config("50"), &model, parts_at(store.clone(), &world, now)).unwrap();
+        let record = answer_recorded(
+            &mut service,
+            &Replies::new(&model),
+            &request(&model, WORKSPACE, n),
+        )
+        .unwrap();
+        assert_eq!(record.outcome, Outcome::Ok, "start {n}");
+    }
+    let mut seen = BTreeSet::new();
+    for stream in [format!("meter:{WORKSPACE}"), format!("dmeter:{DEPLOYMENT}")] {
+        let rows = stream_rows(&store, &stream);
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.event_type == "StreamOpened")
+                .count(),
+            1,
+            "{stream}"
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.event_type == "MeterReserved")
+                .count(),
+            2,
+            "{stream}"
+        );
+        for row in &rows {
+            assert!(
+                seen.insert(row.event_id.clone()),
+                "{} repeats",
+                row.event_id
+            );
+        }
+    }
+}
+
+/// DEC-997 item 3, DEC-2326 item 2: the workspace's budget is the workspace meter's cap and the
+/// deployment's is the deployment meter's, each as the environment names it; with the deployment's
+/// alone below the call's maximum it binds alone, and a call refused reserves nothing on either
+/// stream and sends nothing. (A daily cap above the workspace's budget does not read, DEC-2254
+/// item 3, so the workspace's case sets the daily cap with it.)
+#[test]
+fn each_budget_is_its_own_meter_s_cap_and_binds_alone() {
+    let model = demo();
+    let named = |text: &str| mandate_gateway::money::Usd6::parse(text).unwrap();
+    for (workspace, deployment, daily) in
+        [("0.000001", "20", "0.000001"), ("50", "0.000001", "0.5")]
+    {
+        let world = World::default();
+        world.deploy(AGENT, &world.version(daily));
+        let store = MemoryStore::default();
+        let mut service = recorded_service(
+            &config_with(workspace, deployment),
+            &model,
+            parts(store.clone(), &world),
+        )
+        .unwrap();
+        let meter = service.gateway().meter();
+        assert_eq!(meter.caps().workspace_monthly(), named(workspace));
+        assert_eq!(meter.deployment().monthly(), named(deployment));
+        let record = answer_recorded(
+            &mut service,
+            &Replies::new(&model),
+            &request(&model, WORKSPACE, 1),
+        )
+        .unwrap();
+        assert_eq!(
+            record.outcome,
+            Outcome::BudgetExhausted,
+            "{workspace}/{deployment}"
+        );
+        assert!(service.gateway().transport().sent().is_empty());
+        for stream in [format!("meter:{WORKSPACE}"), format!("dmeter:{DEPLOYMENT}")] {
+            assert!(
+                !kinds(&stream_rows(&store, &stream))
+                    .iter()
+                    .any(|k| k == "MeterReserved"),
+                "{stream}"
+            );
+        }
+    }
 }

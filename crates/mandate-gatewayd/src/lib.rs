@@ -19,7 +19,7 @@
 //! [`service`] holds each research call to it before the gateway reserves anything. [`config`]
 //! reads the start-up values, none with a default, and [`control`] reads the control stream through
 //! the journal store. [`recorded`] replays a recording's model half, and [`run`] reads the binary's
-//! arguments and builds the `--recorded` service over the journaled meters. [`recorded`] is the `--recorded` mode's replies and settings (DEC-2326).
+//! arguments and builds the `--recorded` service over the journaled meters.
 
 pub mod cap;
 pub mod config;
