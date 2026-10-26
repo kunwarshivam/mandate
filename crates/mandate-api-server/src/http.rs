@@ -127,6 +127,10 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             post(reduction::challenge).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/reduction-sessions",
+            post(reduction::open).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/me/session",
             get(me::session).fallback(otherwise.clone()),
         )
@@ -343,10 +347,17 @@ async fn open_session(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
     }
 }
 
-/// `POST /v1/sessions/refresh` (§3.11 item 6).
+/// `POST /v1/sessions/refresh` (§3.11 item 6). A session route 2 opened is refused
+/// `reduction_only` and kept, whatever the provider answers (§4.10 route 2 item 5).
 async fn refresh_session(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> Response {
     if !browser(&headers, &app.settings.app_origin) {
         return forbidden();
+    }
+    let presented = session_cookie(&headers);
+    if let (Some(cookie), Some(now)) = (presented.as_deref(), app.clock.now())
+        && app.sessions.opened_by_passkey(cookie, now)
+    {
+        return routes::Refused::ReductionOnly.response();
     }
     let refreshed = (|| {
         let cookie = session_cookie(&headers)?;

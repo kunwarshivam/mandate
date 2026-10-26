@@ -3036,7 +3036,8 @@ enables `live` (ES-23, OPS-5).
   process runs anywhere beyond the dev and CI cell: E7-4's flatten-intent body and its account and
   workspace kill-switch scopes, so a kill switch reaches the executor from the control stream
   without the runtime (design §3.6, `AGENTS.md` rule 13). Until then it reaches the executor only
-  through the runtime's copy.
+  through the runtime's copy. The account scope waits on the close-position re-ask row from
+  [DEC-2364](decisions/DEC-2364.md).
 - **E21-31 (Proposed, M8; SC; lane A1)** As a workspace member, I want the workspace API served by
   its own process in the cell, so that the web app and the CLI reach my deployment the same way
   (design §3.1, §9; the API server, "A2" in `deploy/README.md`). *Accepted when:* a new crate
@@ -4381,7 +4382,16 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (executor process), from [DEC-2347](decisions/DEC-2347.md) item 6, with DEC-2333's slice
   A2b:** the exit's `owes_nothing` reads agent-scoped work only; once the account-scope switch
   lands, an account switch still closing (`closing_all`) keeps the executor running too, with a
-  test.
+  test. Taken by [DEC-2364](decisions/DEC-2364.md)'s pair: an instrument the switch closes that the
+  fold still reads held keeps it running.
+- **E7-4 (executor, account kill switch), from [DEC-2364](decisions/DEC-2364.md) Not covered
+  here:** a close-position the broker accepts and then drops at once (rejected, or expired before
+  the next read) is asked again on the read that confirms its own answer, whose answer asks another
+  read, within one pass, until the chain bound fails the cycle. Ask a close again only on the
+  in-doubt hold's reads (DEC-2337 item 3), with a test over the fake broker's dropped close.
+  Latent: only the core's account-scope switch sends a close-position, and no process hands the
+  core that scope today. **Blocks** handing the account scope to `mandate-executord` or the shell
+  (E21-30's *Left*, DEC-2003 item 6): neither ships without the other (the coordinator's ruling).
 - **E7-4 (kill switch sizing), from [DEC-2347](decisions/DEC-2347.md) item 9, rule 13:** a buy
   the broker reports filled whose fill named no order (Alpaca's fill activity names only the
   broker's order id, so the reconciliation applies it unattributed) leaves nothing in `kill.rs`'s
@@ -4406,11 +4416,10 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   [DEC-2360](decisions/DEC-2360.md) takes the first: each send, the first and every rung, is capped
   at the sub-ledger; its tests are in `hand.rs`, pending E6-4.
 - **E6-4 (protection sizing after a release), from [DEC-2360](decisions/DEC-2360.md) item 4:**
-  protection the executor places or re-places (§5.4's sequence end, `re_cover`, `new_day`) is sized
-  at the long position, so after a release it covers the owner's released shares with the agent's
-  protective order, which a stop would sell. Size it at the agents' own lots, the owner's released
-  shares left out, with a DEC-77 pair (`a_release_of_everything_while_the_flatten_waits_abandons_it`
-  shows an OCO of 10 placed after a release of all 10).
+  protection the executor places again (the sequence end's `re_place`, `re_cover`, `new_day`) is
+  sized at the long position, so after a release it covers the owner's released shares with the
+  agent's protective order. [DEC-2362](decisions/DEC-2362.md) sizes it at the long position less
+  the released shares the owner still holds; its tests are in `hand.rs`, pending E6-4.
 - **E7-4 (executor kill switch), from [DEC-2361](decisions/DEC-2361.md):** a switch's close that
   no limit can be named for (no quote, no protective stop, no floor) is skipped silently by
   `flatten_closes`. Journal it `exit_unpriced` and alert once per switch and instrument; the
@@ -4437,6 +4446,16 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (executor), from the review of [DEC-2358](decisions/DEC-2358.md):** pin a discretionary
   exit with a limit of its own whose price vanishes mid-sequence: it falls back to its limit, and
   the sequence goes on, rather than ending and re-protecting as an exit with no limit does.
+  Done: `hand.rs`'s `a_discretionary_exits_rung_falls_back_to_its_own_limit_when_its_price_vanishes`
+  (a `max_unprotected_s` above the five-minute staleness is what lets the price vanish inside the
+  sequence; a lone exit with a limit of its own is never laddered, so it has no rung to price).
+- **E7-4 (tests), from the review of #2395 (option (b)):** `plain_entry_protection`'s property
+  accepts the bound's exit as an outcome, so an executor that stopped placing a fill's own stop
+  and left it to the bound passes it (S5 and S6 in the review). Assert that every ended opening
+  with fills has its own stop sent before its bound, unless an exit sequence, a reject or the
+  bound itself intervenes, with a model exact enough to keep it from false failures. The hand
+  tests `a_fill_beside_an_unanswered_stop_being_cancelled_gets_its_own_stop` and
+  `a_fill_beside_an_accepted_stop_being_cancelled_gets_its_own_stop` pin the two cases meanwhile.
 - **E7-4 (executor), from the review of [DEC-2356](decisions/DEC-2356.md) item 8:** `closes_due`
   holds the close only for a `Submitting` sell of ours a read does not list. A sell whose
   submission answer is lost becomes `Unknown`, and a later read that omits it releases the close
