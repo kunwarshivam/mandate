@@ -608,6 +608,32 @@ fn the_silence_finding_reads_its_edges_conservatively() {
         judge(&rejected, last + 3 * DAY),
         "a rejected version cancels nothing"
     );
+    let cancelling = list(&section, "silence")
+        .iter()
+        .find(|c| text(c, "name") == "cancelled_by_a_raised_level")
+        .unwrap();
+    let raised = |agent: &str| {
+        let mut records = list(cancelling, "records").to_vec();
+        for r in &mut records {
+            if text(r, "event_type") == "MandateVersionApplied"
+                && let Value::Object(record) = r
+            {
+                set_payload(record, "agent_id", Value::Str(agent.into()));
+            }
+        }
+        retirement_held_silent(
+            AGENT,
+            cancelling.get("cause").unwrap(),
+            &records,
+            |version| terms_of(cancelling, version),
+            seconds(text(cancelling, "now")),
+        )
+    };
+    assert!(!raised(AGENT), "its own raised level cancels it");
+    assert!(
+        raised("agent_b"),
+        "another agent's raised level cancels nothing"
+    );
     assert!(!judge(&[], last + 30 * DAY), "no held record, no sequence");
 }
 
