@@ -28,6 +28,8 @@ use std::rc::Rc;
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Value, parse};
+use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
+use mandate_connections::record::ConnectionId;
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountDeclaration, AccountFillRefs, AccountScope, AgentId, BindingGateInput,
@@ -1009,11 +1011,97 @@ impl<B: Broker> Broker for Named<B> {
     fn declared(&self) -> Option<AccountDeclaration> {
         self.broker.declared()
     }
+
+    fn has_later_checks(&self) -> bool {
+        self.broker.has_later_checks()
+    }
+
+    fn later_check(
+        &self,
+        connection: ConnectionId,
+        occasion: Occasion,
+        account: AccountRead,
+    ) -> Option<Result<CheckReport, &'static str>> {
+        self.broker.later_check(connection, occasion, account)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::agreed;
+    use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
+    use mandate_connections::record::ConnectionId;
+    use mandate_domain::{CapabilityProfile, ProfileError};
+    use mandate_executor::{BrokerOutcome, BrokerRequest, ConnectorError};
+
+    use super::{Named, agreed};
+    use crate::Broker;
+
+    /// A broker with later checks, each answering a refusal the test can recognise.
+    struct Checking;
+
+    impl Broker for Checking {
+        fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
+            mandate_alpaca::alpaca_profile()
+        }
+
+        fn call(&mut self, _request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
+            Err(ConnectorError::NotSent { code: "fixture" })
+        }
+
+        fn has_later_checks(&self) -> bool {
+            true
+        }
+
+        fn later_check(
+            &self,
+            _connection: ConnectionId,
+            _occasion: Occasion,
+            _account: AccountRead,
+        ) -> Option<Result<CheckReport, &'static str>> {
+            Some(Err("checked_by_the_inner_broker"))
+        }
+    }
+
+    /// A broker that keeps every default.
+    struct Plain;
+
+    impl Broker for Plain {
+        fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
+            mandate_alpaca::alpaca_profile()
+        }
+
+        fn call(&mut self, _request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
+            Err(ConnectorError::NotSent { code: "fixture" })
+        }
+    }
+
+    /// DEC-2840: a broker whose later checks are not built runs none, and `Named` around it says
+    /// so too, so the process never reads the account for one.
+    #[test]
+    fn a_broker_without_later_checks_runs_none_named_or_not() -> Result<(), String> {
+        let connection = ConnectionId::new("conn-1").map_err(|e| format!("{e:?}"))?;
+        assert!(!Plain.has_later_checks());
+        assert_eq!(
+            Plain.later_check(connection.clone(), Occasion::Daily, AccountRead::Unreadable),
+            None
+        );
+        assert!(!Named::new(Plain, None).has_later_checks());
+        Ok(())
+    }
+
+    /// DEC-2840: the binary wraps every broker in `Named`, so it passes the later checks through;
+    /// otherwise the trait's default would answer none and the process would never run them.
+    #[test]
+    fn a_named_broker_runs_its_inner_broker_s_later_checks() -> Result<(), String> {
+        let named = Named::new(Checking, None);
+        assert!(named.has_later_checks());
+        let connection = ConnectionId::new("conn-1").map_err(|e| format!("{e:?}"))?;
+        assert_eq!(
+            named.later_check(connection, Occasion::Daily, AccountRead::Unreadable),
+            Some(Err("checked_by_the_inner_broker"))
+        );
+        Ok(())
+    }
 
     /// DEC-2817: the account's fill configuration is the one every deployment names alike; no
     /// deployment, one that names none, or two that differ name none.

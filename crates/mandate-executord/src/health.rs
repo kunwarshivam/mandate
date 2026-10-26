@@ -48,6 +48,9 @@ enum Reading {
 pub struct Health {
     network: u32,
     authorization: u32,
+    /// Whether a later permission check failed in this process (DEC-2840). Only a replaced
+    /// credential ends `suspended` (connections spec §9.1), so nothing here clears it.
+    check_failed: bool,
 }
 
 impl Health {
@@ -61,6 +64,11 @@ impl Health {
     /// Counts a failed read of a one-read broker's account, which answers as one call.
     pub fn observe_error(&mut self, error: &ConnectorError) {
         self.observe(&Err(*error));
+    }
+
+    /// Notes a later permission check that failed (DEC-2840).
+    pub fn check_failed(&mut self) {
+        self.check_failed = true;
     }
 
     /// Counts a read of a one-read broker's account that the broker answered.
@@ -81,6 +89,9 @@ impl Health {
             troubles.push(ConnectionTrouble::Suspended(
                 SuspendReason::AuthorizationFailed,
             ));
+        }
+        if self.check_failed {
+            troubles.push(ConnectionTrouble::Suspended(SuspendReason::CheckFailed));
         }
         troubles
     }

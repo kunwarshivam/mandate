@@ -10,6 +10,8 @@ use mandate_alpaca::{
     DeclaredRegime as AlpacaRegime, RetryPolicy, TokioPause, TradingClient, TradingTransport,
     alpaca_account_rules,
 };
+use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
+use mandate_connections::record::ConnectionId;
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountDeclaration, BrokerConnector, BrokerOutcome, BrokerRequest, ConnectorError,
@@ -59,6 +61,20 @@ impl<T: TradingTransport + Clone> Broker for AlpacaBroker<T> {
         self.runtime.block_on(client.call(request))
     }
 
+    fn has_later_checks(&self) -> bool {
+        true
+    }
+
+    /// The connect check's own §8.1 checks, at every start and daily (DEC-2840).
+    fn later_check(
+        &self,
+        connection: ConnectionId,
+        occasion: Occasion,
+        account: AccountRead,
+    ) -> Option<Result<CheckReport, &'static str>> {
+        Some(crate::connect::alpaca_report(connection, occasion, account))
+    }
+
     /// Alpaca's declaration (trading spec §7.2, DEC-840): always margin, under `intraday_margin`.
     fn declared(&self) -> Option<AccountDeclaration> {
         let rules = alpaca_account_rules();
@@ -78,9 +94,30 @@ mod tests {
     use mandate_executor::{AccountDeclaration, DeclaredRegime};
     use mandate_time::UtcNanos;
 
+    use mandate_connections::checks::{AccountRead, Occasion};
+    use mandate_connections::record::ConnectionId;
+
     use super::AlpacaBroker;
     use crate::Broker;
     use crate::paper::FixturePaper;
+
+    /// DEC-2840: Alpaca's broker runs the later permission checks, the connect check's own, on
+    /// the occasion it is asked.
+    #[test]
+    fn alpacas_broker_runs_the_later_checks() -> Result<(), Box<dyn std::error::Error>> {
+        let broker = AlpacaBroker::new(FixturePaper::new(UtcNanos::EPOCH))?;
+        assert!(broker.has_later_checks());
+        let report = broker
+            .later_check(
+                ConnectionId::new("conn-1")?,
+                Occasion::Daily,
+                AccountRead::Unreadable,
+            )
+            .ok_or("no later check")??;
+        assert_eq!(report.occasion, Occasion::Daily);
+        assert!(report.account_pii_ref.is_none());
+        Ok(())
+    }
 
     /// Alpaca's broker declares Alpaca's rules (trading spec §7.2: always margin, under
     /// `intraday_margin`; DEC-840), which every snapshot it reconciles journals (journal spec
