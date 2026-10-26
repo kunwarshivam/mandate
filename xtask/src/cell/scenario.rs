@@ -2589,10 +2589,10 @@ mod tests {
         let research = reference(&research_mandate());
         assert_eq!(
             research,
-            "sha256:d64d0988e24fa754e0e64acad129d378eed55297e3b28cb82d0b1587ebe54a60"
+            "sha256:f63145eb604ff161807d849c23a24e53fbd2e535a0e0db52ff775a9de6b533ce"
         );
-        assert_eq!(confirm_code(&research), "2e7bcfa5");
-        assert_eq!(deploy_code(RESEARCH_AGENT, &research), "5ae8bd0c");
+        assert_eq!(confirm_code(&research), "30eb4e5e");
+        assert_eq!(deploy_code(RESEARCH_AGENT, &research), "9400be68");
     }
 
     /// The steps run 1 to 7 in order, then the record; a shown code precedes the gesture that types

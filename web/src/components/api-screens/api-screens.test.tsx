@@ -60,13 +60,16 @@ const pending = fixture.approvals.filter((a) => a.status === "delivered").map((a
 
 /** The journal vectors' sentence and every name a version 3 request may defer (DEC-2515 item 5). */
 const deferrals = (JSON.parse(readFileSync(join(process.cwd(), "../fixtures/refcases/journal.json"), "utf8")) as { approval_deferrals: { approver_sentence: string } }).approval_deferrals;
-/** Serves the approval's content with `deferred_to_binding` set to `value`, as version 3 carries it. */
+/** Serves the approval as version 3 with `deferred_to_binding` set to `value`, or with none when `value` is `undefined`. */
 const deferring =
   (value: unknown): Tamper =>
   (route, body) => {
     if (!route.startsWith("/approvals/")) return body;
     const approval = body.approval as Record<string, unknown>;
-    return { ...body, approval: { ...approval, content: { ...(approval.content as Record<string, unknown>), deferred_to_binding: value } } };
+    const content = { ...(approval.content as Record<string, unknown>) };
+    if (value === undefined) delete content.deferred_to_binding;
+    else content.deferred_to_binding = value;
+    return { ...body, approval: { ...approval, schema_version: 3, content } };
   };
 
 afterEach(() => {
@@ -252,9 +255,9 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     expect(screen.queryByText(deferrals.approver_sentence)).toBeNull();
   });
 
-  it("deferred checks it cannot read are never read as none: it says so and offers Skip, not Approve", async () => {
+  it("deferred checks it cannot read, or a version 3 request without them, are never read as none: it says so and offers Skip, not Approve (DEC-2518)", async () => {
     const approval = pending[0];
-    for (const value of [null, [], "halt", [7]]) {
+    for (const value of [undefined, null, [], "halt", [7]]) {
       const { posts } = mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", deferring(value));
       const region = await screen.findByRole("region", { name: "Checks not run yet" });
       expect(region.textContent, JSON.stringify(value)).toMatch(/cannot be read/);

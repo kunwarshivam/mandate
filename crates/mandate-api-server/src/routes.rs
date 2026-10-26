@@ -370,6 +370,7 @@ fn approval_value(view: &ApprovalView, with_content: bool) -> Value {
     ];
     if with_content {
         members.push(("content", view.content.clone()));
+        members.push(("schema_version", int(view.schema_version)));
     }
     object(members)
 }

@@ -81,7 +81,12 @@ export interface ApprovalRow {
 
 export interface ApprovalDetail extends ApprovalRow {
   content: Record<string, unknown>;
+  /** The `ApprovalRequested` version `content` comes from: version 3's names the checks its dry run deferred (DEC-2518). */
+  schema_version: ApprovalVersion;
 }
+
+/** The `ApprovalRequested` versions the journal spec defines (§9.6). */
+export type ApprovalVersion = 1 | 2 | 3;
 
 /** What the API's own screens read: every agent with its detail, and every approval with its content. */
 export interface ApiView {
@@ -175,7 +180,13 @@ const approvalMembers = {
   order: boundOrder,
 };
 const approvalRow = object<ApprovalRow>(approvalMembers);
-const approvalDetail = object<ApprovalDetail>({ ...approvalMembers, content: record });
+const APPROVAL_VERSIONS: readonly ApprovalVersion[] = [1, 2, 3];
+const approvalVersion: Decoder<ApprovalVersion> = (value, path) => {
+  const read = integer(value, path);
+  if (!read.ok) return read;
+  return (APPROVAL_VERSIONS as readonly number[]).includes(read.value) ? { ok: true, value: read.value as ApprovalVersion } : fail(path, "unknown_enum_value", String(read.value));
+};
+const approvalDetail = object<ApprovalDetail>({ ...approvalMembers, content: record, schema_version: approvalVersion });
 
 export const agentsRead = object<{ agents: AgentRow[] }>({ agents: array(agentRow) });
 export const agentRead = object<{ agent: AgentDetail }>({ agent: agentDetail });
