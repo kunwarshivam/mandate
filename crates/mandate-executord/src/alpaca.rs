@@ -94,9 +94,30 @@ mod tests {
     use mandate_executor::{AccountDeclaration, DeclaredRegime};
     use mandate_time::UtcNanos;
 
+    use mandate_connections::checks::{AccountRead, Occasion};
+    use mandate_connections::record::ConnectionId;
+
     use super::AlpacaBroker;
     use crate::Broker;
     use crate::paper::FixturePaper;
+
+    /// DEC-2840: Alpaca's broker runs the later permission checks, the connect check's own, on
+    /// the occasion it is asked.
+    #[test]
+    fn alpacas_broker_runs_the_later_checks() -> Result<(), Box<dyn std::error::Error>> {
+        let broker = AlpacaBroker::new(FixturePaper::new(UtcNanos::EPOCH))?;
+        assert!(broker.has_later_checks());
+        let report = broker
+            .later_check(
+                ConnectionId::new("conn-1")?,
+                Occasion::Daily,
+                AccountRead::Unreadable,
+            )
+            .ok_or("no later check")??;
+        assert_eq!(report.occasion, Occasion::Daily);
+        assert!(report.account_pii_ref.is_none());
+        Ok(())
+    }
 
     /// Alpaca's broker declares Alpaca's rules (trading spec §7.2: always margin, under
     /// `intraday_margin`; DEC-840), which every snapshot it reconciles journals (journal spec

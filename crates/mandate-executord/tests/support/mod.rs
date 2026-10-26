@@ -424,6 +424,8 @@ struct Books {
     refuse_with: Option<(u16, usize)>,
     /// The status every account read is refused with from now on, every other request answered.
     refuse_account: Option<u16>,
+    /// Whether the broker says it runs no later permission checks, as one not built yet.
+    no_later_checks: bool,
     sequence: u64,
 }
 
@@ -551,6 +553,11 @@ impl Paper {
         self.books.borrow_mut().lose_answers = n;
     }
 
+    /// The broker says it runs no later permission checks from now on (DEC-2840).
+    pub fn without_later_checks(&self) {
+        self.books.borrow_mut().no_later_checks = true;
+    }
+
     /// Every account read from now on is refused with `status`; every other request is answered.
     pub fn refuse_account_with(&self, status: u16) {
         self.books.borrow_mut().refuse_account = Some(status);
@@ -591,7 +598,7 @@ impl Broker for Paper {
     }
 
     fn has_later_checks(&self) -> bool {
-        true
+        !self.books.borrow().no_later_checks
     }
 
     /// The paper Alpaca connection's own later checks (DEC-2840), as the process's Alpaca broker

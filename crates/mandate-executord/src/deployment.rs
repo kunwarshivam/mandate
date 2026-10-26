@@ -1061,6 +1061,33 @@ mod tests {
         }
     }
 
+    /// A broker that keeps every default.
+    struct Plain;
+
+    impl Broker for Plain {
+        fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
+            mandate_alpaca::alpaca_profile()
+        }
+
+        fn call(&mut self, _request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
+            Err(ConnectorError::NotSent { code: "fixture" })
+        }
+    }
+
+    /// DEC-2840: a broker whose later checks are not built runs none, and `Named` around it says
+    /// so too, so the process never reads the account for one.
+    #[test]
+    fn a_broker_without_later_checks_runs_none_named_or_not() -> Result<(), String> {
+        let connection = ConnectionId::new("conn-1").map_err(|e| format!("{e:?}"))?;
+        assert!(!Plain.has_later_checks());
+        assert_eq!(
+            Plain.later_check(connection.clone(), Occasion::Daily, AccountRead::Unreadable),
+            None
+        );
+        assert!(!Named::new(Plain, None).has_later_checks());
+        Ok(())
+    }
+
     /// DEC-2840: the binary wraps every broker in `Named`, so it passes the later checks through;
     /// otherwise the trait's default would answer none and the process would never run them.
     #[test]

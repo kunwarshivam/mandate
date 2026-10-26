@@ -624,6 +624,20 @@ fn a_failed_later_check_suspends_the_connection() -> Result<(), Error> {
     Ok(())
 }
 
+/// DEC-2840: a broker that runs no later checks is never checked: nothing is journaled for one,
+/// although the broker would answer one if asked.
+#[test]
+fn a_broker_without_later_checks_is_never_checked() -> Result<(), Error> {
+    let journal = idle_established()?;
+    let broker = Paper::new(&journal);
+    broker.without_later_checks();
+    let day = 86_400;
+    let exit = run_at(&journal, &broker, &[0, 60, 120, day, day + 60], &|_| {})?;
+    assert_eq!(exit, Ok(0));
+    assert_eq!(check_occasions(&journal), ["connect"]);
+    Ok(())
+}
+
 /// DEC-2840: a check whose account read is lost cannot run, so nothing is journaled for it and it
 /// stays due, tried again once a probe's interval later; it counts toward the connection's
 /// network failures, never as a pass or a failure.
