@@ -21,6 +21,9 @@ const NAME: &str = "evaluate_deferring";
 /// `mandate-daemon`, the cell's runtime, whose dry run is that one caller; and `xtask`, this guard.
 const ALLOWED: [&str; 4] = ["mandate-risk", "mandate-ports", "mandate-daemon", "xtask"];
 
+/// The guard's own crate, whose sources spell out what they refuse.
+const GUARD: &str = "xtask";
+
 /// Runs the guard over the workspace at `root`.
 pub(crate) fn guard_in(root: &Path) -> Result<()> {
     eprintln!(
@@ -48,9 +51,12 @@ pub(crate) fn guard_in(root: &Path) -> Result<()> {
 }
 
 /// Every source of `sources`, each `(crate, path, source)`, outside [`ALLOWED`] that names
-/// [`NAME`], with the first line that does.
+/// [`NAME`], with the first line that does; and every source, inside [`ALLOWED`] or not, that
+/// renames it with `as`, which would let a crate outside [`ALLOWED`] call it under another name;
+/// this guard's own crate, [`GUARD`], spells both out and is exempt.
 fn problems(sources: &[(String, String, String)]) -> Vec<String> {
-    sources
+    let renamed = format!("{NAME} as");
+    let named = sources
         .iter()
         .filter(|(krate, _, _)| !ALLOWED.contains(&krate.as_str()))
         .filter_map(|(krate, path, src)| {
@@ -63,8 +69,18 @@ fn problems(sources: &[(String, String, String)]) -> Vec<String> {
                         ALLOWED.join(", ")
                     )
                 })
-        })
-        .collect()
+        });
+    let aliased = sources.iter().filter(|(krate, _, _)| krate != GUARD).filter_map(|(krate, path, src)| {
+        src.lines()
+            .position(|line| line.contains(&renamed))
+            .map(|index| {
+                format!(
+                    "{path}:{}: `{krate}` renames `{NAME}`, which would let another crate call it unnamed",
+                    index + 1
+                )
+            })
+    });
+    named.chain(aliased).collect()
 }
 
 #[cfg(test)]
@@ -106,6 +122,16 @@ mod tests {
             .len(),
             1
         );
+    }
+
+    #[test]
+    fn no_crate_may_rename_it_not_even_an_allowed_one() {
+        let found = problems(&[source(
+            "mandate-ports",
+            "pub use gate::evaluate_deferring as advise;\n",
+        )]);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("renames"), "{found:?}");
     }
 
     #[test]
