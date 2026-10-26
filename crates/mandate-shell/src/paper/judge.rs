@@ -1,10 +1,11 @@
-//! Whether the snapshot holds at the run clock: an empty, active account; the reviewed asset record;
+//! Whether the snapshot holds at the run clock: an empty, active account, where a position row of
+//! quantity exactly zero is empty (DEC-2390 item 1); the reviewed asset record;
 //! a current, uncrossed IEX quote; and a clock inside the regular session, before its close window.
 //! Only instants are compared and moved here; no money or quantity is computed.
 
 use mandate_accounting::AssetClass;
 use mandate_alpaca::Feed;
-use mandate_num::Usd;
+use mandate_num::{SignedQty, Usd};
 use mandate_risk::GateConfig;
 use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos, new_york_date_and_hour};
 use std::time::Duration;
@@ -23,7 +24,11 @@ pub(super) fn judge(
     now: UtcNanos,
     config: &GateConfig,
 ) -> Result<Date, Cause> {
-    if !broker.positions.is_empty() || !broker.open_orders.is_empty() {
+    let holds = broker
+        .positions
+        .iter()
+        .any(|position| position.qty != SignedQty::ZERO);
+    if holds || !broker.open_orders.is_empty() {
         return Err(absent("a paper account with no position and no open order"));
     }
     let account = &broker.account;
