@@ -210,6 +210,8 @@ paths = [
   '''^schemas/workspace-api/examples/commands\.resume-request\.invalid\.json$''',
   '''^schemas/workspace-api/examples/commands\.stop-request\.valid\.json$''',
   '''^schemas/workspace-api/examples/commands\.stop-request\.invalid\.json$''',
+  '''^schemas/workspace-api/examples/commands\.acknowledge-request\.json$''',
+  '''^schemas/workspace-api/examples/commands\.acknowledgment-request-request\.json$''',
   '''^crates/mandate-api/tests/step_up_assertion\.rs$''',
   '''^crates/mandate-api/tests/acknowledge_request\.rs$''',
   '''^docs/specs/reference-cases/journal\.yaml$''',
