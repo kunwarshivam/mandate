@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use mandate_canon::{Digest, parse};
+use mandate_daemon::deployment::ApproverSource;
 use mandate_daemon::deployment::{Resolved, resolved};
 use mandate_journal::{ArtifactRef, Environment, StoredEvent};
 use mandate_spec::document::Mandate;
@@ -161,6 +162,13 @@ impl World {
     }
 }
 
+/// A resolution's connection, approvers and author: what a process starts with.
+fn summary(
+    resolved: Result<Resolved, &'static str>,
+) -> Result<(String, Vec<String>, String), &'static str> {
+    resolved.map(|found| (found.connection, found.approvers, found.author))
+}
+
 fn approvers(list: &[&str]) -> impl FnOnce(&mut serde_json::Value) {
     let list: Vec<String> = list.iter().map(|a| (*a).to_owned()).collect();
     move |d| d["autonomy"]["approval"]["approvers"] = serde_json::json!(list)
@@ -181,12 +189,12 @@ fn a_deployed_agent_s_connection_approvers_and_author_come_from_its_mandate_docu
     );
     world.deployed(AGENT, &version, "paper");
     assert_eq!(
-        world.resolved(),
-        Ok(Resolved {
-            connection: "conn_alpaca_paper_01".into(),
-            approvers: vec!["u-1".into()],
-            author: "user-author".into(),
-        }),
+        summary(world.resolved()),
+        Ok((
+            "conn_alpaca_paper_01".into(),
+            vec!["u-1".into()],
+            "user-author".into()
+        )),
         "DEC-953: the one owner holds every role, and a user reference resolves only to them"
     );
 }
@@ -270,12 +278,12 @@ fn a_version_3_deployment_resolves_as_its_version_2() {
     let version = world.version(("user", "user-author"), approvers(&["user:u-1"]));
     world.deployed_v3(AGENT, &version, "paper");
     assert_eq!(
-        world.resolved(),
-        Ok(Resolved {
-            connection: "conn_alpaca_paper_01".into(),
-            approvers: vec!["u-1".into()],
-            author: "user-author".into(),
-        })
+        summary(world.resolved()),
+        Ok((
+            "conn_alpaca_paper_01".into(),
+            vec!["u-1".into()],
+            "user-author".into()
+        ))
     );
     world.stopped(AGENT);
     assert!(world.resolved().is_err(), "stopped");
@@ -649,5 +657,74 @@ fn each_role_reference_resolves_by_the_founder_s_roles_in_seq_order() {
         world.resolved().unwrap().approvers,
         both,
         "read in seq order"
+    );
+}
+
+/// Backlog `E21-30-daemon-approvers-reread` (DEC-2818): the approvers a process started with are
+/// narrowed at each later read of the control stream to those its rows still resolve to, as the
+/// shell's `ApproverSource::current` narrows them (DEC-2384 item 6). A member deactivated after the
+/// start, or whose rows can no longer be read, never approves, and nobody is ever added: a role
+/// granted after the start does not reach the running process.
+#[test]
+fn the_admitted_approvers_narrow_at_each_read_and_never_grow() {
+    let mut world = World::default();
+    world.established("conn_alpaca_paper_01", "user-owner");
+    world.founded(FOUNDER);
+    let version = world.version(("user", "user-author"), approvers(&["role:approver"]));
+    world.deployed(AGENT, &version, "paper");
+    let found = world.resolved().unwrap();
+    let both = vec![FOUNDER.to_owned(), FOUNDER.to_ascii_lowercase()];
+    assert_eq!(found.approvers, both);
+    assert_eq!(
+        found
+            .source
+            .current(&world.control)
+            .into_iter()
+            .collect::<Vec<_>>(),
+        both,
+        "an unchanged stream keeps them"
+    );
+
+    let mut later = World {
+        control: world.control.clone(),
+        ..World::default()
+    };
+    let seq = later.next();
+    later.control.push(row(
+        seq,
+        "MemberDeactivated",
+        "paper",
+        ("user", FOUNDER),
+        &format!(r#"{{"member":"{FOUNDER}"}}"#),
+    ));
+    assert!(
+        found.source.current(&later.control).is_empty(),
+        "a member deactivated after the start never approves"
+    );
+
+    let mut broken = row(
+        later.next(),
+        "ConnectionChecked",
+        "paper",
+        ("system", "x"),
+        "{}",
+    );
+    broken.body = b"not json".to_vec();
+    let mut unreadable = world.control.clone();
+    unreadable.push(broken);
+    assert!(
+        found.source.current(&unreadable).is_empty(),
+        "a row it cannot read resolves no one"
+    );
+
+    let one = ApproverSource::new(
+        [FOUNDER.to_owned()].into(),
+        "conn_alpaca_paper_01",
+        &["role:approver"],
+    );
+    assert_eq!(
+        one.current(&world.control).into_iter().collect::<Vec<_>>(),
+        [FOUNDER.to_owned()],
+        "the lower-case spelling resolves afresh but was never admitted, so it is never added"
     );
 }

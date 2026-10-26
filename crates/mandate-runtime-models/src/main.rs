@@ -250,6 +250,7 @@ fn run(
                 &agent,
             );
             wiring.models = models;
+            wiring.approvers = Some(found.source);
             if let Some(opted) = opted {
                 let rows = Box::new(PgStore::connect(&dsn)?);
                 let wired = cell::research_through(

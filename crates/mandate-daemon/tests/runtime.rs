@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Key, Object, Value, parse};
+use mandate_daemon::deployment::ApproverSource;
 use mandate_daemon::models::{Evaluated, Models};
 use mandate_daemon::{ArtifactSink, Config, ModelsWiring, Refs, RuntimeProcess, Wiring, fixture};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
@@ -115,6 +116,7 @@ fn wiring() -> Wiring {
         research: None,
         models: None,
         facts: None,
+        approvers: None,
     }
 }
 
@@ -1533,6 +1535,7 @@ fn the_production_fold_is_fed_the_named_account_and_the_clock_once_each() {
         rig.clone(),
         Wiring {
             facts: Some(facts.clone()),
+            approvers: None,
             ..wiring()
         },
         &config(),
@@ -1584,6 +1587,7 @@ fn a_kill_switch_with_an_unplanned_holding_raises_the_operator_alert_once() {
         rig.clone(),
         Wiring {
             facts: Some(facts),
+            approvers: None,
             flatten: Box::new(flatten),
             ..wiring()
         },
@@ -1671,6 +1675,7 @@ fn holding_spy(rig: &Rig, now: i64) -> RuntimeProcess<Rig> {
         rig.clone(),
         Wiring {
             facts: Some(facts),
+            approvers: None,
             flatten: Box::new(flatten),
             ..wiring()
         },
@@ -2381,6 +2386,190 @@ fn a_held_instrument_whose_thesis_is_current_is_not_sold() {
     assert_eq!(count(&rig, "ThesisProposed"), 1, "{:?}", kinds(&rig));
     assert_eq!(count(&rig, "DecisionMade"), 0, "{:?}", kinds(&rig));
     assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
+}
+
+/// The control stream's `ConnectionEstablished` of `CONNECTION` that `user` made, as the workspace
+/// services journal it, and its `ConnectionRevoked`.
+fn owned(rig: &Rig, user: &str) {
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    let payload = format!(
+        r#"{{"connection_id":"{CONNECTION}","broker":"alpaca","environment":"paper","scopes":[],"account_ref":"{ACCOUNT_REF}","user":"{user}"}}"#
+    );
+    rig.control.borrow_mut().push(versioned(
+        CONTROL,
+        seq,
+        "ConnectionEstablished",
+        2,
+        "user",
+        &payload,
+    ));
+}
+
+fn revoked(rig: &Rig) {
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    let payload = format!(r#"{{"connection_id":"{CONNECTION}","reason":"owner_revoked"}}"#);
+    rig.control
+        .borrow_mut()
+        .push(row(CONTROL, seq, "ConnectionRevoked", "user", &payload));
+}
+
+fn approvers_of(process: &RuntimeProcess<Rig>) -> Vec<&str> {
+    process
+        .view()
+        .approval
+        .approvers
+        .iter()
+        .map(String::as_str)
+        .collect()
+}
+
+/// Backlog `E21-30-daemon-approvers-reread` (DEC-2818): every control pass narrows the view's
+/// approvers to those the stream still resolves to, before it hands the pass's records to the core,
+/// so a connection revoked while the process runs leaves no one to approve until the stream
+/// resolves its owner again, never beyond the set admitted at the start; the fixture wiring,
+/// which has no source, keeps its view's approvers.
+#[test]
+fn a_connection_revoked_while_running_leaves_no_approver() {
+    let rig = Rig::default();
+    owned(&rig, "user-owner");
+    let mut wiring = wiring();
+    wiring.approvers = Some(ApproverSource::new(
+        ["user-owner".to_owned()].into(),
+        CONNECTION,
+        &["user:user-owner"],
+    ));
+    let mut process = RuntimeProcess::start(rig.clone(), wiring, &config(), at(NOW));
+    assert_eq!(approvers_of(&process), ["user-owner"]);
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(
+        approvers_of(&process),
+        ["user-owner"],
+        "unchanged rows keep them"
+    );
+    revoked(&rig);
+    tick(&rig, NOW + 2);
+    process.step(at(NOW + 2));
+    assert_eq!(
+        approvers_of(&process),
+        Vec::<&str>::new(),
+        "{:?}",
+        kinds(&rig)
+    );
+    owned(&rig, "user-owner");
+    tick(&rig, NOW + 3);
+    process.step(at(NOW + 3));
+    assert!(
+        approvers_of(&process)
+            .iter()
+            .all(|user| *user == "user-owner"),
+        "nobody outside the admitted set is added"
+    );
+
+    let fixture = Rig::default();
+    owned(&fixture, "user-owner");
+    let mut kept = start(&fixture, NOW);
+    revoked(&fixture);
+    tick(&fixture, NOW + 1);
+    kept.step(at(NOW + 1));
+    assert_eq!(
+        approvers_of(&kept),
+        ["user-owner"],
+        "no source keeps the view"
+    );
+}
+
+/// The owner's grant of the runtime's one pending request, as the CLI commits it to the control
+/// stream at `at`, with step-up evidence from the same second.
+fn owner_grants_pending(rig: &Rig, at: i64) {
+    let rows = agent_rows(rig);
+    let request = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalRequested")
+        .unwrap_or_else(|| panic!("the opening was asked: {:?}", kinds(rig)));
+    let body = parse(&request.body).unwrap();
+    let hash = body
+        .get("payload")
+        .and_then(|payload| payload.get("content_hash"))
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_owned();
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    let payload = format!(
+        r#"{{"agent":"{AGENT}","approval":"{}","verdict":"approved","content_hash":"{hash}","submitted_at":{at},"step_up":{{"assertion_id":"assertion-{seq}","authenticated_at":{at},"method":"cli_confirm"}},"responder":"user-owner","role":"approver"}}"#,
+        request.event_id
+    );
+    rig.control.borrow_mut().push(row(
+        CONTROL,
+        seq,
+        "ApprovalResponseSubmitted",
+        "user",
+        &payload,
+    ));
+}
+
+/// What the runtime judged the owner's grant of a deferring opening, when the connection was or
+/// was not revoked in the same control pass the grant arrives in.
+fn judged(revoke: bool) -> (String, String) {
+    let rig = Rig::default();
+    owned(&rig, "user-owner");
+    reconciled(&rig, ACCOUNT);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"AAPL","price":"155","source":"fixture","feed":"sip","risk_clock":{NOW}}}"#
+        ),
+    );
+    let mut wiring = fixture::wiring("user-owner", AGENT_STREAM);
+    wiring.gate = Box::new(Deferring);
+    wiring.plan = Box::new(Opening);
+    wiring.view.version = format!("sha256:{}", Digest::of(b"mandate-daemon fixture").to_hex());
+    wiring.view.working_universe = BTreeSet::from([InstrumentId::new("AAPL").unwrap()]);
+    wiring.approvers = Some(ApproverSource::new(
+        ["user-owner".to_owned()].into(),
+        CONNECTION,
+        &["user:user-owner"],
+    ));
+    let mut process = RuntimeProcess::start(rig.clone(), wiring, &config(), at(NOW));
+    for second in 1..4 {
+        tick(&rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    assert_eq!(count(&rig, "ApprovalRequested"), 1, "{:?}", kinds(&rig));
+    if revoke {
+        revoked(&rig);
+    }
+    owner_grants_pending(&rig, NOW + 4);
+    tick(&rig, NOW + 4);
+    process.step(at(NOW + 4));
+    let rows = agent_rows(&rig);
+    let responded = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalResponded")
+        .unwrap_or_else(|| panic!("the grant was judged: {:?}", kinds(&rig)));
+    let body = parse(&responded.body).unwrap();
+    let member = |name: &str| {
+        body.get("payload")
+            .and_then(|payload| payload.get(name))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    (member("result"), member("reason"))
+}
+
+/// DEC-2818 item 3, end to end: a grant in the same control pass as the revocation of its
+/// approver's connection is judged against the narrowed set and refused, while the same grant with
+/// no revocation is admitted, so narrowing after the pass's records are handed would fail here.
+#[test]
+fn a_grant_in_the_pass_that_revokes_its_approver_is_refused() {
+    assert_eq!(judged(false).0, "admitted");
+    assert_eq!(
+        judged(true),
+        ("refused".to_owned(), "not_an_approver".to_owned())
+    );
 }
 
 /// The rule set the gate reads, the tracer's reviewed configuration, as the fold resolves it from
