@@ -2545,8 +2545,9 @@ fn a_mode_record_naming_a_later_owed_cause_is_not_reproduced() {
     assert_eq!(unreadable(fold.view()), (UnreadableCause::NotReproduced, 7));
 }
 
-/// A tick or a mark from before the agent's deployment is not its input and steps nothing; an own
-/// fill or fee there cannot be, and is a refusal to decide (DEC-2804 item 3).
+/// A tick or a mark from before the agent's deployment is not its input and steps nothing, a mark
+/// of an earlier agent's instrument included; an own fill or fee there cannot be, and is a refusal
+/// to decide (DEC-2804 item 3).
 #[test]
 fn rows_from_before_the_deployment_are_not_the_agents() {
     let mandate = mandate();
@@ -2554,7 +2555,7 @@ fn rows_from_before_the_deployment_are_not_the_agents() {
     let mut fold = open(&mandate, &Wall);
     let opened = fold.view().clone();
     fold.fold(&tick(2, before)).unwrap();
-    fold.fold(&mark(3, XYZ, before, "50", true, "regular"))
+    fold.fold(&mark(3, ETH, before, "50", true, "regular"))
         .unwrap();
     let RiskView::Readable { snapshot, head } = fold.view() else {
         panic!("readable");
