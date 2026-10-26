@@ -534,7 +534,8 @@ fn answered(evidence: &StepUpEvidence) -> Option<Value> {
 /// Whether the principal is one the mandate version an approval binds lists in
 /// `autonomy.approval.approvers` ([DEC-2129] item 7, as [DEC-2130] item 1 reads it), at the
 /// membership fold the matrix check reads. A reference lists only an active member holding the
-/// effective `approver` role: `user:<id>` the member whose ULID text is `<id>`, `role:approver`
+/// effective `approver` role: `user:<id>` the member whose principal id `<id>` parses to as a ULID
+/// in either case (anything else lists no one), `role:approver`
 /// any, `role:workspace_admin` one also holding `workspace_admin`, and `role:owner` one a founding
 /// `MemberActivated` made. A version that is not named, not stored, or not a mandate, or a fold
 /// that cannot be read, is `journal_unavailable`, never a pass.
@@ -566,13 +567,11 @@ fn approves(
         .own_roles(principal)
         .map_err(|_| Refused::JournalUnavailable)?
         .unwrap_or_default();
-    let id = principal
-        .to_ulid_text()
-        .map_err(|_| Refused::JournalUnavailable)?;
     let listed = |approver: &str| {
         roles.contains(&Role::Approver)
             && match approver.split_once(':') {
-                Some(("user", user)) => user == id,
+                Some(("user", user)) => PrincipalId::from_ulid_text(&user.to_ascii_uppercase())
+                    .is_ok_and(|listed| listed == principal),
                 Some(("role", "approver")) => true,
                 Some(("role", "workspace_admin")) => roles.contains(&Role::WorkspaceAdmin),
                 Some(("role", "owner")) => founding,
