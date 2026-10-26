@@ -70,23 +70,7 @@ impl Reviewed {
         configuration: &Configuration,
     ) -> Result<Self, InputError> {
         let mandate = confirmed.mandate().clone();
-        let deployed_on = confirmed.deployed_on();
-        let bindings = [
-            &configuration.model_version,
-            &configuration.fee_config,
-            &configuration.trading_calendar,
-            &configuration.rule_set,
-            &configuration.instrument_snapshot,
-        ];
-        if deployed_on.environment != mandate.environment
-            || bindings
-                .iter()
-                .any(|registered| registered.origin != *deployed_on)
-        {
-            return Err(missing(
-                "every binding journaled on the deployment's own control stream",
-            ));
-        }
+        on_its_own_stream(confirmed, configuration)?;
         let [pinned] = mandate.universe.pinned_instruments.as_slice() else {
             return Err(missing("one pinned production instrument"));
         };
@@ -111,21 +95,63 @@ impl Reviewed {
         {
             return Err(missing("the registered instrument"));
         }
-        let instrument = ReviewedInstrument {
-            asset_id: pinned.asset_id.clone(),
-            symbol: InstrumentId::new(&pinned.symbol)
-                .map_err(|_| missing("the registered instrument symbol"))?,
-            asset_class: AssetClass::UsEquity,
-            exchange: snapshot.exchange,
-            gate_exchange: match snapshot.exchange {
-                SnapshotExchange::Arca => Exchange::Arca,
-                SnapshotExchange::Nasdaq => Exchange::Nasdaq,
-            },
-            increment: ShareIncrement::Whole,
-            increment_qty: Qty::parse(WHOLE_SHARE)?,
-            etp: EtpClass::Plain,
-            etp_classified_at: snapshot.etp_classified_at,
+        let instrument = reviewed_instrument(&pinned.asset_id, &pinned.symbol, snapshot)?;
+        let model = model.clone();
+        Self::assemble(mandate, configuration, &model, instrument)
+    }
+
+    /// A research deployment's artifacts for one admitted instrument (DEC-2819 item 3). The
+    /// deployment's model is the confirmed version's one signal model that admits instruments,
+    /// which only an unpinned version has (the version passed V-036, at most one such model, and
+    /// V-037, none in a pinned version); `configuration` read its registration under its own
+    /// hash. The
+    /// instrument is the registered snapshot's, a US equity the mandate's asset classes allow. The
+    /// fee schedule, calendar and rule set are read as [`Self::from_registered`] reads them, every
+    /// binding on the deployment's own stream.
+    ///
+    /// # Errors
+    /// [`InputError::Missing`] for a registered object the run cannot use, a pinned version, or a
+    /// version with no one admitting model.
+    pub fn from_admitted(
+        confirmed: &ConfirmedVersion,
+        configuration: &Configuration,
+    ) -> Result<Self, InputError> {
+        let mandate = confirmed.mandate().clone();
+        on_its_own_stream(confirmed, configuration)?;
+        let Some(model) = mandate
+            .behavior
+            .signal_models
+            .iter()
+            .find(|model| model.admits_instruments)
+        else {
+            return Err(missing("the one model that admits instruments"));
         };
+        if model.content_hash != configuration.model_version.content_hash {
+            return Err(missing("the registered admitting model"));
+        }
+        let snapshot = &configuration.instrument;
+        if !mandate
+            .universe
+            .asset_classes
+            .contains(&AssetClass::UsEquity)
+        {
+            return Err(missing("an asset class the mandate allows"));
+        }
+        let asset_id = AssetId::parse(&snapshot.instrument_id)
+            .map_err(|_| missing("the admitted instrument's asset id"))?;
+        let instrument = reviewed_instrument(&asset_id, &snapshot.symbol, snapshot)?;
+        let model = model.clone();
+        Self::assemble(mandate, configuration, &model, instrument)
+    }
+
+    /// The artifacts of `mandate`, `model` and `instrument` from `configuration`'s fee schedule,
+    /// calendar and rule set, the config references hashing the registered bytes.
+    fn assemble(
+        mandate: mandate_spec::Mandate,
+        configuration: &Configuration,
+        model: &mandate_spec::document::SignalModel,
+        instrument: ReviewedInstrument,
+    ) -> Result<Self, InputError> {
         let fee = fee_artifact(configuration.fee_config.bytes.clone())?;
         let calendar = artifact_from(
             configuration.trading_calendar.bytes.clone(),
@@ -160,4 +186,53 @@ impl Reviewed {
             executor_config,
         })
     }
+}
+
+/// Refuses unless every binding of `configuration` was journaled on the deployment's own control
+/// stream, in the mandate's environment (DEC-952 item 1, DEC-957).
+fn on_its_own_stream(
+    confirmed: &ConfirmedVersion,
+    configuration: &Configuration,
+) -> Result<(), InputError> {
+    let deployed_on = confirmed.deployed_on();
+    let bindings = [
+        &configuration.model_version,
+        &configuration.fee_config,
+        &configuration.trading_calendar,
+        &configuration.rule_set,
+        &configuration.instrument_snapshot,
+    ];
+    if deployed_on.environment != confirmed.mandate().environment
+        || bindings
+            .iter()
+            .any(|registered| registered.origin != *deployed_on)
+    {
+        return Err(missing(
+            "every binding journaled on the deployment's own control stream",
+        ));
+    }
+    Ok(())
+}
+
+/// The reviewed plain, whole-share US equity `asset_id`, `symbol`, as `snapshot` lists it.
+fn reviewed_instrument(
+    asset_id: &AssetId,
+    symbol: &str,
+    snapshot: &crate::control::InstrumentSnapshot,
+) -> Result<ReviewedInstrument, InputError> {
+    Ok(ReviewedInstrument {
+        asset_id: asset_id.clone(),
+        symbol: InstrumentId::new(symbol)
+            .map_err(|_| missing("the registered instrument symbol"))?,
+        asset_class: AssetClass::UsEquity,
+        exchange: snapshot.exchange,
+        gate_exchange: match snapshot.exchange {
+            SnapshotExchange::Arca => Exchange::Arca,
+            SnapshotExchange::Nasdaq => Exchange::Nasdaq,
+        },
+        increment: ShareIncrement::Whole,
+        increment_qty: Qty::parse(WHOLE_SHARE)?,
+        etp: EtpClass::Plain,
+        etp_classified_at: snapshot.etp_classified_at,
+    })
 }
