@@ -105,7 +105,6 @@ fn cash(broker: &mut AlpacaBroker<FixturePaper>) -> Result<(String, String), Err
 /// the cursor it returns reads nothing new, the position is the fill, and the cash falls by its
 /// notional with no fee accrued (paper's fees are simulated).
 #[test]
-#[ignore = "pending E21-30"]
 fn a_limit_opening_fills_whole_at_its_limit() -> Result<(), Error> {
     let mut broker = broker()?;
     let placed = submit(
@@ -153,7 +152,6 @@ fn a_limit_opening_fills_whole_at_its_limit() -> Result<(), Error> {
 /// recorded stop and one sell limit at the take-profit, `new`, nested in the open orders' listing
 /// and in the lookup of the entry by its own id.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_brackets_legs_rest_under_its_filled_entry() -> Result<(), Error> {
     let mut broker = broker()?;
     let id = "md-01JINTENT0000000000000000A";
@@ -201,7 +199,6 @@ fn a_brackets_legs_rest_under_its_filled_entry() -> Result<(), Error> {
 /// A sell limit fills at its limit too: an exit of 4 of the 10 leaves 6, at the buy's average
 /// entry, and brings back its notional.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_sell_limit_fills_and_reduces_the_position() -> Result<(), Error> {
     let mut broker = broker()?;
     submit(
@@ -228,7 +225,6 @@ fn a_sell_limit_fills_and_reduces_the_position() -> Result<(), Error> {
 /// Protection never fills here, since the fixture has no price: an OCO's two orders and a lone
 /// stop rest `new`, unfilled, and cancel.
 #[test]
-#[ignore = "pending E21-30"]
 fn protection_rests_unfilled() -> Result<(), Error> {
     let mut broker = broker()?;
     submit(
@@ -270,7 +266,6 @@ fn protection_rests_unfilled() -> Result<(), Error> {
 
 /// A filled order is not cancelable, as Alpaca refuses it.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_filled_order_does_not_cancel() -> Result<(), Error> {
     let mut broker = broker()?;
     let id = "md-01JINTENT0000000000000000A";
@@ -336,7 +331,6 @@ fn action(payload: &Value) -> Option<&str> {
 /// a clock tick, so the process reads the broker again while its order works and books the fill
 /// without a restart.
 #[test]
-#[ignore = "pending E21-30"]
 fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Error> {
     let journal: Journal = deployed()?;
     propose(&journal, AGENT, OPEN, "buy", "10", "150", "open")?;

@@ -1,7 +1,0 @@
-file = "crates/mandate-executord/tests/fixture_fills.rs"
-test = "a_sell_limit_fills_and_reduces_the_position"
-reason = """
-`FixturePaper::filling` is a stub that rests every order as `FixturePaper::new` does: its limit
-orders rest `new`, unfilled. The test fails on that behaviour, not at a stub's report. X1b-3's
-implementation fills a limit order at its limit, and deletes this row.
-"""
