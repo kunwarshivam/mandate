@@ -7,7 +7,8 @@
 //! `AccountSnapshotRecorded` registered once stream K's fee-step writer conformed (#456), in the
 //! change that journals that writer's form in `fees`, so the fee step's snapshot is never refused
 //! for a member while it pauses every agent and alerts the owner (`AGENTS.md` rules 3 and 13,
-//! DEC-261 item 7, DEC-402).
+//! DEC-261 item 7, DEC-402). Journal spec v0.89 §9.35 adds its version 2, which carries the
+//! account's day-trading facts, with version 1 still registered and rule 24 read at both (DEC-2398).
 //!
 //! The account stream's `MandateVersionApplied` and `UniverseChanged` are journal spec v0.8 §9.3's,
 //! with rules 29 to 33, routed here beside §9.2's (DEC-403, DEC-404).
@@ -125,6 +126,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || crate::deployment::CONTROL.contains(&event_type)
                 || crate::acknowledgments::RECORDS.contains(&event_type)
                 || crate::confirmations::CONTROL.contains(&event_type)
+                || crate::real_money::CONTROL.contains(&event_type)
                 || crate::credentials::CONTROL.contains(&event_type)
                 || crate::connection_roles::CONTROL.contains(&event_type)
         }
@@ -167,6 +169,7 @@ pub(crate) fn closed_schema(
         .or_else(|| crate::risk_limits::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::acknowledgments::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::confirmations::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::real_money::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::credentials::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::connection_roles::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
@@ -248,6 +251,7 @@ pub(crate) fn payload(
     crate::risk_limits::rules(event_type, &payload, causation_id)?;
     crate::acknowledgments::rules(event_type, &payload)?;
     crate::confirmations::rules(event_type, &payload, environment, actor, event_time)?;
+    crate::real_money::rules(event_type, &payload, actor)?;
     crate::credentials::rules(event_type, &payload, actor, event_time, causation_id)?;
     crate::connection_roles::rules(event_type, actor, causation_id)?;
     let p = Payload(&payload);
@@ -946,6 +950,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("AgentStopped", 1) => Some(&AGENT_STOPPED),
         ("OwnerCommandRefused", 1) => Some(&OWNER_COMMAND_REFUSED),
         (SNAPSHOT, 1) => Some(&ACCOUNT_SNAPSHOT_RECORDED),
+        (SNAPSHOT, 2) => Some(&ACCOUNT_SNAPSHOT_RECORDED_V2),
         (ACCOUNT_STATE, 1) => Some(&ACCOUNT_STATE_OBSERVED),
         ("MandateVersionApplied", 1) => Some(&MANDATE_VERSION_APPLIED),
         ("UniverseChanged", 1) => Some(&UNIVERSE_CHANGED),
@@ -1165,6 +1170,38 @@ static ACCOUNT_SNAPSHOT_RECORDED: Ty = Ty::Record(&[
     ("buying_power", Ty::Decimal),
     ("non_marginable_buying_power", Ty::Decimal),
     ("accrued_fees", Ty::Decimal),
+    ("model_cash", Ty::Nullable(&Ty::Decimal)),
+    ("cash_band", Ty::Nullable(&Ty::Decimal)),
+    ("cash_in_band", Ty::Nullable(&Ty::Bool)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// Journal spec v0.89 §9.35's `AccountSnapshotRecorded` at `schema_version` 2 (DEC-2398): version
+/// 1's account members, then the connector's declared account type and day-trading regime, each
+/// `null` when it declares none, and the broker's prior-close equity and maintenance margin, then
+/// version 1's cash comparison, with `risk_clock` last. Rule 24 reads both versions alike.
+static ACCOUNT_SNAPSHOT_RECORDED_V2: Ty = Ty::Record(&[
+    ("status", Ty::Str),
+    ("crypto_status", Ty::Str),
+    ("trading_blocked", Ty::Bool),
+    ("account_blocked", Ty::Bool),
+    ("trade_suspended_by_user", Ty::Bool),
+    ("multiplier", Ty::Int),
+    ("equity", Ty::Decimal),
+    ("cash", Ty::Decimal),
+    ("buying_power", Ty::Decimal),
+    ("non_marginable_buying_power", Ty::Decimal),
+    ("accrued_fees", Ty::Decimal),
+    (
+        "account_type",
+        Ty::Nullable(&Ty::OneOf(&["cash", "margin"])),
+    ),
+    (
+        "day_trading_regime",
+        Ty::Nullable(&Ty::OneOf(&["intraday_margin", "legacy_pdt"])),
+    ),
+    ("last_equity", Ty::Decimal),
+    ("maintenance_margin", Ty::Decimal),
     ("model_cash", Ty::Nullable(&Ty::Decimal)),
     ("cash_band", Ty::Nullable(&Ty::Decimal)),
     ("cash_in_band", Ty::Nullable(&Ty::Bool)),
@@ -2196,20 +2233,26 @@ mod tests {
         Ok(())
     }
 
-    /// A snapshot at any `schema_version` but 1 is refused as `unknown_schema`, as every other §9.2
-    /// type is: the snapshot reaches its schema through `schema`'s version gate, never around it
-    /// (#467 round 1, m3).
+    /// A snapshot at any `schema_version` but 1 and 2 is refused as `unknown_schema`, as every other
+    /// §9.2 type is: the snapshot reaches its schema through `schema`'s version gate, never around
+    /// it (#467 round 1, m3). Version 2 is §9.35's (DEC-2398): a version-1 payload at version 2
+    /// lacks its four members and is refused at the first, `account_type`.
     #[test]
     fn a_snapshot_at_another_schema_version_is_an_unknown_schema() -> Result<(), String> {
         let section = section()?;
-        let mut body = base_of(&section, "AccountSnapshotRecorded")?;
-        let version = Key::new("schema_version").map_err(|_| "key")?;
-        let two = Int::new(2).ok_or("an integer")?;
-        body.insert(version, Value::Int(two));
-        assert_eq!(
-            refusal(body),
-            Some(("unknown_schema".to_owned(), "payload".to_owned()))
-        );
+        for (version, refused) in [
+            (2, ("schema", "payload.account_type")),
+            (3, ("unknown_schema", "payload")),
+        ] {
+            let mut body = base_of(&section, "AccountSnapshotRecorded")?;
+            let key = Key::new("schema_version").map_err(|_| "key")?;
+            body.insert(key, Value::Int(Int::new(version).ok_or("an integer")?));
+            assert_eq!(
+                refusal(body),
+                Some((refused.0.to_owned(), refused.1.to_owned())),
+                "at version {version}"
+            );
+        }
         Ok(())
     }
 

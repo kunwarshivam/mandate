@@ -93,6 +93,9 @@ DIGEST_HEX_FORM = re.compile(r"^[0-9a-f]{64}\Z")
 # §9.29 (DEC-2104 item 1): the code the web app shows for a challenge, normalized.
 CONFIRM_CODE = T("confirm_code")
 CONFIRM_CODE_FORM = re.compile(r"^[0-9A-HJKMNP-TV-Z]{8}\Z")
+# §9.36 (DEC-2134): the accepted decision an enabled real-money gate cites.
+DECISION_ID = T("decision_id")
+DECISION_ID_FORM = re.compile(r"^DEC-[1-9][0-9]{0,4}\Z")
 # §9.31 (DEC-2108 item 2): a WebAuthn credential id as unpadded base64url, 16 to 1023 bytes, and the
 # authenticator's 32-bit signature counter.
 CREDENTIAL_ID = T("credential_id")
@@ -541,6 +544,20 @@ SCHEMAS[("ctl", "StepUpConfirmed")] = rec(
     ("principal", ULID),
     ("code", CONFIRM_CODE),
     ("confirmed_at", INT),
+)
+
+# §9.36 v0.91 (DEC-2134): the customer real-money gate's setting, by a platform operator, and the
+# workspace API's refusal of a request that named another environment while it was off.
+SCHEMAS[("ctl", "RealMoneyGateChanged")] = rec(
+    ("enabled", BOOL),
+    ("operator", ULID),
+    ("decision", opt(DECISION_ID)),
+)
+SCHEMAS[("ctl", "RealMoneyRefused")] = rec(
+    ("action", one_of("create_version", "deploy", "connect", "go_live")),
+    ("requested", one_of("live")),
+    ("principal", ULID),
+    ("reason", one_of("gate_off")),
 )
 
 # §9.31 v0.69 (DEC-2108): a member's passkeys with the workspace's relying party, the fold the API's
@@ -1314,6 +1331,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "OwnerConfirmationReceived"): (1,),
     ("acct", "AccountCloseRequested"): (1,),
     ("acct", "AccountRestrictionChanged"): (1,),
+    ("acct", "KillSwitchActivated"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2, 3),
@@ -1375,6 +1393,21 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("floor", DEC),
         ("expires_at", INT),
         ("copied_from", ULID),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # §9.5 (DEC-2139): a kill switch the executor applied on its account, as it writes it.
+    ("acct", "KillSwitchActivated", 1): rec(
+        ("scope", one_of("agent", "account")),
+        ("subject", IDENT_T),
+        ("initiator", one_of("owner", "risk_limit", "platform_operator")),
+        ("purpose", one_of("risk_exit", "owner_exit")),
+        ("cancels", list_of(STR)),
+        ("closes", list_of(STR)),
+        ("deferred", list_of(STR)),
+        ("floor", opt(DEC)),
+        ("bid", opt(DEC)),
+        ("bid_size", opt(DEC)),
+        ("copied_from", opt(ULID)),
         ("risk_clock", RISK_CLOCK),
     ),
     # §9.5 (DEC-2137): an account restriction the executor detected, with its closed cause
@@ -1635,12 +1668,16 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
         if whole and 0 <= value <= top:
             return []
         return [Violation("types", "schema", path)]
-    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest", "limit_key", "confirm_code", "credential_id"):
+    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest", "limit_key", "confirm_code", "credential_id", "decision_id"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
         if ty.kind == "credential_id":
             padless = len(value) % 4 != 1 or "types.credential_id_length" in skip
             ok = bool(CREDENTIAL_ID_FORM.match(value)) and padless
+        elif ty.kind == "decision_id":
+            ok = bool(DECISION_ID_FORM.match(value)) or (
+                "types.decision_id_zero" in skip and bool(re.match(r"^DEC-[0-9]{1,5}\Z", value))
+            )
         elif ty.kind == "confirm_code":
             ok = bool(CONFIRM_CODE_FORM.match(value)) or (
                 "types.confirm_code_case" in skip and bool(CONFIRM_CODE_FORM.match(value.upper()))
@@ -1916,6 +1953,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
         wrong = next((m for m in prices if not positive(m)), None)
         rule("247", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "KillSwitchActivated" and draft["stream_id"].startswith("acct:"):
+        account_switch_rules(draft, skip, rule)
     if event_type == "AccountRestrictionChanged":
         blocked = p["restriction"] == "blocked"
         if "rule.279.closing_only_any_code" in skip:
@@ -2167,6 +2206,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     out += deployment_manager_violations(event_type, draft, skip)
     out += connection_role_violations(event_type, draft, skip)
     out += retirement_held_violations(event_type, draft, skip)
+    out += real_money_violations(event_type, draft, skip)
     return out
 
 
@@ -2619,6 +2659,40 @@ def gap_nanos(start, end) -> int | None:
     return instant_nanos(end) - instant_nanos(start)
 
 
+KILL_SWITCH_PURPOSE = {"owner": "owner_exit", "risk_limit": "risk_exit", "platform_operator": "risk_exit"}
+CONFIRMED = ("floor", "bid", "bid_size")
+
+
+def account_switch_rules(draft: dict, skip: frozenset[str], rule) -> None:
+    """Rules 281, 282 and 293 to 296 (DEC-2139) on the account stream's `KillSwitchActivated`, in
+    that order, the first that fails reported."""
+    p = draft["payload"]
+    owner = p["initiator"] == "owner"
+    purpose = KILL_SWITCH_PURPOSE[p["initiator"]]
+    if "rule.281.any_exit" in skip:
+        purpose = p["purpose"]
+    confirmed = [m for m in CONFIRMED if p[m] is not None]
+    if "order.rule_282_bid_first" in skip:
+        mixed = next((m for m in ("bid_size", "bid") if (p[m] is None) != (p["floor"] is None)), None)
+    else:
+        mixed = next((m for m in ("bid", "bid_size") if (p[m] is None) != (p["floor"] is None)), None)
+    account = p["scope"] == "account"
+    overlap = set(p["closes"]) & set(p["deferred"])
+    clauses = [
+        ("281", p["purpose"] == purpose, "payload.purpose"),
+        ("282", mixed is None, f"payload.{mixed}"),
+        ("293", owner or not confirmed or "rule.293.any_initiator" in skip, "payload.floor"),
+        ("294.cancels", not account or not p["cancels"], "payload.cancels"),
+        ("294.deferred", not account or not p["deferred"], "payload.deferred"),
+        ("295", draft["causation_id"] is not None, "causation_id"),
+        ("296", not overlap, "payload.deferred"),
+    ]
+    for name, holds, path in clauses:
+        if not holds and f"rule.{name}" not in skip:
+            rule(name, False, "schema", path)
+            return
+
+
 def passkey_step_up(number: str, draft: dict, skip: frozenset[str], rule) -> bool:
     """Rules 267 and 268's evidence clauses (v0.84, DEC-2131): a passkey's step-up, authenticated 0
     to 300 seconds before the envelope's `event_time`, the method judged first."""
@@ -3000,6 +3074,31 @@ def connection_role_violations(event_type: str, draft: dict, skip: frozenset[str
 
     rule("261.system", draft["actor"]["kind"] == "system", "actor.kind")
     rule("261.cause", draft["causation_id"] is not None, "causation_id")
+    return out
+
+
+def real_money_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.35's rules 273 and 274, on a well-typed payload: the gate is set by a platform operator as
+    itself, and turned on only with a decision; a refusal is recorded as the principal refused."""
+    if event_type not in ("RealMoneyGateChanged", "RealMoneyRefused"):
+        return []
+    p = draft["payload"]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> bool:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+            return False
+        return True
+
+    actor = draft["actor"]
+    if event_type == "RealMoneyGateChanged":
+        if rule("273.operator", actor["kind"] == "platform_operator", "actor.kind"):
+            rule("273.self", actor["id"] == p["operator"], "actor.id")
+        rule("273.decision", p["enabled"] is not True or p["decision"] is not None, "payload.decision")
+    else:
+        if rule("274.user", actor["kind"] == "user", "actor.kind"):
+            rule("274.self", actor["id"] == p["principal"], "actor.id")
     return out
 
 

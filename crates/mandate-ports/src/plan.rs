@@ -2,12 +2,12 @@
 //! runtime's model outputs mapped to the builder's, the builder's proposal mapped back to the
 //! runtime's, and the §6 classification with the §6.2 step 5c policy overlay.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_builder::{
     AccountSnapshot, Action as BuilderAction, ActionContext, BuilderMandate, Clip as BuilderClip,
-    Direction, ModelOutput as BuilderModelOutput,
+    Direction, Market, ModelOutput as BuilderModelOutput,
 };
 use mandate_canon::Value;
 use mandate_domain::{AutonomyDecision, Purpose as BuilderPurpose};
@@ -118,7 +118,6 @@ fn runtime_proposal(
     context: &BuilderContext,
     mandate: &BuilderMandate,
     validated: &ValidatedMandate,
-    exit_origin: ExitOrigin,
 ) -> Result<Option<Proposal>, PortError> {
     let mut clips_applied = Vec::new();
     if proposal.clipped_by.contains(&BuilderClip::Limits) {
@@ -202,14 +201,14 @@ fn runtime_proposal(
             )
         })
         .collect();
-    let proposal = Proposal {
+    Ok(Some(Proposal {
         instrument,
         asset_class: context.market.asset_class,
         side,
         qty,
         limit,
         purpose,
-        exit_origin: (purpose == Purpose::DiscretionaryExit).then_some(exit_origin),
+        exit_origin: (purpose == Purpose::DiscretionaryExit).then_some(ExitOrigin::Signal),
         exit_conviction: Some(Value::Str(proposal.combined.exit_conviction.to_string())),
         buy_conviction: Some(Value::Str(proposal.combined.buy_conviction.to_string())),
         combined_score: Value::Str(proposal.combined.score.to_string()),
@@ -217,26 +216,7 @@ fn runtime_proposal(
         model_weights,
         clips_applied,
         execution: Some(context.execution),
-    };
-    Ok(Some(if exit_origin == ExitOrigin::RemovedInstrument {
-        unevaluated(proposal)
-    } else {
-        proposal
     }))
-}
-
-/// A thesis-ended exit's proposal as journal spec §9.1 rule 8 records a decision no §8.3
-/// evaluation produced: no c, b, or s, and no outputs, weights, or clips (DEC-2391). The branch
-/// read no output, so there is nothing true to put there; the builder's no-output proposal
-/// already has no outputs and no clips, and the weights, which come from the mandate, go here.
-fn unevaluated(proposal: Proposal) -> Proposal {
-    Proposal {
-        exit_conviction: None,
-        buy_conviction: None,
-        combined_score: Value::Null,
-        model_weights: BTreeMap::new(),
-        ..proposal
-    }
 }
 
 /// Checks that `side` cannot open a short for `purpose`, that `execution` carries the protective
@@ -314,26 +294,12 @@ pub fn size(
             .iter()
             .any(|ended| ended.as_str() == builder.market.instrument.as_str())
     {
-        let working = inputs
-            .working_exits
-            .iter()
-            .find(|(instrument, _)| instrument.as_str() == builder.market.instrument.as_str())
-            .map_or(Qty::ZERO, |(_, qty)| *qty);
-        let unsold = AccountSnapshot {
-            position_qty: builder
-                .account
-                .position_qty
-                .checked_sub(working)
-                .unwrap_or(Qty::ZERO),
-            ..builder.account.clone()
-        };
-        let proposal = mandate_builder::propose_thesis_exit(&unsold, &builder.market)?;
-        return runtime_proposal(
-            proposal,
-            builder,
-            &mandate,
-            validated,
-            ExitOrigin::RemovedInstrument,
+        return thesis_exit(
+            false,
+            &builder.account,
+            &builder.market,
+            builder.execution,
+            inputs,
         );
     }
     let outputs = builder_outputs(inputs, &mandate, builder)?;
@@ -345,7 +311,84 @@ pub fn size(
         &outputs,
         now,
     )?;
-    runtime_proposal(proposal, builder, &mandate, validated, ExitOrigin::Signal)
+    runtime_proposal(proposal, builder, &mandate, validated)
+}
+
+/// Mandate spec v0.10 §8.3 step 2's first branch on its own (MI-34, DEC-2391): when `market`'s
+/// instrument's thesis ended (`inputs.ended_theses`) and the universe is unpinned, the whole
+/// `account` position less the runtime's working exits in it, at the bid, with `exit_origin`
+/// `removed_instrument`; `Ok(None)` for any other instrument, a pinned universe (V-037: the owner's
+/// list is the universe), or nothing left to sell. It reads no model output, no validated mandate,
+/// and no opening fact, so nothing an opening needs (the account's equity against the allocation,
+/// a protective stop, a model registry) can hold the exit (`AGENTS.md` rule 13). Its
+/// `DecisionMade` carries no c, b, or s and no outputs, weights, or clips (journal spec §9.1 rule
+/// 8). When the working exits cover the position, the subtraction refuses to go below zero and the
+/// branch holds, so an exit already working is never stacked.
+///
+/// # Errors
+/// [`PortError::Absent`] for an execution that is not a plain sell of the market's asset class;
+/// [`PortError::Builder`] as the exit's notional refuses.
+pub fn thesis_exit(
+    pinned: bool,
+    account: &AccountSnapshot,
+    market: &Market,
+    execution: OrderExecution,
+    inputs: &SignalInputs,
+) -> Result<Option<Proposal>, PortError> {
+    let instrument = market.instrument.as_str();
+    if pinned
+        || !inputs
+            .ended_theses
+            .iter()
+            .any(|ended| ended.as_str() == instrument)
+    {
+        return Ok(None);
+    }
+    let working = inputs
+        .working_exits
+        .iter()
+        .find(|(held, _)| held.as_str() == instrument)
+        .map_or(Qty::ZERO, |(_, qty)| *qty);
+    let unsold = AccountSnapshot {
+        position_qty: account
+            .position_qty
+            .checked_sub(working)
+            .unwrap_or(Qty::ZERO),
+        ..account.clone()
+    };
+    let BuilderAction::Sell {
+        purpose,
+        qty,
+        limit_price,
+        ..
+    } = mandate_builder::propose_thesis_exit(&unsold, market)?.action
+    else {
+        return Ok(None);
+    };
+    validate_order_execution(Side::Sell, runtime_purpose(purpose), execution)?;
+    if execution.asset_class != market.asset_class || execution.protection_required {
+        return Err(PortError::Absent {
+            what: "a plain sell's execution in the market's asset class",
+        });
+    }
+    Ok(Some(Proposal {
+        instrument: InstrumentId::new(instrument).map_err(|_| PortError::Absent {
+            what: "the builder market's runtime instrument id",
+        })?,
+        asset_class: market.asset_class,
+        side: Side::Sell,
+        qty,
+        limit: limit_price,
+        purpose: runtime_purpose(purpose),
+        exit_origin: Some(ExitOrigin::RemovedInstrument),
+        exit_conviction: None,
+        buy_conviction: None,
+        combined_score: Value::Null,
+        outputs_used: BTreeSet::new(),
+        model_weights: BTreeMap::new(),
+        clips_applied: Vec::new(),
+        execution: Some(execution),
+    }))
 }
 
 /// The `decided_by` label of mandate spec §6.2 step 5c, the policy overlay (DEC-536 item 2;

@@ -1125,7 +1125,7 @@ impl Shell {
                     }
                     ran.timers.push(request.clone());
                 }
-                Effect::Notify(reference) => ran.notifications.push(reference.message_key),
+                Effect::Notify(reference) => ran.notifications.push(reference.kind.key()),
             }
         }
         Ok(ran)
@@ -1297,7 +1297,7 @@ impl Shell {
             .draft_types()
             .into_iter()
             .filter(|kind| match *kind {
-                "ReconciliationRun" | "BrokerPositionObserved" => false,
+                "ReconciliationRun" | "BrokerPositionObserved" | "OwnerAlertSent" => false,
                 "AccountSnapshotRecorded" => !reported,
                 "OrderStateChanged" | "CompensatingEvent" => !in_doubt,
                 _ => true,

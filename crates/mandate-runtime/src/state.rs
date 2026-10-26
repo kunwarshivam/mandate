@@ -386,6 +386,7 @@ impl RuntimeState {
             now,
             ended_theses: self.ended_theses(now),
             working_exits: self.working_exits(),
+            thesis_classes: self.theses.classes(),
         }
     }
 
