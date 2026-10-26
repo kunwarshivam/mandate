@@ -12,8 +12,8 @@ use mandate_gate_context::Freshness;
 use mandate_journal::StoredEvent;
 use mandate_num::{Conviction, Price, Qty, Unit};
 use mandate_runtime::{
-    ApprovalSettings, Autonomy, Classified, MandateView, ModelDirection, ModelOutput, OrderPlan, Proposal,
-    Purpose, RiskClock, SignalInputs,
+    ApprovalSettings, Autonomy, Classified, MandateView, ModelDirection, ModelOutput, OrderPlan,
+    Proposal, Purpose, RiskClock, SignalInputs,
 };
 use mandate_spec::document::Mandate;
 use mandate_time::UtcNanos;
@@ -162,14 +162,15 @@ fn inputs(now: &str) -> SignalInputs {
 }
 
 /// The demo mandate with `default: auto` and one rule asking about any opening once the risk
-/// day's buys pass $250: a rule on a fact the plan cannot see (mandate spec §6.3).
-fn auto_with_a_daily_buy_rule() -> Value {
+/// day's buys, this order included, pass `above` dollars: a rule on a fact the plan cannot see
+/// (mandate spec §6.3).
+fn auto_with_a_daily_buy_rule(above: &str) -> Value {
     let mut document: serde_json::Value =
         serde_json::from_slice(&mandate_canon::to_canonical(&document())).unwrap();
     document["autonomy"]["default"] = serde_json::json!("auto");
     document["autonomy"]["rules"] = serde_json::json!([{
         "id": "daily_buys", "then": "ask",
-        "when": {"field": "bought_today_usd", "op": "gt", "value": "250"},
+        "when": {"field": "bought_today_usd", "op": "gt", "value": above},
     }]);
     mandate_canon::parse(&serde_json::to_vec(&document).unwrap()).unwrap()
 }
@@ -307,9 +308,11 @@ fn a_mark_that_is_not_sane_proposes_nothing() {
 }
 
 /// An `auto` mandate whose ASK rule reads what the agent bought today, after a buy and a sell
-/// that left it flat: the plan sees none of those buys, so the rule cannot fire on its facts,
-/// and the next opening is asked under the policy overlay rather than placed as the day's first
-/// (§6.2 step 5c, DEC-2378 item 10). Repeated round trips cannot split orders past the rule.
+/// that left it flat: the rule's threshold is $100 above the next opening's own cost, so only
+/// the earlier $199.90 buy would carry it over. The plan sees none of those buys, so the rule
+/// cannot fire on its facts, and the opening is asked under the policy overlay rather than
+/// placed as the day's first (§6.2 step 5c, DEC-2378 item 10). Repeated round trips cannot split
+/// orders past the rule.
 #[test]
 fn an_auto_mandate_is_asked_about_an_opening_after_a_round_trip_it_cannot_see() {
     let mut rows = journaled(REGULAR);
@@ -339,12 +342,19 @@ fn an_auto_mandate_is_asked_about_an_opening_after_a_round_trip_it_cannot_see() 
             ),
         );
     }
+    let sized = proposed(&rows, REGULAR).expect("flat again, so an opening is proposed");
+    let above = sized
+        .qty
+        .notional(sized.limit)
+        .unwrap()
+        .checked_add(mandate_num::Usd::parse("100").unwrap())
+        .unwrap();
     let facts = Facts::new(CLOCK, AGENT);
     facts.follow(ACCOUNT);
     facts.feed(&rows.0);
     let plan = Plan::new(
         facts,
-        Mandate::parse(&auto_with_a_daily_buy_rule()).unwrap(),
+        Mandate::parse(&auto_with_a_daily_buy_rule(&above.to_string())).unwrap(),
         FRESH,
     );
     let proposal = plan
