@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.15 (a fold opened flat is unpriced until its first counted sane mark, which prices the own fills before it, [DEC-2834](../project/decisions/DEC-2834.md); v0.14 a version-1 order-state `CompensatingEvent` beside the `OrderStateChanged` it corrects moves no figure, [DEC-2829](../project/decisions/DEC-2829.md); v0.13 fees charged to the agent's own orders lower E, [DEC-2393](../project/decisions/DEC-2393.md), and a trigger's recorded breach time is the whole breached interval, [DEC-2331](../project/decisions/DEC-2331.md); v0.12 an approval names the checks its dry run deferred, and such an opening is always asked, [DEC-2515](../project/decisions/DEC-2515.md); v0.11 a news item or filing may bring a monitoring run forward, [DEC-2392](../project/decisions/DEC-2392.md); v0.10 a thesis that ends sells its position, [DEC-2391](../project/decisions/DEC-2391.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
+| **Status** | v0.16 (a research agent's one-instrument risk fold binds its instrument only while the agent is flat, carrying every limit's state across, [DEC-2836](../project/decisions/DEC-2836.md); v0.15 a fold opened flat is unpriced until its first counted sane mark, which prices the own fills before it, [DEC-2834](../project/decisions/DEC-2834.md); v0.14 a version-1 order-state `CompensatingEvent` beside the `OrderStateChanged` it corrects moves no figure, [DEC-2829](../project/decisions/DEC-2829.md); v0.13 fees charged to the agent's own orders lower E, [DEC-2393](../project/decisions/DEC-2393.md), and a trigger's recorded breach time is the whole breached interval, [DEC-2331](../project/decisions/DEC-2331.md); v0.12 an approval names the checks its dry run deferred, and such an opening is always asked, [DEC-2515](../project/decisions/DEC-2515.md); v0.11 a news item or filing may bring a monitoring run forward, [DEC-2392](../project/decisions/DEC-2392.md); v0.10 a thesis that ends sells its position, [DEC-2391](../project/decisions/DEC-2391.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
 | **Implements** | PRD 6.3 (FR-3.1 to FR-3.8), 6.5 (FR-5.2 to FR-5.5), 6.6 (FR-6.1 to FR-6.6); backlog E6, E10, E17 |
 | **Schemas** | [mandate.schema.json](../../schemas/mandate.schema.json), [policy.schema.json](../../schemas/policy.schema.json) (structural rules) |
 | **Reference cases** | [reference-cases/mandate.yaml](reference-cases/mandate.yaml) |
@@ -782,6 +782,16 @@ stream** fold (journal spec §2). It belongs to the agent and survives restarts 
   inputs from it on are held, openings wait, and nothing trips, lifts or pauses. The first counted
   sane mark prices them: its bid at the first held input's instant, then the held inputs in order,
   then the mark.
+- **A one-instrument fold follows a research agent's one instrument only while it is flat**
+  ([DEC-2836](../project/decisions/DEC-2836.md)). Until the risk state holds every instrument, the
+  fold of a version that does not pin its universe binds, or rebinds, to the agent's one surviving
+  instrument at the first row, at or after that instrument's `UniverseChanged` (admitted) and the
+  row that leaves the agent flat, at which: Q is zero, no order of the agent is pending, working or
+  `Unknown`, no risk record is owed, no dividend receivable waits for a mark, and the asset class is
+  the bound one's. The bind carries the state across and changes only the instrument's own figures
+  (the mark, its age and staleness limit, and the instrument restrictions): E, H, E₀, C, L, the
+  latches, the rungs and every timer are as they were. The bound fold is unpriced until its first
+  counted sane mark of the new instrument. A pinned universe's fold never rebinds.
 - **Corporate actions** ([DEC-2303](../project/decisions/DEC-2303.md)) are folded at application,
   trading spec §8.5's instant (20:00 New York time on the last trading day before the ex-date). A
   **split** replaces Q, B and realized by §8.5's rule: Q' and the removed residual basis R, and cash
