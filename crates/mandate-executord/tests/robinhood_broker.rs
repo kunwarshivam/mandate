@@ -22,6 +22,7 @@ use mandate_executor::{
     BrokerOutcome, BrokerRequest, ClientOrderId, ExitTier, FillConfigRefs, InstrumentSnapshot,
     OrderType, Purpose, SubmitOrder, TimeInForce,
 };
+use mandate_executord::follow::folded;
 use mandate_executord::marks::NoMarks;
 use mandate_executord::quotes::NoQuotes;
 use mandate_executord::robinhood::RobinhoodBroker;
@@ -343,9 +344,11 @@ fn result(run: &Canon) -> Option<&str> {
 /// holds the 10, the process books the agent's fill from the record and the position at their
 /// average (DEC-1151), protects the position with one resting GTC stop-limit sell, the profile's
 /// only protection (no OCO, DEC-966), and reconciles clean, the broker's cash the model's.
-#[test]
-#[ignore = "pending E21-30"]
-fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Error> {
+/// A process over the Robinhood broker after the agent's opening of 10 AAPL at 150 was placed,
+/// the broker's record read it filled with the 10 held, and the passes a minute apart that book it
+/// and place its protective stop, which the broker then lists as working. Answers the journal, the
+/// process, the account's book and the seam's calls.
+fn protected_position() -> Result<(Journal, Process, Rc<RefCell<Book>>, Calls), Error> {
     let journal: Journal = deployed()?;
     propose(&journal, AGENT, OPEN, "buy", "10", "150", "open")?;
     let (tools, book, calls) = seam(CASH);
@@ -377,18 +380,33 @@ fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Err
             &format!("2026-09-21T15:00:{second}Z"),
         )?;
         let mut account = book.borrow_mut();
-        let stops: Vec<Value> = calls
-            .borrow()
+        let stops: Vec<Value> = stop_places(&calls)
             .iter()
-            .filter(|(tool, arguments)| {
-                *tool == "place_equity_order"
-                    && arguments.get("type").and_then(Value::as_str) == Some("stop_limit")
-            })
-            .map(|(_, arguments)| answered(arguments, "rh-2", "confirmed", "0"))
+            .map(|arguments| answered(arguments, "rh-2", "confirmed", "0"))
             .collect();
         account.orders.truncate(1);
         account.orders.extend(stops);
     }
+    Ok((journal, process, book, calls))
+}
+
+/// Every place of a stop-limit the seam was handed, as its arguments.
+fn stop_places(calls: &Calls) -> Vec<Value> {
+    calls
+        .borrow()
+        .iter()
+        .filter(|(tool, arguments)| {
+            *tool == "place_equity_order"
+                && arguments.get("type").and_then(Value::as_str) == Some("stop_limit")
+        })
+        .map(|(_, arguments)| arguments.clone())
+        .collect()
+}
+
+#[test]
+#[ignore = "pending E21-30"]
+fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Error> {
+    let (journal, _process, _book, calls) = protected_position()?;
     let fill = journal
         .payloads("FillApplied")
         .into_iter()
@@ -451,6 +469,104 @@ fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Err
             .iter()
             .all(|p| p.get("to").and_then(Canon::as_str) == Some("normal")),
         "no agent is held"
+    );
+    Ok(())
+}
+
+/// DEC-2300 and DEC-2395 under the process: the resting stop sells the 10 at the broker, which then
+/// lists no position and the stop's record filled. The process lists the stop, books its fill at
+/// the stop's limit price, never its trigger, as `limit:<id>:10`, and reconciles with no position
+/// mismatch and no agent held: the ledger is flat, as the broker is.
+#[test]
+#[ignore = "pending E21-30"]
+fn the_resting_stop_sells_out_and_is_booked_at_its_limit() -> Result<(), Error> {
+    let (journal, mut process, book, calls) = protected_position()?;
+    let [stop] = stop_places(&calls)
+        .try_into()
+        .map_err(|_| "one stop is placed")?;
+    let limit = stop
+        .get("limit_price")
+        .and_then(Value::as_str)
+        .ok_or("the stop's limit")?
+        .to_owned();
+    assert_ne!(
+        Some(limit.as_str()),
+        stop.get("stop_price").and_then(Value::as_str),
+        "the limit is not the trigger"
+    );
+    let proceeds = Qty::parse("10")?.notional(Price::parse(&limit)?)?;
+    {
+        let mut account = book.borrow_mut();
+        account.cash = Usd::parse(SPENT)?.checked_add(proceeds)?.to_string();
+        account.positions = Vec::new();
+        account.orders.truncate(1);
+        account.orders.push(answered(&stop, "rh-2", "filled", "10"));
+    }
+    for (second, id) in [(40, "t4"), (50, "t5")] {
+        pass(
+            &journal,
+            &mut process,
+            id,
+            &format!("2026-09-21T15:00:{second}Z"),
+        )?;
+    }
+    let sold = journal
+        .payloads("FillApplied")
+        .into_iter()
+        .chain(journal.payloads("LateFillApplied"))
+        .find(|p| p.get("side").and_then(Canon::as_str) == Some("sell"))
+        .ok_or("the stop's fill is booked")?;
+    assert_eq!(
+        sold.get("price").and_then(Canon::as_str),
+        Some(limit.as_str())
+    );
+    assert_eq!(sold.get("qty_gross").and_then(Canon::as_str), Some("10"));
+    assert!(
+        sold.get("fill_id")
+            .and_then(Canon::as_str)
+            .is_some_and(|id| id.starts_with("limit:") && id.ends_with(":10")),
+        "{sold:?}"
+    );
+    assert!(
+        journal
+            .payloads("BrokerPositionObserved")
+            .iter()
+            .all(|p| p.get("mismatch") != Some(&Canon::Bool(true))),
+        "no position mismatch"
+    );
+    assert!(
+        journal.payloads("AgentModeApplied").is_empty(),
+        "no agent is held"
+    );
+    Ok(())
+}
+
+/// After a restart the broker is rebuilt from the account stream: the opening's key is never
+/// placed again, so a second `Submit` of it sends nothing and answers `Unknown` (DEC-860 items 4
+/// and 7).
+#[test]
+#[ignore = "pending E21-30"]
+fn a_restored_broker_never_places_a_journaled_key_again() -> Result<(), Error> {
+    let (journal, _process, _book, _calls) = protected_position()?;
+    let records = journal
+        .rows_of(ACCOUNT_STREAM)
+        .iter()
+        .map(|row| folded(row).map_err(|_| "a readable row"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let (tools, _, calls) = seam(SPENT);
+    let mut restored =
+        RobinhoodBroker::restore(tools, ACCOUNT_NUMBER.to_owned(), tickers()?, &records)?;
+    let again = restored.call(&BrokerRequest::Submit(opening(&format!("md-{OPEN}"))?));
+    assert!(
+        matches!(again, Err(mandate_executor::ConnectorError::Unknown(_))),
+        "{again:?}"
+    );
+    assert!(
+        calls
+            .borrow()
+            .iter()
+            .all(|(tool, _)| *tool != "place_equity_order"),
+        "nothing is placed"
     );
     Ok(())
 }
