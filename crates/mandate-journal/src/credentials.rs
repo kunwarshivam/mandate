@@ -29,6 +29,9 @@ pub(crate) const CONTROL: [&str; 3] = [ENROLLED, REMOVED, ASSERTED];
 /// A cool-off's length when one is owed (identity spec §10.1).
 const DAY_SECS: i64 = 86_400;
 
+/// How long before its event a passkey step-up still counts (identity spec §7.1).
+const STEP_UP_WINDOW_SECS: i64 = 300;
+
 /// §9.31's `credential_id`: a WebAuthn credential id as unpadded base64url, 22 to 1364 characters,
 /// which is 16 to 1023 bytes. `A-Z a-z 0-9 - _` with no `=` padding, and a length no unpadded
 /// base64url can have (`length % 4 == 1`), which is a block cut one character over.
@@ -260,6 +263,31 @@ fn counts_in_32_bits(payload: &Value) -> bool {
         .get("sign_count")
         .and_then(Value::as_int)
         .is_some_and(|n| n <= u64::from(u32::MAX))
+}
+
+/// Rules 267 and 268's evidence clauses (journal spec v0.84, DEC-2131): the record's `step_up` is a
+/// passkey's (`schema` at `payload.step_up.method`), authenticated 0 to 300 seconds before the
+/// envelope's `event_time`, compared to the nanosecond (`schema` at
+/// `payload.step_up.authenticated_at`), the method judged first.
+pub(crate) fn passkey_step_up(payload: &Value, event_time: Option<&Value>) -> Result<(), Invalid> {
+    let step_up = payload.get("step_up").unwrap_or(&Value::Null);
+    ensure(
+        step_up.get("method").and_then(Value::as_str) == Some("passkey"),
+        "payload.step_up.method",
+    )?;
+    let event = event_time
+        .and_then(Value::as_str)
+        .and_then(|t| UtcNanos::parse(t).ok());
+    let fresh = instant(step_up, "authenticated_at")
+        .zip(event)
+        .is_some_and(|(at, event)| {
+            UtcNanos::from_parts(
+                event.secs().saturating_sub(STEP_UP_WINDOW_SECS),
+                event.nanos(),
+            )
+            .is_ok_and(|earliest| earliest <= at && at <= event)
+        });
+    ensure(fresh, "payload.step_up.authenticated_at")
 }
 
 fn instant(payload: &Value, member: &str) -> Option<UtcNanos> {
