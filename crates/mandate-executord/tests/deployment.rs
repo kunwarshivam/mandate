@@ -249,8 +249,8 @@ fn journaled_at(journal: &Journal, prefix: &str, clock: &str) -> Result<(), Erro
     )
 }
 
-/// A feed with one sane quote for every instrument, 99.95 by 100.05, observed at the instant
-/// asked.
+/// A broker's feed, which quotes by symbol: one sane quote for SPY, 99.95 by 100.05, observed at
+/// the instant asked, and none for anything else, an asset id included.
 struct Quoting;
 
 impl QuoteFeed for Quoting {
@@ -259,6 +259,9 @@ impl QuoteFeed for Quoting {
         instrument: &InstrumentId,
         now: UtcNanos,
     ) -> Result<MarketObservation, &'static str> {
+        if instrument.as_str() != "SPY" {
+            return Err("no_quote");
+        }
         Ok(MarketObservation {
             instrument: instrument.clone(),
             bid: Price::parse("99.95").ok(),
@@ -1066,5 +1069,39 @@ fn a_control_row_that_does_not_parse_holds_openings_and_keeps_what_exits_read() 
         Ok(None)
     );
     assert!(opening(&deployment)?.is_none());
+    Ok(())
+}
+
+/// The executor names an instrument by its asset id and the broker quotes by symbol: a deployed
+/// instrument's quote is asked by its symbol and observed under its asset id, and an instrument no
+/// deployment names is asked as named.
+#[test]
+fn a_deployed_instruments_quote_is_asked_by_its_symbol() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    let (deployment, _) = deployment(&journal, store);
+    let observed = QuoteFeed::observe(&deployment, &spy()?, at(MONDAY)?)?;
+    assert_eq!(observed.instrument, spy()?);
+    assert_eq!(observed.bid, Some(Price::parse("99.95")?));
+    assert!(QuoteFeed::observe(&deployment, &InstrumentId::new(AAPL_ID)?, at(MONDAY)?).is_err());
+    let named = QuoteFeed::observe(&deployment, &InstrumentId::new("SPY")?, at(MONDAY)?)?;
+    assert_eq!(named.instrument.as_str(), "SPY");
+    Ok(())
+}
+
+/// While a control row does not parse the deployment is not read in full, so it is read again at
+/// each ask rather than kept.
+#[test]
+fn a_deployment_not_read_in_full_is_read_again() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journal.seed(
+        CONTROL_STREAM,
+        r#"{"environment":"paper","event_id":"zz1","event_type":"Unparsed","schema_version":1,"stream_id":"ctl:ws1"}"#,
+    )?;
+    let (deployment, reads, _) = counted(&journal, store);
+    let agent = agent();
+    assert!(deployment.version(&agent).is_some());
+    let first = reads.get();
+    assert!(deployment.version(&agent).is_some());
+    assert!(reads.get() > first);
     Ok(())
 }

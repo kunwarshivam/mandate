@@ -376,12 +376,17 @@ impl Deployment {
     }
 
     /// Every deployment an exit, a fill or a mark reads: each followed agent's current one, else
-    /// its last.
+    /// its last, the current ones first, so a lookup by instrument prefers a deployment that reads
+    /// now over one a stopped agent last read.
     fn lasting_all(&self) -> Vec<Rc<Resolved>> {
         let current = self.deployments(None);
-        let mut all = self.last();
-        all.extend(current);
-        all.into_values().collect()
+        let last: Vec<Rc<Resolved>> = self
+            .last()
+            .into_iter()
+            .filter(|(agent, _)| !current.contains_key(agent))
+            .map(|(_, resolved)| resolved)
+            .collect();
+        current.into_values().chain(last).collect()
     }
 
     /// `answer` of the deployment whose instrument is `instrument`. Validation refuses a second
@@ -542,12 +547,27 @@ impl Marked for Deployment {
 }
 
 impl QuoteFeed for Deployment {
+    /// The broker's quote of a deployed instrument, asked by its symbol, since the executor names
+    /// an instrument by its asset id and the broker quotes by symbol, and observed under its asset
+    /// id again. An instrument no deployment names is asked as named.
     fn observe(
         &self,
         instrument: &InstrumentId,
         now: UtcNanos,
     ) -> Result<MarketObservation, &'static str> {
-        self.0.sources.quotes.observe(instrument, now)
+        let deployed = self
+            .lasting_all()
+            .into_iter()
+            .find(|resolved| &resolved.instrument == instrument);
+        let Some(resolved) = deployed else {
+            return self.0.sources.quotes.observe(instrument, now);
+        };
+        let symbol = InstrumentId::new(&resolved.symbol).map_err(|_| "symbol_unreadable")?;
+        let observed = self.0.sources.quotes.observe(&symbol, now)?;
+        Ok(MarketObservation {
+            instrument: instrument.clone(),
+            ..observed
+        })
     }
 
     fn feed(&self) -> &'static str {
@@ -579,7 +599,7 @@ impl BindingGateSource for Deployment {
             return None;
         }
         let sources = &self.0.sources;
-        let quote = sane(&sources.quotes.observe(request.instrument, facts.now).ok()?)?;
+        let quote = sane(&self.observe(request.instrument, facts.now).ok()?)?;
         let order = OrderFacts {
             quote,
             asset: sources.broker.asset(&resolved.symbol),
