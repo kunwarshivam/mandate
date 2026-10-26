@@ -50,6 +50,7 @@ pub mod deployment;
 pub mod fixture;
 pub mod launch;
 pub mod meter;
+pub mod models;
 pub mod production;
 pub mod recorded;
 #[cfg(test)]
