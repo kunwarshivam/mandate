@@ -85268,7 +85268,7 @@ stepped_up_records:
     expect: *id178
     processes: *id179
 account_restrictions:
-  spec: docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2134)
+  spec: docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2137)
   drafts:
     blocked:
       envelope_version: 1

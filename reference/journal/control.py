@@ -1353,7 +1353,7 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("copied_from", ULID),
         ("risk_clock", RISK_CLOCK),
     ),
-    # §9.5 (DEC-2134): an account restriction the executor detected, with its closed cause
+    # §9.5 (DEC-2137): an account restriction the executor detected, with its closed cause
     # (trading spec §7.3, DEC-441 item 23), journaled before the modes it applies.
     ("acct", "AccountRestrictionChanged", 1): rec(
         ("restriction", one_of("closing_only", "blocked")),
