@@ -121,6 +121,25 @@ impl<'p, 'a> Batch<'p, 'a> {
         )
     }
 
+    /// Drafts `payload` exactly as given, without the batch's risk clock: a copy of another stream's
+    /// record, whose payload is the original's unchanged, and §9.28's refusal of an acknowledgment,
+    /// whose schema has no `risk_clock` (journal spec §9.28, DEC-2828).
+    pub(crate) fn journal_raw(
+        &mut self,
+        event_type: &str,
+        schema_version: u64,
+        causation_id: Option<EventId>,
+        payload: Value,
+    ) -> Result<EventId, ExecutorError> {
+        self.draft(
+            event_type,
+            schema_version,
+            causation_id,
+            Object::new(),
+            payload,
+        )
+    }
+
     fn journal_at(
         &mut self,
         event_type: &str,

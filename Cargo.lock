@@ -2641,6 +2641,7 @@ dependencies = [
  "mandate-marketdata",
  "mandate-modelhost",
  "mandate-process",
+ "mandate-research",
  "mandate-runtime",
  "mandate-spec",
  "mandate-store",

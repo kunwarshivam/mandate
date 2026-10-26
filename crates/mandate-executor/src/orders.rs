@@ -21,7 +21,8 @@ use crate::protection::{overdue, protection_cancelled};
 use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
     AccountState, AgentId, BrokerAccount, BrokerFill, BrokerOrder, BrokerReject, BrokerRequest,
-    EventId, Mode, OrderState, Purpose, RiskClock, Seq, StatusMapping,
+    ConnectionHealth, ConnectionTrouble, EventId, Mode, OrderState, Purpose, RiskClock, Seq,
+    StatusMapping,
 };
 
 /// Trading-domain spec §5.7's broker status table. It is **total**: every value the table names
@@ -1003,12 +1004,13 @@ impl Restriction {
 }
 
 /// What detected a restriction, journaled as its closed `cause` (journal spec §9.5, DEC-441 item
-/// 23, DEC-2137): the broker's account report (§7.3 row 1) or its rejects (rows 2 and 3). A lost
-/// connection restricts nothing here yet (E7-2v), so there is no variant for it.
+/// 23, DEC-2137): the broker's account report (§7.3 row 1), its rejects (rows 2 and 3), or a
+/// connection the platform cannot reach or use (row 5, DEC-2826).
 #[derive(Debug, Clone, Copy)]
 enum Cause {
     BrokerNotice,
     BrokerReject,
+    ConnectionUnavailable,
 }
 
 impl Cause {
@@ -1016,6 +1018,16 @@ impl Cause {
         match self {
             Self::BrokerNotice => "broker_notice",
             Self::BrokerReject => "broker_reject",
+            Self::ConnectionUnavailable => "connection_unavailable",
+        }
+    }
+
+    /// The owner's alert for a record of this cause: the broker's restriction, or the distinct one
+    /// that says the broker has not restricted the account (notifications spec §3.2, DEC-2520).
+    fn alert(self) -> OwnerAlertKind {
+        match self {
+            Self::BrokerNotice | Self::BrokerReject => OwnerAlertKind::AccountRestriction,
+            Self::ConnectionUnavailable => OwnerAlertKind::ConnectionUnavailable,
         }
     }
 }
@@ -1046,17 +1058,53 @@ fn restrict(
         ],
     )?;
     if tightens {
-        every_agent_alerted(
-            batch,
-            restriction.mode(),
-            reason,
-            changed,
-            OwnerAlertKind::AccountRestriction,
-        )?;
+        every_agent_alerted(batch, restriction.mode(), reason, changed, cause.alert())?;
     } else {
-        batch.notify(changed, OwnerAlertKind::AccountRestriction);
+        batch.notify(changed, cause.alert());
     }
     Ok(true)
+}
+
+/// A connection the platform cannot reach or use (trading spec §7.3 row 5, connections spec CN-6
+/// and §9.1, DEC-2826), reported at every step while it holds. While the cause
+/// `connection_unavailable` is not in force, the step journals only the restriction, every agent
+/// `exits_only` and the owner's alert, so the halt is never behind the state change (journal spec
+/// §9.8). Once it is in force, a later step records the state change: into the reported state, or
+/// a new reason while staying in it, each once per stay. A degrading cause while `suspended` is
+/// held and journals nothing (DEC-687 item 1, rule 60), and so is every state change before the
+/// stream's copy of the establishment (rule 68).
+pub(crate) fn connection(
+    batch: &mut Batch<'_, '_>,
+    trouble: ConnectionTrouble,
+) -> Result<(), ExecutorError> {
+    if restrict(
+        batch,
+        Restriction::ClosingOnly,
+        Cause::ConnectionUnavailable,
+        "account_restricted",
+    )? {
+        return Ok(());
+    }
+    let Some(view) = batch.view.connection.clone() else {
+        return Ok(());
+    };
+    let to = trouble.state();
+    let held = view.health == ConnectionHealth::Suspended && to == ConnectionHealth::Degraded;
+    let recorded = view.health == to && view.reasons.contains(trouble.reason());
+    if held || recorded {
+        return Ok(());
+    }
+    batch.journal(
+        "ConnectionStateChanged",
+        None,
+        vec![
+            ("connection_id", text(&view.id)),
+            ("from", text(view.health.name())),
+            ("to", text(to.name())),
+            ("reason", text(trouble.reason())),
+        ],
+    )?;
+    Ok(())
 }
 
 /// A reject the broker answered with. Journaled with its status, code and message; an order of

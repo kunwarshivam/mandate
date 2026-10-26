@@ -25,10 +25,20 @@ pub struct Evaluated {
     pub source: String,
 }
 
+/// The streams the process read for a tick's evaluation: the workspace's control rows, `None` when
+/// they do not read, and the deployment's agent rows. A research deployment's working universe is
+/// read from them (DEC-2827); a pinned one's models need neither.
+#[derive(Debug, Clone, Copy)]
+pub struct Streams<'a> {
+    pub control: Option<&'a [StoredEvent]>,
+    pub agent: &'a [StoredEvent],
+}
+
 /// The model host as the process reads it: every pinned quant model's evaluation at the tick
-/// `at`, an empty answer for a refusal or a source that cannot be read.
+/// `at`, over the `streams` the process read, an empty answer for a refusal or a source that cannot
+/// be read.
 pub trait Models {
-    fn evaluate(&self, at: RiskClock) -> Vec<Evaluated>;
+    fn evaluate(&self, at: RiskClock, streams: Streams<'_>) -> Vec<Evaluated>;
 }
 
 /// Why the models' inputs could not be made.

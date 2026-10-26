@@ -11,8 +11,8 @@ mod common;
 use common::{
     ACCOUNT_STREAM, AGENT_STREAM, CLOCK_STREAM, CONTROL_STREAM, FixedInstruments, FixedMandate,
     OTHER_AGENT, Shell, TestIds, agent, broker_account, broker_fill, broker_order, broker_position,
-    broker_reject, clock, config, copied, event, handoff, instrument, object, opening, ports, qty,
-    risk_exit, signed_qty, snapshot, stream_opened, text, usd, with_clock,
+    broker_reject, clock, config, copied, event, handoff, instrument, int, object, opening, ports,
+    qty, risk_exit, signed_qty, snapshot, stream_opened, text, usd, with_clock,
 };
 use mandate_accounting::Side;
 use mandate_canon::Value;
@@ -1368,8 +1368,11 @@ fn a_position_mismatch_pauses_only_the_agents_holding_the_instrument() {
     );
 }
 
+/// DEC-2828: an owner's acknowledgment in journal spec §9.28's closed shape names a triggered limit,
+/// never a reconciliation mismatch, so it clears no mismatched instrument and lifts no mismatch
+/// pause: both stay until a spec names how the owner acknowledges them (backlog E7-4b).
 #[test]
-fn an_acknowledgment_lifts_its_own_subject_and_no_other() {
+fn no_acknowledgment_clears_a_mismatch_pause() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
     let instruments = FixedInstruments;
@@ -1379,36 +1382,39 @@ fn an_acknowledgment_lifts_its_own_subject_and_no_other() {
     let mut bad = snapshot(shell.head().0, ReconcileReason::Startup);
     bad.positions = vec![broker_position(AAPL, "7"), broker_position(CPHC, "3")];
     shell.run(Input::BrokerSnapshot(bad), &ports);
-    let ack = |shell: &mut Shell, subject: &str, n: u64| {
-        let event = copied(
-            ACCOUNT_STREAM,
-            next_seq(shell),
-            "OwnerAcknowledged",
-            with_clock(
-                &[
-                    ("subject", text(subject)),
-                    ("user", text("user-1")),
-                    ("step_up", text("assertion-1")),
-                ],
-                100,
-            ),
-            &EventId(format!("{CONTROL_STREAM}-{n}")),
-        );
-        shell.fold_one(&event).expect("the acknowledgment folds");
-    };
-    ack(&mut shell, AAPL, 1);
-    assert!(!shell.state.mismatched().contains(&instrument(AAPL)));
+    let event = copied(
+        ACCOUNT_STREAM,
+        next_seq(&shell),
+        "OwnerAcknowledged",
+        with_clock(
+            &[
+                ("agent", text(common::AGENT)),
+                ("event", text(AAPL)),
+                ("user", text("user-1")),
+                ("requested_by", text("user-1")),
+                ("independent_required", Value::Bool(false)),
+                ("request", Value::Null),
+                ("submitted_at", int(100)),
+                (
+                    "step_up",
+                    object(&[
+                        ("assertion_id", text("assertion-1")),
+                        ("authenticated_at", int(100)),
+                        ("method", text("cli_confirm")),
+                    ]),
+                ),
+            ],
+            100,
+        ),
+        &EventId(format!("{CONTROL_STREAM}-1")),
+    );
+    shell.fold_one(&event).expect("the acknowledgment folds");
+    assert!(shell.state.mismatched().contains(&instrument(AAPL)));
     assert!(shell.state.mismatched().contains(&instrument(CPHC)));
     assert_eq!(
         shell.state.effective_mode(&agent(common::AGENT)),
         Mode::Paused,
-        "CPHC's mismatch still pauses"
-    );
-    ack(&mut shell, CPHC, 2);
-    assert_eq!(
-        shell.state.effective_mode(&agent(common::AGENT)),
-        Mode::Normal,
-        "with both acknowledged, nothing pauses"
+        "the mismatches still pause"
     );
 }
 

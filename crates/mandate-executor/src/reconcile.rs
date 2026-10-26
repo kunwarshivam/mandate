@@ -997,6 +997,50 @@ pub(crate) mod tests {
             Ok(())
         }
 
+        /// Commits the copy of an owner's acknowledgment in journal spec §9.28's closed shape, with
+        /// fresh step-up evidence, naming `event` and caused by a control-stream original. Since
+        /// DEC-2828 no acknowledgment names a reconciliation hold: such holds stay until a spec
+        /// names how one is acknowledged (backlog E7-4b).
+        pub(crate) fn commit_acknowledged(&mut self, event: &str) -> Result<(), ExecutorError> {
+            let seq = self.state.account_head().0.saturating_add(1);
+            let at = self.state.clock();
+            let payload = object(vec![
+                ("agent", Value::Str("agent-a".to_owned())),
+                ("event", Value::Str(event.to_owned())),
+                ("user", Value::Str("user-1".to_owned())),
+                ("requested_by", Value::Str("user-1".to_owned())),
+                ("independent_required", Value::Bool(false)),
+                ("request", Value::Null),
+                (
+                    "submitted_at",
+                    crate::payload::int(u64::try_from(at.secs()).unwrap_or(0))?,
+                ),
+                ("risk_clock", crate::payload::risk_clock_stamp(at)?),
+                (
+                    "step_up",
+                    object(vec![
+                        ("assertion_id", Value::Str("assertion-1".to_owned())),
+                        (
+                            "authenticated_at",
+                            crate::payload::int(u64::try_from(at.secs()).unwrap_or(0))?,
+                        ),
+                        ("method", Value::Str("cli_confirm".to_owned())),
+                    ])?,
+                ),
+            ])?;
+            let copy = FoldedEvent {
+                stream: self.state.account_stream(),
+                seq: Seq(seq),
+                event_id: EventId(format!("j-{seq}")),
+                event_type: "OwnerAcknowledged".to_owned(),
+                causation_id: Some(EventId(format!("ctl-ack-{seq}"))),
+                payload,
+            };
+            fold(&mut self.state, &copy)?;
+            self.journal.push(copy);
+            Ok(())
+        }
+
         /// Handles one input and commits at most `keep` of its drafts; `usize::MAX` commits all.
         fn run_keeping(
             &mut self,
@@ -1310,12 +1354,13 @@ pub(crate) mod tests {
     }
 
     /// DEC-140's slice-5 amendment: a stream slice 5 wrote may hold every agent `exits_only` under
-    /// `reconciliation:incomplete`. The cash slice completes those runs, and the owner's
-    /// acknowledgment of `incomplete`, with step-up evidence, lifts the hold (§11, interpretation
-    /// 14): openings are submitted again. A run that now completes lifts nothing by itself, and an
-    /// acknowledgment without step-up evidence lifts nothing either.
+    /// `reconciliation:incomplete`. The cash slice completes those runs, but a run that now
+    /// completes lifts nothing by itself, and since DEC-2828 no owner's acknowledgment names the
+    /// hold either: §9.28's closed acknowledgment names a triggered limit, so the hold stays and
+    /// openings stay held until a spec names how the owner acknowledges it (backlog E7-4b).
     #[test]
-    fn an_acknowledgment_of_incomplete_lifts_the_slice_5_hold() -> Result<(), ExecutorError> {
+    fn the_slice_5_hold_outlasts_a_completed_run_and_any_acknowledgment()
+    -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
             ids: &Ids,
@@ -1368,31 +1413,13 @@ pub(crate) mod tests {
         )?;
         assert_eq!(submitted(&held), 0, "the hold outlives a completed run");
 
-        let acknowledged = |step_up: &str| -> Result<Value, ExecutorError> {
-            object(vec![
-                ("subject", Value::Str("incomplete".to_owned())),
-                ("user", Value::Str("user-1".to_owned())),
-                ("step_up", Value::Str(step_up.to_owned())),
-                (
-                    "risk_clock",
-                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
-                ),
-            ])
-        };
-        executor.commit_one("OwnerAcknowledged", acknowledged("")?)?;
+        executor.commit_acknowledged("j-1")?;
         assert_eq!(
             executor
                 .state
                 .effective_mode(&AgentId("agent-a".to_owned())),
             Mode::ExitsOnly,
-            "no step-up evidence, no lift"
-        );
-        executor.commit_one("OwnerAcknowledged", acknowledged("assertion-1")?)?;
-        assert_eq!(
-            executor
-                .state
-                .effective_mode(&AgentId("agent-a".to_owned())),
-            Mode::Normal
+            "an acknowledgment names no reconciliation hold, so it lifts nothing"
         );
         let opening = executor.run(
             intent(
@@ -1403,7 +1430,7 @@ pub(crate) mod tests {
             )?,
             &ports,
         )?;
-        assert_eq!(submitted(&opening), 1, "an opening is submitted again");
+        assert_eq!(submitted(&opening), 0, "openings stay held");
         Ok(())
     }
 
@@ -2029,7 +2056,7 @@ pub(crate) mod tests {
         ])?;
         assert!(
             executor.commit_one("OwnerAcknowledged", unnamed).is_err(),
-            "an acknowledgment with no user is refused"
+            "an acknowledgment copy that names no original is refused"
         );
         assert_eq!(
             executor
@@ -2623,11 +2650,11 @@ pub(crate) mod tests {
     /// DEC-2812 (trading spec §6.1, §7.1): an external fill in a registered instrument is booked.
     /// Its `FillApplied` is version 2's, naming no order (`null`), and the journal accepts the whole
     /// batch. The fill moves the account's position and no order's filled quantity; every agent
-    /// holds its openings under `reconciliation:external_activity` until the owner acknowledges
-    /// `external_activity`; and the same fill read again is applied once.
+    /// holds its openings under `reconciliation:external_activity`, which no acknowledgment names
+    /// since DEC-2828 (backlog E7-4b), so the hold stays; and the same fill read again is applied
+    /// once.
     #[test]
-    fn an_external_fill_is_booked_to_the_account_and_held_until_the_owner_acknowledges()
-    -> Result<(), ExecutorError> {
+    fn an_external_fill_is_booked_to_the_account_and_held() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
             ids: &SchemaIds,
@@ -2699,29 +2726,18 @@ pub(crate) mod tests {
             "applied once"
         );
 
-        executor.commit_one(
-            "OwnerAcknowledged",
-            object(vec![
-                ("subject", Value::Str("external_activity".to_owned())),
-                ("user", Value::Str("user-1".to_owned())),
-                ("step_up", Value::Str("assertion-1".to_owned())),
-                (
-                    "risk_clock",
-                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
-                ),
-            ])?,
-        )?;
+        executor.commit_acknowledged("j-1")?;
         assert_eq!(
             executor.state.effective_mode(&agent),
-            Mode::Normal,
-            "the owner's acknowledgment of the external activity lifts the hold"
+            Mode::ExitsOnly,
+            "an acknowledgment names no reconciliation hold, so the external activity's stays"
         );
         Ok(())
     }
 
     /// DEC-2821: a broker input the core could not apply holds every agent's openings under
     /// `reconciliation:incomplete` and alerts the owner, once: with the hold in force, another
-    /// adds nothing. The owner's acknowledgment of `incomplete` lifts it.
+    /// adds nothing. No acknowledgment names it since DEC-2828 (backlog E7-4b), so it stays.
     #[test]
     fn a_failed_broker_input_holds_every_agents_openings_once() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -2747,19 +2763,12 @@ pub(crate) mod tests {
             Vec::<&str>::new(),
             "the hold is already in force"
         );
-        executor.commit_one(
-            "OwnerAcknowledged",
-            object(vec![
-                ("subject", Value::Str("incomplete".to_owned())),
-                ("user", Value::Str("user-1".to_owned())),
-                ("step_up", Value::Str("assertion-1".to_owned())),
-                (
-                    "risk_clock",
-                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
-                ),
-            ])?,
-        )?;
-        assert_eq!(executor.state.effective_mode(&agent), Mode::Normal);
+        executor.commit_acknowledged("j-1")?;
+        assert_eq!(
+            executor.state.effective_mode(&agent),
+            Mode::ExitsOnly,
+            "an acknowledgment lifts no reconciliation hold"
+        );
         Ok(())
     }
 
@@ -2881,8 +2890,8 @@ pub(crate) mod tests {
     /// DEC-2805 item 1: a batch the journal refused leaves nothing committed. The core forgets it,
     /// so later inputs are handled rather than refused as an unresolved append. It holds every
     /// agent's openings under `reconciliation:incomplete` and alerts the owner, once: a second
-    /// refusal adds nothing. An opening is then held, and the owner's acknowledgment of `incomplete`
-    /// lifts the hold as it lifts any incomplete run's.
+    /// refusal adds nothing. An opening is then held, and since DEC-2828 no acknowledgment names
+    /// the hold, so it stays (backlog E7-4b).
     #[test]
     fn a_refused_batch_holds_every_agents_openings_once() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -2986,24 +2995,13 @@ pub(crate) mod tests {
             &ports,
         )?;
         assert_eq!(submitted(&opening), 0, "openings are held");
-        executor.commit_one(
-            "OwnerAcknowledged",
-            object(vec![
-                ("subject", Value::Str("incomplete".to_owned())),
-                ("user", Value::Str("user-1".to_owned())),
-                ("step_up", Value::Str("assertion-1".to_owned())),
-                (
-                    "risk_clock",
-                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
-                ),
-            ])?,
-        )?;
+        executor.commit_acknowledged("j-1")?;
         assert_eq!(
             executor
                 .state
                 .effective_mode(&AgentId("agent-a".to_owned())),
-            Mode::Normal,
-            "the owner's acknowledgment of `incomplete` lifts the hold"
+            Mode::ExitsOnly,
+            "an acknowledgment names no reconciliation hold, so `incomplete`'s stays"
         );
         Ok(())
     }
