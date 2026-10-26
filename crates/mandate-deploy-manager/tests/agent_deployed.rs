@@ -27,10 +27,23 @@ use mandate_time::UtcNanos;
 
 const AT: &str = "2026-10-17T16:00:00.000000000Z";
 
-fn section() -> Value {
+fn section_named(name: &str) -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
     let fixture = parse(&std::fs::read(path).unwrap()).unwrap();
-    fixture.get("agent_deployed").cloned().unwrap()
+    fixture.get(name).cloned().unwrap()
+}
+
+fn section() -> Value {
+    section_named("agent_deployed")
+}
+
+/// Whether a vector record is a deployment that names its connection: version 2, or version 3,
+/// which the manager reads as version 2 (journal spec v0.84, DEC-2131 item 4).
+fn names_connection(record: &Value) -> bool {
+    matches!(
+        record.get("schema_version").and_then(Value::as_int),
+        Some(2 | 3)
+    )
 }
 
 fn list<'a>(value: &'a Value, name: &str) -> &'a [Value] {
@@ -141,7 +154,7 @@ fn unconnected_v2(case: &Value, running: &BTreeSet<String>) -> usize {
     let refused: BTreeSet<&str> = records
         .iter()
         .filter(|r| text(r, "event_type") == "AgentDeployed")
-        .filter(|r| r.get("schema_version").and_then(Value::as_int) == Some(2))
+        .filter(|r| names_connection(r))
         .map(|r| text(r.get("payload").unwrap(), "agent_id"))
         .filter(|agent| !stopped.contains(agent) && !running.contains(*agent))
         .collect();
@@ -167,13 +180,12 @@ fn unread_v1(case: &Value, running: &BTreeSet<String>) -> usize {
     unread.len()
 }
 
-#[test]
-fn every_agent_deployed_stream_starts_exactly_the_processes_its_vector_lists() {
-    let section = section();
-    let cases = list(&section, "streams");
+/// Every stream case of `section` through the manager's first pass: the failures, and how many
+/// unread and unconnected alerts it raised.
+fn stream_failures(section: &Value) -> (Vec<String>, usize, usize) {
     let mut failed = Vec::new();
     let (mut alerted, mut refused) = (0, 0);
-    for case in cases {
+    for case in list(section, "streams") {
         let want = case.get("processes").unwrap();
         let Pass {
             runtimes,
@@ -207,6 +219,28 @@ fn every_agent_deployed_stream_starts_exactly_the_processes_its_vector_lists() {
         alerted += unread;
         refused += unconnected;
     }
+    (failed, alerted, refused)
+}
+
+/// A version-3 `AgentDeployed` starts what its version 2 would: the runtime and its connection's
+/// executor, nothing for a deployment rule 201 refuses, and an unconnected alert for that one
+/// (DEC-2131 item 4). Before the change the manager read version 3 as an unread version 1.
+#[test]
+fn every_version_3_stream_starts_exactly_the_processes_its_vector_lists() {
+    let section = section_named("stepped_up_records");
+    let (failed, alerted, refused) = stream_failures(&section);
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+    assert!(
+        alerted == 0 && refused >= 3,
+        "{alerted} unread alerts, {refused} unconnected; a version 3 is never unread"
+    );
+}
+
+#[test]
+fn every_agent_deployed_stream_starts_exactly_the_processes_its_vector_lists() {
+    let section = section();
+    let cases = list(&section, "streams");
+    let (failed, alerted, refused) = stream_failures(&section);
     assert!(failed.is_empty(), "{}", failed.join("\n"));
     assert!(
         cases.len() >= 17 && alerted >= 2 && refused >= 2,

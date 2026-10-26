@@ -19,6 +19,10 @@
 //! livez|readyz --probe <socket>` is its `exec` probe (DEC-994 item 5). This is the one place the
 //! host clock is read (ES-05).
 //!
+//! A deployment resolved from the journal evaluates its confirmed mandate's pinned quant models on
+//! each tick, over the daily closes stored under `MANDATE_BARS`, through
+//! [`mandate_runtime_models::wiring`] (DEC-2383 item 7); with no bars root it evaluates none.
+//!
 //! A pod the deployment manager starts runs `mandate-daemon run --probe <socket>` and names its
 //! workspace and agent by variables instead ([`launch`], DEC-1015). Until the connection and the
 //! owner are read from the agent's deployment, such a launch refuses `deployment_unresolved`.
@@ -38,6 +42,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mandate_artifacts_fs::FsArtifactStore;
+use mandate_daemon::bars::{BARS_ENV, BarsReader};
 use mandate_daemon::cell::{self, CellDeployment};
 use mandate_daemon::wake::Sleep;
 use mandate_daemon::{Config, RuntimeProcess, Wake, deployment, fixture, launch, production};
@@ -157,6 +162,7 @@ fn run(
 ) -> Result<u8, &'static str> {
     let terminate = Arc::new(AtomicBool::new(false));
     watch_terminate(Arc::clone(&terminate)).map_err(|_| "signal_unavailable")?;
+    let stream = format!("agent:{workspace}:{agent}");
     let config = |connection: String| Config {
         deployment: Deployment {
             agent: AgentId(agent.clone()),
@@ -192,7 +198,7 @@ fn run(
         };
         let process = RuntimeProcess::start(
             MemoryStore::default(),
-            fixture::wiring(&owner),
+            fixture::wiring(&owner, &stream),
             &config(connection),
             host_now(),
         );
@@ -201,20 +207,33 @@ fn run(
     let dsn = std::env::var("MANDATE_JOURNAL_DSN").map_err(|_| "journal_dsn_missing")?;
     let store = PgStore::connect(&dsn)?;
     let (connection, wiring) = match (given, artifacts) {
-        (Given::Named { connection, owner }, _) => (connection, fixture::wiring(&owner)),
+        (Given::Named { connection, owner }, _) => (connection, fixture::wiring(&owner, &stream)),
         (Given::Resolve { root }, Some(artifacts)) => {
             let control =
                 StreamId::parse(&format!("ctl:{workspace}")).ok_or("deployment_missing")?;
             let rows = store.rows(&control).ok_or("journal_unavailable")?;
             let found = deployment::resolved(&rows, &agent, Environment::Paper, &artifacts)?;
-            let (_, document) =
+            let (version, document) =
                 deployment::document(&rows, &agent, Environment::Paper, &artifacts)?;
-            let mut wiring = production::wired(
-                fixture::wiring_for(&found.approvers, &found.author),
+            let rules = deployment::rule_set(&rows, Environment::Paper, &artifacts).ok();
+            let bars = std::env::var(BARS_ENV).ok();
+            let models = mandate_runtime_models::wiring(
+                &rows,
+                Environment::Paper,
                 &document,
+                bars.as_deref(),
+                FsArtifactStore::open_existing(root.as_str())
+                    .map_err(|_| "artifact_store_unavailable")?,
+            );
+            let mut wiring = production::wired(
+                fixture::wiring_for(&found.approvers, &found.author, &stream),
+                &version,
+                &document,
+                (rules, BarsReader::new(bars.as_deref())),
                 &format!("clock:{workspace}"),
                 &agent,
             );
+            wiring.models = models;
             if let Some(opted) = opted {
                 let meter = JournalMeter::open(
                     PgStore::connect(&dsn)?,

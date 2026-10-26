@@ -1798,6 +1798,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-bars"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-liquidity",
+ "mandate-marketdata",
+ "mandate-num",
+ "mandate-time",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-builder"
 version = "0.0.0"
 dependencies = [
@@ -1906,24 +1918,44 @@ version = "0.0.0"
 dependencies = [
  "mandate-accounting",
  "mandate-artifacts-fs",
+ "mandate-bars",
+ "mandate-builder",
  "mandate-canon",
  "mandate-domain",
  "mandate-gate-context",
  "mandate-gateway",
  "mandate-journal",
- "mandate-journal-pg",
+ "mandate-marketdata",
  "mandate-num",
+ "mandate-ports",
  "mandate-process",
  "mandate-research",
  "mandate-research-driver",
  "mandate-research-run",
+ "mandate-risk",
  "mandate-runtime",
  "mandate-spec",
  "mandate-store",
  "mandate-time",
  "proptest",
  "serde_json",
- "sqlx",
+]
+
+[[package]]
+name = "mandate-datad"
+version = "0.0.0"
+dependencies = [
+ "mandate-artifacts-fs",
+ "mandate-bars",
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-liquidity",
+ "mandate-marketdata",
+ "mandate-num",
+ "mandate-process",
+ "mandate-time",
+ "proptest",
+ "thiserror",
  "tokio",
 ]
 
@@ -2052,6 +2084,7 @@ dependencies = [
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-num",
+ "mandate-ports",
  "mandate-process",
  "mandate-risk",
  "mandate-spec",
@@ -2071,6 +2104,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-canon",
  "mandate-num",
+ "mandate-risk",
  "mandate-time",
  "proptest",
  "thiserror",
@@ -2084,6 +2118,8 @@ dependencies = [
  "mandate-canon",
  "mandate-domain",
  "mandate-executor",
+ "mandate-gate-context",
+ "mandate-identity",
  "mandate-journal",
  "mandate-num",
  "mandate-risk",
@@ -2313,6 +2349,7 @@ dependencies = [
  "mandate-accounting",
  "mandate-alpaca",
  "mandate-artifacts-fs",
+ "mandate-bars",
  "mandate-canon",
  "mandate-connections",
  "mandate-domain",
@@ -2571,6 +2608,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-runtime-models"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-artifacts-fs",
+ "mandate-bars",
+ "mandate-canon",
+ "mandate-daemon",
+ "mandate-domain",
+ "mandate-journal",
+ "mandate-journal-pg",
+ "mandate-marketdata",
+ "mandate-modelhost",
+ "mandate-process",
+ "mandate-runtime",
+ "mandate-spec",
+ "mandate-store",
+ "mandate-time",
+ "proptest",
+ "serde_json",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-scheduler"
 version = "0.0.0"
 dependencies = [
@@ -2591,6 +2653,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-accounting",
  "mandate-alpaca",
+ "mandate-bars",
  "mandate-builder",
  "mandate-canon",
  "mandate-domain",

@@ -13,8 +13,7 @@ use mandate_alpaca::{
 };
 use mandate_executor::{BrokerAccount, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest};
 use mandate_liquidity::{
-    DailyBar, DailyLiquidity, LiquidityError, MinuteVolume, TRAILING_WINDOW_S, daily_liquidity,
-    trailing_volume,
+    DailyLiquidity, LiquidityError, MinuteVolume, TRAILING_WINDOW_S, trailing_volume,
 };
 use mandate_num::{Price, Qty, Usd};
 use mandate_time::{Date, UtcNanos};
@@ -23,7 +22,7 @@ use mandate_robinhood::PreflightFacts;
 
 use super::absent;
 use super::artifacts::Artifacts;
-use crate::adapters::{trusted_daily_bars, trusted_daily_closes, untrusted};
+use crate::adapters::{trusted_daily_closes, trusted_daily_liquidity, untrusted};
 use crate::error::Cause;
 use crate::robinhood::{robinhood_account, robinhood_account_rules};
 
@@ -261,8 +260,8 @@ where
 /// The liquidity figures at `now`, from two inputs `mandate-shell` parses and maps:
 ///
 /// - `daily` must pass the same trust check the model host's closes do, ending on the last completed
-///   session; its stored close and volume fields are parsed into [`DailyBar`] values, and
-///   [`daily_liquidity`] reads the last 20.
+///   session; `trusted_daily_liquidity`, `mandate_bars`'s one reading the runtime and the executor
+///   share (DEC-2274), parses its closes and volumes and reads the last 20.
 /// - `minute_bars` must be `symbol`'s, as the preflight read them; [`trailing_volume`] sums those
 ///   that start inside the five minutes before `now` and refuses one that ends after it.
 ///
@@ -282,21 +281,11 @@ pub fn liquidity_facts(
     if minute_bars.instrument != *symbol {
         return Err(absent("the instrument's minute bars"));
     }
-    let daily: Vec<DailyBar> = trusted_daily_bars(daily, symbol.as_str(), now)?
-        .iter()
-        .map(|bar| -> Result<DailyBar, LiquidityError> {
-            Ok(DailyBar {
-                close: Price::parse(bar.close.as_str())?,
-                volume: Qty::parse(bar.volume.as_str())?,
-            })
-        })
-        .collect::<Result<_, _>>()
-        .map_err(refusal)?;
     let DailyLiquidity {
         prior_close,
         median_dollar_volume_20d,
         adv_20d,
-    } = daily_liquidity(&daily).map_err(refusal)?;
+    } = trusted_daily_liquidity(daily, symbol.as_str(), now)?;
     let minutes: Vec<MinuteVolume> = minute_bars
         .bars
         .iter()
@@ -328,7 +317,7 @@ pub fn daily_closes(
     trusted_daily_closes(daily, symbol.as_str(), now)
 }
 
-fn refusal(error: LiquidityError) -> Cause {
+pub(crate) fn refusal(error: LiquidityError) -> Cause {
     match error {
         LiquidityError::FewerSessions => untrusted("fewer than 20 sessions are stored"),
         LiquidityError::AheadOfClock => absent("minute bars complete at the run clock"),

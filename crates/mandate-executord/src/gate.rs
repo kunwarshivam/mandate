@@ -15,8 +15,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_accounting::{AccountType, InstrumentId};
 use mandate_executor::{AgentId, BindingGateConfigRefs, BindingGateInput, BindingGateRequest};
 use mandate_gate_context::Facts;
-use mandate_gate_inputs::{InputError, Reviewed, gate_mandate, reservation};
+use mandate_gate_inputs::{InputError, Reviewed, reservation};
 use mandate_num::{Price, Qty, Ratio, Usd};
+use mandate_ports::{PortError, gate_mandate};
 use mandate_risk::{
     AccountSnapshot, AccountState, AgentId as GateAgentId, AgentMode, AgentSnapshot, AssetId,
     ClientOrderId, ConductState, DayTradeLedger, DayTradeRegime, EtpClass, Exchange, GateConfig,
@@ -86,6 +87,19 @@ pub struct DeployedGate {
     feed: String,
 }
 
+/// `gate_mandate`'s refusal as the gate inputs' (DEC-2388 item 1 moved the reading to
+/// `mandate-ports`): an absent fact keeps its name and an amount its error; anything else is the
+/// mandate's limits, unread, so the opening is refused (`AGENTS.md` rule 3).
+fn limits(error: PortError) -> InputError {
+    match error {
+        PortError::Absent { what } => InputError::Missing { what },
+        PortError::Num(error) => InputError::Num(error),
+        PortError::Gate(_) | PortError::Builder(_) => InputError::Missing {
+            what: "the mandate's gate limits",
+        },
+    }
+}
+
 impl DeployedGate {
     /// `agent`'s deployment as the gate reads it, quoted from `feed`.
     ///
@@ -107,7 +121,7 @@ impl DeployedGate {
             increment: reviewed.instrument.increment_qty,
             allocation: Usd::parse(reviewed.mandate.capital.allocation_usd.as_str())?,
             config: reviewed.gate_config.clone(),
-            mandate: gate_mandate(&reviewed.mandate)?,
+            mandate: gate_mandate(&reviewed.mandate).map_err(limits)?,
             config_refs: reviewed.config_refs.clone(),
             fees: reviewed.fees.clone(),
             feed: feed.to_owned(),

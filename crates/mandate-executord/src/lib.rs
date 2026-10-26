@@ -42,6 +42,7 @@ pub mod follow;
 pub mod gate;
 pub mod launch;
 pub mod lease;
+pub mod marks;
 pub mod oauth_check;
 pub mod paper;
 mod process;

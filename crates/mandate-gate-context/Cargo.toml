@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 mandate-canon.workspace = true
 mandate-num.workspace = true
+mandate-risk.workspace = true
 mandate-time.workspace = true
 thiserror.workspace = true
 

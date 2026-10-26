@@ -215,7 +215,10 @@ fn serve<S: Store>(
     let terminated = || terminate.load(Ordering::SeqCst);
     let mut say = |line: &str| eprintln!("{line}");
     let Some(mount) = paper else {
-        let run = run::fixture(AlpacaBroker::new(FixturePaper::filling(host_now()))?)?;
+        let run = run::fixture(
+            AlpacaBroker::new(FixturePaper::filling(host_now()))?,
+            &config.scope,
+        )?;
         let edge = Edge {
             now: &host_now,
             tick: &mut |_| None,
@@ -233,10 +236,16 @@ fn serve<S: Store>(
         account: |token| paper_transport(token).and_then(paper_account).ok(),
         random: &mut OsRandom,
     };
-    exchanged_start(&mut store, &fixture::Ids, &config.scope, start, host_now())?;
+    exchanged_start(
+        &mut store,
+        &fixture::Ids::of(&config.scope),
+        &config.scope,
+        start,
+        host_now(),
+    )?;
     own_checked_connection(&store, &config.scope, &connection)?;
     let (broker, mut lease) = paper_broker(vault, &connection, host_now())?;
-    let run = run::paper(broker, TokioPause)?;
+    let run = run::paper(broker, TokioPause, &config.scope)?;
     let mut tick = |now| lease.pass(now);
     let mut edge = Edge {
         now: &host_now,
@@ -340,7 +349,7 @@ fn checked_on<S: Store, B: Broker>(
     let checked = connect_check(
         &mut store,
         &mut broker,
-        &fixture::Ids,
+        &fixture::Ids::of(&scope(named)),
         &scope(named),
         connection,
         pii,

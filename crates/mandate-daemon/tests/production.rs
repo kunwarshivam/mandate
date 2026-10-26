@@ -229,7 +229,8 @@ fn before_the_account_is_known_the_flatten_has_nothing_to_sell() {
 
 /// S3a: a resolved paper deployment's wiring sells its pinned universe's sub-ledger under each
 /// instrument's class from the stored mandate; a holding outside it has no class to sell under.
-/// The plan and the gate stay the fixture's deny-all ones until S2b wires them.
+/// The view and every draft's references name the deployed version, and the gate's dry run stays
+/// the fixture's deny-all one until its deferred checks can be journaled (DEC-2378 item 11).
 #[test]
 fn a_resolved_deployment_is_wired_with_the_fold_and_the_flatten_over_its_universe() {
     let document = mandate_canon::parse(
@@ -244,11 +245,55 @@ fn a_resolved_deployment_is_wired_with_the_fold_and_the_flatten_over_its_univers
         mandate_daemon::production::classes(&document),
         BTreeMap::from([(SPY.to_owned(), AssetClass::UsEquity)])
     );
+    let version = "sha256:19dd24280000000000000000000000000000000000000000000000000000092e6";
     let wiring = mandate_daemon::production::wired(
-        mandate_daemon::fixture::wiring("user-owner"),
+        mandate_daemon::fixture::wiring("user-owner", "agent:ws1:agent-a"),
+        version,
         &document,
+        (None, mandate_daemon::bars::BarsReader::default()),
         CLOCK,
         AGENT,
+    );
+    assert_eq!(wiring.view.version, version);
+    let opening = mandate_runtime::Proposal {
+        instrument: InstrumentId::new(SPY).unwrap(),
+        asset_class: AssetClass::UsEquity,
+        side: mandate_accounting::Side::Buy,
+        qty: mandate_num::Qty::parse("1").unwrap(),
+        limit: mandate_num::Price::parse("99.95").unwrap(),
+        purpose: Purpose::Open,
+        exit_origin: None,
+        exit_conviction: None,
+        buy_conviction: None,
+        combined_score: mandate_canon::Value::Null,
+        outputs_used: Default::default(),
+        model_weights: Default::default(),
+        clips_applied: Vec::new(),
+        execution: None,
+    };
+    assert_eq!(
+        wiring.gate.check(&opening),
+        mandate_runtime::DryRunVerdict::Deny {
+            reason_code: "rule_set_unavailable".into()
+        },
+        "the gate is the fold's, not the fixture's"
+    );
+    assert_eq!(
+        wiring.view.working_universe,
+        [InstrumentId::new(SPY).unwrap()].into()
+    );
+    assert_eq!(wiring.view.approval.timeout_s, 600);
+    let draft = mandate_runtime::EventDraft {
+        event_id: mandate_runtime::EventId("e1".into()),
+        event_type: "DecisionMade".into(),
+        causation_id: None,
+        payload: mandate_canon::Value::Null,
+    };
+    let (schema_version, refs) = wiring.refs.refs(&draft).unwrap();
+    assert_eq!(schema_version, 1);
+    assert_eq!(
+        refs.get("mandate_version"),
+        Some(&mandate_canon::Value::Str(version.to_owned()))
     );
     let facts = wiring.facts.clone().unwrap();
     facts.follow(ACCOUNT);
@@ -372,4 +417,30 @@ fn a_held_instrument_the_flatten_cannot_plan_is_recorded() {
     assert_eq!(plan.sells, vec![leg(SPY, AssetClass::UsEquity, "3")]);
     assert_eq!(facts.take_unplanned(), 1);
     assert_eq!(facts.take_unplanned(), 0);
+}
+
+/// DEC-2387 item 1: a plan asked before the process follows its account reads nothing, and is
+/// counted for `flatten_unplanned` rather than passed as "nothing held", since for an owner's exit
+/// of one instrument the plan is the only seller.
+#[test]
+fn a_plan_asked_before_the_account_is_followed_is_counted_unplanned() {
+    let unfollowed = Facts::new(CLOCK, AGENT);
+    let request = FlattenRequest {
+        initiator: Initiator::Owner,
+        instrument: Some(InstrumentId::new(SPY).unwrap()),
+        confirmation: None,
+        working_orders: Vec::new(),
+    };
+    let plan = Flatten::new(unfollowed.clone(), classes()).plan(&request);
+    assert!(plan.sells.is_empty() && plan.cancel_client_order_ids.is_empty());
+    assert_eq!(plan.purpose, Purpose::OwnerExit);
+    assert_eq!(unfollowed.take_unplanned(), 1);
+    let followed = facts();
+    let plan = Flatten::new(followed.clone(), classes()).plan(&request);
+    assert!(plan.sells.is_empty());
+    assert_eq!(
+        followed.take_unplanned(),
+        0,
+        "a followed account holding none is nothing held"
+    );
 }

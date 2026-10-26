@@ -2277,7 +2277,7 @@ fn a_retried_append_hands_the_exit_its_draft_authorises() {
             purpose: Purpose::DiscretionaryExit,
         }) if instrument.as_str() == "AAPL"
             && qty.to_string() == "10"
-            && limit.to_string() == "149"
+            && limit.map(|limit| limit.to_string()).as_deref() == Some("149")
     ));
 }
 

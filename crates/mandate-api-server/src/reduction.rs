@@ -163,12 +163,17 @@ fn hex_digest(value: &str) -> String {
         .collect()
 }
 
-/// The WebAuthn RP ID of `app_origin`: its host, when it is an `https` origin whose host has a dot.
+/// The WebAuthn RP ID of `app_origin`: its host, when it is an `https` origin whose host has a dot
+/// or is `localhost`, the one single-label RP ID browsers admit, which the local cell's web app is
+/// served at (DEC-2132). A passkey bound to `localhost` works on that machine alone.
 pub fn rp_id(app_origin: &str) -> Option<String> {
     let rest = app_origin.strip_prefix("https://")?;
     let host = rest.split_once(':').map_or(rest, |(host, _)| host);
-    (host.contains('.') && !host.contains('/')).then(|| host.to_owned())
+    ((host.contains('.') || host == LOCALHOST) && !host.contains('/')).then(|| host.to_owned())
 }
+
+/// The single-label host WebAuthn admits as an RP ID: a browser treats it as a secure context.
+const LOCALHOST: &str = "localhost";
 
 /// A challenge's id: the ULID whose time is `issued_at`'s millisecond and whose randomness is the
 /// challenge's first ten bytes.

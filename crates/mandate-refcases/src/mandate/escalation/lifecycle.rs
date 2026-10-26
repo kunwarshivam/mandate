@@ -1176,9 +1176,7 @@ fn handoffs(effects: &[Effect]) -> Vec<String> {
                 let by = recorded.get(&handoff.intent_id).copied();
                 let fits = match &handoff.body {
                     IntentBody::Order { .. } => by == Some("IntentProposed"),
-                    IntentBody::Flatten(_) => {
-                        matches!(by, Some("KillSwitchActivated" | "OwnerExitRequested"))
-                    }
+                    IntentBody::Flatten(_) => by == Some("KillSwitchActivated"),
                 };
                 if !fits {
                     faults.push(format!(

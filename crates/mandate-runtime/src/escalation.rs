@@ -41,13 +41,13 @@ use crate::payload;
 use crate::ports::Ports;
 use crate::state::RuntimeState;
 use crate::step::{
-    Batch, Switching, cancel_approvals, dry_run, lifecycle_change, proposed, switched,
+    Batch, Switching, cancel_approvals, dry_run, lifecycle_change, proposed, switched, tif_name,
 };
 use crate::types::{
-    AgentId, Autonomy, ConnectionId, DryRunVerdict, EventId, FlattenRequest, FoldedEvent,
-    Initiator, IntentBody, IntentHandoff, KillScope, Mode, OrderExecution, OwnerConfirmation,
-    Proposal, ProtectionPrices, Purpose, RiskClock, TimeInForce, TimerId, TimerRequest,
-    WorkspaceId,
+    AgentId, Autonomy, ConnectionId, DryRunVerdict, EventId, FlattenLeg, FlattenRequest,
+    FoldedEvent, Initiator, IntentBody, IntentHandoff, KillScope, Mode, OrderExecution,
+    OwnerConfirmation, Proposal, ProtectionPrices, Purpose, RiskClock, TimeInForce, TimerId,
+    TimerRequest, WorkspaceId,
 };
 
 /// The control stream's two event types the runtime acts on (journal spec §9, DEC-155 item 2).
@@ -726,7 +726,7 @@ fn revalidated(
             instrument: act.instrument,
             side: act.side,
             qty: act.qty,
-            limit: act.limit,
+            limit: Some(act.limit),
             purpose: act.purpose,
         },
         execution: act.execution,
@@ -797,7 +797,7 @@ fn judged(
     Ok(Judged {
         status: step_up_status(refusal),
         step_up: match evidence.filter(|_| valid) {
-            Some(evidence) => payload::step_up_value(evidence)?,
+            Some(evidence) => payload::step_up_stamped(evidence)?,
             None => Value::Null,
         },
         confirmation: privileged(bid, evidence.filter(|_| valid), user),
@@ -943,9 +943,12 @@ fn kill_scope(event: &FoldedEvent) -> Result<KillScope, RuntimeError> {
     Ok(scope)
 }
 
-/// The owner's exit of one instrument (DEC-257 item 7): the copy records the bid as given and the
-/// step-up as judged at commit, and the exit is handed as an agent-scoped flatten of that
-/// instrument, identified by the copy, whatever the step-up. Only the confirmation depends on it.
+/// The owner's exit of one instrument (DEC-257 item 7, DEC-2387): the copy records the bid as given
+/// and the step-up as judged at commit. Then each sell of the agent-scoped plan of that instrument
+/// is journaled as an `IntentProposed` at the market, caused by the copy, and handed right after
+/// its own draft, whatever the step-up: the executor reads the floor or the confirmation from the
+/// copy (DEC-2040), so only those depend on it. The journal is the only channel to the cell's
+/// executor, which is why the sells are proposed and not handed as a flatten (journal spec §9.1).
 fn owner_exit(
     state: &RuntimeState,
     event: &FoldedEvent,
@@ -976,17 +979,58 @@ fn owner_exit(
         ("step_up", judged.step_up.clone()),
     ])?;
     let copy = batch.journal("OwnerExitRequested", Some(event.event_id.clone()), body)?;
-    batch.hand(IntentHandoff {
-        intent_id: copy,
-        body: IntentBody::Flatten(exit_plan(
-            state,
-            instrument,
-            judged.confirmation.clone(),
-            ports,
-        )),
-        execution: None,
-    });
+    let plan = exit_plan(state, instrument, judged.confirmation.clone(), ports);
+    for sell in plan.sells {
+        let tif = owner_sell_tif(sell.asset_class);
+        let leg = batch.journal(
+            "IntentProposed",
+            Some(copy.clone()),
+            owner_sell(&sell, tif)?,
+        )?;
+        batch.hand(IntentHandoff {
+            intent_id: leg,
+            body: IntentBody::Order {
+                instrument: sell.instrument,
+                side: Side::Sell,
+                qty: sell.qty,
+                limit: None,
+                purpose: Purpose::OwnerExit,
+            },
+            execution: Some(OrderExecution {
+                asset_class: sell.asset_class,
+                tif,
+                protection_required: false,
+                protection: None,
+            }),
+        });
+    }
     Ok(())
+}
+
+/// An owner's market sell's time in force: the day for an equity, and good till cancelled for a
+/// crypto pair, which trades around the clock and takes no `day` (trading spec §5.1).
+fn owner_sell_tif(class: AssetClass) -> TimeInForce {
+    match class {
+        AssetClass::UsEquity => TimeInForce::Day,
+        AssetClass::Crypto => TimeInForce::Gtc,
+    }
+}
+
+/// One owner's sell as journal spec §9.1's `IntentProposed` records it: at the market, so no
+/// limit, at `tif`, and the purpose `owner_exit`.
+fn owner_sell(sell: &FlattenLeg, tif: TimeInForce) -> Result<Value, RuntimeError> {
+    payload::object(vec![
+        ("instrument_id", payload::text(sell.instrument.as_str())),
+        ("side", payload::text(payload::side_name(Side::Sell))),
+        ("type", payload::text("market")),
+        ("tif", payload::text(tif_name(tif))),
+        ("qty", payload::text(&sell.qty.to_string())),
+        ("limit_price", Value::Null),
+        (
+            "purpose",
+            payload::text(payload::purpose_name(Purpose::OwnerExit)),
+        ),
+    ])
 }
 
 /// The planner's flatten of one instrument for an owner exit: only this agent's orders in it, and

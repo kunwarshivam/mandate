@@ -585,6 +585,11 @@ impl ExecutorState {
         &self.positions
     }
 
+    /// The latest quote handed for `instrument`, sane or not: process-local, never journaled.
+    pub fn latest_quote(&self, instrument: &InstrumentId) -> Option<&MarketObservation> {
+        self.quotes.get(instrument)
+    }
+
     /// Every fill id already applied, which is what makes a re-ingested fill idempotent.
     pub fn fills(&self) -> &BTreeSet<FillId> {
         &self.fills

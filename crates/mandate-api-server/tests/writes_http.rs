@@ -16,6 +16,7 @@ use mandate_api::wire::{Id, decode};
 use mandate_api_server::config::{SESSION_KEY_FILE, read_session_key};
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
+use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::{COOKIE_NAME, OsRandom, Sessions};
 use mandate_api_server::token::{FixedKeys, Issuer};
 use mandate_authn::{Algorithm, IssuerConfig};
@@ -86,7 +87,7 @@ fn fixture() -> Fixture {
         journal: Arc::clone(&journal) as Arc<dyn mandate_api_server::journal::Journal>,
         members: Arc::new(move |_: &[StoredEvent]| parsed.lock().expect("unpoisoned").clone()),
         hosted: hosted(),
-        artifacts: None,
+        artifacts: Some(mandates()),
         objects: None,
         step_up: Arc::new(mandate_api_server::stepup::Unbound),
         challenges: Arc::default(),
@@ -104,6 +105,25 @@ fn fixture() -> Fixture {
     };
     seed(&f);
     f
+}
+
+/// The mandate document every approval here binds, which lists the approver role
+/// ([DEC-2129](../../../docs/project/decisions/DEC-2129.md) item 7).
+const DOCUMENT: &str = include_str!("fixtures/mandate.json");
+
+/// The document's version reference.
+fn bound_version() -> String {
+    let document = to_canonical(&parse(DOCUMENT.as_bytes()).expect("JSON"));
+    format!("sha256:{}", Digest::of(&document).to_hex())
+}
+
+/// An artifact store holding [`DOCUMENT`].
+fn mandates() -> Arc<dyn mandate_journal::ArtifactSource + Send + Sync> {
+    let store = Objects::new(std::collections::BTreeMap::<Digest, Vec<u8>>::new());
+    store
+        .put(&to_canonical(&parse(DOCUMENT.as_bytes()).expect("JSON")))
+        .expect("stored");
+    Arc::new(store)
 }
 
 fn alice() -> PrincipalId {
@@ -767,11 +787,12 @@ fn hash(byte: &str) -> String {
     format!("sha256:{}", byte.repeat(32))
 }
 
-/// `agt_a`'s stream with one approval request, and Alice an approver.
+/// `agt_a`'s stream with one approval request bound to [`DOCUMENT`], and Alice an approver.
 fn approvable(f: &Fixture) {
     let stream = format!("agent:{WORKSPACE}:agt_a");
     let text = format!(
-        r#"{{"environment":"paper","event_id":"{APPROVAL}","event_type":"ApprovalRequested","payload":{{"content":{{}},"content_hash":"{}","deadline":900}},"stream_id":"{stream}"}}"#,
+        r#"{{"environment":"paper","event_id":"{APPROVAL}","event_type":"ApprovalRequested","payload":{{"content":{{"trigger":{{"mandate_version":"{}"}}}},"content_hash":"{}","deadline":900}},"stream_id":"{stream}"}}"#,
+        bound_version(),
         hash("ab")
     );
     let body = to_canonical(&parse(text.as_bytes()).expect("JSON"));

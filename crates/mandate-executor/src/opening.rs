@@ -3,7 +3,7 @@
 //! 1× buying power, which the gate's check 7 compares against (trading-domain spec §7.2, DEC-470
 //! item 5).
 
-use mandate_num::{Adverse, Fraction, Price, TickRule, Usd};
+use mandate_num::{Fraction, Price, Usd};
 
 use crate::error::ExecutorError;
 use crate::types::{BrokerAccount, ProtectionPrices};
@@ -17,7 +17,8 @@ use crate::types::{BrokerAccount, ProtectionPrices};
 /// The take-profit's exact product is first truncated to the 9 places a price holds, as
 /// [`Price::collar_bound`] does for a buy's bound. That can only lower it, by at most one tick, and
 /// only for an entry or distance whose product has no digit between the tick and the ninth place but
-/// one past it. A lower take-profit sells a gain sooner and adds no risk.
+/// one past it. A lower take-profit sells a gain sooner and adds no risk. The computation is
+/// [`Price::equity_bracket`], which the cell's runtime proposes protection with too (DEC-2378).
 ///
 /// # Errors
 /// [`ExecutorError::Num`] when a price reaches zero or leaves the range a price holds.
@@ -26,16 +27,7 @@ pub fn equity_bracket_prices(
     stop_distance: Fraction,
     take_profit_distance: Option<Fraction>,
 ) -> Result<ProtectionPrices, ExecutorError> {
-    let stop = entry
-        .collar_bound(stop_distance, Adverse::Down)?
-        .on_tick(TickRule::RegNmsEquity, Adverse::Down)?;
-    let take_profit = take_profit_distance
-        .map(|distance| {
-            entry
-                .collar_bound(distance, Adverse::Up)?
-                .on_tick(TickRule::RegNmsEquity, Adverse::Down)
-        })
-        .transpose()?;
+    let (stop, take_profit) = entry.equity_bracket(stop_distance, take_profit_distance)?;
     Ok(ProtectionPrices { stop, take_profit })
 }
 

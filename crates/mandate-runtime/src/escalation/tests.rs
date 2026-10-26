@@ -24,6 +24,8 @@ use crate::types::{
     WriterEpoch,
 };
 
+mod owner_exit_legs;
+
 type Checked = Result<(), String>;
 
 const AGENT_STREAM: &str = "agent:w:a";
@@ -1437,86 +1439,5 @@ fn an_owner_exit_names_only_its_instruments_orders() -> Checked {
     let request = asked.last().ok_or("the planner was asked")?;
     assert_eq!(request.instrument, Some(instrument("AAPL")?));
     assert_eq!(request.working_orders, vec![aapl.0]);
-    Ok(())
-}
-
-/// Journal spec §5.1, rule 13: an owner exit whose append went unanswered is retried with the same
-/// draft and hands its flatten again; and a restart hands again an owner exit the executor has not
-/// taken, but not one an `IntentReceived` shows it took.
-#[test]
-fn an_owner_exit_is_handed_again_on_a_retry_and_a_restart_until_taken() -> Checked {
-    let (view, flatten) = (
-        view()?,
-        Recording {
-            asked: RefCell::new(Vec::new()),
-        },
-    );
-    let plan = Plan::of(Vec::new(), Autonomy::Auto);
-    let ports = Ports {
-        ids: &Ids,
-        gate: &Allow,
-        plan: &plan,
-        flatten: &flatten,
-        view: &view,
-    };
-    let (mut rig, _) = Rig::started(&ports)?;
-    let exit = rig.external(
-        CONTROL_STREAM,
-        COMMAND_ISSUED,
-        command(
-            "a",
-            "owner_exit",
-            ("instrument", "AAPL"),
-            Value::Null,
-            false,
-        )?,
-        format!("1{:025}", 1),
-    )?;
-    let first = handle(&mut rig.state, Input::Journal(exit.clone()), &ports).map_err(failed)?;
-    let retry = handle(&mut rig.state, Input::Journal(exit), &ports).map_err(failed)?;
-    assert_eq!(
-        retry, first,
-        "the retry re-emits the drafts and their handoff"
-    );
-    let copy = the(&retry, "OwnerExitRequested")?.event_id.clone();
-    assert!(
-        matches!(handed(&retry).as_slice(), [one] if one.intent_id == copy),
-        "{retry:?}"
-    );
-    rig.step(Input::Tick(RiskClock::from_secs(AT)), &ports)
-        .err()
-        .ok_or("the batch is still in doubt")?;
-    for effect in &retry {
-        if let Effect::Journal(draft) = effect {
-            let event = FoldedEvent {
-                stream: AGENT_STREAM.to_owned(),
-                seq: Seq(Rig::next(AGENT_STREAM, &rig.agent)),
-                event_id: draft.event_id.clone(),
-                event_type: draft.event_type.clone(),
-                causation_id: draft.causation_id.clone(),
-                actor: mandate_approval::ActorKind::Agent,
-                payload: draft.payload.clone(),
-            };
-            fold(&mut rig.state, &event).map_err(failed)?;
-            rig.agent.push(event);
-        }
-    }
-
-    let (mut restarted, recovered) = rig.restarted(&ports)?;
-    assert!(
-        handed(&recovered).iter().any(|h| h.intent_id == copy
-            && matches!(&h.body, IntentBody::Flatten(plan) if plan.purpose == Purpose::OwnerExit)),
-        "an untaken owner exit is handed again: {recovered:?}"
-    );
-    assert_eq!(
-        flatten.asked.borrow().last().map(|r| r.instrument.clone()),
-        Some(Some(instrument("AAPL")?))
-    );
-    restarted.account("IntentReceived", vec![("intent_id", text(&copy.0))])?;
-    let (_, recovered) = restarted.restarted(&ports)?;
-    assert!(
-        handed(&recovered).iter().all(|h| h.intent_id != copy),
-        "a taken one is not: {recovered:?}"
-    );
     Ok(())
 }

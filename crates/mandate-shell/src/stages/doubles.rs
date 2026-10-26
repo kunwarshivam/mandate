@@ -39,6 +39,7 @@ use super::{
     Admitted, Classifier, Connector, Executor, ExitPath, Gate, JournalWriter, MandateSource,
     Protection, Reconciler, Sink, Sizing, Stage, Stages,
 };
+use crate::approvers::ApproverSource;
 use crate::envelope::{IdSpace, Ids};
 use crate::error::Cause;
 use crate::tracer::Setup;
@@ -47,6 +48,8 @@ use crate::tracer::Setup;
 pub const AAPL: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
 pub const AGENT: &str = "tracer-aapl";
 pub const NOW: &str = "2026-09-25T20:00:00.000000000Z";
+/// The connection the fixture's mandate names.
+pub const FIXTURE_CONNECTION: &str = "conn-fixture";
 
 /// What the doubles saw, counted where they saw it.
 #[derive(Debug, Default)]
@@ -497,6 +500,10 @@ impl MandateSource for FixtureMandate {
                     live_cli_confirm: None,
                 },
             },
+            approvers: ApproverSource {
+                references: Vec::new(),
+                connection: FIXTURE_CONNECTION.to_owned(),
+            },
             environment: self.environment,
             governed: None,
         })
@@ -771,7 +778,7 @@ impl Sink for ConvertingSink {
                 instrument: instrument.clone(),
                 side: *side,
                 qty: *qty,
-                limit: Some(*limit),
+                limit: *limit,
                 purpose: executor_purpose(*purpose),
                 protection: execution
                     .protection

@@ -333,7 +333,9 @@ pub enum IntentBody {
         instrument: InstrumentId,
         side: Side,
         qty: Qty,
-        limit: Price,
+        /// The limit, or `None` for an exit at the market, the only order journal spec §9.1 rules
+        /// 2 and 3 let go without one (an owner's exit of one instrument, DEC-2387).
+        limit: Option<Price>,
         purpose: Purpose,
     },
     Flatten(FlattenPlan),

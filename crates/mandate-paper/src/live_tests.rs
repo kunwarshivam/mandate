@@ -75,6 +75,7 @@ fn canonical(text: &str) -> Value {
 fn record(seq: u64, event_type: &str, payload: &str) -> ControlRecord {
     ControlRecord {
         seq,
+        event_time: None,
         event_type: event_type.to_owned(),
         payload: canonical(payload),
         origin: Origin {

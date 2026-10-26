@@ -1,6 +1,7 @@
 //! The deployment's production ports over the journal (DEC-2378 S2): [`Facts`], the one
-//! `mandate-gate-context` fold the process feeds as it tails its streams, and [`Flatten`], the
-//! flatten planner that sells the agent's sub-ledger from it.
+//! `mandate-gate-context` fold the process feeds as it tails its streams; [`Flatten`], the
+//! flatten planner that sells the agent's sub-ledger from it; [`Plan`], the order plan; and
+//! [`Gate`], the gate's dry run over it.
 //!
 //! The daemon reaches no broker and no market data (`AGENTS.md` rule 12), so every fact a port
 //! reads is a journaled row the process has already read. A flatten never waits on the facts an
@@ -12,24 +13,83 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use mandate_accounting::InstrumentId;
-use mandate_canon::{Value, parse};
+use mandate_canon::{Key, Object, Value, parse};
 use mandate_domain::AssetClass;
-use mandate_gate_context::{Journaled, Row};
+use mandate_gate_context::{Freshness, Journaled, Row};
 use mandate_journal::StoredEvent;
-use mandate_runtime::{FlattenLeg, FlattenPlan, FlattenPlanner, FlattenRequest};
+use mandate_risk::GateConfig;
+use mandate_runtime::{EventDraft, FlattenLeg, FlattenPlan, FlattenPlanner, FlattenRequest};
 use mandate_spec::document::Mandate;
 
-use crate::runtime::Wiring;
+use crate::bars::BarsReader;
+use crate::runtime::{Refs, Wiring};
 
-/// `base` with the production ports this slice has (DEC-2378 S3a): the shared fold for `agent`,
-/// ticked by the scheduler's `clock` stream, and the flatten planner over it with the asset
-/// classes of `document`'s pinned universe. Every other port stays `base`'s, so a deployment's
-/// openings are still denied until the plan and the gate's dry run are wired (S2b).
-pub fn wired(mut base: Wiring, document: &Value, clock: &str, agent: &str) -> Wiring {
+mod gate;
+mod plan;
+
+pub use gate::{Gate, Liquidity, UNJOURNALED, UNSEEN, verdict};
+pub use plan::Plan;
+
+/// How fresh, in risk-clock seconds, the facts an opening reads must be (DEC-2378 item 4): a mark
+/// within a minute, as the executor marks each deployed instrument at every tick, and the
+/// account's snapshot within an hour, since the plan reads only its equity for validation and the
+/// executor's binding gate reads its own account.
+pub const FRESH: Freshness = Freshness {
+    mark_max_age_s: 60,
+    snapshot_max_age_s: 3600,
+};
+
+/// `base` with the deployment's production ports (DEC-2378 S3): the shared fold for `agent`,
+/// ticked by the scheduler's `clock` stream; the flatten over it with the asset classes of
+/// `document`'s pinned universe; the order plan and the gate's dry run over the stored mandate,
+/// the dry run with the registered rule set's gate configuration `rules` (DEC-2388) and the
+/// stored bars `bars` read for the liquidity floor and participation (DEC-2274), which still
+/// denies every opening while any check is deferred; the view and every draft's references naming
+/// the deployed `version`. A document that does not parse, which `deployment::document` has
+/// already refused, keeps `base`'s plan, gate and view.
+pub fn wired(
+    mut base: Wiring,
+    version: &str,
+    document: &Value,
+    (rules, bars): (Option<GateConfig>, BarsReader),
+    clock: &str,
+    agent: &str,
+) -> Wiring {
     let facts = Facts::new(clock, agent);
     base.flatten = Box::new(Flatten::new(facts.clone(), classes(document)));
+    if let Ok(mandate) = Mandate::parse(document) {
+        base.view.version = version.to_owned();
+        base.view.working_universe = mandate
+            .universe
+            .pinned_instruments
+            .iter()
+            .filter_map(|pinned| InstrumentId::new(pinned.asset_id.as_str()).ok())
+            .collect();
+        base.view.approval.timeout_s = i64::from(mandate.autonomy.approval.timeout_s);
+        base.plan = Box::new(Plan::new(facts.clone(), mandate.clone(), FRESH));
+        base.gate = Box::new(
+            Gate::new(facts.clone(), (version, mandate), rules, FRESH).reading(Box::new(bars)),
+        );
+    }
+    base.refs = Box::new(MandateRefs(version.to_owned()));
     base.facts = Some(facts);
     base
+}
+
+/// Every draft's references: the deployed mandate version, at schema version 1 (journal spec
+/// §9). A draft whose version needs more, such as `ModelOutputRecorded` version 2's model
+/// registry, is answered by the wiring that writes it (DEC-2383).
+struct MandateRefs(String);
+
+impl Refs for MandateRefs {
+    fn refs(&self, _draft: &EventDraft) -> Option<(u64, Object)> {
+        let mut refs = Object::new();
+        refs.insert(
+            Key::new("mandate_version").ok()?,
+            Value::Str(self.0.clone()),
+        );
+        Some((1, refs))
+    }
 }
 
 /// Each pinned instrument's asset class, by asset id, from the stored mandate `document`; none
@@ -150,7 +210,9 @@ impl Facts {
 /// and the broker holds what it will not take (`AGENTS.md` rule 13). A held instrument it cannot
 /// plan, one with no asset class in the universe or an id that does not parse, is counted for the
 /// process's `flatten_unplanned` alert rather than dropped silently; the executor still flattens
-/// its own sub-ledger of it.
+/// its own sub-ledger of it. A plan asked before the account is followed, when nothing can be read,
+/// is counted the same way, never taken as "nothing held": for an owner's exit of one instrument
+/// the plan is the only seller (DEC-2387 item 1).
 pub struct Flatten {
     facts: Facts,
     classes: BTreeMap<String, AssetClass>,
@@ -172,10 +234,18 @@ impl FlattenPlanner for Flatten {
                 .as_ref()
                 .is_none_or(|named| named.as_str() == instrument)
         };
-        let (held, working) = self
+        let Some((held, working)) = self
             .facts
             .read(|journaled| (journaled.held(), journaled.working()))
-            .unwrap_or_default();
+        else {
+            self.facts.note_unplanned(1);
+            return FlattenPlan {
+                cancel_client_order_ids: Vec::new(),
+                sells: Vec::new(),
+                purpose: request.initiator.sell_purpose(),
+                confirmation: request.confirmation.clone(),
+            };
+        };
         let scoped_held: Vec<_> = held
             .into_iter()
             .filter(|(instrument, _)| scoped(instrument))
