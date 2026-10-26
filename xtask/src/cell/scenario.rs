@@ -1388,13 +1388,16 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
             vec![E2E_FILL],
         ),
         link(
-            "a monitor run starts on the held thesis",
+            "the news item starts a monitor run over the held thesis",
             &agent,
             "RunStarted",
-            Some(r#""kind":"monitor""#),
-            "the monitor run over the held thesis, which reads the news item that ends it, \
-             journaled before the run uses it",
-            "the research pass offers arrived items to the core (#2575)",
+            Some(r#""kind":"event""#),
+            "the monitor run the news item triggers, whose trigger names the item's \
+             ObservationRecorded (rule 271); the recorded item arrives 900 seconds after the \
+             research agent is deployed, so a run waits for it only with \
+             MANDATE_CELL_LOOP_WAIT_S",
+            "the research pass offers arrived items to the core (#2575), and the recorded feed's \
+             item in the runtime image's bundle (#2653)",
             vec![NE_NEWS],
         ),
         link(
@@ -2064,10 +2067,27 @@ fn poll_applied(check: &ApiCheck) -> Result<(&'static str, String, bool)> {
 /// How long [`poll_applied`] waits for the kill switch to read back applied.
 const APPLIED_WITHIN: Duration = Duration::from_secs(90);
 
-/// How long the research loop waits for each of its links to appear in the journal: one research
-/// pass at the runtime's tick, or the executor's next reconciliation, with the Job's ten minutes in
-/// mind, since a link not seen stops the loop's later reads.
+/// How long the research loop waits for each of its links to appear in the journal by default: one
+/// research pass at the runtime's tick, or the executor's next reconciliation, with the Job's ten
+/// minutes in mind, since a link not seen stops the loop's later reads.
 const LINK_WITHIN: Duration = Duration::from_secs(60);
+
+/// The variable a rehearsal sets to wait longer for each link, in whole seconds, up to
+/// [`LINK_WITHIN_MAX`]: the recorded news item arrives 900 seconds after the research agent is
+/// deployed (#2653), which a CI run's wait does not reach.
+pub const LOOP_WAIT_ENV: &str = "MANDATE_CELL_LOOP_WAIT_S";
+
+/// The longest a rehearsal may wait for one link, so a mistyped value never holds a run for hours.
+const LINK_WITHIN_MAX: Duration = Duration::from_secs(1_800);
+
+/// The wait for each link: `set`, the variable's value, in whole seconds from 1 to
+/// [`LINK_WITHIN_MAX`]'s, or [`LINK_WITHIN`] when it is unset or not such a number.
+pub fn link_within(set: Option<&str>) -> Duration {
+    set.and_then(|text| text.trim().parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .filter(|wait| !wait.is_zero() && *wait <= LINK_WITHIN_MAX)
+        .unwrap_or(LINK_WITHIN)
+}
 
 /// Whether the research loop's later links are read: `Open` until a link is not seen, then
 /// `Stopped` with that link, so every later link reads as not reached rather than spending its own
@@ -2160,7 +2180,7 @@ pub fn link_query(check: &LoopCheck, after: u64) -> String {
 }
 
 /// Reads `check`'s first event after the last link seen on its stream, `after`'s, from the journal's
-/// primary every two seconds until one is there or [`LINK_WITHIN`] has passed, and records its
+/// primary every two seconds until one is there or [`link_within`]'s wait has passed, and records its
 /// sequence number there: what Postgres holds, not what a process reports.
 #[expect(
     clippy::disallowed_methods,
@@ -2169,7 +2189,8 @@ pub fn link_query(check: &LoopCheck, after: u64) -> String {
 fn journaled(check: &LoopCheck, after: &mut BTreeMap<String, u64>) -> Seen {
     let since = after.get(&check.stream).copied().unwrap_or(0);
     let query = link_query(check, since);
-    let deadline = Instant::now() + LINK_WITHIN;
+    let wait = link_within(env::var(LOOP_WAIT_ENV).ok().as_deref());
+    let deadline = Instant::now() + wait;
     loop {
         match super::on_primary(&query) {
             Ok(answer) => match answer.trim().parse::<u64>() {
@@ -3582,7 +3603,7 @@ mod tests {
                     "ProtectionChanged",
                     Some(r#""action":"placed""#)
                 ),
-                (agent.clone(), "RunStarted", Some(r#""kind":"monitor""#)),
+                (agent.clone(), "RunStarted", Some(r#""kind":"event""#)),
                 (agent.clone(), "ThesisInvalidated", None),
                 (
                     acct.clone(),
@@ -4438,6 +4459,19 @@ mod tests {
              seq LIMIT 1"
         );
         assert!(link_query(&check(Some("o'clock")), 0).contains("position('o''clock' in"));
+    }
+
+    /// A rehearsal waits as long as it sets, from a second to half an hour; anything else waits the
+    /// default, so a CI run's wait never grows by accident.
+    #[test]
+    fn a_rehearsal_sets_how_long_each_link_is_waited_for() {
+        assert_eq!(link_within(None), LINK_WITHIN);
+        assert_eq!(link_within(Some("1200")), Duration::from_secs(1_200));
+        assert_eq!(link_within(Some(" 1 ")), Duration::from_secs(1));
+        assert_eq!(link_within(Some("1800")), LINK_WITHIN_MAX);
+        for refused in ["0", "1801", "-5", "20m", ""] {
+            assert_eq!(link_within(Some(refused)), LINK_WITHIN, "{refused}");
+        }
     }
 
     /// The grant reads the CLI's own lines (`mandate_cli::inbox`): the first of the agent's
