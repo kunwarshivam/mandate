@@ -22,9 +22,7 @@ use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::{ExchangeCalendar, UtcNanos};
 
-use crate::follow::{
-    Following, Proposal, Switch, agents_of, bounded, folded, proposals, switches,
-};
+use crate::follow::{Following, Proposal, Switch, agents_of, bounded, folded, proposals, switches};
 use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
 use crate::risk::{RiskBook, RiskOpenings};
