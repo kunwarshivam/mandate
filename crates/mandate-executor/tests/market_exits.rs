@@ -420,7 +420,7 @@ fn an_exit_at_the_market_with_nothing_to_price_from_is_held_then_goes() {
             Some(("hold".to_owned(), "exit_unpriced".to_owned())),
             "{purpose:?}"
         );
-        assert_eq!(held.notifications, ["exit_unpriced"], "{purpose:?}");
+        assert_eq!(held.notifications, ["exit_stalled"], "{purpose:?}");
         let quiet = shell.run(Input::Tick(clock(15)), &ports);
         assert!(
             quiet.is_empty(),

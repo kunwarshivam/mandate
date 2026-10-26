@@ -554,7 +554,7 @@ impl<S: Store> RuntimeProcess<S> {
             match effect {
                 Effect::Journal(draft) => drafts.push(draft),
                 Effect::Notify(notice) => asked.push(Alert {
-                    key: notice.message_key,
+                    key: notice.kind.key(),
                     subject: Some(notice.subject_event.0),
                 }),
                 Effect::NotifyApproval(_) => asked.push(Alert {

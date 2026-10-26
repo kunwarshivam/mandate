@@ -364,7 +364,7 @@ impl<S: Store> RuntimeProcess<S> {
                 for effect in effects {
                     if let Effect::Notify(notice) = effect {
                         alerts.push(Alert {
-                            key: notice.message_key,
+                            key: notice.kind.key(),
                             subject: Some(notice.subject_event.0),
                         });
                     }
