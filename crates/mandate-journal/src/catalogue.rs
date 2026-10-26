@@ -37,7 +37,7 @@ const NONE: &[&str] = &[];
 
 /// Every event type [`lookup`] admits, in its order. The test below reads `lookup`'s source, so
 /// a type added there and not here fails the build's tests.
-pub(crate) const EVENT_TYPES: [&str; 138] = [
+pub(crate) const EVENT_TYPES: [&str; 139] = [
     "StreamOpened",
     "MeterReserved",
     "MeterSettled",
