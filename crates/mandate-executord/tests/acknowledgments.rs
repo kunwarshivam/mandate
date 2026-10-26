@@ -1,16 +1,20 @@
 //! E7-4b (journal spec v0.104 §9.28, DEC-2828, DEC-2830): the process hands every owner's
 //! acknowledgment on the control stream for an agent it follows to the executor, which copies it
 //! onto the account stream and judges it there. The overlay is the latest membership record's
-//! `independent_approval_required`, `false` with none; a membership record that does not read
-//! hands no acknowledgment, so none lifts a hold on an unknown policy.
+//! `independent_approval_required`, `false` with none and `true` while it does not read; an
+//! acknowledgment record that does not read holds openings and hands nothing.
 
 mod support;
 
 use mandate_canon::{Int, Value};
+use mandate_process::State;
 use support::{
     ACCOUNT_STREAM, AGENT, CONTROL_STREAM, Error, Journal, NOON, Paper, at, deployed, mode_applied,
-    object, opened, start,
+    object, opened, propose, start, start_allowing,
 };
+
+const OPEN: &str = "01JINTENT0000000000000000A";
+const EXIT: &str = "01JINTENT0000000000000000C";
 
 const HOLD: &str = "01JBHD00001000000000000000";
 const ACK: &str = "01JBAK00001000000000000000";
@@ -161,21 +165,64 @@ fn the_latest_membership_record_requires_independence() -> Result<(), Error> {
 }
 
 /// A membership record whose `independent_approval_required` does not read is never read as
-/// `false`: no acknowledgment is copied and the hold stands.
+/// `false`: it requires independence, so the owner's own acknowledgment is copied and refused
+/// `not_independent`, in the journal, and the hold stands.
 #[test]
-fn an_unreadable_membership_record_lifts_nothing() -> Result<(), Error> {
+fn an_unreadable_membership_record_requires_independence() -> Result<(), Error> {
     for unreadable in [text("no"), Value::Null] {
         let journal = held()?;
-        membership(&journal, "mr1", unreadable.clone())?;
+        membership(&journal, "mr1", Value::Bool(false))?;
+        membership(&journal, "mr2", unreadable.clone())?;
         acknowledge(&journal)?;
         run(&journal)?;
-        let types: Vec<String> = after_hold(&journal).into_iter().map(|(t, _)| t).collect();
+        let after = after_hold(&journal);
+        let types: Vec<&str> = after.iter().map(|(t, _)| t.as_str()).collect();
+        let copy = types.iter().position(|t| *t == "OwnerAcknowledged");
+        assert_eq!(
+            copy.and_then(|c| after.get(c + 1))
+                .map(|(t, p)| (t.as_str(), p.get("reason"))),
+            Some(("OwnerCommandRefused", Some(&text("not_independent")))),
+            "{unreadable:?}: {types:?}"
+        );
         assert!(
-            !types
-                .iter()
-                .any(|t| t == "OwnerAcknowledged" || t == "AgentModeApplied"),
+            !types.contains(&"AgentModeApplied"),
             "{unreadable:?}: {types:?}"
         );
     }
+    Ok(())
+}
+
+/// An acknowledgment on the control stream that does not read holds every opening, and only
+/// openings: the risk exit is handed, nothing is copied, and the process keeps running.
+#[test]
+fn an_unreadable_acknowledgment_holds_openings_and_hands_every_exit() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.write(
+        CONTROL_STREAM,
+        ACK,
+        "OwnerAcknowledged",
+        2,
+        None,
+        object(vec![("event", text(HOLD))])?,
+    )?;
+    propose(&journal, AGENT, OPEN, "buy", "10", "150", "open")?;
+    propose(&journal, AGENT, EXIT, "sell", "10", "150", "risk_exit")?;
+    let broker = Paper::new(&journal);
+    let mut process = start_allowing(&journal, &broker)?;
+    process.step(at(NOON)?);
+    process.step(at(NOON)?);
+    assert_eq!(journal.received(), [EXIT], "the exit only");
+    assert!(
+        !journal
+            .types(ACCOUNT_STREAM)
+            .iter()
+            .any(|t| t == "OwnerAcknowledged"),
+        "nothing copied"
+    );
+    assert!(
+        !matches!(process.lifecycle().state(), State::Exited(_)),
+        "still running: {:?}",
+        process.lifecycle().state()
+    );
     Ok(())
 }

@@ -22,7 +22,9 @@ use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::{ExchangeCalendar, UtcNanos};
 
-use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches, theses};
+use crate::follow::{
+    Proposal, Switch, Unreadable, agents_of, bounded, folded, proposals, switches, theses,
+};
 use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
 use crate::robinhood::AccountReads;
@@ -718,7 +720,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// read. An unreadable control stream yields nothing this pass, and so does an agent stream
     /// that cannot be read. A control record that does not read stops the process at once, since
     /// the agents it names are unknown; a row on one agent's stream that does not read stops it only
-    /// after the other agents' switches are applied (DEC-85, `AGENTS.md` rule 13).
+    /// after the other agents' switches are applied (DEC-85, `AGENTS.md` rule 13). An owner's
+    /// acknowledgment, its request, or a record that spends a step-up that does not read holds
+    /// every opening and hands no acknowledgment, and every exit still goes (journal spec §9.28,
+    /// DEC-2830).
     fn switches(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> Option<Followed> {
         let control = self.control.clone()?;
         let rows = self.follow(&control, alerts)?;
@@ -805,22 +810,17 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         }
         let agents: BTreeSet<AgentId> = following.agents.keys().cloned().collect();
         let processed_at = RiskClock::from_secs(now.secs());
-        let acknowledgments = match crate::acknowledgments::acknowledgments(
+        let acknowledgments = crate::acknowledgments::acknowledgments(
             &rows,
             &agents,
             self.environment,
             processed_at,
-        ) {
-            Ok(all) => all
-                .into_iter()
-                .filter(|handoff| !self.state.copied_acknowledgment(&handoff.original.event_id))
-                .collect(),
-            Err(crate::acknowledgments::Unread::Policy) => Vec::new(),
-            Err(crate::acknowledgments::Unread::Record) => {
-                unreadable = true;
-                Vec::new()
-            }
-        };
+            |original| self.state.copied_acknowledgment(original),
+        )
+        .unwrap_or_else(|Unreadable| {
+            proposed.retain(|(_, proposal)| !proposal.purpose.adds_risk());
+            Vec::new()
+        });
         Some(Followed {
             switches: pending,
             proposals: proposed,

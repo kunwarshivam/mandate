@@ -7,23 +7,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::Value;
-use mandate_executor::{AcknowledgmentHandoff, AgentId, RiskClock};
+use mandate_executor::{AcknowledgmentHandoff, AgentId, EventId, RiskClock};
 use mandate_journal::{Environment, StoredEvent};
 
-use crate::follow::folded;
-
-/// Why the control stream's acknowledgments could not all be handed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Unread {
-    /// An acknowledgment, request or spending record did not read: the process holds every
-    /// opening, as for any followed record that does not read, rather than skip what the owner
-    /// wrote.
-    Record,
-    /// A membership record's `independent_approval_required` did not read, so the overlay is
-    /// unknown: no acknowledgment is handed, and so none is judged or lifts anything, until it
-    /// reads. An unknown overlay is never read as `false`.
-    Policy,
-}
+use crate::follow::{Unreadable, folded};
 
 const REQUESTED: &str = "OwnerAcknowledgmentRequested";
 const ACKNOWLEDGED: &str = "OwnerAcknowledged";
@@ -41,26 +28,35 @@ const SPENDING: [&str; 4] = [
 const MEMBERSHIP: [&str; 3] = ["MemberActivated", "MemberRoleChanged", "MemberReactivated"];
 
 /// Every acknowledgment and request on `control`, in `environment`, whose `agent` is one of
-/// `agents`, as the executor's handoff at the processing second `processed_at`.
+/// `agents` and whose original `copied` does not hold, as the executor's handoff at the processing
+/// second `processed_at`.
 ///
 /// `independent_overlay` is the latest membership record's `independent_approval_required`, the
 /// effective policy as the workspace's writers record it, and with none `false`: a requirement no
-/// level sets is not required (mandate spec §4.3). It applies to every agent of the account alike,
-/// so it is the strictest across them. No effective-policy fold exists yet (backlog E9-6a). `methods` is `cli_confirm` in paper and nothing elsewhere: live
-/// step-up is the founder's own connection's (DEC-529 item 3), which no executor here serves.
+/// level sets is not required (mandate spec §4.3). A membership record whose member does not read
+/// leaves the requirement unknown, which is read as `true`, never `false`, until a later one reads:
+/// an acknowledgment by its owner alone is then copied and refused `not_independent`, in the
+/// journal, and one an independent user gave still passes. The overlay applies to every agent of
+/// the account alike, so it is the strictest across them. No effective-policy fold exists yet
+/// (backlog E9-6).
+///
+/// `methods` is `cli_confirm` in paper and nothing elsewhere: live step-up is the founder's own
+/// connection's (DEC-529 item 3), which no executor here serves.
 ///
 /// # Errors
-/// [`Unread::Record`] for an acknowledgment, request or spending record whose members do not read;
-/// [`Unread::Policy`] for a membership record whose `independent_approval_required` does not.
+/// [`Unreadable`] for an acknowledgment, request or spending record whose members do not read: the
+/// process then holds every opening rather than judge a step-up against a spent set it could not
+/// read in full.
 pub fn acknowledgments(
     control: &[StoredEvent],
     agents: &BTreeSet<AgentId>,
     environment: Environment,
     processed_at: RiskClock,
-) -> Result<Vec<AcknowledgmentHandoff>, Unread> {
+    copied: impl Fn(&EventId) -> bool,
+) -> Result<Vec<AcknowledgmentHandoff>, Unreadable> {
     let mut spent: BTreeSet<String> = BTreeSet::new();
     let mut spent_before_request: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut policy = Some(false);
+    let mut overlay = false;
     let mut out = Vec::new();
     let methods: BTreeSet<String> = if environment == Environment::Paper {
         BTreeSet::from(["cli_confirm".to_owned()])
@@ -74,29 +70,26 @@ pub fn acknowledgments(
         let kind = row.event_type.as_str();
         if MEMBERSHIP.contains(&kind) {
             let read = folded(row).ok();
-            policy = match read
+            overlay = read
                 .as_ref()
                 .and_then(|event| event.payload.get("independent_approval_required"))
-            {
-                Some(Value::Bool(required)) => Some(*required),
-                _ => None,
-            };
+                .is_none_or(|required| *required != Value::Bool(false));
             continue;
         }
         if !SPENDING.contains(&kind) {
             continue;
         }
-        let event = folded(row).map_err(|_| Unread::Record)?;
+        let event = folded(row)?;
         if kind == REQUESTED || kind == ACKNOWLEDGED {
             let agent = event
                 .payload
                 .get("agent")
                 .and_then(Value::as_str)
-                .ok_or(Unread::Record)?;
+                .ok_or(Unreadable)?;
             if kind == REQUESTED {
                 spent_before_request.insert(event.event_id.0.clone(), spent.clone());
             }
-            if agents.contains(&AgentId(agent.to_owned())) {
+            if agents.contains(&AgentId(agent.to_owned())) && !copied(&event.event_id) {
                 let request_spent = event
                     .payload
                     .get("request")
@@ -119,12 +112,11 @@ pub fn acknowledgments(
                 let assertion = step_up
                     .get("assertion_id")
                     .and_then(Value::as_str)
-                    .ok_or(Unread::Record)?;
+                    .ok_or(Unreadable)?;
                 spent.insert(assertion.to_owned());
             }
         }
     }
-    let overlay = policy.ok_or(Unread::Policy)?;
     for handoff in &mut out {
         handoff.independent_overlay = overlay;
     }
@@ -136,10 +128,11 @@ mod tests {
     use std::collections::BTreeSet;
 
     use mandate_canon::{Digest, Key, Object, Value, to_canonical};
-    use mandate_executor::{AgentId, RiskClock};
+    use mandate_executor::{AcknowledgmentHandoff, AgentId, EventId, RiskClock};
     use mandate_journal::{Environment, StoredEvent};
 
-    use super::{Unread, acknowledgments};
+    use super::acknowledgments;
+    use crate::follow::Unreadable;
 
     fn object(members: &[(&str, Value)]) -> Value {
         let mut out = Object::new();
@@ -155,7 +148,7 @@ mod tests {
         Value::Str(text.to_owned())
     }
 
-    fn row(seq: u64, id: &str, kind: &str, payload: Value) -> StoredEvent {
+    fn row_in(environment: &str, seq: u64, id: &str, kind: &str, payload: Value) -> StoredEvent {
         let body = to_canonical(&object(&[("payload", payload)]));
         StoredEvent {
             stream_id: "ctl:ws1".to_owned(),
@@ -163,12 +156,16 @@ mod tests {
             event_id: id.to_owned(),
             event_type: kind.to_owned(),
             schema_version: 2,
-            environment: "paper".to_owned(),
+            environment: environment.to_owned(),
             recorded_at: "2026-10-26T12:00:00.000000000Z".to_owned(),
             prev_hash: Digest::ZERO,
             hash: Digest::of(&body),
             body,
         }
+    }
+
+    fn row(seq: u64, id: &str, kind: &str, payload: Value) -> StoredEvent {
+        row_in("paper", seq, id, kind, payload)
     }
 
     fn step_up(assertion: &str) -> Value {
@@ -207,62 +204,73 @@ mod tests {
         BTreeSet::from([AgentId("agenta".to_owned())])
     }
 
-    fn handed(
+    fn handed_in(
         control: &[StoredEvent],
-    ) -> Result<Vec<mandate_executor::AcknowledgmentHandoff>, Unread> {
+        environment: Environment,
+    ) -> Result<Vec<AcknowledgmentHandoff>, Unreadable> {
         acknowledgments(
             control,
             &ours(),
-            Environment::Paper,
+            environment,
             RiskClock::from_secs(100),
+            |_| false,
         )
+    }
+
+    fn handed(control: &[StoredEvent]) -> Result<Vec<AcknowledgmentHandoff>, Unreadable> {
+        handed_in(control, Environment::Paper)
+    }
+
+    fn overlays(control: &[StoredEvent]) -> Result<Vec<bool>, Unreadable> {
+        handed(control).map(|h| h.iter().map(|x| x.independent_overlay).collect())
     }
 
     #[test]
     fn the_latest_membership_record_sets_the_overlay_and_none_is_false() {
         let ack = acknowledged(3, "ak", "agenta", None, "a1");
-        let none = handed(std::slice::from_ref(&ack));
-        assert_eq!(
-            none.map(|h| h.iter().map(|x| x.independent_overlay).collect::<Vec<_>>()),
-            Ok(vec![false])
-        );
-        let latest = handed(&[
+        assert_eq!(overlays(std::slice::from_ref(&ack)), Ok(vec![false]));
+        let latest = [
             member(1, Value::Bool(false)),
             member(2, Value::Bool(true)),
             ack.clone(),
-        ]);
-        assert_eq!(
-            latest.map(|h| h.iter().map(|x| x.independent_overlay).collect::<Vec<_>>()),
-            Ok(vec![true])
-        );
-        let later = handed(&[
+        ];
+        assert_eq!(overlays(&latest), Ok(vec![true]));
+        let after_the_acknowledgment = [
             member(1, Value::Bool(true)),
             ack,
             member(4, Value::Bool(false)),
-        ]);
+        ];
         assert_eq!(
-            later.map(|h| h.iter().map(|x| x.independent_overlay).collect::<Vec<_>>()),
-            Ok(vec![false])
+            overlays(&after_the_acknowledgment),
+            Ok(vec![false]),
+            "the overlay at processing, not at the acknowledgment"
         );
     }
 
     #[test]
-    fn an_unreadable_membership_record_hands_no_acknowledgment_and_never_reads_as_false() {
+    fn an_unreadable_membership_record_requires_independence_until_a_later_one_reads() {
         let ack = acknowledged(3, "ak", "agenta", None, "a1");
         for unreadable in [s("no"), Value::Null] {
-            assert_eq!(
-                handed(&[
-                    member(1, Value::Bool(false)),
-                    member(2, unreadable.clone()),
-                    ack.clone()
-                ])
-                .err(),
-                Some(Unread::Policy),
-                "{unreadable:?}"
-            );
+            let control = [
+                member(1, Value::Bool(false)),
+                member(2, unreadable.clone()),
+                ack.clone(),
+            ];
+            assert_eq!(overlays(&control), Ok(vec![true]), "{unreadable:?}");
+            let read_again = [
+                member(1, unreadable.clone()),
+                ack.clone(),
+                member(4, Value::Bool(false)),
+            ];
+            assert_eq!(overlays(&read_again), Ok(vec![false]), "{unreadable:?}");
         }
         let missing = row(2, "m2", "MemberActivated", object(&[]));
-        assert_eq!(handed(&[missing, ack]).err(), Some(Unread::Policy));
+        assert_eq!(overlays(&[missing, ack.clone()]), Ok(vec![true]));
+        let bad_body = StoredEvent {
+            body: b"not json".to_vec(),
+            ..member(2, Value::Bool(false))
+        };
+        assert_eq!(overlays(&[bad_body, ack]), Ok(vec![true]));
     }
 
     #[test]
@@ -286,13 +294,20 @@ mod tests {
                 "ApprovalResponseSubmitted",
                 object(&[("step_up", step_up("p1"))]),
             ),
-            acknowledged(4, "ak", "agenta", Some("rq"), "a1"),
+            row(
+                4,
+                "other",
+                "PolicyChanged",
+                object(&[("step_up", step_up("x1"))]),
+            ),
+            acknowledged(5, "ak", "agenta", Some("rq"), "a1"),
         ];
         let handed = handed(&control).unwrap_or_default();
-        assert_eq!(handed.len(), 2, "the request and the acknowledgment");
         let (Some(request), Some(ack)) = (handed.first(), handed.get(1)) else {
             unreachable!("two handed: {handed:?}");
         };
+        assert_eq!(handed.len(), 2);
+        assert_eq!(request.spent, BTreeSet::from(["c1".to_owned()]));
         assert_eq!(
             ack.spent,
             BTreeSet::from(["c1".to_owned(), "r1".to_owned(), "p1".to_owned()])
@@ -301,6 +316,8 @@ mod tests {
         assert_eq!(request.request_spent, None);
         assert_eq!(ack.processed_at, RiskClock::from_secs(100));
         assert_eq!(ack.methods, BTreeSet::from(["cli_confirm".to_owned()]));
+        assert_eq!(ack.original.event_id, EventId("ak".to_owned()));
+        assert_eq!(ack.schema_version, 2);
     }
 
     #[test]
@@ -317,20 +334,112 @@ mod tests {
     }
 
     #[test]
-    fn an_acknowledgment_that_does_not_read_holds_the_record() {
+    fn a_copied_original_is_not_handed_again_but_still_spends() {
+        let control = [
+            acknowledged(1, "done", "agenta", None, "d1"),
+            acknowledged(2, "ak", "agenta", None, "a1"),
+        ];
+        let handed = acknowledgments(
+            &control,
+            &ours(),
+            Environment::Paper,
+            RiskClock::from_secs(100),
+            |id| id.0 == "done",
+        )
+        .unwrap_or_default();
+        assert_eq!(
+            handed
+                .iter()
+                .map(|h| (h.original.event_id.0.clone(), h.spent.clone()))
+                .collect::<Vec<_>>(),
+            [("ak".to_owned(), BTreeSet::from(["d1".to_owned()]))]
+        );
+    }
+
+    #[test]
+    fn another_environments_records_count_for_nothing() {
+        let control = [
+            row_in(
+                "live",
+                1,
+                "lm",
+                "MemberRoleChanged",
+                object(&[("independent_approval_required", Value::Bool(true))]),
+            ),
+            row_in(
+                "live",
+                2,
+                "lc",
+                "OwnerCommandIssued",
+                object(&[("step_up", step_up("l1"))]),
+            ),
+            row_in(
+                "live",
+                3,
+                "la",
+                "OwnerAcknowledged",
+                object(&[("agent", s("agenta")), ("step_up", step_up("l2"))]),
+            ),
+            row_in("live", 4, "lx", "OwnerAcknowledged", object(&[])),
+            acknowledged(5, "ak", "agenta", None, "a1"),
+        ];
+        let handed = handed(&control).unwrap_or_default();
+        assert_eq!(
+            handed
+                .iter()
+                .map(|h| (
+                    h.original.event_id.0.clone(),
+                    h.spent.len(),
+                    h.independent_overlay
+                ))
+                .collect::<Vec<_>>(),
+            [("ak".to_owned(), 0, false)]
+        );
+    }
+
+    #[test]
+    fn only_paper_allows_cli_confirm() {
+        let control = [row_in(
+            "live",
+            1,
+            "ak",
+            "OwnerAcknowledged",
+            object(&[("agent", s("agenta"))]),
+        )];
+        let handed = handed_in(&control, Environment::Live).unwrap_or_default();
+        assert_eq!(
+            handed.iter().map(|h| h.methods.clone()).collect::<Vec<_>>(),
+            [BTreeSet::new()]
+        );
+    }
+
+    #[test]
+    fn an_acknowledgment_or_spending_record_that_does_not_read_is_unreadable() {
         let bad = row(
             1,
             "ak",
             "OwnerAcknowledged",
             object(&[("step_up", step_up("a1"))]),
         );
-        assert_eq!(handed(&[bad]).err(), Some(Unread::Record));
+        assert_eq!(handed(&[bad]).err(), Some(Unreadable));
         let bad_step_up = row(
             1,
             "ak",
             "OwnerAcknowledged",
             object(&[("agent", s("agenta")), ("step_up", s("x"))]),
         );
-        assert_eq!(handed(&[bad_step_up]).err(), Some(Unread::Record));
+        assert_eq!(handed(&[bad_step_up]).err(), Some(Unreadable));
+        let bad_body = StoredEvent {
+            body: b"not json".to_vec(),
+            ..row(1, "cm", "OwnerCommandIssued", object(&[]))
+        };
+        assert_eq!(handed(&[bad_body]).err(), Some(Unreadable));
+        let no_step_up = row(
+            1,
+            "cm",
+            "OwnerCommandIssued",
+            object(&[("step_up", Value::Null)]),
+        );
+        assert_eq!(handed(&[no_step_up]).map(|h| h.len()), Ok(0));
     }
 }
