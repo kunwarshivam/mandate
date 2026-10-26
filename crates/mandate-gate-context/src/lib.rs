@@ -143,8 +143,11 @@ impl Journaled {
     /// Folds one row. A row of a type the fold reads that does not parse is refused and holds
     /// every later [`Journaled::facts`], since it may have changed a fact.
     pub fn fold(&mut self, row: Row<'_>) -> Result<(), Unreadable> {
-        let _ = row;
-        Ok(())
+        let folded = self.read(row);
+        if folded.is_err() {
+            self.unreadable = true;
+        }
+        folded
     }
 
     /// The latest risk clock on the account stream.
@@ -154,7 +157,176 @@ impl Journaled {
 
     /// The facts an opening in `instrument` reads, or why it is held.
     pub fn facts(&self, instrument: &str, fresh: Freshness) -> Result<Facts, Held> {
-        let _ = (instrument, fresh);
-        Err(Held::Unreadable)
+        if self.unreadable {
+            return Err(Held::Unreadable);
+        }
+        let now = self.now.ok_or(Held::NoClock)?;
+        let mandate_version = self.mandate.clone().ok_or(Held::NoMandate)?;
+        let account = self.account.clone().ok_or(Held::NoSnapshot)?;
+        if reached(now, account.at, fresh.snapshot_max_age_s) {
+            return Err(Held::StaleSnapshot);
+        }
+        let mark = match self.marks.get(instrument) {
+            None => return Err(Held::NoMark),
+            Some(Latest::NotSane) => return Err(Held::InsaneMark),
+            Some(Latest::Sane(mark)) => *mark,
+        };
+        if reached(now, mark.at, fresh.mark_max_age_s) {
+            return Err(Held::StaleMark);
+        }
+        Ok(Facts {
+            now,
+            mandate_version,
+            account,
+            mark,
+        })
+    }
+
+    fn read(&mut self, row: Row<'_>) -> Result<(), Unreadable> {
+        let on_account = row.stream == self.account_stream;
+        let refused = |member| Unreadable {
+            event_type: row.event_type.to_owned(),
+            member,
+        };
+        let payload = Payload {
+            value: row.payload,
+            refused: &refused,
+        };
+        let at = if on_account {
+            self.advance(&payload, row.event_type)?
+        } else {
+            None
+        };
+        let ours = || payload.text("agent_id").map(|agent| agent == self.agent);
+        match (row.event_type, at) {
+            ("AgentDeployed", _) if ours()? => {
+                self.mandate = Some(payload.text("mandate_version")?.to_owned());
+            }
+            ("AgentStopped", _) if ours()? => self.mandate = None,
+            ("MandateVersionApplied", Some(_)) if ours()? => match payload.text("result")? {
+                "applied" => self.mandate = Some(payload.text("new_version")?.to_owned()),
+                "rejected" => {}
+                _ => return Err(refused("result")),
+            },
+            ("AccountSnapshotRecorded", Some(at)) => {
+                self.account = Some(AccountFacts {
+                    status: payload.text("status")?.to_owned(),
+                    crypto_status: payload.text("crypto_status")?.to_owned(),
+                    trading_blocked: payload.flag("trading_blocked")?,
+                    account_blocked: payload.flag("account_blocked")?,
+                    trade_suspended_by_user: payload.flag("trade_suspended_by_user")?,
+                    multiplier: payload
+                        .value
+                        .get("multiplier")
+                        .and_then(Value::as_int)
+                        .ok_or_else(|| refused("multiplier"))?,
+                    equity: payload.usd("equity")?,
+                    cash: payload.usd("cash")?,
+                    buying_power: payload.usd("buying_power")?,
+                    non_marginable_buying_power: payload.usd("non_marginable_buying_power")?,
+                    at,
+                });
+            }
+            ("MarkUpdated", Some(at)) => self.mark(&payload, at)?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Moves the clock to the row's `risk_clock`, or a `ClockAdvanced`'s `clock`, and answers it
+    /// for the row to be read at. A row with neither moves nothing and answers the clock so far,
+    /// unless it is of a type read at its own clock, which then has none.
+    fn advance(
+        &mut self,
+        payload: &Payload<'_>,
+        event_type: &str,
+    ) -> Result<Option<UtcNanos>, Unreadable> {
+        let member = if event_type == "ClockAdvanced" {
+            "clock"
+        } else {
+            "risk_clock"
+        };
+        let Some(raw) = payload.value.get(member) else {
+            return if CLOCKED.contains(&event_type) {
+                Err((payload.refused)(member))
+            } else {
+                Ok(self.now)
+            };
+        };
+        let at = raw
+            .as_str()
+            .and_then(|stamp| UtcNanos::parse(stamp).ok())
+            .ok_or_else(|| (payload.refused)(member))?;
+        if self.now.is_some_and(|now| at < now) {
+            return Err((payload.refused)(member));
+        }
+        self.now = Some(at);
+        Ok(Some(at))
+    }
+
+    fn mark(&mut self, payload: &Payload<'_>, at: UtcNanos) -> Result<(), Unreadable> {
+        let Some(sane) = payload.value.get("sane") else {
+            return Ok(());
+        };
+        let counted = match payload.text("session")? {
+            "regular" | "crypto" => true,
+            "overnight" | "pre_market" | "after_hours" => false,
+            _ => return Err((payload.refused)("session")),
+        };
+        let latest = match sane {
+            Value::Bool(true) => {
+                let bid = payload
+                    .text("bid")
+                    .ok()
+                    .and_then(|bid| Price::parse(bid).ok())
+                    .ok_or_else(|| (payload.refused)("bid"))?;
+                Latest::Sane(Mark { bid, at })
+            }
+            Value::Bool(false) => Latest::NotSane,
+            _ => return Err((payload.refused)("sane")),
+        };
+        if counted {
+            let instrument = payload.text("instrument_id")?.to_owned();
+            self.marks.insert(instrument, latest);
+        }
+        Ok(())
+    }
+}
+
+/// The account-stream types the fold reads at their own `risk_clock`, which each must carry.
+const CLOCKED: [&str; 4] = [
+    "AccountSnapshotRecorded",
+    "ClockAdvanced",
+    "MandateVersionApplied",
+    "MarkUpdated",
+];
+
+/// Whether a fact observed at `at` has reached `max_age_s` by `now`.
+fn reached(now: UtcNanos, at: UtcNanos, max_age_s: u32) -> bool {
+    now.secs().saturating_sub(at.secs()) >= i64::from(max_age_s)
+}
+
+struct Payload<'a> {
+    value: &'a Value,
+    refused: &'a dyn Fn(&'static str) -> Unreadable,
+}
+
+impl Payload<'_> {
+    fn text(&self, member: &'static str) -> Result<&str, Unreadable> {
+        self.value
+            .get(member)
+            .and_then(Value::as_str)
+            .ok_or_else(|| (self.refused)(member))
+    }
+
+    fn flag(&self, member: &'static str) -> Result<bool, Unreadable> {
+        match self.value.get(member) {
+            Some(Value::Bool(flag)) => Ok(*flag),
+            _ => Err((self.refused)(member)),
+        }
+    }
+
+    fn usd(&self, member: &'static str) -> Result<Usd, Unreadable> {
+        Usd::parse(self.text(member)?).map_err(|_| (self.refused)(member))
     }
 }

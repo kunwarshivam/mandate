@@ -15,8 +15,8 @@ const AGENT: &str = "agent-1";
 const ASSET: &str = "us_equity:AAPL";
 const START: i64 = 1_790_000_000;
 const FRESH: Freshness = Freshness {
-    mark_max_age_s: 30,
-    snapshot_max_age_s: 90,
+    mark_max_age_s: 8,
+    snapshot_max_age_s: 20,
 };
 
 #[derive(Debug, Clone)]
@@ -57,7 +57,7 @@ fn step() -> impl Strategy<Value = (u8, Step)> {
         ("v[0-9]", any::<bool>()).prop_map(|(version, applied)| Step::Applied { version, applied }),
         Just(Step::Stopped),
     ];
-    (0u8..40, kind)
+    (0u8..6, kind)
 }
 
 fn object(members: &[(&str, Value)]) -> Value {
