@@ -284,9 +284,11 @@ Errors are RFC 9457 problem documents with these members:
 | `step_up_missing` | 401 | Evidence is presented but does not count: its challenge is unknown, its credential is not the principal's or is in its enrolment cool-off, or its assertion does not verify (identity spec §7.2 steps 4 and 6) |
 | `step_up_stale` | 401 | The challenge has expired, or is presented before its `issued_at`; or a first passkey enrolment's session was opened more than 300 s before (§3.6), which alone carries one violation at `/session` ([DEC-2118](../project/decisions/DEC-2118.md) item 4) |
 | `step_up_reused` | 401 | The challenge was already used |
-| `step_up_method` | 401 | The method is not allowed in this environment: `cli_confirm` in `live` (identity spec §7.3) |
+| `step_up_method` | 401 | The method is not allowed in this environment: `cli_confirm` in `live` (identity spec §7.3); for an acknowledgment or its request, any method but `passkey` (§3.11 item 12) |
 | `step_up_mismatch` | 401 | The challenge names another principal, workspace, action kind, or action digest |
 | `live_unavailable` | 409 | A live environment operation before counsel signs off (rule 8, B5) |
+| `acknowledgment_unavailable` | 409 | **(planned: E10-12)** An acknowledgment, or its request, names a hold §3.11 item 12's list does not serve now for that agent and `subject`: never raised, already lifted, or superseded. `effect: none`, `retryable: false`; title "Nothing to acknowledge" |
+| `acknowledgment_request_invalid` | 409 | **(planned: E10-12)** An acknowledgment names a `request` that is not an unspent `OwnerAcknowledgmentRequested` for the same agent, event, and `subject`, or that the caller recorded (journal spec rules 239 to 241). `effect: none`, `retryable: false`; title "Request cannot be answered" |
 | `deferral_mismatch` | 409 | A grant (§5.2) of an approval whose request's deferred checks are not exactly those of the `DecisionMade` it names, or whose decision is not on the agent stream: the request may hide or invent a check that has not been run (mandate spec §6.4, [DEC-2521](../project/decisions/DEC-2521.md)). `effect: none`, `retryable: false`; title "Request does not match its decision". A Skip of it is never refused for this |
 | `control_stream_frozen` | 503 | Journal spec §11 froze mandate and deployment changes; never sent for a risk-reducing call (API-7) |
 | `journal_unavailable` | 503 | Postgres cannot take the append; `effect: none`, `retryable: true` |
@@ -899,10 +901,10 @@ per workspace deployment (item 6).
 12. **Resume, Stop, owner exit, acknowledgment, and command status**
     ([DEC-2102](../project/decisions/DEC-2102.md), E10-12). `POST /agents/{agent_id}/resume`
     (`resume`), `…/stop` (`stop`), `…/exits` (`owner_exit`), `…/acknowledgments`
-    (`acknowledge`), and `GET /commands/{event_id}`. The acknowledgment route is mounted only once
-    `mandate-journal` registers `OwnerAcknowledged`'s payload on the control stream (journal spec
-    §9.2's members): until then the journal refuses its draft, so the route answers the one 401
-    of a route not landed, and the CLI's acknowledgment stays the path. Each command is checked as item 10 orders, the
+    (`acknowledge`), and `GET /commands/{event_id}`. The acknowledgment, its request, and the
+    list of holds to acknowledge are served as **Acknowledgments** below
+    ([DEC-2144](../project/decisions/DEC-2144.md)), now that `mandate-journal` registers both records
+    (journal spec §9.28). Each command is checked as item 10 orders, the
     agent found as item 10 finds it, and recorded as the CLI records it (`mandate agent resume`,
     `stop`, `exit`, `acknowledge`).
     - **Resume and Stop** commit `OwnerCommandIssued` with §9.11's members. A Stop with `release`
@@ -913,18 +915,119 @@ per workspace deployment (item 6).
       (`owner_exit`) with scope `instrument`, the asset as `subject`, and the confirmed `bid`,
       `bid_size`, and `floor`; `quoted_at`, `record`, and `step_up` are kept but not journaled, as
       item 10's are.
-    - **An acknowledgment** commits `OwnerAcknowledged` with `agent`, the acknowledged `event`,
-      `user`, `risk_clock` and `submitted_at` at receipt, and `step_up`. The executor judges the
-      event, the step-up, and independence (mandate spec §5.8).
-    - **Step-up is forwarded only once verified.** Resume, Stop, and acknowledgment carry the port's
+    - **An acknowledgment** is served as **Acknowledgments** below (DEC-2144).
+    - **Step-up is forwarded only once verified.** Resume and Stop carry the port's
       verified evidence as `step_up`, or `null`. A resume's or Stop's `passkey` evidence is verified
       only with its `step_up_assertion`, and then its `StepUpAsserted` follows the command in its
       batch (§3.6, [DEC-2140](../project/decisions/DEC-2140.md)). Until E9-4 binds the port that is always `null`,
       so the runtime or executor refuses each with `OwnerCommandRefused` `step_up_missing`, the
       refusal journaled where the specs put it (§5.4); the client renders that refusal from
-      §5.5, never "stopped". Under `independent_approval_required` an acknowledgment also fails
-      closed (`not_independent`), since `OwnerAcknowledged` does not yet carry its requester. An owner exit forwards `null` too, so it
+      §5.5, never "stopped". An owner exit forwards `null` too, so it
       loses only the owner-exit privilege (mandate spec §6.1).
+    - **Acknowledgments** ([DEC-2144](../project/decisions/DEC-2144.md); journal spec §9.28, version
+      2's `subject`, and v0.106's methods, [DEC-2523](../project/decisions/DEC-2523.md)). Three routes
+      serve the owner's acknowledgment of a hold: a latched limit (`limit`), an account restriction
+      (`restriction`), or a reconciliation hold (`reconciliation`). An acknowledgment adds risk back,
+      so it is not an API-7 operation, and it is refused, with nothing committed, at the first of these
+      checks that fails:
+      1. §3.3's checks, then the body, decoded strictly: anything else is `invalid`.
+      2. The `Acknowledge` row of §3.7, users only, never a client (API-6): else `forbidden`.
+      3. The agent in the path is deployed in this workspace: else `not_found`.
+      4. The workspace is `paper`: else `live_unavailable`, as a grant's is. The founder's live
+         acknowledgment stays the CLI's (journal spec §9.28 check 3, DEC-529 item 3).
+      5. The hold named is one the list below serves now, for this agent, with this `subject`:
+         else `409` `acknowledgment_unavailable`. The writer offers a hold only while it stands
+         (§9.28), so an acknowledgment of a trigger already lifted, superseded, or never raised is
+         refused here and not journaled for the executor to refuse. An account stream the server
+         cannot read is `journal_unavailable`.
+      6. An acknowledgment naming a `request`: an `OwnerAcknowledgmentRequested` on the control
+         stream has that `event_id`, its `agent`, `event`, and `subject` equal the acknowledgment's
+         (a version 1 request, which carries no `subject`, is read as `limit`, as §9.28 reads version
+         1, and a `subject` that is not text matches nothing, so a request for a limit is never
+         answered by an acknowledgment of anything else), no `OwnerAcknowledged` names it yet, and
+         its `requested_by` is not the caller (journal spec rules 239 to 241): else `409`
+         `acknowledgment_request_invalid`.
+      7. Step-up: `passkey` evidence with its `step_up_assertion`, judged by the port against the
+         action's digest below, as a resume's is (§3.6, DEC-2140). Unlike a resume's, unverified
+         evidence is refused with the port's `401` code and nothing is recorded: a `null` step-up is
+         `step_up_required`, and any other method is `step_up_method`, `cli_confirm` in `paper`
+         included: the API accepts an acknowledgment by passkey only, and `cli_confirm` stays the
+         CLI's (DEC-2523). An acknowledgment only lifts
+         a hold, so refusing it never delays risk reduction, and it spends no challenge.
+
+      **The routes.**
+      - `POST /agents/{agent_id}/acknowledgments` (`commands/acknowledge-request`):
+        `acknowledged`, the `event` of the hold; `subject`; `request`, the
+        `OwnerAcknowledgmentRequested` it answers or `null` (absent is `null`); `record`; `step_up`;
+        and `step_up_assertion`. It commits `OwnerAcknowledged` version 2 with `agent`, `event`,
+        `subject`, `user` the caller, `requested_by` the caller or, naming a request, the request's
+        `requested_by`, `independent_required` `true` exactly when it names a request, `request`,
+        `submitted_at` and `risk_clock` at receipt as the CLI writes them (`submitted_at` the whole
+        second, `risk_clock` that second as a timestamp), and the verified
+        `step_up`, then `StepUpAsserted`, in one batch.
+      - `POST /agents/{agent_id}/acknowledgment-requests` (`commands/acknowledgment-request-request`):
+        `acknowledged`, `subject`, `record`, `step_up`, and `step_up_assertion`, for a workspace
+        where another user must acknowledge (mandate spec §5.8). It commits
+        `OwnerAcknowledgmentRequested` version 2 with `agent`, `event`, `subject`, `requested_by` the
+        caller, `independent_required` `true`, `submitted_at`, `risk_clock`, and the verified
+        `step_up`, then `StepUpAsserted`, in one batch. Checks 1 to 5 and 7 apply.
+      - Each answers `202` with §3.4's accepted body, and a repeat under the same key answers as
+        before. The executor judges every acknowledgment again when it processes the copy, by §9.28's
+        four checks, independence included: these checks only keep a request the executor would
+        refuse from being journaled.
+
+      **The digest.** The step-up binds the SHA-256 of the canonical object (journal spec §4) of
+      DEC-279 item 1, as a resume's does: its eight members, `confirms` (`acknowledge`, or
+      `request_ack` for a request), `agent`, `control_head` (the control stream's head `seq` as a
+      decimal string), `instrument`, `bid`, `bid_size`, and `floor` all `null`, and `event` the
+      hold's `event_id`; then two members DEC-279's object does not have, `subject`, and, only for
+      an acknowledgment naming one, `request`. The CLI confirms by its typed code, not this
+      digest, so the members added here are the API's own. A control stream
+      that moves between the client's read and the call changes `control_head`, so the port answers
+      `step_up_mismatch` and nothing is recorded; the client reads again and asks again. Worked
+      vectors, with `agent` `agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z`, `control_head` `"42"`, `event`
+      `01JBH3BTZ8K2M4N6P8R0S2T4V6`, and `subject` `reconciliation`:
+      - acknowledgment, no request:
+        `sha256:5f5506a3ac32cae637a2cc222393f852035c699430656870ba024702431260a7`;
+      - acknowledgment naming request `01JBH3BTZ8K2M4N6P8R0S2T4V7`:
+        `sha256:b9367c62d1201059c5a9f2cf0bf35e637d27a5934e174b779276a2fcbc7af765`;
+      - request (`confirms` `request_ack`):
+        `sha256:b15c59e4e09394ddf0f5430c04569276c27c7a957ac68c683e53b15e6b393ebc`.
+
+      **The list.** `GET /acknowledgments?state=open` (`read-models/acknowledgments`), with an
+      optional `agent`, takes the "View agents, positions, decisions" row. It lists every hold that
+      stands now on the account streams of the workspace's deployed agents, by journal spec §9.28's
+      checks 1 and 2 read for each subject: a `RiskLimitTriggered` neither superseded nor lifted, an
+      `AccountRestrictionChanged` whose cause is in force, and an executor's reconciliation
+      `AgentModeApplied` neither applied again nor removed. Each item has:
+      - `event` and `subject`;
+      - `agent_id`, the agent to post to: a limit's own agent; for a restriction, or a reconciliation
+        hold of every agent (`*`), the account's deployed agent first by id; for a reconciliation
+        hold of one agent, that agent; and for any hold with an unspent request, the request's
+        `agent`, since rule 240 has the acknowledgment name the agent its request named;
+      - `account`, the account stream's id;
+      - `reason`: `{limit}` for a limit, its `limit` code; `{cause}` for a restriction; or
+        `{restriction, kind, instrument}` for a reconciliation hold: `kind` is what follows
+        `reconciliation:` when that is `cash`, `fees`, `external_activity`, or `incomplete`, and
+        otherwise `instrument`, with `instrument` the held asset that follows it; `instrument` is
+        `null` for the other kinds;
+      - `mode`, the agent mode the hold holds: for a restriction, the one trading spec §7.3 gives the account
+        state its `AccountRestrictionChanged` records (`closing_only` holds `exits_only`, `blocked`
+        holds `paused`), and for a
+        reconciliation hold, its `AgentModeApplied`'s `to`; `null` for a limit;
+      - `raised_at`, the hold record's `recorded_at`;
+      - `independent_required`: the workspace's effective `independent_approval_required` (mandate
+        spec §4.3), or `null` until the server reads the policy, as it does not yet; a client then
+        offers the acknowledgment and shows the executor's `not_independent` if it comes;
+      - `request`: the unspent `OwnerAcknowledgmentRequested` for this hold, `{event_id,
+        requested_by}`, or `null`: the latest on the control stream whose `event` and `subject` are
+        the hold's (a version 1 request's subject read as `limit`) and that no `OwnerAcknowledged`
+        names.
+
+      With `agent`, the list holds only the holds that block that agent: its own limits and holds,
+      and every restriction and `*` hold of its account. A `state` other than `open`, or an `agent`
+      not deployed here, is `invalid`. An account stream that cannot be read fails the read
+      `journal_unavailable`, rather than serve a list that leaves a hold out.
     - **Command status** (§5.5) finds the event by equality with a control-stream event id, else
       `not_found`. Its steps are the events on each deployed agent's stream and each account
       stream the control stream names whose `causation_id` is the command, in stream then `seq`
@@ -978,7 +1081,9 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Lift a hold | `POST /agents/{id}/hold/lift` | `OwnerCommandIssued` with command `lift_hold` (journal spec §9.11) | (planned: E10-12) Users only, never a client; step-up required (`lift_hold`); not an API-7 operation, since it adds risk back (DEC-684 item 1) |
 | Stop | `POST /agents/{id}/stop` | `OwnerCommandIssued` | Step-up; `release` and the warning digest per DEC-290 item 2; the flat-or-release precondition is the runtime's (DEC-136) |
 | Owner exit | `POST /agents/{id}/exits` | `OwnerCommandIssued` (`owner_exit`) | §5.4. Never refused for step-up (mandate spec §6.1) |
-| Acknowledge | `POST /agents/{id}/acknowledgments` | `OwnerAcknowledged` | Names the event acknowledged; step-up; independence judged by the executor |
+| Acknowledge | `POST /agents/{id}/acknowledgments` | `OwnerAcknowledged` version 2, `StepUpAsserted` | §3.11 item 12 (DEC-2144). Names the hold and its `subject`; passkey step-up; independence judged again by the executor |
+| Request an acknowledgment | `POST /agents/{id}/acknowledgment-requests` | `OwnerAcknowledgmentRequested` version 2, `StepUpAsserted` | §3.11 item 12 (DEC-2144). Where another user must acknowledge (mandate spec §5.8) |
+| Holds to acknowledge | `GET /acknowledgments?state=open[&agent={id}]` | — | §3.11 item 12 (DEC-2144): each standing hold, the agent to post to, and its open request |
 | Kill switch | `POST /kill-switch` | `OwnerCommandIssued` (`kill_switch`) | §5.4. Agent, connection, or workspace scope |
 | Re-enable a halted scope | **None in v0.1** | — | The halted state is Proposed (DEC-437 item 21; interim: no halted state), so a kill switch leaves no scope halted and there is nothing to re-enable. If the founder accepts item 21, this spec adds a route, a step-up kind, and the events `ScopeHalted` and `ScopeReenabled` (identity spec §12.1) in its own change |
 | Command status | `GET /commands/{event_id}` | — | §5.5 |
@@ -2179,7 +2284,7 @@ refusal is journaled where the specs put it.
 
 | Member | Meaning |
 |---|---|
-| `phase` | `recorded`: the control-stream event is committed. `taken`: the owning stream copied it (`causation_id` points to it). `applied`: its effect is journaled (`AgentModeChanged`, `KillSwitchActivated`, `MandateVersionApplied` applied, `ApprovalRevalidated` `act`). `refused`: the owner refused it (`OwnerCommandRefused`, `ApprovalResponded` refused, `MandateVersionApplied` rejected). `ended`: an approval response whose approval ended otherwise (`skip`, timeout, cancellation) |
+| `phase` | `recorded`: the control-stream event is committed. `taken`: the owning stream copied it (`causation_id` points to it). `applied`: its effect is journaled (`AgentModeChanged`, `KillSwitchActivated`, `MandateVersionApplied` applied, `ApprovalRevalidated` `act`, and for an acknowledgment the `RiskLimitLifted` or `AgentModeApplied` that lifts its hold, DEC-2144). `accepted` **(planned: E10-12)**: an acknowledgment of a restriction whose copy no `OwnerCommandRefused` follows in its batch (journal spec §9.28, v0.102's one row of lookahead); it lifts nothing by itself, and its restriction lifts when §7.3's evidence arrives. `refused`: the owner refused it (`OwnerCommandRefused`, `ApprovalResponded` refused, `MandateVersionApplied` rejected). `ended`: an approval response whose approval ended otherwise (`skip`, timeout, cancellation) |
 | `steps` | Each owning-stream event caused by it, in `seq` order, with `stream_id`, `seq`, `event_type`, `recorded_at`, and a reason code. A kill switch lists mode applied, orders canceled and confirmed, sells submitted or deferred (D10 "In progress") |
 | `as_of` | The watermarks read (§6.1) |
 
