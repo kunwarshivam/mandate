@@ -234,13 +234,14 @@ impl<'a> Members<'a> {
         }
     }
 
-    /// Whether `row` is the agent's: on its own stream, or naming it or `*`, one of its intents or
-    /// orders, or an event of its stream as `causation_id`. DEC-764 item 2's account-wide clause
-    /// (`AccountRestrictionChanged`, a connection- or workspace-scope `KillSwitchActivated`) is
-    /// omitted until the journal registers those payloads, so that no account stream can hold
-    /// them yet (DEC-779).
+    /// Whether `row` is the agent's: on its own stream, an account restriction on one of its
+    /// accounts, or naming it or `*`, one of its intents or orders, or an event of its stream as
+    /// `causation_id`. DEC-764 item 2's account-wide clause holds `AccountRestrictionChanged`, which
+    /// changes what every agent on the account may do; its connection- and workspace-scope
+    /// `KillSwitchActivated` stays omitted while the account stream refuses those scopes, so no
+    /// account stream can hold them (DEC-779).
     fn holds(&self, row: &StoredEvent) -> bool {
-        if row.stream_id == self.agent_stream {
+        if row.stream_id == self.agent_stream || row.event_type == ACCOUNT_RESTRICTION {
             return true;
         }
         let Some(body) = Body::of(row) else {
@@ -257,6 +258,9 @@ impl<'a> Members<'a> {
             || body.causation().is_some_and(|c| self.own.contains(c))
     }
 }
+
+/// The account-wide record DEC-764 item 2 makes every agent's on its account (journal spec §9.5).
+const ACCOUNT_RESTRICTION: &str = "AccountRestrictionChanged";
 
 /// A row's parsed canonical body, whose text members membership reads.
 struct Body(Value);
