@@ -27,7 +27,7 @@ use mandate_api::requests::{
 use mandate_api::wire::{Asset, Decimal, EventId, Id, Ref, decode, encode};
 use mandate_authn::Request;
 use mandate_canon::{Digest, Int, Value, parse, to_canonical};
-use mandate_identity::{MembershipEvent, Permission, PrincipalId, Role, StepUpActionKind};
+use mandate_identity::{Permission, PrincipalId, Roster, StepUpActionKind};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
@@ -37,7 +37,6 @@ use crate::commands::{
     settle_batch_at,
 };
 use crate::http::{App, browser, invalid, problem, problem_body};
-use crate::members::ControlLookup;
 use crate::reads::deployed;
 use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
@@ -532,12 +531,10 @@ fn answered(evidence: &StepUpEvidence) -> Option<Value> {
 }
 
 /// Whether the principal is one the mandate version an approval binds lists in
-/// `autonomy.approval.approvers` ([DEC-2129] item 7, as [DEC-2130] item 1 reads it), at the
-/// membership fold the matrix check reads. A reference lists only an active member holding the
-/// effective `approver` role: `user:<id>` the member whose principal id `<id>` parses to as a ULID
-/// in either case (anything else lists no one), `role:approver`
-/// any, `role:workspace_admin` one also holding `workspace_admin`, and `role:owner` one a founding
-/// `MemberActivated` made. A version that is not named, not stored, or not a mandate, or a fold
+/// `autonomy.approval.approvers` ([DEC-2129] item 7, as [DEC-2130] item 1 reads it): the
+/// references resolved by [`Roster::approvers`] over the control stream's membership records at
+/// the request's instant (DEC-2130 item 3, DEC-2384 item 3), the set the runtime's admission check
+/// 3 compares a responder with. A version that is not named, not stored, or not a mandate, or a fold
 /// that cannot be read, is `journal_unavailable`, never a pass.
 ///
 /// [DEC-2129]: ../../../docs/project/decisions/DEC-2129.md
@@ -556,34 +553,15 @@ fn approves(
         .and_then(|version| stored(store, version))
         .ok_or(Refused::JournalUnavailable)?;
     let records = (app.members)(&reader.control).map_err(|_| Refused::JournalUnavailable)?;
-    let founding = records.iter().any(|record| {
-        matches!(
-            record.event(),
-            MembershipEvent::Activated { member, invitation: None, .. } if *member == principal
-        )
-    });
-    let lookup = ControlLookup::new(app.hosted, Ok(records), reader.now);
-    let roles = lookup
-        .own_roles(principal)
-        .map_err(|_| Refused::JournalUnavailable)?
-        .unwrap_or_default();
-    let listed = |approver: &str| {
-        roles.contains(&Role::Approver)
-            && match approver.split_once(':') {
-                Some(("user", user)) => PrincipalId::from_ulid_text(&user.to_ascii_uppercase())
-                    .is_ok_and(|listed| listed == principal),
-                Some(("role", "approver")) => true,
-                Some(("role", "workspace_admin")) => roles.contains(&Role::WorkspaceAdmin),
-                Some(("role", "owner")) => founding,
-                _ => false,
-            }
-    };
-    Ok(mandate
+    let roster = Roster::read(records, reader.now).map_err(|_| Refused::JournalUnavailable)?;
+    let references: Vec<&str> = mandate
         .autonomy
         .approval
         .approvers
         .iter()
-        .any(|approver| listed(approver.as_str())))
+        .map(|approver| approver.as_str())
+        .collect();
+    Ok(roster.approvers(&references).contains(&principal))
 }
 
 /// The deployed agent whose stream requested `approval`, found by equality with an
