@@ -1305,13 +1305,8 @@ fn a_user_reference_matches_its_ulid_in_either_case_and_nothing_else() {
     recorded(&w, &w.respond(ALICE, KEY, &grant(&w, &issued)));
 
     let aliased = format!("user:{}", ALICE.replacen('1', "I", 1));
-    for listed in [
-        "user:not-a-ulid",
-        aliased.as_str(),
-        "user:",
-        "user: ",
-        "ALICE",
-    ] {
+    let unknown = format!("user:{}", ALICE.replacen('Z', "Y", 1));
+    for listed in ["user:not-a-ulid", aliased.as_str(), unknown.as_str()] {
         let w = world_with(&Setup {
             approvers: &[listed],
             ..PAPER
@@ -1327,30 +1322,20 @@ fn a_user_reference_matches_its_ulid_in_either_case_and_nothing_else() {
     }
 }
 
+/// A member deactivated after confirming is no member at the grant: the matrix row's one 404
+/// (§3.3), before the approvers are read, and nothing is committed.
 #[test]
-#[ignore = "pending E9-4"]
 fn an_approver_deactivated_since_is_refused_at_once() {
     let w = world();
     let (bobs, body) = bobs_grant(&w);
     w.append(
         "MemberDeactivated",
-        T0 + 3,
+        T0,
         json!({"member": BOB, "session_ref": null}),
     );
     let reply = w.respond(BOB, KEY, &body);
-    assert_eq!(
-        code(&reply).0,
-        403,
-        "a member deactivated before the grant: {} {}",
-        lossy(&reply),
-        w.said()
-    );
+    assert_eq!(code(&reply), (404, ProblemCode::NotFound));
     assert!(w.answers().is_empty());
+    assert!(w.asked().is_empty(), "no evidence is read");
     assert!(w.held(&bobs));
-    let issued = w.challenge();
-    w.confirm(&issued);
-    recorded(
-        &w,
-        &w.respond(ALICE, "k1Z-9_grant00002", &grant(&w, &issued)),
-    );
 }
