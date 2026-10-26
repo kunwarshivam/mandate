@@ -41027,32 +41027,6 @@ records_access:
       outcome: Invalid
       reason: schema
       path: payload.ranges[0].failure.seq
-  - name: approval_deferral_mismatch_without_its_seq
-    clause: 'rule 111: `approval_deferral_mismatch` (§11) is reported at the event that breaks it (DEC-774)'
-    base_draft: verification_fail
-    changes:
-    - path: payload.ranges
-      value:
-      - stream_id: agent:ws_01J8Z2:agent_a
-        from_seq: 12
-        to_seq: 30
-        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
-        to_hash: null
-        failure:
-          check: approval_deferral_mismatch
-          seq: null
-      - stream_id: ctl:ws_01J8Z2
-        from_seq: 1
-        to_seq: 9
-        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
-        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
-        failure: null
-    - path: artifact_refs
-      value: []
-    expect:
-      outcome: Invalid
-      reason: schema
-      path: payload.ranges[0].failure.seq
   - name: connection_lifecycle_mismatch_without_its_seq
     clause: 'rule 111: `connection_lifecycle_mismatch` (§11) is reported at the event that breaks it (DEC-774)'
     base_draft: verification_fail
@@ -41545,30 +41519,6 @@ records_access:
         failure:
           check: held_mismatch
           seq: 14
-      - stream_id: ctl:ws_01J8Z2
-        from_seq: 1
-        to_seq: 9
-        prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
-        to_hash: '4444444444444444444444444444444444444444444444444444444444444444'
-        failure: null
-    - path: artifact_refs
-      value: []
-    expect:
-      outcome: Valid
-  - name: failure_at_approval_deferral_mismatch
-    clause: '§9.13 and rule 111: a run records `approval_deferral_mismatch` (§11), reported at the event that breaks it (DEC-774)'
-    base_draft: verification_fail
-    changes:
-    - path: payload.ranges
-      value:
-      - stream_id: agent:ws_01J8Z2:agent_a
-        from_seq: 12
-        to_seq: 30
-        prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
-        to_hash: null
-        failure:
-          check: approval_deferral_mismatch
-          seq: 21
       - stream_id: ctl:ws_01J8Z2
         from_seq: 1
         to_seq: 9

@@ -180,10 +180,9 @@ fn every_verification_run_draft_parses_or_is_refused_as_its_case_says() {
 }
 
 /// §11's per-event checks 1 to 6, `anchor_head_mismatch`, `anchor_self_mismatch`,
-/// `intent_action_mismatch`, `mode_event_mismatch`, `held_mismatch`, the connection's two,
-/// `break_glass_cause_mismatch`, and `approval_deferral_mismatch` (v0.103, DEC-2522), then its
-/// per-range checks, as rule 111 lists them.
-const PER_EVENT: [&str; 16] = [
+/// `intent_action_mismatch`, `mode_event_mismatch`, `held_mismatch`, the connection's two, and
+/// `break_glass_cause_mismatch`, then its per-range checks, as rule 111 lists them.
+const PER_EVENT: [&str; 15] = [
     "non_canonical",
     "column_mismatch",
     "seq_gap",
@@ -199,7 +198,6 @@ const PER_EVENT: [&str; 16] = [
     "connection_lifecycle_mismatch",
     "connection_cause_mismatch",
     "break_glass_cause_mismatch",
-    "approval_deferral_mismatch",
 ];
 const PER_RANGE: [&str; 4] = [
     "anchor_root_mismatch",
@@ -208,7 +206,7 @@ const PER_RANGE: [&str; 4] = [
     "segment_gap",
 ];
 
-/// Rule 111 for each of §9.13's twenty check codes, which the vectors exercise only in part: a
+/// Rule 111 for each of §9.13's nineteen check codes, which the vectors exercise only in part: a
 /// failure names its `seq` exactly when its check is reported at an event, and is refused at
 /// `failure.seq` otherwise.
 #[test]

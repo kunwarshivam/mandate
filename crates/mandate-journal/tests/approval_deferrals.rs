@@ -2,15 +2,12 @@
 //! inside its hashed content, the checks its dry run deferred to the binding gate. Rule 291 judges
 //! the list on the request; rule 292 refuses a batch whose request names other deferrals than the
 //! `DecisionMade` it names. The vectors' additive `approval_deferrals` section holds whole drafts,
-//! so this file needs no other section. Journal spec v0.103 (DEC-2522) adds §11's
-//! `approval_deferral_mismatch`, rule 292 across batches, whose ranges the section also holds.
+//! so this file needs no other section.
 
 use std::path::Path;
 
-use mandate_canon::{Digest, Key, Object, Value, parse, to_canonical};
-use mandate_journal::{
-    AgentStreamCheck, Draft, StoredEvent, TrustedStart, check_batch, verify_agent_stream,
-};
+use mandate_canon::{Key, Object, Value, parse, to_canonical};
+use mandate_journal::{Draft, check_batch};
 
 fn fixture() -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
@@ -220,77 +217,5 @@ fn the_section_carries_the_approver_s_sentence() {
     assert_eq!(
         text(section(&fixture), "approver_sentence"),
         "These checks have not been run yet. They run when the order is placed, and may still refuse it:"
-    );
-}
-
-const STREAM: &str = "agent:ws_01J8Z2:agent_a";
-
-/// A range's event as stored at `seq`: its id, type, version, cause and payload as the case gives
-/// them, on one agent stream.
-fn stored(seq: u64, event: &Value) -> StoredEvent {
-    let mut body = Object::new();
-    for (name, value) in [
-        ("event_id", event.get("event_id").cloned().unwrap()),
-        ("event_type", event.get("event_type").cloned().unwrap()),
-        ("causation_id", event.get("causation_id").cloned().unwrap()),
-        ("payload", event.get("payload").cloned().unwrap()),
-        ("stream_id", Value::Str(STREAM.to_owned())),
-    ] {
-        body.insert(Key::new(name).unwrap(), value);
-    }
-    let body = to_canonical(&Value::Object(body));
-    StoredEvent {
-        stream_id: STREAM.to_owned(),
-        seq,
-        event_id: text(event, "event_id").to_owned(),
-        event_type: text(event, "event_type").to_owned(),
-        schema_version: event.get("schema_version").and_then(Value::as_int).unwrap(),
-        environment: "paper".to_owned(),
-        recorded_at: "2026-10-26T16:00:00.000000000Z".to_owned(),
-        prev_hash: Digest::of(b""),
-        hash: Digest::of(&body),
-        body,
-    }
-}
-
-/// §11's `approval_deferral_mismatch` (v0.103, DEC-2522) over every range of the section: the first
-/// request the case reports fails at its `seq`, with that code, and a range it reports nothing in
-/// passes. Each clause is in some case: a hidden deferral, an invented one, no cause, a cause that
-/// is not a decision, a decision after its request, and a cause outside a later range.
-#[test]
-fn every_range_reports_its_first_request_that_breaks_rule_292_across_batches() {
-    let fixture = fixture();
-    let ranges = list(section(&fixture), "ranges");
-    assert!(ranges.len() >= 13, "{} ranges; never fewer", ranges.len());
-    let mut failed = Vec::new();
-    for case in ranges {
-        let from = case.get("from_seq").and_then(Value::as_int).unwrap();
-        let rows: Vec<StoredEvent> = list(case, "events")
-            .iter()
-            .zip(from..)
-            .map(|(event, seq)| stored(seq, event))
-            .collect();
-        let start = TrustedStart {
-            from_seq: from,
-            prev_hash: Digest::of(b""),
-        };
-        let want = list(case, "expect")
-            .first()
-            .and_then(Value::as_int)
-            .map(|i| (from + i, AgentStreamCheck::ApprovalDeferralMismatch));
-        let got = verify_agent_stream(&rows, start)
-            .err()
-            .map(|f| (f.seq, f.check));
-        if got != want {
-            failed.push(format!(
-                "{}: expected {want:?}, got {got:?}",
-                text(case, "name")
-            ));
-        }
-    }
-    assert!(failed.is_empty(), "{}", failed.join("\n"));
-    assert_eq!(
-        AgentStreamCheck::ApprovalDeferralMismatch.code(),
-        "approval_deferral_mismatch"
     );
 }

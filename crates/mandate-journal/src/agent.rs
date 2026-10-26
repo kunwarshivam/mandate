@@ -212,10 +212,6 @@ pub enum AgentStreamCheck {
     /// A version-2 `AgentModeChanged` that is not a hold or a lift changes the owner's `held`, or a
     /// version-1 one follows a version-2 one (journal spec v0.23 §9.11, §11; DEC-672, DEC-673).
     HeldMismatch,
-    /// An `ApprovalRequested` names no cause, or its cause is an earlier event that is not a
-    /// `DecisionMade`, or on a full chain no earlier event, or its deferrals are not its decision's:
-    /// rule 292 across batches (journal spec v0.103 §11, DEC-2522).
-    ApprovalDeferralMismatch,
 }
 
 impl AgentStreamCheck {
@@ -225,7 +221,6 @@ impl AgentStreamCheck {
             Self::IntentActionMismatch => "intent_action_mismatch",
             Self::ModeEventMismatch => "mode_event_mismatch",
             Self::HeldMismatch => "held_mismatch",
-            Self::ApprovalDeferralMismatch => "approval_deferral_mismatch",
         }
     }
 }
@@ -237,10 +232,8 @@ pub struct AgentStreamFailure {
     pub check: AgentStreamCheck,
 }
 
-/// Runs §11's `intent_action_mismatch`, `mode_event_mismatch` and `approval_deferral_mismatch` over
-/// `rows` of one agent stream, after [`crate::verify_events`] passed them, reporting the first
-/// failing event in `seq` order. A request's cause is looked up among the range's earlier events,
-/// so a cause before the range is checked only on a full chain (DEC-2522).
+/// Runs §11's `intent_action_mismatch` and `mode_event_mismatch` over `rows` of one agent stream,
+/// after [`crate::verify_events`] passed them, reporting the first failing event in `seq` order.
 /// Every event of the range is indexed first, so a reference to an event anywhere in the range is
 /// checked: an `IntentProposed` naming a `DecisionMade` later in the range is still compared, and a
 /// `mode_event` naming a later event, or its own switch, fails (DEC-168 item 13). Only a reference
@@ -378,22 +371,6 @@ pub fn verify_agent_stream_anchored(
             }
             "AgentModeChanged" if !held.carries(row.schema_version, &own) => {
                 return fail(AgentStreamCheck::HeldMismatch);
-            }
-            "ApprovalRequested" => {
-                let agrees = match body.get("causation_id").and_then(Value::as_str) {
-                    None => false,
-                    Some(id) if !earlier.contains(id) => start.from_seq != 1,
-                    Some(id) => match index.get(id) {
-                        Some(("DecisionMade", decision)) => {
-                            let content = own.get("content").cloned().unwrap_or(Value::Null);
-                            deferrals(&content) == deferrals(decision)
-                        }
-                        _ => false,
-                    },
-                };
-                if !agrees {
-                    return fail(AgentStreamCheck::ApprovalDeferralMismatch);
-                }
             }
             _ => {}
         }

@@ -161,9 +161,8 @@ fn connection_checks(rows: &[StoredEvent], start: TrustedStart) -> Option<Stream
     )
 }
 
-/// The agent stream's `intent_action_mismatch`, `mode_event_mismatch`, `held_mismatch` and
-/// `approval_deferral_mismatch` (DEC-2522), which the library reports at the lowest `seq` in §11's
-/// order, with no hold anchor (DEC-782 item 4).
+/// The agent stream's `intent_action_mismatch`, `mode_event_mismatch` and `held_mismatch`, which
+/// the library reports at the lowest `seq` in §11's order, with no hold anchor (DEC-782 item 4).
 fn agent_checks(rows: &[StoredEvent], start: TrustedStart) -> Option<StreamFailure> {
     verify_agent_stream_anchored(rows, start, HeldAnchor::Unknown)
         .err()
