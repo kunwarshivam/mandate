@@ -16,7 +16,7 @@ use common::{
 };
 use mandate_canon::{Value, to_canonical};
 use mandate_gateway::money::Usd6;
-use mandate_journal::Draft;
+use mandate_journal::{Draft, check_batch, check_stream};
 use mandate_research::AssetId;
 use mandate_research_run::agentic::{LoopBounds, OutputMode, Tool};
 use mandate_research_run::{ItemId, ItemKind, RetrievedItem, Symbol};
@@ -139,6 +139,25 @@ fn refs(value: &Value) -> BTreeSet<String> {
     out
 }
 
+/// `draft` in an agent-stream envelope of this file's own making, with the run's `correlation_id`
+/// and the payload's artifact references listed, parsed by the journal's registered schemas.
+fn journal_draft(draft: &FoldedEvent, run: &str) -> Result<Draft, mandate_journal::Invalid> {
+    let body = format!(
+        r#"{{"envelope_version":1,"environment":"paper","event_id":"{}","stream_id":"agent:ws1:agent-a","event_type":"{}","schema_version":1,"event_time":"2026-10-16T14:00:00.000000000Z","clock_source":"scheduler","causation_id":null,"correlation_id":"{run}","actor":{{"kind":"agent","id":"agent-a","version":"0.1.0","build":"sha256:{}"}},"config_refs":{{"model_version":"sha256:{}"}},"payload":{},"artifact_refs":[{}],"pii_refs":[]}}"#,
+        draft.event_id.0,
+        draft.event_type,
+        "c".repeat(64),
+        "a".repeat(64),
+        String::from_utf8_lossy(&to_canonical(&draft.payload)),
+        refs(&draft.payload)
+            .iter()
+            .map(|r| format!(r#""{r}""#))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    Draft::parse(body.as_bytes())
+}
+
 fn started(step: &ResearchStep) -> bool {
     step.requests
         .iter()
@@ -186,24 +205,16 @@ fn a_matching_item_starts_a_monitor_run_journaling_the_item_first() {
         step.correlation_id.is_some(),
         "both drafts carry the run's id"
     );
-    for draft in [&seen, &start] {
-        let body = format!(
-            r#"{{"envelope_version":1,"environment":"paper","event_id":"{}","stream_id":"agent:ws1:agent-a","event_type":"{}","schema_version":1,"event_time":"2026-10-16T14:00:00.000000000Z","clock_source":"scheduler","causation_id":null,"correlation_id":"{}","actor":{{"kind":"agent","id":"agent-a","version":"0.1.0","build":"sha256:{}"}},"config_refs":{{"model_version":"sha256:{}"}},"payload":{},"artifact_refs":[{}],"pii_refs":[]}}"#,
-            draft.event_id.0,
-            draft.event_type,
-            step.correlation_id.clone().unwrap_or_default(),
-            "c".repeat(64),
-            "a".repeat(64),
-            String::from_utf8_lossy(&to_canonical(&draft.payload)),
-            refs(&draft.payload)
-                .iter()
-                .map(|r| format!(r#""{r}""#))
-                .collect::<Vec<_>>()
-                .join(",")
-        );
-        if let Err(refused) = Draft::parse(body.as_bytes()) {
-            panic!("the journal refuses the {}: {refused:?}", draft.event_type);
-        }
+    let batch: Vec<Draft> = [&seen, &start]
+        .iter()
+        .map(|draft| {
+            journal_draft(draft, step.correlation_id.as_deref().unwrap_or_default())
+                .unwrap_or_else(|e| panic!("the journal refuses the {}: {e:?}", draft.event_type))
+        })
+        .collect();
+    let earlier: Vec<Draft> = Vec::new();
+    if let Err(refused) = check_batch(&batch).and_then(|()| check_stream(&earlier, &batch)) {
+        panic!("the journal's batch and stream rules refuse the start: {refused:?}");
     }
 }
 
@@ -368,7 +379,10 @@ fn ny_day(secs: i64) -> i64 {
 /// The fuzz: the offers and cancels of `steps`, with the core's triggers at `cap` runs a day and
 /// `debounce_s`, against the oracle's own count at 2 a day and [`DEBOUNCE_S`]. The first offer the
 /// two disagree on, or `None`.
-fn disagreement(steps: &[Step], cap: u32, debounce_s: u32) -> Option<String> {
+/// `None` when the core starts a run on exactly the offers the oracle predicts with a cap of 2 and
+/// the file's debounce, given the core `cap`, `debounce_s`, and, when `forgets`, every offer under
+/// a name of its own, as a core that never remembers an item would see them.
+fn disagreement(steps: &[Step], cap: u32, debounce_s: u32, forgets: bool) -> Option<String> {
     let (ids, plan, view) = (TestIds, FixedPlan::silent(), universe(&[]));
     let ports = ports(&ids, &AllowGate, &plan, &view);
     let mut world = world();
@@ -387,7 +401,11 @@ fn disagreement(steps: &[Step], cap: u32, debounce_s: u32) -> Option<String> {
         match s {
             Step::Offer { n, gap } => {
                 now += i64::from(*gap);
-                let name = format!("nw-fuzz-{n}");
+                let name = if forgets {
+                    format!("nw-fuzz-{n}-{now}")
+                } else {
+                    format!("nw-fuzz-{n}")
+                };
                 let expected = in_flight.is_none()
                     && !used.contains(n)
                     && starts
@@ -449,9 +467,9 @@ fn the_oracle_catches_seeded_breaches() {
         Step::Cancel,
         Step::Offer { n: 2, gap: 1_000 },
     ];
-    assert_eq!(disagreement(&three_in_a_day, 2, DEBOUNCE_S), None);
+    assert_eq!(disagreement(&three_in_a_day, 2, DEBOUNCE_S, false), None);
     assert!(
-        disagreement(&three_in_a_day, 3, DEBOUNCE_S).is_some(),
+        disagreement(&three_in_a_day, 3, DEBOUNCE_S, false).is_some(),
         "a core that allows a third run a day"
     );
     let soon = [
@@ -459,10 +477,20 @@ fn the_oracle_catches_seeded_breaches() {
         Step::Cancel,
         Step::Offer { n: 1, gap: 0 },
     ];
-    assert_eq!(disagreement(&soon, 2, DEBOUNCE_S), None);
+    assert_eq!(disagreement(&soon, 2, DEBOUNCE_S, false), None);
     assert!(
-        disagreement(&soon, 2, 60).is_some(),
+        disagreement(&soon, 2, 60, false).is_some(),
         "a core with a shorter debounce"
+    );
+    let again = [
+        Step::Offer { n: 0, gap: 0 },
+        Step::Cancel,
+        Step::Offer { n: 0, gap: 3_600 },
+    ];
+    assert_eq!(disagreement(&again, 2, DEBOUNCE_S, false), None);
+    assert!(
+        disagreement(&again, 2, DEBOUNCE_S, true).is_some(),
+        "a core that starts a run on an item it already ran on"
     );
 }
 
@@ -506,6 +534,166 @@ proptest! {
     /// event `RunStarted` per start.
     #[test]
     fn fuzz(steps in prop::collection::vec(step(), 1..18)) {
-        prop_assert_eq!(disagreement(&steps, 2, DEBOUNCE_S), None);
+        prop_assert_eq!(disagreement(&steps, 2, DEBOUNCE_S, false), None);
     }
+}
+
+/// The cost cap (§5.3, admission check 7): at the day's cap nothing starts; a cent under, it does.
+#[test]
+fn the_day_s_spend_at_the_cost_cap_starts_nothing() {
+    let (ids, plan, view) = (TestIds, FixedPlan::silent(), universe(&[]));
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    for (spend, starts) in [("5", false), ("4.99", true)] {
+        let mut world = world();
+        world.facts.research_spend_usd_today =
+            mandate_num::Usd::parse(spend).unwrap_or_else(|e| panic!("{e}"));
+        let mut lp = Loop::new(1);
+        boot(&mut lp, &ports);
+        assert_eq!(
+            started(&offer(
+                &mut lp,
+                &ports,
+                &world,
+                CUT_OFF,
+                item(AAPL_NEWS, None, None)
+            )),
+            starts,
+            "spend {spend} against the 5 USD cap"
+        );
+    }
+}
+
+/// A `monitor` run may start in `exits_only` (§6.9): an event run is one.
+#[test]
+fn an_agent_in_exits_only_still_starts_an_event_run() {
+    let (ids, plan, view) = (TestIds, FixedPlan::silent(), universe(&[]));
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    lp.shell
+        .fold_one(&event(
+            ACCOUNT_STREAM,
+            2,
+            "AgentModeApplied",
+            with_clock(
+                &[
+                    ("to", text("exits_only")),
+                    ("restriction", text("daily_loss")),
+                ],
+                CUT_OFF - 30,
+            ),
+        ))
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(started(&offer(
+        &mut lp,
+        &ports,
+        &world(),
+        CUT_OFF,
+        item(AAPL_NEWS, None, None)
+    )));
+}
+
+/// A restart: a fresh research state folded from the journal alone, with a scheduled run's
+/// observation folded between, refuses the same item again, refuses another inside the debounce,
+/// and starts one after it, exactly as the process that wrote the journal would.
+#[test]
+fn a_restart_folds_the_debounce_the_day_and_the_items_back_from_the_journal() {
+    let (ids, plan, view) = (TestIds, FixedPlan::silent(), universe(&[]));
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let once = || item(AAPL_NEWS, Some("nw-once-1"), Some(CUT_OFF - 3_600));
+    assert!(started(&offer(&mut lp, &ports, &world, CUT_OFF, once())));
+    lp.run(
+        ResearchInput::Poll(RiskClock::from_secs(CUT_OFF + 901)),
+        &ports,
+        &world,
+    );
+    let (shell, _) = lp.shell.restart(&ports);
+    let mut research = mandate_runtime::ResearchState::new();
+    for one in &shell.agent_journal {
+        research.fold(one).unwrap_or_else(|e| panic!("{e}"));
+    }
+    let mut back = Loop {
+        shell,
+        research,
+        steps: Vec::new(),
+    };
+    let early = || item(AAPL_NEWS, Some("nw-early-2"), Some(CUT_OFF - 3_600));
+    assert!(
+        !started(&offer(
+            &mut back,
+            &ports,
+            &world,
+            CUT_OFF + i64::from(DEBOUNCE_S) - 1,
+            early()
+        )),
+        "inside the debounce"
+    );
+    assert!(
+        !started(&offer(
+            &mut back,
+            &ports,
+            &world,
+            CUT_OFF + i64::from(DEBOUNCE_S),
+            once()
+        )),
+        "the same item, past the debounce"
+    );
+    assert!(started(&offer(
+        &mut back,
+        &ports,
+        &world,
+        CUT_OFF + i64::from(DEBOUNCE_S),
+        early()
+    )));
+}
+
+/// The fold finds an event run's cause by its id among the observations since the last start, so
+/// another observation between them never loses the item, and a cause it cannot find is refused
+/// rather than dropped.
+#[test]
+fn the_fold_finds_the_cause_by_id_and_refuses_one_it_cannot() {
+    let digest = |c: char| format!("sha256:{}", c.to_string().repeat(64));
+    let observed = |seq: u64, data: char| {
+        event(
+            "agent:ws1:agent-a",
+            seq,
+            "ObservationRecorded",
+            mandate_canon::parse(
+                format!(
+                    r#"{{"source":"src.newswire","instrument_id":"AAPL","as_of":"2026-10-16T14:00:00.000000000Z","data_ref":"{}"}}"#,
+                    digest(data)
+                )
+                .as_bytes(),
+            )
+            .unwrap_or_else(|e| panic!("{e:?}")),
+        )
+    };
+    let start = |seq: u64, cause: &str| {
+        event(
+            "agent:ws1:agent-a",
+            seq,
+            "RunStarted",
+            mandate_canon::parse(
+                format!(
+                    r#"{{"kind":"monitor","trigger":{{"kind":"event","cause":"{cause}"}},"cut_off":"2026-10-16T20:00:00.000000000Z"}}"#
+                )
+                .as_bytes(),
+            )
+            .unwrap_or_else(|e| panic!("{e:?}")),
+        )
+    };
+    let mut research = mandate_runtime::ResearchState::new();
+    let cause = observed(1, 'a');
+    research.fold(&cause).unwrap_or_else(|e| panic!("{e}"));
+    research
+        .fold(&observed(2, 'b'))
+        .unwrap_or_else(|e| panic!("{e}"));
+    research
+        .fold(&start(3, &cause.event_id.0))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let mut lost = mandate_runtime::ResearchState::new();
+    assert!(lost.fold(&start(1, "agent:ws1:agent-a-9")).is_err());
 }

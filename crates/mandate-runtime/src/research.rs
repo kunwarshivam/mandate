@@ -475,9 +475,11 @@ pub struct ResearchState {
     /// The items, by `data_ref`, an event run's cause has held: one item starts one run (journal
     /// spec rule 271).
     triggered: BTreeSet<Digest>,
-    /// The last folded `ObservationRecorded`, by `event_id` and `data_ref`, which an event run's
-    /// `RunStarted` right after it in its batch names as its cause.
-    last_observation: Option<(EventId, Digest)>,
+    /// The `ObservationRecorded` records folded since the last `RunStarted`, by `event_id`, with
+    /// their `data_ref`: an event run's cause is among them, since it is journaled in the run's own
+    /// start batch (journal spec rule 271), so every `RunStarted` clears them and the map holds no
+    /// more than one run's observations.
+    observations: BTreeMap<EventId, Digest>,
 }
 
 impl Default for ResearchState {
@@ -501,7 +503,7 @@ impl ResearchState {
             doubted: None,
             event_starts: Vec::new(),
             triggered: BTreeSet::new(),
-            last_observation: None,
+            observations: BTreeMap::new(),
         }
     }
 
@@ -513,10 +515,11 @@ impl ResearchState {
     pub fn fold(&mut self, event: &FoldedEvent) -> Result<(), RuntimeError> {
         match event.event_type.as_str() {
             "ObservationRecorded" => {
-                self.last_observation = payload::str_of(&event.payload, "data_ref")
+                let data = payload::str_of(&event.payload, "data_ref")
                     .and_then(|text| text.strip_prefix("sha256:"))
                     .and_then(Digest::from_hex)
-                    .map(|data| (event.event_id.clone(), data));
+                    .ok_or_else(|| payload::non_canonical("data_ref"))?;
+                self.observations.insert(event.event_id.clone(), data);
                 return Ok(());
             }
             "RunStarted" => return self.started(event),
@@ -538,6 +541,7 @@ impl ResearchState {
     /// An event-triggered `RunStarted`: its cut-off counts toward the debounce and the day's cap,
     /// and the item its cause holds can start no other run (agent harness spec §5.3, rule 271).
     fn started(&mut self, event: &FoldedEvent) -> Result<(), RuntimeError> {
+        let observations = std::mem::take(&mut self.observations);
         let trigger = event.payload.get("trigger");
         if trigger.and_then(|t| payload::str_of(t, "kind")) != Some("event") {
             return Ok(());
@@ -546,12 +550,11 @@ impl ResearchState {
             .and_then(|text| UtcNanos::parse(text).ok())
             .ok_or_else(|| payload::non_canonical("cut_off"))?;
         self.event_starts.push(RiskClock::from_secs(cut_off.secs()));
-        let cause = trigger.and_then(|t| payload::str_of(t, "cause"));
-        if let Some((observation, data)) = &self.last_observation
-            && cause == Some(observation.0.as_str())
-        {
-            self.triggered.insert(*data);
-        }
+        let data = trigger
+            .and_then(|t| payload::str_of(t, "cause"))
+            .and_then(|cause| observations.get(&EventId(cause.to_owned())))
+            .ok_or_else(|| payload::non_canonical("trigger.cause"))?;
+        self.triggered.insert(*data);
         Ok(())
     }
 
@@ -857,7 +860,9 @@ fn polled(
 /// It brings a `monitor` run forward only when all of these hold, judged from folded state alone:
 /// no run is in flight; research may run in this mode at all, with an `agentic` entry; the version
 /// in effect lists the item's kind; its source is on the allowlist in effect; its knowledge time is
-/// after the last research call; one of its symbols carries an active thesis; the risk clock is at
+/// after the last research call; one of its symbols carries an active thesis (the smallest symbol
+/// is the one journaled when several do); the day's research spend is below the cost cap, as
+/// admission check 7 reads it; the risk clock is at
 /// least `debounce_s` after the later of the last call, the last reservation, and the last event
 /// run's start; fewer than `max_runs_per_day` event runs have started on the risk day; and no event
 /// run has held the item before. Otherwise nothing is journaled. When it starts, the run's batch
@@ -894,17 +899,30 @@ fn evented(
     let Some(thesis) = context
         .active_theses
         .iter()
-        .find(|thesis| facts.symbols.contains(&thesis.symbol))
+        .filter(|thesis| facts.symbols.contains(&thesis.symbol))
+        .min_by(|a, b| a.symbol.cmp(&b.symbol))
     else {
         return Ok(());
     };
+    let under_cost_cap = context
+        .mandate
+        .envelope()
+        .research
+        .as_ref()
+        .is_some_and(|research| {
+            context.facts.research_spend_usd_today
+                < context
+                    .overlay
+                    .effective_cost_cap(research.cost_cap_usd_per_day)
+        });
     let data = item.observation.data_ref;
     if !triggers.kinds.contains(&facts.kind)
         || !allowlisted
         || !newer
+        || !under_cost_cap
         || research.triggered.contains(&data)
         || !debounced(research, now, context, triggers)
-        || !under_daily_cap(research, now, triggers)?
+        || !under_daily_cap(research, now, triggers)
     {
         return Ok(());
     }
@@ -969,24 +987,27 @@ fn debounced(
 }
 
 /// Whether fewer than `max_runs_per_day` event runs have started on `now`'s risk day, the
-/// America/New_York date (mandate spec §5.4). A clock the calendar cannot place starts none.
-fn under_daily_cap(
-    research: &ResearchState,
-    now: RiskClock,
-    triggers: &EventTriggers,
-) -> Result<bool, RuntimeError> {
-    let day = |at: RiskClock| -> Result<mandate_time::Date, RuntimeError> {
-        let (date, _) = mandate_time::new_york_date_and_hour(UtcNanos::from_parts(at.secs(), 0)?)?;
-        Ok(date)
+/// America/New_York date (mandate spec §5.4). A clock the calendar cannot place, now or in a
+/// start the journal holds, starts none (`AGENTS.md` rule 3).
+fn under_daily_cap(research: &ResearchState, now: RiskClock, triggers: &EventTriggers) -> bool {
+    let day = |at: RiskClock| {
+        UtcNanos::from_parts(at.secs(), 0)
+            .ok()
+            .and_then(|at| mandate_time::new_york_date_and_hour(at).ok())
+            .map(|(date, _)| date)
     };
-    let today = day(now)?;
+    let Some(today) = day(now) else {
+        return false;
+    };
     let mut started = 0_u32;
     for at in &research.event_starts {
-        if day(*at)? == today {
-            started = started.saturating_add(1);
+        match day(*at) {
+            Some(date) if date == today => started = started.saturating_add(1),
+            Some(_) => {}
+            None => return false,
         }
     }
-    Ok(started < triggers.max_runs_per_day)
+    started < triggers.max_runs_per_day
 }
 
 /// Cancels `run`: the worker is told to stop, an agentic run ends with `reason` in this step (the
