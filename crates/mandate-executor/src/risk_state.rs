@@ -1098,8 +1098,9 @@ fn whole_seconds(from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
 
 impl SessionClock for ExchangeRiskCalendar {
     fn seconds_between(&self, from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
+        let every_second = whole_seconds(from, to)?;
         if self.crypto {
-            return whole_seconds(from, to);
+            return Ok(every_second);
         }
         let mut total: u64 = 0;
         let mut date = from.date();

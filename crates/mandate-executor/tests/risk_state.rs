@@ -23,10 +23,10 @@ use mandate_executor::risk_state::{
 };
 use mandate_executor::tripwire::TripwireState;
 use mandate_journal::{Draft, StoredEvent};
-use mandate_num::{Price, Qty, Usd};
+use mandate_num::{Price, Qty, Ratio, Usd};
 use mandate_spec::context::stop_limit_asset_classes;
 use mandate_spec::document::ProvenanceMap;
-use mandate_spec::risk::{Opening, RiskState, SessionClock};
+use mandate_spec::risk::{LimitKey, Opening, RiskState, SessionClock};
 use mandate_spec::{Mandate, SpecError, ValidatedMandate, ValidationContext};
 use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos};
 use serde_json::Value as Json;
@@ -2587,6 +2587,177 @@ fn rows_from_before_the_deployment_are_not_the_agents() {
         unreadable(fee.view()),
         (UnreadableCause::RefusedToDecide, 3)
     );
+}
+
+/// The opening's own second is the agent's: a mark of another instrument there fails closed, and
+/// on a bound fold a mark before it, of the bound instrument or another, steps nothing before the
+/// instrument is checked (DEC-2804 item 3, DEC-2308 item 4).
+#[test]
+fn the_opening_second_is_the_agents_and_a_bound_fold_skips_earlier_marks() {
+    let mandate = mandate();
+    let before = "2026-09-22T14:29:59.000000000Z";
+    let bound = || {
+        AccountRiskFold::open(
+            ACCOUNT,
+            1,
+            AGENT,
+            &mandate,
+            &opening(),
+            Some(XYZ),
+            &Wall,
+            TripwireState::default(),
+        )
+        .unwrap()
+    };
+    let mut fold = bound();
+    let opened = fold.view().clone();
+    fold.fold(&mark(2, ETH, before, "50", true, "regular"))
+        .unwrap();
+    fold.fold(&mark(3, XYZ, before, "99", true, "regular"))
+        .unwrap();
+    let (RiskView::Readable { snapshot, head }, RiskView::Readable { snapshot: was, .. }) =
+        (fold.view(), &opened)
+    else {
+        panic!("readable");
+    };
+    assert_eq!(
+        (snapshot, *head),
+        (was, 3),
+        "neither earlier mark is the agent's"
+    );
+    fold.fold(&mark(4, ETH, OPENED, "50", true, "regular"))
+        .unwrap();
+    assert_eq!(
+        unreadable(fold.view()),
+        (UnreadableCause::RefusedToDecide, 3),
+        "a mark at the opening second is the agent's, and names another instrument"
+    );
+
+    let mut at_opening = bound();
+    for row in own_order(2, AGENT, "o-1", XYZ, "buy", "1") {
+        at_opening.fold(&row).unwrap();
+    }
+    at_opening
+        .fold(&fill(4, "o-1", XYZ, ("buy", "1", "100"), OPENED, "[]"))
+        .unwrap();
+    assert!(
+        matches!(at_opening.view(), RiskView::Readable { head: 4, .. }),
+        "a fill at the opening second is the agent's: {:?}",
+        at_opening.view()
+    );
+}
+
+/// Every latched limit and every figure maps to the gate's own, each distinct so a swap between
+/// two of them shows (DEC-2804 item 7).
+#[test]
+fn the_gates_snapshot_maps_every_limit_and_figure() {
+    let RiskView::Readable { mut snapshot, .. } = readable_in(AgentMode::ExitsOnly) else {
+        panic!("readable");
+    };
+    let usd = |text: &str| Usd::parse(text).unwrap();
+    snapshot.agent_equity = usd("901");
+    snapshot.high_water_mark = usd("1002");
+    snapshot.day_start_equity = usd("953");
+    snapshot.capital_base = usd("1004");
+    snapshot.inherited_loss = usd("5");
+    snapshot.size_factor = Ratio::parse("0.25").unwrap();
+    snapshot.active_rungs = BTreeMap::from([(1, 30), (2, 7)]);
+    snapshot.latched = BTreeSet::from([
+        LimitKey::MaxDailyLoss,
+        LimitKey::DrawdownRung(2),
+        LimitKey::LifetimeFloor,
+        LimitKey::ProfitStop,
+    ]);
+    let view = RiskView::Readable { snapshot, head: 9 };
+    let (risk, mode) = risk_snapshot(&view).unwrap();
+    assert_eq!(mode, mandate_risk::AgentMode::ExitsOnly);
+    assert_eq!(
+        risk,
+        mandate_risk::RiskSnapshot {
+            agent_equity: usd("901"),
+            high_water_mark: usd("1002"),
+            day_start_equity: usd("953"),
+            capital_base: usd("1004"),
+            inherited_loss: usd("5"),
+            latched: BTreeSet::from([
+                mandate_risk::spec_types::LimitKey::MaxDailyLoss,
+                mandate_risk::spec_types::LimitKey::DrawdownRung(2),
+                mandate_risk::spec_types::LimitKey::LifetimeFloor,
+                mandate_risk::spec_types::LimitKey::ProfitStop,
+            ]),
+            active_rungs: BTreeMap::from([(1, 30), (2, 7)]),
+            size_factor: Ratio::parse("0.25").unwrap(),
+            agent_mode: mandate_risk::AgentMode::ExitsOnly,
+        }
+    );
+}
+
+/// The deployed calendar's edges: the regular session's open and close seconds, a half day, a
+/// holiday, a daylight-saving change, a span over several days, and a clock that goes back, which
+/// is refused for an equity as for crypto.
+#[test]
+fn the_deployed_calendar_counts_half_days_holidays_and_edges() {
+    let equity = ExchangeRiskCalendar::new(AssetClass::UsEquity).unwrap();
+    let between = |from: &str, to: &str| equity.seconds_between(at(from), at(to)).unwrap();
+    for (instant, session) in [
+        ("2026-09-22T13:29:59.000000000Z", MarketSession::PreMarket),
+        ("2026-09-22T13:30:00.000000000Z", MarketSession::Regular),
+        ("2026-09-22T19:59:59.000000000Z", MarketSession::Regular),
+        ("2026-09-22T20:00:00.000000000Z", MarketSession::AfterHours),
+        ("2026-11-26T15:00:00.000000000Z", MarketSession::Overnight),
+        ("2026-11-27T18:30:00.000000000Z", MarketSession::AfterHours),
+    ] {
+        assert_eq!(equity.session(at(instant)).unwrap(), session, "{instant}");
+    }
+    assert_eq!(
+        between(
+            "2026-09-22T13:29:00.000000000Z",
+            "2026-09-22T13:31:00.000000000Z"
+        ),
+        60,
+        "only the regular session's first minute"
+    );
+    assert_eq!(
+        between(
+            "2026-11-26T00:00:00.000000000Z",
+            "2026-11-27T00:00:00.000000000Z"
+        ),
+        0,
+        "Thanksgiving"
+    );
+    assert_eq!(
+        between(
+            "2026-11-27T00:00:00.000000000Z",
+            "2026-11-28T00:00:00.000000000Z"
+        ),
+        12_600,
+        "the half day closes at 13:00 New York"
+    );
+    assert_eq!(
+        between(
+            "2026-10-30T14:30:00.000000000Z",
+            "2026-11-02T14:31:00.000000000Z"
+        ),
+        19_800 + 60,
+        "Friday from 10:30 New York, the weekend, Monday's first minute after the change to EST"
+    );
+    assert_eq!(
+        between(
+            "2026-11-02T14:30:00.000000000Z",
+            "2026-11-02T14:31:00.000000000Z"
+        ),
+        60,
+        "09:30 New York is 14:30 UTC after the change"
+    );
+    for calendar in [
+        equity,
+        ExchangeRiskCalendar::new(AssetClass::Crypto).unwrap(),
+    ] {
+        assert_eq!(
+            calendar.seconds_between(at(OPENED), at("2026-09-22T14:29:00.000000000Z")),
+            Err(SpecError::ClockWentBackwards)
+        );
+    }
 }
 
 /// The binding gate's snapshot is the risk state's, member for member, beside its mode; an
