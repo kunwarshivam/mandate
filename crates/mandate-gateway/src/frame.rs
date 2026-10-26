@@ -11,7 +11,8 @@ use std::io::{ErrorKind, Read, Write};
 
 use crate::call::CallRequest;
 use crate::wire::{
-    PutReply, PutRequest, Reply, WireError, reply_bytes, reply_from, request_bytes, request_from,
+    PutReply, PutRequest, Reply, WireError, put_bytes, put_reply_from, reply_bytes, reply_from,
+    request_bytes, request_from,
 };
 
 /// The longest request frame body: the cap `HttpsTransport` reads a provider's body under.
@@ -92,13 +93,10 @@ pub fn call<S: Read + Write>(stream: &mut S, request: &CallRequest) -> Result<Re
 ///
 /// # Errors
 /// Any [`FrameError`]. The caller treats every one as a put that stored nothing (item 3).
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn put<S: Read + Write>(stream: &mut S, put: &PutRequest) -> Result<PutReply, FrameError> {
-    let _ = (stream, put);
-    todo!()
+    write_frame(stream, &put_bytes(put), MAX_REQUEST_FRAME)?;
+    let body = read_frame(stream, MAX_REPLY_FRAME)?;
+    put_reply_from(&body).map_err(FrameError::Wire)
 }
 
 /// The service's side: reads one request, hands it to `answer` only when it decoded whole, and

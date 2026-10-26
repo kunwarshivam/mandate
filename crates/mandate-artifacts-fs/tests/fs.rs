@@ -417,7 +417,6 @@ proptest! {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn put_counted_says_whether_it_linked_a_new_object() {
     let (_, mut store) = open("counted");
     let (first, linked) = store.put_counted(b"thesis").unwrap();
@@ -430,7 +429,6 @@ fn put_counted_says_whether_it_linked_a_new_object() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn put_counted_never_changes_an_existing_objects_bytes() {
     let (_, mut store) = open("counted-create-only");
     let reference = store.put_artifact(b"thesis").unwrap();
@@ -440,7 +438,6 @@ fn put_counted_never_changes_an_existing_objects_bytes() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn stored_bytes_counts_every_file_in_the_store_crashed_writes_among_them() {
     let (dir, mut store) = open("stored-bytes");
     assert_eq!(store.stored_bytes().unwrap(), 0);

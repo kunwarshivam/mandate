@@ -71,12 +71,21 @@ impl FsArtifactStore {
     ///
     /// # Errors
     /// `Unavailable` for a directory or file that cannot be read.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn stored_bytes(&self) -> Result<u64, ArtifactError> {
-        todo!()
+        let mut total: u64 = 0;
+        let mut pending = vec![self.root.join(OBJECTS_DIR), self.root.join(TEMP_DIR)];
+        while let Some(dir) = pending.pop() {
+            for entry in fs::read_dir(&dir).map_err(unavailable)? {
+                let entry = entry.map_err(unavailable)?;
+                if entry.file_type().map_err(unavailable)?.is_dir() {
+                    pending.push(entry.path());
+                } else {
+                    let length = entry.metadata().map_err(unavailable)?.len();
+                    total = total.saturating_add(length);
+                }
+            }
+        }
+        Ok(total)
     }
 
     /// As [`ArtifactStore::put_artifact`], and whether this put linked a new object rather than
@@ -84,13 +93,12 @@ impl FsArtifactStore {
     ///
     /// # Errors
     /// As [`ArtifactStore::put_artifact`].
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn put_counted(&mut self, bytes: &[u8]) -> Result<(ArtifactRef, bool), ArtifactError> {
-        let _ = bytes;
-        todo!()
+        let reference = ArtifactRef::of(bytes);
+        let temp = self.write_temp(&reference, bytes)?;
+        let published = self.publish(&reference, &temp);
+        fs::remove_file(&temp).ok();
+        published.map(|linked| (reference, linked))
     }
 
     /// Where the object for `reference` lives.
@@ -175,11 +183,7 @@ impl ArtifactSource for FsArtifactStore {
 /// the put's outcome is the link's.
 impl ArtifactStore for FsArtifactStore {
     fn put_artifact(&mut self, bytes: &[u8]) -> Result<ArtifactRef, ArtifactError> {
-        let reference = ArtifactRef::of(bytes);
-        let temp = self.write_temp(&reference, bytes)?;
-        let published = self.publish(&reference, &temp);
-        fs::remove_file(&temp).ok();
-        published.map(|_| reference)
+        self.put_counted(bytes).map(|(reference, _)| reference)
     }
 }
 
