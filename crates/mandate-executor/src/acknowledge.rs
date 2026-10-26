@@ -387,7 +387,7 @@ mod tests {
     /// what the copy superseded: another original's refusal, a refused resume of the same original,
     /// or any other record leaves the copy accepted.
     #[test]
-    fn only_the_copys_own_refusal_restores_its_trigger() {
+    fn only_the_refusal_of_a_copy_restores_its_trigger() {
         for (next, restored) in [
             (refusal("acknowledge", "ak-1"), true),
             (refusal("acknowledge", "ak-9"), false),
