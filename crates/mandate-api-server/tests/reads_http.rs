@@ -151,9 +151,21 @@ fn ws(path: &str) -> String {
 }
 
 fn row(stream: &str, seq: u64, event_type: &str, payload: &str) -> StoredEvent {
+    caused_row(stream, seq, event_type, payload, None)
+}
+
+/// A row whose envelope names `causation` as its `causation_id`.
+fn caused_row(
+    stream: &str,
+    seq: u64,
+    event_type: &str,
+    payload: &str,
+    causation: Option<&str>,
+) -> StoredEvent {
     let event_id = format!("01JBH3BTZ8K2M4N6P8R0S2T{seq:03}");
+    let caused_by = causation.map_or_else(String::new, |id| format!(r#""causation_id":"{id}","#));
     let text = format!(
-        r#"{{"environment":"paper","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{stream}"}}"#
+        r#"{{{caused_by}"environment":"paper","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{stream}"}}"#
     );
     let body = to_canonical(&parse(text.as_bytes()).expect("JSON"));
     StoredEvent {
@@ -515,6 +527,86 @@ fn the_approvals_inbox_and_one_approval_read_from_the_agent_streams() {
             "{absent}"
         );
     }
+}
+
+/// The single read names the deferred checks of the `DecisionMade` its request's `causation_id`
+/// names, on the agent stream: its list, empty for a decision without one, and `null` when no such
+/// decision is there, so a reader can tell a request that hides its decision's deferrals across
+/// batches (DEC-2519). The inbox carries no content and none of this.
+#[test]
+fn one_approval_names_its_decisions_deferred_checks_or_null_without_one() {
+    let f = fixture();
+    seed(&f);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Approver])]));
+    let cookie = signed_in(&f, alice());
+    let a = agent_stream("agt_a");
+    let deferring = r#"{"deferred_to_binding":["halt","liquidity_floor","participation"]}"#;
+    let request = |seq, schema_version, causation: Option<&str>| StoredEvent {
+        schema_version,
+        ..caused_row(
+            &a,
+            seq,
+            "ApprovalRequested",
+            &format!(
+                r#"{{"content":{{{ACTION}}},"content_hash":"{}","deadline":900}}"#,
+                version(u8::try_from(seq).expect("small"))
+            ),
+            causation,
+        )
+    };
+    let decision = |seq, schema_version, payload| StoredEvent {
+        schema_version,
+        ..row(&a, seq, "DecisionMade", payload)
+    };
+    let id = |seq: u64| format!("01JBH3BTZ8K2M4N6P8R0S2T{seq:03}");
+    f.journal.streams.lock().expect("unpoisoned").insert(
+        a.clone(),
+        vec![
+            decision(1, 3, deferring),
+            request(2, 2, Some(&id(1))),
+            decision(3, 1, r#"{"dry_run":"allow"}"#),
+            request(4, 2, Some(&id(3))),
+            request(5, 2, Some(&id(99))),
+            request(6, 2, None),
+            request(7, 2, Some(&id(4))),
+        ],
+    );
+    let named = |seq: u64| -> Option<Value> {
+        let reply = get(&f, &ws(&format!("/approvals/{}", id(seq))), Some(&cookie));
+        assert_eq!(reply.status, 200, "{seq}");
+        json(&reply)
+            .get("approval")
+            .and_then(|a| a.get("decision_deferred_to_binding"))
+            .cloned()
+    };
+    assert_eq!(
+        named(2),
+        Some(parse(br#"["halt","liquidity_floor","participation"]"#).expect("JSON")),
+        "a request across from a deferring decision is served that decision's list"
+    );
+    assert_eq!(
+        named(4),
+        Some(parse(b"[]").expect("JSON")),
+        "a decision without a list deferred nothing"
+    );
+    for seq in [5, 6, 7] {
+        assert_eq!(
+            named(seq),
+            Some(Value::Null),
+            "{seq}: no DecisionMade by that id on the stream"
+        );
+    }
+    let reply = get(&f, &ws("/approvals"), Some(&cookie));
+    let Some(Value::Array(listed)) = json(&reply).get("approvals").cloned() else {
+        panic!("approvals");
+    };
+    assert_eq!(listed.len(), 5);
+    assert!(
+        listed
+            .iter()
+            .all(|a| a.get("decision_deferred_to_binding").is_none()),
+        "the inbox carries none of it"
+    );
 }
 
 #[test]

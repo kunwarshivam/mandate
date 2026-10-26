@@ -31,29 +31,45 @@ export const DEFERRED_CHECK_LABELS: Readonly<Record<string, string>> = {
 };
 
 /**
- * What a request's content says was deferred: nothing (versions 1 and 2 have no member), the names
- * in the order the request gives them, or a member that cannot be read. An unreadable member is
- * never read as nothing deferred: the screen then says it cannot tell, and offers no approve. The
- * read names the request's version (DEC-2518): version 3 always names its deferred checks and
- * versions 1 and 2 name none, so a version 3 request without its list, or an older one with a
- * list, is unreadable too.
+ * What a request says was deferred: nothing (versions 1 and 2 have no member), the names in the
+ * order the request gives them, or a reading that cannot be trusted. An untrusted reading is never
+ * read as nothing deferred: the screen then says it cannot tell, and offers no approve. The read
+ * names the request's version (DEC-2518): version 3 always names its deferred checks and versions 1
+ * and 2 name none, so a version 3 request without its list, or an older one with a list, is
+ * unreadable. It also names the deferred checks of the decision the request names (DEC-2519): a
+ * request whose list is not exactly its decision's, or whose decision was not found, is unreadable
+ * too, wherever the two were written.
  */
 export type DeferredChecks = { kind: "none" } | { kind: "named"; names: string[] } | { kind: "unreadable" };
 
 const NAME = /^[a-z][a-z0-9_]*$/;
 
-export function deferredChecks(content: Record<string, unknown>, schemaVersion: number): DeferredChecks {
-  const named = Object.hasOwn(content, "deferred_to_binding");
-  if (schemaVersion !== 3) return named || (schemaVersion !== 1 && schemaVersion !== 2) ? { kind: "unreadable" } : { kind: "none" };
-  if (!named) return { kind: "unreadable" };
-  const value = content.deferred_to_binding;
-  if (!Array.isArray(value) || value.length === 0) return { kind: "unreadable" };
+/** `value` as distinct names, or `null` when it is not a list of them. */
+function readNames(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
   const names: string[] = [];
   for (const name of value) {
-    if (typeof name !== "string" || !NAME.test(name) || names.includes(name)) return { kind: "unreadable" };
+    if (typeof name !== "string" || !NAME.test(name) || names.includes(name)) return null;
     names.push(name);
   }
-  return { kind: "named", names };
+  return names;
+}
+
+/** What the request's own content says, by its version. */
+function requestChecks(content: Record<string, unknown>, schemaVersion: number): DeferredChecks {
+  const named = Object.hasOwn(content, "deferred_to_binding");
+  if (schemaVersion !== 3) return named || (schemaVersion !== 1 && schemaVersion !== 2) ? { kind: "unreadable" } : { kind: "none" };
+  const names = named ? readNames(content.deferred_to_binding) : null;
+  return names && names.length > 0 ? { kind: "named", names } : { kind: "unreadable" };
+}
+
+export function deferredChecks(content: Record<string, unknown>, schemaVersion: number, decided: unknown): DeferredChecks {
+  const own = requestChecks(content, schemaVersion);
+  if (own.kind === "unreadable") return own;
+  const decision = readNames(decided);
+  const requested = own.kind === "named" ? own.names : [];
+  if (!decision || decision.length !== requested.length || decision.some((name, i) => name !== requested[i])) return { kind: "unreadable" };
+  return own;
 }
 
 /** A name as the approver reads it. */

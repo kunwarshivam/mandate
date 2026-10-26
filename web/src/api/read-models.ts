@@ -83,6 +83,8 @@ export interface ApprovalDetail extends ApprovalRow {
   content: Record<string, unknown>;
   /** The `ApprovalRequested` version `content` comes from: version 3's names the checks its dry run deferred (DEC-2518). */
   schema_version: ApprovalVersion;
+  /** The deferred checks of the decision the request names, as served, or `null` when the API found none (DEC-2519); judged by `deferredChecks`. */
+  decision_deferred_to_binding: unknown[] | null;
 }
 
 /** The `ApprovalRequested` versions the journal spec defines (§9.6). */
@@ -186,7 +188,9 @@ const approvalVersion: Decoder<ApprovalVersion> = (value, path) => {
   if (!read.ok) return read;
   return (APPROVAL_VERSIONS as readonly number[]).includes(read.value) ? { ok: true, value: read.value as ApprovalVersion } : fail(path, "unknown_enum_value", String(read.value));
 };
-const approvalDetail = object<ApprovalDetail>({ ...approvalMembers, content: record, schema_version: approvalVersion });
+/** A list as served, its items unread here, or `null`: what is in it is the screen's to judge, so a bad item never hides the approval. */
+const servedList: Decoder<unknown[] | null> = (value, path) => (value === null || Array.isArray(value) ? { ok: true, value } : fail(path, "wrong_type"));
+const approvalDetail = object<ApprovalDetail>({ ...approvalMembers, content: record, schema_version: approvalVersion, decision_deferred_to_binding: servedList });
 
 export const agentsRead = object<{ agents: AgentRow[] }>({ agents: array(agentRow) });
 export const agentRead = object<{ agent: AgentDetail }>({ agent: agentDetail });
