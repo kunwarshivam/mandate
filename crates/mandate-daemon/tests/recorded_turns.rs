@@ -20,7 +20,9 @@ use mandate_gateway::Outcome;
 use mandate_gateway::money::Usd6;
 use mandate_research_run::CallPlan;
 use mandate_research_run::agentic::{RunKind, Tool, TurnPlan};
-use mandate_runtime::{ResearchInput, ResearchRequest, RiskClock, TurnRef, TurnRequest};
+use mandate_runtime::{
+    ActiveThesis, ResearchInput, ResearchRequest, RiskClock, TurnRef, TurnRequest,
+};
 use mandate_time::UtcNanos;
 use serde_json::{Value as Json, json};
 
@@ -337,14 +339,16 @@ fn each_turn_is_answered_with_its_scripted_calls_then_the_final_reply() {
     assert!(record.output.is_some(), "past the script, the final reply");
 }
 
-/// Agent harness spec §6.9 end to end through the worker's gateway: a bundle's `monitor_reply`
-/// answers a `monitor` run's first turn, with no scripted turn, and the gateway takes it under the
+/// Agent harness spec §6.9 end to end through the worker's gateway: a bundle's `monitor_reply`,
+/// naming the thesis the run's context showed, answers a `monitor` run's first turn, with no
+/// scripted turn, and the gateway takes it under the
 /// monitor schema, `invalidations` alone, so the record carries it as the run's final output. The
 /// same bundle's ideate run still takes its script.
 #[test]
 fn a_monitor_turn_is_answered_with_the_bundle_s_monitor_reply() {
-    let invalidation = json!({"invalidations": [{"thesis_id": "01ACTIVE", "evidence": []}]});
-    let output = invalidation.to_string();
+    let output =
+        json!({"invalidations": [{"thesis_id": "$THESIS_ID", "evidence": []}]}).to_string();
+    let invalidation = json!({"invalidations": [{"thesis_id": "01SHOWN", "evidence": []}]});
     let bundle = load_edited("monitor-reply", AGENTIC, |research| {
         research["monitor_reply"] = json!({
             "output": output,
@@ -360,12 +364,21 @@ fn a_monitor_turn_is_answered_with_the_bundle_s_monitor_reply() {
     let now = || UtcNanos::from_parts(CUT_OFF + 5, 0).unwrap();
     let mut worker =
         RecordedWorker::new(&bundle, who(), Box::new(shelf.clone()), Box::new(now)).unwrap();
+    let mut shown = parts();
+    shown.active = vec![ActiveThesis {
+        thesis_id: "01SHOWN".to_owned(),
+        lineage_id: "01SHOWN".to_owned(),
+        revision: 0,
+        instrument: mandate_research::AssetId::new("7b4a1c2e-1111-4a2b-9c3d-000000000001").unwrap(),
+        symbol: mandate_research_run::Symbol::new("AAPL").unwrap(),
+        expires_at: RiskClock::from_secs(CUT_OFF + 86_400),
+    }];
     worker.hand(
         &ResearchRequest::Start {
             run_id: RUN.to_owned(),
             cut_off: RiskClock::from_secs(CUT_OFF),
         },
-        &parts(),
+        &shown,
     );
     let answers = worker.answers(RiskClock::from_secs(CUT_OFF + 1));
     let Some(ResearchInput::Retrieved { items, .. }) = answers.first() else {

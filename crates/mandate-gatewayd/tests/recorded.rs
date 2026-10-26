@@ -276,3 +276,25 @@ fn a_monitor_reply_is_refused_on_a_single_call_entry_or_short_a_member() {
         ))
     );
 }
+
+/// The monitor reply names the least thesis the call's `memory` input shows, so the recorded double
+/// invalidates a thesis the runtime actually holds.
+#[test]
+fn a_monitor_reply_names_the_thesis_the_call_showed() {
+    let recording = model(&with_monitor_reply(AGENTIC).replace("01ACTIVE", "$THESIS_ID"));
+    let replies = Replies::new(&recording);
+    let mut monitor = request(Some("monitor"), 0);
+    monitor.inputs.insert(
+        "memory".to_owned(),
+        r#"[{"expires_at":"2026-10-20T00:00:00.000000000Z","symbol":"SPY","thesis_id":"01THESISB"},{"expires_at":"2026-10-20T00:00:00.000000000Z","symbol":"SPY","thesis_id":"01THESISA"}]"#
+            .to_owned(),
+    );
+    let reply = replies.reply_for(&monitor);
+    let expected = recorded_reply(
+        r#"{"invalidations":[{"thesis_id":"01THESISA","evidence":["nw-1"]}]}"#,
+        recording.probe.model.as_deref().unwrap(),
+        recording.probe.provider.as_deref().unwrap(),
+        recording.monitor_reply.as_ref().unwrap().usage,
+    );
+    assert_eq!(body(&reply.delivery), expected.as_slice());
+}

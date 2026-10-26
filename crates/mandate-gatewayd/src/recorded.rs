@@ -13,7 +13,9 @@ use mandate_gateway::provider::Delivery;
 use mandate_gateway::registry::{Locality, Reported};
 use mandate_gateway::{CallRequest, RateCaps, Settings};
 use mandate_research_run::agentic::RunKind;
-use mandate_research_run::recorded::{RecordedModel, RecordedReply, ScriptedTurn};
+use mandate_research_run::recorded::{
+    RecordedModel, RecordedReply, ScriptedTurn, memory_theses, shown_thesis,
+};
 use mandate_research_run::recorded_reply;
 
 /// The workspace's calls a minute, fixed whatever the entry pins, as the cell's gateway holds them
@@ -44,7 +46,8 @@ impl Replies {
     }
 
     /// The reply `request` takes: a `monitor` run's call the recording's monitor reply, when it has
-    /// one, with no scripted turn (agent harness spec §6.9); else an agentic call's scripted turn,
+    /// one, naming the least thesis the call's memory showed, with no scripted turn (agent harness
+    /// spec §6.9); else an agentic call's scripted turn,
     /// the one after the turns its transcript already holds, when the recording scripts one; else
     /// the recorded final reply.
     pub fn reply_for(&self, request: &CallRequest) -> Recorded {
@@ -57,6 +60,12 @@ impl Replies {
             .as_ref()
             .filter(|_| monitor.is_none())
             .and_then(|_| self.turns.get(request.turns.len()));
+        let shown = memory_theses(&request.inputs);
+        let shown: Vec<&str> = shown.iter().map(String::as_str).collect();
+        let output = match monitor {
+            Some(reply) => shown_thesis(&reply.output, &shown),
+            None => self.reply.output.clone(),
+        };
         let last = monitor.unwrap_or(&self.reply);
         let (latency_ms, body) = match scripted {
             Some(turn) => {
@@ -73,7 +82,7 @@ impl Replies {
             None => (
                 last.latency_ms,
                 recorded_reply(
-                    &last.output,
+                    &output,
                     self.reported.model.as_deref().unwrap_or_default(),
                     self.reported.provider.as_deref().unwrap_or_default(),
                     last.usage,
