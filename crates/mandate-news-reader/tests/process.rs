@@ -124,44 +124,50 @@ fn run_args(socket: &Path, extra: &[&str]) -> Vec<String> {
 #[test]
 fn a_start_it_cannot_make_is_refused_with_its_code() {
     let none = Command::new(BIN).args(["run"]).output().unwrap();
-    assert_eq!(none.status.code(), Some(2));
     assert_eq!(
         String::from_utf8_lossy(&none.stderr),
         "probe_socket_missing\n"
     );
+    assert_eq!(none.status.code(), Some(2));
     let socket = scratch("refused.sock");
     let unknown = Command::new(BIN)
         .args(["serve", "--probe"])
         .arg(&socket)
         .output()
         .unwrap();
-    assert_eq!(unknown.status.code(), Some(2));
     assert_eq!(
         String::from_utf8_lossy(&unknown.stderr),
         "usage: mandate-news-reader run|probe\n"
     );
+    assert_eq!(unknown.status.code(), Some(2));
     let no_workspace = Command::new(BIN)
         .args(["run", "--probe"])
         .arg(&socket)
         .output()
         .unwrap();
-    assert_eq!(no_workspace.status.code(), Some(2));
     assert_eq!(
         String::from_utf8_lossy(&no_workspace.stderr),
         "news_reader_start_failed: workspace_missing\n"
     );
+    assert_eq!(no_workspace.status.code(), Some(2));
     let (status, stderr) = refused(&run_args(&socket, &["--follow", "agent_a=acct_1"]));
-    assert_eq!(status.code(), Some(2));
     assert_eq!(
         stderr, "news_reader_start_failed: journal_dsn_missing\n",
         "without --fixture it runs only on the journal MANDATE_JOURNAL_DSN names"
     );
+    assert_eq!(status.code(), Some(2));
     let probe_word = Command::new(BIN)
         .args(["probe", "healthz", "--probe"])
         .arg(&socket)
         .output()
         .unwrap();
-    assert_eq!(probe_word.status.code(), Some(2));
+    assert_eq!(
+        (
+            String::from_utf8_lossy(&probe_word.stderr).as_ref(),
+            probe_word.status.code()
+        ),
+        ("", Some(2))
+    );
 }
 
 /// A reader that cannot run: it writes `code` alone on its standard error, answers live and not
