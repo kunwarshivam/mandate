@@ -85,8 +85,8 @@ fn offer(
         as_of: RiskClock::from_secs(setup.now.secs()),
         data_ref: Digest::of(CLOSES),
     };
-    let mut session = Session::open_governed(&mut stages, &setup, &admitted.view, None)
-        .map_err(|e| e.to_string())?;
+    let mut session =
+        Session::open_governed(&mut stages, &setup, &admitted).map_err(|e| e.to_string())?;
     session.start().map_err(|e| e.to_string())?;
     let observed = session.observe(observation);
     let killed = session.feed(Input::Command(Command::KillSwitch {

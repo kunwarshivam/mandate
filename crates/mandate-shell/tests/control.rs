@@ -56,6 +56,7 @@ fn record(seq: u64, event_type: &str, payload: &str) -> ControlRecord {
     let event_type = event_type.to_owned();
     ControlRecord {
         seq,
+        event_time: None,
         event_type,
         payload: json(payload),
         origin: Origin {
