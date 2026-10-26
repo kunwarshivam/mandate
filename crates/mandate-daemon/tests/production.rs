@@ -226,3 +226,42 @@ fn before_the_account_is_known_the_flatten_has_nothing_to_sell() {
     assert!(plan.sells.is_empty());
     assert!(plan.cancel_client_order_ids.is_empty());
 }
+
+/// S3a: a resolved paper deployment's wiring sells its pinned universe's sub-ledger under each
+/// instrument's class from the stored mandate; a holding outside it has no class to sell under.
+/// The plan and the gate stay the fixture's deny-all ones until S2b wires them.
+#[test]
+fn a_resolved_deployment_is_wired_with_the_fold_and_the_flatten_over_its_universe() {
+    let document = mandate_canon::parse(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deploy/cell/demo/mandate.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        mandate_daemon::production::classes(&document),
+        BTreeMap::from([(SPY.to_owned(), AssetClass::UsEquity)])
+    );
+    let wiring = mandate_daemon::production::wired(
+        mandate_daemon::fixture::wiring("user-owner"),
+        &document,
+        CLOCK,
+        AGENT,
+    );
+    let facts = wiring.facts.clone().unwrap();
+    facts.follow(ACCOUNT);
+    let mut rows = Vec::new();
+    bought(&mut rows, AGENT, "o1", SPY, "2");
+    bought(&mut rows, AGENT, "o2", BTC, "1");
+    facts.feed(&rows);
+    let plan = wiring.flatten.plan(&kill_switch());
+    assert_eq!(plan.sells, vec![leg(SPY, AssetClass::UsEquity, "2")]);
+}
+
+#[test]
+fn a_document_that_does_not_parse_has_no_classes() {
+    let document = mandate_canon::parse(br#"{"universe":{}}"#).unwrap();
+    assert!(mandate_daemon::production::classes(&document).is_empty());
+}

@@ -17,6 +17,35 @@ use mandate_domain::AssetClass;
 use mandate_gate_context::{Journaled, Row};
 use mandate_journal::StoredEvent;
 use mandate_runtime::{FlattenLeg, FlattenPlan, FlattenPlanner, FlattenRequest};
+use mandate_spec::document::Mandate;
+
+use crate::runtime::Wiring;
+
+/// `base` with the production ports this slice has (DEC-2378 S3a): the shared fold for `agent`,
+/// ticked by the scheduler's `clock` stream, and the flatten planner over it with the asset
+/// classes of `document`'s pinned universe. Every other port stays `base`'s, so a deployment's
+/// openings are still denied until the plan and the gate's dry run are wired (S2b).
+pub fn wired(mut base: Wiring, document: &Value, clock: &str, agent: &str) -> Wiring {
+    let facts = Facts::new(clock, agent);
+    base.flatten = Box::new(Flatten::new(facts.clone(), classes(document)));
+    base.facts = Some(facts);
+    base
+}
+
+/// Each pinned instrument's asset class, by asset id, from the stored mandate `document`; none
+/// when the document does not parse, which `deployment::document` has already refused.
+pub fn classes(document: &Value) -> BTreeMap<String, AssetClass> {
+    Mandate::parse(document)
+        .map(|mandate| {
+            mandate
+                .universe
+                .pinned_instruments
+                .iter()
+                .map(|pinned| (pinned.asset_id.as_str().to_owned(), pinned.asset_class))
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 /// The shared fold of one deployment's streams, cloned into every port that reads it. Each row
 /// reaches the fold once, in its stream's order, however often the process reads its stream.
