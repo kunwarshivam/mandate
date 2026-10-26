@@ -130,6 +130,7 @@ fn thesis_record(
         ("thesis_id", text(thesis)),
         ("lineage_id", text(lineage)),
         ("instrument_id", text(instrument)),
+        ("asset_class", text("us_equity")),
         ("revision", int(0)),
         ("as_of", text(&rfc3339(expires - 86_400))),
         ("expires_at", text(&rfc3339(expires))),
@@ -354,6 +355,7 @@ fn a_thesis_record_the_fold_cannot_read_is_refused_not_dropped() {
         "thesis_id",
         "lineage_id",
         "instrument_id",
+        "asset_class",
         "revision",
         "expires_at",
         "admitted",
@@ -397,17 +399,21 @@ fn a_thesis_record_the_fold_cannot_read_is_refused_not_dropped() {
 struct ThesisExitPlan {
     held: BTreeSet<InstrumentId>,
     seen: std::cell::RefCell<Vec<BTreeSet<InstrumentId>>>,
+    classes: std::cell::RefCell<Vec<BTreeMap<InstrumentId, AssetClass>>>,
 }
 
 impl OrderPlan for ThesisExitPlan {
     fn plan(&self, _view: &MandateView, inputs: &SignalInputs) -> Option<Proposal> {
         self.seen.borrow_mut().push(inputs.ended_theses.clone());
+        self.classes
+            .borrow_mut()
+            .push(inputs.thesis_classes.clone());
         let instrument = inputs.ended_theses.iter().find(|instrument| {
             self.held.contains(*instrument) && !inputs.working_exits.contains_key(*instrument)
         })?;
         Some(Proposal {
             instrument: instrument.clone(),
-            asset_class: AssetClass::UsEquity,
+            asset_class: *inputs.thesis_classes.get(instrument)?,
             side: Side::Sell,
             qty: Qty::parse("10").unwrap_or_else(|e| panic!("{e}")),
             limit: Price::parse("99.5").unwrap_or_else(|e| panic!("{e}")),
@@ -482,6 +488,7 @@ fn a_tick_hands_the_plan_the_ended_theses_and_journals_their_exit() {
     let plan = ThesisExitPlan {
         held,
         seen: Default::default(),
+        classes: Default::default(),
     };
     let (ids, view) = (TestIds, universe(&[]));
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -525,6 +532,14 @@ fn a_tick_hands_the_plan_the_ended_theses_and_journals_their_exit() {
     );
     assert!(ran.draft_types().contains(&"IntentProposed"));
     assert_eq!(ran.handed.len(), 1, "handed to the executor");
+    assert_eq!(
+        plan.classes.borrow().last(),
+        Some(&BTreeMap::from([(
+            InstrumentId::new(A).unwrap_or_else(|e| panic!("{e}")),
+            AssetClass::UsEquity
+        )])),
+        "the plan reads the instrument's class from its thesis record"
+    );
     for draft in &ran.drafts {
         if let Err(refused) = journal_parses(draft) {
             panic!("the journal refuses the {}: {refused:?}", draft.event_type);
@@ -539,6 +554,7 @@ fn the_exit_is_proposed_in_exits_only_and_not_while_paused() {
         let plan = ThesisExitPlan {
             held: held.clone(),
             seen: Default::default(),
+            classes: Default::default(),
         };
         let (ids, view) = (TestIds, universe(&[]));
         let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -761,6 +777,7 @@ fn a_working_exit_counts_until_the_account_stream_ends_it() {
     let plan = ThesisExitPlan {
         held,
         seen: Default::default(),
+        classes: Default::default(),
     };
     let (ids, view) = (TestIds, universe(&[]));
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -822,6 +839,52 @@ fn a_clock_the_ending_rules_cannot_read_ends_every_thesis() {
     ];
     assert_eq!(ended(&ops, T0), set(&[]));
     assert_eq!(ended(&ops, -1), set(&[A, B]));
+}
+
+/// The asset class a plan routes an exit by is the admitted record's, from reference data.
+#[test]
+fn an_admitted_record_names_its_instrument_s_asset_class() {
+    let mut state = RuntimeState::new(common::deployment());
+    let Value::Object(mut crypto) = thesis_record("th1", "th1", A, T0 + 600, None) else {
+        unreachable!("an object");
+    };
+    crypto.insert(common::key("asset_class"), text("crypto"));
+    fold(
+        &mut state,
+        &event(AGENT_STREAM, 1, "ThesisProposed", Value::Object(crypto)),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let refused = thesis_record("th2", "th2", B, T0 + 600, Some("no_corroboration"));
+    fold(
+        &mut state,
+        &event(AGENT_STREAM, 2, "ThesisProposed", refused),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let held = BTreeSet::from([InstrumentId::new(A).unwrap_or_else(|e| panic!("{e}"))]);
+    let plan = ThesisExitPlan {
+        held,
+        seen: Default::default(),
+        classes: Default::default(),
+    };
+    let (ids, view) = (TestIds, universe(&[]));
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let mut shell = Shell::new(1);
+    shell.state = state;
+    shell.agent_journal = events(&[admitted("th1", "th1", A, T0 + 600), refused_op()]);
+    booted(&mut shell, &ports);
+    shell.run(Input::Tick(clock(T0 + 600)), &ports);
+    assert_eq!(
+        plan.classes.borrow().last(),
+        Some(&BTreeMap::from([(
+            InstrumentId::new(A).unwrap_or_else(|e| panic!("{e}")),
+            AssetClass::Crypto
+        )])),
+        "the admitted record's class, and none for a refused record"
+    );
+}
+
+fn refused_op() -> Op {
+    refused("th2", "th2", B, "no_corroboration")
 }
 
 /// The sells the runtime proposed and the account stream has not ended, summed per instrument; a

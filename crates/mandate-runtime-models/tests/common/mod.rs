@@ -169,8 +169,18 @@ pub fn control_row(seq: u64, event_type: &str, environment: &str, payload: &str)
 
 /// The `model register` row of `MODEL` 1.0.0 with `hash` and `params`.
 pub fn registration(seq: u64, environment: &str, hash: &str, params: &str) -> StoredEvent {
+    registration_of(seq, environment, ("1.0.0", hash), params)
+}
+
+/// The `model register` row of `MODEL` at `version` with `hash` and `params`.
+pub fn registration_of(
+    seq: u64,
+    environment: &str,
+    (version, hash): (&str, &str),
+    params: &str,
+) -> StoredEvent {
     let payload = format!(
-        r#"{{"admits_instruments":false,"content_hash":"sha256:{hash}","kind":"model_version","model_id":"{MODEL}","model_version":"1.0.0","params":{params}}}"#
+        r#"{{"admits_instruments":false,"content_hash":"sha256:{hash}","kind":"model_version","model_id":"{MODEL}","model_version":"{version}","params":{params}}}"#
     );
     control_row(seq, "ConfigSnapshotRegistered", environment, &payload)
 }
