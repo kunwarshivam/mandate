@@ -5,8 +5,13 @@
 //! that is not sane, or one outside the regular session, does.
 
 use mandate_accounting::AssetClass;
+use mandate_canon::{Key, Object, Value};
 use mandate_executor::{EventDraft, EventId, MarketObservation, RiskClock};
-use mandate_time::ExchangeCalendar;
+use mandate_num::Price;
+use mandate_time::{ExchangeCalendar, UtcNanos};
+
+/// The record this module writes, at its version 2 (journal spec §9.30).
+const MARK: &str = "MarkUpdated";
 
 /// The `MarkUpdated` version-2 draft of `observation` for an instrument of `class`, with event id
 /// `event_id`, at the executor's latest tick `risk_clock`, from the feed named `feed`:
@@ -18,17 +23,48 @@ use mandate_time::ExchangeCalendar;
 ///
 /// `None`, and no mark, for a quote with no price at all, or an equity's mark while the market is
 /// closed or at an instant outside the calendar, which no session names.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn mark_draft(
-    _observation: &MarketObservation,
-    _class: AssetClass,
-    _calendar: &ExchangeCalendar,
-    _feed: &str,
-    _event_id: EventId,
-    _risk_clock: RiskClock,
+    observation: &MarketObservation,
+    class: AssetClass,
+    calendar: &ExchangeCalendar,
+    feed: &str,
+    event_id: EventId,
+    risk_clock: RiskClock,
 ) -> Option<EventDraft> {
-    todo!()
+    let at = UtcNanos::from_parts(risk_clock.secs(), 0).ok()?;
+    let session = match class {
+        AssetClass::Crypto => "crypto",
+        AssetClass::UsEquity => calendar.session_at(at).ok()??.as_str(),
+    };
+    let price = observation
+        .bid
+        .or(observation.last_trade)
+        .or(observation.mark)?;
+    let bid = observation.bid;
+    let sane = observation.sane && bid.is_some();
+    let decimal = |price: Price| Value::Str(price.to_string());
+    let mut payload = Object::new();
+    for (name, value) in [
+        (
+            "instrument_id",
+            Value::Str(observation.instrument.as_str().to_owned()),
+        ),
+        ("price", decimal(price)),
+        ("source", Value::Str("quote".to_owned())),
+        ("feed", Value::Str(feed.to_owned())),
+        ("bid", bid.map_or(Value::Null, decimal)),
+        ("sane", Value::Bool(sane)),
+        ("session", Value::Str(session.to_owned())),
+        ("risk_clock", Value::Str(at.to_string())),
+    ] {
+        payload.insert(Key::new(name).ok()?, value);
+    }
+    Some(EventDraft {
+        event_id,
+        event_type: MARK.to_owned(),
+        schema_version: 2,
+        config_refs: Object::new(),
+        causation_id: None,
+        payload: Value::Object(payload),
+    })
 }
