@@ -13,8 +13,10 @@ the independent review reads the diff after the merge and posts findings as back
 PR, and reverts a merge that touched the safety surface. Item 1's merge rule waits for the
 founder's yes; until then the light lane still takes step 3 before merging.
 
-1. Open every PR against `main`. Never base a PR on another PR's branch: a merge into that branch
-   never reaches `main`. When work is sequenced (tests, implementation, status), open the next PR
+1. Open every PR against `main`, as a draft, and mark it ready only when you are about to land
+   it, once its review has passed (DEC-2640): a draft runs no CI, so it takes no runner `main`'s
+   verdict needs. Never base a PR on another PR's branch: a merge into that branch never reaches
+   `main`. When work is sequenced (tests, implementation, status), open the next PR
    only after the previous one has merged, from the updated `main`.
 2. Wait until both required checks (`fast`, `full`) are green on the PR's final head.
    Before asking for review, the author runs every check the reviewer will run, and reports each
