@@ -9,6 +9,7 @@ use mandate_time::UtcNanos;
 const ACCOUNT: &str = "acct:ws1:alpaca:paper1";
 const OTHER: &str = "acct:ws1:alpaca:other";
 const CONTROL: &str = "ctl:ws1";
+const CLOCK: &str = "clock:ws1";
 const AGENT: &str = "agent-1";
 const ASSET: &str = "us_equity:AAPL";
 const FRESH: Freshness = Freshness {
@@ -142,7 +143,7 @@ fn deploy(state: &mut Journaled) {
 
 /// A deployed agent with a snapshot and a sane regular-session mark, all at `START`.
 fn ready() -> Journaled {
-    let mut state = Journaled::new(ACCOUNT, AGENT);
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
     deploy(&mut state);
     acct(
         &mut state,
@@ -189,14 +190,14 @@ fn every_fact_journaled_and_current_is_read_exactly() {
 
 #[test]
 fn nothing_journaled_holds_for_want_of_a_clock() {
-    let state = Journaled::new(ACCOUNT, AGENT);
+    let state = Journaled::new(ACCOUNT, CLOCK, AGENT);
     assert_eq!(state.now(), None);
     assert_eq!(state.facts(ASSET, FRESH), Err(Held::NoClock));
 }
 
 #[test]
 fn no_deployment_of_this_agent_holds_for_want_of_a_mandate() {
-    let mut state = Journaled::new(ACCOUNT, AGENT);
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
     acct(
         &mut state,
         "AccountSnapshotRecorded",
@@ -250,7 +251,7 @@ fn a_stopped_agent_has_no_mandate_to_open_under() {
 
 #[test]
 fn no_snapshot_of_this_account_holds() {
-    let mut state = Journaled::new(ACCOUNT, AGENT);
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
     deploy(&mut state);
     acct(&mut state, "ClockAdvanced", &tick(START));
     assert_eq!(state.facts(ASSET, FRESH), Err(Held::NoSnapshot));
@@ -369,7 +370,7 @@ fn a_version_one_mark_has_no_verdict_and_restarts_nothing() {
     let max = i64::from(FRESH.mark_max_age_s);
     acct(&mut state, "MarkUpdated", &mark_v1(ASSET, START + max));
     assert_eq!(state.facts(ASSET, FRESH), Err(Held::StaleMark));
-    let mut fresh = Journaled::new(ACCOUNT, AGENT);
+    let mut fresh = Journaled::new(ACCOUNT, CLOCK, AGENT);
     deploy(&mut fresh);
     acct(&mut fresh, "AccountSnapshotRecorded", &snapshot("1", START));
     acct(&mut fresh, "MarkUpdated", &mark_v1(ASSET, START));
@@ -487,6 +488,79 @@ fn an_unreadable_row_of_a_type_it_reads_holds_from_then_on() {
             state.facts(ASSET, FRESH),
             Err(Held::Unreadable),
             "{event_type}"
+        );
+    }
+}
+
+/// R1's probe on #2432: the account stream goes quiet while the scheduler keeps ticking, so the
+/// mark and the snapshot age by the scheduler's clock.
+#[test]
+fn scheduler_ticks_age_the_facts_while_the_account_stream_is_quiet() {
+    let mut state = ready();
+    let max = i64::from(FRESH.mark_max_age_s);
+    on(&mut state, CLOCK, "ClockAdvanced", &tick(START + max - 1));
+    assert!(state.facts(ASSET, FRESH).is_ok());
+    on(&mut state, CLOCK, "ClockAdvanced", &tick(START + max));
+    assert_eq!(state.now(), Some(instant(START + max)));
+    assert_eq!(state.facts(ASSET, FRESH), Err(Held::StaleMark));
+    let snapshot_max = i64::from(FRESH.snapshot_max_age_s);
+    on(
+        &mut state,
+        CLOCK,
+        "ClockAdvanced",
+        &tick(START + snapshot_max),
+    );
+    assert_eq!(state.facts(ASSET, FRESH), Err(Held::StaleSnapshot));
+}
+
+#[test]
+fn the_scheduler_alone_is_a_clock() {
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+    on(&mut state, CLOCK, "ClockAdvanced", &tick(START));
+    assert_eq!(state.now(), Some(instant(START)));
+    on(
+        &mut state,
+        CLOCK,
+        "ClockOffsetRecorded",
+        &object(&[("clock", text("x"))]),
+    );
+    on(&mut state, CLOCK, "TradingDayStarted", &object(&[]));
+    assert_eq!(state.now(), Some(instant(START)));
+    assert_eq!(state.facts(ASSET, FRESH), Err(Held::NoMandate));
+}
+
+/// Each stream's clock only moves forward against its own: an account row behind the
+/// scheduler's tick is no clock going back, and the later of the two is the time.
+#[test]
+fn an_account_row_behind_the_scheduler_is_read_at_its_own_clock() {
+    let mut state = ready();
+    on(&mut state, CLOCK, "ClockAdvanced", &tick(START + 30));
+    acct(&mut state, "MarkUpdated", &regular("190", START + 10));
+    let facts = state.facts(ASSET, FRESH).unwrap();
+    assert_eq!(facts.now, instant(START + 30));
+    assert_eq!(facts.mark.at, instant(START + 10));
+}
+
+#[test]
+fn a_scheduler_tick_that_goes_back_or_does_not_read_holds_from_then_on() {
+    for payload in [
+        tick(START - 1),
+        object(&[("clock", text("soon"))]),
+        object(&[]),
+    ] {
+        let mut state = ready();
+        on(&mut state, CLOCK, "ClockAdvanced", &tick(START));
+        let row = Row {
+            stream: CLOCK,
+            event_type: "ClockAdvanced",
+            payload: &payload,
+        };
+        assert!(state.fold(row).is_err(), "{payload:?}");
+        on(&mut state, CLOCK, "ClockAdvanced", &tick(START + 1));
+        assert_eq!(
+            state.facts(ASSET, FRESH),
+            Err(Held::Unreadable),
+            "{payload:?}"
         );
     }
 }

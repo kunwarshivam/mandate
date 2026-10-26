@@ -9,6 +9,7 @@ use mandate_num::Qty;
 use mandate_time::UtcNanos;
 
 const ACCOUNT: &str = "acct:ws1:alpaca:paper1";
+const CLOCK: &str = "clock:ws1";
 const AGENT: &str = "agent-1";
 const ASSET: &str = "us_equity:AAPL";
 const START: i64 = 1_790_000_000;
@@ -74,7 +75,7 @@ fn qty(text: &str) -> Qty {
 
 #[test]
 fn the_agents_own_fills_are_its_sub_ledger() {
-    let mut state = Journaled::new(ACCOUNT, AGENT);
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
     submitted(&mut state, AGENT, "o1");
     assert!(on(&mut state, "FillApplied", &fill("f1", "o1", "buy", "3")));
     assert!(on(
@@ -97,7 +98,7 @@ fn the_agents_own_fills_are_its_sub_ledger() {
 
 #[test]
 fn a_fill_seen_twice_counts_once() {
-    let mut state = Journaled::new(ACCOUNT, AGENT);
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
     submitted(&mut state, AGENT, "o1");
     assert!(on(&mut state, "FillApplied", &fill("f1", "o1", "buy", "3")));
     assert!(on(
@@ -110,7 +111,7 @@ fn a_fill_seen_twice_counts_once() {
 
 #[test]
 fn another_agents_orders_and_unnamed_fills_are_not_held() {
-    let mut state = Journaled::new(ACCOUNT, AGENT);
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
     submitted(&mut state, "agent-2", "o9");
     assert!(on(&mut state, "FillApplied", &fill("f1", "o9", "buy", "3")));
     assert!(on(
@@ -123,7 +124,7 @@ fn another_agents_orders_and_unnamed_fills_are_not_held() {
 
 #[test]
 fn a_position_sold_out_is_no_longer_held() {
-    let mut state = Journaled::new(ACCOUNT, AGENT);
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
     submitted(&mut state, AGENT, "o1");
     assert!(on(&mut state, "FillApplied", &fill("f1", "o1", "buy", "3")));
     assert!(on(
@@ -142,7 +143,7 @@ fn a_position_sold_out_is_no_longer_held() {
 
 #[test]
 fn an_order_submitted_with_no_request_before_it_is_not_the_agents() {
-    let mut state = Journaled::new(ACCOUNT, AGENT);
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
     submitted(&mut state, AGENT, "o1");
     let order = object(&[("client_order_id", "o2"), ("instrument_id", ASSET)]);
     assert!(on(&mut state, "OrderSubmitted", &order));
@@ -160,7 +161,7 @@ fn an_unreadable_fill_or_order_row_is_refused() {
         ("OrderRequestRecorded", object(&[("purpose", "open")])),
     ];
     for (event_type, payload) in broken {
-        let mut state = Journaled::new(ACCOUNT, AGENT);
+        let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
         if event_type == "FillApplied" {
             submitted(&mut state, AGENT, "o1");
         }
@@ -187,7 +188,7 @@ fn orders_and_fills_on_another_stream_are_not_the_agents() {
         ]
     };
     for elsewhere in 0..3 {
-        let mut state = Journaled::new(ACCOUNT, AGENT);
+        let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
         for (index, (event_type, payload)) in rows().into_iter().enumerate() {
             let stream = if index == elsewhere {
                 "acct:ws1:alpaca:other"

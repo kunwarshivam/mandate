@@ -1,5 +1,6 @@
 //! The facts are a function of the journaled rows alone (DEC-2378 item 2): random sequences of
-//! ticks, marks, snapshots and mandate records, checked against an oracle that finds each fact by
+//! account and scheduler ticks, each stream's clock running on its own, marks, snapshots and
+//! mandate records, checked against an oracle that finds each fact by
 //! searching the rows from the newest back, rather than folding them forward.
 
 use std::collections::BTreeMap;
@@ -11,6 +12,7 @@ use mandate_time::UtcNanos;
 use proptest::prelude::*;
 
 const ACCOUNT: &str = "acct:ws1:alpaca:paper1";
+const CLOCK: &str = "clock:ws1";
 const AGENT: &str = "agent-1";
 const ASSET: &str = "us_equity:AAPL";
 const START: i64 = 1_790_000_000;
@@ -22,6 +24,7 @@ const FRESH: Freshness = Freshness {
 #[derive(Debug, Clone)]
 enum Step {
     Tick,
+    SchedulerTick,
     Mark {
         bid: u32,
         sane: bool,
@@ -47,6 +50,7 @@ const SESSIONS: [&str; 5] = [
 fn step() -> impl Strategy<Value = (u8, Step)> {
     let kind = prop_oneof![
         Just(Step::Tick),
+        Just(Step::SchedulerTick),
         (1u32..500, any::<bool>(), 0usize..5).prop_map(|(bid, sane, session)| Step::Mark {
             bid,
             sane,
@@ -77,6 +81,7 @@ fn row(step: &Step, at: i64) -> (&'static str, &'static str, Value) {
     let clock = text(&UtcNanos::from_parts(at, 0).unwrap().to_string());
     match step {
         Step::Tick => (ACCOUNT, "ClockAdvanced", object(&[("clock", clock)])),
+        Step::SchedulerTick => (CLOCK, "ClockAdvanced", object(&[("clock", clock)])),
         Step::Mark { bid, sane, session } => (
             ACCOUNT,
             "MarkUpdated",
@@ -191,15 +196,20 @@ fn oracle(steps: &[(i64, Step)]) -> Result<(String, i64, u32, i64), Held> {
 proptest! {
     #[test]
     fn facts_are_the_journaled_rows_alone(raw in prop::collection::vec(step(), 0..24)) {
-        let mut at = START;
+        let (mut account, mut scheduler) = (START, START);
         let steps: Vec<(i64, Step)> = raw
             .into_iter()
             .map(|(gap, step)| {
-                at += i64::from(gap);
-                (at, step)
+                let at = if matches!(step, Step::SchedulerTick) {
+                    &mut scheduler
+                } else {
+                    &mut account
+                };
+                *at += i64::from(gap);
+                (*at, step)
             })
             .collect();
-        let mut forward = Journaled::new(ACCOUNT, AGENT);
+        let mut forward = Journaled::new(ACCOUNT, CLOCK, AGENT);
         for (at, step) in &steps {
             let (stream, event_type, payload) = row(step, *at);
             forward.fold(Row { stream, event_type, payload: &payload }).unwrap();

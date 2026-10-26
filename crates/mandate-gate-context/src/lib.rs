@@ -13,9 +13,11 @@
 //! journal rows alone. The cell's runtime and the executor both fold through it, so the two cannot
 //! disagree about a mark or a snapshot.
 //!
-//! **The risk clock is the only time.** [`Journaled::now`] is the latest `risk_clock` (or a
-//! `ClockAdvanced`'s `clock`) on the account stream; nothing here reads a wall clock, so a replay
-//! of the same rows gives the same facts (mandate spec §5.2).
+//! **The risk clock is the only time.** [`Journaled::now`] is the later of two journaled clocks:
+//! the latest `risk_clock` (or a copied `ClockAdvanced`'s `clock`) on the account stream, and the
+//! latest `ClockAdvanced` on the scheduler's clock stream, which ticks even when the account
+//! stream is quiet, so a fact ages while nothing is written about it. Nothing here reads a wall
+//! clock, so a replay of the same rows gives the same facts (mandate spec §5.2).
 //!
 //! **It fails closed** (DEC-2378 item 3). [`Journaled::facts`] answers [`Held`] unless every fact
 //! is journaled, current by the risk clock, and readable, and a row of a type it reads that does
@@ -120,7 +122,9 @@ enum Latest {
 pub struct Journaled {
     account_stream: String,
     agent: String,
-    now: Option<UtcNanos>,
+    clock_stream: String,
+    account_now: Option<UtcNanos>,
+    scheduler_now: Option<UtcNanos>,
     mandate: Option<String>,
     account: Option<AccountFacts>,
     marks: BTreeMap<String, Latest>,
@@ -132,11 +136,15 @@ pub struct Journaled {
 }
 
 impl Journaled {
-    pub fn new(account_stream: &str, agent: &str) -> Self {
+    /// The fold for `agent` on the account stream `account_stream`, ticked by the scheduler's
+    /// clock stream `clock_stream` (`clock:{workspace}`).
+    pub fn new(account_stream: &str, clock_stream: &str, agent: &str) -> Self {
         Self {
             account_stream: account_stream.to_owned(),
             agent: agent.to_owned(),
-            now: None,
+            clock_stream: clock_stream.to_owned(),
+            account_now: None,
+            scheduler_now: None,
             mandate: None,
             account: None,
             marks: BTreeMap::new(),
@@ -169,9 +177,9 @@ impl Journaled {
             .collect()
     }
 
-    /// The latest risk clock on the account stream.
+    /// The later of the account stream's latest risk clock and the scheduler's latest tick.
     pub fn now(&self) -> Option<UtcNanos> {
-        self.now
+        self.account_now.max(self.scheduler_now)
     }
 
     /// The facts an opening in `instrument` reads, or why it is held.
@@ -179,7 +187,7 @@ impl Journaled {
         if self.unreadable {
             return Err(Held::Unreadable);
         }
-        let now = self.now.ok_or(Held::NoClock)?;
+        let now = self.now().ok_or(Held::NoClock)?;
         let mandate_version = self.mandate.clone().ok_or(Held::NoMandate)?;
         let account = self.account.clone().ok_or(Held::NoSnapshot)?;
         if reached(now, account.at, fresh.snapshot_max_age_s) {
@@ -211,6 +219,13 @@ impl Journaled {
             value: row.payload,
             refused: &refused,
         };
+        if row.stream == self.clock_stream {
+            if row.event_type == "ClockAdvanced" {
+                let tick = stamp(&payload, "clock")?;
+                self.scheduler_now = Some(later(self.scheduler_now, tick, &payload, "clock")?);
+            }
+            return Ok(());
+        }
         let at = if on_account {
             self.advance(&payload, row.event_type)?
         } else {
@@ -275,21 +290,15 @@ impl Journaled {
         } else {
             "risk_clock"
         };
-        let Some(raw) = payload.value.get(member) else {
+        if payload.value.get(member).is_none() {
             return if CLOCKED.contains(&event_type) {
                 Err((payload.refused)(member))
             } else {
-                Ok(self.now)
+                Ok(self.account_now)
             };
-        };
-        let at = raw
-            .as_str()
-            .and_then(|stamp| UtcNanos::parse(stamp).ok())
-            .ok_or_else(|| (payload.refused)(member))?;
-        if self.now.is_some_and(|now| at < now) {
-            return Err((payload.refused)(member));
         }
-        self.now = Some(at);
+        let at = later(self.account_now, stamp(payload, member)?, payload, member)?;
+        self.account_now = Some(at);
         Ok(Some(at))
     }
 
@@ -355,6 +364,30 @@ const CLOCKED: [&str; 4] = [
     "MandateVersionApplied",
     "MarkUpdated",
 ];
+
+/// A journaled instant in `member`, or the member refused.
+fn stamp(payload: &Payload<'_>, member: &'static str) -> Result<UtcNanos, Unreadable> {
+    payload
+        .value
+        .get(member)
+        .and_then(Value::as_str)
+        .and_then(|stamp| UtcNanos::parse(stamp).ok())
+        .ok_or_else(|| (payload.refused)(member))
+}
+
+/// `at`, refused when it goes back behind `so_far`, the same stream's clock: each stream's clock
+/// only moves forward (journal spec §2).
+fn later(
+    so_far: Option<UtcNanos>,
+    at: UtcNanos,
+    payload: &Payload<'_>,
+    member: &'static str,
+) -> Result<UtcNanos, Unreadable> {
+    if so_far.is_some_and(|so_far| at < so_far) {
+        return Err((payload.refused)(member));
+    }
+    Ok(at)
+}
 
 /// Whether a fact observed at `at` has reached `max_age_s` by `now`.
 fn reached(now: UtcNanos, at: UtcNanos, max_age_s: u32) -> bool {
