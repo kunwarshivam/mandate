@@ -21,17 +21,20 @@ use mandate_api::lenient::{Api7, ApprovalAnswer, Kept, decode_lenient};
 use mandate_api::problem::Violation;
 use mandate_api::problem::{Effect, Problem, ProblemCode};
 use mandate_api::requests::{
-    KillSwitchRequest, OwnerExitRequest, PauseRequest, ResumeRequest, Scope, StopRequest,
+    ApprovalResponseRequest, KillSwitchRequest, OwnerExitRequest, PauseRequest, ResumeRequest,
+    Scope, StopRequest,
 };
 use mandate_api::wire::{Asset, Decimal, EventId, Id, Ref, decode, encode};
 use mandate_authn::Request;
-use mandate_canon::{Digest, Value, parse, to_canonical};
-use mandate_identity::{Permission, StepUpActionKind};
+use mandate_canon::{Digest, Int, Value, parse, to_canonical};
+use mandate_identity::{Permission, PrincipalId, Roster, StepUpActionKind};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
+use crate::backtests::paper;
 use crate::commands::{
-    Command, Issued, KillScope, Settled, draft, in_workspace, release_warning, same, settle_at,
+    Command, Issued, KillScope, Settled, draft, in_workspace, release_warning, same,
+    settle_batch_at,
 };
 use crate::http::{App, browser, invalid, problem, problem_body};
 use crate::reads::deployed;
@@ -39,7 +42,8 @@ use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
 use crate::session::Authenticated;
-use crate::stepup::{Action, Judged, journaled};
+use crate::stepup::{Action, Judged, Unverified, journaled};
+use crate::versions::stored;
 
 /// The `Idempotency-Key` request header (§3.4).
 const IDEMPOTENCY_KEY: &str = "idempotency-key";
@@ -261,17 +265,32 @@ pub(crate) async fn appended_at(
     now: UtcNanos,
     pinned: Option<u64>,
 ) -> Settled {
+    appended_batch_at(app, reader, (id, &[draft]), now, pinned).await
+}
+
+/// [`appended_at`] for `drafts` appended in one batch, all or none, the first of which has the id
+/// `id` and settles it: a retry finds that one stored.
+pub(crate) async fn appended_batch_at(
+    app: &App,
+    reader: &Reader,
+    (id, drafts): (&str, &[&[u8]]),
+    now: UtcNanos,
+    pinned: Option<u64>,
+) -> Settled {
     let stream = format!("ctl:{}", reader.workspace);
-    if let Some(settled) = repeated(&reader.control, id, draft) {
+    let Some(first) = drafts.first() else {
+        return Settled::Unavailable;
+    };
+    if let Some(settled) = repeated(&reader.control, id, first) {
         return settled;
     }
-    match settle_at(app.journal.as_ref(), &stream, id, draft, now, pinned).await {
+    match settle_batch_at(app.journal.as_ref(), &stream, id, drafts, now, pinned).await {
         Settled::Conflict => app
             .journal
             .rows(&stream)
             .await
             .ok()
-            .and_then(|rows| repeated(&rows, id, draft))
+            .and_then(|rows| repeated(&rows, id, first))
             .unwrap_or(Settled::Unknown),
         settled => settled,
     }
@@ -355,8 +374,9 @@ pub(crate) fn unknown(id: EventId) -> Response {
 }
 
 /// `POST /v1/workspaces/{ws}/approvals/{id}/responses` (§5.2, DEC-1007 item 10): a Skip is
-/// recorded; a grant is refused for its step-up, which the server cannot verify yet, once the
-/// approval is found.
+/// recorded; a grant, in paper only and once the approval is found, is recorded with its
+/// `cli_confirm` evidence when the port verifies it as an `approve` bound to the request's content
+/// hash (DEC-2104), and refused with the port's code otherwise.
 pub async fn respond(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
@@ -388,19 +408,25 @@ pub async fn respond(
         Ok(reader) => reader,
         Err(refusal) => return refusal.response(),
     };
-    let agent = match requester(&app, &reader, &approval).await {
-        Ok(Some(agent)) => agent,
+    let (agent, version) = match requester(&app, &reader, &approval).await {
+        Ok(Some(found)) => found,
         Ok(None) => return Refused::NotFound.response(),
         Err(refusal) => return refusal.response(),
     };
     let skip = match &kept.value {
         ApprovalAnswer::Skipped(skip) => skip,
         ApprovalAnswer::Approved(grant) => {
-            let code = match grant.step_up {
-                Some(_) => ProblemCode::StepUpMissing,
-                None => ProblemCode::StepUpRequired,
+            match approves(&app, &reader, version.as_deref(), gate.admitted.principal) {
+                Ok(true) => {}
+                Ok(false) => return Refused::Forbidden.response(),
+                Err(refusal) => return refusal.response(),
+            }
+            let asked = Asked {
+                agent,
+                approval,
+                grant,
             };
-            return problem(StatusCode::UNAUTHORIZED, problem_body(code));
+            return granted(&app, &gate, &reader, &asked).await;
         }
     };
     let Some(content_hash) = ref_text(&skip.content_hash) else {
@@ -414,11 +440,140 @@ pub async fn respond(
     committed(&app, &gate, &reader, &command, &kept.dropped, None).await
 }
 
+/// A grant of the approval `approval` an agent requested.
+struct Asked<'a> {
+    agent: String,
+    approval: String,
+    grant: &'a ApprovalResponseRequest,
+}
+
+/// The grant `asked` recorded with its evidence once the port verifies it as an `approve` bound to
+/// the request's content hash (§3.6, identity spec §7.2 step 1, DEC-2104 item 6), or refused with
+/// the port's code. A grant naming a delegation is §5.3's batch, not served here, and `invalid`.
+/// A repeat whose key holds the same grant replays before the port is asked, since the port spent
+/// the challenge with the first (§3.4 step 1).
+async fn granted(app: &App, gate: &Gate, reader: &Reader, asked: &Asked<'_>) -> Response {
+    if asked.grant.delegation.is_some() {
+        return invalid(vec![schema_violation("/delegation", "delegation_unserved")]);
+    }
+    if !paper(&reader.control) {
+        return problem(
+            StatusCode::CONFLICT,
+            problem_body(ProblemCode::LiveUnavailable),
+        );
+    }
+    let Some(evidence) = &asked.grant.step_up else {
+        return problem(
+            StatusCode::UNAUTHORIZED,
+            problem_body(ProblemCode::StepUpRequired),
+        );
+    };
+    let Some(content_hash) = ref_text(&asked.grant.content_hash) else {
+        return Refused::Invalid.response();
+    };
+    let Some(digest) = content_hash
+        .strip_prefix("sha256:")
+        .and_then(Digest::from_hex)
+    else {
+        return Refused::Invalid.response();
+    };
+    let Some(step_up) = answered(evidence) else {
+        return problem(
+            StatusCode::UNAUTHORIZED,
+            problem_body(ProblemCode::StepUpStale),
+        );
+    };
+    let command = Command::Grant {
+        agent: asked.agent.clone(),
+        approval: asked.approval.clone(),
+        content_hash,
+        step_up,
+    };
+    if let Some(row) = replayed(gate, reader, &command) {
+        return accepted(command.id_member(), &row, gate.now, &[], None);
+    }
+    let action = Action {
+        kind: StepUpActionKind::Approve,
+        digest,
+    };
+    let judged = Judged {
+        tenant: &reader.tenant,
+        control: &reader.control,
+        now: gate.now,
+    };
+    match app.step_up.asserted(evidence, None, &action, &judged) {
+        Ok(None) => committed(app, gate, reader, &command, &[], None).await,
+        Ok(Some(_)) | Err(Unverified::Code(ProblemCode::JournalUnavailable)) => {
+            Refused::JournalUnavailable.response()
+        }
+        Err(Unverified::Code(code)) => problem(StatusCode::UNAUTHORIZED, problem_body(code)),
+    }
+}
+
+/// `evidence` as `ApprovalResponseSubmitted` records it (journal spec §9.7): its assertion id and
+/// method, and `authenticated_at` as the integer second the CLI writes, the second it falls in, so
+/// the recorded evidence is never fresher than the presented; `None` only for an instant the
+/// canonical integer cannot hold.
+fn answered(evidence: &StepUpEvidence) -> Option<Value> {
+    let presented = journaled(Some(evidence))?;
+    let at = UtcNanos::parse(presented.get("authenticated_at")?.as_str()?).ok()?;
+    let second = Value::Int(Int::new(u64::try_from(at.secs()).ok()?)?);
+    let mut object = mandate_canon::Object::new();
+    let members = [
+        ("assertion_id", presented.get("assertion_id")?.clone()),
+        ("authenticated_at", second),
+        ("method", presented.get("method")?.clone()),
+    ];
+    for (name, value) in members {
+        object.insert(mandate_canon::Key::new(name).ok()?, value);
+    }
+    Some(Value::Object(object))
+}
+
+/// Whether the principal is one the mandate version an approval binds lists in
+/// `autonomy.approval.approvers` ([DEC-2129] item 7, as [DEC-2130] item 1 reads it): the
+/// references resolved by [`Roster::approvers`] over the control stream's membership records at
+/// the request's instant (DEC-2130 item 3, DEC-2384 item 3), the set the runtime's admission check
+/// 3 compares a responder with. A version that is not named, not stored, or not a mandate, or a fold
+/// that cannot be read, is `journal_unavailable`, never a pass.
+///
+/// [DEC-2129]: ../../../docs/project/decisions/DEC-2129.md
+/// [DEC-2130]: ../../../docs/project/decisions/DEC-2130.md
+fn approves(
+    app: &App,
+    reader: &Reader,
+    version: Option<&str>,
+    principal: PrincipalId,
+) -> Result<bool, Refused> {
+    let store = app
+        .artifacts
+        .as_deref()
+        .ok_or(Refused::JournalUnavailable)?;
+    let (_, mandate) = version
+        .and_then(|version| stored(store, version))
+        .ok_or(Refused::JournalUnavailable)?;
+    let records = (app.members)(&reader.control).map_err(|_| Refused::JournalUnavailable)?;
+    let roster = Roster::read(records, reader.now).map_err(|_| Refused::JournalUnavailable)?;
+    let references: Vec<&str> = mandate
+        .autonomy
+        .approval
+        .approvers
+        .iter()
+        .map(|approver| approver.as_str())
+        .collect();
+    Ok(roster.approvers(&references).contains(&principal))
+}
+
 /// The deployed agent whose stream requested `approval`, found by equality with an
-/// `ApprovalRequested` event id. A stream that cannot be read does not hide the approval on another
-/// that can; only when none that was read holds it and one could not be read is the answer
-/// `journal_unavailable` rather than `not_found`.
-async fn requester(app: &App, reader: &Reader, approval: &str) -> Result<Option<String>, Refused> {
+/// `ApprovalRequested` event id, with the mandate version its content binds
+/// (`trigger.mandate_version`) when it names one. A stream that cannot be read does not hide the
+/// approval on another that can; only when none that was read holds it and one could not be read
+/// is the answer `journal_unavailable` rather than `not_found`.
+async fn requester(
+    app: &App,
+    reader: &Reader,
+    approval: &str,
+) -> Result<Option<(String, Option<String>)>, Refused> {
     let mut unreadable = false;
     for deployment in deployed(&reader.control) {
         let stream = format!("agent:{}:{}", reader.workspace, deployment.0);
@@ -428,9 +583,16 @@ async fn requester(app: &App, reader: &Reader, approval: &str) -> Result<Option<
         };
         let requested = rows
             .iter()
-            .any(|row| row.event_type == "ApprovalRequested" && row.event_id == approval);
-        if requested {
-            return Ok(Some(deployment.0));
+            .find(|row| row.event_type == "ApprovalRequested" && row.event_id == approval);
+        if let Some(row) = requested {
+            let version = parse(&row.body).ok().and_then(|event| {
+                ["payload", "content", "trigger", "mandate_version"]
+                    .iter()
+                    .try_fold(&event, |value, name| value.get(name))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            });
+            return Ok(Some((deployment.0, version)));
         }
     }
     match unreadable {

@@ -1,5 +1,5 @@
 {
-  "about": "The processes of a workspace deployment (infrastructure design §3.1), the one list the Helm chart and the Compose file are both rendered from (E21-36). A process renders only when values.images names its image, so a lane adds its process by building the image; nothing else changes. `built` says whether the process's image exists yet: the Compose file holds exactly the built processes, less any whose `compose` is false, which have no Compose adapter (the deployment manager drives Kubernetes only, DEC-1172). A process whose `started_by` names another is not a Deployment of its own once that process renders: the chart renders its pod into that process's templates instead, and that process starts it (DEC-1170), with `run --probe /tmp/process.sock` and its `probe`; its `args` start it only where that process does not render. A `one_shot` process it starts (the token exchange, DEC-1175) runs its `command` and `args`, `{vault}` the vault's address, with no probe, once; the token exchange reads its connection from `MANDATE_SUBJECT`. A `vault_token` process mounts a projected ServiceAccount token for the vault (audience `mandate-vault`, 600 seconds, at `/run/mandate/vault-token/token`), beside its namespace at `/run/mandate/vault-token/namespace`, and no other credential (DEC-2060, DEC-1177), only as a pod the deployment manager starts as its connection's own account, and the executor only where its broker reaches the vault (DEC-2336). A `vault_ca` process mounts the vault chart's CA certificate alone, the ConfigMap `vault-ca`, read-only at `/run/mandate/vault/ca.crt`; the executor only when its broker reaches the vault (DEC-2332 item 5). A service's `args` start it and its `probe` asks it `livez` or `readyz` over its socket on the pod's `/tmp` (DEC-994 item 5); `{workspace}` and the `runtime` values' `{agent}`, `{connection}` and `{owner}` fill them (DEC-1013). Edit this file, then run `cargo xtask cell generate --write`, which writes the Compose file and the journal's roles file from it.",
+  "about": "The processes of a workspace deployment (infrastructure design §3.1), the one list the Helm chart and the Compose file are both rendered from (E21-36). A process renders only when values.images names its image, so a lane adds its process by building the image; nothing else changes. `built` says whether the process's image exists yet: the Compose file holds exactly the built processes, less any whose `compose` is false, which have no Compose adapter (the deployment manager drives Kubernetes only, DEC-1172), or none yet (the scheduler and the data process, until the Compose drill builds their images, E21-29). A process whose `started_by` names another is not a Deployment of its own once that process renders: the chart renders its pod into that process's templates instead, and that process starts it (DEC-1170), with `run --probe /tmp/process.sock` and its `probe`; its `args` start it only where that process does not render. A `one_shot` process it starts (the token exchange, DEC-1175) runs its `command` and `args`, `{vault}` the vault's address, with no probe, once; the token exchange reads its connection from `MANDATE_SUBJECT`. A `vault_token` process mounts a projected ServiceAccount token for the vault (audience `mandate-vault`, 600 seconds, at `/run/mandate/vault-token/token`), beside its namespace at `/run/mandate/vault-token/namespace`, and no other credential (DEC-2060, DEC-1177), only as a pod the deployment manager starts as its connection's own account, and the executor only where its broker reaches the vault (DEC-2336). A `vault_ca` process mounts the vault chart's CA certificate alone, the ConfigMap `vault-ca`, read-only at `/run/mandate/vault/ca.crt`; the executor only when its broker reaches the vault (DEC-2332 item 5). A service's `args` start it and its `probe` asks it `livez` or `readyz` over its socket on the pod's `/tmp` (DEC-994 item 5); `{workspace}`, `{hosted_workspace}` (`api.workspace`, the workspace the deployment manager hosts), `{data_instruments}`, the `data.instruments` list as `<symbol>:<assetId>:<anchor>` comma-separated, and the `runtime` values' `{agent}`, `{connection}` and `{owner}` fill them (DEC-1013). Edit this file, then run `cargo xtask cell generate --write`, which writes the Compose file and the journal's roles file from it.",
   "processes": [
     {
       "name": "migrate",
@@ -187,10 +187,13 @@
     },
     {
       "name": "scheduler",
-      "row": "Scheduler, one per workspace: Postgres and time sources",
+      "row": "Scheduler, one per workspace: the single writer of the hosted workspace's clock stream, whose ticks the runtime and executor the manager starts read (E21-29, DEC-1010); Postgres and time sources, asking none until values.egress.time names one, so every measurement is out of tolerance",
       "kind": "service",
       "image": "scheduler",
-      "built": false,
+      "built": true,
+      "compose": false,
+      "args": ["run", "--workspace", "{hosted_workspace}", "--probe", "/tmp/process.sock"],
+      "probe": ["/mandate-scheduler", "probe", "{probe}", "--probe", "/tmp/process.sock"],
       "db_role": "mandate_scheduler",
       "guaranteed": true,
       "colocate": false,
@@ -231,10 +234,13 @@
     },
     {
       "name": "data",
-      "row": "Market data service, per workspace: its data host only; it serves the workspace's runtimes and executors over the host-local channel, which is not network (§3.1)",
+      "row": "Market data service, per workspace: its data host only; it serves the workspace's runtimes and executors over the host-local channel, which is not network (§3.1). In the cell, mandate-datad stores each listed instrument's daily bars and its latest trading day's minute bars from the cell's recorded series as mandate-marketdata's datasets under the artifact store, and each instrument's closes object, which the runtime and the executor read read-only; it reaches no host and appends to no stream",
       "kind": "service",
       "image": "data",
-      "built": false,
+      "built": true,
+      "compose": false,
+      "args": ["run", "--store", "/var/lib/mandate/artifacts/datasets", "--artifacts", "/var/lib/mandate/artifacts", "--instruments", "{data_instruments}", "--probe", "/tmp/process.sock"],
+      "probe": ["/mandate-datad", "probe", "{probe}", "--probe", "/tmp/process.sock"],
       "db_role": null,
       "guaranteed": false,
       "colocate": true,

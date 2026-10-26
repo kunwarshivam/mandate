@@ -30,7 +30,7 @@ use super::doubles::{
     AAPL, AGENT, ConvertingSink, FixedClassifier, FixedGate, FixedReconciler, PaperExecutor, World,
     agent_stream, control_stream, instrument, output, passed_checks, seed, setup,
 };
-use super::tail_install::ApprovableMandate;
+use super::tail_install::{ApprovableMandate, established};
 use crate::error::{Cause, ShellError};
 use crate::lt10::watch_may_end;
 use crate::stages::{Connector, Executor, Reconciler, Sink, Stage, Stages};
@@ -167,6 +167,7 @@ fn parts(
     stages.mandate = Box::new(ApprovableMandate {
         world: world.clone(),
     });
+    established(world)?;
     let artifacts: Arc<dyn mandate_journal::ArtifactSource + Send + Sync> =
         Arc::new(BTreeMap::from([(Digest::of(CLOSES), CLOSES.to_vec())]));
     stages.artifacts = Some(artifacts);
@@ -234,7 +235,7 @@ fn answer(world: &World) -> Result<(), String> {
     seed(
         world,
         &control_stream(),
-        1,
+        2,
         ANSWER,
         "ApprovalResponseSubmitted",
         "user",
@@ -535,7 +536,7 @@ fn the_wake_reads_the_runs_own_streams() -> Result<(), String> {
             &end,
         );
     let (agent, agent_ledger, control, control_ledger) = *lengths.borrow();
-    assert!(agent > 0 && control == 1, "{:?}", lengths.borrow());
+    assert!(agent > 0 && control == 2, "{:?}", lengths.borrow());
     assert_eq!(
         (agent, control),
         (agent_ledger, control_ledger),

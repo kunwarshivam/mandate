@@ -2,11 +2,15 @@
 //! working universe and before concentration. Only an opening or an increase reaches here: the
 //! floor never applies to a risk-reducing order in a held instrument (§3.2's last paragraph, MI-1).
 
+use std::collections::BTreeSet;
+
 use mandate_num::{Price, Qty, Usd};
 use mandate_time::UtcNanos;
 
 use crate::gate::Stop;
-use crate::{AssetClass, EtpClass, GateError, GateInput, QuoteCurrency, ReasonCode, Verdict};
+use crate::{
+    AssetClass, Deferred, EtpClass, GateError, GateInput, QuoteCurrency, ReasonCode, Verdict,
+};
 
 /// The first §3.2 item the instrument fails, or `None` when it passes all seven.
 ///
@@ -19,20 +23,27 @@ use crate::{AssetClass, EtpClass, GateError, GateInput, QuoteCurrency, ReasonCod
 /// only" first, so a pair whose quote currency is not stated as USD reports `crypto_pair_not_usd`
 /// before its volume is looked at (DEC-254 items 1 and 2, DEC-255); an unstated quote currency is
 /// never read as USD.
-pub(crate) fn eligibility(input: &GateInput<'_>) -> Result<Option<Stop>, GateError> {
+pub(crate) fn eligibility(
+    input: &GateInput<'_>,
+    skipped: &BTreeSet<Deferred>,
+) -> Result<Option<Stop>, GateError> {
     let i = input.instrument;
     let config = input.config;
     let equity = i.asset_class == AssetClass::UsEquity;
-    let failed = if !(i.status_active && i.tradable) {
+    let items = !skipped.contains(&Deferred::Eligibility);
+    let floors = !skipped.contains(&Deferred::LiquidityFloor);
+    let failed = if items && !(i.status_active && i.tradable) {
         Some(ReasonCode::NotInWorkingUniverse)
-    } else if equity && !i.exchange.is_some_and(|e| e.is_eligible()) {
+    } else if items && equity && !i.exchange.is_some_and(|e| e.is_eligible()) {
         Some(ReasonCode::IneligibleExchange)
-    } else if i.ipo || i.ptp_no_exception {
+    } else if items && (i.ipo || i.ptp_no_exception) {
         Some(ReasonCode::IpoNotTradable)
     } else if equity {
-        equity_items(input)?
-    } else if i.quote_currency != Some(QuoteCurrency::Usd) {
+        equity_items(input, items, floors)?
+    } else if items && i.quote_currency != Some(QuoteCurrency::Usd) {
         Some(ReasonCode::CryptoPairNotUsd)
+    } else if !floors {
+        None
     } else {
         below(
             i.median_dollar_volume_30d,
@@ -71,27 +82,39 @@ fn binding(configured: Usd, minimum: Usd) -> Usd {
 }
 
 /// Items 4 to 6 for a US equity: the price floor, the 20-day liquidity floor, then the ETP rule.
-fn equity_items(input: &GateInput<'_>) -> Result<Option<ReasonCode>, GateError> {
+/// The two floors are skipped when `floors` is deferred, and the ETP rule when `items` is
+/// (DEC-2378 item 11).
+fn equity_items(
+    input: &GateInput<'_>,
+    items: bool,
+    floors: bool,
+) -> Result<Option<ReasonCode>, GateError> {
     let i = input.instrument;
     let config = input.config;
     let prior_close = i.prior_close.map(per_share).transpose()?;
-    if below(
-        prior_close,
-        binding(config.price_floor, platform_price_floor()?),
-    ) {
+    if floors
+        && below(
+            prior_close,
+            binding(config.price_floor, platform_price_floor()?),
+        )
+    {
         return Ok(Some(ReasonCode::BelowPriceFloor));
     }
-    if below(
-        i.median_dollar_volume_20d,
-        binding(config.liquidity_floor_usd, platform_liquidity_floor()?),
-    ) {
+    if floors
+        && below(
+            i.median_dollar_volume_20d,
+            binding(config.liquidity_floor_usd, platform_liquidity_floor()?),
+        )
+    {
         return Ok(Some(ReasonCode::BelowLiquidityFloor));
     }
     let enabled =
         input.mandate.leveraged_etps_enabled() && input.mandate.leveraged_etp_disclosure_accepted();
     let complex = i.etp != EtpClass::Plain;
-    Ok((classification_stale(input)? || (complex && !enabled))
-        .then_some(ReasonCode::LeveragedEtpNotEnabled))
+    Ok(
+        (items && (classification_stale(input)? || (complex && !enabled)))
+            .then_some(ReasonCode::LeveragedEtpNotEnabled),
+    )
 }
 
 /// §3.2 item 6's "older than the configured age", failing closed: a classification with no date

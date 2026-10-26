@@ -1,9 +1,12 @@
 //! The `executor` drill (E21-30, DEC-2035): an agent deployed on a recorded paper connection, and
 //! the deployment manager starting that account's executor, which the drill waits on until its pod
-//! runs and its process answers `livez`. Not `readyz`: the executor is ready only once a scheduler
-//! tick lets it start and reconcile, and the cell builds no scheduler yet (`processes.json`), so no
-//! tick is ever journaled there. Paper and fixtures only: the connect check and the executor reach
-//! the in-process fixture broker (DEC-2007), and no credential is read.
+//! runs and its process answers `livez`. Before it, the scheduler's ticks (E21-29): the run's
+//! workspace is the one the chart names the scheduler, and its clock stream, exported twice a few
+//! seconds apart, must have grown, so the ticks the runtime and the executor read arrive; and the
+//! data process's daily bars, inspected in the artifact store with no problem and at least
+//! [`BAR_SESSIONS`] sessions, so the bars the runtime's model host reads are there. Paper and
+//! fixtures only: the connect check and the executor reach the in-process fixture broker
+//! (DEC-2007), and no credential is read.
 //!
 //! Three one-off Jobs, each a fresh `/work`: the executor's connect check (`checked <event id>`);
 //! the workspace opened and founded, and the connection's record shown (`code <code>`); then the
@@ -16,7 +19,7 @@ use std::fs;
 use std::thread::sleep;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use super::scenario::{
@@ -35,6 +38,34 @@ const INPUTS: &str = "/in";
 const POLLS: u32 = 45;
 const MANAGED_BY: &str = "app.kubernetes.io/managed-by=mandate-deploy-manager";
 const SUBJECT: &str = "mandate.dev/subject";
+/// The seconds between the clock stream's two exports: the scheduler ticks once a second, so the
+/// second export holds more records than the first however the Jobs are scheduled.
+const TICK_GAP: Duration = Duration::from_secs(3);
+/// The export's file, in the Job's own `/work`.
+const CLOCK_SEGMENT: &str = "/work/clock.seg";
+/// Where the data process stores its datasets (`processes.json`'s `data` args and
+/// `mandate-datad`'s layout), in the artifact store the control Job mounts.
+pub const BARS_ROOT: &str = "/var/lib/mandate/artifacts/datasets/cell-recorded/alpaca/iex";
+/// The instruments the local cell's values list for the data process (`values/k3d.yaml`'s
+/// `data.instruments`): the demo agent's SPY and the second agent's QQQ.
+pub const BAR_SYMBOLS: [&str; 2] = ["SPY", "QQQ"];
+/// The sessions the data process stores (`mandate_datad::series::SESSIONS`).
+pub const BAR_SESSIONS: u64 = 30;
+
+/// Each dataset the drill inspects, with the fewest days it must list: every instrument's daily
+/// bars, [`BAR_SESSIONS`] of them, and its minute bars, which hold at least the latest trading
+/// day's session on any day (`mandate_datad::series::minute_day`).
+pub fn bar_datasets() -> Vec<(String, u64)> {
+    BAR_SYMBOLS
+        .iter()
+        .flat_map(|symbol| {
+            [
+                (format!("{BARS_ROOT}/bars-1Day/{symbol}"), BAR_SESSIONS),
+                (format!("{BARS_ROOT}/bars-1Min/{symbol}"), 1),
+            ]
+        })
+        .collect()
+}
 /// The executor's own probe, as its pod's `livez` probe runs it (`processes.json`, DEC-994 item 5).
 const LIVEZ: [&str; 5] = [
     "/mandate-executord",
@@ -72,6 +103,40 @@ pub fn check_args(workspace: &str, account: &str) -> Vec<String> {
     .to_vec()
 }
 
+/// The scheduler's stream for `workspace` (journal spec §2), the one the runtime and executor
+/// read their ticks from.
+pub fn clock_of(workspace: &str) -> String {
+    format!("clock:{workspace}")
+}
+
+/// The arguments of one export of the workspace's clock stream, for the `mandate` CLI.
+pub fn clock_export_args(workspace: &str) -> Vec<String> {
+    strings(&[
+        "journal",
+        "export",
+        &clock_of(workspace),
+        CLOCK_SEGMENT,
+        "--journal",
+        JOURNAL,
+    ])
+}
+
+/// The last sequence number an export's logs report for `stream`: `None` when no line reports
+/// that stream's export.
+pub fn exported_through(logs: &str, stream: &str) -> Option<u64> {
+    let head = format!("exported: stream {stream}, seq 1 to ");
+    logs.lines().find_map(|l| {
+        let (_, rest) = l.split_once(&head)?;
+        rest.split(',').next()?.trim().parse().ok()
+    })
+}
+
+/// Whether two exports show the scheduler ticking: the first holds its `StreamOpened` and at
+/// least one record after it, and the second strictly more.
+pub fn ticking(first: Option<u64>, second: Option<u64>) -> bool {
+    matches!((first, second), (Some(a), Some(b)) if a >= 2 && b > a)
+}
+
 /// The executor's connect check for `account` in `workspace`, as the one-off Job run `run`: the
 /// passing `ConnectionChecked`'s event id, or the Job's logs when it did not pass.
 pub fn connect_check(run: &str, workspace: &str, account: &str) -> Result<Result<String, String>> {
@@ -88,6 +153,25 @@ pub fn connect_check(run: &str, workspace: &str, account: &str) -> Result<Result
         .filter(|_| done)
         .map(str::to_owned)
         .ok_or(logs))
+}
+
+/// The days each dataset of an inspection's logs lists, in the report's order, when the report
+/// covers `datasets` datasets and counts no problem: `None` for any other total, or when a
+/// dataset's coverage line is missing.
+pub fn inspected_days(logs: &str, datasets: usize) -> Option<Vec<u64>> {
+    let total = format!("total: {datasets} datasets, 0 problems");
+    if !logs.lines().any(|l| l.ends_with(&total)) {
+        return None;
+    }
+    let days: Vec<u64> = logs
+        .lines()
+        .filter_map(|l| {
+            let (_, rest) = l.split_once("coverage: ")?;
+            let (_, listed) = rest.split_once(", ")?;
+            listed.strip_suffix(" days listed")?.trim().parse().ok()
+        })
+        .collect();
+    (days.len() == datasets).then_some(days)
 }
 
 /// The event id a connect check's logs name as passing.
@@ -338,6 +422,12 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
         };
         Some((checked, code))
     };
+    if let Some(broken) = ticks(&id, &workspace)? {
+        return Ok(Verdict::Broken(broken));
+    }
+    if let Some(broken) = bars(&id)? {
+        return Ok(Verdict::Broken(broken));
+    }
     let recorded = recorded
         .as_ref()
         .map(|(checked, code)| (account.as_str(), checked.as_str(), code.as_str()));
@@ -355,8 +445,8 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
     Ok(match executor_live(&account)? {
         Ok(_) => {
             eprintln!(
-                "    the manager's executor for account {account} runs and is live; not ready \
-                 until a scheduler tick, and the cell builds no scheduler yet"
+                "    the manager's executor for account {account} runs and is live; its \
+                 readiness is lane X's (E21-30)"
             );
             Verdict::Held
         }
@@ -401,8 +491,150 @@ pub fn executor_live(account: &str) -> Result<Result<String, String>> {
     }))
 }
 
+/// The scheduler's Deployment, which the chart renders once `cell up` names its image.
+const SCHEDULER_DEPLOYMENT: &str = "deployment/scheduler";
+const SCHEDULER_POD: &str = "mandate.dev/process=scheduler";
+
+/// The ticks drill (E21-29). The chart is pointed at a fresh workspace, which restarts the
+/// scheduler on it, and two exports of its clock stream must show it growing. Seeded, the
+/// scheduler is scaled to zero once a first export shows its stream ticking, so the two that
+/// follow end at the same seq and the drill reports that the scheduler is not ticking; it is
+/// scaled back to one replica and waited on before the verdict is returned, whatever it is.
+pub fn ticks_drill(seeded: bool) -> Result<Verdict> {
+    let id = run_id()?;
+    let workspace = workspace_of(&id);
+    point_api(&workspace)?;
+    if !seeded {
+        return Ok(ticks(&id, &workspace)?.map_or(Verdict::Held, Verdict::Broken));
+    }
+    if let Some(broken) = ticks(&format!("{id}s"), &workspace)? {
+        return Ok(Verdict::Broken(format!(
+            "the scheduler never ticked before it was scaled down: {broken}"
+        )));
+    }
+    let scale = |replicas: &str| {
+        kubectl(&[
+            "scale",
+            SCHEDULER_DEPLOYMENT,
+            "--namespace",
+            NAMESPACE,
+            &format!("--replicas={replicas}"),
+        ])
+    };
+    let stopped = scale("0").map(|_| {
+        let gone = kubectl(&[
+            "wait",
+            "--for=delete",
+            "pod",
+            "--selector",
+            SCHEDULER_POD,
+            "--namespace",
+            NAMESPACE,
+            "--timeout=60s",
+        ]);
+        if gone.is_err() {
+            eprintln!("    the scheduler's pod was not seen gone; the exports judge it");
+        }
+    });
+    let verdict = stopped.and_then(|_| ticks(&id, &workspace));
+    let restored = scale("1").and_then(|_| {
+        kubectl(&[
+            "rollout",
+            "status",
+            SCHEDULER_DEPLOYMENT,
+            "--namespace",
+            NAMESPACE,
+            "--timeout=120s",
+        ])
+    });
+    match (verdict, restored) {
+        (Ok(broken), Ok(_)) => Ok(broken.map_or(Verdict::Held, Verdict::Broken)),
+        (verdict, Err(e)) => {
+            bail!(
+                "the drill's verdict was {verdict:?}, but the scheduler was not scaled back: {e:#}"
+            )
+        }
+        (Err(e), Ok(_)) => Err(e),
+    }
+}
+
+/// The scheduler's ticks on the run's workspace (E21-29): two exports of its clock stream,
+/// [`TICK_GAP`] apart, each a one-off `control` Job; `None` when the second holds more records than
+/// the first, else why not.
+fn ticks(id: &str, workspace: &str) -> Result<Option<String>> {
+    let stream = clock_of(workspace);
+    let mut seen = Vec::new();
+    for (n, suffix) in ["k1", "k2"].into_iter().enumerate() {
+        if n > 0 {
+            sleep(TICK_GAP);
+        }
+        let export = render(
+            &[
+                format!("run.id=\"{id}{suffix}\""),
+                format!("run.args={}", json!(clock_export_args(workspace))),
+            ],
+            Some("templates/run.yaml"),
+        )?;
+        let (done, logs) = run_job(export)?;
+        let through = exported_through(&logs, &stream).filter(|_| done);
+        if through.is_none() {
+            return Ok(Some(format!(
+                "the scheduler's stream {stream} could not be exported:\n{logs}"
+            )));
+        }
+        seen.push(through);
+    }
+    let (first, second) = (
+        seen.first().copied().flatten(),
+        seen.get(1).copied().flatten(),
+    );
+    if !ticking(first, second) {
+        return Ok(Some(format!(
+            "the scheduler is not ticking {stream}: its exports end at seq {first:?}, then {second:?}"
+        )));
+    }
+    eprintln!("    the scheduler ticks {stream}: seq {first:?}, then {second:?}");
+    Ok(None)
+}
+
+/// The data process's daily and minute bars (E21-29 lane SC): one `mandate inspect` of every
+/// [`bar_datasets`] dataset in a one-off `control` Job, which reports them in the order given;
+/// `None` when it counts no problem and each dataset lists at least its fewest days.
+fn bars(id: &str) -> Result<Option<String>> {
+    let datasets = bar_datasets();
+    let args: Vec<&str> = std::iter::once("inspect")
+        .chain(datasets.iter().map(|(dir, _)| dir.as_str()))
+        .collect();
+    let inspect = render(
+        &[
+            format!("run.id=\"{id}b\""),
+            format!("run.args={}", json!(args)),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    let (done, logs) = run_job(inspect)?;
+    let listed = inspected_days(&logs, datasets.len()).filter(|_| done);
+    match listed {
+        Some(days)
+            if days
+                .iter()
+                .zip(&datasets)
+                .all(|(listed, (_, fewest))| listed >= fewest) =>
+        {
+            eprintln!(
+                "    the data process stores {} instruments' daily and minute bars ({days:?} days), no problem",
+                BAR_SYMBOLS.len()
+            );
+            Ok(None)
+        }
+        _ => Ok(Some(format!(
+            "the data process's daily or minute bars are missing or have problems:\n{logs}"
+        ))),
+    }
+}
+
 /// Runs `all` as one gestures Job of the `control` process, run `{id}{suffix}`.
-fn gestures(
+pub(super) fn gestures(
     id: &str,
     suffix: &str,
     all: &[Gesture],
@@ -456,6 +688,91 @@ mod tests {
             assert!(crockford(&account_of(id)), "{}", account_of(id));
         }
         assert_ne!(workspace_of("1"), workspace_of("2"));
+    }
+
+    /// The export's report is read for its own stream alone, and a later line of another stream
+    /// or a failed export reports nothing.
+    #[test]
+    fn the_clock_exports_last_seq_is_read_from_the_logs() {
+        let stream = clock_of("01KDEX0000000042000000000X");
+        let line = format!(
+            "[pod/x/run] exported: stream {stream}, seq 1 to 17, last hash ab, to /work/clock.seg"
+        );
+        assert_eq!(exported_through(&line, &stream), Some(17));
+        let other = "exported: stream clock:01KDEX0000000043000000000X, seq 1 to 9, last hash ab";
+        assert_eq!(exported_through(other, &stream), None);
+        assert_eq!(exported_through("stream_not_found", &stream), None);
+        let args = clock_export_args("w");
+        assert_eq!(args[..3], ["journal", "export", "clock:w"]);
+        assert!(args.windows(2).any(|w| w == ["--journal", JOURNAL]));
+    }
+
+    /// The inspection's report is read for each dataset's listed days only when it covers every
+    /// dataset asked and counts no problem.
+    #[test]
+    fn the_bars_inspection_is_read_from_the_logs() {
+        let clean = "[pod/x/run] alpaca iex bars-1Day SPY\n\
+                     [pod/x/run] coverage: 2026-09-14 to 2026-10-23, 30 days listed\n\
+                     [pod/x/run] problems: 0\n\
+                     [pod/x/run] alpaca iex bars-1Min SPY\n\
+                     [pod/x/run] coverage: 2026-10-23 to 2026-10-23, 1 days listed\n\
+                     [pod/x/run] problems: 0\n\
+                     [pod/x/run] total: 2 datasets, 0 problems";
+        assert_eq!(inspected_days(clean, 2), Some(vec![30, 1]));
+        assert_eq!(inspected_days(clean, 4), None, "fewer datasets than asked");
+        let flawed = clean.replace(
+            "total: 2 datasets, 0 problems",
+            "total: 2 datasets, 2 problems",
+        );
+        assert_eq!(inspected_days(&flawed, 2), None);
+        let uncovered = clean.replace(
+            "coverage: 2026-10-23 to 2026-10-23, 1 days listed",
+            "rows: 0",
+        );
+        assert_eq!(inspected_days(&uncovered, 2), None);
+        assert_eq!(
+            inspected_days("Error: inspecting /var/lib/mandate: missing", 2),
+            None
+        );
+    }
+
+    /// The drill inspects every instrument the local cell's values list, daily and minute bars
+    /// each, under the data process's store.
+    #[test]
+    fn the_drill_inspects_every_recorded_instrument() {
+        let values = fs::read_to_string("../deploy/cell/values/k3d.yaml").unwrap();
+        let listed: Vec<&str> = values
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("- symbol: "))
+            .collect();
+        assert_eq!(listed, BAR_SYMBOLS);
+        let datasets = bar_datasets();
+        assert_eq!(datasets.len(), 2 * BAR_SYMBOLS.len());
+        for symbol in BAR_SYMBOLS {
+            for (kind, fewest) in [("bars-1Day", BAR_SESSIONS), ("bars-1Min", 1)] {
+                let dir = format!("{BARS_ROOT}/{kind}/{symbol}");
+                assert!(datasets.contains(&(dir, fewest)), "{kind} {symbol}");
+            }
+        }
+        assert!(BARS_ROOT.starts_with("/var/lib/mandate/artifacts/datasets/cell-recorded/"));
+    }
+
+    /// Ticking is a second export strictly past a first that holds a record after the stream's
+    /// opening: a stalled, reset, opened-only, or missing stream is not.
+    #[test]
+    fn ticking_needs_a_grown_stream() {
+        assert!(ticking(Some(2), Some(3)));
+        assert!(ticking(Some(40), Some(43)));
+        for (a, b) in [
+            (Some(5), Some(5)),
+            (Some(5), Some(4)),
+            (Some(1), Some(4)),
+            (None, Some(4)),
+            (Some(4), None),
+            (None, None),
+        ] {
+            assert!(!ticking(a, b), "{a:?} then {b:?}");
+        }
     }
 
     #[test]

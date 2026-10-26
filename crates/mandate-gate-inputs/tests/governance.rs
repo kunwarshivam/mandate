@@ -7,13 +7,13 @@ use std::collections::BTreeMap;
 
 use mandate_canon::{Digest, Value, to_canonical};
 use mandate_domain::Environment;
-use mandate_shell::control::{
+use mandate_gate_inputs::control::{
     ConfigRefusal as Refusal, ControlRecord, Governance, Origin, Pinned, governance,
 };
 use mandate_spec::policy::{LevelName, PolicyKey, PolicyValue, values_of};
 use mandate_spec::{Mandate, SchemaDec};
 
-const MANDATE: &str = include_str!("fixtures/tracer/mandate.json");
+const MANDATE: &str = include_str!("../../mandate-shell/tests/fixtures/tracer/mandate.json");
 const MODEL: &str = r#"{"kind":"quant_model_content","model_id":"quant.ma_crossover"}"#;
 /// §9.2's closed payload with rule 21's nulls: `@K` is the kind and `@H` the content hash.
 const RECORD: &str = r#"{"admits_instruments":null,"content_hash":"@H","kind":"@K","model_id":null,"model_version":null,"params":[]}"#;
@@ -82,6 +82,7 @@ impl Stream {
     fn then(mut self, event_type: &str, payload: &str) -> Self {
         self.records.push(ControlRecord {
             seq: u64::try_from(self.records.len()).unwrap() + 1,
+            event_time: None,
             event_type: event_type.to_owned(),
             payload: json(payload),
             origin: Origin {

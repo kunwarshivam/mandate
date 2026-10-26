@@ -24,10 +24,10 @@ adapter's production door.
   arm for any non-answer; `src/envelope.rs` the journal envelope (always `paper`) and the
   deterministic ids; `src/host.rs` the refusal of a configured host;
   `src/control.rs` the deployment input from the control
-  stream (E19-11, DEC-505; tests in `crates/mandate-shell/tests/control.rs`) and the effective
-  registrations with the DEC-523 snapshot (tests in `crates/mandate-shell/tests/registrations.rs`),
+  stream (E19-11, DEC-505; tests in `crates/mandate-gate-inputs/tests/control.rs`) and the effective
+  registrations with the DEC-523 snapshot (tests in `crates/mandate-gate-inputs/tests/registrations.rs`),
   and the policy set and model registry that govern the run, DEC-534 (tests in
-  `crates/mandate-shell/tests/governance.rs`);
+  `crates/mandate-gate-inputs/tests/governance.rs`);
   `src/paper.rs` the DEC-466 one-run loader that verifies the reviewed artifacts and binds the
   bytes it checked (`Artifacts::from_registered` takes them from the confirmed version and the
   registered objects instead of files, Q1; tests in `crates/mandate-shell/tests/registered.rs`), reads the GET-only broker preflight (including the trailing window's
@@ -83,6 +83,6 @@ adapter's production door.
 - **Reference cases:** none move, and `crates/mandate-refcases/status.toml` is untouched by every PR of
   this stream. The tracer cites `trading_domain::RC-04`, `RC-09`, `RC-09B`, `RC-11`, `RC-14`, `RC-16`,
   `RC-17`, the mandate gate and autonomy families, and the journal append vectors read-only.
-- **Run:** `cargo nextest run -p mandate-shell`; `cargo xtask ci pending` for the pending cases.
+- **Run:** `cargo nextest run -p mandate-gate-inputs -p mandate-shell`; `cargo xtask ci pending` for the pending cases.
   The manual paper run is `mandate-paper`'s, not the shell's own command (DEC-475 items 1 and 6);
   see the paper adapter's feature file and the first paper trade brief's E2.

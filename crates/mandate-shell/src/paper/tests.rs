@@ -135,6 +135,7 @@ impl Deployed {
         })?;
         self.records.push(ControlRecord {
             seq: seq.saturating_add(1),
+            event_time: None,
             event_type: event_type.to_owned(),
             payload: parsed,
             origin: Origin {

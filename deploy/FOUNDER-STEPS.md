@@ -347,3 +347,57 @@ Do these only once you have recorded DEC-2614 as Accepted. Until you set the var
 
 No other workflow may ask for this runner. `cargo xtask lint` refuses any `runs-on` that is not a
 hosted runner outside `infra.yml`. Keep the runner registered to this repository alone.
+
+## J. Confirming a step-up challenge in staging ([DEC-2106](../docs/project/decisions/DEC-2106.md), [DEC-2125](../docs/project/decisions/DEC-2125.md))
+
+In paper, the web app shows a step-up challenge and an `XXXX-XXXX` code before it grants an
+approval or starts an Alpaca connect, and waits for you to confirm it with the `mandate` CLI. In
+staging the CLI runs as the chart's one-off `control` run: a Job in `ws-ws1` under the control
+process's existing database role and ServiceAccount, the same run the kill switch uses
+([RB-03](../docs/runbooks/RB-03-kill-switches.md), *In the cell*). It widens no role, no grant and
+no credential, and the command reads the approval from the journal, never from the browser.
+
+1. **Reach the cluster from your machine, once.** Staging's cluster API admits only each `infra`
+   run's own runner. To use `kubectl` yourself, add your address to the `infra-staging`
+   environment secret `KUBE_API_ALLOWED_CIDRS` (for example `["203.0.113.7/32"]`, no wider than
+   /24; [deploy/tofu/README.md](tofu/README.md)) and dispatch `infra` with `apply` on `staging`.
+   Then fetch a kubeconfig as yourself: `doctl kubernetes cluster kubeconfig save mandate-staging`.
+   Remove the address again when you no longer need it.
+2. **Take the values staging runs with**, and use the chart from the commit staging was last
+   promoted from:
+
+   ```bash
+   helm get values workspace -n ws-ws1 --all -o yaml > /tmp/staging-values.yaml
+   ```
+
+3. **Confirm an approval's grant.** Copy the principal, agent, approval, challenge and code from
+   the web app; give each run a new `run.id`:
+
+   ```bash
+   helm template workspace deploy/cell/charts/workspace -n ws-ws1 -f /tmp/staging-values.yaml \
+     --show-only templates/run.yaml \
+     --set run.id="stepup1" \
+     --set-json 'run.args=["step-up","confirm","--workspace","01KDEM0000000000000000000W","--principal","<PRINCIPAL>","--agent","<AGENT>","--approval","<APPROVAL>","--challenge","<CHALLENGE>","--code","<CODE>","--journal","$(MANDATE_JOURNAL_DSN)","--store","$(MANDATE_ARTIFACTS)"]' \
+     | kubectl apply -n ws-ws1 -f -
+   kubectl logs -n ws-ws1 job/control-stepup1
+   ```
+
+4. **Confirm a connect's start** the same way, with no agent or approval:
+
+   ```bash
+   helm template workspace deploy/cell/charts/workspace -n ws-ws1 -f /tmp/staging-values.yaml \
+     --show-only templates/run.yaml \
+     --set run.id="connect1" \
+     --set-json 'run.args=["step-up","confirm-connect","--workspace","01KDEM0000000000000000000W","--principal","<PRINCIPAL>","--challenge","<CHALLENGE>","--code","<CODE>","--journal","$(MANDATE_JOURNAL_DSN)","--store","$(MANDATE_ARTIFACTS)"]' \
+     | kubectl apply -n ws-ws1 -f -
+   kubectl logs -n ws-ws1 job/control-connect1
+   ```
+
+`--store` is the workspace's own artifact store, which the run mounts, not the Job's scratch
+directory: a connect's confirmation stores the action it names there, beside the workspace's other
+artifacts, and the Job's scratch directory is gone when the Job is.
+
+The log names the confirmation it appended, or the one it had already appended if you run it
+again. A Job that fails leaves the challenge unconfirmed and adds nothing; the challenge expires on
+its own. The code is short-lived, but it is still not for chat or an
+issue.

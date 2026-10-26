@@ -109,6 +109,11 @@ def every_image() -> list[str]:
         for image in dict.fromkeys(p["image"] for p in PROCESSES)
         if image != "postgres"
     ]
+    sets += [
+        f"data.instruments[{i}].{key}={value}"
+        for i, instrument in enumerate(INSTRUMENTS)
+        for key, value in instrument.items()
+    ]
     return [arg for s in sets for arg in ("--set", s)]
 
 
@@ -648,6 +653,8 @@ the processes it starts render as Deployments of their own; its pod templates ar
         assert not [x for x in words if "{" in x], words
         assert c["args"][: len(p["args"])] == [
             x.replace("{workspace}", "ws1")
+            .replace("{hosted_workspace}", HOSTED)
+            .replace("{data_instruments}", INSTRUMENTS_ARG)
             .replace("{agent}", "demo-agent")
             .replace("{connection}", "demo-paper")
             .replace("{owner}", "demo-owner")
@@ -655,6 +662,123 @@ the processes it starts render as Deployments of their own; its pod templates ar
         ]
         assert c["readinessProbe"]["exec"]["command"] == [x.replace("{probe}", "readyz") for x in p["probe"]]
         assert c["livenessProbe"]["exec"]["command"] == [x.replace("{probe}", "livez") for x in p["probe"]]
+
+
+HOSTED = "01KDEM0000000000000000000W"
+SPY_ASSET = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"
+QQQ_ASSET = "eb82ffb0-efd6-4f4e-9307-8fead28e04f6"
+# The cell's two recorded instruments: the demo agent's SPY and the second agent's QQQ, which the
+# trade loop runs on (`demo/instrument.json`, `demo/web-instrument.json`).
+INSTRUMENTS = [
+    {"symbol": "SPY", "assetId": SPY_ASSET, "anchor": "2026-10-23=150"},
+    {"symbol": "QQQ", "assetId": QQQ_ASSET, "anchor": "2026-10-23=140"},
+]
+INSTRUMENTS_ARG = ",".join(f"{i['symbol']}:{i['assetId']}:{i['anchor']}" for i in INSTRUMENTS)
+SCHEDULER = ("--set", f"images.scheduler={PLACEHOLDER.format('scheduler')}")
+
+
+def test_the_scheduler_writes_the_clock_stream_the_manager_s_processes_read():
+    """One scheduler per workspace writes `clock:{workspace_id}` (journal spec §2, E21-29), and the
+    runtime and executor the manager starts read the clock stream of the manager's own `--workspace`
+    (`MANDATE_WORKSPACE`), so the scheduler is named the same workspace: the hosted one,
+    `api.workspace`, never the namespace's short name. It asks no time server (`egress.time` is
+    empty in the cell), so every measurement is journaled out of tolerance (AGENTS.md rule 3)."""
+    docs = render_all(*SCHEDULER)
+    by_name = {w["metadata"]["name"]: w for w in workloads(docs)}
+    scheduler = by_name["scheduler"]
+    assert scheduler["kind"] == "Deployment" and scheduler["spec"]["replicas"] == 1
+    c = first_container(scheduler)
+    assert c["image"] == PLACEHOLDER.format("scheduler")
+    assert c["args"] == ["run", "--workspace", HOSTED, "--probe", "/tmp/process.sock"]
+    manager_args = first_container(by_name[MANAGER])["args"]
+    assert manager_args[manager_args.index("--workspace") + 1] == HOSTED
+    dsn = next(e["value"] for e in c["env"] if e["name"] == "MANDATE_JOURNAL_DSN")
+    assert dsn.startswith("postgres://mandate_scheduler@")
+    for k, asked in (("readinessProbe", "readyz"), ("livenessProbe", "livez")):
+        assert c[k]["exec"]["command"] == ["/mandate-scheduler", "probe", asked, "--probe", "/tmp/process.sock"]
+    volumes = {v["name"] for v in pod_spec(scheduler).get("volumes", [])}
+    assert not [v for v in volumes if "vault" in v or v == "artifacts"], volumes
+    for check in (hardened, gated, default_deny, secrets_as_files, migration_first):
+        assert check(docs) == [], check.__name__
+    assert egress_exact(docs) == []
+
+
+def test_the_scheduler_never_renders_for_no_hosted_workspace():
+    """Naming the scheduler's image without the hosted workspace fails the render, rather than
+    ticking a clock stream no process reads (AGENTS.md rule 3)."""
+    done = helm(CHART, *SCHEDULER, "--set", "api.workspace=")
+    assert done.returncode != 0
+    assert "api.workspace" in done.stderr and "scheduler" in done.stderr
+
+
+DATA = ("--set", f"images.data={PLACEHOLDER.format('data')}")
+
+
+def test_the_data_process_stores_the_recorded_series_where_the_runtime_reads_it():
+    """The data process writes the deployed instrument's daily bars from the cell's recorded series
+    into the artifact store, which it alone besides control and the API mounts writable and the
+    runtime mounts read-only; it holds no journal role and no vault token, and reaches no host in
+    the cell (`egress.market-data` is empty)."""
+    docs = render_all(*DATA)
+    by_name = {w["metadata"]["name"]: w for w in workloads(docs)}
+    data = by_name["data"]
+    c = first_container(data)
+    assert c["image"] == PLACEHOLDER.format("data")
+    assert c["args"] == [
+        "run",
+        "--store",
+        "/var/lib/mandate/artifacts/datasets",
+        "--artifacts",
+        "/var/lib/mandate/artifacts",
+        "--instruments",
+        INSTRUMENTS_ARG,
+        "--probe",
+        "/tmp/process.sock",
+    ]
+    assert not [e for e in c["env"] if e["name"] in ("MANDATE_JOURNAL_DSN", "PGPASSFILE")]
+    mounts = {m["mountPath"]: m.get("readOnly", False) for m in c["volumeMounts"]}
+    assert mounts.get("/var/lib/mandate/artifacts") is False, mounts
+    volumes = {v["name"] for v in pod_spec(data).get("volumes", [])}
+    assert not [v for v in volumes if "vault" in v or "journal" in v or v.startswith("pg")], volumes
+    for k, asked in (("readinessProbe", "readyz"), ("livenessProbe", "livez")):
+        assert c[k]["exec"]["command"] == ["/mandate-datad", "probe", asked, "--probe", "/tmp/process.sock"]
+    for check in (hardened, gated, default_deny, colocated, egress_exact):
+        assert check(docs) == [], check.__name__
+
+
+def test_the_data_process_never_renders_without_its_series_or_outside_the_cell(tmp_path: Path):
+    """Naming the data image without the series fails the render, as does an instrument missing a
+    field or a symbol listed twice, and only the local cell's values name one: the series is a
+    recording, never market data."""
+    k3d = ("-f", str(CELL / "values" / "k3d.yaml"), *DATA)
+    none = tmp_path / "none.yaml"
+    none.write_text("data:\n  instruments: []\n")
+    done = helm(CHART, *k3d, "-f", str(none))
+    assert done.returncode != 0 and "data.instruments, the instruments" in done.stderr, done.stderr
+    for unset, said in (
+        ("data.instruments[0].symbol=", "/data/instruments/0/symbol"),
+        ("data.instruments[1].assetId=", "/data/instruments/1/assetId"),
+        ("data.instruments[1].anchor=", "/data/instruments/1/anchor"),
+        ("data.instruments[0].anchor=150", "/data/instruments/0/anchor"),
+        ("data.instruments[1].symbol=SPY", "data.instruments lists SPY twice"),
+    ):
+        done = helm(CHART, *k3d, "--set", unset)
+        assert done.returncode != 0 and said in done.stderr, f"{unset}: {done.stderr}"
+    for values in ("k3s.yaml", "managed.yaml"):
+        done = helm(CHART, "-f", str(CELL / "values" / values), *DATA)
+        assert done.returncode != 0 and "data.instruments" in done.stderr, f"{values}: only the local cell names a series"
+
+
+def test_the_local_cell_records_both_demo_agents_instruments():
+    """The local cell's values list SPY and QQQ, each with the asset id its demo agent's envelope
+    pins, so the second agent's trade loop has bars, closes and marks as the first's has."""
+    docs = render("-f", str(CELL / "values" / "k3d.yaml"), *DATA)
+    data = next(w for w in workloads(docs) if w["metadata"]["name"] == "data")
+    args = first_container(data)["args"]
+    assert args[args.index("--instruments") + 1] == INSTRUMENTS_ARG
+    for name, instrument in (("instrument.json", INSTRUMENTS[0]), ("web-instrument.json", INSTRUMENTS[1])):
+        pinned = json.loads((CELL / "demo" / name).read_text())
+        assert (pinned["symbol"], pinned["instrument_id"]) == (instrument["symbol"], instrument["assetId"]), name
 
 
 def test_the_runtime_never_renders_for_no_deployment():
@@ -2694,7 +2818,7 @@ def admission_problems(docs: list[dict]) -> Iterator[str]:
             n: sorted({"journal-ca", "journal-role-" + role(n).replace("_", "-")}) if role(n) else []
             for n in names
         },
-        "claims": {n: ["artifacts"] if n == "runtime" and claimed else [] for n in names},
+        "claims": {n: ["artifacts"] if n in ("runtime", "executor") and claimed else [] for n in names},
         "projected": {
             n: ["mandate-vault|600|token|292|namespace=metadata.namespace"]
             if n == EXCHANGE or (n == "executor" and "alpaca-paper" in json.dumps(launches(templates[n])))

@@ -59,7 +59,7 @@ fn a_passing_check_opens_the_stream_and_records_every_check() -> Result<(), Erro
     let checked = connect_check(
         &mut store,
         &mut broker,
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         "conn1",
         PII,
@@ -110,7 +110,7 @@ fn a_second_check_appends_only_its_record() -> Result<(), Error> {
     let first = connect_check(
         &mut store,
         &mut broker,
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         "conn1",
         PII,
@@ -119,7 +119,7 @@ fn a_second_check_appends_only_its_record() -> Result<(), Error> {
     let second = connect_check(
         &mut store,
         &mut broker,
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         "conn1",
         PII,
@@ -159,7 +159,7 @@ fn an_unreadable_account_fails_the_check_and_is_journaled() -> Result<(), Error>
     let checked = connect_check(
         &mut store,
         &mut Unreadable,
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         "conn1",
         PII,
@@ -197,7 +197,7 @@ fn an_invalid_connection_or_reference_writes_nothing() -> Result<(), Error> {
         connect_check(
             &mut store,
             &mut broker,
-            &Ids,
+            &Ids::of(&scope()),
             &scope(),
             "conn 1",
             PII,
@@ -215,7 +215,7 @@ fn an_invalid_connection_or_reference_writes_nothing() -> Result<(), Error> {
             connect_check(
                 &mut store,
                 &mut broker,
-                &Ids,
+                &Ids::of(&scope()),
                 &scope(),
                 "conn1",
                 reference,
