@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { confirmStepUpDigest } from "./confirm";
-import { ASSERTION_TIMEOUT_MS, type Authenticator, type Passkey, assertPasskey, deployStepUpDigest, fromBase64url, passkeysRead, toBase64url } from "./passkey";
+import { ASSERTION_TIMEOUT_MS, type Authenticator, type Passkey, assertPasskey, commandStepUpDigest, deployStepUpDigest, fromBase64url, passkeysRead, toBase64url } from "./passkey";
 import type { StepUpChallenge } from "./step-up";
 
 /** 32 bytes 0..31 as unpadded base64url: what a served `webauthn_challenge` looks like. */
@@ -58,6 +58,20 @@ describe("the deployment's step-up digest (spec §3.11 item 11)", () => {
     const base = deployStepUpDigest("agt_A", `sha256:${"ab".repeat(32)}`);
     expect(deployStepUpDigest("agt_B", `sha256:${"ab".repeat(32)}`)).not.toBe(base);
     expect(deployStepUpDigest("agt_A", `sha256:${"cd".repeat(32)}`)).not.toBe(base);
+  });
+});
+
+describe("a resume's and a Stop's step-up digest (spec §3.11 item 12, DEC-2102, DEC-2140)", () => {
+  it("is SHA-256 of the server's canonical object at the control head, as an independent canonical JSON writer computes it", () => {
+    expect(commandStepUpDigest("agt_01JC0000000000000000000000", "resume", 7)).toBe("sha256:1c476e4e5e7773a324d00665e94933291654aa68e2aa94a24a4599268a2b1db2");
+    expect(commandStepUpDigest("agt_01JC0000000000000000000000", "stop_release", 12)).toBe("sha256:07b387b66421770bc58e26aafdc95696b33a356ceb42d3051020aa68edaf7caa");
+  });
+
+  it("binds the agent, what it confirms, and the head: any other is another digest", () => {
+    const base = commandStepUpDigest("agt_A", "stop", 3);
+    expect(commandStepUpDigest("agt_B", "stop", 3)).not.toBe(base);
+    expect(commandStepUpDigest("agt_A", "resume", 3)).not.toBe(base);
+    expect(commandStepUpDigest("agt_A", "stop", 4)).not.toBe(base);
   });
 });
 

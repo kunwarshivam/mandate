@@ -1,7 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { type Fetch } from "@/api/client";
-import { createMockServer } from "@/api/mock-server";
+import { MOCK_PASSKEY_ID, createMockServer } from "@/api/mock-server";
+import type { Authenticator } from "@/api/passkey";
+import { mockAuthenticator } from "@/test/set-up";
 import type { AgentDetail, ApiView } from "@/api/read-models";
 import { ApiRuntimeProvider } from "@/lib/api-runtime";
 import { UNREAD_CONNECTION, buildApiRecord } from "./api-record";
@@ -18,7 +20,7 @@ const ORIGIN = "https://api.owlhead.ai";
  * build from what the API serves, so the switch is reachable there, and nothing the API does not
  * serve is shown as "none".
  */
-function mount(ui: React.ReactNode, scenario: "normal" | "unreachable" | "silent" = "normal") {
+function mount(ui: React.ReactNode, scenario: "normal" | "unreachable" | "silent" = "normal", authenticator: Authenticator | null = mockAuthenticator(MOCK_PASSKEY_ID).get) {
   const server = createMockServer({ workspaceId: WS, scenario: scenario === "silent" ? "normal" : scenario });
   const posts: Array<{ path: string; body: Record<string, unknown> }> = [];
   const fetch: Fetch = (input, init) => {
@@ -28,7 +30,7 @@ function mount(ui: React.ReactNode, scenario: "normal" | "unreachable" | "silent
     return server.fetch(input, init);
   };
   render(
-    <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={fetch} refreshMs={60_000} statusPollMs={5} retryMs={5}>
+    <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={fetch} refreshMs={60_000} statusPollMs={5} retryMs={5} authenticator={authenticator}>
       {ui}
     </ApiRuntimeProvider>,
   );
@@ -145,5 +147,51 @@ describe("the Stop sheet and D10 over the API (rule 13)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Use passkey" }));
     await waitFor(() => expect(posts.filter((p) => p.path.endsWith("/kill-switch"))).toHaveLength(1), { timeout: 5000 });
     expect(posts.find((p) => p.path.endsWith("/kill-switch"))?.body).toMatchObject({ scope: { kind: "connection", id } });
+  });
+});
+
+describe("resume and Stop on the sheet over the API, under passkey step-up (DEC-2140, rule 13)", () => {
+  const AGENT = "agt_01JB3K8Y4N7QW2M6R9T5V0XZAC";
+
+  /** The sheet for one agent, paused first so it offers Resume. */
+  async function paused(authenticator?: Authenticator | null) {
+    const mounted = mount(<StopSheet open onOpenChange={() => {}} agentId={AGENT} />, "normal", authenticator);
+    const sheet = await screen.findByRole("dialog", { name: /^Stop/ });
+    fireEvent.click(await within(sheet).findByRole("button", { name: /^Pause (?!all)/ }));
+    const resume = await within(sheet).findByRole("button", { name: /^Resume / }, { timeout: 5000 });
+    return { ...mounted, sheet, resume };
+  }
+
+  it("offers Stop for an agent not stopped, and Resume once it is paused, each saying it needs a passkey", async () => {
+    mount(<StopSheet open onOpenChange={() => {}} agentId={AGENT} />);
+    const sheet = await screen.findByRole("dialog", { name: /^Stop/ });
+    const stop = await within(sheet).findByRole("button", { name: /^Stop (?!all)/ });
+    expect(stop).toHaveTextContent("Needs your passkey.");
+    cleanup();
+    const { resume } = await paused();
+    expect(resume).toHaveTextContent("Needs your passkey.");
+  });
+
+  it("resumes with the passkey, and says it is done only once the agent's runtime applies it", async () => {
+    const { sheet, resume, posts } = await paused();
+    fireEvent.click(resume);
+    await waitFor(() => expect(sheet.querySelector("[data-phase=applied]")).not.toBeNull(), { timeout: 5000 });
+    expect(sheet.querySelector("[data-phase=applied]")).toHaveTextContent("is trading again.");
+    expect(posts.find((p) => p.path.endsWith(`/agents/${AGENT}/resume`))?.body).toMatchObject({ step_up: { method: "passkey" } });
+  });
+
+  it("says in words why a declined passkey sent nothing, and keeps the kill switch", async () => {
+    const declined: Authenticator = async () => {
+      throw new DOMException("not allowed", "NotAllowedError");
+    };
+    cleanup();
+    const { sheet, resume, posts } = await paused(declined);
+    fireEvent.click(resume);
+    await waitFor(() => expect(sheet.querySelector("[data-phase=undelivered]")).not.toBeNull(), { timeout: 5000 });
+    const entry = sheet.querySelector("[data-phase=undelivered]");
+    expect(entry).toHaveTextContent("Not sent: the passkey check was canceled or timed out.");
+    expect(entry?.textContent).not.toMatch(/passkey_canceled|trading again/);
+    expect(posts.filter((p) => p.path.endsWith("/resume"))).toHaveLength(0);
+    expect(within(sheet).getByRole("link", { name: /^Kill switch:/ }).getAttribute("href")).toBe(recordHref("kill", AGENT));
   });
 });

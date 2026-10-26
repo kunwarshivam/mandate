@@ -133,3 +133,21 @@ test("a backtest report reads GET /backtests/{id} and shows the served report, w
   expect(calls.map((c) => new URL(c.url()).pathname)).toContain(`/v1/workspaces/${WS}/backtests/bt_01JBR2C4D6E8F0G2H4J6K8M0N2`);
   for (const call of calls) expect(operationFor(call.method(), call.url(), WS), `${call.method()} ${call.url()}`).not.toBeNull();
 });
+
+test("Stop on the sheet asks for the passkey; one declined sends nothing, says so in words, and leaves the kill switch (DEC-2140, rule 13)", async ({ page }) => {
+  const calls = apiCalls(page);
+  await page.addInitScript(() => {
+    navigator.credentials.get = () => Promise.reject(new DOMException("The operation either timed out or was not allowed.", "NotAllowedError"));
+  });
+  await page.goto("/?scenario=normal");
+  await expect(page.getByRole("region", { name: "Agents" }).getByRole("link")).not.toHaveCount(0);
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: /^Stop/ });
+  const stop = sheet.getByRole("button", { name: /^Stop (?!all)/ }).first();
+  await expect(stop).toContainText("Needs your passkey.");
+  await stop.click();
+  await expect(sheet.locator("[data-phase=undelivered]")).toContainText("Not sent: the passkey check was canceled or timed out.");
+  await expect(sheet.locator("[data-phase=applied]")).toHaveCount(0);
+  await expect(sheet.getByRole("link", { name: /^Kill switch:/ }).first()).toBeVisible();
+  expect(calls.filter((c) => c.method() === "POST" && new URL(c.url()).pathname.endsWith("/stop"))).toHaveLength(0);
+});

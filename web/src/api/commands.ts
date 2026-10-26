@@ -40,16 +40,21 @@ export function recordRef(record: CommandRecord | ApprovalRecord | ConfirmRecord
 
 const one = (command: PreparedCommand): Prepared => ({ ok: true, commands: [command] });
 
-export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, kind: CommandKind, agentId: string | null, record?: CommandRecord): Prepared {
+/**
+ * One owner command's body. A resume and a Stop carry the passkey step-up `stepUp` names, its
+ * evidence and assertion, or `step_up: null` without one (DEC-2140); the others carry none.
+ */
+export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, kind: CommandKind, agentId: string | null, record?: CommandRecord, stepUp?: PasskeyStepUp): Prepared {
+  const stepped: JsonObject = stepUp ? { step_up: { ...stepUp.step_up }, step_up_assertion: { ...stepUp.step_up_assertion } } : { step_up: null };
   const agentCommand = (operation: "pause" | "resume" | "stop", body: JsonObject): Prepared =>
     agentId ? one(client.prepare(operation, { agent: agentId }, body)) : { ok: false, reason: "no_agent" };
   switch (kind) {
     case "pause":
       return agentCommand("pause", { record: null });
     case "resume":
-      return agentCommand("resume", { record: null, step_up: null });
+      return agentCommand("resume", { record: null, ...stepped });
     case "stop":
-      return agentCommand("stop", { release: false, warning_shown: null, record: null, step_up: null });
+      return agentCommand("stop", { release: false, warning_shown: null, record: null, ...stepped });
     case "release":
       if (!record) return { ok: false, reason: "no_warning_shown" };
       return agentCommand("stop", { release: true, warning_shown: ref(JSON.stringify(record.shown)), record: null, step_up: null });

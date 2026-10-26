@@ -16,7 +16,7 @@ const ORIGIN = "https://api.owlhead.ai";
 
 type Acceptances = NonNullable<Parameters<typeof createMockServer>[0]["acceptances"]>;
 
-function mount(node: React.ReactNode, role: Role = "owner", acceptances?: Acceptances) {
+function mount(node: React.ReactNode, role: Role = "owner", acceptances?: Acceptances | null) {
   const server = createMockServer({ workspaceId: WS, scenario: "normal", acceptances });
   const posts: string[] = [];
   const fetch: Fetch = async (input, init) => {
@@ -110,7 +110,7 @@ describe("the go-live disclosure's acceptance (DEC-2134; journal spec §9.2 Disc
   });
 
   it("says when the deployment does not report the acceptance, and gives the host command to accept", async () => {
-    mount(<GoLive />);
+    mount(<GoLive />, "owner", null);
     const panel = await screen.findByRole("region", { name: "Your acceptance" });
     expect(await within(panel).findByText("Your deployment did not report whether you accepted it.")).toBeTruthy();
     const command = await within(panel).findByText(/^mandate disclosure accept go_live_risk /);

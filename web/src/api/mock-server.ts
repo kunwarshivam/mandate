@@ -23,7 +23,7 @@
  */
 import { CSRF_HEADER, OPERATIONS, SESSION_ROUTE, STEP_UP_CHALLENGE_ROUTE, isIdempotencyKey, type Fetch } from "./client";
 import { CONNECT_START_ROUTE } from "./connect";
-import { deployStepUpDigest } from "./passkey";
+import { commandStepUpDigest, deployStepUpDigest } from "./passkey";
 import { CONNECT_DISCLOSURE, connectStepUpDigest } from "./step-up";
 import type { Watermark } from "./types";
 import { servedBacktestFixture } from "@/fixtures/backtests";
@@ -44,9 +44,10 @@ export interface MockServerOptions {
   hostConfirms?: boolean;
   /**
    * `DisclosureAccepted` records on the workspace's control stream, in order, which its audit reads
-   * serve with their bodies (journal spec §9.2, DEC-2134). Without it the control stream is not served.
+   * serve with their bodies (journal spec §9.2, DEC-2134). Without it the control stream holds none;
+   * `null` serves no control stream, a deployment that does not report it, so no resume or Stop can bind its head.
    */
-  acceptances?: ReadonlyArray<{ document: string; version: string; user: string; method: string | null }>;
+  acceptances?: null | ReadonlyArray<{ document: string; version: string; user: string; method: string | null }>;
   /** The member's passkeys `GET /passkeys` serves; one past its cool-off by default. */
   passkeys?: ReadonlyArray<{ passkey_id: string; cool_off_ends: string | null }>;
 }
@@ -64,6 +65,11 @@ export interface RecordedCommand {
   path: string;
   idempotency_key: string;
   body: string;
+  /**
+   * The step-up evidence a resume or Stop was recorded with: the passkey evidence the mock verified,
+   * or `null`, which the agent's runtime refuses (DEC-2140). Absent for every other command.
+   */
+  step_up?: unknown;
 }
 
 export interface MockServer {
@@ -74,6 +80,8 @@ export interface MockServer {
   servedDigests(): string[];
   /** Every step-up challenge the mock has issued, in order. */
   challenges(): IssuedChallenge[];
+  /** The control stream's head as the mock serves it now (DEC-2140). */
+  controlHead(): number;
   /** The agent ids a deployment recorded, in order. */
   deployed(): string[];
   /** The connects the mock has started, by key, in order. */
@@ -231,15 +239,26 @@ export function createMockServer(options: MockServerOptions): MockServer {
     };
   }
 
-  /** The control stream, when the options name acceptances: its opening, then each `DisclosureAccepted` with its body, base64. */
+  /**
+   * The control stream: its opening, then each `DisclosureAccepted` the options name with its body,
+   * base64, then one record for each command recorded here, so its head moves on as the server's does
+   * and a resume's or Stop's step-up binds it (DEC-2140).
+   */
   function controlStream(streamId: string) {
-    if (streamId !== `ctl:${workspaceId}` || !options.acceptances) return null;
+    if (streamId !== `ctl:${workspaceId}` || options.acceptances === null) return null;
     const body = (payload: unknown) => btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify({ event_type: "DisclosureAccepted", payload }))));
-    const accepted = options.acceptances.map(({ document, version, user, method }) => ({
+    const accepted = (options.acceptances ?? []).map(({ document, version, user, method }) => ({
       type: "DisclosureAccepted",
       body: body({ document, version, user, step_up: method === null ? null : { assertion_id: "cli-1", authenticated_at: workspace.now, method } }),
     }));
-    return [{ type: "StreamOpened", body: "e30=" }, ...accepted].map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: servedAt, prev_hash: "0".repeat(64), hash: "0".repeat(64), body: e.body }));
+    const opening = [{ type: "StreamOpened", body: "e30=" }, ...accepted].map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: servedAt, prev_hash: "0".repeat(64), hash: "0".repeat(64), body: e.body }));
+    const issued = commands.map((c, i) => ({ seq: opening.length + i + 1, event_id: c.event_id, event_type: "OwnerCommandIssued", recorded_at: servedAt, prev_hash: "0".repeat(64), hash: "0".repeat(64), body: "e30=" }));
+    return [...opening, ...issued];
+  }
+
+  /** The control stream's head, the `control_head` a resume's or Stop's step-up binds (DEC-2102 item 4). */
+  function controlHead(): number {
+    return controlStream(`ctl:${workspaceId}`)?.length ?? 0;
   }
 
   /**
@@ -357,14 +376,28 @@ export function createMockServer(options: MockServerOptions): MockServer {
       const reads = (statusReads.get(command.event_id) ?? 0) + 1;
       statusReads.set(command.event_id, reads);
       if (reads === 1) return read({ phase: "recorded", steps: [] });
+      if (command.step_up === null) {
+        const refusal = { stream_id: "agent", seq: commands.indexOf(command) + 1, event_type: "OwnerCommandRefused", recorded_at: servedAt, reason: "step_up_missing" };
+        return read({ phase: "refused", steps: [refusal] });
+      }
       const step = { stream_id: "control", seq: commands.indexOf(command) + 1, event_type: "OwnerCommandApplied", recorded_at: servedAt, reason: null };
       return read({ phase: "applied", steps: [step] });
     }
     return problem(404, "not_found", "none");
   }
 
-  /** What the deployment would show once it acted: a pause pauses its agent, a Skip skips its request. */
+  /**
+   * What the deployment would show once it acted: a pause pauses its agent, a resume under a verified
+   * passkey resumes it, a Stop under one stops it, and a Skip skips its request.
+   */
   function apply(operation: string, path: string, body: Record<string, unknown>) {
+    const brake = path.match(/\/agents\/([^/]+)\/(resume|stop)$/);
+    const braked = brake ? agentOf(decodeURIComponent(brake[1])) : undefined;
+    if (braked && brake?.[2] === "resume" && braked.mode !== "stopped") {
+      braked.restrictions = braked.restrictions.filter((r) => r.code !== "owner_pause");
+      if (braked.mode === "paused") braked.mode = "normal";
+    }
+    if (braked && brake?.[2] === "stop") braked.mode = "stopped";
     const pause = path.match(/\/agents\/([^/]+)\/pause$/);
     const agent = pause ? agentOf(decodeURIComponent(pause[1])) : undefined;
     if (operation === "pause" && agent && agent.mode !== "stopped") {
@@ -593,14 +626,24 @@ export function createMockServer(options: MockServerOptions): MockServer {
       if (refused) return problem(refused.status, refused.code, "none");
       deployedAgents.set(agent, version);
     }
+    const brake = route.match(/^\/agents\/([^/]+)\/(resume|stop)$/);
+    let evidence: unknown = undefined;
+    if (brake && !repeated) {
+      const passkey = typeof members.step_up === "object" && members.step_up !== null && (members.step_up as Record<string, unknown>).method === "passkey";
+      if (members.step_up_assertion != null && !passkey) return problem(422, "invalid", "none");
+      const agent = decodeURIComponent(brake[1]);
+      const confirms = brake[2] === "resume" ? "resume" : members.release === true ? "stop_release" : "stop";
+      const verified = members.step_up_assertion != null && judgePasskey(members.step_up, members.step_up_assertion, brake[2], commandStepUpDigest(agent, confirms, controlHead())) === null;
+      evidence = verified ? members.step_up : null;
+    }
     if (match.operation === "create_version" && (typeof members.environment !== "string" || members.environment === "live")) return problem(422, "invalid", "none");
     const path = prefix + route;
     let command = commands.find((c) => c.idempotency_key === key && c.path === path);
     if (command && command.body !== body) return problem(409, "idempotency_conflict", "none");
     if (!command) {
-      command = { event_id: eventId(`${workspaceId}\n${match.operation}\n${key}`), path, idempotency_key: key, body };
+      command = { event_id: eventId(`${workspaceId}\n${match.operation}\n${key}`), path, idempotency_key: key, body, ...(brake ? { step_up: evidence } : {}) };
       commands.push(command);
-      apply(match.operation, path, members);
+      if (!brake || evidence !== null) apply(match.operation, path, members);
     }
     if (match.operation === "approval_response") return respond(202, { response_id: command.event_id, phase: "recorded" });
     if (match.operation === "confirm_version")
@@ -632,5 +675,5 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return problem(404, "not_found", "none");
   };
 
-  return { fetch, deployed: () => [...deployedAgents.keys()], recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], challenges: () => issued.map((c) => ({ ...c })), goLives: () => [...goLives], started: () => connects.map(({ idempotency_key, connection_id }) => ({ idempotency_key, connection_id })) };
+  return { fetch, deployed: () => [...deployedAgents.keys()], recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], challenges: () => issued.map((c) => ({ ...c })), controlHead, goLives: () => [...goLives], started: () => connects.map(({ idempotency_key, connection_id }) => ({ idempotency_key, connection_id })) };
 }

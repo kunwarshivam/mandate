@@ -145,7 +145,24 @@ function AgentChoices({ agent, choose, leave, full }: { agent: Agent; choose: (k
  * each agent's kill switch, which opens its record screen. Release needs the positions it hands
  * over, which the API does not serve per agent, so it is not offered here.
  */
-function ApiAgentChoices({ agents, agentId, full, pause, leave }: { agents: AgentDetail[]; agentId: string | null; full: boolean; pause: (agentId: string) => void; leave: () => void }) {
+/**
+ * One agent's choices over the API. Resume and Stop ask for the passkey when pressed (DEC-2140), and the
+ * command log says what came of it; the kill switch is always beside them and needs none here (rule 13).
+ * A Stop that would leave positions behind is refused by the agent's runtime (DEC-136), so it says so.
+ */
+function ApiAgentChoices({
+  agents,
+  agentId,
+  full,
+  command,
+  leave,
+}: {
+  agents: AgentDetail[];
+  agentId: string | null;
+  full: boolean;
+  command: (kind: "pause" | "resume" | "stop", agentId: string) => void;
+  leave: () => void;
+}) {
   const shown = agentId ? agents.filter((a) => a.agent_id === agentId) : agents;
   if (shown.length === 0) return null;
   return (
@@ -165,11 +182,18 @@ function ApiAgentChoices({ agents, agentId, full, pause, leave }: { agents: Agen
               <p className="rounded-xl bg-ink px-4 py-3 text-sm text-ink-foreground">Stopped. There is nothing more to stop for this agent.</p>
             ) : (
               <>
-                {agent.mode === "paused" ? null : (
-                  <Choice tone="ink" title={`Pause ${label}`} onClick={() => pause(agent.agent_id)}>
+                {agent.mode === "paused" ? (
+                  <Choice tone="outline" title={`Resume ${label}`} onClick={() => command("resume", agent.agent_id)}>
+                    It trades again within its mandate. Needs your passkey.
+                  </Choice>
+                ) : (
+                  <Choice tone="ink" title={`Pause ${label}`} onClick={() => command("pause", agent.agent_id)}>
                     No new orders. Resting protection stays. You can resume later.
                   </Choice>
                 )}
+                <Choice tone="outline" title={`Stop ${label}`} onClick={() => command("stop", agent.agent_id)}>
+                  Ends the agent for good. If it still holds positions, it refuses and nothing changes; the kill switch sells them. Needs your passkey.
+                </Choice>
                 {full ? (
                   <KillSwitchButton title="Kill switch: close and stop" href={recordHref("kill", agent.agent_id)} onClick={leave}>
                     Cancels only this agent&apos;s orders, sells only its positions, and ends it. Other agents and your own holdings are untouched. Opens the full list to confirm
@@ -253,7 +277,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
 
             {source === "api" ? (
               view ? (
-                <ApiAgentChoices agents={view.agents} agentId={agentId} full={full} pause={(id) => send("pause", id)} leave={leave} />
+                <ApiAgentChoices agents={view.agents} agentId={agentId} full={full} command={(kind, id) => send(kind, id)} leave={leave} />
               ) : (
                 <p className="rounded-xl bg-background px-4 py-3 text-sm" data-slot="agents-unavailable">
                   The agents could not be read, so each agent&apos;s own kill switch is not listed. The account&apos;s choices below work without them.

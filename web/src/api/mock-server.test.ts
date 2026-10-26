@@ -254,3 +254,68 @@ describe("the mock's passkey step-up for a confirm and a deployment (DEC-2128)",
     expect(((await r.json()) as { code: string }).code).toBe("step_up_missing");
   });
 });
+
+describe("the mock's passkey step-up for a resume and a Stop (DEC-2140)", () => {
+  async function challenge(server: MockServer, kind: string, digest: string, key: string) {
+    return (await (await post(server, "/step-up/challenges", { action: { kind, digest } }, key)).json()) as { challenge_id: string; webauthn_challenge: string; issued_at: string };
+  }
+  const assertion = (signed: string) => ({
+    passkey_id: MOCK_PASSKEY_ID,
+    authenticator_data: "AQ",
+    signature: "Ag",
+    client_data_json: Buffer.from(JSON.stringify({ type: "webauthn.get", challenge: signed })).toString("base64url"),
+  });
+  /** The server's bound object for `confirms` at `head`, written independently of the client's helper. */
+  const bound = (agent: string, confirms: string, head: number) =>
+    `sha256:${sha256Hex(`{"agent":"${agent}","bid":null,"bid_size":null,"confirms":"${confirms}","control_head":"${head}","event":null,"floor":null,"instrument":null}`)}`;
+  async function status(server: MockServer, eventId: string) {
+    let last: { phase: string; steps: Array<{ event_type: string; reason: string | null }> } = { phase: "", steps: [] };
+    for (let read = 0; read < 3; read += 1) last = await (await server.fetch(`/v1/workspaces/${WS}/commands/${eventId}`, { method: "GET" })).json();
+    return last;
+  }
+
+  it("serves the control stream's head, which each recorded command moves on, as the server's does", async () => {
+    const { server } = setup();
+    const head = server.controlHead();
+    const read = async () => ((await (await server.fetch(`/v1/workspaces/${WS}/journal/streams/${encodeURIComponent(`ctl:${WS}`)}/events?after_seq=0&limit=1`, { method: "GET" })).json()) as { head: { seq: number } }).head.seq;
+    expect(await read()).toBe(head);
+    await post(server, "/agents/agt_01/pause", { record: null }, "head-key-00000001");
+    expect(server.controlHead()).toBe(head + 1);
+    expect(await read()).toBe(head + 1);
+  });
+
+  it("records a resume whose passkey verifies with its evidence, and the runtime applies it", async () => {
+    const { server } = setup();
+    const agent = "agt_01";
+    const issued = await challenge(server, "resume", bound(agent, "resume", server.controlHead()), "resume-chal-00001");
+    const step_up = { assertion_id: issued.challenge_id, authenticated_at: issued.issued_at, method: "passkey" };
+    const answer = await post(server, `/agents/${agent}/resume`, { record: null, step_up, step_up_assertion: assertion(issued.webauthn_challenge) }, "resume-key-000001");
+    expect(answer.status).toBe(202);
+    const [recorded] = server.recorded();
+    expect(recorded.step_up).toEqual(step_up);
+    expect(server.challenges()[0].used).toBe(true);
+    expect((await status(server, recorded.event_id)).phase).toBe("applied");
+  });
+
+  it("records a Stop whose passkey does not verify with null evidence, still 202, and the runtime refuses it step_up_missing", async () => {
+    const { server } = setup();
+    const agent = "agt_01";
+    const issued = await challenge(server, "stop", bound(agent, "stop", server.controlHead() + 1), "stop-chal-0000001");
+    const step_up = { assertion_id: issued.challenge_id, authenticated_at: issued.issued_at, method: "passkey" };
+    const answer = await post(server, `/agents/${agent}/stop`, { release: false, warning_shown: null, record: null, step_up, step_up_assertion: assertion(issued.webauthn_challenge) }, "stop-key-00000001");
+    expect(answer.status).toBe(202);
+    const [recorded] = server.recorded();
+    expect(recorded.step_up).toBeNull();
+    expect(server.challenges()[0].used).toBe(false);
+    const settled = await status(server, recorded.event_id);
+    expect(settled).toMatchObject({ phase: "refused", steps: [{ event_type: "OwnerCommandRefused", reason: "step_up_missing" }] });
+  });
+
+  it("refuses an assertion beside evidence that is not a passkey's, recording nothing", async () => {
+    const { server } = setup();
+    const issued = await challenge(server, "resume", bound("agt_01", "resume", server.controlHead()), "resume-chal-00002");
+    const answer = await post(server, "/agents/agt_01/resume", { record: null, step_up: null, step_up_assertion: assertion(issued.webauthn_challenge) }, "resume-key-000002");
+    expect(answer.status).toBe(422);
+    expect(server.recorded()).toHaveLength(0);
+  });
+});

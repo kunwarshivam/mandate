@@ -40,8 +40,20 @@ export interface Command {
   id: string;
   kind: CommandKind;
   agentId: string | null;
-  /** `unknown`: the deployment took the command but no journal entry came back. */
-  phase: "sent" | "recorded" | "undelivered" | "unknown";
+  /**
+   * `unknown`: the deployment took the command but no journal entry came back. `applied` and
+   * `refused`: what the agent's runtime did with a recorded command that is followed to its outcome,
+   * a resume or Stop over the API (DEC-2140), which the deployment records even when its step-up did
+   * not count; only those reach either.
+   */
+  phase: "sent" | "recorded" | "applied" | "refused" | "undelivered" | "unknown";
+  /** Why it was not sent, or why the runtime refused it: a code, which the screen puts in words. */
+  reason?: string;
+  /**
+   * Followed to the agent's runtime's answer: `recorded` then says the command waits for it, and
+   * only `applied` says it is done (DEC-2140; web PRODUCT.md P8).
+   */
+  follows?: true;
   sentAt: Iso;
   recordedAt?: Iso;
   record?: CommandRecord;

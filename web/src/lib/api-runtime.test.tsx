@@ -14,7 +14,7 @@ import { buildWorkspace } from "@/fixtures/workspace";
 import { confirmStepUpDigest } from "@/api/confirm";
 import { CONNECT_START_ROUTE } from "@/api/connect";
 import { CONFIRM_RECORD, DEPLOY_RECORD, mockAuthenticator } from "@/test/set-up";
-import { type Authenticator, deployStepUpDigest } from "@/api/passkey";
+import { type Authenticator, commandStepUpDigest, deployStepUpDigest } from "@/api/passkey";
 import { MOCK_PASSKEY_ID } from "@/api/mock-server";
 import { AGENT_ID } from "./ids";
 
@@ -162,6 +162,92 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
       { path: `/v1/workspaces/${WS}/kill-switch`, body: expect.objectContaining({ scope: { kind: "agent", id: view().agents[0].agent_id }, environment_shown: ws.environment }) },
       { path: `/v1/workspaces/${WS}/kill-switch`, body: expect.objectContaining({ scope: { kind: "connection", id: ws.connection.connection_id }, environment_shown: ws.environment }) },
     ]);
+  });
+
+  it("resumes an agent under a passkey bound to the command at the control head, and shows it done only once the runtime applies it (DEC-2140)", async () => {
+    const authenticator = mockAuthenticator(MOCK_PASSKEY_ID);
+    const { posts, server } = mount("approvals", undefined, undefined, { authenticator: authenticator.get });
+    await ready();
+    const agent = view().agents[0].agent_id;
+    const head = server.controlHead();
+    let id = "";
+    act(() => {
+      id = current().send("resume", agent).id;
+    });
+    const command = () => current().commands.find((c) => c.id === id);
+    await waitFor(() => expect(command()?.phase).toBe("applied"));
+    const [challenge] = server.challenges();
+    expect(challenge).toMatchObject({ kind: "resume", digest: commandStepUpDigest(agent, "resume", head), used: true });
+    expect(authenticator.calls).toHaveLength(1);
+    const resumes = posts().filter((p) => p.url.endsWith(`/agents/${agent}/resume`));
+    expect(resumes).toHaveLength(1);
+    const body = JSON.parse(resumes[0].body ?? "{}");
+    expect(body).toMatchObject({ record: null, step_up: { assertion_id: challenge.challenge_id, authenticated_at: challenge.issued_at, method: "passkey" } });
+    expect(Object.keys(body.step_up_assertion).sort()).toEqual(["authenticator_data", "client_data_json", "passkey_id", "signature"]);
+  });
+
+  it("stops an agent under a passkey bound to `stop`, its body naming no release", async () => {
+    const { posts, server } = mount("approvals");
+    await ready();
+    const agent = view().agents[0].agent_id;
+    const head = server.controlHead();
+    let id = "";
+    act(() => {
+      id = current().send("stop", agent).id;
+    });
+    await waitFor(() => expect(current().commands.find((c) => c.id === id)?.phase).toBe("applied"));
+    expect(server.challenges()[0]).toMatchObject({ kind: "stop", digest: commandStepUpDigest(agent, "stop", head) });
+    const body = JSON.parse(posts().find((p) => p.url.endsWith(`/agents/${agent}/stop`))?.body ?? "{}");
+    expect(body).toMatchObject({ release: false, warning_shown: null, record: null, step_up: { method: "passkey" } });
+  });
+
+  it("sends no resume or Stop when the passkey is not given, and says why", async () => {
+    const dismissed: Authenticator = async () => {
+      throw new DOMException("not allowed", "NotAllowedError");
+    };
+    for (const [authenticator, reason] of [
+      [null, "passkey_unavailable"],
+      [dismissed, "passkey_canceled"],
+    ] as const) {
+      const { posts } = mount("approvals", undefined, undefined, { authenticator });
+      await ready();
+      const agent = view().agents[0].agent_id;
+      let ids: string[] = [];
+      act(() => {
+        ids = [current().send("resume", agent).id, current().send("stop", agent).id];
+      });
+      for (const id of ids) await waitFor(() => expect(current().commands.find((c) => c.id === id)).toMatchObject({ phase: "undelivered", reason }));
+      expect(posts().filter((p) => /\/agents\/[^/]+\/(resume|stop)$/.test(p.url))).toHaveLength(0);
+      cleanup();
+    }
+  });
+
+  it("shows a resume the agent's runtime refused as refused, with its reason, never as done", async () => {
+    const { server } = mount("approvals", (send) => async (input, init) => {
+      const answer = await send(input, init);
+      const status = new URL(input).pathname.match(/\/commands\/([0-9A-Z]{26})$/);
+      if (!status || !server.recorded().some((c) => c.event_id === status[1] && c.path.endsWith("/resume"))) return answer;
+      const step = { stream_id: "agent:x", seq: 2, event_type: "OwnerCommandRefused", recorded_at: "2026-10-18T00:00:00.000000000Z", reason: "step_up_missing" };
+      const served = (await answer.json()) as Record<string, unknown>;
+      return new Response(JSON.stringify({ ...served, phase: "refused", steps: [step] }), { status: 200, headers: answer.headers });
+    });
+    await ready();
+    const agent = view().agents[0].agent_id;
+    let id = "";
+    act(() => {
+      id = current().send("resume", agent).id;
+    });
+    await waitFor(() => expect(current().commands.find((c) => c.id === id)).toMatchObject({ phase: "refused", reason: "step_up_missing" }));
+  });
+
+  it("asks no passkey for the kill switch, which never waits on step-up", async () => {
+    const { posts, server } = mount("approvals", undefined, undefined, { authenticator: null });
+    await ready();
+    act(() => {
+      current().send("kill", view().agents[0].agent_id);
+    });
+    await waitFor(() => expect(posts().filter((p) => p.url.endsWith("/kill-switch"))).toHaveLength(1));
+    expect(server.challenges()).toHaveLength(0);
   });
 
   it("pauses every agent not stopped when the owner pauses all, one call each", async () => {

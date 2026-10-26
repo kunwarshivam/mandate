@@ -3,9 +3,9 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readBacktestFrom } from "@/api/backtest";
 import { type Fetch, createWorkspaceClient } from "@/api/client";
-import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand, prepareOwnerExit } from "@/api/commands";
+import { type CommandScope, prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand, prepareOwnerExit } from "@/api/commands";
 import { confirmAccepted, confirmStepUpDigest } from "@/api/confirm";
-import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPasskey, browserAuthenticator, deployStepUpDigest, passkeysRead, usablePasskeys } from "@/api/passkey";
+import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPasskey, browserAuthenticator, commandStepUpDigest, deployStepUpDigest, passkeysRead, usablePasskeys } from "@/api/passkey";
 import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDigest, passkeyList } from "@/api/enrol";
 import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
@@ -238,14 +238,44 @@ export function ApiRuntimeProvider({
     [client, retryMs],
   );
 
-  /** Follows a recorded command to `applied`, `refused` or `ended`, then reads the workspace again (spec §6.3). */
+  /**
+   * Passkey step-up for one action (§3.6, DEC-2128): the member's passkeys are read first, and only
+   * when one can sign is a challenge bound to `kind` and `digest` asked for; then the authenticator
+   * signs it. Each press is its own challenge, never retried. Nothing reaches the journal here: a
+   * refusal means the command was not sent.
+   */
+  const passkeyStepUp = useCallback(
+    async (kind: PasskeyKind, digest: ContentRef): Promise<{ ok: true; value: PasskeyStepUp } | { ok: false; reason: AssertionRefusal | string }> => {
+      const held = await client.read("/passkeys", passkeysRead);
+      if (!held.ok) return { ok: false, reason: held.error.code };
+      const device = authenticator === undefined ? browserAuthenticator() : authenticator;
+      const usable = usablePasskeys(held.value.passkeys, device, nowRef.current);
+      if (!usable.ok) return usable;
+      const issued = await client.askChallenge({ kind, digest });
+      if (!issued.ok) return { ok: false, reason: issued.error.code };
+      return assertPasskey(issued.value, usable.value, device, nowRef.current);
+    },
+    [client, authenticator],
+  );
+
+  /** The control stream's head (§4.8.1), the `control_head` a resume's or Stop's step-up binds (DEC-2102 item 4); a refusal's code when unread. */
+  const controlHead = useCallback(async (): Promise<{ ok: true; head: number } | { ok: false; reason: string }> => {
+    const stream = `ctl:${client.workspaceId}`;
+    const read = await client.read(`/journal/streams/${encodeURIComponent(stream)}/events?after_seq=0&limit=1`, journalPageRead(stream));
+    return read.ok ? { ok: true, head: read.value.head_seq } : { ok: false, reason: read.error.code };
+  }, [client]);
+
+  /**
+   * Follows a recorded command to `applied`, `refused` or `ended`, then reads the workspace again (spec
+   * §6.3): the phase, and the first reason a step gave, which a refusal names.
+   */
   const follow = useCallback(
-    async (eventId: string): Promise<CommandPhase | null> => {
+    async (eventId: string): Promise<{ phase: CommandPhase; reason: string | null } | null> => {
       for (let read = 0; read < STATUS_READS && mounted.current; read += 1) {
         const status = await client.commandStatus(eventId);
         if (status.ok && SETTLED.has(status.value.phase)) {
           await refresh();
-          return status.value.phase;
+          return { phase: status.value.phase, reason: status.value.steps.find((step) => step.reason !== null)?.reason ?? null };
         }
         await wait(statusPollMs);
       }
@@ -253,6 +283,37 @@ export function ApiRuntimeProvider({
       return null;
     },
     [client, refresh, statusPollMs],
+  );
+
+  /**
+   * A resume or Stop over the API under passkey step-up (DEC-2140): the control head read, a passkey
+   * bound to the command there, then the command with its evidence and assertion, followed to the
+   * agent's runtime's answer. A passkey not given sends nothing and says why. The deployment records
+   * a command whose step-up did not count with none, and the runtime refuses it, so a 202 alone is
+   * never shown as done: only `applied` is (web PRODUCT.md P8). The kill switch never comes here.
+   */
+  const brake = useCallback(
+    async (kind: "resume" | "stop", agentId: string | null, scope: CommandScope, onRecorded: () => void, record?: CommandRecord): Promise<Partial<Command>> => {
+      if (!agentId) return { phase: "undelivered", reason: "no_agent" };
+      const head = await controlHead();
+      if (!head.ok) return { phase: "undelivered", reason: head.reason };
+      const stepUp = await passkeyStepUp(kind, commandStepUpDigest(agentId, kind, head.head));
+      if (!stepUp.ok) return { phase: "undelivered", reason: stepUp.reason };
+      const prepared = prepareOwnerCommand(client, scope, kind, agentId, record, stepUp.value);
+      if (!prepared.ok) return { phase: "undelivered", reason: prepared.reason };
+      const delivered = await deliver(prepared.commands[0]);
+      if (delivered.phase === "undelivered") return { phase: "undelivered", reason: delivered.reason };
+      if (delivered.phase === "unknown") {
+        if (delivered.eventId) void follow(delivered.eventId);
+        return { phase: "unknown" };
+      }
+      onRecorded();
+      const settled = await follow(delivered.eventId);
+      if (settled?.phase === "applied") return { phase: "applied", recordedAt: nowRef.current, follows: true };
+      if (settled?.phase === "refused") return { phase: "refused", reason: settled.reason ?? undefined, recordedAt: nowRef.current, follows: true };
+      return { phase: "recorded", recordedAt: nowRef.current, follows: true };
+    },
+    [client, controlHead, passkeyStepUp, deliver, follow],
   );
 
   const send = useCallback(
@@ -265,6 +326,13 @@ export function ApiRuntimeProvider({
       const scope = last
         ? { agents: last.view.agents, connectionId: last.ws.connection.connection_id, environment: last.ws.environment }
         : { agents: [], connectionId: "", environment: wsRef.current.environment };
+      if (kind === "resume" || kind === "stop") {
+        void (async () => {
+          const outcome = await brake(kind, agentId, scope, () => update({ phase: "recorded", recordedAt: nowRef.current, follows: true }), record);
+          if (mounted.current) update(outcome);
+        })();
+        return command;
+      }
       const prepared = prepareOwnerCommand(client, scope, kind, agentId, record);
       void (async () => {
         if (!prepared.ok) return update({ phase: "undelivered" });
@@ -282,7 +350,7 @@ export function ApiRuntimeProvider({
       })();
       return command;
     },
-    [client, deliver, follow],
+    [client, deliver, follow, brake],
   );
 
   /** The owner's exit (§5.4): sent with one key until answered, then followed to its outcome (§5.5). */
@@ -295,7 +363,7 @@ export function ApiRuntimeProvider({
       if (delivered.phase === "recorded") onRecorded();
       if (!delivered.eventId) return { phase: "unknown" };
       const settled = await follow(delivered.eventId);
-      if (settled === "applied" || settled === "refused" || settled === "ended") return { phase: settled };
+      if (settled && (settled.phase === "applied" || settled.phase === "refused" || settled.phase === "ended")) return { phase: settled.phase };
       return delivered.phase === "recorded" ? { phase: "recorded" } : { phase: "unknown" };
     },
     [client, deliver, follow],
@@ -320,7 +388,7 @@ export function ApiRuntimeProvider({
         }
         update({ phase: "recorded", recordedAt: nowRef.current });
         const settled = await follow(delivered.eventId);
-        if (response === "approve" && settled === "applied" && mounted.current) update({ phase: "decided" });
+        if (response === "approve" && settled?.phase === "applied" && mounted.current) update({ phase: "decided" });
       })();
     },
     [client, deliver, follow],
@@ -530,25 +598,6 @@ export function ApiRuntimeProvider({
     [client, deliver, patchSetUp],
   );
 
-  /**
-   * Passkey step-up for one action (§3.6, DEC-2128): the member's passkeys are read first, and only
-   * when one can sign is a challenge bound to `kind` and `digest` asked for; then the authenticator
-   * signs it. Each press is its own challenge, never retried. Nothing reaches the journal here: a
-   * refusal means the command was not sent.
-   */
-  const passkeyStepUp = useCallback(
-    async (kind: PasskeyKind, digest: ContentRef): Promise<{ ok: true; value: PasskeyStepUp } | { ok: false; reason: AssertionRefusal | string }> => {
-      const held = await client.read("/passkeys", passkeysRead);
-      if (!held.ok) return { ok: false, reason: held.error.code };
-      const device = authenticator === undefined ? browserAuthenticator() : authenticator;
-      const usable = usablePasskeys(held.value.passkeys, device, nowRef.current);
-      if (!usable.ok) return usable;
-      const issued = await client.askChallenge({ kind, digest });
-      if (!issued.ok) return { ok: false, reason: issued.error.code };
-      return assertPasskey(issued.value, usable.value, device, nowRef.current);
-    },
-    [client, authenticator],
-  );
 
   /**
    * The member's workspace passkeys (§3.6, DEC-2108). Adding one asks a registration challenge;

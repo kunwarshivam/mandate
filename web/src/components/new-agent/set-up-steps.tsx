@@ -18,6 +18,7 @@ import { useCan } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import type { Draft } from "./draft";
 import { confirmAction, confirmedPaths, deployAction, summaryLines } from "./summary";
+import { stepUpWords } from "@/lib/step-up-words";
 
 /**
  * Setting up an agent's last stretch as three steps, each its own record and each shown only once the
@@ -118,28 +119,12 @@ function undeliveredWords(reason: string | undefined): string {
       return NOT_SENT;
     case "unreachable":
       return "Not delivered: your deployment did not answer.";
-    case "step_up_required":
-      return "Not recorded: your deployment asked for a passkey check that was not sent.";
-    case "step_up_missing":
-    case "step_up_stale":
-    case "step_up_method":
-      return "Not recorded: your deployment did not accept the passkey check.";
-    case "passkey_unavailable":
-      return "Not sent: this browser can't use a passkey.";
-    case "no_passkey":
-      return "Not sent: you have no passkey on your deployment yet. Add one, then try again.";
-    case "passkey_cooling_off":
-      return "Not sent: your passkey is new, and confirms only once its first 24 hours have passed.";
-    case "passkey_canceled":
-      return "Not sent: the passkey check was canceled or timed out.";
-    case "passkey_failed":
-      return "Not sent: your passkey's answer could not be read.";
     case "not_created":
       return "Not sent: version 1 was not created, so there is nothing to confirm.";
     case "not_confirmed":
       return "Not sent: version 1 is not confirmed, so there is nothing to deploy.";
     default:
-      return "Not recorded: your deployment refused it.";
+      return stepUpWords(reason) ?? "Not recorded: your deployment refused it.";
   }
 }
 

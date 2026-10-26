@@ -3,27 +3,39 @@
 import { Plug } from "pixelarticons/react/Plug.js";
 import { clock } from "@/lib/format";
 import { type Command, useRuntime } from "@/lib/mock-runtime";
+import { stepUpWords } from "@/lib/step-up-words";
 import { commandTitle, recordedLine } from "./commands";
 
-/** "Sent" until the runtime records it (rule 5); the recorded line only once it has. */
+/**
+ * "Sent" until the runtime records it (rule 5); the recorded line only once it has, and for a command
+ * followed to the agent's runtime, only once that runtime applied it (DEC-2140).
+ */
 export function CommandEntry({ command, label }: { command: Command; label: string }) {
   const { now } = useRuntime();
   return (
     <p data-phase={command.phase} className="reveal rounded-xl bg-background px-4 py-3 text-sm">
       <span className="font-semibold">{commandTitle(command.kind, label)}.</span>{" "}
-      <PhaseLine phase={command.phase} at={clock(command.recordedAt ?? now)} recorded={recordedLine(command.kind, label)} />
+      <PhaseLine command={command} at={clock(command.recordedAt ?? now)} recorded={recordedLine(command.kind, label)} />
     </p>
   );
 }
 
-function PhaseLine({ phase, at, recorded }: { phase: Command["phase"]; at: string; recorded: string }) {
+function PhaseLine({ command, at, recorded }: { command: Command; at: string; recorded: string }) {
+  const { phase, reason, follows } = command;
   switch (phase) {
     case "sent":
       return "Sent; waiting for the runtime to record it.";
     case "recorded":
+      return follows ? `Recorded at ${at}; waiting for the agent's runtime to apply it.` : `Recorded at ${at}. ${recorded}`;
+    case "applied":
       return `Recorded at ${at}. ${recorded}`;
+    case "refused":
+      return `Recorded at ${at}, then refused by the agent's runtime, so nothing changed. ${refusedWords(reason)}`;
     case "undelivered":
-      return "Not delivered: your deployment did not answer, so nothing changed from this request. Use the broker directly, as described above.";
+      return (
+        stepUpWords(reason) ??
+        "Not delivered: your deployment did not answer, so nothing changed from this request. Use the broker directly, as described above."
+      );
     case "unknown":
       return "The result is unknown; we are checking. Nothing on screen changes until the journal answers.";
     default: {
@@ -31,6 +43,12 @@ function PhaseLine({ phase, at, recorded }: { phase: Command["phase"]; at: strin
       throw new Error(`unhandled phase ${String(unhandled)}`);
     }
   }
+}
+
+/** Why the agent's runtime refused a recorded command, in words; the kill switch needs no passkey, so it is named as the way that still works. */
+function refusedWords(reason: string | undefined): string {
+  if (reason?.startsWith("step_up_")) return "It did not accept your passkey check. Try again; the kill switch needs no passkey.";
+  return "The kill switch still works, and needs no passkey.";
 }
 
 /** The deployment is not answering: say so, and give the route to the broker that still works. */
