@@ -1279,7 +1279,6 @@ fn placeholder() -> Issued {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_user_reference_matches_its_ulid_in_either_case_and_nothing_else() {
     let lower = format!("user:{}", ALICE.to_ascii_lowercase());
     let w = world_with(&Setup {
