@@ -1904,6 +1904,7 @@ dependencies = [
 name = "mandate-daemon"
 version = "0.0.0"
 dependencies = [
+ "mandate-accounting",
  "mandate-artifacts-fs",
  "mandate-canon",
  "mandate-domain",
@@ -2058,6 +2059,17 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+]
+
+[[package]]
+name = "mandate-gate-context"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-num",
+ "mandate-time",
+ "proptest",
+ "thiserror",
 ]
 
 [[package]]
