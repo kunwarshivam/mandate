@@ -856,7 +856,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 Effect::Journal(draft) => drafts.push(draft),
                 Effect::Broker(request) => requests.push(request),
                 Effect::Notify(notice) => asked.push(Alert {
-                    key: notice.message_key,
+                    key: notice.kind.key(),
                     subject: Some(notice.subject_event.0),
                 }),
                 Effect::Timer(_) => {}

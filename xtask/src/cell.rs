@@ -135,6 +135,12 @@ const SCHEDULER_PACKAGE: &str = "mandate-scheduler";
 const DATA_DOCKERFILE: &str = "deploy/cell/images/data.Dockerfile";
 const DATA_PROCESS: &str = "data";
 const DATA_PACKAGE: &str = "mandate-datad";
+/// The workspace model gateway's image (E21-62): the only caller of a model provider, serving the
+/// demo's recorded research bundle in the cell (DEC-2326 item 3), which it carries as the runtime
+/// image does.
+const MODEL_GATEWAY_DOCKERFILE: &str = "deploy/cell/images/model-gateway.Dockerfile";
+const MODEL_GATEWAY_PROCESS: &str = "model-gateway";
+const MODEL_GATEWAY_PACKAGE: &str = "mandate-gatewayd";
 /// The token-exchange process's image (DEC-1175), which the deployment manager starts once per
 /// OAuth connect.
 const EXCHANGE_DOCKERFILE: &str = "deploy/cell/images/token-exchange.Dockerfile";
@@ -420,7 +426,10 @@ pub fn ci_upgrade() -> Result<()> {
 }
 
 /// `cargo xtask ci cell-journal`, `ci cell-failover`, `ci cell-kill-switch`, `ci cell-executor` and
-/// `ci cell-vault`: the cell, then `drills`, plain and seeded (E21-41, DEC-2602, DEC-2615, DEC-2616). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
+/// `ci cell-vault`: the cell, then `drills`, plain and seeded, or only the variant
+/// [`VARIANT_ENV`] names, and only the drill [`DRILL_ENV`] names (E21-41, DEC-2602, DEC-2615,
+/// DEC-2616, DEC-2641). The chart checks are `ci cell`'s.
+/// Skipped as `ci cell` is.
 pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
     if let Some(reason) = tools_missing() {
         if env::var_os(CELL_REQUIRED_ENV).is_some() {
@@ -429,9 +438,57 @@ pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
         eprintln!("    {job}: {reason}; skipping (see deploy/cell/README.md)");
         return Ok(());
     }
+    let (plain, seeded) = variants(env::var(VARIANT_ENV).ok().as_deref())?;
+    let drills = shard_drills(job, drills, env::var(DRILL_ENV).ok().as_deref())?;
     up()?;
-    drill(drills, false)?;
-    drill(drills, true)
+    if plain {
+        drill(&drills, false)?;
+    }
+    if seeded {
+        drill(&drills, true)?;
+    }
+    Ok(())
+}
+
+/// One drill of a drill job, by its name, when CI's matrix also splits the job by drill because
+/// one variant of all its drills still runs past DEC-464's ten minutes (DEC-2641); unset or empty,
+/// the job runs every drill of its list.
+pub const DRILL_ENV: &str = "MANDATE_CELL_DRILL";
+
+/// The drills a run of `job` takes: all of `drills`, or the one [`DRILL_ENV`] names, which must be
+/// one of the job's own, so a misspelt matrix entry is refused rather than running nothing.
+fn shard_drills(job: &str, drills: &[Drill], named: Option<&str>) -> Result<Vec<Drill>> {
+    match named.unwrap_or("") {
+        "" => Ok(drills.to_vec()),
+        name => drills
+            .iter()
+            .copied()
+            .find(|d| d.name() == name)
+            .map(|d| vec![d])
+            .with_context(|| {
+                let names: Vec<&str> = drills.iter().map(|d| d.name()).collect();
+                format!(
+                    "{DRILL_ENV}={name} is not one of {job}'s drills: {}",
+                    names.join(", ")
+                )
+            }),
+    }
+}
+
+/// Which of a drill job's variants this run takes, set by CI's matrix so each runs on its own
+/// runner inside DEC-464's ten minutes: `plain`, `seeded`, or, unset or empty, both, one after the
+/// other, as a local run does.
+pub const VARIANT_ENV: &str = "MANDATE_CELL_VARIANT";
+
+/// `(plain, seeded)` for [`VARIANT_ENV`]'s value; refused for any other value, so a misspelt
+/// matrix entry runs nothing silently.
+fn variants(value: Option<&str>) -> Result<(bool, bool)> {
+    match value.unwrap_or("") {
+        "" => Ok((true, true)),
+        "plain" => Ok((true, false)),
+        "seeded" => Ok((false, true)),
+        other => bail!("{VARIANT_ENV}={other} is neither plain nor seeded"),
+    }
 }
 
 /// The Kubernetes API's address for a rendering with no cluster to read it from: k3s's
@@ -669,17 +726,18 @@ const RUNNER: &str = "mandate-backtest-runner";
 
 /// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
 /// them.
-const BUILT_PACKAGES: [&str; 10] = [
+const BUILT_PACKAGES: [&str; 11] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
-    "mandate-daemon",
+    "mandate-runtime-models",
     "mandate-deployd",
     "mandate-executord",
     "mandate-provisionerd",
     EXCHANGE_PACKAGE,
     SCHEDULER_PACKAGE,
     DATA_PACKAGE,
+    MODEL_GATEWAY_PACKAGE,
 ];
 
 /// The token exchange's package (DEC-1175), a dev-profile build like the rest, so its cell token
@@ -692,7 +750,7 @@ const STUB_PACKAGE: &str = "mandate-stub-issuer";
 /// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
 /// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
 /// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
-pub const IMAGE_PACKAGES: [&str; 11] = [
+pub const IMAGE_PACKAGES: [&str; 12] = [
     BUILT_PACKAGES[0],
     BUILT_PACKAGES[1],
     BUILT_PACKAGES[2],
@@ -703,6 +761,7 @@ pub const IMAGE_PACKAGES: [&str; 11] = [
     BUILT_PACKAGES[7],
     BUILT_PACKAGES[8],
     BUILT_PACKAGES[9],
+    BUILT_PACKAGES[10],
     STUB_PACKAGE,
 ];
 
@@ -899,6 +958,17 @@ fn scheduler_image() -> Result<Option<String>> {
     local_tag(SCHEDULER_PROCESS, &[SCHEDULER_PACKAGE]).map(Some)
 }
 
+/// The cell's `model-gateway` image (E21-62): this checkout's `mandate-gatewayd`, with the demo's
+/// recorded research bundle beside it. `None` where the `mandate` image is pulled, as for the
+/// runtime, whose research calls it serves.
+fn model_gateway_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    let files: Vec<String> = demo_research().into_iter().map(|(from, _)| from).collect();
+    local_tag_with(MODEL_GATEWAY_PROCESS, &[MODEL_GATEWAY_PACKAGE], &files).map(Some)
+}
+
 /// The cell's `data` image (E21-29 lane SC): this checkout's `mandate-datad`. `None` where the
 /// `mandate` image is pulled, as for the runtime, which reads what it stores.
 fn data_image() -> Result<Option<String>> {
@@ -994,11 +1064,14 @@ fn image_sets() -> Result<Vec<String>> {
     if let Some(data) = data_image()? {
         sets.push(format!("images.{DATA_PROCESS}={data}"));
     }
+    if let Some(gateway) = model_gateway_image()? {
+        sets.push(format!("images.{MODEL_GATEWAY_PROCESS}={gateway}"));
+    }
     Ok(sets)
 }
 
 /// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `scheduler`, `data`,
-/// `deploy-manager` and `role-provisioner` images from this checkout (never with the `live` feature), bring up the k3d
+/// `model-gateway`, `deploy-manager` and `role-provisioner` images from this checkout (never with the `live` feature), bring up the k3d
 /// cluster if it is not up, install the CloudNativePG operator, the journal's Postgres and the
 /// vault, issue the vault's AppRole Secrets once the provisioner runs ([`provision_vault`]), install
 /// the workspace chart, and wait until every pod is ready and the migration Job has finished.
@@ -1015,6 +1088,7 @@ pub fn up() -> Result<()> {
     let executor = executor_image()?;
     let scheduler = scheduler_image()?;
     let data = data_image()?;
+    let gateway = model_gateway_image()?;
     let stub = stub_image_tag()?;
     let exchange = exchange_image()?;
     if source == ImageSource::Build {
@@ -1037,6 +1111,19 @@ pub fn up() -> Result<()> {
     }
     if let Some(data) = &data {
         build_image(data, DATA_DOCKERFILE, DATA_PACKAGE, &[])?;
+    }
+    if let Some(gateway) = &gateway {
+        let research = demo_research();
+        let files: Vec<(&str, &str)> = research
+            .iter()
+            .map(|(from, name)| (from.as_str(), name.as_str()))
+            .collect();
+        build_image(
+            gateway,
+            MODEL_GATEWAY_DOCKERFILE,
+            MODEL_GATEWAY_PACKAGE,
+            &files,
+        )?;
     }
     if let Some(stub) = &stub {
         build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
@@ -1072,7 +1159,7 @@ pub fn up() -> Result<()> {
         create_cluster()?;
     }
     let built = (source == ImageSource::Build).then_some(&image);
-    for image in [
+    let images = [
         built,
         api.as_ref(),
         runtime.as_ref(),
@@ -1083,12 +1170,12 @@ pub fn up() -> Result<()> {
         exchange.as_ref(),
         manager.as_ref(),
         provisioner.as_ref(),
+        gateway.as_ref(),
     ]
     .into_iter()
     .flatten()
-    {
-        import_image(image)?;
-    }
+    .collect::<Vec<_>>();
+    import_images(&images)?;
     let config = kubeconfig()?;
     sh(
         "k3d",
@@ -1347,7 +1434,7 @@ const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
 /// `mandate-cli`, the backtest runner, `mandate-api-server` and the runtime's `mandate-daemon`
-/// (DEC-1013), the deployment manager's `mandate-deployd` (DEC-1172), the executor's
+/// (DEC-1013, built by `mandate-runtime-models` since DEC-2383), the deployment manager's `mandate-deployd` (DEC-1172), the executor's
 /// `mandate-executord` (DEC-2031), the scheduler's `mandate-scheduler` (E21-29) and the data
 /// process's `mandate-datad` linked statically, so their images need no base (DEC-993 item 9),
 /// with no feature at all: never `live`; with them the stub issuer once [`stub_ready`], which the
@@ -1451,6 +1538,29 @@ fn import_image(image: &str) -> Result<()> {
         eprintln!("xtask: {image} is not in {NODE} after import attempt {attempt}");
     }
     bail!("{image} never reached {NODE} after {IMPORT_ATTEMPTS} imports")
+}
+
+/// Every image into the node in one `k3d image import`, which starts k3d's tools container once
+/// rather than once an image (about 30 seconds of `up` on a CI runner, DEC-2641), then each image
+/// the node does not yet hold through [`import_image`]'s own attempts.
+fn import_images(images: &[&String]) -> Result<()> {
+    if images.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["image", "import", "--cluster", CLUSTER];
+    args.extend(images.iter().map(|image| image.as_str()));
+    if sh("k3d", &args).is_err() {
+        eprintln!(
+            "xtask: the batched image import failed; importing what the node lacks one by one"
+        );
+    }
+    api_server_ready()?;
+    for image in images {
+        if !node_holds(image) {
+            import_image(image)?;
+        }
+    }
+    Ok(())
 }
 
 /// Whether the node's containerd lists `image` by its exact reference; a node it cannot ask holds
@@ -5747,6 +5857,42 @@ mod tests {
 
     use super::*;
 
+    /// A drill job runs both variants locally, and one each in CI's matrix; any other value is
+    /// refused rather than running nothing.
+    #[test]
+    fn a_drill_job_runs_the_drills_its_matrix_names() -> Result<()> {
+        assert_eq!(
+            shard_drills("cell-executor", &EXECUTOR_DRILLS, None)?,
+            EXECUTOR_DRILLS.to_vec()
+        );
+        assert_eq!(
+            shard_drills("cell-executor", &EXECUTOR_DRILLS, Some(""))?,
+            EXECUTOR_DRILLS.to_vec()
+        );
+        assert_eq!(
+            shard_drills("cell-executor", &EXECUTOR_DRILLS, Some("ticks"))?,
+            vec![Drill::Ticks]
+        );
+        for other in ["exchange", "boot", "Ticks", "nope"] {
+            assert!(
+                shard_drills("cell-executor", &EXECUTOR_DRILLS, Some(other)).is_err(),
+                "{other} is not one of cell-executor's drills"
+            );
+        }
+        Ok(())
+    }
+
+    /// A drill job runs both variants locally, and one each in CI's matrix; any other value is
+    /// refused rather than running nothing.
+    #[test]
+    fn a_drill_job_runs_the_variants_its_matrix_names() {
+        assert_eq!(variants(None).unwrap(), (true, true));
+        assert_eq!(variants(Some("")).unwrap(), (true, true));
+        assert_eq!(variants(Some("plain")).unwrap(), (true, false));
+        assert_eq!(variants(Some("seeded")).unwrap(), (false, true));
+        assert!(variants(Some("both")).is_err());
+    }
+
     /// The API's diagnosis asks for the logs of a run before only of the containers that restarted.
     #[test]
     fn only_restarted_containers_are_asked_for_their_previous_logs() {
@@ -6331,6 +6477,86 @@ mod tests {
         assert_eq!(process["image"], SCHEDULER_PROCESS);
         assert_eq!(process["built"], true);
         assert_eq!(process["probe"][0], "/mandate-scheduler");
+        Ok(())
+    }
+
+    /// The model gateway's image (E21-62): built with the cell's others and followed by the cell
+    /// jobs, its Dockerfile copies exactly that binary and the recorded bundle on an empty base as
+    /// non-root, and its process serves the bundle's `research.json` with `--recorded` and never
+    /// names a live start (DEC-2326 item 3).
+    #[test]
+    fn the_cell_builds_the_model_gateways_image_over_the_recording() -> Result<()> {
+        assert!(BUILT_PACKAGES.contains(&MODEL_GATEWAY_PACKAGE));
+        assert!(IMAGE_PACKAGES.contains(&MODEL_GATEWAY_PACKAGE));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dockerfile = fs::read_to_string(root.join(MODEL_GATEWAY_DOCKERFILE))?;
+        for line in [
+            "FROM scratch",
+            "COPY mandate-gatewayd /mandate-gatewayd",
+            "COPY research/ /usr/local/share/mandate/research/",
+            "USER 65532:65532",
+        ] {
+            assert!(dockerfile.contains(line), "{line}: {dockerfile}");
+        }
+        let process = processes_in(&root)?
+            .into_iter()
+            .find(|p| p["name"] == MODEL_GATEWAY_PROCESS)
+            .context("processes.json has no model gateway")?;
+        assert_eq!(process["image"], MODEL_GATEWAY_PROCESS);
+        assert_eq!(process["built"], true);
+        assert_eq!(process["probe"][0], "/mandate-gatewayd");
+        let args: Vec<&str> = process["args"]
+            .as_array()
+            .context("the model gateway has no args")?
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        let recorded = args.iter().position(|a| *a == "--recorded");
+        assert_eq!(
+            recorded.and_then(|i| args.get(i + 1)).copied(),
+            Some("/usr/local/share/mandate/research/research.json")
+        );
+        assert!(
+            !args.iter().any(|a| a.starts_with("--registry")),
+            "{args:?}"
+        );
+        assert!(
+            demo_research()
+                .iter()
+                .any(|(_, name)| name == "research/research.json")
+        );
+        Ok(())
+    }
+
+    /// Every image `cell up` builds is imported into the cluster: each `*_image()` or
+    /// `*_image_tag()` it binds is in the import list, so no process the chart names an image for
+    /// waits on a pull that cannot succeed (`IfNotPresent` on a `mandate.local/` tag).
+    #[test]
+    fn every_image_cell_up_builds_is_imported() -> Result<()> {
+        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cell.rs"))?;
+        let up = source
+            .split_once("pub fn up() -> Result<()> {")
+            .and_then(|(_, rest)| rest.split_once("\n}\n"))
+            .map(|(body, _)| body)
+            .context("cell.rs has no up()")?;
+        let imported = up
+            .split_once("for image in [")
+            .and_then(|(_, rest)| rest.split_once(']'))
+            .map(|(list, _)| list)
+            .context("up() has no import list")?;
+        let bound: Vec<&str> = up
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("let "))
+            .filter(|line| line.contains("_image()?;") || line.contains("_image_tag()?;"))
+            .filter_map(|line| line.split_once(" = ").map(|(name, _)| name))
+            .collect();
+        assert!(bound.len() >= 8, "{bound:?}");
+        for name in bound {
+            assert!(
+                imported.contains(&format!("{name}.as_ref()")),
+                "{name} is built but never imported"
+            );
+        }
         Ok(())
     }
 

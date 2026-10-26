@@ -10,6 +10,7 @@ description = "The journaled facts an opening's builder and gate read, folded fr
 workspace = true
 
 [dependencies]
+mandate-accounting.workspace = true
 mandate-canon.workspace = true
 mandate-num.workspace = true
 mandate-risk.workspace = true

@@ -31,5 +31,7 @@ pub use context::{AdvisoryGateContext, AdvisoryOrderFacts, BuilderContext, Decis
 pub use error::PortError;
 pub use gate::{evaluate, evaluate_deferring, proposed_order};
 pub use mandate::gate_mandate;
-pub use plan::{POLICY_OVERLAY, auto_not_allowed, classify, size, validate_order_execution};
+pub use plan::{
+    POLICY_OVERLAY, auto_not_allowed, classify, size, thesis_exit, validate_order_execution,
+};
 pub use view::{ViewFacts, runtime_view};

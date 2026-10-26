@@ -173,7 +173,7 @@ fn step_with(effects: Vec<Effect>, requests: Vec<ResearchRequest>) -> ResearchSt
 fn notice() -> Effect {
     Effect::Notify(NotificationRef {
         subject_event: EventId("e1".to_owned()),
-        message_key: "research_notice",
+        kind: mandate_runtime::RuntimeAlert::ResearchCallRefused,
     })
 }
 

@@ -2,6 +2,7 @@
 //! DEC-485): the final mode first, then the agent's own orders cancelled by id, then its
 //! sub-ledger sold through the executor's own flatten intents, each step journaled.
 
+use mandate_notify::OwnerAlertKind;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
@@ -104,7 +105,7 @@ pub(crate) fn kill_switch(
             ),
         ],
     )?;
-    batch.notify(switch, KILL_SWITCH);
+    batch.notify(switch, OwnerAlertKind::KillSwitch);
     cancel_each(batch, cancels)
 }
 
@@ -180,7 +181,7 @@ fn account(
             ),
         ],
     )?;
-    batch.notify(switch, KILL_SWITCH);
+    batch.notify(switch, OwnerAlertKind::KillSwitch);
     batch.broker(BrokerRequest::CancelAll(AccountWideScope::new(
         AccountWide::Account(reference),
     )));
@@ -587,7 +588,7 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
                         Vec::new(),
                         Some(id.clone()),
                     )?;
-                    batch.notify(alerted, "exit_unpriced");
+                    batch.notify(alerted, OwnerAlertKind::ExitStalled);
                 }
                 continue;
             };
@@ -1013,11 +1014,16 @@ mod tests {
             let alerts: Vec<(&EventId, &str)> = effects
                 .iter()
                 .filter_map(|effect| match effect {
-                    Effect::Notify(alert) => Some((&alert.subject_event, alert.message_key)),
+                    Effect::Notify(alert) => Some((&alert.subject_event, alert.kind.key())),
                     _ => None,
                 })
                 .collect();
-            assert_eq!(alerts, vec![(&record.event_id, "kill_switch")], "{name}");
+            assert_eq!(
+                alerts,
+                vec![(&record.event_id, "kill_switch")],
+                "{name}: every switch is alerted here until workspace services write a user's \
+                 (DEC-2514 item 2, backlog E8-9k)"
+            );
             assert_eq!(
                 raised(&effects),
                 vec![format!("k-{}-0", record.event_id.0)],
