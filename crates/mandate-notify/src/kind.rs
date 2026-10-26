@@ -125,7 +125,8 @@ impl NoticeKind {
     #[rustfmt::skip]
     pub const ALL: [Self; 35] = [
         Self::ApprovalRequested, Self::ApprovalReminder, Self::RiskLimit, Self::KillSwitch,
-        Self::KillSwitchUnapplied, Self::AgentHeld, Self::RetirementHeld, Self::AccountRestriction, Self::Protection, Self::ExitStalled,
+        Self::KillSwitchUnapplied, Self::AgentHeld, Self::RetirementHeld,
+        Self::AccountRestriction, Self::Protection, Self::ExitStalled,
         Self::Reconciliation, Self::ExternalActivity, Self::AccountState, Self::DataFeedDown,
         Self::IntegrityIncident, Self::CredentialAdded, Self::NewDevice,
         Self::NotificationAddressChanged, Self::RecoveryUsed, Self::RoleGranted,
