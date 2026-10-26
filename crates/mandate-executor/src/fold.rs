@@ -1301,6 +1301,11 @@ fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), 
             state.account_switch = None;
             state.switch_read = None;
         }
+        if let Some(held) = restriction.strip_prefix("reconciliation:")
+            && let Ok(instrument) = InstrumentId::new(held)
+        {
+            state.mismatched.remove(&instrument);
+        }
         state.restrictions.remove(&(agent.clone(), restriction));
     } else {
         state

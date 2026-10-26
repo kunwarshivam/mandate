@@ -24,6 +24,9 @@ const ACKNOWLEDGED: &str = "OwnerAcknowledged";
 const REQUESTED: &str = "OwnerAcknowledgmentRequested";
 const REFUSED: &str = "OwnerCommandRefused";
 
+/// The prefix of every reconciliation hold's restriction (`crate::state::restriction_for`).
+const RECONCILIATION: &str = "reconciliation:";
+
 /// Mandate spec §6.1's freshness window, in seconds, inclusive.
 const STEP_UP_WINDOW_S: i64 = 300;
 
@@ -45,6 +48,13 @@ pub(crate) struct Acknowledgments {
     copied: BTreeSet<String>,
     /// The acknowledgment copy folded last, until the next record says whether it was refused.
     pending: Option<Pending>,
+    /// Every reconciliation hold, by its `event_id`: the executor's own `exits_only` or `paused`
+    /// `AgentModeApplied` under `reconciliation:<subject>`, as its agent and restriction (§9.28
+    /// v0.104, DEC-2830).
+    holds: BTreeMap<String, (String, String)>,
+    /// The latest `AgentModeApplied` of each agent and restriction: a hold stands while it is its
+    /// key's latest, so applying it again or removing it supersedes it.
+    latest: BTreeMap<(String, String), String>,
 }
 
 /// One triggered limit: whose and which, and whether it still stands (§9.28 check 2).
@@ -157,6 +167,21 @@ pub(crate) fn fold(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(),
                 superseded,
             });
         }
+        "AgentModeApplied" => {
+            if let (Some(agent), Some(restriction)) = (
+                optional_text(payload, "agent"),
+                optional_text(payload, "restriction"),
+            ) {
+                let key = (agent.to_owned(), restriction.to_owned());
+                let holds = payload.get("originated") == Some(&Value::Bool(true))
+                    && matches!(optional_text(payload, "to"), Some("exits_only" | "paused"))
+                    && restriction.starts_with(RECONCILIATION);
+                if holds {
+                    held.holds.insert(event.event_id.0.clone(), key.clone());
+                }
+                held.latest.insert(key, event.event_id.0.clone());
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -204,12 +229,25 @@ pub(crate) fn copy(
     } else {
         None
     };
-    batch.journal_raw(
+    let hold = held_by(&batch.view.acknowledgments, handoff).cloned();
+    let copy = batch.journal_raw(
         kind,
         handoff.schema_version,
         Some(original.event_id.clone()),
         original.payload.clone(),
     )?;
+    if let (true, None, Some((agent, restriction))) = (kind == ACKNOWLEDGED, verdict, hold) {
+        batch.journal(
+            "AgentModeApplied",
+            Some(copy),
+            vec![
+                ("agent", text(agent)),
+                ("to", text("normal")),
+                ("restriction", text(restriction)),
+                ("originated", Value::Bool(true)),
+            ],
+        )?;
+    }
     if let Some(reason) = verdict {
         let refusal = object(vec![
             ("command", text("acknowledge")),
@@ -221,6 +259,53 @@ pub(crate) fn copy(
     Ok(())
 }
 
+/// What a handed acknowledgment's `event` names: a version 1 acknowledgment names a limit, and a
+/// version 2 one what its `subject` says.
+fn subject(handoff: &AcknowledgmentHandoff) -> Option<&str> {
+    if handoff.schema_version == 1 {
+        Some("limit")
+    } else {
+        optional_text(&handoff.original.payload, "subject")
+    }
+}
+
+/// The reconciliation hold an acknowledgment of `subject` `reconciliation` names, as its agent and
+/// restriction, if the account stream holds it.
+fn held_by<'h>(
+    held: &'h Acknowledgments,
+    handoff: &AcknowledgmentHandoff,
+) -> Option<&'h (String, String)> {
+    if subject(handoff) != Some("reconciliation") {
+        return None;
+    }
+    optional_text(&handoff.original.payload, "event").and_then(|id| held.holds.get(id))
+}
+
+/// §9.28's checks 1 and 2 for what the acknowledgment names: a limit's trigger (§9.28), or a
+/// reconciliation hold (v0.104, DEC-2830). Any other subject names nothing the executor lifts yet,
+/// so it is refused `trigger_unknown` (a restriction's lift is E7-2y slice C's).
+fn named_stands(held: &Acknowledgments, handoff: &AcknowledgmentHandoff) -> Option<&'static str> {
+    let p = &handoff.original.payload;
+    match subject(handoff) {
+        Some("limit") => {
+            let agent = optional_text(p, "agent");
+            let trigger = optional_text(p, "event").and_then(|id| held.triggers.get(id));
+            let Some(trigger) = trigger.filter(|t| Some(t.agent.as_str()) == agent) else {
+                return Some("trigger_unknown");
+            };
+            (!trigger.stands).then_some("trigger_superseded")
+        }
+        Some("reconciliation") => {
+            let event = optional_text(p, "event");
+            let Some(key) = held_by(held, handoff) else {
+                return Some("trigger_unknown");
+            };
+            (held.latest.get(key).map(String::as_str) != event).then_some("trigger_superseded")
+        }
+        _ => Some("trigger_unknown"),
+    }
+}
+
 /// §9.28's four checks, in order, at the second `at`: `None` when the acknowledgment passes all
 /// four, or the first failing check's reason. A member that does not read fails the check that
 /// reads it, so an unreadable acknowledgment never lifts.
@@ -230,13 +315,8 @@ fn judged(
     at: RiskClock,
 ) -> Option<&'static str> {
     let p = &handoff.original.payload;
-    let agent = optional_text(p, "agent");
-    let trigger = optional_text(p, "event").and_then(|id| held.triggers.get(id).map(|t| (id, t)));
-    let Some((_, trigger)) = trigger.filter(|(_, t)| Some(t.agent.as_str()) == agent) else {
-        return Some("trigger_unknown");
-    };
-    if !trigger.stands {
-        return Some("trigger_superseded");
+    if let Some(failed) = named_stands(held, handoff) {
+        return Some(failed);
     }
     if let Some(failed) = step_up_failure(
         p.get("step_up"),
