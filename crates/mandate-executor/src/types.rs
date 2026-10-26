@@ -957,12 +957,24 @@ pub struct FoldedEvent {
 pub struct AcknowledgmentHandoff {
     /// The control-stream record, as journaled: its `event_id` becomes the copy's `causation_id`.
     pub original: FoldedEvent,
+    /// The original's `schema_version`, which the copy keeps.
+    pub schema_version: u64,
+    /// The whole second the shell hands the original at, from its clock: the copy is judged at the
+    /// later of this and the executor's risk clock, so a risk clock behind the shell's never judges
+    /// a step-up fresher than it is at processing (§9.28 check 3, DEC-2828 item 3).
+    pub processed_at: RiskClock,
     /// Every step-up `assertion_id` an `ApprovalResponseSubmitted`, `OwnerCommandIssued`,
     /// `OwnerAcknowledgmentRequested` or `OwnerAcknowledged` on the control stream spent before the
     /// original (mandate spec §6.1's reuse check).
     pub spent: BTreeSet<String>,
+    /// For an acknowledgment that names a request, the same set before that request's original on
+    /// the control stream, which check 4 judges the request's own step-up against. `None` for a
+    /// request, and for an acknowledgment whose request the control stream does not hold. Handed
+    /// with the acknowledgment so a restart between the two copies loses nothing.
+    pub request_spent: Option<BTreeSet<String>>,
     /// The policy overlay's `independent_approval_required` at processing, the strictest of every
-    /// agent the acknowledgment's subject belongs to (§9.28 check 4).
+    /// agent the acknowledgment's subject belongs to (§9.28 check 4). The shell keeps the handoff
+    /// it built until the copy's batch resolves, so a retry hands it unchanged.
     pub independent_overlay: bool,
     /// The step-up methods the environment allows: `cli_confirm` in paper, and in live only on the
     /// founder's own connection (mandate spec §6.1, DEC-529 item 3).
