@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type Hold, acknowledgeStepUpDigest, acknowledgmentsRead, holdWords, prepareAcknowledge } from "./acknowledgments";
 import { createWorkspaceClient } from "./client";
@@ -63,6 +65,31 @@ describe("the holds to acknowledge (`read-models/acknowledgments`)", () => {
     expect(acknowledgmentsRead(served([{ ...HOLD, subject: "tripwire" }]), "").ok).toBe(false);
     expect(acknowledgmentsRead(served([{ ...HOLD, reason: { ...HOLD.reason, kind: "mystery" } }]), "").ok).toBe(false);
     expect(acknowledgmentsRead(served([{ ...HOLD, mode: "stopped" }]), "").ok).toBe(false);
+  });
+});
+
+/** The schema's own examples (`schemas/workspace-api/examples/read-models.acknowledgments*.json`), which the schema checks hold to the JSON Schema: an oracle written against the schema, not against this client. */
+const EXAMPLES = join(__dirname, "..", "..", "..", "schemas", "workspace-api", "examples");
+const example = (name: string): unknown => JSON.parse(readFileSync(join(EXAMPLES, name), "utf8"));
+
+function withSet(base: unknown, set: Record<string, unknown>): unknown {
+  const doc = structuredClone(base) as Record<string, unknown>;
+  for (const [pointer, value] of Object.entries(set)) {
+    const path = pointer.split("/").slice(1);
+    let node = doc;
+    for (const token of path.slice(0, -1)) node = node[token] as Record<string, unknown>;
+    node[path[path.length - 1]] = structuredClone(value);
+  }
+  return doc;
+}
+
+describe("the holds read against the schema's examples", () => {
+  it("decodes the base example and every valid variant, so a body the server may serve is never read as not reported", () => {
+    const base = example("read-models.acknowledgments.json");
+    expect(acknowledgmentsRead(base, "").ok).toBe(true);
+    for (const variant of example("read-models.acknowledgments.valid.json") as Array<{ label: string; set?: Record<string, unknown> }>) {
+      expect(acknowledgmentsRead(withSet(base, variant.set ?? {}), "").ok, variant.label).toBe(true);
+    }
   });
 });
 
