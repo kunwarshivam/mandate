@@ -64,7 +64,7 @@ run "api_host_is_tunnel_only_and_behind_access" {
 
   assert {
     condition     = cloudflare_zero_trust_access_application.api.options_preflight_bypass == true && cloudflare_zero_trust_access_application.api.cors_headers == null
-    error_message = "Access passes CORS preflights alone to the API and sets no CORS headers itself, so the API alone names the allowed origin."
+    error_message = "Access forwards unauthenticated OPTIONS alone to the API and sets no CORS headers itself, so the API alone names the allowed origin (DEC-2381)."
   }
 
   assert {
