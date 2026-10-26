@@ -13,13 +13,20 @@ import { closedEnum, contentRef, isRecord, timestamp } from "./decode";
 import type { ContentRef, Decoded, DecodeProblem, Decoder, Timestamp } from "./types";
 import { sha256Hex } from "@/lib/sha256";
 
-/** `envelope.schema.json`'s `StepUpAction` kinds this client asks for: the two `cli_confirm` confirms. */
+/** `envelope.schema.json`'s `StepUpAction` kinds the host confirms by `cli_confirm`. */
 export const CLI_CONFIRM_KINDS = ["approve", "connection"] as const;
 export type CliConfirmKind = (typeof CLI_CONFIRM_KINDS)[number];
 
+/** The kinds a passkey confirms from the browser (DEC-2128): a version's confirmation and a deployment. */
+export const PASSKEY_KINDS = ["confirm_version", "deploy"] as const;
+export type PasskeyKind = (typeof PASSKEY_KINDS)[number];
+
+/** Every `StepUpAction` kind this client asks for. */
+export type StepUpKind = CliConfirmKind | PasskeyKind;
+
 /** The one action a challenge is bound to (§3.6): its kind and the SHA-256 of its canonical object. */
 export interface StepUpAction {
-  kind: CliConfirmKind;
+  kind: StepUpKind;
   digest: ContentRef;
 }
 
@@ -58,7 +65,7 @@ const CODE_BITS = 40;
 
 const fail = (path: string, problem: DecodeProblem, value: string | null = null, allowed: readonly string[] | null = null): Decoded<never> => ({ ok: false, issue: { path, problem, value, allowed } });
 
-const kind = closedEnum(CLI_CONFIRM_KINDS);
+const kind = closedEnum<StepUpKind>([...CLI_CONFIRM_KINDS, ...PASSKEY_KINDS]);
 
 /**
  * `commands/step-up-challenge`, decoded against the action it was asked for: an answer bound to any
