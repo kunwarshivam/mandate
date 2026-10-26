@@ -35,6 +35,8 @@
   lost answers in a row or `401`s restrict the account to closing with cause
   `connection_unavailable`, a good answer resets its class, a `403` is not an authorization
   failure, and the counter fuzzed against an independent oracle.
+  `crates/mandate-executord/tests/health_probe.rs` (DEC-2837): an idle executor probes the account
+  once a minute with reads only, and a lost or refused-credential probe restricts it.
   `crates/mandate-executord/tests/universe.rs` (DEC-2823): an admitted thesis copied
   onto the account stream as `UniverseChanged` once, across passes and a restart; in
   `mandate-executor`, `universe.rs`'s copy tests and its property test that the folded universe is
