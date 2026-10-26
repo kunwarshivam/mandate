@@ -305,6 +305,7 @@ fn conforms(body: &Json, schema: &str, item: &str, def: &str, control: &[StoredE
         "recorded_at": last.recorded_at,
     }]);
     assert_eq!(body["as_of"], mark);
+    bounded(body);
 }
 
 /// One instrument as the read states it.
@@ -736,15 +737,16 @@ proptest! {
             .iter()
             .map(|(id, (symbol, _, _))| (id.clone(), symbol.clone()))
             .collect();
-        for id in IDS.iter().take(3) {
-            for symbol in SYMBOLS.iter().take(2) {
+        bounded(&body);
+        for id in IDS {
+            for symbol in SYMBOLS {
                 let admitted = instruments(&control, store, &pinning(id, symbol)).is_ok();
-                let pair = ((*id).to_owned(), (*symbol).to_owned());
+                let pair = (id.to_owned(), symbol.to_owned());
                 if listed.contains(&pair) {
                     prop_assert!(admitted, "{pair:?} is listed but refused");
                 }
-                let pinnable_class = oracle.contains_key(*id);
-                if admitted && pinnable_class {
+                let pinnable = oracle.contains_key(id);
+                if admitted && pinnable {
                     prop_assert!(listed.contains(&pair), "{pair:?} is admitted but not listed");
                 }
             }
@@ -1163,6 +1165,7 @@ proptest! {
             })
             .collect();
         prop_assert_eq!(&body["models"], &Json::Array(wanted));
+        bounded(&body);
         let listed: BTreeSet<(String, String, String, Vec<String>)> = body["models"]
             .as_array()
             .expect("a list")
@@ -1188,6 +1191,342 @@ proptest! {
                 listed.contains(&candidate),
                 "{:?}", candidate
             );
+        }
+    }
+}
+
+/// Whether `text` is the schema's lowercase `uuid`, checked character by character.
+fn uuid_text(text: &str) -> bool {
+    text.len() == 36
+        && text.char_indices().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => c == '-',
+            _ => c.is_ascii_digit() || ('a'..='f').contains(&c),
+        })
+}
+
+/// `^[a-z][a-z0-9_]{0,63}$`, checked character by character.
+fn name_text(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 64
+        && bytes[0].is_ascii_lowercase()
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_')
+}
+
+/// The mandate schema's model version pattern.
+fn version_text(text: &str) -> bool {
+    let parts: Vec<&str> = text.split('.').collect();
+    parts.len() == 3
+        && parts.iter().all(|p| {
+            !p.is_empty()
+                && p.len() <= 6
+                && p.bytes().all(|b| b.is_ascii_digit())
+                && (*p == "0" || !p.starts_with('0'))
+        })
+}
+
+/// `^sha256:[0-9a-f]{64}$`.
+fn ref_text(text: &str) -> bool {
+    text.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
+}
+
+/// A journal timestamp's shape: nine fractional digits and `Z`.
+fn timestamp_text(text: &str) -> bool {
+    let b = text.as_bytes();
+    b.len() == 30 && b[4] == b'-' && b[10] == b'T' && b[19] == b'.' && b[29] == b'Z'
+}
+
+fn text_within(value: &Json, max: usize) -> bool {
+    value.as_str().is_some_and(|t| t.chars().count() <= max)
+}
+
+fn keys_within(value: &Json, allowed: &[&str]) -> bool {
+    value
+        .as_object()
+        .is_some_and(|o| o.keys().all(|k| allowed.contains(&k.as_str())))
+}
+
+/// Every member's bound in the two read models' schemas, checked here member by member: each
+/// pattern, length, count, enum, and closed object the schema states.
+fn bounded(body: &Json) {
+    for entry in body["instruments"].as_array().into_iter().flatten() {
+        let text = |k: &str| {
+            entry[k]
+                .as_str()
+                .unwrap_or_else(|| panic!("{k} in {entry}"))
+        };
+        assert!(uuid_text(text("instrument_id")), "{entry}");
+        assert!(
+            (1..=32).contains(&text("symbol").chars().count()),
+            "{entry}"
+        );
+        assert!(
+            ["us_equity", "crypto"].contains(&text("asset_class")),
+            "{entry}"
+        );
+        assert!(ref_text(text("snapshot")), "{entry}");
+        assert!(timestamp_text(text("registered_at")), "{entry}");
+    }
+    for entry in body["models"].as_array().into_iter().flatten() {
+        let text = |k: &str| {
+            entry[k]
+                .as_str()
+                .unwrap_or_else(|| panic!("{k} in {entry}"))
+        };
+        let id = text("model_id");
+        let (kind, name) = id.split_once('.').expect("a kind");
+        assert!(["fast", "llm", "quant"].contains(&kind), "{entry}");
+        assert!(
+            (1..=48).contains(&name.len())
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'),
+            "{entry}"
+        );
+        assert!(version_text(text("model_version")), "{entry}");
+        assert!(ref_text(text("content_hash")), "{entry}");
+        assert!(timestamp_text(text("registered_at")), "{entry}");
+        assert!(entry["admits_instruments"].is_boolean(), "{entry}");
+        let params = entry["params"].as_array().expect("params");
+        assert!(params.len() <= 32, "{entry}");
+        let unique: BTreeSet<&str> = params.iter().filter_map(Json::as_str).collect();
+        assert_eq!(unique.len(), params.len(), "{entry}");
+        assert!(unique.iter().all(|p| name_text(p)), "{entry}");
+        let content = &entry["content"];
+        if content.is_null() {
+            continue;
+        }
+        assert!(
+            keys_within(content, &["authorship", "methodology", "params_schema"]),
+            "{entry}"
+        );
+        if let Some(a) = content.get("authorship") {
+            assert!(text_within(a, 64), "{entry}");
+        }
+        if let Some(m) = content.get("methodology") {
+            assert!(text_within(m, 4000), "{entry}");
+        }
+        let Some(schema) = content.get("params_schema") else {
+            continue;
+        };
+        assert!(keys_within(schema, &["params", "constraints"]), "{entry}");
+        if let Some(constraints) = schema.get("constraints") {
+            let items = constraints.as_array().expect("a list");
+            assert!(items.len() <= 32, "{entry}");
+            assert!(items.iter().all(|c| text_within(c, 200)), "{entry}");
+        }
+        if let Some(params) = schema.get("params") {
+            let items = params.as_array().expect("a list");
+            assert!(items.len() <= 32, "{entry}");
+            for item in items {
+                assert!(
+                    keys_within(item, &["name", "type", "min", "max"]),
+                    "{entry}"
+                );
+                assert!(item["name"].as_str().is_some_and(name_text), "{entry}");
+                if let Some(t) = item.get("type") {
+                    assert!(text_within(t, 32), "{entry}");
+                }
+                for bound in ["min", "max"] {
+                    if let Some(b) = item.get(bound) {
+                        assert!(b.is_i64() || b.is_u64(), "{entry}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The content object with `members` as its top-level members.
+fn content_with(members: &Json) -> String {
+    members.to_string()
+}
+
+mod bounds {
+    use super::*;
+
+    fn one_param(name: &str, kind: &str) -> Json {
+        serde_json::json!({"name": name, "type": kind, "min": 1, "max": 2})
+    }
+
+    /// Registers one model per object of `objects`, ids `fast.m0`, `fast.m1`, …, and reads them.
+    fn contents(objects: &[Json]) -> Json {
+        let f = fixture();
+        let mut records = Vec::new();
+        for (i, object) in objects.iter().enumerate() {
+            let hash = stored(&f, &content_with(object));
+            let id = format!("fast.m{i}");
+            records.push((
+                "ConfigSnapshotRegistered",
+                model_payload(&id, "1.0.0", &hash, &[], false),
+            ));
+        }
+        let control = seed(&f, &records);
+        let alice = signed_in(&f, ALICE);
+        let body = ok(&get(&f, &ws("/signal-models"), Some(&alice)));
+        conforms(&body, MODELS_SCHEMA, "models", "Model", &control);
+        body
+    }
+
+    #[test]
+    fn content_at_every_bound_is_kept() {
+        let params: Vec<Json> = (0..32)
+            .map(|i| one_param(&format!("p{i:02}{}", "x".repeat(61)), &"t".repeat(32)))
+            .collect();
+        let object = serde_json::json!({
+            "authorship": "a".repeat(64),
+            "methodology": "m".repeat(4000),
+            "params_schema": {"constraints": vec!["c".repeat(200); 32], "params": params},
+        });
+        let body = contents(std::slice::from_ref(&object));
+        assert_eq!(body["models"][0]["content"], object);
+    }
+
+    #[test]
+    fn content_past_any_bound_is_absent_member_by_member() {
+        let many: Vec<Json> = (0..33)
+            .map(|i| one_param(&format!("p{i}"), "integer"))
+            .collect();
+        let objects = [
+            serde_json::json!({
+                "authorship": "a".repeat(65),
+                "methodology": "m".repeat(4001),
+                "params_schema": {
+                    "constraints": vec!["c"; 33],
+                    "params": [one_param("fast_periods", &"t".repeat(33))],
+                },
+            }),
+            serde_json::json!({
+                "params_schema": {"constraints": ["c".repeat(201)], "params": many},
+            }),
+            serde_json::json!({
+                "params_schema": {"params": [one_param("Bad", "integer")]},
+            }),
+            serde_json::json!({
+                "params_schema": {"params": [one_param(&format!("p{}", "x".repeat(64)), "integer")]},
+            }),
+            serde_json::json!({
+                "params_schema": {"params": [one_param("9lives", "integer")]},
+            }),
+        ];
+        let body = contents(&objects);
+        assert_eq!(
+            body["models"][0]["content"],
+            serde_json::json!({"params_schema": {"params": [
+                {"name": "fast_periods", "min": 1, "max": 2}
+            ]}})
+        );
+        for i in 1..5 {
+            assert_eq!(
+                body["models"][i]["content"],
+                serde_json::json!({"params_schema": {}}),
+                "{i}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_model_no_document_can_name_is_omitted() {
+        let f = fixture();
+        let hash = stored(&f, &content_object(MA, "1.0.0"));
+        let long_name = format!("p{}", "x".repeat(63));
+        let at_bound: Vec<String> = (0..32).map(|i| format!("p{i:02}")).collect();
+        let at_bound: Vec<&str> = at_bound.iter().map(String::as_str).collect();
+        let past: Vec<String> = (0..33).map(|i| format!("p{i:02}")).collect();
+        let past: Vec<&str> = past.iter().map(String::as_str).collect();
+        let too_long = format!("{long_name}x");
+        let cases: Vec<(&str, &str, Vec<&str>, bool)> = vec![
+            ("fast.v_short", "1.0", vec![], false),
+            ("fast.v_padded", "01.0.0", vec![], false),
+            ("fast.v_wide", "1.0.1234567", vec![], false),
+            ("fast.v_four", "1.0.0.0", vec![], false),
+            ("fast.v_letters", "a.b.c", vec![], false),
+            ("fast.v_empty", "1..0", vec![], false),
+            ("fast.v_widest", "999999.0.0", vec![], true),
+            ("fast.v_zero", "0.0.0", vec![], true),
+            ("fast.p_upper", "1.0.0", vec!["Bad"], false),
+            ("fast.p_digit", "1.0.0", vec!["9lives"], false),
+            ("fast.p_long", "1.0.0", vec![too_long.as_str()], false),
+            ("fast.p_longest", "1.0.0", vec![long_name.as_str()], true),
+            ("fast.p_many", "1.0.0", past.clone(), false),
+            ("fast.p_most", "1.0.0", at_bound.clone(), true),
+        ];
+        let records: Vec<(&str, String)> = cases
+            .iter()
+            .map(|(id, version, params, _)| {
+                (
+                    "ConfigSnapshotRegistered",
+                    model_payload(id, version, &hash, params, false),
+                )
+            })
+            .collect();
+        let control = seed(&f, &records);
+        let alice = signed_in(&f, ALICE);
+        let body = ok(&get(&f, &ws("/signal-models"), Some(&alice)));
+        conforms(&body, MODELS_SCHEMA, "models", "Model", &control);
+        let listed: BTreeSet<&str> = body["models"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .map(|m| m["model_id"].as_str().expect("an id"))
+            .collect();
+        let wanted: BTreeSet<&str> = cases
+            .iter()
+            .filter(|(_, _, _, nameable)| *nameable)
+            .map(|(id, ..)| *id)
+            .collect();
+        assert_eq!(listed, wanted);
+    }
+}
+
+/// Only a full user session reads either catalogue.
+mod sessions {
+    use super::*;
+
+    #[test]
+    fn a_reduction_only_session_reads_neither() {
+        let f = fixture();
+        seed(&f, &[]);
+        let cookie = signed_in(&f, ALICE);
+        assert_eq!(
+            f.sessions.refresh(
+                &cookie,
+                mandate_api_server::session::Answer::Unreachable,
+                at(T0 + 1)
+            ),
+            Ok(None)
+        );
+        for path in ["/instruments", "/signal-models"] {
+            refused(
+                &get(&f, &ws(path), Some(&cookie)),
+                403,
+                ProblemCode::ReductionOnly,
+            );
+        }
+    }
+
+    #[test]
+    fn a_client_credential_is_the_one_401_for_both() {
+        let f = fixture();
+        seed(&f, &[]);
+        let token = "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjbGllbnQtMSIsInNjb3BlIjoicmVhZCJ9.c2ln";
+        let bearer = format!("Bearer {token}");
+        for path in ["/instruments", "/signal-models"] {
+            for cookie in [None, Some(format!("{COOKIE_NAME}=not-a-session"))] {
+                let mut headers = vec![("Origin", APP), ("Authorization", bearer.as_str())];
+                if let Some(cookie) = cookie.as_deref() {
+                    headers.push(("Cookie", cookie));
+                }
+                let reply = send(f.addr, "GET", &ws(path), &headers, b"");
+                refused(&reply, 401, ProblemCode::Unauthenticated);
+            }
         }
     }
 }
