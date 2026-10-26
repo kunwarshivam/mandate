@@ -3,10 +3,14 @@
 //! mandate version" row, read from the control stream and the store the version routes check
 //! against.
 //!
-//! Every expected body is computed here from the spec's own words: the instrument oracle folds the
-//! test's own registrations with its own map of the bytes it stored, never through the server's
-//! fold, and the property below holds the read to exactly what the create's instrument check
-//! (`versions::instruments`) admits.
+//! The oracle for each body's shape is the read model's own published example and its valid cases
+//! (which `check_examples.py` validates against the schema): the test stores the objects and seeds
+//! the rows that reproduce each, and the served body equals it apart from the members a test cannot
+//! fix. Every body is also held to the members each schema requires and allows, read from the
+//! schema files at every level. Elsewhere, expected bodies are computed here from the spec's own
+//! words: the instrument oracle folds the test's own registrations with its own map of the bytes it
+//! stored, never through the server's fold, and the properties below hold each read to exactly
+//! what the create's checks (`versions::instruments`, V-007) admit.
 
 mod common;
 
@@ -46,6 +50,14 @@ const QQQ_ID: &str = "eb82ffb0-efd6-4f4e-9307-8fead28e04f6";
 const INSTRUMENTS_SCHEMA: &str =
     include_str!("../../../schemas/workspace-api/read-models/instruments.schema.json");
 const ENVELOPE_SCHEMA: &str = include_str!("../../../schemas/workspace-api/envelope.schema.json");
+const INSTRUMENTS_EXAMPLE: &str =
+    include_str!("../../../schemas/workspace-api/examples/read-models.instruments.json");
+const INSTRUMENTS_VALID: &str =
+    include_str!("../../../schemas/workspace-api/examples/read-models.instruments.valid.json");
+const MODELS_EXAMPLE: &str =
+    include_str!("../../../schemas/workspace-api/examples/read-models.signal-models.json");
+const MODELS_VALID: &str =
+    include_str!("../../../schemas/workspace-api/examples/read-models.signal-models.valid.json");
 
 type Json = serde_json::Value;
 
@@ -278,8 +290,9 @@ fn listed(value: &Json) -> BTreeSet<String> {
 }
 
 /// The body against `schema`: the envelope's and the read model's required members and nothing
-/// either does not list, each item's members exactly its closed `$defs` entry's required list, and
-/// `as_of` naming the control stream's last row only (API-14).
+/// either does not list, each item's members exactly its closed `$defs` entry's required list and,
+/// at every level below, within what that entry allows ([`closed`]), and `as_of` naming the control
+/// stream's last row only (API-14).
 fn conforms(body: &Json, schema: &str, item: &str, def: &str, control: &[StoredEvent]) {
     let schema: Json = serde_json::from_str(schema).expect("the schema");
     let envelope: Json = serde_json::from_str(ENVELOPE_SCHEMA).expect("the envelope");
@@ -294,6 +307,7 @@ fn conforms(body: &Json, schema: &str, item: &str, def: &str, control: &[StoredE
     assert_eq!(shape["additionalProperties"], Json::Bool(false));
     for entry in body[item].as_array().expect("a list") {
         assert_eq!(names(entry), listed(&shape["required"]), "{entry}");
+        closed(entry, shape);
     }
     assert_eq!(body["api_version"], "v1");
     assert_eq!(body["served_at"], "2026-10-03T04:00:00.000000000Z");
@@ -305,7 +319,51 @@ fn conforms(body: &Json, schema: &str, item: &str, def: &str, control: &[StoredE
         "recorded_at": last.recorded_at,
     }]);
     assert_eq!(body["as_of"], mark);
-    bounded(body);
+}
+
+/// `value` against `shape`, a part of the read model's schema file: an object's members within its
+/// `properties` when it is closed, its `required` all present, and each member against its own
+/// shape; each list item against `items`; a `oneOf` against the branch naming the value's type.
+fn closed(value: &Json, shape: &Json) {
+    if let Some(branches) = shape["oneOf"].as_array() {
+        let kind = match value {
+            Json::Null => "null",
+            Json::Object(_) => "object",
+            _ => panic!("{value} is neither branch of {shape}"),
+        };
+        let branch = branches
+            .iter()
+            .find(|branch| branch["type"] == kind)
+            .unwrap_or_else(|| panic!("{value} in {shape}"));
+        closed(value, branch);
+        return;
+    }
+    if let Some(items) = value.as_array() {
+        if let Some(each) = shape.get("items") {
+            for item in items {
+                closed(item, each);
+            }
+        }
+        return;
+    }
+    let (Some(members), Some(properties)) = (value.as_object(), shape["properties"].as_object())
+    else {
+        return;
+    };
+    if shape["additionalProperties"] == Json::Bool(false) {
+        for name in members.keys() {
+            assert!(properties.contains_key(name), "{name} in {value}");
+        }
+    }
+    for name in shape["required"].as_array().into_iter().flatten() {
+        let name = name.as_str().expect("a name");
+        assert!(members.contains_key(name), "{name} in {value}");
+    }
+    for (name, member) in members {
+        if let Some(each) = properties.get(name) {
+            closed(member, each);
+        }
+    }
 }
 
 /// One instrument as the read states it.
@@ -737,7 +795,7 @@ proptest! {
             .iter()
             .map(|(id, (symbol, _, _))| (id.clone(), symbol.clone()))
             .collect();
-        bounded(&body);
+        conforms(&body, INSTRUMENTS_SCHEMA, "instruments", "Instrument", &control);
         for id in IDS {
             for symbol in SYMBOLS {
                 let admitted = instruments(&control, store, &pinning(id, symbol)).is_ok();
@@ -970,9 +1028,34 @@ mod signal_models_read {
         );
         assert_eq!(
             body["models"][1]["content"],
-            serde_json::json!({"authorship": "platform", "params_schema": {"constraints": ["c"]}})
+            serde_json::json!({"authorship": "platform", "params_schema": {"constraints": ["c"], "params": []}})
         );
         assert_eq!(body["models"][2]["content"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn a_parameter_without_a_valid_name_drops_only_itself() {
+        let f = fixture();
+        let hash = stored(
+            &f,
+            r#"{"params_schema":{"params":[{"name":"fast_periods","type":"integer"},{"type":"integer"},{"name":"Bad","min":1},7,{"max":3,"min":2,"name":"slow_periods"}]}}"#,
+        );
+        seed(
+            &f,
+            &[(
+                "ConfigSnapshotRegistered",
+                model_payload("fast.a", "1.0.0", &hash, &[], false),
+            )],
+        );
+        let alice = signed_in(&f, ALICE);
+        let body = ok(&get(&f, &ws("/signal-models"), Some(&alice)));
+        assert_eq!(
+            body["models"][0]["content"],
+            serde_json::json!({"params_schema": {"params": [
+                {"name": "fast_periods", "type": "integer"},
+                {"name": "slow_periods", "min": 2, "max": 3},
+            ]}})
+        );
     }
 
     #[test]
@@ -1165,7 +1248,7 @@ proptest! {
             })
             .collect();
         prop_assert_eq!(&body["models"], &Json::Array(wanted));
-        bounded(&body);
+        conforms(&body, MODELS_SCHEMA, "models", "Model", &control);
         let listed: BTreeSet<(String, String, String, Vec<String>)> = body["models"]
             .as_array()
             .expect("a list")
@@ -1191,155 +1274,6 @@ proptest! {
                 listed.contains(&candidate),
                 "{:?}", candidate
             );
-        }
-    }
-}
-
-/// Whether `text` is the schema's lowercase `uuid`, checked character by character.
-fn uuid_text(text: &str) -> bool {
-    text.len() == 36
-        && text.char_indices().all(|(i, c)| match i {
-            8 | 13 | 18 | 23 => c == '-',
-            _ => c.is_ascii_digit() || ('a'..='f').contains(&c),
-        })
-}
-
-/// `^[a-z][a-z0-9_]{0,63}$`, checked character by character.
-fn name_text(text: &str) -> bool {
-    let bytes = text.as_bytes();
-    !bytes.is_empty()
-        && bytes.len() <= 64
-        && bytes[0].is_ascii_lowercase()
-        && bytes
-            .iter()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_')
-}
-
-/// The mandate schema's model version pattern.
-fn version_text(text: &str) -> bool {
-    let parts: Vec<&str> = text.split('.').collect();
-    parts.len() == 3
-        && parts.iter().all(|p| {
-            !p.is_empty()
-                && p.len() <= 6
-                && p.bytes().all(|b| b.is_ascii_digit())
-                && (*p == "0" || !p.starts_with('0'))
-        })
-}
-
-/// `^sha256:[0-9a-f]{64}$`.
-fn ref_text(text: &str) -> bool {
-    text.strip_prefix("sha256:").is_some_and(|hex| {
-        hex.len() == 64
-            && hex
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    })
-}
-
-/// A journal timestamp's shape: nine fractional digits and `Z`.
-fn timestamp_text(text: &str) -> bool {
-    let b = text.as_bytes();
-    b.len() == 30 && b[4] == b'-' && b[10] == b'T' && b[19] == b'.' && b[29] == b'Z'
-}
-
-fn text_within(value: &Json, max: usize) -> bool {
-    value.as_str().is_some_and(|t| t.chars().count() <= max)
-}
-
-fn keys_within(value: &Json, allowed: &[&str]) -> bool {
-    value
-        .as_object()
-        .is_some_and(|o| o.keys().all(|k| allowed.contains(&k.as_str())))
-}
-
-/// Every member's bound in the two read models' schemas, checked here member by member: each
-/// pattern, length, count, enum, and closed object the schema states.
-fn bounded(body: &Json) {
-    for entry in body["instruments"].as_array().into_iter().flatten() {
-        let text = |k: &str| {
-            entry[k]
-                .as_str()
-                .unwrap_or_else(|| panic!("{k} in {entry}"))
-        };
-        assert!(uuid_text(text("instrument_id")), "{entry}");
-        assert!(
-            (1..=32).contains(&text("symbol").chars().count()),
-            "{entry}"
-        );
-        assert!(
-            ["us_equity", "crypto"].contains(&text("asset_class")),
-            "{entry}"
-        );
-        assert!(ref_text(text("snapshot")), "{entry}");
-        assert!(timestamp_text(text("registered_at")), "{entry}");
-    }
-    for entry in body["models"].as_array().into_iter().flatten() {
-        let text = |k: &str| {
-            entry[k]
-                .as_str()
-                .unwrap_or_else(|| panic!("{k} in {entry}"))
-        };
-        let id = text("model_id");
-        let (kind, name) = id.split_once('.').expect("a kind");
-        assert!(["fast", "llm", "quant"].contains(&kind), "{entry}");
-        assert!(
-            (1..=48).contains(&name.len())
-                && name
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'),
-            "{entry}"
-        );
-        assert!(version_text(text("model_version")), "{entry}");
-        assert!(ref_text(text("content_hash")), "{entry}");
-        assert!(timestamp_text(text("registered_at")), "{entry}");
-        assert!(entry["admits_instruments"].is_boolean(), "{entry}");
-        let params = entry["params"].as_array().expect("params");
-        assert!(params.len() <= 32, "{entry}");
-        let unique: BTreeSet<&str> = params.iter().filter_map(Json::as_str).collect();
-        assert_eq!(unique.len(), params.len(), "{entry}");
-        assert!(unique.iter().all(|p| name_text(p)), "{entry}");
-        let content = &entry["content"];
-        if content.is_null() {
-            continue;
-        }
-        assert!(
-            keys_within(content, &["authorship", "methodology", "params_schema"]),
-            "{entry}"
-        );
-        if let Some(a) = content.get("authorship") {
-            assert!(text_within(a, 64), "{entry}");
-        }
-        if let Some(m) = content.get("methodology") {
-            assert!(text_within(m, 4000), "{entry}");
-        }
-        let Some(schema) = content.get("params_schema") else {
-            continue;
-        };
-        assert!(keys_within(schema, &["params", "constraints"]), "{entry}");
-        if let Some(constraints) = schema.get("constraints") {
-            let items = constraints.as_array().expect("a list");
-            assert!(items.len() <= 32, "{entry}");
-            assert!(items.iter().all(|c| text_within(c, 200)), "{entry}");
-        }
-        if let Some(params) = schema.get("params") {
-            let items = params.as_array().expect("a list");
-            assert!(items.len() <= 32, "{entry}");
-            for item in items {
-                assert!(
-                    keys_within(item, &["name", "type", "min", "max"]),
-                    "{entry}"
-                );
-                assert!(item["name"].as_str().is_some_and(name_text), "{entry}");
-                if let Some(t) = item.get("type") {
-                    assert!(text_within(t, 32), "{entry}");
-                }
-                for bound in ["min", "max"] {
-                    if let Some(b) = item.get(bound) {
-                        assert!(b.is_i64() || b.is_u64(), "{entry}");
-                    }
-                }
-            }
         }
     }
 }
@@ -1423,10 +1357,14 @@ mod bounds {
                 {"name": "fast_periods", "min": 1, "max": 2}
             ]}})
         );
-        for i in 1..5 {
+        assert_eq!(
+            body["models"][1]["content"],
+            serde_json::json!({"params_schema": {}})
+        );
+        for i in 2..5 {
             assert_eq!(
                 body["models"][i]["content"],
-                serde_json::json!({"params_schema": {}}),
+                serde_json::json!({"params_schema": {"params": []}}),
                 "{i}"
             );
         }
@@ -1527,6 +1465,154 @@ mod sessions {
                 let reply = send(f.addr, "GET", &ws(path), &headers, b"");
                 refused(&reply, 401, ProblemCode::Unauthenticated);
             }
+        }
+    }
+}
+
+/// The example, then each of its valid cases (the example with the case's `set` applied), with
+/// their labels.
+fn examples(example: &str, valid: &str) -> Vec<(String, Json)> {
+    let base: Json = serde_json::from_str(example).expect("the example");
+    let mut all = vec![("the example".to_owned(), base.clone())];
+    let cases: Json = serde_json::from_str(valid).expect("the valid cases");
+    for case in cases.as_array().expect("a list") {
+        let mut value = base.clone();
+        for (pointer, to) in case["set"].as_object().expect("an object") {
+            *value.pointer_mut(pointer).expect("the member") = to.clone();
+        }
+        let label = case["label"].as_str().expect("a label").to_owned();
+        all.push((label, value));
+    }
+    all
+}
+
+/// The envelope members a test cannot fix: when the body was served, the build serving it, and the
+/// watermark, which [`conforms`] checks against the control stream the test seeded.
+const UNFIXED: [&str; 3] = ["served_at", "build", "as_of"];
+
+/// `body` without [`UNFIXED`].
+fn fixed(body: &Json) -> Json {
+    let mut fixed = body.clone();
+    for name in UNFIXED {
+        fixed.as_object_mut().expect("an object").remove(name);
+    }
+    fixed
+}
+
+/// Seeds `records`, the row numbered `seq` of each of `stamps` recorded at its time.
+fn seed_stamped(
+    f: &Fixture,
+    records: &[(&str, String)],
+    stamps: &[(u64, String)],
+) -> Vec<StoredEvent> {
+    let mut control = seed(f, records);
+    for (seq, at) in stamps {
+        let row = control
+            .iter_mut()
+            .find(|row| row.seq == *seq)
+            .expect("the row");
+        row.recorded_at.clone_from(at);
+    }
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .insert(ctl(), control.clone());
+    control
+}
+
+/// `content` as a stored object holds it: with members the projection never serves added at each
+/// level it projects.
+fn unprojected(content: &Json) -> Json {
+    let mut object = content.clone();
+    object["kind"] = Json::from("quant_model_content");
+    object["prompt"] = Json::from("never served");
+    if let Some(schema) = object.get_mut("params_schema") {
+        schema["extra"] = Json::Bool(true);
+        let params = schema.get_mut("params").and_then(Json::as_array_mut);
+        for param in params.into_iter().flatten() {
+            param["default"] = Json::from(5);
+        }
+    }
+    object
+}
+
+/// The published examples, reproduced from stored objects and seeded rows: each served body equals
+/// its example apart from [`UNFIXED`], with each object reference the one the test stored under.
+mod published_examples {
+    use super::*;
+
+    #[test]
+    fn the_instruments_example_and_each_valid_case_are_served_as_written() {
+        for (label, mut example) in examples(INSTRUMENTS_EXAMPLE, INSTRUMENTS_VALID) {
+            let f = fixture();
+            let mut records = Vec::new();
+            let mut stamps = Vec::new();
+            let entries = example["instruments"].as_array_mut().expect("a list");
+            for entry in entries {
+                let text = |k: &str| entry[k].as_str().expect(k).to_owned();
+                let (id, symbol, class) =
+                    (text("instrument_id"), text("symbol"), text("asset_class"));
+                let at = text("registered_at");
+                let hash = stored(&f, &snapshot_object(&id, &symbol, &class));
+                entry["snapshot"] = Json::from(hash.as_str());
+                let seq = u64::try_from(records.len()).expect("a count") + 2;
+                stamps.push((seq, at));
+                records.push(("ConfigSnapshotRegistered", snapshot_payload(&hash)));
+            }
+            let control = seed_stamped(&f, &records, &stamps);
+            let alice = signed_in(&f, ALICE);
+            let body = ok(&get(&f, &ws("/instruments"), Some(&alice)));
+            assert_eq!(fixed(&body), fixed(&example), "{label}");
+            conforms(
+                &body,
+                INSTRUMENTS_SCHEMA,
+                "instruments",
+                "Instrument",
+                &control,
+            );
+        }
+    }
+
+    #[test]
+    fn the_signal_models_example_and_each_valid_case_are_served_as_written() {
+        for (label, mut example) in examples(MODELS_EXAMPLE, MODELS_VALID) {
+            let f = fixture();
+            let mut records = Vec::new();
+            let mut stamps = Vec::new();
+            let entries = example["models"].as_array_mut().expect("a list");
+            for entry in entries {
+                let text = |k: &str| entry[k].as_str().expect(k).to_owned();
+                let (id, version, at) = (
+                    text("model_id"),
+                    text("model_version"),
+                    text("registered_at"),
+                );
+                let params: Vec<String> = entry["params"]
+                    .as_array()
+                    .expect("params")
+                    .iter()
+                    .map(|p| p.as_str().expect("a name").to_owned())
+                    .collect();
+                let params: Vec<&str> = params.iter().map(String::as_str).collect();
+                let admits = entry["admits_instruments"].as_bool().expect("a flag");
+                let hash = match &entry["content"] {
+                    Json::Null => reference(b"no content stored"),
+                    content => stored(&f, &unprojected(content).to_string()),
+                };
+                entry["content_hash"] = Json::from(hash.as_str());
+                let seq = u64::try_from(records.len()).expect("a count") + 2;
+                stamps.push((seq, at));
+                records.push((
+                    "ConfigSnapshotRegistered",
+                    model_payload(&id, &version, &hash, &params, admits),
+                ));
+            }
+            let control = seed_stamped(&f, &records, &stamps);
+            let alice = signed_in(&f, ALICE);
+            let body = ok(&get(&f, &ws("/signal-models"), Some(&alice)));
+            assert_eq!(fixed(&body), fixed(&example), "{label}");
+            conforms(&body, MODELS_SCHEMA, "models", "Model", &control);
         }
     }
 }

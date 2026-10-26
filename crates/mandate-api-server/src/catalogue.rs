@@ -280,9 +280,9 @@ fn content(store: &dyn ArtifactSource, digest: Digest) -> Value {
 }
 
 /// `params_schema`'s projection: its `constraints` when there are at most 32, each text of at most
-/// 200 characters, and its `params` when there are at most 32, each an object with a valid
-/// `name`, each with only its `name`, its `type` (text of at most 32 characters), and its integer
-/// `min` and `max`.
+/// 200 characters, and its `params` when there are at most 32, member by member: each parameter
+/// that is an object with a valid `name` is kept with only its `name`, its `type` (text of at most
+/// 32 characters), and its integer `min` and `max`, and any other parameter is dropped alone.
 fn params_schema(schema: &Value) -> Value {
     let mut members = Vec::new();
     let constraints = schema
@@ -297,7 +297,7 @@ fn params_schema(schema: &Value) -> Value {
         .get("params")
         .and_then(Value::as_array)
         .filter(|items| items.len() <= LIST_MAX_ITEMS)
-        .and_then(|items| items.iter().map(param).collect::<Option<Vec<Value>>>());
+        .map(|items| items.iter().filter_map(param).collect());
     if let Some(items) = params {
         members.push(("params", Value::Array(items)));
     }
