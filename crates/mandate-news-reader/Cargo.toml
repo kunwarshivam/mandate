@@ -1,0 +1,29 @@
+[package]
+name = "mandate-news-reader"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The workspace news reader: the news stream's single writer, storing each Alpaca news item it fetches with its paper data key (E2-10, DEC-2278, DEC-2280)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-artifacts-fs.workspace = true
+mandate-canon.workspace = true
+mandate-gate-context.workspace = true
+mandate-journal.workspace = true
+mandate-process.workspace = true
+mandate-research.workspace = true
+mandate-research-run.workspace = true
+mandate-sources.workspace = true
+mandate-sources-http.workspace = true
+mandate-store.workspace = true
+mandate-time.workspace = true
+mandate-vault.workspace = true
+secrecy.workspace = true
+tokio = { workspace = true, features = ["rt", "signal"] }
+
+[dev-dependencies]
+proptest.workspace = true

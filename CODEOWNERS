@@ -74,6 +74,7 @@
 /crates/mandate-liquidity/  @kunwarshivam
 /crates/mandate-mcp/        @kunwarshivam
 /crates/mandate-modelhost/  @kunwarshivam
+/crates/mandate-news-reader/ @kunwarshivam
 /crates/mandate-notify/     @kunwarshivam
 /crates/mandate-num/        @kunwarshivam
 /crates/mandate-objectstore/ @kunwarshivam
