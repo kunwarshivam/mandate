@@ -9,6 +9,9 @@ Epics map to [milestones](02-milestones-and-wbs.md) and [PRD](../product/04-prd-
 requirements. Priority uses MoSCoW: **Must**, **Should**, **Could**, **Won't (v1)**.
 Stories follow "As a … I want … so that …" with acceptance criteria.
 
+New rows, stories and debt alike, are one file each under [backlog/](backlog/README.md) until they
+are folded in here ([DEC-2373](decisions/DEC-2373.md)); add none to this file.
+
 ## Epic overview
 
 | Epic | Milestone | PRD | Priority |
@@ -940,15 +943,6 @@ after U-A1 to U-A5 are recorded.
   (trading spec §5.5); and an unconfirmed one still waits for the session. Design:
   [DEC-2040](decisions/DEC-2040.md).
 
-- **E7-31 (Must, M6, the local cell's trade loop; SC)** As an owner of a founded workspace, I want
-  my approval to pass the runtime's approver check, so that an `ask` order I approve in the web app
-  or the CLI is sent. Today the runtime resolves no approver once the control stream holds a
-  §9.12 record, and every founded workspace holds its founding grant
-  ([DEC-2129](decisions/DEC-2129.md) item 8). *Accepted when:* the run folds §9.12 to a roster of
-  active members and resolves each reference only to active approvers (`role:owner` to the founder),
-  and every stream it cannot fold resolves no one. Design: [DEC-2384](decisions/DEC-2384.md).
-  Follow-up: re-read the roster when the stream's memberships change during a run (item 6).
-
 ### E8 Escalation and approvals
 
 - **E8-1 (Must, M7)** As an approver, I want requests with the proposed action, alternatives,
@@ -1871,6 +1865,21 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   tombstone's `cas` write, and asserts the take answers `None` (or `Denied` when the session lacks
   the right) and never the code; reading a lost check-and-set's `Denied` as a won take fails it,
   and `cargo mutants` finds no missed mutant in `take_code` and `lost_or_denied`.
+
+- **E10-25 (Must, M8, before the founder's staging connect; SC)** As the founder, I want every image
+  that holds `mandate-token-exchange` to carry a CA bundle, so that the exchange's token client can
+  be built and a connect does not end `endpoint_failed` before it sends anything
+  ([DEC-2063](decisions/DEC-2063.md) item 8: on an empty base reqwest's platform verifier finds no
+  roots and the client build fails). *Accepted when:* any image that holds
+  `mandate-token-exchange` (cell or release) carries a CA bundle, and a release check fails the
+  build when the image has no roots, for example by starting the binary in the built image far
+  enough to build its live client.
+
+- **E10-26 (Should, M8; SC)** As an engineer, I want the token exchange's HTTP client to ignore any
+  ambient proxy, as the vault client does (`no_proxy()`), so that the one live token request never
+  goes through a proxy an environment variable names. *Accepted when:* the client is built with
+  `no_proxy()` and a test shows a request built with a proxy variable set still reaches the
+  endpoint directly.
 
 ### E11 Web app: dashboard and controls
 

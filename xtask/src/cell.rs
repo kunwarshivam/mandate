@@ -26,6 +26,7 @@ use crate::admission_drill;
 use crate::{output, sh};
 use web::web_run;
 
+pub mod exchange;
 pub mod executor;
 pub mod scenario;
 pub mod web;
@@ -103,7 +104,8 @@ const KEY_SET_TIER_CHECK: (&str, &str) = (
 /// Where a Linux host keeps its CA bundle, in the order `cell up` looks after `SSL_CERT_FILE`:
 /// Debian and Ubuntu, Fedora and RHEL, openSUSE, Alpine. The bundle is copied into the `api`
 /// image: on an empty base the server finds no roots, cannot build its key-set client, and refuses
-/// to start (`MANDATE_API_JWKS_URL`).
+/// to start (`MANDATE_API_JWKS_URL`). The `token-exchange` image carries it for the same reason:
+/// without roots its token client cannot be built (DEC-2063 item 8).
 const HOST_CA_BUNDLES: [&str; 4] = [
     "/etc/ssl/certs/ca-certificates.crt",
     "/etc/pki/tls/certs/ca-bundle.crt",
@@ -190,6 +192,13 @@ pub enum Drill {
     /// no policy of the cell's holds a wildcard but DEC-2349's prefix grants, each in its own policy
     /// (E21-32, DEC-2022 item 3).
     Vault,
+    /// The real token-exchange pod the deployment manager starts redeems a code the cell's
+    /// `oauth-fixture` issued, after a connect the CLI confirmed and the API started, against the
+    /// cell's vault (E10-22, DEC-2063); see [`exchange`].
+    Exchange,
+    /// The same connect with the owner authorizing only once the manager's exchange pod runs, as
+    /// at Alpaca, so the exchange waits for its code until the request's deadline (DEC-2363).
+    ExchangeLate,
 }
 
 pub const DRILLS: [Drill; 4] = [Drill::Boot, Drill::Journal, Drill::Egress, Drill::Compose];
@@ -215,6 +224,10 @@ pub const EXECUTOR_DRILLS: [Drill; 1] = [Drill::Executor];
 /// own, so each cell job stays within its ten minutes (DEC-464, DEC-2616).
 pub const VAULT_DRILLS: [Drill; 1] = [Drill::Vault];
 
+/// The token-exchange drill (E10-22, DEC-2063), which `cargo xtask ci cell-exchange` runs on a cell
+/// of its own, so each cell job stays within its ten minutes (DEC-464).
+pub const EXCHANGE_DRILLS: [Drill; 2] = [Drill::Exchange, Drill::ExchangeLate];
+
 impl Drill {
     pub fn name(self) -> &'static str {
         match self {
@@ -229,6 +242,8 @@ impl Drill {
             Self::Archive => "archive",
             Self::Executor => "executor",
             Self::Vault => "vault",
+            Self::Exchange => "exchange",
+            Self::ExchangeLate => "exchange-late",
         }
     }
 
@@ -240,6 +255,7 @@ impl Drill {
             .chain(KILL_SWITCH_DRILLS)
             .chain(EXECUTOR_DRILLS)
             .chain(VAULT_DRILLS)
+            .chain(EXCHANGE_DRILLS)
             .find(|d| d.name() == name)
             .with_context(|| format!("no drill named `{name}`"))
     }
@@ -275,6 +291,9 @@ impl Drill {
             Self::Vault => {
                 "the runtime's policy rewritten to read every connection's token through a wildcard"
             }
+            Self::Exchange | Self::ExchangeLate => {
+                "the connect's step-up never confirmed in the CLI, so the API must refuse its start"
+            }
         }
     }
 }
@@ -295,6 +314,7 @@ impl Drill {
             Self::Archive => "is not in the archive",
             Self::Executor => "no executor pod",
             Self::Vault => "wildcard in mandate-runtime",
+            Self::Exchange | Self::ExchangeLate => "step_up_missing",
         }
     }
 }
@@ -843,7 +863,12 @@ fn exchange_image() -> Result<Option<String>> {
     if deploy_manager_image_tag()?.is_none() {
         return Ok(None);
     }
-    local_tag("token-exchange", &[EXCHANGE_PACKAGE]).map(Some)
+    local_tag_with(
+        "token-exchange",
+        &[EXCHANGE_PACKAGE],
+        &[EXCHANGE_DOCKERFILE.to_owned()],
+    )
+    .map(Some)
 }
 
 /// The fixture OAuth app the cell's API, token exchange and fixture provider share (DEC-1176 item
@@ -952,7 +977,12 @@ pub fn up() -> Result<()> {
         build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
     }
     if let Some(exchange) = &exchange {
-        build_image(exchange, EXCHANGE_DOCKERFILE, EXCHANGE_PACKAGE, &[])?;
+        build_image(
+            exchange,
+            EXCHANGE_DOCKERFILE,
+            EXCHANGE_PACKAGE,
+            &[(&host_ca_bundle()?, "ca-certificates.crt")],
+        )?;
     }
     if let Some(manager) = &manager {
         build_image(manager, DEPLOY_MANAGER_DOCKERFILE, "mandate-deployd", &[])?;
@@ -2537,6 +2567,8 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Archive => archive(seeded),
             Drill::Executor => executor::drill(seeded),
             Drill::Vault => vault_drill(seeded),
+            Drill::Exchange => exchange::drill(seeded, false),
+            Drill::ExchangeLate => exchange::drill(seeded, true),
         };
         if seeded && matches!(d, Drill::Boot | Drill::Journal | Drill::Egress) {
             restore()?;
