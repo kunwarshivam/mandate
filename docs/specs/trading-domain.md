@@ -2,13 +2,19 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.20 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md); v0.20 amendment [DEC-2302](../project/decisions/DEC-2302.md) item 7); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.21 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md); v0.20 amendment [DEC-2302](../project/decisions/DEC-2302.md) item 7; v0.21 amendment [DEC-2807](../project/decisions/DEC-2807.md)); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)); US equities on Robinhood for the founder's one live order ([DEC-529](../project/decisions/DEC-529.md)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.21:** §2.3 states the client order id the executor derives, as accepted decisions already
+  bind it ([DEC-2807](../project/decisions/DEC-2807.md)). It is `md-{intent}`, a function of the
+  intent ID alone (DEC-449, DEC-860, DEC-506, DEC-521), and not `"{intent_ulid}-{attempt}"`. The
+  attempt is journaled but never part of the ID, and a rejected intent is not submitted again. A
+  broker's replacement is `md-r-{origin}` (DEC-876), the watchdog's exit is `md-w-{event}`
+  (DEC-160 (11)), and a kill switch's flatten is `md-k-{switch}-{n}` (DEC-485). No behavior changes.
 - **v0.20:** §5.7: within each run, a kill switch's unconfirmed cancel is sent again at the
   `Unknown` lookup cadence, by the risk clock, up to that pair's cap per run, each re-send journaled
   first, with an operator alert when the last window passes unconfirmed, so a lost answer cannot
@@ -215,9 +221,21 @@ Crypto uses the broker's `price_increment`.
 
 - **Instrument ID:** the broker's `asset_id` (UUID); symbol is a dated attribute; crypto symbols
   normalized at the connector (`BTC/USD` and `BTCUSD` are one instrument).
-- **Intent ID:** ULID. **`client_order_id`:** `"{intent_ulid}-{attempt}"` (≤ 128 characters);
-  `attempt` increments only after the broker confirms the previous attempt `Rejected`; retries of
-  an unconfirmed attempt reuse the same ID.
+- **Intent ID:** the `event_id` of the agent stream's `IntentProposed` ([journal spec](journal.md)
+  §2), a ULID. **`client_order_id`:** `"md-{intent}"` (≤ 128 characters;
+  [DEC-860](../project/decisions/DEC-860.md), and the `md-` ids of
+  [DEC-449](../project/decisions/DEC-449.md)), a function of the intent ID alone
+  ([DEC-506](../project/decisions/DEC-506.md), [DEC-521](../project/decisions/DEC-521.md)), so every
+  restart and every writer derives the same one, and a retry of an unconfirmed submission reuses it.
+  The `md-` prefix is how reconciliation tells an order of ours from external activity (§7.1): an ID
+  without it is never ours. The attempt number is not part of the ID. `OrderSubmitted` journals it,
+  and it increments only when `Unknown → Intent` resubmits after a confirmed absence, which carries
+  the **same** ID (§5.7). `Rejected` is terminal, so a rejected intent is never submitted again. An
+  intent ID is alphanumeric, so an intent's ID has no hyphen after `md-`; every other form below
+  adds one, and none meets an intent's.
+- **A replacement the broker made** (§5.7's `replaced` row): the successor is
+  `"md-r-{origin}"`, `{origin}` the ID of the `OrderStateChanged` event that records the
+  replacement ([DEC-876](../project/decisions/DEC-876.md)), so it replaces exactly one order.
 - **Protective orders** ([DEC-160](../project/04-decision-log.md#decisions)): a protective order
   the platform places is named for the entry it protects. The parent is
   `"{entry}-p{protection}"`, where `{entry}` is the entry order's `client_order_id` and
@@ -233,14 +251,19 @@ Crypto uses the broker's `price_increment`.
   it. The suffix is lowercase and an intent ID is an uppercase ULID, so a rung's ID never reads
   back as a protective order's (no `-p`) and never collides with another intent's.
 - **The triggered-stop watchdog's exit** ([DEC-160](../project/04-decision-log.md#decisions)) has
-  no agent intent. The executor journals it as its own intent, purpose `risk_exit`, whose
-  `client_order_id` carries `"w-{event}"` where an intent's carries its ULID; `{event}` is the ID
-  of the journaled watchdog record (a ULID, [journal spec](journal.md) §2), so a restart derives
-  the same ID. A ULID has no hyphen and no lowercase letter, so the ID never matches an intent's
-  and never reads back as a protective order's. Its agent is the position's single holder (§5.4's
+  no agent intent. The executor journals it as its own intent `"w-{event}"`, purpose
+  `risk_exit`, so its `client_order_id` is `"md-w-{event}"`; `{event}` is the ID of the journaled
+  watchdog record (a ULID, [journal spec](journal.md) §2), so a restart derives the same ID. A ULID
+  has no hyphen and no lowercase letter, so the ID never matches an intent's and never reads back
+  as a protective order's. Its agent is the position's single holder (§5.4's
   leg-agent rule); failing one, it belongs to no agent (`*`): every kill switch whose scope covers
   the instrument may cancel it by its own ID, and no agent-scoped kill switch treats it as that
   agent's own.
+- **A kill switch's flatten** ([DEC-485](../project/decisions/DEC-485.md) item 2) is the
+  executor's own intent too, one per instrument it closes: `"k-{switch}-{n}"`, `{switch}` the ID of
+  the journaled `KillSwitchActivated` record and `{n}` the instrument's ordinal among its `closes`
+  then `deferred`, so a restart derives the same ID and the order is `"md-k-{switch}-{n}"`. Like
+  the watchdog's, it never matches an intent's and never reads back as a protective order's.
 - **Fill ID:** the broker's execution ID; fills are de-duplicated by it.
 
 ## 3. Instruments and eligibility

@@ -1,0 +1,46 @@
+# The vetted-source allowlist (DEC-101, E17-7, data-plane spec §4.1, DEC-1130), version 3. Versioned
+# configuration: a change is a new file `allowlist-v<N+1>.toml` whose `version` is N+1, and this
+# file is never edited after it reaches main. E17-7 holds its contents (E2-19).
+#
+# Version 3 (DEC-2276) corrects version 2's record of who approved Alpaca news. Version 2 set its
+# `counsel_confirmed = true`, which claimed a confirmation counsel never gave; no reader ever
+# consumed version 2. Here counsel's confirmation is recorded as not given, and the founder's
+# approval, his answer to DEC-1130 item 2 recorded in DEC-2394 (DEC-79: legal), is recorded as his.
+# DEC-433 item 20's retention question stays open with counsel. It must be read read-only with a
+# paper data key, each item journaled before use (DEC-2394), and research may read it; it gives
+# opinions only, never orders. Its text stays licensed, so readers withhold it until the founder and
+# counsel decide inference spec §13 question 6 (DEC-1130 item 6).
+#
+# A source is in effect while its entry says `counsel_confirmed = true`, or names the founder's
+# approval with `approved_by = "founder"` and the decision that records it in `approved_in`
+# (DEC-2276). An entry with neither is listed so its endpoints are reviewed, but nothing fetches
+# from it and no reader returns its items (DEC-1130 item 2).
+#
+# Each endpoint is an `https://` host and a path prefix; a fetch to any other URL is refused before
+# a byte is sent (DP-9, DEC-433 item 11).
+
+version = 3
+
+[[source]]
+id = "sec.edgar"
+kind = "filings"
+licensed = false
+counsel_confirmed = true
+# The SEC's fair-access rules: at most 10 requests a second, with a declared user agent.
+min_interval_ms = 125
+max_response_bytes = 8388608
+endpoints = [
+  "https://data.sec.gov/submissions/",
+  "https://www.sec.gov/Archives/edgar/data/",
+]
+
+[[source]]
+id = "alpaca.news"
+kind = "news"
+licensed = true
+counsel_confirmed = false
+approved_by = "founder"
+approved_in = "DEC-2394"
+min_interval_ms = 300
+max_response_bytes = 1048576
+endpoints = ["https://data.alpaca.markets/v1beta1/news"]

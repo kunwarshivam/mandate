@@ -4,9 +4,10 @@
   the research query interface), §5.2 (knowledge time), DP-1, DP-2, DP-8, DP-9;
   `docs/specs/agent-harness.md` §6.3 (the `news` and `filings` reads and their caps) and §10.2;
   decision `docs/project/decisions/DEC-1130.md`.
-- **Configuration:** `config/sources/allowlist-v1.toml`, the vetted-source allowlist (E17-7 holds
-  its contents, E2-19). Alpaca news stays unconfirmed until counsel confirms its terms (DEC-433
-  item 20).
+- **Configuration:** `config/sources/allowlist-v<N>.toml`, the vetted-source allowlist (E17-7 holds
+  its contents, E2-19), one file a version, never edited once merged. Version 3 is in use: Alpaca
+  news is in effect on the founder's approval (DEC-2394), recorded as his with `approved_by` and
+  `approved_in`, and counsel has not confirmed its terms (DEC-433 item 20, DEC-2276).
 - **Code:** `mandate-sources` (safety-critical, pure): `crates/mandate-sources/src/allowlist.rs`
   (the file, `permit`, the only constructor of a `PermittedUrl`), `crates/mandate-sources/src/ingest.rs`
   (Alpaca news pages and EDGAR filings to drafts, structured fields only),

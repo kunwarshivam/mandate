@@ -2726,8 +2726,8 @@ fn a_late_fill_a_reconciliation_finds_asks_for_the_next_from_its_checkpoint() {
 /// batch writes, its ids made ULIDs as the deployed id source makes them, is accepted by the
 /// journal beside its subject, and refused with its subject off the batch or with a second alert
 /// on one subject, so the check is not vacuous. The subject stands in as the batch's
-/// `AgentModeApplied` at the subject's id: `AccountRestrictionChanged` has no registered schema
-/// yet, which is its own gap, reported, not this record's.
+/// `AgentModeApplied` at the subject's id; the restriction's own record, now registered, is judged
+/// with its batch in `journal_catalogue`.
 #[test]
 fn a_restrictions_alert_is_accepted_by_the_journal_in_its_subjects_batch() {
     let ids = TestIds;

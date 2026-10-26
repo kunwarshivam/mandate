@@ -520,3 +520,31 @@ fn releases_fees_and_corporate_actions_on_another_stream_change_nothing() {
         BTreeMap::from([(ASSET.to_owned(), qty("10"))])
     );
 }
+
+/// DEC-2380 item 2: nothing has traded until the account's stream holds a fill or an order
+/// request or submission of any agent's; another agent's order, never filled, is enough.
+#[test]
+fn an_account_is_untraded_until_any_order_or_fill() {
+    let state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+    assert!(state.untraded());
+    let mut others = state.clone();
+    submitted(&mut others, "agent-2", "o9");
+    assert!(!others.untraded(), "another agent's order, never filled");
+    let mut requested = state.clone();
+    assert!(on(
+        &mut requested,
+        "OrderRequestRecorded",
+        &object(&[("agent_id", "agent-2")])
+    ));
+    assert!(!requested.untraded(), "a request not yet submitted");
+    let mut ordered = state.clone();
+    submitted(&mut ordered, AGENT, "o1");
+    assert!(!ordered.untraded(), "the agent's order");
+    let mut filled = state;
+    assert!(on(
+        &mut filled,
+        "FillApplied",
+        &fill("f9", "o9", "buy", "1")
+    ));
+    assert!(!filled.untraded(), "a fill of an order the fold never saw");
+}

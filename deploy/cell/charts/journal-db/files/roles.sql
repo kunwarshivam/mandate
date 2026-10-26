@@ -100,6 +100,15 @@ GRANT CONNECT ON DATABASE mandate TO mandate_scheduler;
 ALTER ROLE mandate_scheduler IN DATABASE mandate SET search_path = journal;
 DO $$
 BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_dispatcher') THEN
+    CREATE ROLE mandate_dispatcher LOGIN IN ROLE mandate_journal_app;
+  END IF;
+END
+$$;
+GRANT CONNECT ON DATABASE mandate TO mandate_dispatcher;
+ALTER ROLE mandate_dispatcher IN DATABASE mandate SET search_path = journal;
+DO $$
+BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_gateway') THEN
     CREATE ROLE mandate_gateway LOGIN IN ROLE mandate_journal_app;
   END IF;

@@ -434,7 +434,40 @@ nothing.
    call then ends `credential_invalid`, the safe default, with no output, so no proposal and no
    order.
 
-## L. The Alpaca news key, for the agent to read news ([DEC-2394](../docs/project/decisions/DEC-2394.md), [DEC-2277](../docs/project/decisions/DEC-2277.md))
+## L. Does Alpaca's free data plan carry halts? (trading spec §4.4, [DEC-2380](../docs/project/decisions/DEC-2380.md) item 2)
+
+The executor's binding gate holds every Alpaca paper opening while the instrument's halt status is
+unread (`crates/mandate-executord/src/gate.rs`, `DeployedGate::input`): no halt is ever assumed
+absent (`AGENTS.md` rule 3). The fixture broker is unaffected.
+Alpaca's stock stream has `statuses` and `lulds` channels, but its documentation does not say
+whether the free `iex` feed carries them. One run of a probe tells, and an agent builds the status
+reader only if it does.
+
+1. Close any other Alpaca market-data stream on the key first: the free plan allows one
+   connection.
+2. On your own machine, with your Alpaca **paper** key (never a live one) in the environment, run
+   once from the repository root:
+
+   ```bash
+   APCA_API_KEY_ID=... APCA_API_SECRET_KEY=... \
+     uv run --no-project --with 'websockets==15.0.1' python scripts/alpaca-status-probe.py
+   ```
+
+   It connects only to Alpaca's market-data stream, places no order, and prints only what the stream
+   answered to the sign-in and the subscription, then the message types that arrived in 20 seconds:
+   types, codes and channel names, never the key, the secret, a price or a time. `websockets` is
+   fetched for this run only and added to no project. Its last line is one of:
+   - `result: subscription confirmed for statuses and lulds, delivery observed (...)`;
+   - `result: subscription confirmed for statuses and lulds, delivery not observed`: the plan
+     takes the subscription, but a halt is rare, so no status arrived to prove delivery;
+   - `result: subscription not confirmed for statuses and lulds`;
+   - `result: sign-in refused`, or `result: inconclusive (...)`: run it again later.
+3. Paste the printed lines (they hold no secret) to the coordinator. If the subscription is not
+   confirmed, Alpaca paper openings stay held. A paid feed, or reading §4.4's presumed halt (a
+   dropped status feed bars only market orders, and openings are limit orders, §5.1) as allowing
+   them, are your decisions: the second weakens a safety rule (DEC-79).
+
+## M. The Alpaca news key, for the agent to read news ([DEC-2394](../docs/project/decisions/DEC-2394.md), [DEC-2277](../docs/project/decisions/DEC-2277.md))
 
 The agent reads Alpaca's news feed with a key of its own. It never uses a trading connection's
 token. The news reader reads the key once from the vault, at `platform/news-data-key`, and from
