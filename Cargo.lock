@@ -1908,6 +1908,7 @@ dependencies = [
  "mandate-artifacts-fs",
  "mandate-canon",
  "mandate-domain",
+ "mandate-gate-context",
  "mandate-gateway",
  "mandate-journal",
  "mandate-journal-pg",

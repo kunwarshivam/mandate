@@ -20,7 +20,7 @@ use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
-use mandate_api::envelope::{Record, StepUpEvidence};
+use mandate_api::envelope::{Record, StepUpAssertion, StepUpEvidence};
 use mandate_api::problem::{CurrentBase, Effect, Problem, ProblemCode, Violation};
 use mandate_api::requests::ConfirmRequest;
 use mandate_api::responses::Classification;
@@ -38,7 +38,7 @@ use crate::reads::account_ref;
 use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
-use crate::stepup::{Action, Judged, journaled};
+use crate::stepup::{Action, Asserted, Judged, Unverified, journaled};
 use crate::versions::{
     CONFIRMED, CREATED, DEPLOYED, FIRST_VERSION, Pending, Refusal, active, check, confirm_digest,
     deploy_digest, envelope_paths, established_v2, instruments, last_confirmed, latest, object,
@@ -287,13 +287,18 @@ fn outcome(settled: Settled, id: &EventId) -> Result<StoredEvent, Answer> {
     }
 }
 
-/// Judges `evidence` for `action` through the port: `step_up_required` without any (§3.5).
+/// Judges `evidence`, with the `assertion` beside it, for `action` through the port's `asserted`
+/// ([DEC-2128] item 2): `step_up_required` without any (§3.5), and `journal_unavailable` when the
+/// port cannot read what it judges by.
+///
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
 fn stepped_up(
     app: &App,
     admitted: &Admitted,
     evidence: Option<&StepUpEvidence>,
+    assertion: Option<&StepUpAssertion>,
     action: &Action,
-) -> Result<(), Answer> {
+) -> Result<Option<Asserted>, Answer> {
     let evidence = evidence.ok_or(Answer::step_up(ProblemCode::StepUpRequired))?;
     let judged = Judged {
         tenant: &admitted.reader.tenant,
@@ -301,8 +306,13 @@ fn stepped_up(
         now: admitted.gate.now,
     };
     app.step_up
-        .verify(evidence, action, &judged)
-        .map_err(Answer::step_up)
+        .asserted(evidence, assertion, action, &judged)
+        .map_err(|unverified| match unverified {
+            Unverified::Code(ProblemCode::JournalUnavailable) => {
+                Answer::from(Refused::JournalUnavailable)
+            }
+            Unverified::Code(code) => Answer::step_up(code),
+        })
 }
 
 /// `members` with the event's watermark, enveloped, as `status`.
@@ -648,7 +658,16 @@ async fn confirmed(
         kind: StepUpActionKind::ConfirmVersion,
         digest,
     };
-    stepped_up(app, &admitted, request.step_up.as_ref(), &action)?;
+    let asserted = stepped_up(
+        app,
+        &admitted,
+        request.step_up.as_ref(),
+        request.step_up_assertion.as_ref(),
+        &action,
+    )?;
+    if let Some(_refused_until_the_route_commits_its_batch) = asserted {
+        return Err(Refused::JournalUnavailable.into());
+    }
     let row = commit(app, &admitted, drafted).await?;
     Ok(confirm_accepted(StatusCode::ACCEPTED, &admitted, &row))
 }
@@ -868,7 +887,7 @@ async fn deployed(
         kind: StepUpActionKind::Deploy,
         digest,
     };
-    stepped_up(app, &admitted, request.step_up.as_ref(), &action)?;
+    stepped_up(app, &admitted, request.step_up.as_ref(), None, &action)?;
     let row = commit(app, &admitted, drafted).await?;
     Ok(command_accepted(StatusCode::ACCEPTED, &admitted, &row))
 }
