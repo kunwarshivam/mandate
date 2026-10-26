@@ -7,7 +7,9 @@
  * does not answer, and `result-unknown` as commands recorded whose answer is lost, so a later status
  * poll finds them (spec §5.5). A status is `recorded` when first read and `applied` after; a recorded
  * pause pauses its agent and a recorded Skip skips its request, so a screen can follow a command to its
- * effect. It refuses an approve without step-up as `step_up_required`, as spec §5.2 does. It creates a
+ * effect. It refuses an approve without step-up as `step_up_required`, as spec §5.2 does, and judges
+ * one with `cli_confirm` evidence in DEC-2104 item 6's order against the challenges it issued at
+ * `POST /step-up/challenges`, standing in for the host's confirmation (`hostConfirms`). It creates a
  * mandate version from the document (DEC-2101 item 3), serves that version's confirmation screen as a
  * new mandate's (item 4), with a new `screen_digest` at each read. A confirm that does not carry the
  * digest it last served is `classification_changed`; one that does, without step-up, is
@@ -15,7 +17,9 @@
  * never created is `not_found`. A backtest
  * is the fixture's served `backtest` member under the mock's own envelope (DEC-2400).
  */
-import { CSRF_HEADER, OPERATIONS, isIdempotencyKey, type Fetch } from "./client";
+import { CSRF_HEADER, OPERATIONS, SESSION_ROUTE, STEP_UP_CHALLENGE_ROUTE, isIdempotencyKey, type Fetch } from "./client";
+import { CONNECT_START_ROUTE } from "./connect";
+import { CONNECT_DISCLOSURE, connectStepUpDigest } from "./step-up";
 import type { Watermark } from "./types";
 import { servedBacktestFixture } from "@/fixtures/backtests";
 import { buildWorkspace } from "@/fixtures/workspace";
@@ -27,6 +31,12 @@ import { sha256Hex } from "@/lib/sha256";
 export interface MockServerOptions {
   workspaceId: string;
   scenario?: Scenario;
+  /**
+   * Whether the host has confirmed each challenge the mock issues (DEC-2104): the mock stands in for
+   * `mandate step-up confirm`, which no browser can run. `false` plays an owner who has not run it yet,
+   * so an approve with that challenge's evidence is `step_up_missing`.
+   */
+  hostConfirms?: boolean;
 }
 
 export interface RecordedCommand {
@@ -42,7 +52,28 @@ export interface MockServer {
   recorded(): RecordedCommand[];
   /** Every `screen_digest` the confirmation read has served, in order. */
   servedDigests(): string[];
+  /** Every step-up challenge the mock has issued, in order. */
+  challenges(): IssuedChallenge[];
+  /** The connects the mock has started, by key, in order. */
+  started(): Array<{ idempotency_key: string; connection_id: string }>;
 }
+
+/** Where the mock's start sends the browser: no real authorization server is ever named. */
+export const MOCK_AUTHORIZATION_ORIGIN = "https://paper-oauth.mock.invalid";
+
+export interface IssuedChallenge {
+  challenge_id: string;
+  kind: string;
+  digest: string;
+  issued_at: string;
+  expires_at: string;
+  used: boolean;
+}
+
+/** The mock's one principal, as `GET /v1/me/session` serves it. */
+export const MOCK_PRINCIPAL = "01JBR2C4D6E8F0G2H4J6K8M0P3";
+/** A challenge's life (DEC-2103 item 5). */
+const CHALLENGE_SECONDS = 300;
 
 const API_VERSION = "v1";
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -88,7 +119,10 @@ const ROUTES = Object.entries(OPERATIONS).map(([operation, route]) => ({
 }));
 
 export function createMockServer(options: MockServerOptions): MockServer {
-  const { workspaceId, scenario = "normal" } = options;
+  const { workspaceId, scenario = "normal", hostConfirms = true } = options;
+  const issued: IssuedChallenge[] = [];
+  /** Connects started, each read `connecting` once and `established` after, as a completed paper connect would be. */
+  const connects: Array<{ idempotency_key: string; body: string; connection_id: string; reads: number }> = [];
   const workspace = structuredClone(buildWorkspace(scenario));
   const prefix = `/v1/workspaces/${workspaceId}`;
   const commands: RecordedCommand[] = [];
@@ -164,16 +198,74 @@ export function createMockServer(options: MockServerOptions): MockServer {
     };
   }
 
+  /**
+   * An agent stream's events as the mock tells them (`agent:{ws}:{agent}`): the deployment, then each
+   * order submitted and each filled, in time order. Types and times only; the body is a stand-in.
+   */
+  function agentStream(streamId: string) {
+    const match = streamId.match(/^agent:([^:]+):(.+)$/);
+    const agent = match && match[1] === workspaceId ? agentOf(match[2]) : undefined;
+    if (!agent) return null;
+    const orders = [...agent.past_orders, ...agent.orders].sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at));
+    const told = [{ type: "AgentDeployed", at: orders[0]?.submitted_at ?? workspace.now }, ...orders.flatMap((o) => [{ type: "OrderSubmitted", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])])];
+    return told.map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: "0".repeat(64), body: "e30=" }));
+  }
+
   function get(route: string, query: URLSearchParams): Response {
-    if ([...query.keys()].some((name) => !(route === "/approvals" && name === "state"))) return problem(404, "not_found", "none");
+    const journal = route.match(/^\/journal\/streams\/([^/]+)\/events$/);
+    const allowed = (name: string) => (route === "/approvals" && name === "state") || (journal !== null && (name === "after_seq" || name === "limit"));
+    if ([...query.keys()].some((name) => !allowed(name))) return problem(404, "not_found", "none");
+    if (journal) {
+      const lines = agentStream(decodeURIComponent(journal[1]));
+      if (!lines) return problem(404, "not_found", "none");
+      const after = Number(query.get("after_seq") ?? "0");
+      const limit = Number(query.get("limit") ?? "100");
+      if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 1000) return problem(422, "invalid", "none");
+      const events = lines.filter((e) => e.seq > after).slice(0, limit);
+      const head = { seq: lines.length, hash: "0".repeat(64), recorded_at: servedAt };
+      return read({ stream_id: decodeURIComponent(journal[1]), head, events, next_after_seq: events.at(-1)?.seq ?? after, at_head: (events.at(-1)?.seq ?? after) >= lines.length });
+    }
     if (route === "/health") return read(healthBody(workspace.health, servedAt));
     if (route === "/agents") return read({ agents: workspace.agents.map(agentRow) });
-    if (route === "/connections") return read({ connections: [{ connection_id: workspace.connection.connection_id, environment: workspace.environment }] });
+    if (route === "/connections") return read({ connections: connectionRows() });
+    const oneConnection = route.match(/^\/connections\/([^/]+)$/);
+    if (oneConnection) {
+      const row = connectionRows().find((c) => c.connection_id === decodeURIComponent(oneConnection[1]));
+      return row ? read({ connection: row }) : problem(404, "not_found", "none");
+    }
     if (route === "/approvals") {
       const state = query.get("state");
       if (state !== "pending" && state !== "resolved") return problem(422, "invalid", "none");
       const listed = workspace.approvals.filter((a) => (a.status === "delivered") === (state === "pending"));
       return read({ approvals: listed.map(approvalRow) });
+    }
+    const activity = route.match(/^\/agents\/([^/]+)\/(orders|positions)$/);
+    if (activity) {
+      const agent = agentOf(decodeURIComponent(activity[1]));
+      if (!agent) return problem(404, "not_found", "none");
+      const head = { agent_id: agent.agent_id, account_ref: workspace.connection.connection_id };
+      if (activity[2] === "positions") {
+        const positions = agent.positions.map((p) => ({ instrument_id: p.instrument.symbol, filled_qty: canon(p.qty), cost_basis: null, risk_mark: null, protection: null }));
+        return read({ ...head, positions, account_positions: agentDetail(agent).account_positions });
+      }
+      const served = [...agent.past_orders.map((o) => ({ ...o, updated: o.closed_at })), ...agent.orders.map((o) => ({ ...o, updated: o.submitted_at }))];
+      const orders = served.map((o) => ({
+        client_order_id: o.client_order_id,
+        intent_id: null,
+        purpose: o.purpose,
+        instrument_id: o.instrument.symbol,
+        side: o.side,
+        type: o.limit_price === null ? "market" : "limit",
+        tif: o.time_in_force,
+        qty: canon(o.qty),
+        limit_price: o.limit_price === null ? null : canon(o.limit_price),
+        stop_price: o.stop_price === null ? null : canon(o.stop_price),
+        state: o.state.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase(),
+        filled_qty: canon(o.filled_qty),
+        submitted_at: canonical(o.submitted_at),
+        updated_at: canonical(o.updated),
+      }));
+      return read({ ...head, orders });
     }
     const agentRoute = route.match(/^\/agents\/([^/]+)$/);
     if (agentRoute) {
@@ -228,8 +320,101 @@ export function createMockServer(options: MockServerOptions): MockServer {
     }
   }
 
+  /**
+   * DEC-2104 item 6's order for `cli_confirm` evidence, with the host's confirmation played by
+   * `hostConfirms`; `null` when it verifies, and then the challenge is spent.
+   */
+  function judgeCliConfirm(evidence: unknown, kind: string, digest: unknown): string | null {
+    if (evidence == null) return "step_up_required";
+    if (typeof evidence !== "object" || Array.isArray(evidence)) return "step_up_missing";
+    const { assertion_id, authenticated_at, method } = evidence as Record<string, unknown>;
+    if (method !== "cli_confirm") return "step_up_missing";
+    const challenge = issued.find((c) => c.challenge_id === assertion_id);
+    if (!challenge) return "step_up_missing";
+    if (challenge.kind !== kind || challenge.digest !== digest) return "step_up_mismatch";
+    if (authenticated_at !== challenge.issued_at) return "step_up_stale";
+    if (challenge.used) return "step_up_reused";
+    if (!hostConfirms) return "step_up_missing";
+    challenge.used = true;
+    return null;
+  }
+
+  /** `POST /step-up/challenges` (§3.6): a challenge bound to the action, never journaled; the same key answers the same challenge. */
+  const challengeKeys = new Map<string, { body: string; challenge: IssuedChallenge; bytes: string }>();
+  function challenge(headers: Headers, body: string): Response {
+    const key = headers.get("Idempotency-Key") ?? "";
+    if (!isIdempotencyKey(key)) return problem(422, "invalid", "none");
+    const earlier = challengeKeys.get(key);
+    if (earlier && earlier.body !== body) return problem(409, "idempotency_conflict", "none");
+    let action: { kind?: unknown; digest?: unknown } = {};
+    try {
+      action = ((JSON.parse(body) as { action?: typeof action }).action ?? {}) as typeof action;
+    } catch {
+      return problem(422, "invalid", "none");
+    }
+    if (typeof action.kind !== "string" || typeof action.digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(action.digest)) return problem(422, "invalid", "none");
+    if (workspace.environment === "live") return problem(403, "live_unavailable", "none");
+    const entry = earlier ?? {
+      body,
+      bytes: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"),
+      challenge: {
+        challenge_id: eventId(`${workspaceId}\nstep_up_challenge\n${key}`),
+        kind: action.kind,
+        digest: action.digest,
+        issued_at: servedAt,
+        expires_at: canonical(new Date(Date.parse(workspace.now) + CHALLENGE_SECONDS * 1000).toISOString()),
+        used: false,
+      },
+    };
+    if (!earlier) {
+      challengeKeys.set(key, entry);
+      issued.push(entry.challenge);
+    }
+    const c = entry.challenge;
+    return respond(201, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: [], challenge_id: c.challenge_id, webauthn_challenge: entry.bytes, action: { kind: c.kind, digest: c.digest }, issued_at: c.issued_at, expires_at: c.expires_at });
+  }
+
+  /** `read-models/connections`' rows: the fixture's established connection, then each connect started here. */
+  function connectionRows() {
+    const row = (connection_id: string, state: string) => ({ connection_id, broker: "alpaca", environment: workspace.environment === "live" ? "live" : "paper", state, scopes: state === "established" ? ["account:write", "trading"] : null, since: servedAt, refusal: null, revoked_reason: null, agents: [] as string[] });
+    return [row(workspace.connection.connection_id, "established"), ...connects.map((c) => row(c.connection_id, c.reads++ === 0 ? "connecting" : "established"))];
+  }
+
+  /**
+   * `POST /connections/oauth/start` (DEC-2623 item 6's order after the session and body): live is
+   * refused, a disclosure other than the current one is `invalid`, then the step-up for the connect
+   * digest; a retry with the same key and body answers the same start (item 8).
+   */
+  function startConnect(headers: Headers, body: string): Response {
+    const key = headers.get("Idempotency-Key") ?? "";
+    if (!isIdempotencyKey(key)) return problem(422, "invalid", "none");
+    const earlier = connects.find((c) => c.idempotency_key === key);
+    if (earlier && earlier.body !== body) return problem(409, "idempotency_conflict", "none");
+    let members: Record<string, unknown> = {};
+    try {
+      members = JSON.parse(body) as Record<string, unknown>;
+    } catch {
+      return problem(422, "invalid", "none");
+    }
+    if (members.broker !== "alpaca" || (members.environment !== "paper" && members.environment !== "live")) return problem(422, "invalid", "none");
+    if (workspace.environment === "live" || members.environment === "live") return problem(403, "live_unavailable", "none");
+    const disclosure = members.disclosure as { document?: unknown; version?: unknown } | undefined;
+    if (disclosure?.document !== CONNECT_DISCLOSURE.document || disclosure.version !== CONNECT_DISCLOSURE.version) return problem(422, "invalid", "none");
+    if (!earlier) {
+      const refused = judgeCliConfirm(members.step_up, "connection", connectStepUpDigest(workspaceId));
+      if (refused) return problem(401, refused, "none");
+    }
+    const entry = earlier ?? { idempotency_key: key, body, connection_id: `conn_${eventId(`${workspaceId}\nconnect\n${key}`)}`, reads: 0 };
+    if (!earlier) connects.push(entry);
+    const state = sha256Hex(`state\n${key}`);
+    const expires = canonical(new Date(Date.parse(workspace.now) + 600_000).toISOString());
+    return respond(201, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: asOf(), authorization_url: `${MOCK_AUTHORIZATION_ORIGIN}/oauth/authorize?state=${state}`, expires_at: expires, connection_id: entry.connection_id });
+  }
+
   function post(route: string, headers: Headers, body: string): Response {
     if (headers.get(CSRF_HEADER) !== "1") return problem(403, "forbidden", "none");
+    if (route === STEP_UP_CHALLENGE_ROUTE) return challenge(headers, body);
+    if (route === CONNECT_START_ROUTE) return startConnect(headers, body);
     const match = ROUTES.find((r) => r.pattern.test(route));
     if (!match) return problem(404, "not_found", "none");
     const key = headers.get("Idempotency-Key") ?? "";
@@ -241,7 +426,10 @@ export function createMockServer(options: MockServerOptions): MockServer {
       return problem(422, "invalid", "none");
     }
     const members = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
-    if (match.operation === "approval_response" && members.verdict === "approved" && members.step_up == null) return problem(401, "step_up_required", "none");
+    if (match.operation === "approval_response" && members.verdict === "approved") {
+      const refused = judgeCliConfirm(members.step_up, "approve", members.content_hash);
+      if (refused) return problem(401, refused, "none");
+    }
     if (match.operation === "confirm_version") {
       const version = decodeURIComponent(route.split("/")[2] ?? "");
       if (!versions.has(version)) return problem(404, "not_found", "none");
@@ -270,6 +458,10 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const method = (init.method ?? "GET").toUpperCase();
     if (scenario === "unreachable") throw new TypeError("Failed to fetch");
     const url = new URL(input, "http://mock.invalid");
+    if (method === "GET" && url.pathname === SESSION_ROUTE) {
+      const expires = canonical(new Date(Date.parse(workspace.now) + 15 * 60 * 1000).toISOString());
+      return respond(200, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: [], principal_id: MOCK_PRINCIPAL, kind: "full", expires_at: expires });
+    }
     if (!url.pathname.startsWith(`${prefix}/`)) return problem(404, "not_found", "none");
     const route = url.pathname.slice(prefix.length);
     if (method === "GET") return get(route, url.searchParams);
@@ -281,5 +473,5 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return problem(404, "not_found", "none");
   };
 
-  return { fetch, recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests] };
+  return { fetch, recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], challenges: () => issued.map((c) => ({ ...c })), started: () => connects.map(({ idempotency_key, connection_id }) => ({ idempotency_key, connection_id })) };
 }

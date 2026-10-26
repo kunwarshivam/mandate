@@ -23,6 +23,9 @@ use mandate_executor::{
     ExitTier, FillId, IdGen, InstrumentSnapshot, MandateVersion, MandateView, ProtectionPrices,
     Purpose, Seq, WorkspaceId, WriterEpoch, equity_bracket_prices,
 };
+use mandate_executord::marks::NoMarks;
+use mandate_executord::quotes::NoQuotes;
+use mandate_executord::serve::ScriptedBroker;
 use mandate_executord::{Broker, Config, ExecutorProcess, Protections, Unplanned, Wiring};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price, Qty, Ratio, ShareIncrement, SignedQty, Usd};
@@ -86,6 +89,9 @@ struct Rows {
     streams: BTreeMap<String, Vec<StoredEvent>>,
     epochs: BTreeMap<String, u64>,
     faults: VecDeque<Fault>,
+    /// Failures answered, in order, to the next appends whose first draft is of the named event
+    /// type, before any in `faults`.
+    typed: BTreeMap<String, VecDeque<Fault>>,
     unreadable: BTreeSet<String>,
     appends: usize,
     /// After this many appends the journal answers nothing more, as a process that crashed would
@@ -147,6 +153,19 @@ impl Journal {
             .collect()
     }
 
+    /// Each agent switch the account stream records, as the agent and the record it copies.
+    pub fn applications(&self) -> Vec<(String, String)> {
+        self.payloads("KillSwitchActivated")
+            .iter()
+            .filter_map(|p| {
+                Some((
+                    p.get("subject")?.as_str()?.to_owned(),
+                    p.get("copied_from")?.as_str()?.to_owned(),
+                ))
+            })
+            .collect()
+    }
+
     /// The intents the account stream received, by the `intent_id` each `IntentReceived` names.
     pub fn received(&self) -> Vec<String> {
         self.payloads("IntentReceived")
@@ -157,6 +176,16 @@ impl Journal {
 
     pub fn fail_next(&self, faults: &[Fault]) {
         self.0.borrow_mut().faults.extend(faults.iter().copied());
+    }
+
+    /// Answers `faults`, in order, to the next appends whose first draft is a `event_type`.
+    pub fn fail_next_of(&self, event_type: &str, faults: &[Fault]) {
+        self.0
+            .borrow_mut()
+            .typed
+            .entry(event_type.to_owned())
+            .or_default()
+            .extend(faults.iter().copied());
     }
 
     pub fn clear_faults(&self) {
@@ -289,7 +318,17 @@ impl Store for Journal {
                 current_epoch: current,
             };
         }
-        let fault = rows.faults.pop_front();
+        let first_type = drafts.first().and_then(|d| {
+            parse(d)
+                .ok()?
+                .get("event_type")?
+                .as_str()
+                .map(str::to_owned)
+        });
+        let typed = first_type
+            .and_then(|kind| rows.typed.get_mut(&kind))
+            .and_then(VecDeque::pop_front);
+        let fault = typed.or_else(|| rows.faults.pop_front());
         if fault == Some(Fault::Unavailable) {
             return AppendOutcome::Unavailable;
         }
@@ -343,6 +382,9 @@ impl Store for Journal {
 pub struct Seen {
     pub request: BrokerRequest,
     pub journaled_first: bool,
+    /// How many appends the journal had taken when the request was sent: what the process had
+    /// journaled of every answer handed before it.
+    pub appended: usize,
 }
 
 #[derive(Default)]
@@ -356,6 +398,12 @@ struct Books {
     lose_answers: usize,
     /// Whether the account reads as blocked from trading (trading spec §7.3).
     blocked: bool,
+    /// How a cancel-all or a close-position is answered: refused unsent while `None`, accepted
+    /// while `Some`. A close is an order of the broker's own, working while `Some(false)` and
+    /// filled whole at 150 on arrival while `Some(true)`.
+    account_wide: Option<bool>,
+    /// Whether every close-position's answer is lost after the close takes effect.
+    lose_closes: bool,
     sequence: u64,
 }
 
@@ -463,6 +511,17 @@ impl Paper {
         Ok(())
     }
 
+    /// The broker confirms the cancel of the order under `client_order_id`: it reads as canceled.
+    pub fn canceled(&self, client_order_id: &str) -> Result<(), Error> {
+        let mut books = self.books.borrow_mut();
+        let order = books
+            .orders
+            .get_mut(client_order_id)
+            .ok_or("no such order")?;
+        order.status = "canceled".to_owned();
+        Ok(())
+    }
+
     /// The account reads as blocked from trading from now on.
     pub fn block(&self) {
         self.books.borrow_mut().blocked = true;
@@ -471,7 +530,30 @@ impl Paper {
     pub fn lose_next_answers(&self, n: usize) {
         self.books.borrow_mut().lose_answers = n;
     }
+
+    /// Every cancel-all and close-position is accepted from now on. Each close is an order of the
+    /// broker's own that names no client order id, for the whole position: if `closes_fill`, it
+    /// sells it at once, else it works until [`Paper::expire_closes`].
+    pub fn accept_account_wide(&self, closes_fill: bool) {
+        self.books.borrow_mut().account_wide = Some(closes_fill);
+    }
+
+    /// Every close-position from now on takes effect and its answer is lost.
+    pub fn lose_close_answers(&self) {
+        self.books.borrow_mut().lose_closes = true;
+    }
+
+    /// The broker expires every close still working, unfilled: the position stays held.
+    pub fn expire_closes(&self) {
+        for order in self.books.borrow_mut().orders.values_mut() {
+            if order.client_order_id.is_none() && order.status == "new" {
+                order.status = "expired".to_owned();
+            }
+        }
+    }
 }
+
+impl ScriptedBroker for Paper {}
 
 impl Broker for Paper {
     fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
@@ -495,8 +577,12 @@ impl Broker for Paper {
         books.seen.push(Seen {
             request: request.clone(),
             journaled_first,
+            appended: self.journal.appends(),
         });
         let outcome = answer(&mut books, request)?;
+        if books.lose_closes && matches!(request, BrokerRequest::ClosePosition(..)) {
+            return Err(ConnectorError::Unknown(BrokerUnknown::Timeout));
+        }
         if books.lose_answers > 0 {
             books.lose_answers = books.lose_answers.saturating_sub(1);
             return Err(ConnectorError::Unknown(BrokerUnknown::Timeout));
@@ -559,8 +645,69 @@ fn answer(books: &mut Books, request: &BrokerRequest) -> Result<BrokerOutcome, C
                 cursor: ActivityCursor(books.fills.len().to_string()),
             }
         }
+        BrokerRequest::CancelAll(_) if books.account_wide.is_some() => {
+            BrokerOutcome::AccountWideAccepted
+        }
+        BrokerRequest::ClosePosition(_, instrument) if books.account_wide.is_some() => {
+            let fills = books.account_wide == Some(true);
+            close(books, instrument, fills).map_err(|_| not_sent)?;
+            BrokerOutcome::AccountWideAccepted
+        }
         _ => return Err(not_sent),
     })
+}
+
+/// The broker's close of `instrument`: a sell of the whole position as an order of its own with no
+/// client order id, working, or, if `fills`, filled at 150, its fill in the account's activities
+/// and the position gone.
+fn close(books: &mut Books, instrument: &InstrumentId, fills: bool) -> Result<(), Error> {
+    let held = books
+        .positions
+        .iter()
+        .filter(|position| &position.instrument == instrument)
+        .try_fold(SignedQty::ZERO, |sum, position| {
+            sum.checked_add(position.qty)
+        })?;
+    let qty = held.abs();
+    books.sequence = books.sequence.saturating_add(1);
+    let broker_order_id = format!("b{}", books.sequence);
+    let price = Price::parse("150")?;
+    books.orders.insert(
+        broker_order_id.clone(),
+        BrokerOrder {
+            broker_order_id: broker_order_id.clone(),
+            client_order_id: None,
+            instrument: instrument.clone(),
+            side: Side::Sell,
+            qty,
+            filled_qty: if fills { qty } else { Qty::ZERO },
+            limit_price: None,
+            stop_price: None,
+            status: if fills { "filled" } else { "new" }.to_owned(),
+            reject_code: None,
+            replaced_by_broker_order_id: None,
+            legs: Vec::new(),
+            created_on: None,
+        },
+    );
+    if !fills {
+        return Ok(());
+    }
+    books.fills.push(BrokerFill {
+        fill_id: FillId(format!("f-{broker_order_id}")),
+        client_order_id: None,
+        broker_order_id: Some(broker_order_id),
+        instrument: instrument.clone(),
+        side: Side::Sell,
+        qty,
+        price,
+        fees: Usd::parse("0")?,
+        trade_date: mandate_time::Date::parse("2026-09-21")?,
+    });
+    books
+        .positions
+        .retain(|position| &position.instrument != instrument);
+    Ok(())
 }
 
 fn account() -> Result<BrokerAccount, Error> {
@@ -682,6 +829,8 @@ pub fn wired(
         fees: fees()?,
         gate,
         protections,
+        quotes: Box::new(NoQuotes),
+        marked: Box::new(NoMarks),
     })
 }
 
@@ -779,6 +928,36 @@ pub fn deploy(journal: &Journal, id: &str, agent: &str, connection: &str) -> Res
     )
 }
 
+/// A version-3 `AgentDeployed` (journal spec v0.84, DEC-2131): version 2's members, then the
+/// passkey step-up that authorized it.
+pub fn deploy_stepped_up(
+    journal: &Journal,
+    id: &str,
+    agent: &str,
+    connection: &str,
+) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "AgentDeployed",
+        3,
+        None,
+        object(vec![
+            ("agent_id", text(agent)),
+            ("connection_id", text(connection)),
+            ("mandate_version", text(VERSION)),
+            (
+                "step_up",
+                object(vec![
+                    ("assertion_id", text("01JAA3P0A000000000000000H1")),
+                    ("authenticated_at", text("2026-10-17T15:59:50.000000000Z")),
+                    ("method", text("passkey")),
+                ])?,
+            ),
+        ])?,
+    )
+}
+
 pub fn tick(journal: &Journal, id: &str, clock: &str) -> Result<(), Error> {
     journal.write(
         CLOCK_STREAM,
@@ -854,6 +1033,155 @@ pub fn kill_by(journal: &Journal, agent: &str, id: &str, initiator: &str) -> Res
             ("mode_event", Value::Null),
             ("scope", text("agent")),
             ("subject", text(agent)),
+        ])?,
+    )
+}
+
+/// The control stream's `OwnerCommandIssued` of a kill switch of `scope` (`connection` or
+/// `workspace`) and `subject` (journal spec §9.1, workspace API §5.6).
+pub fn kill_command(journal: &Journal, id: &str, scope: &str, subject: &str) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "OwnerCommandIssued",
+        1,
+        None,
+        object(vec![
+            ("command", text("kill_switch")),
+            ("scope", text(scope)),
+            ("subject", text(subject)),
+            ("step_up", Value::Null),
+            ("user", text("usr_owner")),
+        ])?,
+    )
+}
+
+/// The control stream's `ConnectionRevoked` of `connection`, ordinary or compromised.
+pub fn revoke(
+    journal: &Journal,
+    id: &str,
+    connection: &str,
+    compromised: bool,
+) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "ConnectionRevoked",
+        1,
+        None,
+        object(vec![
+            ("connection_id", text(connection)),
+            (
+                "reason",
+                text(if compromised { "compromised" } else { "owner" }),
+            ),
+        ])?,
+    )
+}
+
+/// The control stream's `ConnectionRequested` of an OAuth connect of `connection` for `account`
+/// (journal spec §9.8), with the members the executor reads.
+pub fn requested(
+    journal: &Journal,
+    id: &str,
+    connection: &str,
+    account: &str,
+) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "ConnectionRequested",
+        1,
+        None,
+        object(vec![
+            ("account_ref", text(account)),
+            ("connection_id", text(connection)),
+            ("environment", text("paper")),
+        ])?,
+    )
+}
+
+/// The manager's `ProcessStartIssued` of `account`'s executor on its connect's token exchange's
+/// success, cause `exchanged` (journal spec §9.21, DEC-2335).
+pub fn exchanged(journal: &Journal, id: &str, account: &str) -> Result<(), Error> {
+    start_issued(journal, id, "executor", account, "exchanged")
+}
+
+/// The manager's `ProcessStartIssued` of `process` for `subject`, at generation 1, for `cause`.
+pub fn start_issued(
+    journal: &Journal,
+    id: &str,
+    process: &str,
+    subject: &str,
+    cause: &str,
+) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "ProcessStartIssued",
+        1,
+        None,
+        object(vec![
+            ("cause", text(cause)),
+            (
+                "generation",
+                Value::Int(mandate_canon::Int::new(1).ok_or("generation")?),
+            ),
+            ("process", text(process)),
+            ("subject", text(subject)),
+        ])?,
+    )
+}
+
+/// The control stream's `ConnectionRefused` of `connection`'s connect, by a teardown.
+pub fn refused(journal: &Journal, id: &str, connection: &str) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "ConnectionRefused",
+        1,
+        None,
+        object(vec![
+            ("check", Value::Null),
+            ("connection_id", text(connection)),
+            ("occasion", text("connect")),
+            ("reason", text("timeout")),
+        ])?,
+    )
+}
+
+/// The control stream's `AgentStopped` of `agent`.
+pub fn stopped(journal: &Journal, id: &str, agent: &str) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "AgentStopped",
+        1,
+        None,
+        object(vec![("agent_id", text(agent))])?,
+    )
+}
+
+/// The runtime's copy on `agent`'s stream of the kill-switch command `command`, at its scope.
+pub fn copy_of(
+    journal: &Journal,
+    agent: &str,
+    id: &str,
+    command: &str,
+    scope: &str,
+    subject: &str,
+) -> Result<(), Error> {
+    journal.write(
+        &agent_stream(agent),
+        id,
+        "KillSwitchActivated",
+        1,
+        Some(command),
+        object(vec![
+            ("initiator", text("owner")),
+            ("mode_event", Value::Null),
+            ("scope", text(scope)),
+            ("subject", text(subject)),
         ])?,
     )
 }

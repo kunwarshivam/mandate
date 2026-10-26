@@ -2,7 +2,10 @@
 //! token endpoint and no network. A test marked `#[ignore = "pending <story>"]` fails at that
 //! story's `Unimplemented` stub until the story's code lands; every other test runs.
 
+mod account_entry;
 mod checks;
+mod code_entry;
+mod code_wait;
 mod errors;
 mod exchange;
 mod grant;

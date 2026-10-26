@@ -6,7 +6,7 @@
 //! cannot read is never skipped: it is [`Unreadable`], and the process stops rather than guess
 //! (DEC-85, `AGENTS.md` rule 3).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::{Value, parse};
@@ -44,74 +44,299 @@ pub fn folded(row: &StoredEvent) -> Result<FoldedEvent, Unreadable> {
 }
 
 /// The agents whose deployments trade on the account in `scope`, read from the control stream in
-/// `environment`: an agent whose latest version-2 `AgentDeployed` names a connection whose latest
-/// establishment or revocation is a version-2 `ConnectionEstablished` naming this `account_ref`
-/// (journal spec §9.8, §9.24, DEC-1171). A version-1 deployment names no connection, so it reaches
-/// no executor (DEC-1171 item 3), nor ends the following an earlier version-2 one began: an agent
-/// followed one switch too many only has its own orders cancelled (`AGENTS.md` rule 13). An agent whose deployment stopped is still followed, since it may
-/// still hold orders or a position its kill switch must reach (`AGENTS.md` rule 13). Each agent comes
-/// with the `mandate_version` its latest version-2 deployment names, the version it runs under
-/// (DEC-2034 item 1).
+/// `environment` (journal spec §9.8, §9.24, DEC-1171, DEC-2343), with what a revocation changes
+/// for them.
+///
+/// A version-3 `AgentDeployed` is read as its version 2 (journal spec v0.84, DEC-2131 item 4).
+/// An agent is followed when any of its version-2 `AgentDeployed` named a connection that a
+/// version-2 `ConnectionEstablished` in this environment ever named this `account_ref` for, and a
+/// later deployment naming another connection never drops it (DEC-2343 item 2). A revocation never
+/// ends the following either (DEC-2343 item 1): the agent's kill switches, exits and protective
+/// re-placements are still read. Its openings are `held` unless its latest version-2 deployment, on
+/// any connection, names a connection whose latest establishment or revocation is a version-2
+/// establishment naming this account: none after a revocation, and none once a later deployment
+/// names another account's connection. A version-1 deployment names no connection, so it neither begins nor ends
+/// any following (DEC-1171 item 3), and an agent whose deployment stopped is still followed, since
+/// it may still hold orders or a position its kill switch must reach (`AGENTS.md` rule 13). Each
+/// agent comes with the `mandate_version` of its latest version-2 deployment on this account, the
+/// version it runs under (DEC-2034 item 1).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Following {
+    pub agents: BTreeMap<AgentId, MandateVersion>,
+    /// The followed agents whose openings are not handed (DEC-2343 item 1).
+    pub held: BTreeSet<AgentId>,
+    /// This account's connections: each one a version-2 establishment ever named this account for.
+    ours: BTreeSet<String>,
+    /// Each of this account's connections' revocations, by control-stream `seq`.
+    revocations: BTreeMap<String, Vec<u64>>,
+    /// The kill-switch commands of connection or workspace scope, in control-stream order.
+    commands: Vec<KillCommand>,
+    /// The agents with an `AgentStopped`, whose runtime no longer runs to copy a kill switch.
+    stopped: BTreeSet<AgentId>,
+    /// Whether an `exchanged` start of this account's executor is open (DEC-2347 item 3.9).
+    connecting: bool,
+    /// Whether the account's connection is closed (DEC-2347 item 3.2): a connect or a connection
+    /// was journaled for it, no connect is open, and none of its connections is live.
+    closed: bool,
+    /// Whether a connection record on the control stream did not read (DEC-2357): every agent with a
+    /// version-2 deployment is followed, with its openings held, every kill-switch command covering
+    /// it is applied directly, and the executor is never released, while exits go on.
+    unsure: bool,
+}
+
+/// An `OwnerCommandIssued` `kill_switch` the executor may read itself (DEC-2343 item 3): its
+/// record, its `seq`, and the connection it names, or `None` for the workspace.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct KillCommand {
+    id: EventId,
+    seq: u64,
+    connection: Option<String>,
+    /// Every version-2 deployment before the command, as agent and connection: the agents it can
+    /// cover, so one deployed after it never is.
+    before: BTreeSet<(String, String)>,
+    /// The agent an agent-scope command names, which the executor reads only for a stopped agent.
+    agent: Option<AgentId>,
+}
+
+/// Reads [`Following`] from the control stream. `control` must hold the stream's rows in `seq`
+/// order: which deployments a kill-switch command covers is the deployments read before it.
+///
+/// A connection record that does not read is ambiguity, never a stop (DEC-2357, `AGENTS.md` rules 3
+/// and 13): it is set aside, every followed agent's openings are held, and the executor is never
+/// released, while its exits and kill switches go on.
 ///
 /// # Errors
-/// [`Unreadable`] for a deployment or connection record whose members do not read: an agent the
-/// account may owe a kill switch is never dropped for it (DEC-85).
+/// [`Unreadable`] for a deployment or kill-switch command record whose members do not read: an
+/// agent the account may owe a kill switch is never dropped for it (DEC-85).
 pub fn agents_of(
     control: &[StoredEvent],
     scope: &AccountScope,
     environment: Environment,
-) -> Result<BTreeMap<AgentId, MandateVersion>, Unreadable> {
-    let mut ours: BTreeMap<String, bool> = BTreeMap::new();
-    let mut deployed: BTreeMap<String, Option<(String, String)>> = BTreeMap::new();
+) -> Result<Following, Unreadable> {
+    let mut ours: BTreeSet<String> = BTreeSet::new();
+    let mut live: BTreeMap<String, bool> = BTreeMap::new();
+    let mut deployed: BTreeMap<String, Vec<(u64, String, String)>> = BTreeMap::new();
+    let mut revocations: BTreeMap<String, Vec<u64>> = BTreeMap::new();
+    let mut commands = Vec::new();
+    let mut stopped = BTreeSet::new();
+    let mut requested: Option<String> = None;
+    let mut connects: Vec<Option<String>> = Vec::new();
+    let mut exchanged = false;
+    let mut unsure = false;
     for row in control
         .iter()
         .filter(|row| row.environment == environment.as_str())
     {
         if !matches!(
             row.event_type.as_str(),
-            "ConnectionEstablished" | "ConnectionRevoked" | "AgentDeployed" | "AgentStopped"
+            "ConnectionEstablished"
+                | "ConnectionRevoked"
+                | "AgentDeployed"
+                | "AgentStopped"
+                | "OwnerCommandIssued"
+                | "ConnectionRequested"
+                | "ConnectionRefused"
+                | "ProcessStartIssued"
         ) {
             continue;
         }
-        let event = folded(row)?;
-        let text = |member: &str| {
-            event
-                .payload
-                .get(member)
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .ok_or(Unreadable)
+        let connection_record = matches!(
+            row.event_type.as_str(),
+            "ConnectionEstablished"
+                | "ConnectionRevoked"
+                | "ConnectionRequested"
+                | "ConnectionRefused"
+                | "ProcessStartIssued"
+        );
+        let mut read = || -> Result<(), Unreadable> {
+            let event = folded(row)?;
+            let text = |member: &str| {
+                event
+                    .payload
+                    .get(member)
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .ok_or(Unreadable)
+            };
+            match (row.event_type.as_str(), row.schema_version) {
+                ("ConnectionEstablished", 2) => {
+                    let mine = text("account_ref")? == scope.account.0
+                        && text("environment")? == environment.as_str();
+                    let connection = text("connection_id")?;
+                    if mine {
+                        ours.insert(connection.clone());
+                    }
+                    live.insert(connection, mine);
+                }
+                ("ConnectionEstablished", _) => {
+                    live.insert(text("connection_id")?, false);
+                }
+                ("ConnectionRequested", _) => {
+                    if text("account_ref")? == scope.account.0 {
+                        requested = Some(text("connection_id")?);
+                    }
+                }
+                ("ProcessStartIssued", _) => {
+                    if text("process")? == "executor"
+                        && text("subject")? == scope.account.0
+                        && text("cause")? == "exchanged"
+                    {
+                        exchanged = true;
+                        connects.push(requested.clone());
+                    }
+                }
+                ("ConnectionRefused", _) => {
+                    if text("occasion")? == "connect" {
+                        let connection = Some(text("connection_id")?);
+                        connects.retain(|open| open != &connection);
+                    }
+                }
+                ("ConnectionRevoked", _) => {
+                    let connection = text("connection_id")?;
+                    connects.retain(|open| open.as_ref() != Some(&connection));
+                    revocations
+                        .entry(connection.clone())
+                        .or_default()
+                        .push(row.seq);
+                    live.insert(connection, false);
+                }
+                ("AgentDeployed", 2 | 3) => {
+                    deployed.entry(text("agent_id")?).or_default().push((
+                        row.seq,
+                        text("connection_id")?,
+                        text("mandate_version")?,
+                    ));
+                }
+                ("OwnerCommandIssued", _) => {
+                    if text("command")? != "kill_switch" {
+                        return Ok(());
+                    }
+                    let (connection, agent) = match text("scope")?.as_str() {
+                        "connection" => (Some(text("subject")?), None),
+                        "workspace" if text("subject")? == scope.workspace.0 => (None, None),
+                        "agent" => (None, Some(AgentId(text("subject")?))),
+                        _ => return Ok(()),
+                    };
+                    let before = deployed
+                        .iter()
+                        .flat_map(|(agent, deployments)| {
+                            deployments
+                                .iter()
+                                .map(move |(_, connection, _)| (agent.clone(), connection.clone()))
+                        })
+                        .collect();
+                    commands.push(KillCommand {
+                        id: event.event_id.clone(),
+                        seq: row.seq,
+                        connection,
+                        before,
+                        agent,
+                    });
+                }
+                ("AgentStopped", _) => {
+                    stopped.insert(AgentId(text("agent_id")?));
+                }
+                _ => {
+                    text("agent_id")?;
+                }
+            }
+            Ok(())
         };
-        match (row.event_type.as_str(), row.schema_version) {
-            ("ConnectionEstablished", 2) => {
-                let mine = text("account_ref")? == scope.account.0
-                    && text("environment")? == environment.as_str();
-                ours.insert(text("connection_id")?, mine);
-            }
-            ("ConnectionEstablished" | "ConnectionRevoked", _) => {
-                ours.insert(text("connection_id")?, false);
-            }
-            ("AgentDeployed", 2) => {
-                deployed.insert(
-                    text("agent_id")?,
-                    Some((text("connection_id")?, text("mandate_version")?)),
-                );
-            }
-            _ => {
-                text("agent_id")?;
-            }
+        match read() {
+            Err(Unreadable) if connection_record => unsure = true,
+            other => other?,
         }
     }
-    Ok(deployed
-        .into_iter()
-        .filter_map(|(agent, deployment)| {
-            let (connection, version) = deployment?;
-            ours.get(&connection)
-                .copied()
-                .unwrap_or(false)
-                .then_some((AgentId(agent), MandateVersion(version)))
-        })
-        .collect())
+    let mut following = Following {
+        stopped,
+        connecting: !connects.is_empty(),
+        closed: connects.is_empty()
+            && (exchanged || !ours.is_empty())
+            && ours
+                .iter()
+                .all(|connection| live.get(connection) != Some(&true)),
+        revocations: revocations
+            .into_iter()
+            .filter(|(connection, _)| ours.contains(connection))
+            .collect(),
+        commands,
+        ours: ours.clone(),
+        unsure,
+        ..Following::default()
+    };
+    for (agent, deployments) in deployed {
+        let latest_live = deployments
+            .last()
+            .is_some_and(|(_, connection, _)| live.get(connection).copied().unwrap_or(false));
+        let Some((_, _, version)) = deployments
+            .iter()
+            .rev()
+            .find(|(_, connection, _)| unsure || ours.contains(connection))
+        else {
+            continue;
+        };
+        let agent = AgentId(agent);
+        following
+            .agents
+            .insert(agent.clone(), MandateVersion(version.clone()));
+        if !latest_live || unsure {
+            following.held.insert(agent);
+        }
+    }
+    Ok(following)
+}
+
+impl Following {
+    /// Whether nothing the journal shows still wants this executor (DEC-2347 items 3.1, 3.2 and
+    /// 3.9): no OAuth connect of its account is open (an `exchanged` start whose connection, the
+    /// latest requested for this account before it, has no `ConnectionRefused` of its connect and
+    /// no `ConnectionRevoked` after it; DEC-2335 item 2), and either every agent it follows has an
+    /// `AgentStopped`, which is final (journal spec v0.56), or it follows none and its account's
+    /// connection is closed. An executor following none while its connection is live, or with none
+    /// journaled, waits for the manager to stop it.
+    pub fn released(&self) -> bool {
+        !self.connecting
+            && !self.unsure
+            && if self.agents.is_empty() {
+                self.closed
+            } else {
+                self.agents.keys().all(|agent| self.stopped.contains(agent))
+            }
+    }
+
+    /// The kill-switch commands the executor applies itself to `agent` (DEC-2343 item 3), in
+    /// control-stream order: each command of its connection's or the workspace's scope issued
+    /// after the agent was deployed on one of this account's connections it names, when one of
+    /// those connections is revoked at or after the command, or the agent has an `AgentStopped`, so
+    /// no runtime will copy it; and each agent-scope command naming the agent when it has an
+    /// `AgentStopped`. Every other covered agent waits for the runtime's copy, which carries the
+    /// owner's confirmation. While the reading is unsure, a connection record having not read, a
+    /// command covering the agent on any connection is applied as if revoked at or after it
+    /// (DEC-2357 item 3).
+    pub fn commands_for(&self, agent: &AgentId) -> Vec<EventId> {
+        let stopped = self.stopped.contains(agent);
+        self.commands
+            .iter()
+            .filter(|command| match &command.agent {
+                Some(named) => named == agent && stopped,
+                None => command.before.iter().any(|(deployed, connection)| {
+                    deployed == &agent.0
+                        && (self.unsure || self.ours.contains(connection))
+                        && command
+                            .connection
+                            .as_ref()
+                            .is_none_or(|named| named == connection)
+                        && (stopped
+                            || self.unsure
+                            || self
+                                .revocations
+                                .get(connection)
+                                .is_some_and(|seqs| seqs.iter().any(|seq| *seq >= command.seq)))
+                }),
+            })
+            .map(|command| command.id.clone())
+            .collect()
+    }
 }
 
 /// A `KillSwitchActivated` on an agent's stream: the runtime's copy of a kill switch that covers
@@ -121,6 +346,9 @@ pub fn agents_of(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Switch {
     pub switch: EventId,
+    /// The record the copy was made from, its `causation_id`: for a connection's or the workspace's
+    /// switch, the control stream's command (DEC-2343 item 4).
+    pub cause: Option<EventId>,
     pub initiator: Initiator,
     pub confirmation: Option<OwnerConfirmation>,
 }
@@ -140,6 +368,7 @@ pub fn switches(rows: &[FoldedEvent]) -> Result<Vec<Switch>, Unreadable> {
                 .ok_or(Unreadable)?;
             Ok(Switch {
                 switch: row.event_id.clone(),
+                cause: row.causation_id.clone(),
                 initiator: initiator_of(initiator)?,
                 confirmation: confirmation_for(rows, row)?,
             })

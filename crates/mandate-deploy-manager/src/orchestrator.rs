@@ -2,6 +2,9 @@
 //! asks for. It reads probes and changes nothing else (infrastructure design §3.1, DEC-986).
 
 use std::future::Future;
+use std::time::Duration;
+
+use mandate_time::UtcNanos;
 
 use crate::control::Slot;
 
@@ -15,6 +18,13 @@ pub enum Phase {
     Running { ready: bool },
     /// Exited, and never restarted by the orchestrator itself.
     Exited,
+    /// Exited successfully, and never restarted by the orchestrator itself: a token exchange that
+    /// wrote its connection's token (DEC-2336 item 1), or an executor started for a kill switch
+    /// that ended once nothing was left to apply (DEC-2344 item 1). An orchestrator keeps a finished
+    /// instance listed with this phase until the manager has read it: one it drops sooner reads as
+    /// gone, which the manager takes for a crash, so a kill-switch generation that ended well would
+    /// be restarted and could raise a false `kill_switch_unapplied`.
+    Succeeded,
     /// Neither running nor exited as far as the orchestrator can tell (a lost node, or a stop in
     /// progress): it may still be running, so it counts as live.
     Unknown,
@@ -23,7 +33,7 @@ pub enum Phase {
 impl Phase {
     /// Whether the instance may still be running, and so still be its stream's writer.
     pub fn live(self) -> bool {
-        !matches!(self, Self::Exited)
+        !matches!(self, Self::Exited | Self::Succeeded)
     }
 }
 
@@ -33,6 +43,18 @@ pub struct Instance {
     pub slot: Slot,
     pub generation: u64,
     pub phase: Phase,
+}
+
+/// What a start needs beside its slot and generation: a token exchange's `lifetime`, which its
+/// request has left, and its request's `expires_at`, the instant that lifetime runs to, which the
+/// exchange waits for its code until (DEC-2363); and an executor's `connection`, whose own account
+/// it runs as (DEC-2060). A standing process has neither a lifetime nor an expiry; a runtime and a
+/// token exchange name no connection here, an exchange's being its subject.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Launch {
+    pub lifetime: Option<Duration>,
+    pub expires_at: Option<UtcNanos>,
+    pub connection: Option<String>,
 }
 
 /// An effect, performed only after its record is committed.
@@ -55,17 +77,22 @@ pub trait Orchestrator {
     /// may start (the Kubernetes API's list is a quorum read; the writer epoch still fences a copy
     /// a stale list hid).
     fn observe(&mut self) -> impl Future<Output = Result<Vec<Instance>, Unavailable>>;
-    /// Creates `generation` of `slot`, which the orchestrator must never restart on its own.
+    /// Creates `generation` of `slot`, which the orchestrator must never restart on its own. A token
+    /// exchange is given the `lifetime` its request has left and ends by it; a standing process is
+    /// given none. An executor is given its connection, whose account it runs as.
     fn start(
         &mut self,
         slot: &Slot,
         generation: u64,
+        launch: &Launch,
     ) -> impl Future<Output = Result<(), Unavailable>>;
-    /// Asks `generation` of `slot` to stop, by the process's own drain (design §7.3).
+    /// Asks `generation` of `slot` to stop, by the process's own drain (design §7.3). An executor's
+    /// stop names its connection, so the account it ran as goes with it.
     fn stop(
         &mut self,
         slot: &Slot,
         generation: u64,
+        connection: Option<&str>,
     ) -> impl Future<Output = Result<(), Unavailable>>;
 }
 
@@ -79,6 +106,14 @@ pub struct OperatorAlert {
 /// §8.2's "Crash loop; agent left paused".
 pub const CRASH_LOOP: OperatorAlert = OperatorAlert {
     code: "crash_loop",
+    runbook: "RB-14",
+};
+
+/// A crash loop of an executor no agent wants, started for a kill switch it had not applied
+/// (DEC-2344 item 1): the switch is unapplied, so this replaces [`CRASH_LOOP`] for it. A fixed code
+/// with no subject (`AGENTS.md` rule 6).
+pub const KILL_SWITCH_UNAPPLIED: OperatorAlert = OperatorAlert {
+    code: "kill_switch_unapplied",
     runbook: "RB-14",
 };
 

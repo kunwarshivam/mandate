@@ -41,6 +41,7 @@
 /crates/mandate-authn/      @kunwarshivam
 /crates/mandate-backtest-runner/ @kunwarshivam
 /crates/mandate-backtest/   @kunwarshivam
+/crates/mandate-bars/       @kunwarshivam
 /crates/mandate-builder/    @kunwarshivam
 /crates/mandate-canon/      @kunwarshivam
 /crates/mandate-cli/        @kunwarshivam
@@ -49,6 +50,7 @@
 /crates/mandate-cp-site/    @kunwarshivam
 /crates/mandate-cp/         @kunwarshivam
 /crates/mandate-daemon/     @kunwarshivam
+/crates/mandate-datad/      @kunwarshivam
 /crates/mandate-dataservice/ @kunwarshivam
 /crates/mandate-deploy-manager/ @kunwarshivam
 /crates/mandate-deployd/     @kunwarshivam
@@ -57,6 +59,8 @@
 /crates/mandate-evaluation/ @kunwarshivam
 /crates/mandate-executor/   @kunwarshivam
 /crates/mandate-executord/  @kunwarshivam
+/crates/mandate-gate-context/ @kunwarshivam
+/crates/mandate-gate-inputs/ @kunwarshivam
 /crates/mandate-gateway-http/ @kunwarshivam
 /crates/mandate-gateway/    @kunwarshivam
 /crates/mandate-gatewayd/   @kunwarshivam
@@ -77,6 +81,8 @@
 /crates/mandate-passkey/    @kunwarshivam
 /crates/mandate-ports/      @kunwarshivam
 /crates/mandate-process/    @kunwarshivam
+/crates/mandate-provisioner/ @kunwarshivam
+/crates/mandate-provisionerd/ @kunwarshivam
 /crates/mandate-push-relay/ @kunwarshivam
 /crates/mandate-refcases/   @kunwarshivam
 /crates/mandate-release/    @kunwarshivam

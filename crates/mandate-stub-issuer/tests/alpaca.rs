@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use mandate_stub_issuer::alpaca::{
-    Alpaca, CODE_TTL_S, MAX_CODES, Random, Refusal, SecretFileError, Settings, read_secret,
-    settings,
+    AccountRefusal, Alpaca, CODE_TTL_S, Cause, MAX_CODES, MAX_TOKENS, Random, Refusal,
+    SecretFileError, Settings, account_id, read_secret, refusal_line, settings,
 };
 use mandate_stub_issuer::start::Refused;
 use proptest::prelude::{any, prop};
@@ -322,6 +322,129 @@ fn each_token_refusal_has_its_code() {
     );
 }
 
+/// Fills like [`Counter`] for its first `.0` fills, then fails: a code is issued, and the token
+/// it would redeem for is not.
+struct FailingAfter(u64, Counter);
+
+impl Random for FailingAfter {
+    fn fill(&self, out: &mut [u8]) -> bool {
+        self.1.0.load(Ordering::Relaxed) < self.0 && self.1.fill(out)
+    }
+}
+
+/// The values a form carries, decoded: none of them may appear in a refusal's line.
+fn values(form: &str) -> Vec<String> {
+    form.split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .map(|(_, value)| decode(value))
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+/// DEC-1179: each token refusal names the check that refused it, and its line is `token_refused`,
+/// the answer's `error` and that check's word, with nothing the request carried.
+#[test]
+fn each_token_refusal_names_its_cause_and_its_line_carries_no_request_value() {
+    let provider = provider();
+    let cases: Vec<(Box<Form>, Refusal, Cause, &str)> = vec![
+        (
+            Box::new(|c| with(token_params(c), "client_id", "client-2")),
+            Refusal::InvalidClient,
+            Cause::Client,
+            "token_refused invalid_client client\n",
+        ),
+        (
+            Box::new(|c| with(token_params(c), "client_secret", "another-secret-canary")),
+            Refusal::InvalidClient,
+            Cause::Client,
+            "token_refused invalid_client client\n",
+        ),
+        (
+            Box::new(|c| with(token_params(c), "code_verifier", "another-verifier")),
+            Refusal::InvalidGrant,
+            Cause::CodeVerifier,
+            "token_refused invalid_grant code_verifier\n",
+        ),
+        (
+            Box::new(|c| {
+                with(
+                    token_params(c),
+                    "redirect_uri",
+                    "http://localhost:8080/v1/oauth/alpaca/callback",
+                )
+            }),
+            Refusal::InvalidGrant,
+            Cause::RedirectUri,
+            "token_refused invalid_grant redirect_uri\n",
+        ),
+        (
+            Box::new(|c| with(token_params(c), "grant_type", "refresh_token")),
+            Refusal::InvalidRequest,
+            Cause::GrantType,
+            "token_refused invalid_request grant_type\n",
+        ),
+        (
+            Box::new(|c| without(&token_params(c), "code_verifier")),
+            Refusal::InvalidRequest,
+            Cause::Form,
+            "token_refused invalid_request form\n",
+        ),
+        (
+            Box::new(|_| token_params("no-such-code-canary")),
+            Refusal::InvalidGrant,
+            Cause::CodeUnknown,
+            "token_refused invalid_grant code_unknown\n",
+        ),
+    ];
+    for (make, refusal, cause, line) in cases {
+        let code = code(&provider, T0);
+        let form = joined(&make(&code));
+        assert_eq!(
+            provider.exchange(&form, T0 + 1),
+            Err((refusal, cause)),
+            "{form}"
+        );
+        let written = refusal_line(refusal, cause);
+        assert_eq!(written, line, "{form}");
+        for value in values(&form) {
+            assert!(!written.contains(&value), "{value:?} in {written:?}");
+        }
+    }
+    let stale = joined(&token_params(&code(&provider, T0)));
+    assert_eq!(
+        provider.exchange(&stale, T0 + CODE_TTL_S),
+        Err((Refusal::InvalidGrant, Cause::CodeExpired))
+    );
+    assert_eq!(
+        refusal_line(Refusal::InvalidGrant, Cause::CodeExpired),
+        "token_refused invalid_grant code_expired\n"
+    );
+    assert_eq!(
+        provider.exchange("not a form %zz", T0),
+        Err((Refusal::InvalidRequest, Cause::Form))
+    );
+    let settings = Settings {
+        client_id: "client-1".to_owned(),
+        client_secret: SECRET.as_bytes().to_vec(),
+        redirect_uri: REDIRECT.to_owned(),
+    };
+    let starved = Alpaca::new(settings, Box::new(FailingAfter(1, Counter::default())));
+    let form = joined(&token_params(&code(&starved, T0)));
+    assert_eq!(
+        starved.exchange(&form, T0 + 1),
+        Err((Refusal::Unavailable, Cause::StoreFull))
+    );
+    assert_eq!(
+        refusal_line(Refusal::Unavailable, Cause::StoreFull),
+        "token_refused temporarily_unavailable store_full\n"
+    );
+    let redeemed = joined(&token_params(&code(&provider, T0)));
+    assert!(
+        provider.exchange(&redeemed, T0 + 1).is_ok(),
+        "a redeemable code is not refused"
+    );
+}
+
 #[test]
 fn a_code_expires_six_hundred_seconds_after_it_is_issued() {
     let provider = provider();
@@ -565,4 +688,101 @@ fn a_redirect_uri_outside_dec_2623s_shape_is_refused_at_start() {
         let settings = settings(Some("client-1"), Some(file), Some(uri));
         assert!(matches!(settings, Err(Refused::Alpaca)), "{uri}");
     }
+}
+
+/// The account id of `token` as DEC-1178 item 1 states it, computed here on its own: SHA-256's
+/// first 16 bytes, the version nibble set to 4 and the variant bits to `10`, in lowercase
+/// hexadecimal grouped 8-4-4-4-12.
+fn expected_id(token: &str) -> String {
+    let sum = digest(&SHA256, token.as_bytes());
+    let mut bytes: Vec<u8> = sum.as_ref().iter().take(16).copied().collect();
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
+}
+
+/// A token issued by `provider` for a fresh code at `now`.
+fn issued_token(provider: &Alpaca, now: i64) -> Result<String, Refusal> {
+    let code = code(provider, now);
+    let body = provider.token(&joined(&token_params(&code)), now)?;
+    let answer: serde_json::Value = serde_json::from_str(&body).expect("JSON");
+    Ok(answer["access_token"].as_str().expect("a token").to_owned())
+}
+
+/// The id is the token's SHA-256 as a version 4 UUID: two vectors computed outside the crate, and
+/// for other tokens the test's own derivation; distinct tokens read distinct accounts.
+#[test]
+fn an_account_id_is_the_tokens_sha256_as_a_version_4_uuid() {
+    assert_eq!(
+        account_id("token-a"),
+        Ok("a70bf50e-531c-41a8-9756-1f2f5d5b6645".to_owned())
+    );
+    assert_eq!(
+        account_id("token-b"),
+        Ok("49e2bb7e-ab54-4f09-b409-ffafd3fa8a8a".to_owned())
+    );
+    let mut seen = std::collections::BTreeSet::new();
+    for token in ["", "x", "AAAA", "a-much-longer-token-0123456789_-"] {
+        let id = account_id(token).expect("an id");
+        assert_eq!(id, expected_id(token), "{token:?}");
+        assert_eq!(id.as_bytes()[14], b'4', "{id}: version 4");
+        assert!(b"89ab".contains(&id.as_bytes()[19]), "{id}: variant 1");
+        assert!(seen.insert(id), "{token:?} shares an account");
+    }
+}
+
+/// A token the provider issued reads its own account, `{"id": ...}` and nothing else; every other
+/// header, or none, reads nothing, as does another provider's token.
+#[test]
+fn an_issued_token_reads_its_account_and_nothing_else_does() {
+    let provider = provider();
+    let token = issued_token(&provider, T0).expect("a token");
+    let body = provider
+        .account(Some(format!("Bearer {token}").as_bytes()))
+        .expect("an account");
+    let answer: serde_json::Value = serde_json::from_str(&body).expect("JSON");
+    assert_eq!(answer, serde_json::json!({ "id": expected_id(&token) }));
+    let foreign = issued_token(&self::provider(), T0).expect("another provider's token");
+    for refused in [
+        None,
+        Some(String::new()),
+        Some("Bearer".to_owned()),
+        Some("Bearer ".to_owned()),
+        Some(format!("bearer {token}")),
+        Some(format!("Basic {token}")),
+        Some(format!("Bearer  {token}")),
+        Some(format!("Bearer {token} ")),
+        Some(format!("Bearer {token}x")),
+        Some(format!("Bearer {foreign}x")),
+        Some("Bearer token-a".to_owned()),
+    ] {
+        assert_eq!(
+            provider.account(refused.as_deref().map(str::as_bytes)),
+            Err(AccountRefusal::Unauthorized),
+            "{refused:?}"
+        );
+    }
+}
+
+/// The provider holds at most [`MAX_TOKENS`] tokens: the next redemption is unavailable, and every
+/// token held still reads its account.
+#[test]
+fn the_token_store_holds_at_most_its_bound() {
+    let provider = provider();
+    let first = issued_token(&provider, T0).expect("a token");
+    let read = |token: &str| provider.account(Some(format!("Bearer {token}").as_bytes()));
+    read(&first).expect("a held token reads its account");
+    for _ in 1..MAX_TOKENS {
+        issued_token(&provider, T0).expect("a token");
+    }
+    assert_eq!(issued_token(&provider, T0), Err(Refusal::Unavailable));
+    read(&first).expect("the first token is still held");
 }

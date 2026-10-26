@@ -126,9 +126,10 @@ impl PartialGateDecision {
         }
     }
 
-    /// DEC-160 (12): an allowed discretionary exit with nothing to price from is **held**
-    /// `exit_unpriced`, protection resting, and re-evaluated at every tick. A discretionary exit
-    /// may be paced, never denied (rule 13); no other exit is held for a price.
+    /// DEC-2037 item 5: an allowed exit with no limit of its own and nothing to price from is
+    /// **held** `exit_unpriced`, protection resting, and re-evaluated at every tick. One with a
+    /// limit of its own, a discretionary exit included, goes at it instead (DEC-2358, narrowing
+    /// DEC-160 (12)): an exit may be paced, never denied (rule 13).
     pub(crate) fn unpriced(self) -> Self {
         self.held_for("exit_priceable", UNPRICED)
     }
@@ -583,17 +584,24 @@ fn origin(purpose: Purpose) -> Origin {
     }
 }
 
+/// The binding gate's checks as §9's records carry them. The binding gate defers nothing, so a
+/// [`CheckOutcome::Deferred`] here is not its answer and nothing is recorded (DEC-2378 item 11).
 fn binding_checks_value(checks: &[CheckOutcome]) -> Result<Value, ExecutorError> {
-    let rows = checks
+    let judged = checks
         .iter()
-        .flat_map(|outcome| {
-            let (check, result) = match outcome {
-                CheckOutcome::Passed(check) => (*check, "pass"),
-                CheckOutcome::Failed(check, _) => (*check, "fail"),
-                CheckOutcome::NotReached(check) => (*check, "not_reached"),
-            };
-            binding_check_ids(check).iter().map(move |id| (id, result))
+        .map(|outcome| match outcome {
+            CheckOutcome::Passed(check) => Ok((*check, "pass")),
+            CheckOutcome::Failed(check, _) => Ok((*check, "fail")),
+            CheckOutcome::NotReached(check) => Ok((*check, "not_reached")),
+            CheckOutcome::Deferred(_) => Err(ExecutorError::NotInterpreted {
+                what: "a deferred check in the binding gate's answer".to_owned(),
+                story: "DEC-2378 item 11",
+            }),
         })
+        .collect::<Result<Vec<_>, _>>()?;
+    let rows = judged
+        .into_iter()
+        .flat_map(|(check, result)| binding_check_ids(check).iter().map(move |id| (id, result)))
         .map(|(id, result)| {
             object(vec![
                 ("id", text(*id)),

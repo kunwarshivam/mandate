@@ -14,6 +14,8 @@ cluster with its buckets, DNS and Access. Lane GO's GitOps installs everything i
 | `modules/budget` | The monthly estimate, which the plan refuses past $65 per environment |
 | `modules/cell` | The DigitalOcean modules wired into one environment |
 | `environments/staging`, `environments/production` | A root each: backend, encrypted state, values |
+| `modules/cluster`, `modules/ingress`, `modules/archive`, `modules/monitoring`, `modules/costing` | Customer production's HA cluster and tainted pools, per-workspace hosts and Access, locked backup buckets, out-of-cell alerts, and the estimate ([DEC-2064](../../docs/project/decisions/DEC-2064.md), Proposed) |
+| `environments/production-cell1` | Customer production, cell 1: proposed and never applied. `infra.yml` cannot dispatch it, and it refuses every plan until the founder approves its monthly spend ([design and cost](../../docs/design/production-cell.md)) |
 
 **Who runs what.** Pull requests run only checks that need no credential (`cargo xtask ci tofu`,
 [DEC-2013](../../docs/project/decisions/DEC-2013.md)). `plan` and `apply` run only in

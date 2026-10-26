@@ -46,6 +46,14 @@ pub enum Command {
         approval: String,
         content_hash: String,
     },
+    /// Grant an approval (§5.2, DEC-2104): as a Skip, with the step-up evidence the port verified
+    /// as journal spec §9.7 types it, `authenticated_at` an integer second.
+    Grant {
+        agent: String,
+        approval: String,
+        content_hash: String,
+        step_up: Value,
+    },
     /// Resume the agent, with the evidence the step-up port verified, or `null` (DEC-2102 item 4).
     Resume { agent: String, step_up: Value },
     /// The owner's Stop (DEC-136): with `release`, the positions become the owner's and the
@@ -85,7 +93,7 @@ impl Command {
         match self {
             Self::Pause(_) => "pause",
             Self::KillSwitch(_) => "kill_switch",
-            Self::Skip { .. } => "approval_response",
+            Self::Skip { .. } | Self::Grant { .. } => "approval_response",
             Self::Resume { .. } => "resume",
             Self::Stop { .. } => "stop",
             Self::OwnerExit { .. } => "owner_exit",
@@ -99,6 +107,7 @@ impl Command {
             Self::KillSwitch(KillScope::Agent(_)) => Permission::KillSwitchAgent,
             Self::KillSwitch(_) => Permission::KillSwitchConnectionOrWorkspace,
             Self::Skip { .. } => Permission::Skip,
+            Self::Grant { .. } => Permission::Approve,
             Self::Resume { .. } | Self::Stop { .. } => Permission::ResumeOrStop,
             Self::OwnerExit { .. } => Permission::OwnerExit,
         }
@@ -114,10 +123,10 @@ impl Command {
         }
     }
 
-    /// The member of the `202` that names the event: `command_id`, or a Skip's `response_id`.
+    /// The member of the `202` that names the event: `command_id`, or an answer's `response_id`.
     pub fn id_member(&self) -> &'static str {
         match self {
-            Self::Skip { .. } => "response_id",
+            Self::Skip { .. } | Self::Grant { .. } => "response_id",
             _ => "command_id",
         }
     }
@@ -125,38 +134,49 @@ impl Command {
     /// The event it is journaled as.
     fn event_type(&self) -> &'static str {
         match self {
-            Self::Skip { .. } => "ApprovalResponseSubmitted",
+            Self::Skip { .. } | Self::Grant { .. } => "ApprovalResponseSubmitted",
             _ => "OwnerCommandIssued",
         }
     }
 
     /// The digest references its payload names, which the envelope's `artifact_refs` lists
-    /// (journal spec §3): a Skip's content hash, a releasing Stop's warning, and none for any
+    /// (journal spec §3): an answer's content hash, a releasing Stop's warning, and none for any
     /// other command.
     fn artifact_refs(&self) -> Vec<Value> {
         match self {
-            Self::Skip { content_hash, .. } => vec![text(content_hash)],
+            Self::Skip { content_hash, .. } | Self::Grant { content_hash, .. } => {
+                vec![text(content_hash)]
+            }
             Self::Stop { release: true, .. } => vec![text(&release_warning())],
             _ => Vec::new(),
         }
     }
 
-    /// Its payload: journal spec §9.11's members for an owner command, §9.7's for a Skip, as the
+    /// Its payload: journal spec §9.11's members for an owner command, §9.7's for an answer, as the
     /// CLI writes each.
     fn payload(&self, workspace: &str, principal: &str, second: Int) -> Option<Value> {
-        if let Self::Skip {
-            agent,
-            approval,
-            content_hash,
-        } = self
-        {
+        let answer = match self {
+            Self::Skip {
+                agent,
+                approval,
+                content_hash,
+            } => Some((agent, approval, "skipped", content_hash, Value::Null)),
+            Self::Grant {
+                agent,
+                approval,
+                content_hash,
+                step_up,
+            } => Some((agent, approval, "approved", content_hash, step_up.clone())),
+            _ => None,
+        };
+        if let Some((agent, approval, verdict, content_hash, step_up)) = answer {
             return object(vec![
                 ("agent", text(agent)),
                 ("approval", text(approval)),
-                ("verdict", text("skipped")),
+                ("verdict", text(verdict)),
                 ("content_hash", text(content_hash)),
                 ("submitted_at", Value::Int(second)),
-                ("step_up", Value::Null),
+                ("step_up", step_up),
                 ("responder", text(principal)),
                 ("role", text("approver")),
             ]);
@@ -203,9 +223,10 @@ impl Command {
             }
             Self::KillSwitch(KillScope::Connection(connection)) => (None, "connection", connection),
             Self::KillSwitch(KillScope::Workspace) => (None, "workspace", workspace),
-            Self::Skip { agent, .. } | Self::Resume { agent, .. } | Self::Stop { agent, .. } => {
-                (Some(agent), "agent", agent)
-            }
+            Self::Skip { agent, .. }
+            | Self::Grant { agent, .. }
+            | Self::Resume { agent, .. }
+            | Self::Stop { agent, .. } => (Some(agent), "agent", agent),
             Self::OwnerExit {
                 agent, instrument, ..
             } => (Some(agent), "instrument", instrument),
@@ -218,6 +239,7 @@ impl Command {
             Self::Pause(agent)
             | Self::KillSwitch(KillScope::Agent(agent))
             | Self::Skip { agent, .. }
+            | Self::Grant { agent, .. }
             | Self::Resume { agent, .. }
             | Self::Stop { agent, .. }
             | Self::OwnerExit { agent, .. } => Some(agent),
@@ -308,6 +330,15 @@ pub struct Event {
 /// The canonical draft of `event`, written by the user `writer` names on the workspace's control
 /// stream; `None` only for a value the canonical form cannot hold.
 pub fn envelope(writer: &Writer<'_>, event: &Event) -> Option<Vec<u8>> {
+    caused_envelope(writer, event, None)
+}
+
+/// [`envelope`] with `causation_id` the event `causation` names, or `null` for `None`.
+pub fn caused_envelope(
+    writer: &Writer<'_>,
+    event: &Event,
+    causation: Option<&str>,
+) -> Option<Vec<u8>> {
     let actor = object(vec![
         ("build", text(BUILD)),
         ("id", text(writer.principal)),
@@ -319,7 +350,7 @@ pub fn envelope(writer: &Writer<'_>, event: &Event) -> Option<Vec<u8>> {
     let envelope = object(vec![
         ("actor", actor),
         ("artifact_refs", Value::Array(event.artifact_refs.clone())),
-        ("causation_id", Value::Null),
+        ("causation_id", causation.map_or(Value::Null, text)),
         ("clock_source", text("local")),
         ("config_refs", object(event.config_refs.clone())?),
         ("correlation_id", Value::Null),
@@ -425,9 +456,22 @@ pub async fn settle_at(
     now: UtcNanos,
     pinned: Option<u64>,
 ) -> Settled {
+    settle_batch_at(journal, stream, event_id, &[draft], now, pinned).await
+}
+
+/// [`settle_at`] for `drafts` appended in one batch, all or none, settled by the one whose id is
+/// `event_id`.
+pub async fn settle_batch_at(
+    journal: &dyn Journal,
+    stream: &str,
+    event_id: &str,
+    drafts: &[&[u8]],
+    now: UtcNanos,
+    pinned: Option<u64>,
+) -> Settled {
     let mut ambiguous = false;
     for _ in 0..ATTEMPTS {
-        match attempt(journal, stream, draft, now, pinned).await {
+        match attempt(journal, stream, drafts, now, pinned).await {
             Some(AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows)) => {
                 match rows.into_iter().find(|row| row.event_id == event_id) {
                     Some(row) => return Settled::Stored(Box::new(row)),
@@ -454,7 +498,7 @@ pub async fn settle_at(
 async fn attempt(
     journal: &dyn Journal,
     stream: &str,
-    draft: &[u8],
+    drafts: &[&[u8]],
     now: UtcNanos,
     pinned: Option<u64>,
 ) -> Option<AppendOutcome> {
@@ -463,5 +507,5 @@ async fn attempt(
         Some(head) => head,
         None => journal.head(stream).await.ok()?,
     };
-    journal.append(stream, head, epoch, now, draft).await.ok()
+    journal.append(stream, head, epoch, now, drafts).await.ok()
 }

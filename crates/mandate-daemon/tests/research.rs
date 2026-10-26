@@ -23,7 +23,11 @@ use research_rig::*;
 /// DEC-2208 item 1: the binary's fixture wiring runs no research.
 #[test]
 fn the_fixture_wiring_runs_no_research() {
-    assert!(fixture::wiring("user-owner").research.is_none());
+    assert!(
+        fixture::wiring("user-owner", "agent:ws1:agent-a")
+            .research
+            .is_none()
+    );
 }
 
 /// DEC-2208 item 1: with no research wiring, the process journals exactly what it journals without

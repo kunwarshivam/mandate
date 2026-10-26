@@ -12,8 +12,8 @@ use std::rc::Rc;
 use mandate_canon::{Digest, parse};
 use mandate_deploy_manager::fake::Fake;
 use mandate_deploy_manager::{
-    Alerts, ControlJournal, Deployer, Identity, Instance, OperatorAlert, Orchestrator, Slot,
-    Unavailable,
+    Alerts, ControlJournal, Deployer, Identity, Instance, Launch, OperatorAlert, Orchestrator,
+    Slot, Unavailable,
 };
 use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId};
 use mandate_time::UtcNanos;
@@ -219,19 +219,28 @@ impl Orchestrator for Checked {
         self.fake.observe().await
     }
 
-    async fn start(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {
+    async fn start(
+        &mut self,
+        slot: &Slot,
+        generation: u64,
+        launch: &Launch,
+    ) -> Result<(), Unavailable> {
         if self.fake.unavailable || self.fake.refuse_effects {
-            return self.fake.start(slot, generation).await;
+            return self.fake.start(slot, generation, launch).await;
         }
         self.check_start(slot, generation);
         match self.seed {
             Seed::None => {}
             Seed::DropStarts => return Ok(()),
-            Seed::SecondInstance => self.fake.start(slot, generation + 1000).await?,
-            Seed::Unwanted => self.fake.start(&Slot::runtime("agent_nobody"), 1).await?,
+            Seed::SecondInstance => self.fake.start(slot, generation + 1000, launch).await?,
+            Seed::Unwanted => {
+                self.fake
+                    .start(&Slot::runtime("agent_nobody"), 1, &Launch::default())
+                    .await?
+            }
             Seed::Repeated => {
-                self.fake.start(slot, generation).await?;
-                self.fake.start(slot, generation).await?;
+                self.fake.start(slot, generation, launch).await?;
+                self.fake.start(slot, generation, launch).await?;
             }
             Seed::Unjournaled => {
                 self.check_start(slot, generation + 1);
@@ -253,15 +262,20 @@ impl Orchestrator for Checked {
                     .collect();
                 for other in looped {
                     if self.fake.live(&other) == 0 {
-                        self.fake.start(&other, 1000).await?;
+                        self.fake.start(&other, 1000, &Launch::default()).await?;
                     }
                 }
             }
         }
-        self.fake.start(slot, generation).await
+        self.fake.start(slot, generation, launch).await
     }
 
-    async fn stop(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {
+    async fn stop(
+        &mut self,
+        slot: &Slot,
+        generation: u64,
+        connection: Option<&str>,
+    ) -> Result<(), Unavailable> {
         if !self.fake.unavailable
             && !self.fake.refuse_effects
             && !self.journal.holds("ProcessStopIssued", slot, generation)
@@ -269,7 +283,7 @@ impl Orchestrator for Checked {
             self.violations
                 .push(format!("stop of {slot:?} g{generation} before its record"));
         }
-        self.fake.stop(slot, generation).await
+        self.fake.stop(slot, generation, connection).await
     }
 }
 
@@ -531,4 +545,101 @@ pub fn owner_command(command: &str, scope: &str, subject: &str, nth: u32) -> (St
         "[]",
     );
     (id, draft)
+}
+
+/// A connect's request on the control stream (journal spec §9.8): at version 2 with `credential`
+/// `oauth` (and its breadth) or `api_key`, or at version 1, which names no credential.
+pub fn requested(connection: &str, account: &str, credential: Option<&str>) -> Vec<u8> {
+    let step_up = r#"{"assertion_id":"assert_owner_09","authenticated_at":"2026-10-17T14:59:50.000000000Z","method":"cli_confirm"}"#;
+    let tail = match credential {
+        Some("oauth") => r#","credential":"oauth","breadth":{"other_environment":"may_reach","disclosure":{"document":"alpaca_oauth_token_breadth","version":"1"}}"#.to_owned(),
+        Some(other) => format!(r#","credential":"{other}","breadth":null"#),
+        None => String::new(),
+    };
+    let draft = envelope(
+        &event_id(&format!("requested {connection}")),
+        "ConnectionRequested",
+        SERVICES,
+        "{}",
+        &format!(
+            r#"{{"connection_id":"{connection}","account_ref":"{account}","broker":"alpaca","environment":"paper","user":"user_owner_01","step_up":{step_up}{tail}}}"#
+        ),
+        "[]",
+    );
+    match credential {
+        Some(_) => at_version_2(&draft),
+        None => draft,
+    }
+}
+
+/// The role provisioner's actor (journal spec §9.33 rule 261: a system actor).
+const PROVISIONER: &str = r#"{"kind":"system","id":"role_provisioner","version":"0.1.0","build":"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}"#;
+
+/// The event id of [`requested`]'s request of `connection`.
+pub fn request_id(connection: &str) -> String {
+    event_id(&format!("requested {connection}"))
+}
+
+/// A role provisioner's answer to the request whose event id is `request` (journal spec §9.33):
+/// `ConnectionRolesMade` of `connection` when `refused` is `None`, else `ConnectionRolesRefused`
+/// with that reason, each caused by the request.
+fn roles(connection: &str, request: &str, refused: Option<&str>) -> Vec<u8> {
+    let (event_type, payload) = match refused {
+        None => (
+            "ConnectionRolesMade",
+            format!(r#"{{"connection_id":"{connection}"}}"#),
+        ),
+        Some(reason) => (
+            "ConnectionRolesRefused",
+            format!(r#"{{"connection_id":"{connection}","reason":"{reason}"}}"#),
+        ),
+    };
+    let draft = envelope(
+        &event_id(&format!("{event_type} {connection} {request}")),
+        event_type,
+        PROVISIONER,
+        "{}",
+        &payload,
+        "[]",
+    );
+    let mandate_canon::Value::Object(mut body) = parse(&draft).unwrap() else {
+        unreachable!("an envelope is an object")
+    };
+    body.insert(
+        mandate_canon::Key::new("causation_id").unwrap(),
+        mandate_canon::Value::Str(request.to_owned()),
+    );
+    mandate_canon::to_canonical(&mandate_canon::Value::Object(body))
+}
+
+/// The provisioner's `ConnectionRolesMade` for [`requested`]'s request of `connection`: what a
+/// connect's token exchange waits for (journal spec §9.21, DEC-2350).
+pub fn roles_made(connection: &str) -> Vec<u8> {
+    roles(connection, &request_id(connection), None)
+}
+
+/// A `ConnectionRolesMade` of `connection` that answers the request `request`, which need not be
+/// that connection's latest.
+pub fn roles_made_for(connection: &str, request: &str) -> Vec<u8> {
+    roles(connection, request, None)
+}
+
+/// The provisioner's `ConnectionRolesRefused` for [`requested`]'s request of `connection`.
+pub fn roles_refused(connection: &str, reason: &str) -> Vec<u8> {
+    roles(connection, &request_id(connection), Some(reason))
+}
+
+/// A teardown's `ConnectionRefused` of `connection` with `occasion` (journal spec §9.8): with
+/// occasion `connect` it closes the connection's request.
+pub fn refused(connection: &str, occasion: &str) -> Vec<u8> {
+    envelope(
+        &event_id(&format!("refused {connection} {occasion}")),
+        "ConnectionRefused",
+        SERVICES,
+        "{}",
+        &format!(
+            r#"{{"connection_id":"{connection}","broker":"alpaca","environment":"paper","occasion":"{occasion}","check":null,"reason":"timeout","existing_connection_id":null,"user":"user_owner_01","step_up":{{"assertion_id":"assert_owner_09","authenticated_at":"2026-10-17T14:59:50.000000000Z","method":"cli_confirm"}}}}"#
+        ),
+        "[]",
+    )
 }

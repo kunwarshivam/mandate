@@ -4,6 +4,7 @@
 //! paths [`kv_path`] stores at, and no two connections share a path, a ServiceAccount or a role.
 
 use std::collections::BTreeSet;
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::Path;
 
 use mandate_connections::record::ConnectionId;
@@ -11,8 +12,8 @@ use serde_json::{Value, json};
 
 use crate::SourceError;
 use crate::kubernetes::{
-    KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
-    mount_accessor, provisioner_policy, role_request, service_account_name,
+    KubernetesAuth, api_server_address, kubernetes_mount_requests, kubernetes_policy,
+    kubernetes_policy_name, mount_accessor, provisioner_policy, role_request, service_account_name,
 };
 use crate::policy::{Identity, Mounts, SecretPath, connection_segment, kv_path};
 
@@ -185,14 +186,28 @@ fn each_kinds_policy_reaches_exactly_the_paths_its_connection_is_stored_at() {
         for (identity, wanted) in [
             (
                 Identity::Executor(connection.clone()),
-                block("data", &token, "\"read\""),
+                [
+                    block("data", &token, "\"read\""),
+                    format!(
+                        "path \"mandate/data/personal/accounts/{}/+\" {{\n  capabilities = [\"create\"]\n}}\n",
+                        connection_segment(&connection).unwrap_or_default()
+                    ),
+                    format!(
+                        "path \"mandate/data/personal/fingerprints/{}/+\" {{\n  capabilities = [\"create\"]\n}}\n",
+                        connection_segment(&connection).unwrap_or_default()
+                    ),
+                    "path \"transit/hmac/account-fingerprint\" {\n  capabilities = [\"update\"]\n}\n"
+                        .to_owned(),
+                ]
+                .concat(),
             ),
             (
                 Identity::TokenExchange(connection.clone()),
                 [
                     block("data", &SecretPath::ClientSecret, "\"read\""),
-                    block("data", &code, "\"read\""),
-                    block("metadata", &code, "\"delete\""),
+                    block("data", &code, "\"read\", \"update\""),
+                    block("delete", &code, "\"update\""),
+                    block("destroy", &code, "\"update\""),
                     block("data", &token, "\"create\", \"update\""),
                 ]
                 .concat(),
@@ -268,18 +283,80 @@ fn each_kinds_policy_is_named_under_the_kv_mount() {
     );
 }
 
+/// The executor reads its own token, and creates its own connection's account entry and its
+/// fingerprint entry in the personal-data vault, which it can neither read nor write over
+/// (DEC-2339), and asks transit for the fingerprint key's HMAC alone (DEC-2345).
 #[test]
 fn the_executors_policy_reads_its_own_token_alone() {
     assert_eq!(
         kubernetes_policy(&Identity::Executor(c("any")), &Mounts::default(), ACCESSOR),
         Ok(format!(
-            "path \"mandate/data/connections/x{TEMPLATE}/token\" {{\n  capabilities = [\"read\"]\n}}\n"
+            "path \"mandate/data/connections/x{TEMPLATE}/token\" {{\n  capabilities = [\"read\"]\n}}\n\
+             path \"mandate/data/personal/accounts/x{TEMPLATE}/+\" {{
+  capabilities = [\"create\"]
+}}
+\
+             path \"mandate/data/personal/fingerprints/x{TEMPLATE}/+\" {{
+  capabilities = [\"create\"]
+}}
+\
+             path \"transit/hmac/account-fingerprint\" {{
+  capabilities = [\"update\"]
+}}
+"
         ))
     );
 }
 
+/// DEC-2339 item 1's deliberate exception to spelling every path out, and DEC-2345's beside it: the
+/// executor's creates of its account entries and its fingerprint entries end in `+`, one segment
+/// below its own connection's templated segment, and create only, so a request again on the
+/// connection to another account stream (DEC-699) has entries of its own. No other path of a
+/// templated policy holds `+` or `*`.
 #[test]
-fn the_exchanges_policy_writes_its_token_and_reads_and_deletes_its_code() {
+fn the_executors_one_wildcard_is_below_its_own_account_entries() {
+    let wildcards = |policy: &str| -> Vec<(String, String)> {
+        policy
+            .split("path \"")
+            .skip(1)
+            .filter_map(|block| {
+                let (path, rest) = block.split_once('"')?;
+                let caps = rest.split_once('[')?.1.split_once(']')?.0;
+                (path.contains('+') || path.contains('*'))
+                    .then(|| (path.to_owned(), caps.replace([' ', '"'], "")))
+            })
+            .collect()
+    };
+    let executor =
+        kubernetes_policy(&Identity::Executor(c("any")), &Mounts::default(), ACCESSOR).unwrap();
+    assert_eq!(
+        wildcards(&executor),
+        [
+            (
+                format!("mandate/data/personal/accounts/x{TEMPLATE}/+"),
+                "create".to_owned()
+            ),
+            (
+                format!("mandate/data/personal/fingerprints/x{TEMPLATE}/+"),
+                "create".to_owned()
+            ),
+        ]
+    );
+    let exchange = kubernetes_policy(
+        &Identity::TokenExchange(c("any")),
+        &Mounts::default(),
+        ACCESSOR,
+    )
+    .unwrap();
+    assert!(wildcards(&exchange).is_empty(), "{exchange}");
+}
+
+/// The exchange's code block reads and updates, the update being its take (DEC-2061); it destroys
+/// the version it took and soft-deletes its tombstone's version alone, by the `destroy` and
+/// `delete` endpoints (DEC-2321); and it never creates: `create` would let it write a code where
+/// none is.
+#[test]
+fn the_exchanges_policy_writes_its_token_and_reads_takes_and_deletes_its_code() {
     assert_eq!(
         kubernetes_policy(
             &Identity::TokenExchange(c("any")),
@@ -288,8 +365,9 @@ fn the_exchanges_policy_writes_its_token_and_reads_and_deletes_its_code() {
         ),
         Ok(format!(
             "path \"mandate/data/platform/alpaca-oauth-client-secret\" {{\n  capabilities = [\"read\"]\n}}\n\
-             path \"mandate/data/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"read\"]\n}}\n\
-             path \"mandate/metadata/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"delete\"]\n}}\n\
+             path \"mandate/data/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"read\", \"update\"]\n}}\n\
+             path \"mandate/delete/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"update\"]\n}}\n\
+             path \"mandate/destroy/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"update\"]\n}}\n\
              path \"mandate/data/connections/{TEMPLATE}/token\" {{\n  capabilities = [\"create\", \"update\"]\n}}\n"
         ))
     );
@@ -325,6 +403,7 @@ fn no_platform_identity_has_a_kubernetes_policy() {
         Identity::SecretImport,
         Identity::ModelGateway,
         Identity::EmailSender,
+        Identity::Provisioner,
     ] {
         assert_eq!(
             kubernetes_policy(&identity, &Mounts::default(), ACCESSOR),
@@ -335,13 +414,14 @@ fn no_platform_identity_has_a_kubernetes_policy() {
 }
 
 /// The provisioner's policy, written out whole: one block per mount, every parameter required
-/// and every one but the ServiceAccount's name pinned.
+/// and every one but the ServiceAccount's name pinned; it may remove a token exchange's role and
+/// never an executor's (DEC-2350 items 3 and 5).
 #[test]
 fn the_provisioners_policy_requires_every_parameter_and_pins_all_but_the_name() {
-    let block = |mount: &str, namespace: &str, policy: &str, ttl: &str, max: &str| {
+    let block = |mount: &str, caps: &str, namespace: &str, policy: &str, ttl: &str, max: &str| {
         format!(
             "path \"auth/{mount}/role/+\" {{\n  \
-             capabilities = [\"create\", \"update\", \"read\"]\n  \
+             capabilities = [{caps}]\n  \
              required_parameters = [\"alias_name_source\", \"audience\", \"bound_service_account_names\", \"bound_service_account_namespaces\", \"token_max_ttl\", \"token_no_default_policy\", \"token_policies\", \"token_ttl\"]\n  \
              allowed_parameters = {{\n    \
              \"alias_name_source\" = [\"serviceaccount_uid\"]\n    \
@@ -361,6 +441,7 @@ fn the_provisioners_policy_requires_every_parameter_and_pins_all_but_the_name() 
             "{}{}",
             block(
                 "kubernetes-executor",
+                "\"create\", \"update\"",
                 "ws-ws1",
                 "mandate-kubernetes-executor",
                 "86400",
@@ -368,6 +449,7 @@ fn the_provisioners_policy_requires_every_parameter_and_pins_all_but_the_name() 
             ),
             block(
                 "kubernetes-exchange",
+                "\"create\", \"update\", \"delete\"",
                 "ws-ws1",
                 "mandate-kubernetes-exchange",
                 "600",
@@ -425,10 +507,10 @@ fn an_executors_role_is_named_by_and_binds_exactly_its_service_account() {
             "auth/kubernetes-executor/role/6331".to_owned(),
             json!({
                 "bound_service_account_names": ["6331"],
-                "bound_service_account_namespaces": ["ws-ws1"],
+                "bound_service_account_namespaces": "ws-ws1",
                 "audience": "mandate-vault",
                 "alias_name_source": "serviceaccount_uid",
-                "token_policies": ["mandate-kubernetes-executor"],
+                "token_policies": "mandate-kubernetes-executor",
                 "token_ttl": "86400",
                 "token_max_ttl": "2592000",
                 "token_no_default_policy": "false"
@@ -449,10 +531,10 @@ fn an_exchanges_role_is_named_by_and_binds_exactly_its_service_account() {
             "auth/kubernetes-exchange/role/x6332".to_owned(),
             json!({
                 "bound_service_account_names": ["x6332"],
-                "bound_service_account_namespaces": ["ws-ws1"],
+                "bound_service_account_namespaces": "ws-ws1",
                 "audience": "mandate-vault",
                 "alias_name_source": "serviceaccount_uid",
-                "token_policies": ["mandate-kubernetes-exchange"],
+                "token_policies": "mandate-kubernetes-exchange",
                 "token_ttl": "600",
                 "token_max_ttl": "600",
                 "token_no_default_policy": "false"
@@ -462,8 +544,9 @@ fn an_exchanges_role_is_named_by_and_binds_exactly_its_service_account() {
 }
 
 /// Every role request passes the provisioner's policy: the parameters it sends are exactly the
-/// required ones, each allowed with the value the policy pins. The oracle reads the policy's
-/// text, not the code that wrote it.
+/// required ones, each allowed with the value the policy pins, and each pinned one a plain string,
+/// since OpenBao's pin refuses an array however it is filled (DEC-2350 item 5). The oracle reads
+/// the policy's text, not the code that wrote it.
 #[test]
 fn every_role_request_is_one_the_provisioners_policy_allows() {
     let written = provisioner_policy(&Mounts::default(), NAMESPACE);
@@ -502,17 +585,57 @@ fn every_role_request_is_one_the_provisioners_policy_allows() {
             assert!(!line.is_empty(), "{key} is not allowed");
             let pinned = !line.trim_end().ends_with("= []");
             if pinned {
-                let wanted = match value {
-                    Value::Array(items) => items.first().cloned().unwrap_or_default(),
-                    other => other.clone(),
-                };
+                assert!(value.is_string(), "{key} = {value} is pinned, so a string");
                 assert!(
-                    line.contains(&wanted.to_string()),
+                    line.contains(&format!("[{value}]")),
                     "{key} = {value} is not the pinned {line}"
                 );
             }
         }
     }
+}
+
+/// The provisioner's `+` stays on exactly the two Kubernetes mounts' role paths: no other path,
+/// no policy, token, secret or `sys/` path, and each block's capabilities exactly, `delete` on the
+/// token exchange's alone (DEC-2350 item 5). The oracle parses the policy's text.
+#[test]
+fn the_provisioners_plus_reaches_only_the_two_role_paths() {
+    let mounts = Mounts {
+        kv: "kv-x".to_owned(),
+        auth: "approle-x".to_owned(),
+        kubernetes_executor: "k-exec".to_owned(),
+        kubernetes_exchange: "k-exch".to_owned(),
+        transit: "transit-x".to_owned(),
+    };
+    let written = provisioner_policy(&mounts, NAMESPACE);
+    assert!(written.is_ok(), "{written:?}");
+    let policy = written.unwrap_or_default();
+    let blocks: Vec<(String, String)> = policy
+        .split("path \"")
+        .skip(1)
+        .map(|block| {
+            let path = block.split('"').next().unwrap_or_default().to_owned();
+            let caps = block
+                .lines()
+                .find_map(|line| line.trim_start().strip_prefix("capabilities = ["))
+                .and_then(|list| list.strip_suffix(']'))
+                .unwrap_or_default()
+                .replace([' ', '"'], "");
+            (path, caps)
+        })
+        .collect();
+    assert_eq!(
+        blocks,
+        [
+            ("auth/k-exec/role/+".to_owned(), "create,update".to_owned()),
+            (
+                "auth/k-exch/role/+".to_owned(),
+                "create,update,delete".to_owned()
+            ),
+        ]
+    );
+    assert_eq!(policy.matches('+').count(), 2, "{policy}");
+    assert!(!policy.contains('*'), "{policy}");
 }
 
 /// A CA certificate's shape, enough for the checks here; the server test passes a real one.
@@ -525,6 +648,7 @@ fn both_kubernetes_mounts_are_enabled_and_pointed_at_the_api_server() {
     let in_cluster = KubernetesAuth {
         host: "https://10.43.0.1:443".to_owned(),
         ca_pem: None,
+        namespace: None,
     };
     assert_eq!(
         kubernetes_mount_requests(&Mounts::default(), &in_cluster),
@@ -550,6 +674,7 @@ fn both_kubernetes_mounts_are_enabled_and_pointed_at_the_api_server() {
     let outside = KubernetesAuth {
         host: "https://127.0.0.1:6443".to_owned(),
         ca_pem: Some(PEM.to_owned()),
+        namespace: None,
     };
     let requests = kubernetes_mount_requests(&Mounts::default(), &outside);
     assert!(requests.is_ok(), "{requests:?}");
@@ -570,6 +695,7 @@ fn a_plain_address_a_bad_ca_or_a_bad_mount_sets_nothing_up() {
     let fine = KubernetesAuth {
         host: "https://10.43.0.1:443".to_owned(),
         ca_pem: None,
+        namespace: None,
     };
     let fine_requests = kubernetes_mount_requests(&Mounts::default(), &fine);
     assert!(fine_requests.is_ok(), "{fine_requests:?}");
@@ -577,6 +703,7 @@ fn a_plain_address_a_bad_ca_or_a_bad_mount_sets_nothing_up() {
         let auth = KubernetesAuth {
             host: host.to_owned(),
             ca_pem: None,
+            namespace: None,
         };
         assert_eq!(
             kubernetes_mount_requests(&Mounts::default(), &auth),
@@ -592,6 +719,7 @@ fn a_plain_address_a_bad_ca_or_a_bad_mount_sets_nothing_up() {
         let auth = KubernetesAuth {
             host: fine.host.clone(),
             ca_pem: Some(ca.to_owned()),
+            namespace: None,
         };
         assert_eq!(
             kubernetes_mount_requests(&Mounts::default(), &auth),
@@ -613,6 +741,80 @@ fn a_plain_address_a_bad_ca_or_a_bad_mount_sets_nothing_up() {
             kubernetes_mount_requests(&broken, &fine),
             Err(SourceError::Config),
             "{broken:?}"
+        );
+    }
+}
+
+/// The vault sends its reviewer token to the host on every TokenReview, so the host is exactly
+/// `https://`, an IPv4 address and a port, and nothing else, or no mount is set up.
+#[test]
+fn an_api_server_is_https_an_ipv4_address_and_a_port_and_nothing_else() {
+    for (host, ip, port) in [
+        ("https://10.43.0.1:443", [10, 43, 0, 1], 443),
+        ("https://127.0.0.1:6443", [127, 0, 0, 1], 6443),
+        ("https://10.43.0.1:1", [10, 43, 0, 1], 1),
+        ("https://10.43.0.1:65535", [10, 43, 0, 1], 65535),
+    ] {
+        assert_eq!(
+            api_server_address(host),
+            Ok(SocketAddrV4::new(Ipv4Addr::from(ip), port)),
+            "{host:?}"
+        );
+        let auth = KubernetesAuth {
+            host: host.to_owned(),
+            ca_pem: None,
+            namespace: None,
+        };
+        let requests = kubernetes_mount_requests(&Mounts::default(), &auth);
+        assert!(requests.is_ok(), "{host:?}: {requests:?}");
+    }
+    for host in [
+        "https://u:p@10.43.0.1:443",
+        "https://u@10.43.0.1:443",
+        "https://@10.43.0.1:443",
+        "https://@",
+        "https:///x",
+        "https://10.43.0.1:443/",
+        "https://10.43.0.1:443/x",
+        "https://10.43.0.1:443?a=b",
+        "https://10.43.0.1:443#f",
+        "https://evil.example.com:443",
+        "https://evil.example.com",
+        "https://localhost:6443",
+        "https://10.43.0.1",
+        "https://10.43.0.1:",
+        "https://10.43.0.1:0",
+        "https://10.43.0.1:99999",
+        "https://10.43.0.1:65536",
+        "https://10.43.0.1:+443",
+        "https://10.43.0.1:0443",
+        "https://010.43.0.1:443",
+        "https://10.43.1:443",
+        "https://[::1]:443",
+        "https://10.43.0.1:443 ",
+        " https://10.43.0.1:443",
+        "https://10.43.0.1:443\n",
+        "https://10.43.0.1 :443",
+        "HTTPS://10.43.0.1:443",
+        "http://10.43.0.1:443",
+        "10.43.0.1:443",
+        "https://",
+        "",
+    ] {
+        assert_eq!(
+            api_server_address(host),
+            Err(SourceError::Config),
+            "{host:?}"
+        );
+        let auth = KubernetesAuth {
+            host: host.to_owned(),
+            ca_pem: None,
+            namespace: None,
+        };
+        assert_eq!(
+            kubernetes_mount_requests(&Mounts::default(), &auth),
+            Err(SourceError::Config),
+            "{host:?}"
         );
     }
 }
@@ -646,5 +848,30 @@ fn a_mounts_accessor_is_read_from_the_vaults_list_and_must_be_plain() {
     assert_eq!(
         mount_accessor(None, "kubernetes-executor"),
         Err(SourceError::Malformed)
+    );
+}
+
+/// DEC-2321: the exchange reaches its code's metadata not at all, so it can neither read its
+/// versions, list a connection's entries, nor delete the metadata and so restart the version
+/// count; and it creates nothing but its own token.
+#[test]
+fn the_exchange_never_reaches_metadata_lists_or_creates_a_code() {
+    let policy = kubernetes_policy(
+        &Identity::TokenExchange(c("c1")),
+        &Mounts::default(),
+        ACCESSOR,
+    );
+    assert!(policy.is_ok(), "{policy:?}");
+    let policy = policy.unwrap_or_default();
+    assert!(!policy.contains("/metadata/"), "{policy}");
+    assert!(!policy.contains("\"list\""), "{policy}");
+    let creates: Vec<&str> = policy
+        .split("path \"")
+        .filter(|block| block.contains("\"create\""))
+        .collect();
+    assert_eq!(creates.len(), 1, "{policy}");
+    assert!(
+        creates[0].starts_with(&format!("mandate/data/connections/{TEMPLATE}/token\"")),
+        "{policy}"
     );
 }

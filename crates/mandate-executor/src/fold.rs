@@ -17,13 +17,14 @@ use crate::payload::{
 };
 use crate::protection::climbs;
 use crate::state::{
-    Adoption, Confirmed, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder,
-    LoneLadder, ObservedAccount, OrderDetail, PendingRequest, PriorBase, Replacement, Switch,
+    AccountSwitch, Adoption, Confirmed, EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome,
+    IntentRecord, Ladder, LoneLadder, ObservedAccount, OrderDetail, PendingRequest, PriorBase,
+    Replacement, Switch,
 };
 use crate::types::{
-    AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
-    Mode, OcoLegs, Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose, RiskClock,
-    Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
+    AccountRef, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent,
+    IntentBody, Mode, OcoLegs, Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose,
+    RiskClock, Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
 };
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
@@ -132,6 +133,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             Ok(())
         }
         "OwnerAcknowledged" => owner_acknowledged(state, payload),
+        "PositionReleased" => position_released(state, payload),
         "ReconciliationRun" => {
             state.reconciled_through = Some(event.seq);
             if let Some(cursor) = optional_text(payload, "checkpoint") {
@@ -141,18 +143,20 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         }
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
-        "KillSwitchActivated" => kill_switch_activated(state, event),
+        "KillSwitchActivated" => kill_switch_activated(state, event, at),
+        "AccountCloseRequested" => account_close_requested(state, event),
         "OwnerConfirmationReceived" => owner_confirmation_received(state, payload),
         "ClockAdvanced" | "MarkUpdated" | "ConductBreachDetected" => Ok(()),
         "TradingDayStarted" => {
             let date = Date::parse(required_text(payload, "date")?)?;
             state.trading_day = Some(state.trading_day.map_or(date, |current| current.max(date)));
+            state.day_started = Some(event.event_id.clone());
             Ok(())
         }
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload, event.seq),
         "FeesCharged" => fees_charged(state, payload),
         "ExternalActivityIngested" => Ok(()),
-        "ConnectionChecked" => connection_checked(),
+        "ConnectionChecked" | "ConnectionEstablished" => connection_checked(),
         "AccountRestrictionChanged" => {
             state.account_state = match required_text(payload, "restriction")? {
                 "closing_only" => AccountState::ClosingOnly,
@@ -162,7 +166,10 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             state.consecutive_403s = 0;
             Ok(())
         }
-        "ProtectionChanged" => protection_changed(state, payload, at),
+        "ProtectionChanged" => {
+            unpriced_close(state, event)?;
+            protection_changed(state, payload, at, event.causation_id.as_ref())
+        }
         "AccountStateObserved" => account_observed(state, payload, event.seq),
         "AccountSnapshotRecorded" => {
             account_observed(state, payload, event.seq)?;
@@ -204,7 +211,9 @@ fn net_after(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorE
 /// `degraded` or `suspended`, the executor commits `AccountRestrictionChanged` and
 /// `AgentModeApplied` before the failed check, so the halt is never behind this record and a
 /// replay that reads it adds nothing to hold. Its risk clock is read like every account event's
-/// (DEC-969 item 5).
+/// (DEC-969 item 5). The executor's copy of its `ConnectionEstablished` folds the same way
+/// (DEC-2341 item 2): it ends rule 68's `connecting` at the executor, which reads it from the
+/// journal, and holds no account state; E7-3's later slice interprets it if one ever needs to.
 fn connection_checked() -> Result<(), ExecutorError> {
     Ok(())
 }
@@ -258,13 +267,15 @@ fn owner_elsewhere(kind: &str) -> Option<&'static str> {
         | "ConductBreachDetected"
         | "KillSwitchActivated"
         | "OwnerConfirmationReceived"
-        | "ConnectionChecked" => None,
+        | "AccountCloseRequested"
+        | "ConnectionChecked"
+        | "ConnectionEstablished"
+        | "PositionReleased" => None,
         "RelatedAccountsCoordination" => Some("E7-5"),
         "MandateVersionApplied"
         | "RiskLimitTriggered"
         | "RiskLimitLifted"
         | "HighWaterMarkReset"
-        | "PositionReleased"
         | "InstrumentRestrictionChanged"
         | "GoalCompleted" => Some("E6-4"),
         "UniverseChanged" => Some("E17-3"),
@@ -324,6 +335,19 @@ fn risk_clock(state: &ExecutorState, event: &FoldedEvent) -> Result<RiskClock, E
 /// The instrument a payload names, either spelling the account stream has written: the closed
 /// form's `instrument_id` (§9.5) beside the legacy `instrument` the golden journal carries
 /// (DEC-446 item 7: the fold's legacy reads stay).
+/// An agent's position, or part of it, became the owner's (journal spec §9.27, mandate spec §3.1,
+/// DEC-2354): the quantity leaves the agent's lots, so its kill switch never sells it.
+fn position_released(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let agent = AgentId(required_text(payload, "agent_id")?.to_owned());
+    let released = qty(payload, "qty")?;
+    let total = state
+        .released
+        .entry((agent, instrument(payload)?))
+        .or_insert(Qty::ZERO);
+    *total = total.checked_add(released)?;
+    Ok(())
+}
+
 fn instrument(payload: &Value) -> Result<InstrumentId, ExecutorError> {
     let name = optional_text(payload, "instrument_id")
         .or_else(|| optional_text(payload, "instrument"))
@@ -418,6 +442,23 @@ fn owner_confirmation_received(
     Ok(())
 }
 
+/// DEC-2361 item 2: an `exit_unpriced` naming an agent switch as its cause is that switch's close
+/// alerted for want of a limit, noted on the switch so it is alerted once.
+fn unpriced_close(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), ExecutorError> {
+    if required_text(&event.payload, "action")? != "exit_unpriced" {
+        return Ok(());
+    }
+    let Some(switch) = event
+        .causation_id
+        .as_ref()
+        .and_then(|cause| state.switches.get_mut(cause))
+    else {
+        return Ok(());
+    };
+    switch.unpriced.insert(instrument(&event.payload)?);
+    Ok(())
+}
+
 /// One agent-scoped `KillSwitchActivated` (§5.5, DEC-485 item 3): the agent, the purpose its
 /// sells carry, the owner's confirmed floor if any, and the closes it named, now or deferred,
 /// every one pending until its flatten's `IntentReceived` folds. Any other scope, the account and
@@ -425,9 +466,11 @@ fn owner_confirmation_received(
 fn kill_switch_activated(
     state: &mut ExecutorState,
     event: &FoldedEvent,
+    at: RiskClock,
 ) -> Result<(), ExecutorError> {
     let payload = &event.payload;
-    if optional_text(payload, "scope") != Some("agent") {
+    let scope = optional_text(payload, "scope");
+    if !matches!(scope, Some("agent" | "account")) {
         return Err(ExecutorError::Unimplemented { story: "E7-4" });
     }
     let named = |field: &str| -> Result<Vec<InstrumentId>, ExecutorError> {
@@ -445,6 +488,20 @@ fn kill_switch_activated(
     };
     let mut instruments = named("closes")?;
     instruments.extend(named("deferred")?);
+    if scope == Some("account") {
+        state.closing_all.extend(instruments);
+        state.account_switch = Some(AccountSwitch {
+            event: event.event_id.clone(),
+            seq: event.seq,
+            reference: AccountRef(required_text(payload, "subject")?.to_owned()),
+            at,
+            requests: BTreeMap::new(),
+            bound: BTreeSet::new(),
+        });
+        state.switch_read = None;
+        state.cancel_all_answered = false;
+        return Ok(());
+    }
     let cancels = match payload.get("cancels") {
         Some(Value::Array(items)) => items
             .iter()
@@ -461,6 +518,7 @@ fn kill_switch_activated(
         bid: optional_price(payload, "bid")?,
         pending: instruments.iter().cloned().collect(),
         instruments,
+        unpriced: BTreeSet::new(),
     };
     state.switches.insert(event.event_id.clone(), switch);
     Ok(())
@@ -872,6 +930,9 @@ fn order_state_changed(
             client_order_id: id.as_str().to_owned(),
         })?;
     let detail = state.details.entry(id.clone()).or_default();
+    if let Some(broker) = optional_text(payload, "broker_order_id") {
+        detail.broker_ids.insert(broker.to_owned());
+    }
     if let Some(reported) = optional_qty(payload, "filled_qty")? {
         detail.reported_filled = detail.reported_filled.max(Some(reported));
     }
@@ -933,6 +994,7 @@ fn leaves_protection(
     id: &ClientOrderId,
     qty: Qty,
 ) {
+    state.alerted.remove(instrument);
     let Some(protection) = state.protection.get_mut(instrument) else {
         return;
     };
@@ -1027,6 +1089,13 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value, seq: Seq) -> Result<
         .and_then(|id| state.orders.get_mut(&id))
     {
         order.filled_qty = order.filled_qty.checked_add(quantity)?;
+        let id = order.client_order_id.clone();
+        state
+            .details
+            .entry(id)
+            .or_default()
+            .fill_qtys
+            .push(quantity);
     }
     if named.is_none() && side == Side::Sell {
         state
@@ -1089,6 +1158,27 @@ fn net_unattributed(
     Ok(())
 }
 
+/// One close-position request of the account switch (journal spec §9.5, DEC-2337): the latest
+/// attempt of its instrument and where it was journaled, so a replay never sends it again and a
+/// re-request waits for a read taken after it. A request naming another switch changes nothing.
+fn account_close_requested(
+    state: &mut ExecutorState,
+    event: &FoldedEvent,
+) -> Result<(), ExecutorError> {
+    let payload = &event.payload;
+    let instrument = instrument(payload)?;
+    let attempt = optional_int(payload, "attempt").ok_or_else(|| refused("attempt"))?;
+    let named = required_text(payload, "kill_switch_event")?;
+    if let Some(switch) = state
+        .account_switch
+        .as_mut()
+        .filter(|switch| switch.event.0 == named)
+    {
+        switch.requests.insert(instrument, (attempt, event.seq));
+    }
+    Ok(())
+}
+
 /// One restriction on one agent (or on every agent, as `*`). A mode is the strictest of an
 /// agent's active restrictions, and `normal` lifts the restriction it names (mandate spec §5.9).
 /// Lifting the `kill_switch` restriction also lifts whatever closes the agent's kill switches had
@@ -1105,6 +1195,11 @@ fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), 
             if switch.agent == agent && restriction == "kill_switch" {
                 switch.pending.clear();
             }
+        }
+        if agent.0 == EVERY_AGENT && restriction == "kill_switch" {
+            state.closing_all.clear();
+            state.account_switch = None;
+            state.switch_read = None;
         }
         state.restrictions.remove(&(agent.clone(), restriction));
     } else {
@@ -1243,6 +1338,7 @@ fn protection_changed(
     state: &mut ExecutorState,
     payload: &Value,
     at: RiskClock,
+    cause: Option<&EventId>,
 ) -> Result<(), ExecutorError> {
     let instrument = instrument(payload)?;
     let action = required_text(payload, "action")?;
@@ -1266,11 +1362,17 @@ fn protection_changed(
                 let entry = ClientOrderId::parse(entry)?;
                 state.details.entry(entry).or_default().bracket_placed = true;
             }
+            state.alerted.remove(&instrument);
             let orders = protective_orders(payload)?;
             let covered = qty(payload, "qty")?;
             let prices = prices_of(payload)?;
             let created = created_on(payload)?;
             legs(state, &instrument, &orders, covered, created);
+            if state.closing_all.contains(&instrument)
+                && let Some(switch) = state.account_switch.as_mut()
+            {
+                switch.bound.extend(orders.iter().cloned());
+            }
             for id in &orders {
                 if let Some(order) = state.orders.get_mut(id) {
                     order.created_on = order.created_on.or(created);
@@ -1297,6 +1399,7 @@ fn protection_changed(
             protection.covered_qty = protection.covered_qty.checked_add(covered)?;
         }
         "cancelled" => {
+            state.alerted.remove(&instrument);
             let orders = protective_orders(payload)?;
             let uncovered = optional_qty(payload, "qty")?;
             if let Some(protection) = state.protection.get_mut(&instrument) {
@@ -1397,7 +1500,11 @@ fn protection_changed(
         "watchdog" => {
             state.watchdogged.insert(instrument.clone(), at);
         }
-        "exit_unpriced" | "ladder_floor" | "expiry_unreplaceable" => {}
+        "expiry_unreplaceable" if cause.is_some() && cause == state.day_started.as_ref() => {
+            state.alerted.insert(instrument.clone());
+        }
+        "expiry_unreplaceable" => {}
+        "exit_unpriced" | "ladder_floor" => {}
         "rung_short" if optional_qty(payload, "sent")? == Some(Qty::ZERO) => {
             let intent = required_text(payload, "intent_id")?;
             if let Some(sequence) = state

@@ -12,6 +12,11 @@
 //! [--drain-bound-s <1 to 90>]`: the workspace API process (§3.11, E21-31, DEC-978). The drain
 //! bound may only be shortened from [`DRAIN_BOUND`].
 //!
+//! `mandate-api-server finish`: the connect finish's own process (DEC-2348 item 3), which holds
+//! the connection manager's vault identity alone and runs the finish pass every five seconds.
+//! Without its settings it refuses with exit status 2 and one line naming them. SIGTERM lets the
+//! pass in flight end, and the process exits 0 before the next.
+//!
 //! It makes every start check before it listens, and refuses with exit status 2 and one line on
 //! stderr naming the check. Once both listeners are bound it prints
 //! `listening api=<addr> probes=<addr>` and nothing else. SIGTERM starts the drain: readiness
@@ -32,7 +37,7 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mandate_api_server::challenges::Challenges;
@@ -44,21 +49,28 @@ use mandate_api_server::config::{
     read_session_key,
 };
 use mandate_api_server::confirm::CliConfirm;
+use mandate_api_server::connect_binding::{ConnectBinding, bound, connect_binding};
+use mandate_api_server::finish_binding::{finish_binding, off_line};
+use mandate_api_server::finish_pass::{Finisher, LineAlerts, PASS_SECS, run_until_stopped};
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::journal::{Journal, JournalUnavailable, Postgres};
 use mandate_api_server::keys::{FetchedKeys, REFETCH};
 use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
 use mandate_api_server::members::{self, Hosted};
+use mandate_api_server::methods::{Methods, Passkey};
 use mandate_api_server::objects::{ObjectStore, Objects};
-use mandate_api_server::reduction::{self, Reduction};
+use mandate_api_server::reduction::{self, Reduction, rp_id};
 use mandate_api_server::session::{OsRandom, Sessions};
 use mandate_api_server::subject;
 use mandate_api_server::token::Issuer;
+use mandate_api_server::vault_fingerprints::VaultFingerprints;
+use mandate_api_server::vault_teardown::VaultTeardown;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_identity::{OrgId, WorkspaceId};
 use mandate_journal::ArtifactSource;
 use mandate_journal_pg::PgJournal;
+use mandate_passkey::RelyingParty;
 use mandate_release::startup::{TIER_VAR, Tier};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
@@ -147,6 +159,7 @@ struct Start {
     hosted: Hosted,
     artifacts: Option<Arc<Objects<FsArtifactStore>>>,
     ingress: Vec<IpAddr>,
+    connect: ConnectBinding,
 }
 
 /// A required setting's value, refused when absent, empty, or not Unicode.
@@ -159,6 +172,8 @@ fn setting(name: &'static str) -> Result<String, StartRefusal> {
 
 fn checked() -> Result<(Args, Start), StartRefusal> {
     check_environment(env::vars_os())?;
+    let tier = Tier::from_setting(env::var(TIER_VAR).ok().as_deref());
+    let connect = connect_binding(tier, |name| env::var_os(name))?;
     let args = args(env::args_os().skip(1))?;
     check_bind(args.bind, args.pod_address)?;
     check_bind(args.probe_bind, args.pod_address)?;
@@ -193,7 +208,6 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         name: "MANDATE_API_ISSUER",
     })?;
     let key_set = setting("MANDATE_API_JWKS_URL")?;
-    let tier = Tier::from_setting(env::var(TIER_VAR).ok().as_deref());
     check_key_set_tier(&key_set, tier)?;
     let keys = FetchedKeys::new(&key_set).map_err(|_| StartRefusal::Setting {
         name: "MANDATE_API_JWKS_URL",
@@ -215,6 +229,7 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         hosted,
         artifacts,
         ingress,
+        connect,
     };
     Ok((args, start))
 }
@@ -275,9 +290,24 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         }
     });
     let challenges = Arc::new(Challenges::default());
-    let step_up = CliConfirm {
-        challenges: Arc::clone(&challenges),
-        links: Arc::new(subject::Fixed),
+    let rp = RelyingParty {
+        rp_id: rp_id(&start.settings.app_origin)
+            .ok_or_else(|| io::Error::other("the app origin names no relying party"))?,
+        origin: start.settings.app_origin.clone(),
+    };
+    let step_up = Methods {
+        passkey: Passkey {
+            challenges: Arc::clone(&challenges),
+            rp,
+            keys: start.artifacts.clone().map(|store| {
+                let store: Arc<dyn ArtifactSource + Send + Sync> = store;
+                store
+            }),
+        },
+        cli_confirm: CliConfirm {
+            challenges: Arc::clone(&challenges),
+            links: Arc::new(subject::Fixed),
+        },
     };
     let app = App {
         settings: start.settings,
@@ -300,7 +330,11 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         }),
         step_up: Arc::new(step_up),
         challenges,
-        connect: None,
+        connect: bound(
+            start.connect,
+            Box::new(OsRandom::new()),
+            Arc::new(SystemClock),
+        ),
         reduction: Arc::new(Reduction::new(start.ingress, Box::new(OsRandom::new()))),
     };
     let api = spawn_listener(
@@ -357,10 +391,83 @@ async fn wait_for(mut stop: watch::Receiver<bool>) {
     let _ = stop.wait_for(|stopped| *stopped).await;
 }
 
+/// The finish's own process: the pass over the hosted workspace's connects, every
+/// [`PASS_SECS`], as the connection manager, until the process is stopped.
+fn finish() -> ExitCode {
+    if env::args_os().nth(2).is_some() {
+        eprintln!("refused: {}", StartRefusal::Setting { name: "arguments" });
+        return ExitCode::from(2);
+    }
+    if let Err(refusal) = check_environment(env::vars_os()) {
+        eprintln!("refused: {refusal}");
+        return ExitCode::from(2);
+    }
+    let bound = match finish_binding(|name| env::var_os(name)) {
+        Ok(bound) => bound,
+        Err(names) => {
+            eprintln!("{}", off_line(&names));
+            return ExitCode::from(2);
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("refused: the runtime could not start: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let in_the_runtime_the_pool_needs = runtime.enter();
+    let Ok(journal) = PgJournal::from_dsn(&bound.database_url) else {
+        eprintln!("refused: the journal's connection settings are refused");
+        return ExitCode::from(2);
+    };
+    let login = Arc::new(bound.login);
+    let finisher = Finisher::new(
+        Arc::new(Postgres(journal)),
+        VaultFingerprints {
+            login: Arc::clone(&login),
+            clock: Arc::new(SystemClock),
+        },
+        VaultTeardown {
+            login,
+            clock: Arc::new(SystemClock),
+        },
+        LineAlerts(Mutex::new(io::stderr())),
+        bound.workspace,
+    );
+    drop(in_the_runtime_the_pool_needs);
+    let drained = run_until_stopped(
+        runtime,
+        finisher,
+        Arc::new(SystemClock),
+        Duration::from_secs(PASS_SECS),
+        || {
+            let mut term = signal(SignalKind::terminate())?;
+            println!("finishing");
+            Ok(async move {
+                term.recv().await;
+            })
+        },
+    );
+    match drained {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("refused: the signal handler could not start: {error}");
+            ExitCode::from(2)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     if let Err(refused) = mandate_release::startup::check_running() {
         eprintln!("{}", refused.code());
         return ExitCode::from(2);
+    }
+    if env::args_os().nth(1).is_some_and(|mode| mode == "finish") {
+        return finish();
     }
     let (args, start) = match checked() {
         Ok(checked) => checked,
@@ -369,6 +476,9 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if let Some(line) = start.connect.off_line() {
+        eprintln!("{line}");
+    }
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

@@ -14,6 +14,7 @@ mandate-audit = { path = "crates/mandate-audit", version = "0.0.0" }
 mandate-artifacts-fs = { path = "crates/mandate-artifacts-fs", version = "0.0.0" }
 mandate-authn = { path = "crates/mandate-authn", version = "0.0.0" }
 mandate-backtest = { path = "crates/mandate-backtest", version = "0.0.0" }
+mandate-bars = { path = "crates/mandate-bars", version = "0.0.0" }
 mandate-builder = { path = "crates/mandate-builder", version = "0.0.0" }
 mandate-canon = { path = "crates/mandate-canon", version = "0.0.0" }
 mandate-cp-agent = { path = "crates/mandate-cp-agent", version = "0.0.0" }
@@ -21,6 +22,7 @@ mandate-cp = { path = "crates/mandate-cp", version = "0.0.0" }
 mandate-cp-site = { path = "crates/mandate-cp-site", version = "0.0.0" }
 mandate-daemon = { path = "crates/mandate-daemon", version = "0.0.0" }
 mandate-dataservice = { path = "crates/mandate-dataservice", version = "0.0.0" }
+mandate-datad = { path = "crates/mandate-datad", version = "0.0.0" }
 mandate-deploy-manager = { path = "crates/mandate-deploy-manager", version = "0.0.0" }
 mandate-deployd = { path = "crates/mandate-deployd", version = "0.0.0" }
 mandate-dispatcher = { path = "crates/mandate-dispatcher", version = "0.0.0" }
@@ -28,6 +30,7 @@ mandate-domain = { path = "crates/mandate-domain", version = "0.0.0" }
 mandate-evaluation = { path = "crates/mandate-evaluation", version = "0.0.0" }
 mandate-executor = { path = "crates/mandate-executor", version = "0.0.0" }
 mandate-executord = { path = "crates/mandate-executord", version = "0.0.0" }
+mandate-gate-inputs = { path = "crates/mandate-gate-inputs", version = "0.0.0" }
 mandate-gateway = { path = "crates/mandate-gateway", version = "0.0.0" }
 mandate-gateway-http = { path = "crates/mandate-gateway-http", version = "0.0.0" }
 mandate-gatewayd = { path = "crates/mandate-gatewayd", version = "0.0.0" }
@@ -49,8 +52,11 @@ mandate-notify = { path = "crates/mandate-notify", version = "0.0.0" }
 mandate-telemetry = { path = "crates/mandate-telemetry", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
 mandate-passkey = { path = "crates/mandate-passkey", version = "0.0.0" }
+mandate-gate-context = { path = "crates/mandate-gate-context", version = "0.0.0" }
 mandate-ports = { path = "crates/mandate-ports", version = "0.0.0" }
 mandate-process = { path = "crates/mandate-process", version = "0.0.0" }
+mandate-provisioner = { path = "crates/mandate-provisioner", version = "0.0.0" }
+mandate-provisionerd = { path = "crates/mandate-provisionerd", version = "0.0.0" }
 mandate-push-relay = { path = "crates/mandate-push-relay", version = "0.0.0" }
 mandate-scheduler = { path = "crates/mandate-scheduler", version = "0.0.0" }
 mandate-store = { path = "crates/mandate-store", version = "0.0.0" }

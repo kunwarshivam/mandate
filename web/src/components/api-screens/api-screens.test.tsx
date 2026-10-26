@@ -2,12 +2,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, describe, expect, it } from "vitest";
 import { ApiAgent, ApiAgents, ApiApproval, ApiApprovals, ApiHome, BySource } from "./api-screens";
 import { type Fetch } from "@/api/client";
-import { createMockServer } from "@/api/mock-server";
+import { MOCK_PRINCIPAL, type MockServer, createMockServer } from "@/api/mock-server";
 import { Providers } from "@/components/providers";
 import { WorkspaceGate } from "@/components/screens/common";
 import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { ApiRuntimeProvider } from "@/lib/api-runtime";
+import { quantity } from "@/lib/format";
 import { RoleProvider } from "@/lib/roles";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
@@ -15,8 +16,8 @@ const ORIGIN = "https://api.owlhead.ai";
 
 type Tamper = (route: string, body: Record<string, unknown>) => Record<string, unknown>;
 
-function mount(node: React.ReactNode, scenario: Scenario = "approvals", tamper?: Tamper) {
-  const server = createMockServer({ workspaceId: WS, scenario });
+function mount(node: React.ReactNode, scenario: Scenario = "approvals", tamper?: Tamper, hostConfirms = true) {
+  const server = createMockServer({ workspaceId: WS, scenario, hostConfirms });
   const posts: Array<{ path: string; body: Record<string, unknown> }> = [];
   const fetch: Fetch = async (input, init) => {
     const url = new URL(input);
@@ -34,6 +35,19 @@ function mount(node: React.ReactNode, scenario: Scenario = "approvals", tamper?:
     </RoleProvider>,
   );
   return { posts };
+}
+
+/** Mounts over a fetch the test writes itself, in front of the mock. */
+function mountWith(node: React.ReactNode, fetchVia: (input: string, init: RequestInit, server: MockServer) => Promise<Response>) {
+  const server = createMockServer({ workspaceId: WS, scenario: "approvals" });
+  const fetch: Fetch = (input, init) => fetchVia(input, init, server);
+  render(
+    <RoleProvider>
+      <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={fetch} refreshMs={60_000} statusPollMs={5} retryMs={5}>
+        {node}
+      </ApiRuntimeProvider>
+    </RoleProvider>,
+  );
 }
 
 const fixture = buildWorkspace("approvals");
@@ -73,6 +87,66 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     expect(await screen.findByText("Mandate not reported")).toBeTruthy();
     expect(screen.getByText("Account positions not reported")).toBeTruthy();
     expect(screen.queryByText(/\$10,000/)).toBeNull();
+  });
+
+  it("an agent shows its orders, newest first, and its own positions, from the served reads (DEC-2111)", async () => {
+    const agent = fixture.agents.find((a) => a.orders.length + a.past_orders.length > 0 && a.positions.length > 0)!;
+    mount(<ApiAgent agentId={agent.agent_id} />);
+    const orders = await screen.findByRole("list", { name: "Orders" });
+    const rows = within(orders).getAllByRole("listitem");
+    expect(rows).toHaveLength(agent.orders.length + agent.past_orders.length);
+    const newest = [...agent.past_orders, ...agent.orders].at(-1)!;
+    expect(rows[0].textContent).toContain(`${newest.side === "buy" ? "Buy" : "Sell"} ${quantity(newest.qty)} ${newest.instrument.symbol}`);
+    const held = await screen.findByRole("list", { name: "This agent's positions" });
+    expect(within(held).getAllByRole("listitem")).toHaveLength(agent.positions.length);
+  });
+
+  it("an agent lists the latest records on its stream, by type and time, from the journal read", async () => {
+    const agent = fixture.agents.find((a) => a.orders.length + a.past_orders.length > 0)!;
+    const { posts } = mount(<ApiAgent agentId={agent.agent_id} />);
+    const journal = await screen.findByRole("list", { name: "Journal" });
+    const rows = within(journal).getAllByRole("listitem");
+    expect(rows[0].textContent).toContain("#1 AgentDeployed");
+    expect(rows.some((r) => r.textContent?.includes("OrderSubmitted"))).toBe(true);
+    expect(posts).toEqual([]);
+  });
+
+  it("a journal the role may not read says so, and shows no records", async () => {
+    const agent = fixture.agents[0];
+    mountWith(<ApiAgent agentId={agent.agent_id} />, (input, init, server) =>
+      input.includes("/journal/") ? Promise.resolve(new Response(JSON.stringify({ code: "forbidden", effect: "none", retryable: false }), { status: 403 })) : server.fetch(input, init),
+    );
+    expect(await screen.findByText("Not available to your role.")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Journal" })).toBeNull();
+  });
+
+  it("an order's unreported state and quantity say not reported, and unknown stays unknown, never working (trading spec §5.7)", async () => {
+    const agent = fixture.agents.find((a) => a.orders.length + a.past_orders.length >= 2)!;
+    mount(<ApiAgent agentId={agent.agent_id} />, "approvals", (route, body) => {
+      if (!/\/orders$/.test(route)) return body;
+      const [first, second, ...rest] = body.orders as Array<Record<string, unknown>>;
+      return { ...body, orders: [{ ...first, state: null, filled_qty: null }, { ...second, state: "unknown" }, ...rest] };
+    });
+    const orders = await screen.findByRole("list", { name: "Orders" });
+    expect(within(orders).getByText(/^State not reported/)).toBeTruthy();
+    expect(within(orders).getByText(/filled quantity not reported/)).toBeTruthy();
+    const unknown = orders.querySelector("[data-state=unknown]");
+    expect(unknown?.textContent).toContain("Unknown: being checked with the broker");
+    expect(unknown?.textContent).not.toContain("Working");
+  });
+
+  it("an order list the API cannot answer says not reported, never none", async () => {
+    const agent = fixture.agents[0];
+    mount(<ApiAgent agentId={agent.agent_id} />, "approvals", (route, body) => (/\/(orders|positions)$/.test(route) ? { ...body, agent_id: "agt_someone_else" } : body));
+    expect(await screen.findByText("Orders not reported.")).toBeTruthy();
+    expect(screen.queryByText("No order yet.")).toBeNull();
+    expect(screen.queryByText("This agent holds nothing.")).toBeNull();
+  });
+
+  it("an agent the deployment found no account for says its orders are not reported", async () => {
+    const agent = fixture.agents[0];
+    mount(<ApiAgent agentId={agent.agent_id} />, "approvals", (route, body) => (/\/orders$/.test(route) ? { ...body, account_ref: null, orders: [] } : body));
+    expect(await screen.findByText(/^Orders not reported: the deployment found no account/)).toBeTruthy();
   });
 
   it("an agent shows its mandate's envelope, its account's positions, and limit usage as not reported yet", async () => {
@@ -123,12 +197,76 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     expect(screen.queryByText("PAPER")).toBeNull();
   });
 
-  it("an approve the deployment cannot take without step-up says nothing was approved", async () => {
+  it("Approve asks for a code first and sends no answer: the owner confirms it on the host (DEC-2104)", async () => {
     const approval = pending[0];
-    mount(<ApiApproval approvalId={approval.approval_id} />);
+    const { posts } = mount(<ApiApproval approvalId={approval.approval_id} />);
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-    expect(await screen.findByText(/nothing was approved/)).toBeTruthy();
-    expect(screen.queryByText(/^Approved/)).toBeNull();
+    const panel = await screen.findByRole("region", { name: "Confirm on the host" });
+    expect(posts.map((p) => p.path)).toEqual(["/step-up/challenges"]);
+    expect(posts[0].body).toEqual({ action: { kind: "approve", digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/) } });
+    const code = within(panel).getByText(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/).textContent ?? "";
+    const command = panel.querySelector("[data-slot=host-confirm-command]")?.textContent ?? "";
+    expect(command).toContain(`mandate step-up confirm --workspace ${WS} --principal ${MOCK_PRINCIPAL} --agent ${approval.agent_id} --approval ${approval.approval_id} --challenge `);
+    expect(command).toContain(`--code ${code}`);
+    expect(screen.queryByText(/^Recorded in the journal/)).toBeNull();
+  });
+
+  it("an approve the host confirmed is recorded with that challenge's evidence", async () => {
+    const approval = pending[0];
+    const { posts } = mount(<ApiApproval approvalId={approval.approval_id} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    const panel = await screen.findByRole("region", { name: "Confirm on the host" });
+    fireEvent.click(within(panel).getByRole("button", { name: "Approve" }));
+    expect(await screen.findByText(/^Recorded in the journal: you approved/)).toBeTruthy();
+    const answer = posts.find((p) => p.path.endsWith("/responses"));
+    expect(answer?.body).toMatchObject({ verdict: "approved", content_hash: posts[0].body.action && (posts[0].body.action as { digest: string }).digest, step_up: { method: "cli_confirm", assertion_id: expect.stringMatching(/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/) } });
+    expect(screen.queryByRole("region", { name: "Confirm on the host" })).toBeNull();
+  });
+
+  it("an approve the host has not confirmed says nothing was approved, and the owner can approve again", async () => {
+    const approval = pending[0];
+    mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", undefined, false);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    const panel = await screen.findByRole("region", { name: "Confirm on the host" });
+    fireEvent.click(within(panel).getByRole("button", { name: "Approve" }));
+    expect(await screen.findByText(/found no confirmation of this code on the host, so nothing was approved/)).toBeTruthy();
+    expect(screen.queryByText(/^Recorded in the journal/)).toBeNull();
+    expect(within(screen.getByRole("region", { name: "Confirm on the host" })).getByRole("button", { name: "Approve" })).toBeTruthy();
+  });
+
+  it("Cancel drops the code and sends nothing more", async () => {
+    const approval = pending[0];
+    const { posts } = mount(<ApiApproval approvalId={approval.approval_id} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(within(await screen.findByRole("region", { name: "Confirm on the host" })).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("region", { name: "Confirm on the host" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Skip" })).toBeTruthy();
+    expect(posts.map((p) => p.path)).toEqual(["/step-up/challenges"]);
+  });
+
+  it("no code from the deployment says nothing was approved, and asks the host for nothing", async () => {
+    const approval = pending[0];
+    const refused = () => Promise.resolve(new Response(JSON.stringify({ code: "live_unavailable", effect: "none", retryable: false }), { status: 403 }));
+    mountWith(<ApiApproval approvalId={approval.approval_id} />, (input, init, server) => (init.method === "POST" && input.endsWith("/step-up/challenges") ? refused() : server.fetch(input, init)));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    expect(await screen.findByText("No code: a host confirmation is for paper only. Nothing was approved.")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Confirm on the host" })).toBeNull();
+  });
+
+  it("an expired code cannot be sent: its life is counted from when it was shown", async () => {
+    const approval = pending[0];
+    const shortLived = async (input: string, init: RequestInit, server: MockServer) => {
+      const answer = await server.fetch(input, init);
+      if (!(init.method === "POST" && input.endsWith("/step-up/challenges"))) return answer;
+      const body = (await answer.json()) as { issued_at: string };
+      const second = `${new Date(Date.parse(`${body.issued_at.slice(0, 23)}Z`) + 200).toISOString().slice(0, 23)}000000Z`;
+      return new Response(JSON.stringify({ ...body, expires_at: second }), { status: 201 });
+    };
+    mountWith(<ApiApproval approvalId={approval.approval_id} />, shortLived);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    const panel = await screen.findByRole("region", { name: "Confirm on the host" });
+    expect(await within(panel).findByText(/This code has expired/)).toBeTruthy();
+    expect((within(panel).getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("the agents screen lists every agent the API serves", async () => {

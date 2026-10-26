@@ -5,6 +5,7 @@
  * the fixtures or computed in its place (rule 3). The reads the schemas do not define yet (health,
  * connections) are optional: a 404 is "not reported", never the deployment down.
  */
+import { CONNECTION_STATES, type ConnectionState } from "./connect";
 import type { WorkspaceClient } from "./client";
 import { array, closedEnum, contentRef, decimal, integer, isRecord, nullable, object, string, timestamp } from "./decode";
 import { emptyWorkspace } from "./reads";
@@ -186,15 +187,15 @@ export function deadlineIso(deadline: number): string {
   return new Date(deadline * 1000).toISOString();
 }
 
-/** The reads the schemas do not define yet (DEC-975 item 5's provisional bodies): health and connections. */
-interface ServedComponent {
-  state: "ok" | "stale" | "down";
-  freshness: { observed_at: string; stale: boolean };
-}
-const component = object<ServedComponent>({ state: closedEnum(["ok", "stale", "down"]), freshness: object({ observed_at: timestamp, stale: flag }) });
-const health = object<{ served_at: string } & Record<keyof Workspace["health"], ServedComponent>>({ served_at: timestamp, market_data: component, broker: component, deployment: component, relay: component });
-const connections = object<{ connections: Array<{ connection_id: string; environment: Environment }> }>({
-  connections: array(object({ connection_id: string, environment: closedEnum<Environment>(["paper", "live"]) })),
+/**
+ * The connections read (`read-models/connections`, DEC-2620), only the members the workspace needs:
+ * each connection's id, environment and state. Health
+ * (`GET /health`, workspace API spec §4.7) is not read until the API routes it: the API answers an
+ * unrouted path with its one 401 (API-1), which would read as signed out and hide every agent, so
+ * web/ reads routed paths only and the status strip shows health as not reported (backlog E21-63).
+ */
+const connections = object<{ connections: Array<{ connection_id: string; environment: Environment; state: ConnectionState }> }>({
+  connections: array(object({ connection_id: string, environment: closedEnum<Environment>(["paper", "live"]), state: closedEnum(CONNECTION_STATES) })),
 });
 
 /** A read the API may not serve yet: its 404 is "not reported" (`null`), any other failure is the load's. */
@@ -226,15 +227,14 @@ function agreedEnvironment(agents: AgentDetail[]): Environment | null {
 }
 
 export async function loadApi(client: WorkspaceClient): Promise<LoadedApi> {
-  const [agents, pending, resolved, served, held] = await Promise.all([
+  const [agents, pending, resolved, held] = await Promise.all([
     client.read("/agents", agentsRead),
     client.read("/approvals?state=pending", approvalsRead),
     client.read("/approvals?state=resolved", approvalsRead),
-    optional(client.read("/health", health)),
     optional(client.read("/connections", connections)),
   ]);
-  for (const outcome of [agents, pending, resolved, served, held]) if (!outcome.ok) return { ok: false, error: outcome.error };
-  if (!agents.ok || !pending.ok || !resolved.ok || !served.ok || !held.ok) return mismatch("");
+  for (const outcome of [agents, pending, resolved, held]) if (!outcome.ok) return { ok: false, error: outcome.error };
+  if (!agents.ok || !pending.ok || !resolved.ok || !held.ok) return mismatch("");
 
   const enc = encodeURIComponent;
   const agentIds = agents.value.agents.map((a) => a.agent_id);
@@ -243,7 +243,7 @@ export async function loadApi(client: WorkspaceClient): Promise<LoadedApi> {
     Promise.all(agentIds.map((id) => client.read(`/agents/${enc(id)}`, agentRead))),
     Promise.all(approvalIds.map((id) => client.read(`/approvals/${enc(id)}`, approvalRead))),
   ]);
-  const marks = [...agents.as_of, ...pending.as_of, ...resolved.as_of, ...served.as_of, ...held.as_of];
+  const marks = [...agents.as_of, ...pending.as_of, ...resolved.as_of, ...held.as_of];
   const view: ApiView = { agents: [], approvals: [] };
   for (const [i, outcome] of details.entries()) {
     if (!outcome.ok) return { ok: false, error: outcome.error };
@@ -258,16 +258,20 @@ export async function loadApi(client: WorkspaceClient): Promise<LoadedApi> {
     marks.push(...outcome.as_of);
   }
 
-  const now = served.value?.served_at ?? new Date().toISOString();
+  const now = new Date().toISOString();
   const unreported = { state: "stale" as const, as_of: null };
-  const at = (c: ServedComponent | undefined) => (c ? { state: c.state === "ok" && c.freshness.stale ? ("stale" as const) : c.state, as_of: c.freshness.observed_at } : unreported);
-  const connection = held.value?.connections[0] ?? null;
+  /**
+   * The workspace's connection is an established one: a pending, refused or revoked connection is
+   * never the scope of Stop-all or Close-all. With none established the workspace names none, and
+   * those take the workspace scope instead, which covers every connection (spec §5.4).
+   */
+  const connection = held.value?.connections.find((c) => c.state === "established") ?? null;
   const base = emptyWorkspace("ready", now);
   const ws: Workspace = {
     ...base,
     environment: connection?.environment ?? agreedEnvironment(view.agents) ?? base.environment,
     connection: { ...base.connection, connection_id: connection?.connection_id ?? "" },
-    health: { market_data: at(served.value?.market_data), broker: at(served.value?.broker), deployment: at(served.value?.deployment), relay: at(served.value?.relay) },
+    health: { market_data: unreported, broker: unreported, deployment: unreported, relay: unreported },
   };
   return { ok: true, ws, view, as_of: newest(marks) };
 }

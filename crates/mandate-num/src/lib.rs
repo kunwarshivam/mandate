@@ -378,6 +378,32 @@ impl Price {
         bounded.to_decimal(QTY_SCALE).and_then(positive).map(Self)
     }
 
+    /// The resting protection of an equity entry at `self` (mandate spec §3, `protection`): the
+    /// stop at `self × (1 − stop_distance)` and the take-profit at `self × (1 + take_profit_distance)`,
+    /// each moved onto the Reg NMS grid the way spec §2.1 moves a sell's price (DEC-470 item 3).
+    /// The one computation the executor places protection with and the cell's runtime proposes it
+    /// with, so the two cannot disagree (DEC-2378 item 10).
+    ///
+    /// The take-profit's exact product is first truncated to the 9 places a price holds, as
+    /// [`Price::collar_bound`] does for a buy's bound, which can only lower it and adds no risk.
+    /// `not_positive` when a price reaches zero.
+    pub fn equity_bracket(
+        self,
+        stop_distance: Fraction,
+        take_profit_distance: Option<Fraction>,
+    ) -> Result<(Self, Option<Self>), NumError> {
+        let stop = self
+            .collar_bound(stop_distance, Adverse::Down)?
+            .on_tick(TickRule::RegNmsEquity, Adverse::Down)?;
+        let take_profit = take_profit_distance
+            .map(|distance| {
+                self.collar_bound(distance, Adverse::Up)?
+                    .on_tick(TickRule::RegNmsEquity, Adverse::Down)
+            })
+            .transpose()?;
+        Ok((stop, take_profit))
+    }
+
     /// The nearest price on `tick`'s grid, moved against the order: down for a buy limit
     /// ([`Adverse::Up`] is the direction slippage moves a buy, so a buy's limit rounds the other
     /// way) and up for a sell limit, which is spec §2.1's rule for limit and stop prices. A price

@@ -141,12 +141,15 @@ impl Draft {
                     pii_refs: fields.get("pii_refs"),
                     event_time: fields.get("event_time"),
                     environment: fields.get("environment"),
+                    event_id: fields.get("event_id"),
                 },
             )?
         } else {
             let schema = payload_schema(event_type, int("schema_version"))
                 .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
-            normalize(schema, written, "payload")?
+            let payload = normalize(schema, written, "payload")?;
+            crate::schema::rules(event_type, int("schema_version"), &payload)?;
+            payload
         };
 
         let mut referenced = BTreeSet::new();
@@ -289,7 +292,9 @@ fn check_config_refs(
             return Err(Invalid::new(InvalidReason::NonCanonical, path));
         }
     }
-    if schema_version == 1
+    let historical_refs =
+        schema_version == 1 || (schema_version == 3 && event_type == "DecisionMade");
+    if historical_refs
         && matches!(event_type, "ModelOutputRecorded" | "DecisionMade")
         && [catalogue::POL, catalogue::REG]
             .iter()

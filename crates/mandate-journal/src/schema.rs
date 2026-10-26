@@ -192,15 +192,15 @@ pub(crate) fn parse_digest_ref(s: &str) -> Option<Digest> {
     s.strip_prefix("sha256:").and_then(Digest::from_hex)
 }
 
-/// The payload schema for `(event_type, schema_version)`, if one is registered.
+/// The payload schema for `(event_type, schema_version)`, if one is registered. `IntentReceived`,
+/// `GateDecided` and `OrderSubmitted` are account-stream records that `control::governs` takes, so
+/// `control::schema` serves their versions, the v1 schemas below among them, and none is here.
 pub(crate) fn payload_schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
     match (event_type, schema_version) {
         ("StreamOpened", 1) => Some(&STREAM_OPENED_V1),
-        ("IntentReceived", 1) => Some(&INTENT_RECEIVED_V1),
-        ("GateDecided", 1) => Some(&GATE_DECIDED_V1),
-        ("OrderSubmitted", 1) => Some(&ORDER_SUBMITTED_V1),
         ("FillApplied", 1) => Some(&FILL_APPLIED_V1),
         ("MarkUpdated", 1) => Some(&MARK_UPDATED_V1),
+        ("MarkUpdated", 2) => Some(&MARK_UPDATED_V2),
         ("ReconciliationRun", 1) => Some(&RECONCILIATION_RUN_V1),
         ("LateFillApplied", 1) => Some(&FILL_APPLIED_V1),
         ("FeesCharged", 1) => Some(&FEES_CHARGED_V1),
@@ -338,6 +338,43 @@ static MARK_UPDATED_V1: Ty = Ty::Record(&[
     ("feed", Ty::Str),
     ("risk_clock", Ty::RiskClock),
 ]);
+
+/// §9.30's version 2 (DEC-2305): version 1's members, then the risk mark's `bid`, its `sane`
+/// verdict and its `session`, with `risk_clock` last.
+static MARK_UPDATED_V2: Ty = Ty::Record(&[
+    ("instrument_id", Ty::Str),
+    ("price", Ty::Decimal),
+    ("source", Ty::Str),
+    ("feed", Ty::Str),
+    ("bid", Ty::Nullable(&Ty::Decimal)),
+    ("sane", Ty::Bool),
+    (
+        "session",
+        Ty::OneOf(&[
+            "overnight",
+            "pre_market",
+            "regular",
+            "after_hours",
+            "crypto",
+        ]),
+    ),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// Rule 244 on a payload its schema has normalized: a version-2 `MarkUpdated` that is sane carries
+/// a bid greater than 0 (`payload.bid`), since trading spec §8.2's checks require one. A mark that
+/// is not sane may carry any bid, or none.
+pub(crate) fn rules(event_type: &str, schema_version: u64, payload: &Value) -> Result<(), Invalid> {
+    if (event_type, schema_version) != ("MarkUpdated", 2)
+        || payload.get("sane") != Some(&Value::Bool(true))
+    {
+        return Ok(());
+    }
+    match payload.get("bid").and_then(Value::as_str) {
+        Some(bid) if crate::scheduler::positive(bid) => Ok(()),
+        _ => Err(Invalid::new(InvalidReason::Schema, "payload.bid")),
+    }
+}
 
 static RECONCILIATION_RUN_V1: Ty = Ty::Record(&[
     ("result", Ty::OneOf(&["clean", "adopted", "mismatch"])),
