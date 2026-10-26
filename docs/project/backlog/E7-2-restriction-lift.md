@@ -9,5 +9,8 @@
   only after that acknowledgment and a later account report showing no restriction, and
   `connection_unavailable` only after the connection's `condition_cleared` and then the
   acknowledgment; the executor recomputes the account state from the causes left, and moves the
-  agents back only when none remains.
+  agents back only when none remains. The executor's fold of `ConnectionStateChanged` (DEC-2826)
+  keeps only the causes journaled in the current state: a degrading cause held while `suspended`
+  is never journaled, and those before `degraded` to `suspended` are dropped, so the
+  acknowledgment guard needs DEC-687's outstanding set tracked across that change.
 <!-- section: E7 Alpaca connector and recovery -->
