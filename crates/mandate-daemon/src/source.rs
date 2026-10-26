@@ -17,15 +17,19 @@ use mandate_research::{
     ResearchEnvelope, SourceAllowlist, ThesisId, UniverseEntry, ValidatedMandate, WorkingUniverse,
     expire_theses,
 };
-use mandate_research_run::{InstrumentFact, Symbol};
-use mandate_runtime::{ActiveThesis, JournalCatalog, Preconditions, RiskClock, RuntimeState};
+use mandate_research_run::{InstrumentFact, ItemKind, RetrievedItem, Symbol};
+use mandate_runtime::{
+    ActiveThesis, EventTriggers, JournalCatalog, Preconditions, RiskClock, RuntimeState,
+};
+use mandate_spec::Mandate;
+use mandate_spec::document::EventTrigger;
 use mandate_spec::risk::risk_day;
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 
 use crate::deployment;
 use crate::meter::CellMeter;
-use crate::recorded::Bundle;
+use crate::recorded::{Bundle, FeedItem};
 use crate::runtime::{ResearchParts, ResearchSource};
 
 /// The `event_time` of `agent`'s latest research `MeterReserved` on the workspace's meter stream
@@ -246,6 +250,7 @@ pub struct CellSource {
     /// every pass no context.
     halted: Option<BTreeSet<AssetId>>,
     instruments: Vec<InstrumentFact>,
+    feed: Vec<FeedItem>,
     rows: Rc<dyn Rows>,
     documents: Box<dyn ArtifactSource>,
     meter: CellMeter,
@@ -292,6 +297,7 @@ impl CellSource {
                 .map(|id| AssetId::new(id.as_str()).ok())
                 .collect(),
             instruments: bundle.plane.instruments.clone(),
+            feed: bundle.feed.clone(),
             rows,
             documents,
             meter,
@@ -354,6 +360,42 @@ impl CellSource {
     }
 }
 
+impl CellSource {
+    /// The feed's items that have arrived by `clock` for this agent's latest deployment in this
+    /// environment, each at its arrival (DEC-2392), or `None` when that deployment's `event_time`
+    /// cannot be read.
+    fn arrived(&self, control: &[StoredEvent], clock: RiskClock) -> Option<Vec<RetrievedItem>> {
+        let mut deployed_at = None;
+        for row in control.iter().rev().filter(|row| {
+            row.environment == self.who.environment.as_str() && row.event_type == "AgentDeployed"
+        }) {
+            let body = parse(&row.body).ok()?;
+            if body
+                .get("payload")
+                .and_then(|payload| payload.get("agent_id"))
+                .and_then(Value::as_str)?
+                == self.who.agent
+            {
+                deployed_at = Some(
+                    body.get("event_time")
+                        .and_then(Value::as_str)
+                        .and_then(|text| UtcNanos::parse_rfc3339(text).ok())?,
+                );
+                break;
+            }
+        }
+        let deployed_at = deployed_at?;
+        Some(
+            self.feed
+                .iter()
+                .filter_map(|item| item.arrived(deployed_at))
+                .filter(|item| item.knowledge_at.secs() <= clock.secs())
+                .map(RetrievedItem::News)
+                .collect(),
+        )
+    }
+}
+
 impl ResearchSource for CellSource {
     fn parts(&self, state: &RuntimeState) -> Option<ResearchParts> {
         let control = StreamId::parse(&format!("ctl:{}", self.who.workspace))?;
@@ -371,6 +413,7 @@ impl ResearchSource for CellSource {
         )
         .ok()?;
         let envelope = envelope(&document).ok()?;
+        let event_triggers = event_triggers(&document).ok()?;
         if self.others_deployed(&control)? {
             return None;
         }
@@ -427,8 +470,41 @@ impl ResearchSource for CellSource {
                 .iter()
                 .map(|fact| fact.symbol.clone())
                 .collect::<BTreeSet<Symbol>>(),
+            events: if event_triggers.is_some() {
+                self.arrived(&control, clock)?
+            } else {
+                Vec::new()
+            },
+            event_triggers,
         })
     }
+}
+
+/// The version's `behavior.research.event_triggers` (mandate spec v0.11 §8.4, DEC-2392) as the
+/// core reads it, `None` when the member is absent or `null`.
+///
+/// # Errors
+/// [`SourceError::Unreadable`] when the document does not parse as a mandate.
+pub fn event_triggers(document: &Value) -> Result<Option<EventTriggers>, SourceError> {
+    let mandate = Mandate::parse(document).map_err(|_| SourceError::Unreadable {
+        member: "event_triggers",
+    })?;
+    Ok(mandate
+        .behavior
+        .research
+        .and_then(|research| research.event_triggers)
+        .map(|triggers| EventTriggers {
+            kinds: triggers
+                .sources
+                .iter()
+                .map(|source| match source {
+                    EventTrigger::Filings => ItemKind::Filing,
+                    EventTrigger::News => ItemKind::News,
+                })
+                .collect(),
+            debounce_s: triggers.debounce_s,
+            max_runs_per_day: triggers.max_runs_per_day,
+        }))
 }
 
 /// The research envelope of a mandate `document` (mandate spec §8.5 and §8.6): the universe's

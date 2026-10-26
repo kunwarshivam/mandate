@@ -71,9 +71,9 @@ const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 /// `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1, and so does
 /// `OrderStateChanged` (journal spec §9.16, DEC-869). `OwnerConfirmationReceived` closes at
 /// version 1 (DEC-2040), and so do `AccountCloseRequested` (DEC-2337),
-/// `AccountRestrictionChanged` (DEC-2137), and the account stream's `KillSwitchActivated`
-/// (DEC-2139).
-const EXECUTOR: [&str; 13] = [
+/// `AccountRestrictionChanged` (DEC-2137), the account stream's `KillSwitchActivated`
+/// (DEC-2139), and `ExternalActivityIngested`, `RejectObserved` and `OrderAbandoned` (DEC-2803).
+const EXECUTOR: [&str; 16] = [
     "IntentReceived",
     "GateDecided",
     "OrderSubmitted",
@@ -84,6 +84,9 @@ const EXECUTOR: [&str; 13] = [
     CLOSE,
     RESTRICTION,
     KILL_SWITCH,
+    EXTERNAL,
+    REJECT,
+    ABANDONED,
     "BrokerPositionObserved",
     "AgentModeApplied",
     "CompensatingEvent",
@@ -106,6 +109,18 @@ const RESTRICTION: &str = "AccountRestrictionChanged";
 /// A kill switch the executor applied on its account, as `kill.rs` writes it (§9.5, DEC-2139):
 /// rules 281, 282 and 293 to 296. The agent stream's keeps its own §9.1 schema.
 const KILL_SWITCH: &str = "KillSwitchActivated";
+
+/// The broker's activity the executor did not originate, an open order or a fill (§9.5, DEC-2803):
+/// rules 297 and 298 bind each `source`'s members.
+const EXTERNAL: &str = "ExternalActivityIngested";
+
+/// A reject the broker answered with (§9.5, DEC-2803): no rule, since any combination of its
+/// members is a reject a broker may send.
+const REJECT: &str = "RejectObserved";
+
+/// An intent the executor gave up on (§9.5, DEC-2803): no rule, until trading spec §2.3 states the
+/// client order id the executor derives from an intent.
+const ABANDONED: &str = "OrderAbandoned";
 
 /// The companion's (§9.5): an `OrderSubmitted` at `schema_version` 2 must be immediately preceded
 /// in its `append` batch by exactly one `OrderRequestRecorded`, which its `causation_id` names.
@@ -409,6 +424,7 @@ pub(crate) fn payload(
         CLOSE => close_rules(p, causation_id)?,
         RESTRICTION => restriction_rules(p)?,
         KILL_SWITCH => kill_switch_rules(p, causation_id)?,
+        EXTERNAL => external_rules(p)?,
         "ProtectionChanged" => protection_changed_rules(p)?,
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
@@ -636,6 +652,40 @@ fn kill_switch_rules(p: Payload<'_>, causation_id: Option<&Value>) -> Result<(),
         InvalidReason::Schema,
         "payload.deferred",
     )
+}
+
+/// Rules 297 and 298 (DEC-2803): a fill names only its fill id, each other member in the table's
+/// order `null`; an open order names no fill id, then always its instrument, side and quantity.
+fn external_rules(p: Payload<'_>) -> Result<(), Invalid> {
+    let (nulls, present): (&[&str], &[&str]) = if p.text("source") == "fill" {
+        (
+            &[
+                "broker_order_id",
+                "client_order_id",
+                "instrument",
+                "side",
+                "qty",
+            ],
+            &[],
+        )
+    } else {
+        (&["fill_id"], &["instrument", "side", "qty"])
+    };
+    for member in nulls {
+        ensure(
+            p.is_null(member),
+            InvalidReason::Schema,
+            &format!("payload.{member}"),
+        )?;
+    }
+    for member in present {
+        ensure(
+            !p.is_null(member),
+            InvalidReason::Schema,
+            &format!("payload.{member}"),
+        )?;
+    }
+    Ok(())
 }
 
 /// Rule 260 (DEC-2337 item 2), a stream rule: an `AccountCloseRequested` names a switch,
@@ -985,6 +1035,9 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         (CLOSE, 1) => Some(&ACCOUNT_CLOSE_REQUESTED),
         (RESTRICTION, 1) => Some(&ACCOUNT_RESTRICTION_CHANGED),
         (KILL_SWITCH, 1) => Some(&ACCOUNT_KILL_SWITCH_ACTIVATED),
+        (EXTERNAL, 1) => Some(&EXTERNAL_ACTIVITY_INGESTED),
+        (REJECT, 1) => Some(&REJECT_OBSERVED),
+        (ABANDONED, 1) => Some(&ORDER_ABANDONED),
         ("BrokerPositionObserved", 1) => Some(&BROKER_POSITION_OBSERVED),
         ("AgentModeApplied", 1) => Some(&AGENT_MODE_APPLIED),
         ("CompensatingEvent", 1) => Some(&COMPENSATING_EVENT),
@@ -1390,6 +1443,44 @@ static ACCOUNT_KILL_SWITCH_ACTIVATED: Ty = Ty::Record(&[
     ("bid", Ty::Nullable(&Ty::Decimal)),
     ("bid_size", Ty::Nullable(&Ty::Decimal)),
     ("copied_from", Ty::Nullable(&Ty::Ulid)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's `ExternalActivityIngested` (DEC-2803): every member the broker supplies is nullable.
+static EXTERNAL_ACTIVITY_INGESTED: Ty = Ty::Record(&[
+    ("source", Ty::OneOf(&["open_order", "fill"])),
+    ("broker_order_id", Ty::Nullable(&Ty::Str)),
+    ("fill_id", Ty::Nullable(&Ty::Str)),
+    ("client_order_id", Ty::Nullable(&Ty::Str)),
+    ("instrument", Ty::Nullable(&Ty::Str)),
+    ("side", Ty::Nullable(&Ty::OneOf(&["buy", "sell"]))),
+    ("qty", Ty::Nullable(&Ty::Decimal)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's `RejectObserved` (DEC-2803).
+static REJECT_OBSERVED: Ty = Ty::Record(&[
+    ("http_status", Ty::Int),
+    ("code", Ty::Nullable(&Ty::Str)),
+    ("message", Ty::Nullable(&Ty::Str)),
+    ("client_order_id", Ty::Nullable(&Ty::Str)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's `OrderAbandoned` (DEC-2803): an `id` intent, since the executor's own exits are `w-` and
+/// `k-` ids, not ULIDs.
+static ORDER_ABANDONED: Ty = Ty::Record(&[
+    ("client_order_id", Ty::Str),
+    ("intent_id", Ty::Ident),
+    (
+        "reason",
+        Ty::OneOf(&[
+            "intent_too_old",
+            "gate_recheck",
+            "released_to_owner",
+            "unprotected_interval_limit",
+        ]),
+    ),
     ("risk_clock", Ty::RiskClock),
 ]);
 

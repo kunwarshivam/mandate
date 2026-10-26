@@ -524,9 +524,15 @@ fn decide(
             });
             Ok(())
         }
-        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. } => {
-            allowed(state, &proposal, &classified, now, ports, decision, batch)
-        }
+        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. } => allowed(
+            state,
+            &proposal,
+            (&classified, &deferred_names(&verdict)),
+            now,
+            ports,
+            decision,
+            batch,
+        ),
     }
 }
 
@@ -645,7 +651,7 @@ pub(crate) fn dry_run(
 fn allowed(
     state: &RuntimeState,
     proposal: &Proposal,
-    classified: &Classified,
+    (classified, deferred): (&Classified, &[&'static str]),
     now: RiskClock,
     ports: &Ports<'_>,
     decision: EventId,
@@ -656,6 +662,7 @@ fn allowed(
             state,
             proposal,
             classified.decided_by.as_deref(),
+            deferred,
             now,
             ports,
             decision,
