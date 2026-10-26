@@ -771,7 +771,8 @@ fn fold(journaled: &mut Journaled, stored: &StoredEvent) {
         event_type: &stored.event_type,
         payload: &payload,
     };
-    let _refused_rows_hold_every_later_opening = journaled.fold(row);
+    let recorded = UtcNanos::parse_rfc3339(&stored.recorded_at).ok();
+    let _refused_rows_hold_every_later_opening = journaled.fold_recorded(row, recorded);
 }
 
 /// The agent's risk while nothing has traded on the account: its whole allocation is its equity,
