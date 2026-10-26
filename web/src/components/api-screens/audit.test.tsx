@@ -14,7 +14,7 @@ const ORIGIN = "https://api.owlhead.ai";
 
 function mount(wrap: (send: Fetch) => Fetch = (send) => send) {
   setPathname("/audit/timeline");
-  const server = createMockServer({ workspaceId: WS, scenario: "normal" });
+  const server = createMockServer({ workspaceId: WS, scenario: "normal", acceptances: [] });
   const reads: string[] = [];
   const fetch: Fetch = (input, init) => {
     if ((init.method ?? "GET") === "GET") reads.push(decodeURIComponent(new URL(input).pathname));

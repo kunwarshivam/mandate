@@ -25,6 +25,16 @@ pub(crate) fn text(value: impl Into<String>) -> Value {
     Value::Str(value.into())
 }
 
+/// A member the broker supplies (journal spec §9.5, DEC-2803): its text, or `null` when the broker
+/// sent none or sent it empty, since `text` refuses an empty string and a broker's empty field must
+/// never refuse the batch it rides in.
+pub(crate) fn broker_text(value: Option<&str>) -> Value {
+    match value {
+        Some(raw) if !raw.is_empty() => Value::Str(raw.to_owned()),
+        Some(_) | None => Value::Null,
+    }
+}
+
 pub(crate) fn int(value: u64) -> Result<Value, ExecutorError> {
     Int::new(value)
         .map(Value::Int)

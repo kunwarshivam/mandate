@@ -17,13 +17,10 @@ use mandate_executor::{
 };
 use mandate_journal::{Draft, StreamType, check_batch, stream_event_types};
 
-/// The account-stream records the executor drafts that the journal does not close yet, each the
-/// next slice's (DEC-2139 item 4). Closing one fails this test until it leaves the list.
-const PENDING: [&str; 3] = [
-    "ExternalActivityIngested",
-    "RejectObserved",
-    "OrderAbandoned",
-];
+/// The account-stream records the executor drafts that the journal does not close yet: none since
+/// DEC-2803 closed `ExternalActivityIngested`, `RejectObserved` and `OrderAbandoned` (DEC-2139
+/// item 4). A record added here fails this test once it is closed, so the list only shrinks.
+const PENDING: [&str; 0] = [];
 
 /// A started executor on an opened stream, reconciled, as a production shell starts.
 fn opened(ports: &mandate_executor::Ports<'_>) -> Shell {
