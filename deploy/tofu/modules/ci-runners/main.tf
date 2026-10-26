@@ -199,14 +199,43 @@ locals {
       fi
       sleep 1
     done
-    exec sudo -u runner -H env PATH=/home/runner/.cargo/bin:/home/runner/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /home/runner/actions-runner/run.sh --jitconfig "$1"
+    exec sudo -u runner -H env ACTIONS_RUNNER_HOOK_JOB_STARTED=/usr/local/bin/mandate-runner-admit PATH=/home/runner/.cargo/bin:/home/runner/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /home/runner/actions-runner/run.sh --jitconfig "$1"
   ENTRY
+
+  # The runner's job-started hook, which runs before any step of every job and fails the job
+  # unless it is this repository's own: a pull request whose head is a branch of it, or a push or
+  # dispatch on main. ci.yml's guard keeps honest runs off these runners, but a fork's pull request
+  # brings its own workflow, which can name the label directly; this hook is part of the image, so
+  # no workflow can change it (DEC-2065 item 4). Anything it cannot read is refused.
+  image_admit = <<-ADMIT
+    #!/bin/bash
+    set -eo pipefail
+    refuse() {
+      echo "This runner takes only ${var.repository}'s own jobs: $1 (DEC-2065)." >&2
+      exit 1
+    }
+    [ "$GITHUB_REPOSITORY" = "${var.repository}" ] || refuse "a job of $GITHUB_REPOSITORY"
+    [ -r "$GITHUB_EVENT_PATH" ] || refuse "no event to read"
+    case "$GITHUB_EVENT_NAME" in
+      pull_request)
+        head=$(jq -r '.pull_request.head.repo.full_name // ""' "$GITHUB_EVENT_PATH")
+        [ "$head" = "${var.repository}" ] || refuse "a pull request from $head"
+        ;;
+      push | workflow_dispatch)
+        [ "$GITHUB_REF" = refs/heads/main ] || refuse "a $GITHUB_EVENT_NAME on $GITHUB_REF"
+        ;;
+      *)
+        refuse "a $GITHUB_EVENT_NAME event"
+        ;;
+    esac
+  ADMIT
 
   image_dockerfile = <<-DOCKER
     FROM ${var.base_image}
     COPY build.sh toolchain.sh /opt/
     COPY entry.sh /usr/local/bin/mandate-runner-entry
-    RUN chmod 0755 /usr/local/bin/mandate-runner-entry && bash /opt/build.sh && rm /opt/build.sh /opt/toolchain.sh
+    COPY admit.sh /usr/local/bin/mandate-runner-admit
+    RUN chmod 0755 /usr/local/bin/mandate-runner-entry /usr/local/bin/mandate-runner-admit && bash /opt/build.sh && rm /opt/build.sh /opt/toolchain.sh
   DOCKER
 
   # The host's loop, one job per run; systemd starts it again when it exits, however it exits.
@@ -222,14 +251,22 @@ locals {
     app_jwt() {
       now=$(date +%s)
       header=$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | b64url)
-      claims=$(jq -cn --arg iss "$APP_CLIENT_ID" --argjson iat "$((now - 60))" --argjson exp "$((now + 540))" '{iat: $iat, exp: $exp, iss: $iss}' | b64url)
+      claims=$(jq -cjn --arg iss "$APP_CLIENT_ID" --argjson iat "$((now - 60))" --argjson exp "$((now + 540))" '{iat: $iat, exp: $exp, iss: $iss}' | b64url)
       signature=$(printf '%s.%s' "$header" "$claims" | openssl dgst -sha256 -sign /etc/mandate-runner/app.pem -binary | b64url)
       printf '%s.%s.%s' "$header" "$claims" "$signature"
     }
     built=$(docker image inspect --format '{{.Created}}' "$image" 2> /dev/null || echo 1970-01-01T00:00:00Z)
     if [ "$(( $(date +%s) - $(date -d "$built" +%s) ))" -gt 86400 ]; then
-      docker build --no-cache --pull -t "$image" /opt/mandate-runner/image
-      docker image prune --force
+      if docker build --no-cache --pull -t "$image" /opt/mandate-runner/image; then
+        docker image prune --force
+      elif [ "$built" = 1970-01-01T00:00:00Z ]; then
+        exit 1
+      else
+        echo "the daily rebuild failed; keeping the image built at $built" >&2
+      fi
+    fi
+    if [ -n "$(docker ps --quiet --filter 'name=^mandate-ci-job$')" ]; then
+      docker wait mandate-ci-job
     fi
     docker container prune --force
     token=$(curl -fsS --retry 3 -X POST -H "Authorization: Bearer $(app_jwt)" -H "Accept: application/vnd.github+json" "$api/app/installations/$INSTALLATION_ID/access_tokens" -d "$(jq -cn --arg r "$REPOSITORY_NAME" '{repositories: [$r], permissions: {administration: "write"}}')" | jq -er .token)
@@ -240,12 +277,15 @@ locals {
     exec docker run --rm --runtime=sysbox-runc --name mandate-ci-job --hostname "$name" "$image" mandate-runner-entry "$config"
   MANAGER
 
-  # Keeps jobs off the host and off the metadata service. Docker keeps DOCKER-USER across its own
+  # Keeps jobs off the host, the metadata service and every private range, so a job reaches no
+  # other droplet or cluster in the account's VPCs. Docker keeps DOCKER-USER across its own
   # restarts, and the unit runs again with every Docker start.
   fence = <<-FENCE
     #!/bin/bash
     set -euo pipefail
-    iptables -C DOCKER-USER -d 169.254.169.254 -j REJECT 2> /dev/null || iptables -I DOCKER-USER -d 169.254.169.254 -j REJECT
+    for range in 169.254.0.0/16 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10; do
+      iptables -C DOCKER-USER -i docker0 -d "$range" -j REJECT 2> /dev/null || iptables -I DOCKER-USER -i docker0 -d "$range" -j REJECT
+    done
     iptables -C INPUT -i docker0 -j REJECT 2> /dev/null || iptables -I INPUT -i docker0 -j REJECT
   FENCE
 
@@ -254,6 +294,7 @@ locals {
     # A CI runner host (DEC-2065), made by deploy/tofu/modules/ci-runners.
     set -euo pipefail
     export DEBIAN_FRONTEND=noninteractive
+    passwd --lock root
     install -d -m 0700 /etc/mandate-runner
     umask 077
     cat > /etc/mandate-runner/app.pem <<'PEM'
@@ -270,12 +311,15 @@ locals {
     apt-get -o DPkg::Lock::Timeout=600 update
     apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends docker.io jq curl ca-certificates openssl
     install -d -m 0755 /etc/docker
-    echo '{"bip": "10.213.0.1/24", "default-address-pools": [{"base": "10.214.0.0/16", "size": 24}]}' > /etc/docker/daemon.json
-    systemctl restart docker
+    echo '{}' > /etc/docker/daemon.json
     curl -fsSL --retry 5 --retry-all-errors -o /root/sysbox.deb "https://github.com/nestybox/sysbox/releases/download/v${var.sysbox_version}/sysbox-ce_${var.sysbox_version}.linux_amd64.deb"
     echo "${var.sysbox_sha256}  /root/sysbox.deb" | sha256sum --check
     apt-get -o DPkg::Lock::Timeout=600 install -y /root/sysbox.deb
     rm /root/sysbox.deb
+    jq '. + {"bip": "10.213.0.1/24", "default-address-pools": [{"base": "10.214.0.0/16", "size": 24}]}' /etc/docker/daemon.json > /etc/docker/daemon.json.new
+    mv /etc/docker/daemon.json.new /etc/docker/daemon.json
+    systemctl restart docker
+    docker info --format '{{json .Runtimes}}' | grep -q sysbox-runc
     install -d -m 0755 /opt/mandate-runner/image
     base64 -d > /opt/mandate-runner/image/Dockerfile <<'B64'
     ${base64encode(local.image_dockerfile)}
@@ -288,6 +332,9 @@ locals {
     B64
     base64 -d > /opt/mandate-runner/image/entry.sh <<'B64'
     ${base64encode(local.image_entry)}
+    B64
+    base64 -d > /opt/mandate-runner/image/admit.sh <<'B64'
+    ${base64encode(local.image_admit)}
     B64
     base64 -d > /usr/local/sbin/mandate-runner-manager <<'B64'
     ${base64encode(local.manager)}
@@ -317,7 +364,7 @@ locals {
     [Service]
     ExecStart=/usr/local/sbin/mandate-runner-manager
     Restart=always
-    RestartSec=10
+    RestartSec=30
     [Install]
     WantedBy=multi-user.target
     UNIT

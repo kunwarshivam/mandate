@@ -113,7 +113,8 @@ jobs:
       # DEC-2065. Where the cell jobs run: the founder's self-hosted runners, named by the repository
       # variable CI_RUNNER, but only for main's own runs and pull requests from this repository's
       # branches. A fork's pull request, and any run while CI_RUNNER is unset, stays on GitHub's
-      # runners, so the self-hosted ones never run code from outside the repository.
+      # runners. A fork's pull request brings its own workflow, so this keeps honest runs off them;
+      # what stops a fork is the approval setting and the runners' own job-started hook.
       runner: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

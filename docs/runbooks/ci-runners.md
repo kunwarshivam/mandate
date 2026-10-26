@@ -9,21 +9,25 @@ time. Every job gets a fresh container built from a baked image (the repository'
 Docker, the GitHub runner) and the container is deleted when the job ends. They cost **144 USD a
 month** against your cap of **150 USD** ([DEC-2065](../project/decisions/DEC-2065.md)), separate
 from the hosting budget of DEC-2011. Only ci.yml's eleven cell jobs move to them, and only for
-`main` and for pull requests from this repository's own branches: a fork's pull request always
-runs on GitHub's runners.
+`main` and for pull requests from this repository's own branches.
+
+**The one rule.** A fork's pull request brings its own workflow files, which can ask for these
+runners by label. What stops it is the setting in step 3, and the runners refuse any job that is
+not this repository's own before its first step. So **never approve a fork's workflow run while
+the runners are up** without first reading every change it makes under `.github/`. If in doubt,
+unset `CI_RUNNER` and power the droplets off before approving (step 7).
 
 **The switch.** Nothing changes until you set the repository variable `CI_RUNNER` (step 5).
 Rolling back is deleting it (step 7).
 
 ## 1. DigitalOcean: a team, a billing alert and a token
 
-1. **Recommended: a separate team for CI.** In the DigitalOcean console, **Create a team** (for
-   example `mandate-ci`) and use it for everything below. Its bill and its billing alert then
-   cover the runners alone, apart from the hosting budget, and its token cannot touch staging or
-   production.
+1. **A separate team for CI.** In the DigitalOcean console, **Create a team** (for example
+   `mandate-ci`) and use it for everything below. Its bill and its billing alert then cover the
+   runners alone, apart from the hosting budget; its token cannot touch staging or production; and
+   only its members can read the droplets' user data, which holds the App's key.
 2. **Billing alert at the cap.** In that team, **Billing → Billing alerts**, set an alert at
-   **150 USD** a month. No API sets this. If you use the hosting team instead, raise its alert by
-   150 USD and note that the plan's own check (below) still refuses a fleet over 150 USD.
+   **150 USD** a month. No API sets this. The plan's own check also refuses a fleet over 150 USD.
 3. **A personal access token**, in **API → Tokens → Generate New Token**, **Custom Scopes**, an
    expiry of 30 days (you only need it while you apply), with only:
 
@@ -63,12 +67,20 @@ on every droplet as a long-lived bearer token tied to your account.
    address ends in its **installation id** (`.../settings/installations/<number>`); note the
    number.
 
-## 3. GitHub: keep forks out
+## 3. GitHub: keep forks out (before step 4, not after)
 
-In **Settings → Actions → General → Fork pull request workflows from outside collaborators**, keep
-**Require approval for all outside collaborators** selected. The workflow already sends every
-fork's pull request to GitHub's runners; this setting is the second fence, so no outside code runs
-at all until you approve it.
+The runners exist from the moment you apply, before you set `CI_RUNNER`, so confirm this first.
+
+1. In **Settings → Actions → General → Fork pull request workflows from outside collaborators**,
+   select **Require approval for all outside collaborators** and save.
+2. Check it took:
+   `gh api repos/kunwarshivam/mandate/actions/permissions/fork-pr-contributor-approval` must print
+   `"approval_policy":"all_external_contributors"`. Do not go on until it does.
+
+This setting is the fence against code from forks: until you approve a fork's run, none of it runs
+anywhere. ci.yml's own guard only keeps this repository's workflow from sending a fork to the
+runners, and the runners' job-started hook refuses an approved fork's job before its first step
+(DEC-2065 item 4). Keep the rule above.
 
 ## 4. Apply, from your own machine
 
@@ -107,18 +119,26 @@ new one appears after every job; finished ones remove themselves.
 name `CI_RUNNER`, value `mandate-ci-do`.
 
 From the next run on, the eleven cell jobs of a pull request from this repository, and of `main`,
-run there. In a cell job's log, **Set up job** names the runner. Every other job stays on GitHub's
-runners.
+run there. In a cell job's log, **Set up job** names the runner, and the runner's job-started hook
+runs first and passes. Every other job stays on GitHub's runners. If this repository's own cell
+jobs all fail with "This runner takes only kunwarshivam/mandate's own jobs", roll back (step 7)
+and tell lane RN: the hook refuses whatever it cannot read.
 
 ## 6. Day to day
 
-- **Nothing to do.** The droplets rebuild the job image every 24 hours from `main`'s
-  `.cursor/install.sh`, so new tool pins arrive by themselves within a day; a job installs any pin
-  it still lacks itself.
+- **Nothing to do.** A droplet rebuilds the job image from `main`'s `.cursor/install.sh` once the
+  image is a day old, before its next job, so new tool pins arrive by themselves; a job installs
+  any pin it still lacks itself. If a rebuild fails, the droplet keeps the old image. Ubuntu's
+  unattended upgrades may restart Docker on a droplet now and then; the job it was running fails
+  and can be re-run.
 - **A change to the fleet, the runner version or the base image** is a pull request to
   `deploy/tofu/`, then `tofu apply` as in step 4. Changing the boot script replaces the droplets.
-- **Rotating the App key:** generate a new key on the App's page, apply with it (the droplets are
-  replaced), then delete the old key there.
+- **Rotating the App key, every 90 days:** generate a new key on the App's page, apply with it
+  (the droplets are replaced), then delete the old key there. Replacing the droplets bills the
+  hours both sets run; the cap leaves 6 USD, about 84 droplet-hours, so a month with a replacement
+  can come close to the 150 USD alert.
+- **No SSH.** The droplets admit nothing inbound and their root password is locked at boot, so
+  ignore the password DigitalOcean emails. To look at one, destroy it and apply again.
 
 ## 7. Rollback
 
@@ -136,7 +156,7 @@ runners.
 |---|---|
 | OpenTofu state (encrypted with your passphrase) | the droplets' ids, names and addresses; the firewall and tag; the cost estimate; and a SHA-1 digest of the boot script, which the DigitalOcean provider stores instead of its text. No variable is stored in state |
 | Each droplet | the App's private key at `/etc/mandate-runner/app.pem`, root only (mode 0600), and the client id, installation id and repository in `/etc/mandate-runner/env`. Jobs run in a separate container that never sees either |
-| DigitalOcean | the boot script, key included, as the droplets' user data, readable through the droplet's metadata service. The host blocks jobs from reaching that service and the host itself |
+| DigitalOcean | the boot script, key included, as the droplets' user data: readable through each droplet's metadata service, and by anyone with Droplet read on the team, in the console and the API. Hence a team of the runners' own, and the 90-day rotation. The host blocks jobs from the metadata service, the host itself and every private range |
 | GitHub | each job's one-hour installation token, revoked once its runner is registered, and the runner's single-use registration |
 
 What this does not guard, said plainly, is DEC-2065 item 6.

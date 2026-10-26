@@ -69,6 +69,8 @@ run "the_firewall_admits_nothing_and_lets_out_only_what_jobs_need" {
   }
 }
 
+# A fleet whose estimate passes the cap fails the plan in modules/budget's precondition, which
+# its own cap.tftest.hcl tests; expect_failures cannot name a resource inside a called module.
 run "refuses_a_cap_above_the_founders_150" {
   command = plan
 
