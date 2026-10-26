@@ -1,117 +1,127 @@
-# Product-flow map, main at 517ee19 (2026-10-26 ~01:00 UTC), lane DR
+# Product-flow map, main at 1349070 (2026-10-26 ~08:00 UTC), lane DR
 
-How this was checked: code reading and grep on main, plus CI run evidence where cited. Docs alone never count. "Library" means the logic exists and is tested. "Deployed" means a cell process actually runs it. UNVERIFIED marks anything not traced to the end. Sizes: S (<1 day for one agent), M (1–2 days), L (more).
+How this was checked: code reading and grep on main, plus cell runs. Docs alone never count.
 
-## The cross-cutting blockers (they gate several steps; fix these first)
+- **CI:** main's run 40281337291 at a5f2e0c (`cell-demo-web`).
+- **Local:** the cell on 60c26eb plus #2495's registrations.
 
-| # | Blocker | Evidence | Steps it blocks | Lane | Size |
+"Library" means the logic exists and is tested. "Deployed" means a cell process actually runs it. UNVERIFIED marks anything not traced to the end. Sizes: S (<1 day for one agent), M (1–2 days), L (more). The previous map was at 517ee19.
+
+## Where the cell stops today
+
+`cell-demo-web` on main (run 40281337291) ran steps 1 to 3:
+- the API's 401, 204 and 200, and web/'s sign-in;
+- the connect check, the connection record, and the deploy at version 2;
+- the manager's executor, live.
+
+It stopped in **step 4**: the trade loop "stopped before approval", because no approval request ever reached web/. The run was locally reproduced up to step 2 on this sandbox. In order, what stands between the trade loop and a fill:
+
+1. **No ask.** The runtime never proposes an opening:
+   - no model output reaches it (X2);
+   - the gate's dry run denies every opening while any check is deferred, and four always are (X4).
+2. **The approve is refused.** The API answers 401 to every Approved grant (X6).
+3. **The second agent's runtime cannot open its stream.** Deployed event ids are not unique across streams (X9). The trade loop runs on the second agent, `WEB_AGENT`.
+4. **The executor holds every opening.** Its fixture wiring knows no mandate, instruments or facts (X5).
+
+## The cross-cutting blockers
+
+| # | Blocker | Evidence on main | Steps | Lane | Size |
 |---|---|---|---|---|---|
-| X1 | **No risk clock.** No process writes `ClockAdvanced`: `scheduler` is built=false (processes.json:189-193), there is no scheduler Dockerfile, and values.yaml:36 has `scheduler: ""`. The binary exists (crates/mandate-scheduler/src/main.rs). Without a tick: the executor never hands `Input::Started` (executord/src/process.rs:313-324), so it never reconciles, is never ready and applies no kill switch; the runtime never decides (mandate-runtime/src/step.rs:474-486); research returns early (daemon/src/runtime/research.rs:248-251); approvals never time out (step.rs:491) | 3, 4, 5, 6, 7 | SC / P2 (E21-29) | M |
-| X2 | **No signal inputs.** The daemon never hands `Input::ModelOutput` or `Input::Observation`; it hands only Started, Journal, Tick and Research (daemon/src/runtime.rs:376-385). The model host (`mandate-modelhost::evaluate`) runs only in `mandate-paper` (lib.rs:664-690) over a local `--bars` file | 3, 6 | **DR (DEC-2383)** | L |
-| X3 | **No bars or marks.** `data` is built=false (processes.json:233-237); `mandate-dataservice` is library only. No deployed process writes `MarkUpdated` (only the shell's tracer, shell/src/tracer.rs:681-724). The executor's quotes are `NoQuotes` on the fixture broker (executord/src/quotes.rs:44-54) | 3, 4, 6, 7 | SC (bars) / E21-44 | L |
-| X4 | **The runtime is deny-all.** daemon/src/fixture.rs:26-65 has DenyAll, NoPlan (`classify` = Deny) and NothingHeld, and a fake mandate_version (`:67-77`), used on every path (main.rs:204, 210) | 3, 6 | D1 (DEC-2378; S1 = #2432 open) | L |
-| X5 | **The executor knows nothing.** executord/src/fixture.rs:29-101 has NoMandate, NoInstruments, NoFacts, NoProtection and NoQuotes; "This wiring books no fill" (`:106`); the fixture broker never fills (paper.rs:8-9, 239-240) | 3, 4, 6 | X (E21-30 X1b-3) | L |
-| X6 | **Step-up.** The passkey verifier is a stub (api-server/src/methods.rs:41 always `StepUpMissing`; `:51,:81` `Unimplemented{E9-4}`). `CliConfirm` accepts only Approve and Connection actions (confirm.rs:75-80). Every approval grant answers 401 before any verifier runs (writes.rs:397-403) | 1, 7 | L1 (E9-4 S4: #2391, #2403) | L |
-| X7 | **Exits never reach the executor.** The daemon drops `Effect::Intent` (daemon/src/runtime.rs:435), and the core journals `IntentProposed` only for builder proposals and approvals (step.rs:607, escalation.rs:722), never for flatten or owner-exit legs. So even the confirmed owner exit (journaled as `OwnerExitRequested`, escalation.rs:978) is never sold | 6, 7 | **unowned** (D1/X boundary) | M |
-| X8 | **Alerts are dropped.** Both binaries discard `step()`'s alerts (executord/src/serve.rs:205; daemon/src/main.rs:256), and no dispatcher process exists (`mandate-dispatcher` is library only) | 4, 7 | **unowned** (E8-10) | S to stop dropping them, M for a dispatcher |
+| X1 | ~~No risk clock~~ **Closed.** The scheduler runs in the cell (#2439) | deploy/cell/charts/journal-db/files/processes.json:189-197 `built: true`; deploy/cell/images/scheduler.Dockerfile; xtask/src/cell.rs:884-891, :982-984. Locally the `scheduler` pod runs. The executor takes the first tick, then `Input::Started` (executord/src/process.rs:322-334); the runtime hands it in `clock_pass` (daemon/src/runtime.rs:415) | — | SC | — |
+| X2 | **No model outputs in the deployed runtime** | The daemon's models pass is wired: it queues `Observation` and `ModelOutput` ahead of each tick (daemon/src/runtime.rs:448-512, `ModelsWiring` at :54; #2448, DEC-2383). Deployed, `Wiring::models` is `None` (daemon/src/fixture.rs:106), and nothing outside tests implements `Models` (daemon/tests/runtime.rs:1140) | 3, 6 | DR (S3, the composer) | M, after the founder's DEC-503 item 2 layer call |
+| X3 | **Bars yes, marks no** | `data` is built and deployed with SPY and QQQ (processes.json:236-243; values/k3d.yaml:22-30; #2467, #2487), but it appends to no stream (processes.json:237). The executor's `MarkUpdated` v2 writer landed (#2449), but executord's fixture wiring marks nothing (`marked: NoMarks`, executord/src/fixture.rs:102), and its quotes are `NoQuotes` (executord/src/quotes.rs:44) | 3, 4, 6, 7 | X | M |
+| X4 | **The gate's dry run denies every opening** | The deployed runtime uses `production::wired` (daemon/src/main.rs:212-218). It has a real plan (production/plan.rs), flatten, references and view, and a real gate dry run: `Gate` over `evaluate_deferring` with the registered rule set's gate config (production.rs:43-68; production/gate.rs:69-91; #2489, DEC-2388). That gate defers `UNJOURNALED`, which is eligibility, the liquidity floor, participation and the day-trade budget (gate.rs:26-30), on every opening, and denies any opening with a deferred check. `Plan::classify` never answers auto (plan.rs:90-133), so an opening that passed would ask | 3, 6 | D1 (DEC-2378 item 11: journal those four facts, then the `DecisionMade` v2 spec) | L |
+| X5 | **The executor knows nothing** | The fixture broker fills (`FixturePaper::filling`, executord/src/main.rs:218; paper.rs:201-206; #2468), and executord reads `IntentProposed` (follow.rs:463-499, process.rs:582). But its wiring is still NoMandate, NoInstruments, NoFacts, NoProtection, NoQuotes and NoMarks (executord/src/fixture.rs:29-102), and NoFacts holds every opening at the binding gate (:63-70) | 3, 4, 6 | X (G1b to G2b: #2458, #2463, #2470, #2478) + LV | L |
+| X6 | **The approve is refused** | Passkey enrolment and assertion are implemented (api-server/src/passkeys.rs:187; methods.rs:117), and confirm, deploy and connect judge step-up (version_routes.rs:302-314; connect.rs:352). The responses route still answers 401 to every `Approved` grant, `StepUpMissing` with evidence and `StepUpRequired` without (api-server/src/writes.rs:414-419). Web's cli_confirm approve (#2435) is real, but only the mock API accepts it | 1, 4, 7 | L1 (#2469/#2474, DEC-2129) | M |
+| X7 | **Exits never reach the executor** | The daemon drops `Effect::Intent` (daemon/src/runtime.rs:564). The core journals `IntentProposed` only for builder proposals and approvals (runtime/src/step.rs:607; escalation.rs:722). Flatten and owner-exit legs are only `Effect::Intent` (step.rs:121, :942), and an owner exit only `OwnerExitRequested` (escalation.rs:978) | 6, 7 | EX (session started 06:26) | M |
+| X8 | **Alerts are dropped** | The daemon prints each alert to stderr (daemon/src/main.rs:266-267); executord discards them (serve.rs:205). `mandate-dispatcher` has no binary and no process | 4, 7 | EX | S/M |
+| X9 | **NEW: deployed event ids are not unique across streams** | executord's `fixture::Ids` is `1`, epoch, head, ordinal (executord/src/fixture.rs:18-26); the daemon's is `0`, epoch, head, ordinal (daemon/src/fixture.rs:20-24). The journal requires a globally unique `event_id` (journal spec, envelope table: "ULID; globally unique"). Every account stream's first batch therefore has the same ids, and so does every agent stream's. In one cell journal only the first agent's runtime can open its stream, and only the first account's connect check commits. Reproduced: a second demo run on one cell, connect check `append_refused`. The trade loop's agent is the second | 4, 7 | unowned (X and D1 crates) | S |
 
 ## Step 1: the owner creates an agent in web (envelope, confirm, deploy)
-Today: web can create a version through the API, but no confirm or deploy can succeed. The CLI path works in the cell (cell-demo 981eb90: version create, confirm and deploy all ran; DR-1 makes the deployment v2).
 
-| Item | Wired? | Evidence | Stub | Lane | Size |
-|---|---|---|---|---|---|
-| `/agents/new` reachable over the API | no | agents/new/page.tsx:9 is gated, so `ApiNotYetNotice` shows (components/screens/common.tsx:218) | same | W | S |
-| Drafting the envelope | fixture only | new-agent-flow.tsx:13,26 `fixtureCompiler()` | same; model route UNVERIFIED (DEC-476 item 7 is Proposed) | W (+ founder for the model) | M |
-| Create the version | yes | api-runtime.tsx:278-313, then http.rs:194, then version_routes.rs:329 | — | W | — |
-| Confirm | no | api-runtime.tsx:316-338 sends `step_up: null`; version_routes.rs:297 answers StepUpRequired | X6 | L1, then W | L |
-| Deploy, `POST /agents` | no | Server route at version_routes.rs:750-878; web never sends it (api-runtime.tsx:340-351 is `not_sent`) | X6; the web README's "needs an agent stream" excuse is stale (version_routes.rs:771) | W + L1 | M |
-| The connection (Alpaca paper OAuth) | API yes, web no | oauth/start (#2018), callback (#2100); the cell has the oauth fixture and token exchange | No web connect screen (W-4); staging `alpacaOAuth.clientId: ""` (the founder registers the app, DEC-2636); connect start needs step-up (X6) | W, founder | M |
-| Runtime started after deploy | yes from the CLI (DR-1, #2430) | connect check, then `connection record`, then AgentDeployed v2, then the manager starts the executor and runtime | the research agent's workspace is still v1 | DR | S |
+Today: the CLI path runs end to end in the cell (CI 40281337291, step 2). From web/, a version can be created, but confirm and deploy are not sent.
+
+| Item | Wired? | Evidence | Lane | Size |
+|---|---|---|---|---|
+| `/agents/new` over the API | no | page.tsx wraps `WorkspaceGate` without `api`, so `ApiNotYetNotice` shows (components/screens/common.tsx:212-218); the compiler is the fixture one (web/src/components/new-agent/new-agent-flow.tsx:13) | W | S |
+| Create the version | yes | web/src/lib/api-runtime.tsx, then http.rs:196, then version_routes.rs:339 | W | — |
+| Confirm | server yes, web no | The server takes passkey step-up (version_routes.rs:302-314; handler :529); web sends `step_up: null` (web/src/api/commands.ts:138; web/src/lib/api-runtime.tsx:407-430) | W + L1 (#2475 waits on DEC-2131's slices) | M |
+| Deploy, `POST /agents` | server yes, web no | version_routes.rs:769; web is `not_sent` (web/src/lib/api-runtime.tsx:432-443) | W | S |
+| The connection (Alpaca paper) | yes | web connects with cli_confirm (api-screens/connections.tsx; web/src/lib/api-runtime.tsx:285-300; #2453). Staging `alpacaOAuth.clientId` is still "" (deploy/gitops/clusters/staging/workspace.yaml:40): the founder registers the app | founder | — |
+| Reviewed configuration registered | yes (cell) | Step 2 registers the reviewed `rule_set`, `fee_config` and `trading_calendar` before any version: one rule set for both gates (#2495) | DR | — |
+| Runtime and executor started after deploy | yes | CI 40281337291: "the account's executor … answers livez" | — | — |
 
 ## Step 2: autonomous research (models through the gateway, agentic harness, ideas and theses)
-Today: no real model is called anywhere on main. In the cell the research agent never runs.
 
-| Item | Wired? | Evidence | Stub | Lane | Size |
-|---|---|---|---|---|---|
-| Research loop (single call and agentic), judge, theses | library yes | runtime/src/research.rs:534-781; research/agentic.rs:127-215; judge.rs:120-141 | — | AH / I2 | — |
-| Daemon `--research` on the recorded bundle | yes (fake) | daemon/src/main.rs:175-228; worker.rs RecordedTransport only | other transports are `#[cfg(test)]` (worker.rs:672) | I2 | — |
-| A real model call | no | demo bundle host `recorded.invalid`; gateway-http "not wired ... `NoKeys`" (lib.rs:16-19) | — | I2 + V2 (keys) + GO (egress) | L |
-| model-gateway service | no | `mandate-gatewayd` has no bin; processes.json:203-207 built=false; E21-62 `--recorded` is only in open #2172/#2173 | — | I2 | M (recorded), L (live) |
-| Agentic harness in the demo | no | the demo research.json has no `entry.agentic` or `caps.run_usd`, so it runs single-call | — | AH | S |
-| Research agent started in the cell | no | scenario step 3 deploys v1 (no connection) | DR_RESEARCH gap | DR | S |
-| Risk clock for research | no | X1 | — | SC/P2 | M |
-| Admission into the working universe | partial | mandate-research admit (lib.rs:400-433); daemon fold_research (source.rs:136-240) | judge.rs:220 drops UniverseChanged; executor refuses it (fold.rs:281, E17-3) | I2 / X | M |
-| filings.* and market.quote tools | no | recorded.rs implements only news and bars | ports default to Unavailable (research-run/src/ports.rs:84-86,146,166); demo filings.json is `[]` | AH | S each |
+Today: no real model is called anywhere on main. In the cell, the research agent's runtime is not started. These rows are unchanged since 517ee19 except where noted.
+
+| Item | Wired? | Evidence | Lane | Size |
+|---|---|---|---|---|
+| Research loop, judge, theses | library yes | runtime/src/research.rs; research/agentic.rs; judge.rs | AH / I2 | — |
+| Daemon `--research` on the recorded bundle | yes (fake) | daemon/src/main.rs:174-187, :218-236; worker.rs RecordedTransport | I2 | — |
+| A real model call; model-gateway service | no | gateway-http "not wired … `NoKeys`"; `mandate-gatewayd` has no bin | unowned | L |
+| Research agent's runtime in the cell | no | CI step 3: deployed, but at version 1, with no connection of its own, so the manager starts nothing | DR | S |
+| Event-triggered research (E19-12) | no | `RunStarted.trigger` is always `schedule` | unowned | L |
 
 ## Step 3: keeps deciding until it buys (signals, builder, gate, autonomy, executor, broker)
-Today: the library is complete (only `mandate-paper`, the founder's one-shot CLI, runs it end to end through `mandate_shell::production_cycle`). In the cell nothing can propose or fill: X1, X2, X3, X4, X5.
 
-| Item | Wired? | Evidence | Stub | Lane | Size |
-|---|---|---|---|---|---|
-| quant.ma_crossover evaluated | deployed no | modelhost/src/ma_crossover.rs; only paper/src/lib.rs:680 calls it | X2 | DR (DEC-2383) | L |
-| Builder and sizing, gate, autonomy, ApprovalRequested | deployed no | mandate-ports, mandate-risk:852, escalation.rs:288 | X4 (NoPlan classify=Deny, so no ask is ever journaled) | D1 | L |
-| Daemon may not link the shell | by design | xtask/layers.toml:776 forbids it, which is why DEC-2378 builds ports over mandate-ports and mandate-risk | daemon is layer 8, the same as modelhost (DEC-503 item 2): DEC-2383 needs a layer change (founder review) | D1 / DR | — |
-| Runtime to executor handoff | partial | executor reads IntentProposed (follow.rs:463-490) | none is written under NoPlan | D1 / X | — |
-| Executor opening, fill, protective stop | no | X5; protection E7-4 stubs (executor/src/protection.rs:991,1070,2668,3174) | — | X | L |
-| Broker: Alpaca paper | staging only | staging `--broker alpaca-paper` (gitops staging workspace.yaml:19); the cell uses the fixture | behind X5 | X | — |
-| Broker: Robinhood, rh-sim | no | executord forbids mandate-robinhood (layers.toml:789); #2434 (DEC-2382) open | the CLI records Robinhood only in `live` (connection.rs `requested`): a founder call | X / founder | L |
+Today: in the cell, the runtime decides on every tick, but nothing can propose (X2, X4) or fill (X5).
+
+| Item | Wired? | Evidence | Lane | Size |
+|---|---|---|---|---|
+| Model outputs into the runtime | port yes, deployed no | X2 | DR | M |
+| Plan and sizing over the journaled fold | deployed yes | production/plan.rs:75-108 (#2471) | D1 | — |
+| Gate dry run | deployed, denies openings | X4 | D1 | L |
+| Autonomy: ask, `ApprovalRequested` | library yes | `Plan::classify` never auto (plan.rs:90-133); escalation.rs:288 | D1 | — |
+| Runtime to executor handoff | yes | executord reads `IntentProposed` (follow.rs:463-499) | — | — |
+| Executor opening, fill, protective stop | fill yes, opening no | X5 | X / LV | L |
+| Broker: Robinhood (rh-sim) | no | #2434 waits on the founder's three DEC-2382 answers | founder | — |
 
 ## Step 4: monitors the position (marks, protection, risk)
-Today: none of it runs deployed. The executor never starts (X1) and never holds a position (X5).
 
-| Item | Wired? | Evidence | Stub | Lane | Size |
-|---|---|---|---|---|---|
-| Executor start, reconciliation, readiness | no | process.rs:313-324, 768-777, 810-841 | X1 | SC/P2, then X | S once ticks exist |
-| Quotes | partial | staging AlpacaQuotes REST (credential.rs:423-498), polled only for exits | `quote_wanted` covers exits only (executor/src/state.rs:527-533); `mark: None` (credential.rs:494) | X | S |
-| Marks in the journal | no | X3 | risk_state.rs:7-9 "Nothing calls it yet" | TW (E6-15 slice C, the founder's timing) | L |
-| Protection, OCO, watchdog | library yes | executor/src/protection.rs:100-125, 1390-1465, 1808-1826 | NoProtection (X5); exit_hold Unimplemented (protection.rs:3161-3174) | X / LV | L |
-| Drawdown ladder, daily loss, exits-only | library yes | AccountRiskFold; gate.rs:740 | not called (risk_state.rs:7-9); fold `NotInterpreted E6-4` (executor fold.rs:275-280) | TW | L |
-| Breach alerts | no | X8 | — | unowned | M |
-| Owner sees positions and P&L | no | API positions return `cost_basis`, `risk_mark` and `protection` as null (reads.rs:420-461) | web positions screen runs on mock-runtime (positions-screen.tsx:6); `/positions` and `/orders` are not in web operations.ts | W | M |
+| Item | Wired? | Evidence | Lane | Size |
+|---|---|---|---|---|
+| Executor start, reconciliation, readiness | yes | ticks arrive (X1); CI step 2's executor is live | — | — |
+| Marks in the journal | writer yes, deployed no | X3 (#2449, `NoMarks` in the fixture wiring) | X | S |
+| Protection, OCO, watchdog | library yes | NoProtection (X5) | X / LV | L |
+| Drawdown ladder, daily loss | library yes | not called deployed | TW | L |
+| Owner sees positions | agent page yes | The agent page reads orders, positions and the journal from the API (web/src/lib/api-runtime.tsx:320-345; api-screens.tsx:279-335; #2459). The `/positions` screen is mock (positions-screen.tsx:6), and the API returns null cost basis, risk mark and protection (reads.rs) | W | M |
 
-## Step 5: acts on news and events (event-triggered research, news.search/get, thesis updates)
-Today: news tools exist on the recorded plane only, and event triggers don't exist.
+## Step 5: acts on news and events
 
-| Item | Wired? | Evidence | Stub | Lane | Size |
-|---|---|---|---|---|---|
-| news.search / news.get | recorded only | daemon/src/recorded.rs:250-304 (#2156) | the demo bundle isn't agentic, so it never offers them | AH | S |
-| Live news (Alpaca) | no | sources/src/fetch.rs:23 | allowlist-v1.toml `alpaca.news counsel_confirmed=false` (DEC-1130 item 2, the founder's) | founder, then I2 | blocked |
-| Live SEC EDGAR | no | fetch.rs:24-25; nothing links mandate-sources | no ingest process | I2 (E17-7) | L |
-| Event-triggered runs (E19-12) | no | `RunStarted.trigger` is hard-coded `schedule` (agentic.rs:152-157); runs.rs:424 accepts `event` but nothing emits it | no spec yet (backlog 06:2560-2582; DEC-2204 deferred it) | **unowned** | L |
-| ThesisRevised / ThesisInvalidated | library yes | judge.rs:120-141, 200-240; daemon source.rs:152-158 | never reaches the cell (step 2) | I2 / AH | — |
+Unchanged since 517ee19: news tools exist on the recorded plane only, live news waits on the founder (DEC-1130 item 2), and E19-12 is unowned.
 
 ## Step 6: decides to sell (signal, goal, thesis, risk exit)
-Today: no sell path runs deployed.
 
-| Item | Wired? | Evidence | Stub | Lane | Size |
-|---|---|---|---|---|---|
-| Signal and goal exits | library yes | builder.rs:707, 965, 247-334 | X2, X4 | D1 + DR | (in L) |
-| Thesis exit | no anywhere | ThesisInvalidated journaled (research.rs:1097), but the runtime fold ignores it (state.rs:758); no UniverseChanged producer | — | I2 / **unowned** | L |
-| Risk exits (ladder, flatten_and_pause) | library yes | risk_state.rs | not called; rung C5 and fail-closed B2b-2b (`:549-562`) | TW | L |
-| Agent flatten planner | deployed no | mandate_risk::agent_flatten (lib.rs:993) used only by the shell | NothingHeld (daemon fixture.rs:53-65) | D1 (S2) | M |
-| Owner exit | journaled, never sold | X7 | — | unowned | M |
-| Exit priced at the confirmed floor | library yes | follow.rs:455-480; executord/tests/owner_exits.rs | never reached (X1, X5, X7) | — | — |
+| Item | Wired? | Evidence | Lane | Size |
+|---|---|---|---|---|
+| Agent flatten over the journaled fold | deployed yes | production.rs `Flatten` over the agent's own fills (#2447); its legs never reach the executor (X7) | EX | M |
+| Signal and goal exits | library yes | X2, X4 | D1 + DR | — |
+| Thesis exit | no | the runtime fold ignores `ThesisInvalidated` (state.rs:758) | unowned | L |
+| Owner exit | journaled, never sold | X7 | EX | M |
 
 ## Step 7: the owner sees everything in web, and approves, intervenes or kills
-Today: web reads agents and approvals, and pause, kill switch and approval skip are recorded. Approve, resume, release, owner exit, mandate change, and the journal, positions and orders reads are not available from web.
 
-| Item | Wired? | Evidence | Stub | Lane | Size |
-|---|---|---|---|---|---|
-| API-backed screens | partial | home, /agents, /agents/[id], /approvals (api-screens.tsx:23-25, 101-332), polled every 5 s | positions, audit, alerts, messages, backtests, connections and settings all show `ApiNotYetNotice` (common.tsx:168-176,218) | W | M |
-| Approve | no | X6, writes.rs:397-403; web sends `step_up: null` (commands.ts:80) | — | L1 + W | L |
-| Approvals read from agent streams | check | `ApprovalRequested`, `DecisionMade` and `ApprovalResponded` are on `agent:{ws}:{agent}` (D1) | web and `approvals list` must read them there | W / L1 | S to verify |
-| Pause | records | stop-sheet.tsx:169, then writes.rs:48 | applied by the runtime: UNVERIFIED | W / D1 | S |
-| Resume, release, owner exit, mandate change | no | resume needs step-up (writes.rs:449-475); release returns null (stop/api-record.ts:101); no `owner_exit` in web; `changeMandate` is `not_sent` (api-runtime.tsx:255-263) | hold, acknowledgment and delegation routes are not mounted (writes.rs:3) | W + L1 | M–L |
-| Kill switch | records; CLI kill applied by the runtime (DR-1 asserts it; #2433 pins it to the runtime's `KillSwitchActivated` on the agent stream) | writes.rs:69-101; cell-demo-web kill-switch.spec.ts | executor workspace scope `Unimplemented E7-4` (executor/src/kill.rs:49, 138); the executor applies nothing before a tick (X1) | W, X, SC/P2 | M |
-| Journal, activity, positions and orders reads | served, unused | http.rs:150-173, journal_reads.rs | no web caller (operations.ts:34-45) | W | M |
-| `/v1/me/workspaces` and `/v1/me/session` | served, unused | http.rs:132-139 | web reads `OWLHEAD_WORKSPACE_ID` (data-source.ts:23-50) | W | S |
+| Item | Wired? | Evidence | Lane | Size |
+|---|---|---|---|---|
+| Approve | web yes, server no | X6 | L1 | M |
+| Kill switch | yes | web's and the CLI's are recorded, and the runtime applies the CLI's (cell steps 4 and 7) | — | — |
+| Orders, positions, journal reads | used | the agent page (#2459); `/v1/me/session` by step-up (web/src/lib/api-runtime.tsx:272) | W | — |
+| Screens still on `ApiNotYetNotice` | — | positions, audit, alerts, messages, settings | W | M |
+| Resume, release, mandate change | no | unchanged | W + L1 | M–L |
 
-## Unowned today (need an owner)
-1. X7: owner-exit and flatten legs never journaled as `IntentProposed`, so no deployed sell exists (M).
-2. X8: alerts dropped, and no dispatcher process (S/M).
-3. E19-12: event-triggered research, which has no spec (L).
-4. Thesis exit end to end (`UniverseChanged` producer, runtime fold of `ThesisInvalidated`) (L).
-5. The step 1 drafting model route (DEC-476 item 7 is the founder's).
+## Running the cell from a cloud session
+
+Three things this sandbox needs, which CI does not:
+1. `MANDATE_CELL_CA_BUNDLE=/root/.ccr/ca-bundle.crt`, because the egress proxy inspects TLS.
+2. `MANDATE_CELL_RESTRICT_OOM=1`, because the VM refuses a negative `oom_score_adj`, so no pod sandbox starts without it (DR's open PR).
+3. A host `kubectl`. Without one, the scenario never points the API and the manager at the run's workspace, and the manager starts no executor. One way to get it: `docker cp k3d-mandate-cell-server-0:/bin/k3s /usr/local/bin/k3s && ln -s k3s /usr/local/bin/kubectl`.
+
+A second demo run on one cell fails its connect check until X9 is fixed, so delete the cluster between runs.
 
 ## Founder calls on the path
-DEC-503 item 2 layer change (DEC-2383's daemon to layer 9 or a composer crate); Robinhood's `live`-only rule against rh-sim (DEC-2382); the staging Alpaca OAuth app registration (DEC-2636); Alpaca news (DEC-1130 item 2); E6-15 slice C timing.
+
+- DEC-503 item 2: the layer change for the model composer (X2).
+- DEC-2382: Robinhood's three open questions.
+- The staging Alpaca OAuth app (DEC-2636).
+- Alpaca news (DEC-1130 item 2).
