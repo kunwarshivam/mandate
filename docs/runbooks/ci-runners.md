@@ -128,6 +128,11 @@ runs first and passes. Every other job stays on GitHub's runners. If this reposi
 jobs all fail with "This runner takes only kunwarshivam/mandate's own jobs", roll back (step 7)
 and tell lane RN: the hook refuses whatever it cannot read.
 
+**The first run is the hook's smoke test.** No agent can run a real runner, so the hook's inputs
+(the event's name, its payload and the ref) are untested until then. On the first pull request
+after the switch, and on the first run on `main`, check that a cell job's **Set up job** shows the
+hook passing. It fails closed, so a wrong guess fails jobs and never admits one.
+
 ## 6. Day to day
 
 - **Nothing to do.** A droplet rebuilds the job image from `main`'s `.cursor/install.sh` once the

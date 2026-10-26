@@ -199,7 +199,7 @@ locals {
       fi
       sleep 1
     done
-    exec sudo -u runner -H env ACTIONS_RUNNER_HOOK_JOB_STARTED=/usr/local/bin/mandate-runner-admit PATH=/home/runner/.cargo/bin:/home/runner/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /home/runner/actions-runner/run.sh --jitconfig "$1"
+    exec sudo -u runner -H env ACTIONS_RUNNER_HOOK_JOB_STARTED=/usr/local/bin/mandate-runner-admit.sh PATH=/home/runner/.cargo/bin:/home/runner/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /home/runner/actions-runner/run.sh --jitconfig "$1"
   ENTRY
 
   # The runner's job-started hook, which runs before any step of every job and fails the job
@@ -234,8 +234,8 @@ locals {
     FROM ${var.base_image}
     COPY build.sh toolchain.sh /opt/
     COPY entry.sh /usr/local/bin/mandate-runner-entry
-    COPY admit.sh /usr/local/bin/mandate-runner-admit
-    RUN chmod 0755 /usr/local/bin/mandate-runner-entry /usr/local/bin/mandate-runner-admit && bash /opt/build.sh && rm /opt/build.sh /opt/toolchain.sh
+    COPY admit.sh /usr/local/bin/mandate-runner-admit.sh
+    RUN chmod 0755 /usr/local/bin/mandate-runner-entry /usr/local/bin/mandate-runner-admit.sh && bash /opt/build.sh && rm /opt/build.sh /opt/toolchain.sh
   DOCKER
 
   # The host's loop, one job per run; systemd starts it again when it exits, however it exits. It
