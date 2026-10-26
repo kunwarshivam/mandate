@@ -11,7 +11,7 @@ mod support;
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::Value;
 use mandate_executor::{
-    ActivityCursor, AgentId, BracketLegs, BrokerOutcome, BrokerRequest, ClientOrderId, ExitTier,
+    ActivityCursor, BracketLegs, BrokerOutcome, BrokerRequest, ClientOrderId, ExitTier,
     FillConfigRefs, InstrumentSnapshot, OcoLegs, OrderType, Purpose, SubmitOrder, TimeInForce,
 };
 use mandate_executord::alpaca::AlpacaBroker;
@@ -19,7 +19,7 @@ use mandate_executord::paper::{CASH, FixturePaper};
 use mandate_executord::quotes::NoQuotes;
 use mandate_executord::{Broker, ExecutorProcess, Wiring};
 use mandate_journal::Environment;
-use mandate_num::{Price, Qty, ShareIncrement, SignedQty, Usd};
+use mandate_num::{Price, Qty, ShareIncrement, Usd};
 use support::{
     ACCOUNT_STREAM, AGENT, Allowing, Error, Ids, Instruments, Journal, Mandate, NOON,
     TwoPercentStop, at, config, deployed, fees, process_config, propose,
@@ -332,7 +332,9 @@ fn action(payload: &Value) -> Option<&str> {
 /// X1b-3 end to end: an agent's opening of 10 AAPL at 150, handed to a process over the filling
 /// fixture, is journaled and sent as a bracket, fills whole, is booked as the agent's fill, keeps
 /// the bracket's two legs as the position's protection, and the account reconciles clean: the
-/// broker's cash is the model's, and no agent is held.
+/// broker's cash is the model's, and no agent is held. The passes run a minute apart, each after
+/// a clock tick, so the process reads the broker again while its order works and books the fill
+/// without a restart.
 #[test]
 #[ignore = "pending E21-30"]
 fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Error> {
@@ -345,8 +347,10 @@ fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Err
         &process_config(Environment::Paper),
         at(NOON)?,
     );
-    for _ in 0..4 {
-        process.step(at(NOON)?);
+    for minute in 0..10 {
+        let now = format!("2026-09-21T15:{minute:02}:00Z");
+        support::tick(&journal, &format!("t{minute}"), &now)?;
+        process.step(at(&now)?);
     }
     let fill = journal
         .payloads("FillApplied")
@@ -386,6 +390,5 @@ fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Err
             .all(|p| p.get("to").and_then(Value::as_str) == Some("normal")),
         "no agent is held"
     );
-    let _ = (SignedQty::ZERO, AgentId(AGENT.to_owned()));
     Ok(())
 }
