@@ -250,14 +250,50 @@ pub fn config() -> Config {
 pub type Reader = NewsReader<Journal, Shelf, Recorded>;
 
 pub fn started(journal: &Journal, shelf: &Shelf, transport: &Recorded, now: UtcNanos) -> Reader {
+    started_with(journal, shelf, transport, &config(), now)
+}
+
+pub fn started_with(
+    journal: &Journal,
+    shelf: &Shelf,
+    transport: &Recorded,
+    config: &Config,
+    now: UtcNanos,
+) -> Reader {
     NewsReader::start(
         journal.clone(),
         shelf.clone(),
         transport.clone(),
-        &config(),
+        config,
         Ok(paper_auth()),
         now,
     )
+}
+
+/// The URL's `symbols` query, as asked.
+pub fn asked(url: &str) -> String {
+    url.split("symbols=")
+        .nth(1)
+        .and_then(|rest| rest.split('&').next())
+        .unwrap()
+        .to_owned()
+}
+
+/// The news stream's `NewsItemStored` rows.
+pub fn stored(journal: &Journal) -> Vec<StoredEvent> {
+    journal
+        .news()
+        .into_iter()
+        .filter(|row| row.event_type == "NewsItemStored")
+        .collect()
+}
+
+/// The stored items' ids, in stream order.
+pub fn ids(journal: &Journal) -> Vec<String> {
+    stored(journal)
+        .iter()
+        .map(|row| member(row, "item_id").as_str().unwrap().to_owned())
+        .collect()
 }
 
 pub fn object(members: &[(&str, Value)]) -> Value {
@@ -306,10 +342,15 @@ pub fn register_ref(journal: &Journal, reference: &ArtifactRef) {
     );
 }
 
-/// An admitted thesis on `asset`, expiring at `expires_at`.
+/// An admitted thesis of the followed agent on `asset`, expiring at `expires_at`.
 pub fn thesis(journal: &Journal, thesis_id: &str, asset: &str, expires_at: &str) {
+    thesis_of(journal, AGENT, thesis_id, asset, expires_at);
+}
+
+/// An admitted thesis of `agent` on `asset`, expiring at `expires_at`.
+pub fn thesis_of(journal: &Journal, agent: &str, thesis_id: &str, asset: &str, expires_at: &str) {
     journal.push(
-        &format!("agent:{WS}:{AGENT}"),
+        &format!("agent:{WS}:{agent}"),
         "ThesisProposed",
         object(&[
             ("thesis_id", s(thesis_id)),

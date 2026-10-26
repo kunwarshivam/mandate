@@ -23,6 +23,7 @@ use std::collections::BTreeMap;
 use mandate_canon::Value;
 use mandate_time::UtcNanos;
 use proptest::prelude::*;
+use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
 use common::*;
 
@@ -72,68 +73,95 @@ fn item_id(served: Served) -> String {
     format!("{}:{}", served.id, updated(served))
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig {
+/// One generated sequence of steps, checked against the ledger.
+fn holds(steps: &[Step]) -> Result<(), TestCaseError> {
+    let (journal, shelf) = (Journal::default(), Shelf::default());
+    spy(&journal, &shelf);
+    let transport = Recorded::default();
+    let mut now = t0();
+    let mut reader = started(&journal, &shelf, &transport, now);
+    let mut first_receipt: BTreeMap<String, UtcNanos> = BTreeMap::new();
+    let mut times: BTreeMap<String, (UtcNanos, UtcNanos)> = BTreeMap::new();
+    for step in steps {
+        now = plus(now, step.gap_s);
+        if step.restart {
+            now = plus(now, -step.behind_s);
+            reader = started(&journal, &shelf, &transport, now);
+        }
+        let page_items: Vec<String> = step
+            .items
+            .iter()
+            .map(|s| {
+                item(
+                    s.id,
+                    &created(s.id).to_string(),
+                    &updated(*s).to_string(),
+                    &["SPY"],
+                )
+            })
+            .collect();
+        transport.answer(page(&page_items, None));
+        block_on(reader.step(now));
+        for served in &step.items {
+            first_receipt.entry(item_id(*served)).or_insert(now);
+            times.insert(item_id(*served), (created(served.id), updated(*served)));
+        }
+    }
+    let rows: Vec<_> = journal
+        .news()
+        .into_iter()
+        .filter(|row| row.event_type == "NewsItemStored")
+        .collect();
+    let stored: Vec<String> = rows
+        .iter()
+        .map(|row| member(row, "item_id").as_str().unwrap().to_owned())
+        .collect();
+    let mut sorted = stored.clone();
+    sorted.sort();
+    sorted.dedup();
+    prop_assert_eq!(
+        sorted.len(),
+        stored.len(),
+        "no version stored twice: {:?}",
+        stored
+    );
+    let served: Vec<String> = first_receipt.keys().cloned().collect();
+    prop_assert_eq!(
+        sorted,
+        served,
+        "every version served is stored, and nothing else"
+    );
+    let mut last: Option<UtcNanos> = None;
+    for (row, id) in rows.iter().zip(&stored) {
+        let (published, revised) = times[id];
+        let expected = [
+            Some(first_receipt[id]),
+            Some(published),
+            Some(revised),
+            last,
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+        .unwrap();
+        let Value::Str(known) = member(row, "knowledge_at") else {
+            panic!("knowledge_at is a timestamp")
+        };
+        prop_assert_eq!(UtcNanos::parse(&known).unwrap(), expected, "{}", id);
+        last = Some(expected);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn each_version_is_stored_once_and_known_times_never_go_back() {
+    let mut runner = TestRunner::new(Config {
         cases: 96,
         failure_persistence: None,
-        ..ProptestConfig::default()
-    })]
-
-    #[test]
-    fn each_version_is_stored_once_and_known_times_never_go_back(steps in steps()) {
-        let (journal, shelf) = (Journal::default(), Shelf::default());
-        spy(&journal, &shelf);
-        let transport = Recorded::default();
-        let mut now = t0();
-        let mut reader = started(&journal, &shelf, &transport, now);
-        let mut first_receipt: BTreeMap<String, UtcNanos> = BTreeMap::new();
-        let mut times: BTreeMap<String, (UtcNanos, UtcNanos)> = BTreeMap::new();
-        for step in &steps {
-            now = plus(now, step.gap_s);
-            if step.restart {
-                now = plus(now, -step.behind_s);
-                reader = started(&journal, &shelf, &transport, now);
-            }
-            let page_items: Vec<String> = step
-                .items
-                .iter()
-                .map(|s| item(s.id, &created(s.id).to_string(), &updated(*s).to_string(), &["SPY"]))
-                .collect();
-            transport.answer(page(&page_items, None));
-            block_on(reader.step(now));
-            for served in &step.items {
-                first_receipt.entry(item_id(*served)).or_insert(now);
-                times.insert(item_id(*served), (created(served.id), updated(*served)));
-            }
-        }
-        let rows: Vec<_> = journal
-            .news()
-            .into_iter()
-            .filter(|row| row.event_type == "NewsItemStored")
-            .collect();
-        let stored: Vec<String> = rows
-            .iter()
-            .map(|row| member(row, "item_id").as_str().unwrap().to_owned())
-            .collect();
-        let mut sorted = stored.clone();
-        sorted.sort();
-        sorted.dedup();
-        prop_assert_eq!(sorted.len(), stored.len(), "no version stored twice: {:?}", stored);
-        let served: Vec<String> = first_receipt.keys().cloned().collect();
-        prop_assert_eq!(sorted, served, "every version served is stored, and nothing else");
-        let mut last: Option<UtcNanos> = None;
-        for (row, id) in rows.iter().zip(&stored) {
-            let (published, revised) = times[id];
-            let expected = [Some(first_receipt[id]), Some(published), Some(revised), last]
-                .into_iter()
-                .flatten()
-                .max()
-                .unwrap();
-            let Value::Str(known) = member(row, "knowledge_at") else {
-                panic!("knowledge_at is a timestamp")
-            };
-            prop_assert_eq!(UtcNanos::parse(&known).unwrap(), expected, "{}", id);
-            last = Some(expected);
-        }
+        ..Config::default()
+    });
+    if let Err(failure) = runner.run(&steps(), |steps| holds(&steps)) {
+        panic!("{failure}");
     }
 }

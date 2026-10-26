@@ -8,14 +8,13 @@
 //! the one read decides `no_key`, `vault_unavailable`, or the key's own refusal, and no refusal,
 //! error, or `Debug` output carries a byte of the key.
 
-mod common;
-
 use mandate_news_reader::{KeyRefusal, stored_key};
 use mandate_sources::fetch::NewsKeyRefusal;
 use mandate_vault::SourceError;
 use secrecy::{ExposeSecret, SecretSlice};
 
-use common::{PAPER_KEY, block_on};
+/// A paper key, as `mandate vault put news-data-key` stores it.
+const PAPER_KEY: &[u8] = b"PKTESTKEYID0001:topsecret0001";
 
 fn stored(bytes: &[u8]) -> Result<Option<SecretSlice<u8>>, SourceError> {
     Ok(Some(SecretSlice::from(bytes.to_vec())))
@@ -90,29 +89,6 @@ fn no_byte_of_the_key_reaches_a_refusal_an_error_or_debug_output() {
             "PKSPLIT",
         ] {
             assert!(!text.contains(part), "{part} in {text}");
-        }
-    }
-}
-
-#[test]
-fn a_started_reader_never_shows_its_key() {
-    let (journal, shelf, transport) = (
-        common::Journal::default(),
-        common::Shelf::default(),
-        common::Recorded::default(),
-    );
-    common::spy(&journal, &shelf);
-    transport.answer(common::page(&[], None));
-    let mut reader = common::started(&journal, &shelf, &transport, common::t0());
-    block_on(reader.step(common::t0()));
-    let shown = format!("{:?} {:?}", reader.counts(), reader.lifecycle());
-    for part in ["PKTESTKEYID0001", "topsecret0001"] {
-        assert!(!shown.contains(part));
-        for (url, _) in transport.sent.borrow().iter() {
-            assert!(
-                !url.contains(part),
-                "the key travels only as headers: {url}"
-            );
         }
     }
 }

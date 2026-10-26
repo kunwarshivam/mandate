@@ -6,123 +6,28 @@
     clippy::arithmetic_side_effects,
     reason = "tests: a broken fixture or a wrong answer should stop the test"
 )]
-//! The news reader on recorded pages (DEC-2278 items 1 to 3, DEC-2280; journal spec §9.37's "What
-//! the writer owes"). Every record it writes goes through the real in-memory journal, so rules 283
-//! to 286 judge it. The oracle is each test's own reading of the recorded page and the stored rows.
+//! The news reader storing what it fetches (DEC-2278 item 3, DEC-2280 items 2 to 5; journal spec
+//! §9.37's "What the writer owes"): each new item's typed record stored and journaled once, with
+//! its known time and without the key; skipped items counted; the vendor's pages followed at the
+//! allowlist's pace; a batch in doubt retried; and a refused append stopping the reader.
+//! Every record goes through the real in-memory journal, so rules 283 to 286 judge it. The oracle
+//! is each test's own reading of the recorded page and the stored rows.
 
 mod common;
 
 use std::collections::BTreeSet;
 
 use mandate_canon::{Digest, Value, parse};
-use mandate_journal::{ArtifactRef, StoredEvent, get_artifact};
-use mandate_news_reader::{KeyRefusal, NewsReader};
+use mandate_journal::{ArtifactRef, get_artifact};
+use mandate_news_reader::reader::exit;
 use mandate_process::{Exit, State};
-use mandate_sources::fetch::NewsAuth;
 
 use common::*;
-
-fn stored(journal: &Journal) -> Vec<StoredEvent> {
-    journal
-        .news()
-        .into_iter()
-        .filter(|row| row.event_type == "NewsItemStored")
-        .collect()
-}
-
-fn ids(journal: &Journal) -> Vec<String> {
-    stored(journal)
-        .iter()
-        .map(|row| member(row, "item_id").as_str().unwrap().to_owned())
-        .collect()
-}
-
-/// A workspace whose agent holds a thesis on SPY, with SPY's ticker registered.
-fn spy_thesis(journal: &Journal, shelf: &Shelf) {
-    register(journal, shelf, SPY, "SPY");
-    thesis(journal, "01THESISSPY", SPY, "2026-11-30T00:00:00Z");
-}
-
-#[test]
-fn with_no_key_or_a_refused_key_it_writes_nothing_fetches_nothing_and_is_not_ready() {
-    let cases: Vec<(Result<NewsAuth, KeyRefusal>, &str)> = vec![
-        (Err(KeyRefusal::NoKey), "no_key"),
-        (Err(KeyRefusal::VaultUnavailable), "vault_unavailable"),
-        (
-            NewsAuth::from_stored(b"AKLIVEKEY0001:livesecret").map_err(KeyRefusal::Refused),
-            "not_paper",
-        ),
-        (
-            NewsAuth::from_stored(b"PK one:two").map_err(KeyRefusal::Refused),
-            "news_key_malformed",
-        ),
-    ];
-    for (key, code) in cases {
-        let (journal, shelf) = (Journal::default(), Shelf::default());
-        spy_thesis(&journal, &shelf);
-        let transport = Recorded::answering(&[page(
-            &[item(
-                1,
-                "2026-10-26T14:00:00Z",
-                "2026-10-26T14:00:00Z",
-                &["SPY"],
-            )],
-            None,
-        )]);
-        let mut reader = NewsReader::start(
-            journal.clone(),
-            shelf.clone(),
-            transport.clone(),
-            &config(),
-            key,
-            t0(),
-        );
-        for second in 0..5 {
-            block_on(reader.step(plus(t0(), second)));
-        }
-        assert_eq!(reader.not_ready(), Some(code));
-        assert_ne!(reader.lifecycle().state(), State::Ready, "{code}");
-        assert!(
-            !matches!(reader.lifecycle().state(), State::Exited(_)),
-            "{code}: it never crashes"
-        );
-        assert!(reader.lifecycle().live(plus(t0(), 5)), "{code}: still live");
-        assert!(transport.sent().is_empty(), "{code}: nothing fetched");
-        assert!(journal.news().is_empty(), "{code}: nothing journaled");
-        reader.drain(plus(t0(), 6));
-        assert_eq!(reader.lifecycle().state(), State::Exited(Exit::Drained));
-    }
-}
-
-#[test]
-fn a_source_the_allowlist_does_not_have_in_effect_is_not_ready_and_fetches_nothing() {
-    let (journal, shelf) = (Journal::default(), Shelf::default());
-    spy_thesis(&journal, &shelf);
-    let mut config = config();
-    config.allowlist = mandate_sources::allowlist::Allowlist::parse(&ALLOWLIST.replace(
-        "approved_by = \"founder\"\napproved_in = \"DEC-2394\"\n",
-        "",
-    ))
-    .unwrap();
-    let transport = Recorded::default();
-    let mut reader = NewsReader::start(
-        journal.clone(),
-        shelf,
-        transport.clone(),
-        &config,
-        Ok(paper_auth()),
-        t0(),
-    );
-    block_on(reader.step(t0()));
-    assert_eq!(reader.not_ready(), Some("news_source_not_in_effect"));
-    assert!(transport.sent().is_empty());
-    assert!(journal.news().is_empty());
-}
 
 #[test]
 fn each_new_item_is_stored_as_its_typed_record_and_journaled_before_anything_reads_it() {
     let (journal, shelf) = (Journal::default(), Shelf::default());
-    spy_thesis(&journal, &shelf);
+    spy(&journal, &shelf);
     let first = item(
         41000002,
         "2026-10-26T13:00:00Z",
@@ -223,7 +128,7 @@ fn each_new_item_is_stored_as_its_typed_record_and_journaled_before_anything_rea
 #[test]
 fn known_time_is_the_latest_of_receipt_publication_update_and_the_stream_s_last() {
     let (journal, shelf) = (Journal::default(), Shelf::default());
-    spy_thesis(&journal, &shelf);
+    spy(&journal, &shelf);
     let receipt = t0();
     let updated_after_receipt = item(
         7,
@@ -267,7 +172,7 @@ fn known_time_is_the_latest_of_receipt_publication_update_and_the_stream_s_last(
 #[test]
 fn an_item_is_stored_once_across_fetches_restarts_and_failovers() {
     let (journal, shelf) = (Journal::default(), Shelf::default());
-    spy_thesis(&journal, &shelf);
+    spy(&journal, &shelf);
     let one = item(1, "2026-10-26T12:00:00Z", "2026-10-26T12:00:00Z", &["SPY"]);
     let two = item(2, "2026-10-26T12:30:00Z", "2026-10-26T12:30:00Z", &["SPY"]);
     let transport = Recorded::answering(&[
@@ -323,113 +228,11 @@ fn an_item_is_stored_once_across_fetches_restarts_and_failovers() {
 }
 
 /// The URL's `symbols` query, as asked.
-fn asked(url: &str) -> String {
-    url.split("symbols=")
-        .nth(1)
-        .and_then(|rest| rest.split('&').next())
-        .unwrap()
-        .to_owned()
-}
-
-#[test]
-fn it_polls_the_active_theses_and_held_instruments_and_drops_a_thesis_that_ends() {
-    let (journal, shelf) = (Journal::default(), Shelf::default());
-    register(&journal, &shelf, SPY, "SPY");
-    register(&journal, &shelf, QQQ, "QQQ");
-    register(&journal, &shelf, AAPL, "AAPL");
-    thesis(&journal, "01THESISSPY", SPY, "2026-11-30T00:00:00Z");
-    thesis(&journal, "01THESISAAPL", AAPL, "2026-10-26T15:00:30Z");
-    bought(&journal, "o1", QQQ, "2");
-    let transport = Recorded::default();
-    for _ in 0..3 {
-        transport.answer(page(&[], None));
-    }
-    let mut reader = started(&journal, &shelf, &transport, t0());
-    block_on(reader.step(t0()));
-    assert_eq!(
-        asked(&transport.sent()[0]),
-        "AAPL,QQQ,SPY",
-        "each active thesis's and each held instrument's ticker, once"
-    );
-    block_on(reader.step(plus(t0(), 60)));
-    assert_eq!(
-        asked(&transport.sent()[1]),
-        "QQQ,SPY",
-        "a thesis past its expiry drops out of the next poll"
-    );
-    invalidated(&journal, "01THESISSPY");
-    block_on(reader.step(plus(t0(), 61)));
-    assert_eq!(
-        asked(&transport.sent()[2]),
-        "QQQ",
-        "an invalidated thesis drops out; the held instrument stays"
-    );
-    assert!(reader.counts().unreadable_follows.is_empty());
-}
-
-#[test]
-fn an_instrument_with_no_registered_ticker_is_not_polled_and_is_counted() {
-    let (journal, shelf) = (Journal::default(), Shelf::default());
-    thesis(&journal, "01THESISAAPL", AAPL, "2026-11-30T00:00:00Z");
-    thesis(&journal, "01THESISQQQ", QQQ, "2026-11-30T00:00:00Z");
-    register(&journal, &shelf, QQQ, "QQQ");
-    register(&journal, &shelf, QQQ, "not a ticker");
-    register_ref(&journal, &ArtifactRef::of(b"no such artifact"));
-    let transport = Recorded::default();
-    let mut reader = started(&journal, &shelf, &transport, t0());
-    block_on(reader.step(t0()));
-    assert!(
-        transport.sent().is_empty(),
-        "AAPL has no snapshot and QQQ's latest names no ticker, so nothing is asked"
-    );
-    assert_eq!(
-        reader.counts().unregistered,
-        BTreeSet::from([AAPL.to_owned(), QQQ.to_owned()])
-    );
-    assert_eq!(reader.counts().unreadable_snapshots, 1);
-
-    register(&journal, &shelf, QQQ, "QQQ");
-    transport.answer(page(&[], None));
-    block_on(reader.step(plus(t0(), 1)));
-    assert_eq!(
-        asked(&transport.sent()[0]),
-        "QQQ",
-        "a later registration wins"
-    );
-}
-
-#[test]
-fn a_stream_it_cannot_read_polls_nothing_and_a_fold_it_cannot_read_is_counted() {
-    let (journal, shelf) = (Journal::default(), Shelf::default());
-    spy_thesis(&journal, &shelf);
-    let transport = Recorded::default();
-    let mut reader = started(&journal, &shelf, &transport, t0());
-    journal.others_down.set(true);
-    block_on(reader.step(t0()));
-    assert!(transport.sent().is_empty());
-    journal.others_down.set(false);
-    journal.push(
-        &format!("acct:{WS}:{ACCOUNT}"),
-        "FillApplied",
-        object(&[("fill_id", s("broken"))]),
-    );
-    transport.answer(page(&[], None));
-    block_on(reader.step(plus(t0(), 1)));
-    assert_eq!(
-        asked(&transport.sent()[0]),
-        "SPY",
-        "the theses still count when the account stream cannot be folded"
-    );
-    assert_eq!(
-        reader.counts().unreadable_follows,
-        BTreeSet::from([AGENT.to_owned()])
-    );
-}
 
 #[test]
 fn an_item_with_no_ticker_or_one_the_parser_refuses_is_counted_and_never_journaled() {
     let (journal, shelf) = (Journal::default(), Shelf::default());
-    spy_thesis(&journal, &shelf);
+    spy(&journal, &shelf);
     let tickers: Vec<String> = (0..33).map(|n| format!("T{n}")).collect();
     let tickers: Vec<&str> = tickers.iter().map(String::as_str).collect();
     let transport = Recorded::answering(&[page(
@@ -457,9 +260,84 @@ fn an_item_with_no_ticker_or_one_the_parser_refuses_is_counted_and_never_journal
 }
 
 #[test]
+fn an_unanswered_append_is_retried_and_a_refused_one_stops_the_reader() {
+    let (journal, shelf) = (Journal::default(), Shelf::default());
+    spy(&journal, &shelf);
+    let transport = Recorded::answering(&[page(
+        &[item(
+            1,
+            "2026-10-26T12:00:00Z",
+            "2026-10-26T12:00:00Z",
+            &["SPY"],
+        )],
+        None,
+    )]);
+    let mut reader = started(&journal, &shelf, &transport, t0());
+    journal.appends_down.set(true);
+    block_on(reader.step(t0()));
+    assert!(journal.news().is_empty());
+    assert_eq!(reader.lifecycle().state(), State::Ready);
+    journal.appends_down.set(false);
+    block_on(reader.step(plus(t0(), 1)));
+    assert_eq!(
+        ids(&journal),
+        ["1:2026-10-26T12:00:00.000000000Z"],
+        "the retried batch is committed once, as the same bytes"
+    );
+    assert_eq!(
+        reader.counts().fetch_failed.get("transport"),
+        Some(&1),
+        "then the step asks again, the empty transport fails, and the reader pauses"
+    );
+
+    transport.answer(page(
+        &[item(
+            2,
+            "2026-10-26T12:30:00Z",
+            "2026-10-26T12:30:00Z",
+            &["SPY"],
+        )],
+        None,
+    ));
+    journal.appends_refused.set(true);
+    block_on(reader.step(plus(t0(), 31)));
+    assert_eq!(
+        reader.lifecycle().state(),
+        State::Exited(Exit::CycleFailed),
+        "a refused append stops the reader; the next process folds again"
+    );
+    transport.answer(page(&[], None));
+    block_on(reader.step(plus(t0(), 32)));
+    assert_eq!(transport.sent().len(), 3, "an exited reader asks nothing");
+}
+
+#[test]
+fn an_artifact_store_that_cannot_take_a_record_stops_the_reader_before_it_journals() {
+    let (journal, shelf) = (Journal::default(), Shelf::default());
+    spy(&journal, &shelf);
+    let transport = Recorded::answering(&[page(
+        &[item(
+            1,
+            "2026-10-26T12:00:00Z",
+            "2026-10-26T12:00:00Z",
+            &["SPY"],
+        )],
+        None,
+    )]);
+    let mut reader = started(&journal, &shelf, &transport, t0());
+    shelf.down.set(true);
+    block_on(reader.step(t0()));
+    assert_eq!(reader.lifecycle().state(), State::Exited(Exit::CycleFailed));
+    assert!(
+        journal.news().is_empty(),
+        "no record names an item not stored"
+    );
+}
+
+#[test]
 fn it_follows_the_vendor_s_pages_one_request_a_step_at_the_allowlist_s_pace() {
     let (journal, shelf) = (Journal::default(), Shelf::default());
-    spy_thesis(&journal, &shelf);
+    spy(&journal, &shelf);
     let transport = Recorded::answering(&[
         page(
             &[item(
@@ -499,163 +377,6 @@ fn it_follows_the_vendor_s_pages_one_request_a_step_at_the_allowlist_s_pace() {
 }
 
 #[test]
-fn an_unanswered_append_is_retried_and_a_refused_one_stops_the_reader() {
-    let (journal, shelf) = (Journal::default(), Shelf::default());
-    spy_thesis(&journal, &shelf);
-    let transport = Recorded::answering(&[page(
-        &[item(
-            1,
-            "2026-10-26T12:00:00Z",
-            "2026-10-26T12:00:00Z",
-            &["SPY"],
-        )],
-        None,
-    )]);
-    let mut reader = started(&journal, &shelf, &transport, t0());
-    journal.appends_down.set(true);
-    block_on(reader.step(t0()));
-    assert!(journal.news().is_empty());
-    assert_eq!(reader.lifecycle().state(), State::Ready);
-    journal.appends_down.set(false);
-    block_on(reader.step(plus(t0(), 1)));
-    assert_eq!(
-        ids(&journal),
-        ["1:2026-10-26T12:00:00.000000000Z"],
-        "the retried batch is committed once, as the same bytes"
-    );
-    assert_eq!(
-        reader.counts().fetch_failed.get("transport"),
-        Some(&1),
-        "then the step asks again, and the empty transport fails"
-    );
-
-    transport.answer(page(
-        &[item(
-            2,
-            "2026-10-26T12:30:00Z",
-            "2026-10-26T12:30:00Z",
-            &["SPY"],
-        )],
-        None,
-    ));
-    journal.appends_refused.set(true);
-    block_on(reader.step(plus(t0(), 2)));
-    assert_eq!(
-        reader.lifecycle().state(),
-        State::Exited(Exit::CycleFailed),
-        "a refused append stops the reader; the next process folds again"
-    );
-    transport.answer(page(&[], None));
-    block_on(reader.step(plus(t0(), 3)));
-    assert_eq!(transport.sent().len(), 3, "an exited reader asks nothing");
-}
-
-#[test]
-fn an_artifact_store_that_cannot_take_a_record_stops_the_reader_before_it_journals() {
-    let (journal, shelf) = (Journal::default(), Shelf::default());
-    spy_thesis(&journal, &shelf);
-    let transport = Recorded::answering(&[page(
-        &[item(
-            1,
-            "2026-10-26T12:00:00Z",
-            "2026-10-26T12:00:00Z",
-            &["SPY"],
-        )],
-        None,
-    )]);
-    let mut reader = started(&journal, &shelf, &transport, t0());
-    shelf.down.set(true);
-    block_on(reader.step(t0()));
-    assert_eq!(reader.lifecycle().state(), State::Exited(Exit::CycleFailed));
-    assert!(
-        journal.news().is_empty(),
-        "no record names an item not stored"
-    );
-}
-
-#[test]
-fn a_failed_request_ends_the_round_and_journals_nothing() {
-    let (journal, shelf) = (Journal::default(), Shelf::default());
-    spy_thesis(&journal, &shelf);
-    let transport = Recorded::default();
-    transport
-        .answers
-        .borrow_mut()
-        .push(mandate_sources::fetch::RawResponse {
-            status: 500,
-            body: Vec::new(),
-        });
-    let mut reader = started(&journal, &shelf, &transport, t0());
-    block_on(reader.step(t0()));
-    transport.answer(b"not json".to_vec());
-    block_on(reader.step(plus(t0(), 1)));
-    assert_eq!(reader.counts().fetch_failed.get("status"), Some(&1));
-    assert_eq!(reader.counts().fetch_failed.get("malformed"), Some(&1));
-    assert!(journal.news().is_empty());
-    assert_eq!(reader.lifecycle().state(), State::Ready);
-}
-
-#[test]
-fn each_follow_names_an_agent_and_its_account_and_a_malformed_one_is_refused() {
-    let args = |text: &str| -> Vec<String> { text.split(' ').map(str::to_owned).collect() };
-    assert_eq!(
-        mandate_news_reader::reader::parse_follows(&args(
-            "run --follow a1=acct1 --workspace ws --follow a2=acct2"
-        )),
-        Ok(vec![
-            mandate_news_reader::Follow {
-                agent: "a1".to_owned(),
-                account: "acct1".to_owned()
-            },
-            mandate_news_reader::Follow {
-                agent: "a2".to_owned(),
-                account: "acct2".to_owned()
-            },
-        ])
-    );
-    assert_eq!(
-        mandate_news_reader::reader::parse_follows(&args("run --workspace ws")),
-        Ok(vec![])
-    );
-    for malformed in [
-        "run --follow a1",
-        "run --follow =acct",
-        "run --follow a1=",
-        "run --follow",
-    ] {
-        assert_eq!(
-            mandate_news_reader::reader::parse_follows(&args(malformed)),
-            Err("follow_malformed"),
-            "{malformed}"
-        );
-    }
-}
-
-#[test]
-fn only_a_paper_workspace_s_reader_starts() {
-    let (journal, shelf) = (Journal::default(), Shelf::default());
-    spy(&journal, &shelf);
-    let mut config = config();
-    config.environment = mandate_journal::Environment::Live;
-    let transport = Recorded::default();
-    let mut reader = NewsReader::start(
-        journal.clone(),
-        shelf,
-        transport.clone(),
-        &config,
-        Ok(paper_auth()),
-        t0(),
-    );
-    block_on(reader.step(t0()));
-    assert_eq!(
-        mandate_news_reader::reader::exit(&reader),
-        Some(Exit::Refused)
-    );
-    assert!(transport.sent().is_empty());
-    assert!(journal.news().is_empty());
-}
-
-#[test]
 fn the_reader_reports_its_exit_and_its_stream_s_last_known_time() {
     let (journal, shelf) = (Journal::default(), Shelf::default());
     spy(&journal, &shelf);
@@ -670,15 +391,31 @@ fn the_reader_reports_its_exit_and_its_stream_s_last_known_time() {
     )]);
     let mut reader = started(&journal, &shelf, &transport, t0());
     assert_eq!(reader.last_known(), None);
-    assert_eq!(mandate_news_reader::reader::exit(&reader), None);
+    assert_eq!(exit(&reader), None);
     block_on(reader.step(t0()));
     assert_eq!(reader.last_known(), Some(t0()));
     assert_eq!(reader.counts().unreadable_snapshots, 0);
     let restarted = started(&journal, &shelf, &transport, plus(t0(), 1));
     assert_eq!(restarted.last_known(), Some(t0()), "folded at start");
     reader.drain(plus(t0(), 2));
-    assert_eq!(
-        mandate_news_reader::reader::exit(&reader),
-        Some(Exit::Drained)
-    );
+    assert_eq!(exit(&reader), Some(Exit::Drained));
+}
+
+#[test]
+fn a_started_reader_never_shows_its_key() {
+    let (journal, shelf, transport) = (Journal::default(), Shelf::default(), Recorded::default());
+    spy(&journal, &shelf);
+    transport.answer(page(&[], None));
+    let mut reader = started(&journal, &shelf, &transport, t0());
+    block_on(reader.step(t0()));
+    let shown = format!("{:?} {:?}", reader.counts(), reader.lifecycle());
+    for part in ["PKTESTKEYID0001", "topsecret0001"] {
+        assert!(!shown.contains(part));
+        for (url, _) in transport.sent.borrow().iter() {
+            assert!(
+                !url.contains(part),
+                "the key travels only as headers: {url}"
+            );
+        }
+    }
 }

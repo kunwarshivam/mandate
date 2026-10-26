@@ -29,8 +29,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_journal::{ArtifactStore, Environment};
+use mandate_news_reader::parse_follows;
 use mandate_news_reader::reader::exit;
-use mandate_news_reader::reader::parse_follows;
 use mandate_news_reader::{Config, KeyRefusal, NewsReader, read_key};
 use mandate_process::probe::{self, Probe, Status};
 use mandate_sources::allowlist::Allowlist;
@@ -115,7 +115,7 @@ fn run(
         workspace,
         environment: Environment::Paper,
         allowlist,
-        follows: parse_follows(args)?,
+        follows: parse_follows(args),
         liveness: LIVENESS,
     };
     let runtime = tokio::runtime::Builder::new_current_thread()

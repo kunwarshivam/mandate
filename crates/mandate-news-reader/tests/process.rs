@@ -150,9 +150,6 @@ fn a_start_it_cannot_make_is_refused_with_its_code() {
         String::from_utf8_lossy(&no_workspace.stderr),
         "news_reader_start_failed: workspace_missing\n"
     );
-    let (status, stderr) = refused(&run_args(&socket, &["--fixture", "--follow", "agent_a"]));
-    assert_eq!(status.code(), Some(2));
-    assert_eq!(stderr, "news_reader_start_failed: follow_malformed\n");
     let (status, stderr) = refused(&run_args(&socket, &["--follow", "agent_a=acct_1"]));
     assert_eq!(status.code(), Some(2));
     assert_eq!(
@@ -167,15 +164,13 @@ fn a_start_it_cannot_make_is_refused_with_its_code() {
     assert_eq!(probe_word.status.code(), Some(2));
 }
 
-#[test]
-fn with_no_key_it_says_why_answers_live_and_not_ready_and_drains_on_sigterm() {
-    let socket = scratch("nokey.sock");
+/// A reader that cannot run: it writes `code` alone on its standard error, answers live and not
+/// ready, and on SIGTERM drains and exits cleanly.
+fn not_ready(name: &str, extra: &[&str], code: &str) {
+    let socket = scratch(name);
     let mut child = Guard(
         Command::new(BIN)
-            .args(run_args(
-                &socket,
-                &["--fixture", "--follow", "agent_a=acct_1"],
-            ))
+            .args(run_args(&socket, extra))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -183,13 +178,13 @@ fn with_no_key_it_says_why_answers_live_and_not_ready_and_drains_on_sigterm() {
             .unwrap(),
     );
     let (reason, mut stderr) = first_line(child.0.stderr.take().unwrap());
-    assert_eq!(reason, "no_key\n", "the reason, as its code alone");
+    assert_eq!(reason, format!("{code}\n"), "the reason, as its code alone");
     let deadline = Instant::now() + BOUND;
     while probe(&socket, "livez") != Some(0) {
         assert!(Instant::now() < deadline, "never live");
         thread::sleep(Duration::from_millis(50));
     }
-    assert_eq!(probe(&socket, "readyz"), Some(1), "not ready without a key");
+    assert_eq!(probe(&socket, "readyz"), Some(1), "not ready: {code}");
     let killed = Command::new("kill")
         .args(["-TERM", &child.0.id().to_string()])
         .status()
@@ -199,4 +194,29 @@ fn with_no_key_it_says_why_answers_live_and_not_ready_and_drains_on_sigterm() {
     assert_eq!(status.code(), Some(0));
     assert_eq!(rest, "drained\n");
     std::fs::remove_file(&socket).ok();
+}
+
+#[test]
+fn with_no_key_it_says_why_answers_live_and_not_ready_and_drains_on_sigterm() {
+    not_ready(
+        "nokey.sock",
+        &["--fixture", "--follow", "agent_a=acct_1"],
+        "no_key",
+    );
+}
+
+#[test]
+fn with_no_follows_or_a_malformed_one_it_says_why_and_stays_not_ready() {
+    not_ready("nofollow.sock", &["--fixture"], "no_follows");
+    not_ready(
+        "badfollow.sock",
+        &[
+            "--fixture",
+            "--follow",
+            "agent_a=acct_1",
+            "--follow",
+            "agent_b",
+        ],
+        "follow_malformed",
+    );
 }

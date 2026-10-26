@@ -19,7 +19,7 @@ use mandate_time::UtcNanos;
 
 /// One followed agent's instruments, and which of its streams could not be read.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Followed {
+pub struct Watched {
     pub assets: BTreeSet<String>,
     pub theses_unreadable: bool,
     pub held_unreadable: bool,
@@ -33,8 +33,8 @@ pub fn followed(
     account_stream: &str,
     account_rows: &[StoredEvent],
     at: UtcNanos,
-) -> Followed {
-    let mut followed = Followed::default();
+) -> Watched {
+    let mut followed = Watched::default();
     match theses(agent_rows, at) {
         Some(assets) => followed.assets.extend(assets),
         None => followed.theses_unreadable = true,

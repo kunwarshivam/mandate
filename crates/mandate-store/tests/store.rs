@@ -5,7 +5,7 @@
 use mandate_canon::{Digest, Object, Value, parse};
 use mandate_journal::{AppendOutcome, Environment, StreamId};
 use mandate_store::envelope::{
-    Envelope, Fields, draft_bytes, draft_bytes_with_clock, object, text,
+    ClockSource, Envelope, Fields, draft_bytes, draft_bytes_with_clock, object, text,
 };
 use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
@@ -157,8 +157,15 @@ fn a_draft_with_its_own_clock_names_it_and_changes_nothing_else() {
         payload: &payload,
     };
     let scheduled = parse(&draft_bytes(&envelope(), &fields).unwrap()).unwrap();
-    let local = parse(&draft_bytes_with_clock(&envelope(), &fields, "local").unwrap()).unwrap();
+    let local =
+        parse(&draft_bytes_with_clock(&envelope(), &fields, ClockSource::Local).unwrap()).unwrap();
     assert_eq!(local.get("clock_source"), Some(&text("local")));
+    let named = draft_bytes_with_clock(&envelope(), &fields, ClockSource::Scheduler).unwrap();
+    assert_eq!(
+        parse(&named).unwrap(),
+        scheduled,
+        "naming the scheduler's clock is the plain draft"
+    );
     let (Value::Object(mut scheduled), Value::Object(mut local)) = (scheduled, local) else {
         panic!("a draft is an object")
     };

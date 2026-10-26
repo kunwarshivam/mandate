@@ -17,21 +17,28 @@
 //!   held only as `NewsAuth`, which never prints.
 //! - [`tickers`] reads each asset id's ticker from the latest instrument snapshot the control stream
 //!   registers (DEC-2280 item 1), and only those rows of it.
+//! - [`follows`] names the agents the reader follows, each checked at start.
 //! - [`watch`] folds the instruments to poll: the followed agents' active theses and held
 //!   instruments, through the research core's and the gate context's own folds.
+//! - [`poll`] runs a round: the tickers in chunks the fetcher takes, a page cap per chunk, and a
+//!   pause after an idle or failed round.
 //! - [`records`] writes `StreamOpened` and `NewsItemStored` as drafts with deterministic event ids.
 //! - [`reader`] runs them under one writer epoch with [`mandate_process`]'s lifecycle: it folds its
-//!   stream at start, asks the vendor one page a step, stores each new item's typed record and
-//!   appends its record, and stops on a refused append.
+//!   stream at start and asks the vendor one page a step; [`items`] stores each new item's typed
+//!   record and appends its record, and stops the reader on a refused append.
 //!
 //! It never reads a clock: the binary hands it the host clock's reading. It keeps no raw
 //! response and no licensed text (DEC-2280 item 4), and nothing it writes is a risk input.
 
+pub mod follows;
+pub mod items;
 pub mod key;
+pub mod poll;
 pub mod reader;
 pub mod records;
 pub mod tickers;
 pub mod watch;
 
+pub use follows::{Follow, parse_follows};
 pub use key::{KeyRefusal, read_key, stored_key};
-pub use reader::{Config, Counts, Follow, NewsReader};
+pub use reader::{Config, Counts, NewsReader};

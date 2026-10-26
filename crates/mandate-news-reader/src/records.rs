@@ -9,7 +9,9 @@ use std::collections::BTreeSet;
 
 use mandate_canon::{Object, Value, stream_event_id};
 use mandate_journal::{ArtifactRef, Environment};
-use mandate_store::envelope::{Envelope, Fields, draft_bytes_with_clock, int, object, text};
+use mandate_store::envelope::{
+    ClockSource, Envelope, Fields, draft_bytes_with_clock, int, object, text,
+};
 use mandate_time::UtcNanos;
 
 /// The version the envelope's actor carries.
@@ -86,7 +88,7 @@ impl Writer {
                         config_refs: &Object::new(),
                         payload: &payload,
                     },
-                    "local",
+                    ClockSource::Local,
                 )
             })
             .collect()
