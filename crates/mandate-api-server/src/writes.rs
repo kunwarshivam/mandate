@@ -27,7 +27,7 @@ use mandate_api::requests::{
 use mandate_api::wire::{Asset, Decimal, EventId, Id, Ref, decode, encode};
 use mandate_authn::Request;
 use mandate_canon::{Digest, Int, Value, parse, to_canonical};
-use mandate_identity::{Permission, PrincipalId, Role, StepUpActionKind};
+use mandate_identity::{MembershipEvent, Permission, PrincipalId, Role, StepUpActionKind};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
@@ -517,13 +517,15 @@ fn answered(evidence: &StepUpEvidence) -> Option<Value> {
 }
 
 /// Whether the principal is one the mandate version an approval binds lists in
-/// `autonomy.approval.approvers` ([DEC-2129] item 7), against the membership fold the matrix check
-/// reads: `user:<id>` names the principal's ULID while it is an active member, and `role:approver`,
-/// `role:workspace_admin` and `role:owner` the active members holding the approver, workspace
-/// admin, and org owner roles. A version that is not named, not stored, or not a mandate, or a
-/// fold that cannot be read, is `journal_unavailable`, never a pass.
+/// `autonomy.approval.approvers` ([DEC-2129] item 7, as [DEC-2130] item 1 reads it), at the
+/// membership fold the matrix check reads. A reference lists only an active member holding the
+/// effective `approver` role: `user:<id>` the member whose ULID text is `<id>`, `role:approver`
+/// any, `role:workspace_admin` one also holding `workspace_admin`, and `role:owner` one a founding
+/// `MemberActivated` made. A version that is not named, not stored, or not a mandate, or a fold
+/// that cannot be read, is `journal_unavailable`, never a pass.
 ///
 /// [DEC-2129]: ../../../docs/project/decisions/DEC-2129.md
+/// [DEC-2130]: ../../../docs/project/decisions/DEC-2130.md
 fn approves(
     app: &App,
     reader: &Reader,
@@ -537,22 +539,30 @@ fn approves(
     let (_, mandate) = version
         .and_then(|version| stored(store, version))
         .ok_or(Refused::JournalUnavailable)?;
-    let lookup = ControlLookup::new(app.hosted, (app.members)(&reader.control), reader.now);
-    let Some(roles) = lookup
+    let records = (app.members)(&reader.control).map_err(|_| Refused::JournalUnavailable)?;
+    let founding = records.iter().any(|record| {
+        matches!(
+            record.event(),
+            MembershipEvent::Activated { member, invitation: None, .. } if *member == principal
+        )
+    });
+    let lookup = ControlLookup::new(app.hosted, Ok(records), reader.now);
+    let roles = lookup
         .own_roles(principal)
         .map_err(|_| Refused::JournalUnavailable)?
-    else {
-        return Ok(false);
-    };
+        .unwrap_or_default();
     let id = principal
         .to_ulid_text()
         .map_err(|_| Refused::JournalUnavailable)?;
-    let listed = |approver: &str| match approver.split_once(':') {
-        Some(("user", user)) => user == id,
-        Some(("role", "approver")) => roles.contains(&Role::Approver),
-        Some(("role", "workspace_admin")) => roles.contains(&Role::WorkspaceAdmin),
-        Some(("role", "owner")) => roles.contains(&Role::OrgOwner),
-        _ => false,
+    let listed = |approver: &str| {
+        roles.contains(&Role::Approver)
+            && match approver.split_once(':') {
+                Some(("user", user)) => user == id,
+                Some(("role", "approver")) => true,
+                Some(("role", "workspace_admin")) => roles.contains(&Role::WorkspaceAdmin),
+                Some(("role", "owner")) => founding,
+                _ => false,
+            }
     };
     Ok(mandate
         .autonomy
