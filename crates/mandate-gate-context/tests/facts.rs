@@ -389,7 +389,7 @@ fn the_clock_is_the_latest_account_stream_risk_clock_alone() {
     );
     assert_eq!(state.now(), Some(instant(START)));
     let changed = object(&[("risk_clock", clock(START + 7))]);
-    acct(&mut state, "OrderStateChanged", &changed);
+    acct(&mut state, "GateDecided", &changed);
     assert_eq!(state.now(), Some(instant(START + 7)));
     acct(&mut state, "FeesCharged", &object(&[]));
     assert_eq!(state.now(), Some(instant(START + 7)));
@@ -405,7 +405,7 @@ fn an_unreadable_row_of_a_type_it_reads_holds_from_then_on() {
         (ACCOUNT, "ClockAdvanced", tick(START - 1)),
         (
             ACCOUNT,
-            "OrderStateChanged",
+            "GateDecided",
             object(&[("risk_clock", text("2026-10-26"))]),
         ),
         (

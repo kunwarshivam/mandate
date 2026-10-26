@@ -130,6 +130,7 @@ pub struct Journaled {
     marks: BTreeMap<String, Latest>,
     requested_by: Option<String>,
     orders: BTreeSet<String>,
+    ended: BTreeSet<String>,
     fills: BTreeSet<String>,
     positions: BTreeMap<String, SignedQty>,
     unreadable: bool,
@@ -150,6 +151,7 @@ impl Journaled {
             marks: BTreeMap::new(),
             requested_by: None,
             orders: BTreeSet::new(),
+            ended: BTreeSet::new(),
             fills: BTreeSet::new(),
             positions: BTreeMap::new(),
             unreadable: false,
@@ -175,6 +177,12 @@ impl Journaled {
             .filter(|(_, qty)| !qty.is_negative() && **qty != SignedQty::ZERO)
             .map(|(instrument, qty)| (instrument.clone(), qty.abs()))
             .collect()
+    }
+
+    /// The agent's own orders that no terminal state has ended, by `client_order_id`, which a
+    /// flatten cancels (DEC-2378 item 7).
+    pub fn working(&self) -> BTreeSet<String> {
+        self.orders.difference(&self.ended).cloned().collect()
     }
 
     /// The later of the account stream's latest risk clock and the scheduler's latest tick.
@@ -272,6 +280,11 @@ impl Journaled {
                 }
             }
             ("FillApplied" | "LateFillApplied", _) if on_account => self.fill(&payload)?,
+            ("OrderStateChanged", _) if on_account => self.changed(&payload)?,
+            ("OrderAbandoned", _) if on_account => {
+                self.ended
+                    .insert(payload.text("client_order_id")?.to_owned());
+            }
             _ => {}
         }
         Ok(())
@@ -328,6 +341,30 @@ impl Journaled {
         Ok(())
     }
 
+    /// An order's change of state. A terminal state ends the order, and a replacement of one of
+    /// the agent's orders is the agent's too. A change the executor journaled as `ignored`
+    /// changes nothing.
+    fn changed(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
+        let order = payload.text("client_order_id")?.to_owned();
+        let state = payload.text("state")?;
+        let ignored = payload.flag("ignored")?;
+        let successor = match payload.value.get("replaced_by") {
+            None | Some(Value::Null) => None,
+            Some(Value::Str(successor)) => Some(successor.clone()),
+            Some(_) => return Err((payload.refused)("replaced_by")),
+        };
+        if ignored || !self.orders.contains(&order) {
+            return Ok(());
+        }
+        if TERMINAL.contains(&state) {
+            self.ended.insert(order);
+        }
+        if let Some(successor) = successor {
+            self.orders.insert(successor);
+        }
+        Ok(())
+    }
+
     fn mark(&mut self, payload: &Payload<'_>, at: UtcNanos) -> Result<(), Unreadable> {
         let Some(sane) = payload.value.get("sane") else {
             return Ok(());
@@ -356,6 +393,16 @@ impl Journaled {
         Ok(())
     }
 }
+
+/// The order states that end an order (trading-domain spec §5.7), `abandoned` among them.
+const TERMINAL: [&str; 6] = [
+    "filled",
+    "canceled",
+    "rejected",
+    "expired",
+    "replaced",
+    "abandoned",
+];
 
 /// The account-stream types the fold reads at their own `risk_clock`, which each must carry.
 const CLOCKED: [&str; 4] = [
