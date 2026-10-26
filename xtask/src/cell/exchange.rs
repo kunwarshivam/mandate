@@ -285,11 +285,14 @@ pub fn confirm_connect(workspace: &str, challenge: &str, code: &str) -> Gesture 
 }
 
 /// The vault pod's script that reports the connection's code entry: `taken` for the take's
-/// tombstone, `readable` for a code still there, `missing` for none. The root token is its stdin's
+/// tombstone, `readable` for a code entry's `value` still there, `missing` for none. A take leaves
+/// its tombstone soft-deleted and the code's version destroyed, which `bao kv get` still answers
+/// with exit 0 and no data, so only a `value` read counts as readable. The root token is its stdin's
 /// one line, so it reaches no argument, and nothing of the entry leaves the pod.
 const CODE_READ: &str = "read -r BAO_TOKEN && export BAO_TOKEN && \
      if [ \"$(bao kv get -mount=mandate -field=taken \"$1\" 2>/dev/null)\" = true ]; then echo taken; \
-     elif bao kv get -mount=mandate \"$1\" >/dev/null 2>&1; then echo readable; else echo missing; fi";
+     elif [ -n \"$(bao kv get -mount=mandate -field=value \"$1\" 2>/dev/null)\" ]; then echo readable; \
+     else echo missing; fi";
 
 /// The vault pod's script that hands out the connection's token entry with its access token
 /// replaced by `present`, so the token never leaves the pod: `sed -n …p` prints only an entry
