@@ -1865,7 +1865,6 @@ fn a_confirm_whose_passkeys_cannot_be_read_is_journal_unavailable() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_passkey_confirm_commits_mandate_confirmed_then_its_assertion_and_stores_the_raw_assertion() {
     let w = passkeyed();
     let issued = w.challenge();
@@ -1911,11 +1910,13 @@ fn a_passkey_confirm_commits_mandate_confirmed_then_its_assertion_and_stores_the
         Ok(canonical),
         "the raw assertion is stored under its own digest"
     );
+    for row in [confirmed, assertion] {
+        Draft::parse(&row.body).unwrap_or_else(|e| panic!("{}: {e:?}", row.event_type));
+    }
     assert!(!w.held(&issued), "the challenge is taken");
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_replayed_passkey_confirm_answers_as_the_first_though_its_challenge_is_gone() {
     let w = passkeyed();
     let issued = w.challenge();
