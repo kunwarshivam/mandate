@@ -17,7 +17,7 @@
   `src/run.rs` (`command`, the binary's arguments, a live start refused `live_not_built` in every
   form; `recorded_service`, the recorded service over the journaled meter streams, started only
   when both read and every deployed cap reads; the ids, the host clock, the log and the
-  heartbeat);
+  heartbeat), `src/main.rs` (the `mandate-gatewayd run|probe` binary);
   `RequestError::ALL`, `RequestError::code` and `Meter::set_research_daily` in `mandate-gateway`.
 - **Tests:** `crates/mandate-gatewayd/tests/key.rs` (read once, only as the model gateway, each
   vault failure's code, a value a header cannot carry, and a canary that the key shows in no
@@ -39,7 +39,8 @@
   `tests/run.rs` (the arguments and each refusal's code, the recording read strictly, a call
   reserved and settled on both journaled meter streams and answered with the recording, a foreign
   workspace and a budget below the call's maximum refused with nothing sent, the start refused
-  while a meter stream or a deployed cap does not read, the ids, the log and the heartbeat);
+  while a meter stream or a deployed cap does not read, the ids, the log and the heartbeat),
+  `tests/bin.rs` (the binary's exit codes);
   `crates/mandate-gateway/tests/wire.rs` (every refusal's code crosses the wire as itself),
   `crates/mandate-gateway/tests/meter.rs` (a replaced daily cap binds the next reservation, and an
   unread one refuses `Unavailable` reserving nothing).

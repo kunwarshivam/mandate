@@ -53,7 +53,6 @@ fn at(text: &str) -> UtcNanos {
 /// DEC-2326 item 3: `run` names its recording, its address and its probe socket, and `probe` its
 /// word and the socket.
 #[test]
-#[ignore = "pending E21-62"]
 fn run_and_probe_read_their_flags() {
     assert_eq!(
         run::command(&args(
@@ -77,7 +76,6 @@ fn run_and_probe_read_their_flags() {
 /// DEC-2326 items 1 and 3, DEC-79: a live start is refused `live_not_built` in every form,
 /// whatever else is named, so no argument makes the binary build a provider client.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_live_start_is_refused_in_every_form() {
     for text in [
         "run --registry /r.json --listen 0.0.0.0:8080 --probe /p",
@@ -98,7 +96,6 @@ fn a_live_start_is_refused_in_every_form() {
 /// A flag that is missing, empty, written `--name=value`, or followed by another flag reads as
 /// missing, and each refusal names its own code.
 #[test]
-#[ignore = "pending E21-62"]
 fn each_missing_or_malformed_flag_refuses_with_its_code() {
     for (text, refused, code) in [
         (
@@ -152,7 +149,6 @@ fn each_missing_or_malformed_flag_refuses_with_its_code() {
 /// DEC-2210 item 1: the recording is read strictly; a file that is missing or not a recording
 /// refuses the start with its code.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_recording_is_read_strictly() {
     let demo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(DEMO);
     assert!(read_recorded(&demo).is_ok());
@@ -350,7 +346,6 @@ fn started(
 /// journaled meter stream and copied to the deployment's before it is sent, settled after, and
 /// answered with the recorded reply, through the one recorded endpoint and without a key.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_call_is_journaled_on_both_meter_streams_and_answered_with_the_recording() {
     let store = MemoryStore::default();
     let world = World::default();
@@ -384,7 +379,6 @@ fn a_call_is_journaled_on_both_meter_streams_and_answered_with_the_recording() {
 /// DEC-2265 items 2 and 7, INF-9: a request naming another workspace is refused before anything is
 /// reserved or sent.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_foreign_workspace_is_refused_with_nothing_reserved_or_sent() {
     let store = MemoryStore::default();
     let world = World::default();
@@ -411,7 +405,6 @@ fn a_foreign_workspace_is_refused_with_nothing_reserved_or_sent() {
 /// name binds; a call whose maximum passes it is refused `budget_exhausted` and nothing is
 /// reserved or sent.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_named_budget_below_the_call_s_maximum_binds_with_nothing_sent() {
     let store = MemoryStore::default();
     let world = World::default();
@@ -437,7 +430,6 @@ fn a_named_budget_below_the_call_s_maximum_binds_with_nothing_sent() {
 /// DEC-2257 item 2: the service does not start while either meter stream cannot be read, and
 /// names the one that does not.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_start_refuses_while_a_meter_stream_does_not_read() {
     let world = World::default();
     for (unreadable, refused, code) in [
@@ -468,7 +460,6 @@ fn the_start_refuses_while_a_meter_stream_does_not_read() {
 
 /// DEC-2272 item 4: the service does not start while a deployed agent's cap cannot be read.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_start_refuses_while_a_deployed_agent_s_cap_does_not_read() {
     let world = World::default();
     world.deploy(AGENT, &ArtifactRef::of(b"never stored").to_string());
@@ -487,7 +478,6 @@ fn the_start_refuses_while_a_deployed_agent_s_cap_does_not_read() {
 /// start; the started ids are ULIDs at the start's millisecond, each lane apart, and a later
 /// start's sort after an earlier one's.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_ids_never_meet_and_sort_by_start() {
     let first = |mut ids: SequentialIds| ids.next_id();
     assert_eq!(
@@ -514,14 +504,12 @@ fn the_ids_never_meet_and_sort_by_start() {
 
 /// ES-05: the host clock reads now, not a default.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_host_clock_reads_now() {
     assert!(host_now() > at("2026-01-01T00:00:00.000000000Z"));
 }
 
 /// DEC-2265 item 9: each log line is written whole, with its newline, in order.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_log_writes_each_line_whole() {
     let log = WriteLog::new(Vec::new());
     log.line("call answered: ok");
@@ -535,7 +523,6 @@ fn the_log_writes_each_line_whole() {
 /// Design §3.4: while the service serves, the heartbeat keeps its liveness bound moving past the
 /// start's; once it stops serving, the bound stops moving.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_heartbeat_moves_liveness_while_serving_and_stops_after() {
     fn ticking() -> UtcNanos {
         static TICKS: AtomicI64 = AtomicI64::new(0);

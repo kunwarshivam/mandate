@@ -2159,9 +2159,11 @@ dependencies = [
 name = "mandate-gatewayd"
 version = "0.0.0"
 dependencies = [
+ "mandate-artifacts-fs",
  "mandate-canon",
  "mandate-connections",
  "mandate-gateway",
+ "mandate-gateway-http",
  "mandate-journal",
  "mandate-num",
  "mandate-process",
