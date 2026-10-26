@@ -206,9 +206,7 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     });
     const recorded = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/kill-switch`);
     await page.getByRole("button", { name: /Activate the kill switch/ }).click();
-    const passkey = page.getByRole("dialog", { name: "Confirm it is you" });
-    const first = await Promise.race([recorded.then(() => "sent" as const), passkey.waitFor({ state: "visible" }).then(() => "passkey" as const)]);
-    if (first === "passkey") await passkey.getByRole("button", { name: "Use passkey" }).click();
+    await page.getByRole("dialog", { name: "Confirm the kill switch" }).getByRole("button", { name: "Activate" }).click();
     const answer = await Promise.race([recorded, page.waitForEvent("requestfailed", { predicate: () => wrongScope, timeout: 30_000 }).then(() => null)]);
     if (answer === null) return refuse(`the kill switch was sent for ${JSON.stringify(scope)}, not agent ${AGENT} alone, and was stopped`);
     if (!answer.ok()) refuse(`the API answered ${answer.status()} for the kill switch`);

@@ -25,6 +25,11 @@ pub const UNAUTHORIZED: u16 = 401;
 /// it says nothing of the credential.
 pub const FORBIDDEN: u16 = 403;
 
+/// How often, in seconds, the process probes the connection's health with a read of the broker's
+/// account (connections spec §8.2's cadence while any agent is deployed, Proposed; DEC-2837). It is
+/// fixed for every process: the faster of §8.2's two cadences, so no executor probes less often.
+pub const PROBE_EVERY_S: i64 = 60;
+
 /// Consecutive network failures that make the connection `degraded` (§8.2, Proposed).
 pub const NETWORK_FAILURES: u32 = 3;
 /// Consecutive authorization failures that make the connection `suspended` (§8.2, Proposed).
@@ -43,6 +48,9 @@ enum Reading {
 pub struct Health {
     network: u32,
     authorization: u32,
+    /// Whether a later permission check failed in this process (DEC-2840). Only a replaced
+    /// credential ends `suspended` (connections spec §9.1), so nothing here clears it.
+    check_failed: bool,
 }
 
 impl Health {
@@ -56,6 +64,11 @@ impl Health {
     /// Counts a failed read of a one-read broker's account, which answers as one call.
     pub fn observe_error(&mut self, error: &ConnectorError) {
         self.observe(&Err(*error));
+    }
+
+    /// Notes a later permission check that failed (DEC-2840).
+    pub fn check_failed(&mut self) {
+        self.check_failed = true;
     }
 
     /// Counts a read of a one-read broker's account that the broker answered.
@@ -76,6 +89,9 @@ impl Health {
             troubles.push(ConnectionTrouble::Suspended(
                 SuspendReason::AuthorizationFailed,
             ));
+        }
+        if self.check_failed {
+            troubles.push(ConnectionTrouble::Suspended(SuspendReason::CheckFailed));
         }
         troubles
     }

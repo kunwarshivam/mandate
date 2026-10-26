@@ -20,14 +20,17 @@
 //! through [`Named`], which names each deployed instrument by its asset id, as the executor sent it,
 //! wherever the broker names it by its ticker (DEC-938 item 1, [DEC-2813](../../../docs/project/decisions/DEC-2813.md)).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::Duration;
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Value, parse};
+use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
+use mandate_connections::record::ConnectionId;
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountDeclaration, AccountFillRefs, AccountScope, AgentId, BindingGateInput,
@@ -45,6 +48,7 @@ use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price, Ratio, ShareIncrement, Usd};
 use mandate_research::{ReplayError, Replayed, ThesisRecord, replay_theses};
 use mandate_risk::{AgentMode, ConductState, DayTradeLedger, RiskSnapshot, SaneQuote};
+use mandate_spec::ValidatedMandate;
 use mandate_spec::context::Membership;
 use mandate_time::{Date, UtcNanos};
 
@@ -52,6 +56,7 @@ use crate::follow::agents_of;
 use crate::gate::{AccountRules, AgentRisk, AssetRecord, DeployedGate, Liquidity, OrderFacts};
 use crate::marks::Marked;
 use crate::quotes::QuoteFeed;
+use crate::risk::{GateRisk, RiskOpening, RiskOpenings};
 use crate::{Broker, Protections, Unplanned, Wiring};
 
 /// How fresh, in risk-clock seconds, the journal's facts an opening reads must be: a mark within a
@@ -177,6 +182,12 @@ struct Resolved {
     loss_carry: Usd,
     symbol: String,
     instrument: InstrumentId,
+    /// The confirmed version, validated on every V-rule but V-002, which its risk fold's opening
+    /// validates on the opening's equity (DEC-2804 item 2).
+    confirmed: ConfirmedVersion,
+    /// The reviewed instrument's asset class and its quote staleness, its fold's opening's.
+    asset_class: AssetClass,
+    quote_max_age: Duration,
     /// Whether the deployed version pins its universe: the binding gate's hold once the account
     /// has traded is named by it (DEC-2143).
     pinned: bool,
@@ -229,6 +240,11 @@ struct Inner {
     clock: Option<StreamId>,
     sources: Sources,
     cache: RefCell<Cache>,
+    /// Each agent's risk as the process's risk book last read it (DEC-2804 item 7).
+    risk: RefCell<BTreeMap<AgentId, GateRisk>>,
+    /// Whether the last hand-off could not be kept: then no agent's risk is answered, so a view
+    /// that failed is never read as the one before it.
+    risk_stale: Cell<bool>,
 }
 
 /// The account's deployments as every production port reads them, shared by all of them.
@@ -247,6 +263,8 @@ impl Deployment {
             clock: StreamId::parse(&format!("clock:{workspace}")),
             sources,
             cache: RefCell::new(Cache::default()),
+            risk: RefCell::new(BTreeMap::new()),
+            risk_stale: Cell::new(false),
         }))
     }
 
@@ -278,6 +296,7 @@ impl Deployment {
             protections: Box::new(deployment.clone()),
             quotes: Box::new(deployment.clone()),
             marked: Box::new(deployment.clone()),
+            risk: Box::new(deployment.clone()),
             ..wiring
         };
         (wired, deployment)
@@ -674,6 +693,9 @@ impl Deployment {
             loss_carry: confirmed.connection_loss_carry(),
             symbol: reviewed.instrument.symbol.as_str().to_owned(),
             instrument: InstrumentId::new(reviewed.instrument.asset_id.as_str()).ok()?,
+            asset_class: reviewed.instrument.asset_class,
+            quote_max_age: reviewed.quote_max_age,
+            confirmed: confirmed.clone(),
             pinned: confirmed.mandate().universe.pinned,
         })
     }
@@ -771,7 +793,8 @@ fn fold(journaled: &mut Journaled, stored: &StoredEvent) {
         event_type: &stored.event_type,
         payload: &payload,
     };
-    let _refused_rows_hold_every_later_opening = journaled.fold(row);
+    let recorded = UtcNanos::parse_rfc3339(&stored.recorded_at).ok();
+    let _refused_rows_hold_every_later_opening = journaled.fold_recorded(row, recorded);
 }
 
 /// The agent's risk while nothing has traded on the account: its whole allocation is its equity,
@@ -959,6 +982,11 @@ impl BindingGateSource for Deployment {
         {
             return None;
         }
+        let agent = if journaled.untraded() {
+            untraded(resolved.allocation, resolved.loss_carry)
+        } else {
+            self.traded(request.agent, &journaled, facts.now)
+        };
         let sources = &self.0.sources;
         let quote = sane(&self.observe(request.instrument, facts.now).ok()?)?;
         let order = OrderFacts {
@@ -966,12 +994,87 @@ impl BindingGateSource for Deployment {
             asset: sources.broker.asset(&resolved.symbol),
             rules: sources.broker.rules(),
             liquidity: sources.liquidity.liquidity(&resolved.symbol, facts.now),
-            agent: untraded(resolved.allocation, resolved.loss_carry),
+            agent,
             halted: sources.broker.halted(&resolved.symbol),
             flat: true,
             journaled: facts,
         };
         resolved.gate.input(&order, request)
+    }
+}
+
+impl Deployment {
+    /// `agent`'s risk on a traded account that is flat again (DEC-2833 items 1 to 3), which
+    /// `Journaled::opening_hold` has already found flat: the account risk book's snapshot, whose
+    /// mode is the book's, and restrictions, with the counters `journaled` folds from the account stream at `now`. `None`
+    /// while the counters do not read, or the book reads no risk for the agent, which holds the
+    /// opening and never an exit. The day-trade ledger is empty: the gate answers only where day
+    /// trades cannot bind (item 5).
+    fn traded(&self, agent: &AgentId, journaled: &Journaled, now: UtcNanos) -> Option<AgentRisk> {
+        let counted = journaled.counted(now)?;
+        let GateRisk {
+            risk,
+            instrument_restrictions,
+            ..
+        } = self.risk(agent)?;
+        Some(AgentRisk {
+            risk,
+            conduct: counted.conduct,
+            instrument_restrictions,
+            last_exit_fill_at: counted.last_exit_fill_at,
+            orders_today: counted.orders_today,
+            day_trades: DayTradeLedger::default(),
+        })
+    }
+
+    /// `agent`'s risk as the process's risk book last read it: `None` while its fold is not open
+    /// or its view is unreadable, which holds its openings and never its exits (DEC-2804 items 2
+    /// and 7).
+    pub fn risk(&self, agent: &AgentId) -> Option<GateRisk> {
+        if self.0.risk_stale.get() {
+            return None;
+        }
+        self.0.risk.try_borrow().ok()?.get(agent).cloned()
+    }
+}
+
+impl RiskOpenings for Deployment {
+    /// `agent`'s deployment as `control` reads it (the rows up to its first deployment), on
+    /// `date`, its version validated on `equity` (DEC-2804 item 2).
+    fn opening(
+        &self,
+        agent: &AgentId,
+        control: &[StoredEvent],
+        equity: Usd,
+        date: Date,
+    ) -> Option<RiskOpening> {
+        let records: Vec<ControlRecord> =
+            control.iter().filter_map(ControlRecord::of_row).collect();
+        if records.len() != control.len() {
+            return None;
+        }
+        let confirmed = self.confirm(&records, agent, date)?;
+        let resolved = self.resolve_pinned(&records, agent, date, &confirmed)?;
+        let input = resolved.confirmed.clone().with_equity(equity).ok()?;
+        Some(RiskOpening {
+            mandate: ValidatedMandate::new(input.mandate().clone(), input.context(), &[]).ok()?,
+            instrument: resolved.instrument.as_str().to_owned(),
+            asset_class: resolved.asset_class,
+            inherited_loss_usd: resolved.loss_carry,
+            mark_max_age_s: u32::try_from(resolved.quote_max_age.as_secs()).ok()?,
+        })
+    }
+
+    /// Keeps `risks` for [`Self::risk`]. A hand-off that cannot be kept marks the map stale, and
+    /// no agent's risk is answered until the next one is kept.
+    fn read(&self, risks: BTreeMap<AgentId, GateRisk>) {
+        match self.0.risk.try_borrow_mut() {
+            Ok(mut held) => {
+                *held = risks;
+                self.0.risk_stale.set(false);
+            }
+            Err(_) => self.0.risk_stale.set(true),
+        }
     }
 }
 
@@ -1008,11 +1111,97 @@ impl<B: Broker> Broker for Named<B> {
     fn declared(&self) -> Option<AccountDeclaration> {
         self.broker.declared()
     }
+
+    fn has_later_checks(&self) -> bool {
+        self.broker.has_later_checks()
+    }
+
+    fn later_check(
+        &self,
+        connection: ConnectionId,
+        occasion: Occasion,
+        account: AccountRead,
+    ) -> Option<Result<CheckReport, &'static str>> {
+        self.broker.later_check(connection, occasion, account)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::agreed;
+    use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
+    use mandate_connections::record::ConnectionId;
+    use mandate_domain::{CapabilityProfile, ProfileError};
+    use mandate_executor::{BrokerOutcome, BrokerRequest, ConnectorError};
+
+    use super::{Named, agreed};
+    use crate::Broker;
+
+    /// A broker with later checks, each answering a refusal the test can recognise.
+    struct Checking;
+
+    impl Broker for Checking {
+        fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
+            mandate_alpaca::alpaca_profile()
+        }
+
+        fn call(&mut self, _request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
+            Err(ConnectorError::NotSent { code: "fixture" })
+        }
+
+        fn has_later_checks(&self) -> bool {
+            true
+        }
+
+        fn later_check(
+            &self,
+            _connection: ConnectionId,
+            _occasion: Occasion,
+            _account: AccountRead,
+        ) -> Option<Result<CheckReport, &'static str>> {
+            Some(Err("checked_by_the_inner_broker"))
+        }
+    }
+
+    /// A broker that keeps every default.
+    struct Plain;
+
+    impl Broker for Plain {
+        fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
+            mandate_alpaca::alpaca_profile()
+        }
+
+        fn call(&mut self, _request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
+            Err(ConnectorError::NotSent { code: "fixture" })
+        }
+    }
+
+    /// DEC-2840: a broker whose later checks are not built runs none, and `Named` around it says
+    /// so too, so the process never reads the account for one.
+    #[test]
+    fn a_broker_without_later_checks_runs_none_named_or_not() -> Result<(), String> {
+        let connection = ConnectionId::new("conn-1").map_err(|e| format!("{e:?}"))?;
+        assert!(!Plain.has_later_checks());
+        assert_eq!(
+            Plain.later_check(connection.clone(), Occasion::Daily, AccountRead::Unreadable),
+            None
+        );
+        assert!(!Named::new(Plain, None).has_later_checks());
+        Ok(())
+    }
+
+    /// DEC-2840: the binary wraps every broker in `Named`, so it passes the later checks through;
+    /// otherwise the trait's default would answer none and the process would never run them.
+    #[test]
+    fn a_named_broker_runs_its_inner_broker_s_later_checks() -> Result<(), String> {
+        let named = Named::new(Checking, None);
+        assert!(named.has_later_checks());
+        let connection = ConnectionId::new("conn-1").map_err(|e| format!("{e:?}"))?;
+        assert_eq!(
+            named.later_check(connection, Occasion::Daily, AccountRead::Unreadable),
+            Some(Err("checked_by_the_inner_broker"))
+        );
+        Ok(())
+    }
 
     /// DEC-2817: the account's fill configuration is the one every deployment names alike; no
     /// deployment, one that names none, or two that differ name none.

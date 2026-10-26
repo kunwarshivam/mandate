@@ -295,7 +295,8 @@ export function ApiRuntimeProvider({
       const inFlight = stepped ? braking.current.get(brakeKey) : undefined;
       if (inFlight) return inFlight;
       counter.current += 1;
-      const command: Command = { id: `cmd-${counter.current}`, kind, agentId, phase: "sent", sentAt: nowRef.current, ...(record ? { record } : {}), ...(stepped ? { awaitsRuntime: true } : {}) };
+      const killing = kind === "kill" || kind === "stop_all" || kind === "close_all";
+      const command: Command = { id: `cmd-${counter.current}`, kind, agentId, phase: "sent", sentAt: nowRef.current, ...(record ? { record } : {}), ...(stepped || killing ? { awaitsRuntime: true } : {}) };
       const update = (patch: Partial<Command>) => setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, ...patch } : c)));
       setCommands((list) => [...list, command]);
       if (stepped) braking.current.set(brakeKey, command);

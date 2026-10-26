@@ -109,7 +109,7 @@ describe("the Stop sheet and D10 over the API (rule 13)", () => {
   it("sends the agent's kill switch, scoped to that agent, from its record screen", async () => {
     const { posts } = mount(<StopRecordScreen kind="kill" targetId="agt_01JB3K8Y4N7QW2M6R9T5V0XZAC" />);
     fireEvent.click(await screen.findByRole("button", { name: /^Activate the kill switch/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Use passkey" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Confirm the kill switch" })).getByRole("button", { name: "Activate" }));
     await waitFor(() => expect(posts.filter((p) => p.path.endsWith("/kill-switch"))).toHaveLength(1), { timeout: 5000 });
     expect(posts.find((p) => p.path.endsWith("/kill-switch"))?.body).toMatchObject({ scope: { kind: "agent", id: "agt_01JB3K8Y4N7QW2M6R9T5V0XZAC" }, environment_shown: "paper" });
   });
@@ -135,7 +135,7 @@ describe("the Stop sheet and D10 over the API (rule 13)", () => {
     const { posts } = mount(<StopRecordScreen kind="stop_all" targetId={UNREAD_CONNECTION} />, reads);
     expect(await screen.findByText(/^The account has not been read, so this is the workspace's kill switch/)).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: /^Stop all agents on this account/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Use passkey" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Confirm the kill switch" })).getByRole("button", { name: "Activate" }));
     await waitFor(() => expect(posts.filter((p) => p.path.endsWith("/kill-switch")).length).toBeGreaterThan(0), { timeout: 5000 });
     for (const p of posts.filter((p) => p.path.endsWith("/kill-switch"))) expect(p.body).toMatchObject({ scope: { kind: "workspace", id: null } });
   });
@@ -153,7 +153,7 @@ describe("the Stop sheet and D10 over the API (rule 13)", () => {
     expect(recordHref("stop_all", id)).toBe(`/connections/${id}/stop-all`);
     const { posts } = mount(<StopRecordScreen kind="stop_all" targetId={id} />);
     fireEvent.click(await screen.findByRole("button", { name: /^Stop all agents on this account/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Use passkey" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Confirm the kill switch" })).getByRole("button", { name: "Activate" }));
     await waitFor(() => expect(posts.filter((p) => p.path.endsWith("/kill-switch"))).toHaveLength(1), { timeout: 5000 });
     expect(posts.find((p) => p.path.endsWith("/kill-switch"))?.body).toMatchObject({ scope: { kind: "connection", id } });
   });

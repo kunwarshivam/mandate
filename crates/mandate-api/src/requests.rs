@@ -70,7 +70,10 @@ pub struct StepUpChallengeRequest {
 }
 
 /// `POST /agents/{agent_id}/acknowledgments` (§4.2): the event acknowledged, declared after the
-/// nullable members so serde names a missing one of them first.
+/// nullable members so serde names a missing one of them first. `subject`, `request`, and
+/// `step_up_assertion` are optional, an absent one read as `null`, ahead of the schema that names
+/// them (journal spec §9.28 version 2, DEC-2523; the struct first, as DEC-2126 and DEC-2128 order
+/// it). An assertion is carried only beside `passkey` evidence (DEC-2128 item 1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(remote = "Self", deny_unknown_fields)]
 pub struct AcknowledgeRequest {
@@ -78,7 +81,23 @@ pub struct AcknowledgeRequest {
     pub record: Option<Record>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub step_up: Option<StepUpEvidence>,
+    #[serde(default)]
+    pub subject: Option<AcknowledgeSubject>,
+    #[serde(default)]
+    pub request: Option<EventId>,
+    #[serde(default)]
+    pub step_up_assertion: Option<StepUpAssertion>,
     pub acknowledged: EventId,
+}
+
+/// What an acknowledgment answers (journal spec §9.28 version 2): a latched limit, an account
+/// restriction, or a reconciliation hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcknowledgeSubject {
+    Limit,
+    Restriction,
+    Reconciliation,
 }
 
 /// `POST /agents/{agent_id}/requests` (§4.6, DEC-682 item 16). Who asked comes from the channel,
@@ -101,7 +120,7 @@ pub enum Side {
 }
 
 crate::wire::rules!(none: PauseRequest, HoldRequest, EndDelegationRequest, LiftHoldRequest);
-crate::wire::rules!(none: AcknowledgeRequest, OwnerRequest, StepUpChallengeRequest);
+crate::wire::rules!(none: OwnerRequest, StepUpChallengeRequest);
 
 /// `POST /mandate-versions/{mandate_version}/confirm` (§5.1): each confirmed path is a pointer.
 /// `step_up_assertion` is optional, an absent one read as `null`, and is carried only beside
@@ -437,7 +456,18 @@ impl Rules for OauthStartRequest {
     }
 }
 
-crate::wire::rules!(checked: StopRequest, ResumeRequest, OauthStartRequest);
+impl Rules for AcknowledgeRequest {
+    fn rules(&self, at: &str, check: &mut Check) {
+        assertion_rules(
+            self.step_up.as_ref(),
+            self.step_up_assertion.as_ref(),
+            at,
+            check,
+        );
+    }
+}
+
+crate::wire::rules!(checked: StopRequest, ResumeRequest, OauthStartRequest, AcknowledgeRequest);
 crate::wire::rules!(none: KillSwitchRequest, OwnerExitRequest, RevokeRequest);
 
 crate::wire::object_only!(

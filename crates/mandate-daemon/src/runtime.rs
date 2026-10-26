@@ -6,7 +6,7 @@ pub use research::{
     ArtifactSink, ContextUnread, ResearchParts, ResearchSource, ResearchWiring, ResearchWorker,
 };
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::time::Duration;
 
 use mandate_canon::{Digest, Object, parse};
@@ -351,6 +351,7 @@ impl<S: Store> RuntimeProcess<S> {
             self.wiring.view.approval.approvers = source.current(&rows);
         }
         self.feed(&rows);
+        self.read_working_universe();
         let events = tailed(&rows).ok()?;
         let head = events.last().map_or(0, |e| e.seq.0);
         if self.control_handed == Some(head) {
@@ -437,6 +438,7 @@ impl<S: Store> RuntimeProcess<S> {
             return false;
         };
         self.feed(&rows);
+        self.read_working_universe();
         let latest = rows
             .iter()
             .filter(|r| r.event_type == "ClockAdvanced")
@@ -529,6 +531,28 @@ impl<S: Store> RuntimeProcess<S> {
     fn takes(&self, input: &Input) -> bool {
         let mut probe = self.state.clone();
         handle(&mut probe, input.clone(), &self.wiring.ports()).is_ok()
+    }
+
+    /// An unpinned mandate's working universe, read again before anything is handed (DEC-2841):
+    /// the agent stream's thesis records are fed to the fold, and the view, which an approval's
+    /// revalidation reads, names only the instrument the plan may open in. An agent stream that
+    /// cannot be read names none, so a grant is skipped rather than acted on a guess. A pinned
+    /// mandate's view keeps its pins.
+    fn read_working_universe(&mut self) {
+        let Some(facts) = self.wiring.facts.clone() else {
+            return;
+        };
+        if facts.working_universe().is_none() {
+            return;
+        }
+        let rows = self.agent.clone().and_then(|agent| self.store.rows(&agent));
+        self.wiring.view.working_universe = match rows {
+            Some(rows) => {
+                facts.feed(&rows);
+                facts.working_universe().unwrap_or_default()
+            }
+            None => BTreeSet::new(),
+        };
     }
 
     /// Feeds `rows` to the production ports' fold, which takes each row once (DEC-2378 S2).

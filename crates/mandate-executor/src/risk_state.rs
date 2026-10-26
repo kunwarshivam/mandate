@@ -354,6 +354,14 @@ pub enum UnreadableCause {
     AppendFailed,
     /// The risk state refused to decide an input (mandate spec §5.2; `RiskState::step`).
     RefusedToDecide,
+    /// No fold is open for the agent (DEC-2804 items 2 and 8): its deployment, version, equity or
+    /// instrument does not read, it is redeployed on another version, another agent that has not
+    /// stopped is followed on its account, or its universe may hold a second instrument.
+    NotOpened,
+    /// The fold, opened flat, read an own fill before any counted sane mark of its instrument, so E
+    /// is unknown (DEC-2834). The one cause the fold leaves again: its first counted sane mark
+    /// prices the inputs it holds, and the view reads.
+    Unpriced,
 }
 
 /// What the gate reads of the account's risk state.
@@ -424,7 +432,9 @@ pub struct RiskAppend {
     pub payload: Value,
 }
 
-/// The account stream's risk state, folded row by row.
+/// The account stream's risk state, folded row by row. A clone steps a row the live fold has not
+/// journaled, to see whether it would return a record (DEC-2804 item 5).
+#[derive(Clone)]
 pub struct AccountRiskFold<'c> {
     stream: String,
     agent: String,
@@ -461,9 +471,36 @@ pub struct AccountRiskFold<'c> {
     /// The row right before the next, when it is an `OrderStateChanged`: the only row a
     /// compensation may correct (DEC-2829).
     state_change: Option<StateChange>,
+    /// The position's asset class, which says which marks count (mandate spec §5.2).
+    asset_class: AssetClass,
+    /// Whether the risk state's mark is one a counted sane mark set: a fold opened with a position
+    /// is priced at its cost, and one opened flat is not until such a mark (DEC-2834 item 1).
+    priced: bool,
+    /// While unpriced, the inputs held since the own fill that found no price (DEC-2834 item 2).
+    held: Option<Held>,
+}
+
+/// The inputs an unpriced fold holds, from the own fill that found no price on, in journal order.
+#[derive(Clone)]
+struct Held {
+    /// The first held input's instant, at which the pricing mark's bid is taken.
+    since: UtcNanos,
+    /// The mode of the view the fill found, which the unpriced view keeps.
+    mode: AgentMode,
+    rows: Vec<(StoredEvent, Stepped)>,
+}
+
+/// Which step a held row is.
+#[derive(Clone, Copy)]
+enum Stepped {
+    Tick,
+    Mark,
+    Fill,
+    Fee,
 }
 
 /// An `OrderStateChanged` as a compensation right after it must name it (DEC-2829).
+#[derive(Clone)]
 struct StateChange {
     event_id: String,
     recorded_at: String,
@@ -550,6 +587,9 @@ impl<'c> AccountRiskFold<'c> {
             fills: BTreeSet::new(),
             owed: VecDeque::new(),
             state_change: None,
+            asset_class: opening.asset_class,
+            priced: !opening.position_qty.is_zero(),
+            held: None,
         })
     }
 
@@ -570,8 +610,14 @@ impl<'c> AccountRiskFold<'c> {
                 stream: row.stream_id.clone(),
             });
         }
-        let RiskView::Readable { head, .. } = &self.view else {
-            return Ok(Vec::new());
+        let head = match &self.view {
+            RiskView::Readable { head, .. }
+            | RiskView::Unreadable {
+                cause: UnreadableCause::Unpriced,
+                head,
+                ..
+            } => *head,
+            RiskView::Unreadable { .. } => return Ok(Vec::new()),
         };
         if head.checked_add(1) != Some(row.seq) {
             self.unreadable(UnreadableCause::SeqGap);
@@ -580,9 +626,16 @@ impl<'c> AccountRiskFold<'c> {
         match self.read(row) {
             Ok(appends) => {
                 self.owed.extend(appends.iter().cloned());
-                self.view = RiskView::Readable {
-                    snapshot: Box::new(self.risk.snapshot().clone()),
-                    head: row.seq,
+                self.view = match &self.held {
+                    Some(held) => RiskView::Unreadable {
+                        cause: UnreadableCause::Unpriced,
+                        head: row.seq,
+                        mode: held.mode,
+                    },
+                    None => RiskView::Readable {
+                        snapshot: Box::new(self.risk.snapshot().clone()),
+                        head: row.seq,
+                    },
                 };
                 Ok(appends)
             }
@@ -621,16 +674,16 @@ impl<'c> AccountRiskFold<'c> {
         match (reading(&row.event_type), row.schema_version) {
             (None, _) => Err(UnreadableCause::UnfoldedEventType),
             (Some(Reading::Record), _) | (Some(Reading::Mark), 1) => Ok(Vec::new()),
-            (Some(Reading::Tick), 1) => self.tick(row, payload),
-            (Some(Reading::Mark), 2) => self.mark(row, payload),
+            (Some(Reading::Tick), 1) => self.stepped(row, payload, Stepped::Tick),
+            (Some(Reading::Mark), 2) => self.stepped(row, payload, Stepped::Mark),
             (Some(Reading::Order), version) if order_version(&row.event_type, version) => {
                 self.order(row, &body, payload)?;
                 Ok(Vec::new())
             }
             (Some(Reading::Fill), version) if fill_version(&row.event_type, version) => {
-                self.fill(row, payload)
+                self.stepped(row, payload, Stepped::Fill)
             }
-            (Some(Reading::Fee), 1) => self.fee(row, payload),
+            (Some(Reading::Fee), 1) => self.stepped(row, payload, Stepped::Fee),
             (Some(Reading::Compensation), 1) if compensates(row, &body, payload, corrects) => {
                 whole_second(payload, "risk_clock")?;
                 Ok(Vec::new())
@@ -717,11 +770,7 @@ impl<'c> AccountRiskFold<'c> {
         row: &StoredEvent,
         payload: &Object,
     ) -> Result<Vec<RiskAppend>, UnreadableCause> {
-        let ours = payload
-            .get("client_order_id")
-            .and_then(Value::as_str)
-            .is_some_and(|order| self.own.contains(order));
-        if !ours {
+        if !self.ours(payload) {
             return Ok(Vec::new());
         }
         let fill_id = payload
@@ -757,6 +806,18 @@ impl<'c> AccountRiskFold<'c> {
             return Err(UnreadableCause::RefusedToDecide);
         }
         self.bind(instrument)?;
+        if !self.priced {
+            let mode = match &self.view {
+                RiskView::Readable { snapshot, .. } => snapshot.agent_mode,
+                RiskView::Unreadable { mode, .. } => *mode,
+            };
+            self.held = Some(Held {
+                since: clock,
+                mode: mode.max(AgentMode::ExitsOnly),
+                rows: vec![(row.clone(), Stepped::Fill)],
+            });
+            return Ok(Vec::new());
+        }
         self.fills.insert(fill_id.to_owned());
         let session = self.calendar.session(clock).map_err(refused)?;
         let outcome = self.step(clock, session, Input::Fill { side, qty, price })?;
@@ -778,11 +839,7 @@ impl<'c> AccountRiskFold<'c> {
         row: &StoredEvent,
         payload: &Object,
     ) -> Result<Vec<RiskAppend>, UnreadableCause> {
-        let ours = payload
-            .get("client_order_id")
-            .and_then(Value::as_str)
-            .is_some_and(|order| self.own.contains(order));
-        if !ours {
+        if !self.ours(payload) {
             return Ok(Vec::new());
         }
         let simulated = payload.get("simulated") == Some(&Value::Bool(true))
@@ -859,7 +916,116 @@ impl<'c> AccountRiskFold<'c> {
             })
             .ok_or(UnreadableCause::Undecodable)?;
         let outcome = self.step(clock, session, Input::Mark { bid, sane })?;
+        self.priced |= sane && self.counts(session);
         self.records(row, clock, &outcome)
+    }
+
+    /// Whether the fill or fee `payload` names one of the agent's own orders (DEC-2393 item 1).
+    fn ours(&self, payload: &Object) -> bool {
+        payload
+            .get("client_order_id")
+            .and_then(Value::as_str)
+            .is_some_and(|order| self.own.contains(order))
+    }
+
+    /// Whether a mark in `session` counts (mandate spec §5.2): any for crypto, the regular session
+    /// for equities.
+    fn counts(&self, session: MarketSession) -> bool {
+        self.asset_class == AssetClass::Crypto || session == MarketSession::Regular
+    }
+
+    /// Steps `row`, a risk input of kind `kind`, or holds it while the fold is unpriced (DEC-2834
+    /// item 2). Whose a fill or fee is, and whether a mark is from before the opening instant, is
+    /// decided where the row is, as a priced fold decides it: another's fill or fee and an earlier
+    /// mark step nothing and are not held. A counted sane mark of the bound instrument prices the
+    /// held inputs (item 3); a mark naming another instrument is refused at once (item 4).
+    fn stepped(
+        &mut self,
+        row: &StoredEvent,
+        payload: &Object,
+        kind: Stepped,
+    ) -> Result<Vec<RiskAppend>, UnreadableCause> {
+        if self.held.is_none() {
+            return self.step_input(row, payload, kind);
+        }
+        if matches!(kind, Stepped::Fill | Stepped::Fee) && !self.ours(payload) {
+            return Ok(Vec::new());
+        }
+        if let Stepped::Mark = kind {
+            let instrument = payload
+                .get("instrument_id")
+                .and_then(Value::as_str)
+                .ok_or(UnreadableCause::Undecodable)?;
+            if whole_second(payload, "risk_clock")? < self.opened_at {
+                return Ok(Vec::new());
+            }
+            if self.instrument.as_deref() != Some(instrument) {
+                return Err(UnreadableCause::RefusedToDecide);
+            }
+            let session = payload
+                .get("session")
+                .and_then(Value::as_str)
+                .and_then(|name| {
+                    SESSIONS
+                        .into_iter()
+                        .find(|session| session.as_str() == name)
+                })
+                .ok_or(UnreadableCause::Undecodable)?;
+            if payload.get("sane") == Some(&Value::Bool(true)) && self.counts(session) {
+                return self.price(row, payload, session);
+            }
+        }
+        if let Some(held) = &mut self.held {
+            held.rows.push((row.clone(), kind));
+        }
+        Ok(Vec::new())
+    }
+
+    /// Steps `row` as a risk input of kind `kind`.
+    fn step_input(
+        &mut self,
+        row: &StoredEvent,
+        payload: &Object,
+        kind: Stepped,
+    ) -> Result<Vec<RiskAppend>, UnreadableCause> {
+        match kind {
+            Stepped::Tick => self.tick(row, payload),
+            Stepped::Mark => self.mark(row, payload),
+            Stepped::Fill => self.fill(row, payload),
+            Stepped::Fee => self.fee(row, payload),
+        }
+    }
+
+    /// Prices the held inputs with `row`, the first counted sane mark (DEC-2834 item 3): its bid at
+    /// the first held input's instant in the mark's `session`, then each held input in journal
+    /// order, then the mark itself. Each record is owed after the mark, with its own cause.
+    fn price(
+        &mut self,
+        row: &StoredEvent,
+        payload: &Object,
+        session: MarketSession,
+    ) -> Result<Vec<RiskAppend>, UnreadableCause> {
+        let Some(held) = self.held.take() else {
+            return Err(UnreadableCause::Unpriced);
+        };
+        let bid = payload
+            .get("bid")
+            .and_then(Value::as_str)
+            .and_then(|bid| Price::parse(bid).ok())
+            .ok_or(UnreadableCause::Undecodable)?;
+        let outcome = self.step(held.since, session, Input::Mark { bid, sane: true })?;
+        let mut appends = self.records(row, held.since, &outcome)?;
+        self.priced = true;
+        for (held_row, kind) in &held.rows {
+            let body = parse(&held_row.body).map_err(|_| UnreadableCause::Undecodable)?;
+            let held_payload = body
+                .get("payload")
+                .and_then(Value::as_object)
+                .ok_or(UnreadableCause::Undecodable)?;
+            appends.extend(self.step_input(held_row, held_payload, *kind)?);
+        }
+        appends.extend(self.mark(row, payload)?);
+        Ok(appends)
     }
 
     /// Steps a `ClockAdvanced` tick at its `clock` (DEC-2304 item 7). A tick that reaches the next
@@ -1098,13 +1264,19 @@ impl<'c> AccountRiskFold<'c> {
     /// An unreadable view owes nothing (DEC-2399 item 3).
     fn unreadable(&mut self, cause: UnreadableCause) {
         self.owed.clear();
-        if let RiskView::Readable { snapshot, head } = &self.view {
-            self.view = RiskView::Unreadable {
-                cause,
-                head: *head,
-                mode: snapshot.agent_mode.max(AgentMode::ExitsOnly),
-            };
-        }
+        self.held = None;
+        let (head, mode) = match &self.view {
+            RiskView::Readable { snapshot, head } => {
+                (*head, snapshot.agent_mode.max(AgentMode::ExitsOnly))
+            }
+            RiskView::Unreadable {
+                cause: UnreadableCause::Unpriced,
+                head,
+                mode,
+            } => (*head, *mode),
+            RiskView::Unreadable { .. } => return,
+        };
+        self.view = RiskView::Unreadable { cause, head, mode };
     }
 }
 

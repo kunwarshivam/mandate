@@ -51,7 +51,9 @@
     "fold_unavailable",
     "positions_held",
     "agents_not_stopped",
-    "deferral_mismatch"
+    "deferral_mismatch",
+    "acknowledgment_unavailable",
+    "acknowledgment_request_invalid"
   ],
   "Effect": [
     "none",
@@ -555,6 +557,26 @@
       "status": 409,
       "code": "deferral_mismatch",
       "title": "Request does not match its decision",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/acknowledgment_unavailable",
+      "status": 409,
+      "code": "acknowledgment_unavailable",
+      "title": "Nothing to acknowledge",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/acknowledgment_request_invalid",
+      "status": 409,
+      "code": "acknowledgment_request_invalid",
+      "title": "Request cannot be answered",
       "effect": "none",
       "event_id": null,
       "retryable": false,

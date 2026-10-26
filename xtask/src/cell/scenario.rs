@@ -351,13 +351,6 @@ const DR_CONNECT: Wait = Wait {
     lands: "a connection the dry run can name: staging's comes from the owner's OAuth connect, \
             which the scenario does not run yet",
 };
-const W2_WEB: Wait = Wait {
-    lane: "W2",
-    story: "E11-9",
-    pr: None,
-    lands: "web/ sends the demo's gestures through the API, and `cell demo` drives web/ against \
-            the cell (claim #1443)",
-};
 const WB_SETUP: Wait = Wait {
     lane: "WB",
     story: "E9-4",
@@ -365,6 +358,13 @@ const WB_SETUP: Wait = Wait {
     lands: "web/'s confirm and deploy with a passkey in the cell, once the founder decides whether \
             a dev or ci cell may waive a first passkey's 24-hour cool-off (workspace API spec \
             §3.6, DEC-79); until then the cell's confirm and deploy stay the CLI's",
+};
+const W2_REPORT_VISIT: Wait = Wait {
+    lane: "W2",
+    story: "E11-9",
+    pr: None,
+    lands: "a browser visit of web/'s report screen at `/backtests/bt-demo-01` in `cell demo`'s web \
+            run, reading the stored report, and a link to it",
 };
 const E2E_FILL: Wait = Wait {
     lane: "E2E",
@@ -1134,16 +1134,14 @@ pub fn plan(
             parts: vec![
                 Part::Gap(Gap {
                     what: "the runtime sizes the opening and the gate and autonomy rules ask",
-                    on_main: "the runtime and its image (#1521, #1560), on the deny-all wiring \
-                              that proposes nothing (DEC-1013 item 2), started by the manager \
-                              from step 2's version-2 deployment (#1759, #1763)",
+                    on_main: "the runtime and its image (#1521, #1560), started by the manager \
+                              from step 2's version-2 deployment (#1759, #1763), asking the owner \
+                              on a deferring opening (#2538), the demo envelope's loop from \
+                              decide to proposed as a test (#2637); the owner's inbox is read \
+                              by this step's web run below, since a read in the Job races the \
+                              runtime's first ask",
                     waits: vec![P5_HOOK],
                 }),
-                gesture(
-                    "the owner's inbox, read (empty until the runtime asks)",
-                    owner(&["approvals", "list", "--agent", WEB_AGENT]),
-                    "no approvals".into(),
-                ),
                 Part::Gap(Gap {
                     what: "the owner approves the ask in web/",
                     on_main: "the approval answer in web/ and the API's responses route in the \
@@ -1241,10 +1239,12 @@ pub fn plan(
                     ]),
                 }),
                 Part::Gap(Gap {
-                    what: "web/ shows the backtest's report",
+                    what: "the owner opens the backtest's report in web/, from a link (the API \
+                           lists no backtests)",
                     on_main: "the API's backtest read (#1555), web/'s report screen (#1549), \
-                              and the owner's session through the stub issuer (#1591)",
-                    waits: vec![W2_WEB],
+                              which renders this report over the API, and the owner's session \
+                              through the stub issuer (#1591)",
+                    waits: vec![W2_REPORT_VISIT],
                 }),
             ],
         },
@@ -3459,7 +3459,11 @@ mod tests {
             })
             .flatten()
             .collect();
-        assert_eq!(lanes, ["W2"], "only web/'s report screen is left");
+        assert_eq!(
+            lanes,
+            ["W2"],
+            "only the web run's visit to the report screen is left"
+        );
     }
 
     /// Step 2 registers the reviewed configuration before any version, once each in each

@@ -23,6 +23,7 @@ use mandate_executord::deployment::{BrokerFacts, Deployment, LiquidityRead, Sour
 use mandate_executord::gate::{AccountRules, AssetRecord, Liquidity};
 use mandate_executord::marks::Marked;
 use mandate_executord::quotes::QuoteFeed;
+use mandate_executord::risk::RiskOpenings;
 use mandate_executord::{Broker, Protections};
 use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, StreamId};
 use mandate_marketdata::dataset::Store as Datasets;
@@ -60,6 +61,8 @@ const LLM_CONTENT: &str =
 const ENVELOPE: &str = "autonomy behavior capital connection_id environment goal name notifications protection risk universe";
 /// Monday 12:00 in New York, inside the regular session.
 const MONDAY: &str = "2026-09-21T16:00:00Z";
+/// [`MONDAY`] as a journaled `risk_clock`.
+const MONDAY_NANOS: &str = "2026-09-21T16:00:00.000000000Z";
 
 type Artifacts = BTreeMap<Digest, Vec<u8>>;
 
@@ -628,6 +631,145 @@ fn a_traded_account_holds_the_opening() -> Result<(), Error> {
     Ok(())
 }
 
+/// A round trip in SPY on the account at `clock`: an unattributed buy and sell, as the reconciler
+/// applies fills it did not originate.
+fn round_trip(journal: &Journal, clock: &str) -> Result<(), Error> {
+    let text = |value: &str| Value::Str(value.to_owned());
+    for (id, fill, side) in [("a4", "f1", "buy"), ("a5", "f2", "sell")] {
+        journal.write(
+            ACCOUNT_STREAM,
+            id,
+            "FillApplied",
+            2,
+            None,
+            object(vec![
+                ("client_order_id", Value::Null),
+                ("fees", Value::Array(Vec::new())),
+                ("fill_id", text(fill)),
+                ("instrument_id", text(SPY)),
+                ("price", text("500")),
+                ("qty_gross", text("1")),
+                ("risk_clock", text(clock)),
+                ("side", text(side)),
+                ("trade_date", text("2026-09-21")),
+            ])?,
+        )?;
+    }
+    Ok(())
+}
+
+/// What the account risk book reads for the agent: equity 990 of a 1000 allocation, mode `mode`.
+fn book(mode: mandate_risk::AgentMode) -> Result<mandate_executord::risk::GateRisk, Error> {
+    Ok(mandate_executord::risk::GateRisk {
+        risk: mandate_risk::RiskSnapshot {
+            agent_equity: Usd::parse("990")?,
+            high_water_mark: Usd::parse("1000")?,
+            day_start_equity: Usd::parse("995")?,
+            capital_base: Usd::parse("1000")?,
+            inherited_loss: Usd::ZERO,
+            latched: BTreeSet::new(),
+            active_rungs: BTreeMap::new(),
+            size_factor: mandate_num::Ratio::parse("1")?,
+            agent_mode: mode,
+        },
+        mode,
+        instrument_restrictions: BTreeMap::new(),
+    })
+}
+
+/// DEC-2833 items 1 to 3: a traded account that is flat again opens on what the account risk book
+/// reads for the agent, never its allocation, and the counters folded from the account stream pace
+/// it. Right after the round trip's sell the opening is denied, as the trading-domain reference
+/// case denies one within 60 s of an opposite-side fill; past the cooldown it is allowed. With no
+/// risk read the opening is held.
+#[test]
+fn a_traded_flat_account_opens_on_its_risk_book_and_its_counters_pace_it() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    round_trip(&journal, MONDAY_NANOS)?;
+    let (deployment, _) = deployment(&journal, store);
+    assert!(opening(&deployment)?.is_none(), "no risk read: held");
+    deployment.read(BTreeMap::from([(
+        agent(),
+        book(mandate_risk::AgentMode::Normal)?,
+    )]));
+    let snapshot = opening(&deployment)?.ok_or("answered on the book's risk")?;
+    assert_eq!(snapshot.risk.agent_equity, Usd::parse("990")?);
+    let spy_asset = mandate_risk::AssetId::new(SPY)?;
+    assert!(snapshot.agent.last_exit_fill_at.contains_key(&spy_asset));
+    let (verdict_now, reason) = verdict(&snapshot)?;
+    assert_eq!(verdict_now, Verdict::Deny, "{reason:?}");
+    assert!(
+        matches!(
+            reason,
+            Some(ReasonCode::OppositeFillInterval | ReasonCode::ReentryCooldown)
+        ),
+        "{reason:?}"
+    );
+    tick(&journal, "t-later", "2026-09-21T17:01:00Z")?;
+    journaled_at(&journal, "later", "2026-09-21T17:01:00.000000000Z")?;
+    let snapshot = opening(&deployment)?.ok_or("answered later")?;
+    assert_eq!(verdict(&snapshot)?, (Verdict::Allow, None));
+    deployment.read(BTreeMap::new());
+    assert!(
+        opening(&deployment)?.is_none(),
+        "an unreadable view holds again"
+    );
+    Ok(())
+}
+
+/// A traded account holding a position, or whose workspace relates a second account, is held
+/// whatever the risk book reads (DEC-2833 items 1 and 4).
+#[test]
+fn a_position_or_a_second_connection_holds_the_traded_opening() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    round_trip(&journal, MONDAY_NANOS)?;
+    journal.write(
+        CONTROL_STREAM,
+        "c2",
+        "ConnectionEstablished",
+        2,
+        None,
+        json(r#"{"account_ref":"acct9","broker":"alpaca","connection_id":"conn9","environment":"paper","scopes":["trading"],"user":"user_other"}"#)?,
+    )?;
+    let (deployment, _) = deployment(&journal, store);
+    deployment.read(BTreeMap::from([(
+        agent(),
+        book(mandate_risk::AgentMode::Normal)?,
+    )]));
+    assert!(opening(&deployment)?.is_none(), "a second connection");
+
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    let text = |value: &str| Value::Str(value.to_owned());
+    journal.write(
+        ACCOUNT_STREAM,
+        "a4",
+        "FillApplied",
+        2,
+        None,
+        object(vec![
+            ("client_order_id", Value::Null),
+            ("fees", Value::Array(Vec::new())),
+            ("fill_id", text("f1")),
+            ("instrument_id", text(SPY)),
+            ("price", text("500")),
+            ("qty_gross", text("1")),
+            ("risk_clock", text(MONDAY_NANOS)),
+            ("side", text("buy")),
+            ("trade_date", text("2026-09-21")),
+        ])?,
+    )?;
+    let (deployment, _) = self::deployment(&journal, store);
+    deployment.read(BTreeMap::from([(
+        agent(),
+        book(mandate_risk::AgentMode::Normal)?,
+    )]));
+    assert!(opening(&deployment)?.is_none(), "a position");
+    Ok(())
+}
+
 /// The opening is held while the clock has not ticked, the account has no snapshot, or the
 /// facts the journal does not hold are unread.
 #[test]
@@ -1073,8 +1215,8 @@ fn unread_answers_nothing() -> Result<(), Error> {
     Ok(())
 }
 
-/// The wiring the deployment replaces answers the binding gate from it: with every fact read,
-/// the untraded agent's opening reaches the gate.
+/// The wiring the deployment replaces answers the binding gate and the risk book's openings from
+/// it: with every fact read, the untraded agent's opening reaches the gate, and its fold opens.
 #[test]
 fn the_wired_gate_reads_the_deployment() -> Result<(), Error> {
     let (journal, store, _) = deployed()?;
@@ -1098,6 +1240,18 @@ fn the_wired_gate_reads_the_deployment() -> Result<(), Error> {
             .gate
             .input(&request(&agent, &spy, Purpose::Open, Side::Buy)?)
             .is_some()
+    );
+    assert!(
+        wiring
+            .risk
+            .opening(
+                &agent,
+                &journal.rows_of(CONTROL_STREAM),
+                Usd::parse("25000")?,
+                Date::parse("2026-09-21")?,
+            )
+            .is_some(),
+        "the wired risk book opens the agent's fold from the deployment"
     );
     Ok(())
 }
@@ -2008,5 +2162,143 @@ fn an_instrument_that_no_longer_resolves_holds_openings_and_keeps_exits() -> Res
         (false, false, false, true, true, true),
         "openings hold on the longer stream; exits keep SPY as it last resolved"
     );
+    Ok(())
+}
+
+/// DEC-2804 item 2: the deployment opens its agent's risk fold on the reviewed instrument, its
+/// class and its quote staleness, with the connection's loss carry, its version validated on the
+/// equity it is handed over the control rows it is handed: an equity below the allocation fails
+/// V-002 and opens none, and so does an agent the rows do not deploy.
+#[test]
+fn the_deployment_opens_its_agents_risk_fold() -> Result<(), Error> {
+    let (journal, store, _) = deployed_as(Variant {
+        retired_loss: Some("40"),
+        ..Variant::default()
+    })?;
+    let (deployment, _) = deployment(&journal, store);
+    let control = journal.rows_of(CONTROL_STREAM);
+    let day = Date::parse("2026-09-21")?;
+    let opening = deployment
+        .opening(&agent(), &control, Usd::parse("25000")?, day)
+        .ok_or("the deployed agent opens")?;
+    assert_eq!(opening.instrument, SPY);
+    assert_eq!(opening.asset_class, AssetClass::UsEquity);
+    assert_eq!(
+        opening.mark_max_age_s, 10,
+        "the rule set's IEX quote staleness"
+    );
+    assert_eq!(opening.inherited_loss_usd, Usd::parse("40")?);
+    assert_eq!(opening.mandate.mandate().universe.max_instruments, 1);
+    assert!(
+        deployment
+            .opening(&agent(), &control, Usd::parse("1")?, day)
+            .is_none(),
+        "V-002: an equity below the allocation"
+    );
+    let before = control
+        .iter()
+        .take_while(|row| row.event_type != "AgentDeployed")
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        deployment
+            .opening(&agent(), &before, Usd::parse("25000")?, day)
+            .is_none(),
+        "rows that do not deploy the agent"
+    );
+    Ok(())
+}
+
+/// DEC-2804 item 7: the risk the process's book hands the deployment is what it answers for the
+/// agent, and an agent it was not handed has none.
+#[test]
+fn the_deployment_answers_the_risk_its_book_read() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    let (deployment, _) = deployment(&journal, store);
+    assert_eq!(deployment.risk(&agent()), None);
+    let risk = mandate_executord::risk::GateRisk {
+        risk: mandate_risk::RiskSnapshot {
+            agent_equity: Usd::parse("990")?,
+            high_water_mark: Usd::parse("1000")?,
+            day_start_equity: Usd::parse("995")?,
+            capital_base: Usd::parse("1000")?,
+            inherited_loss: Usd::ZERO,
+            latched: BTreeSet::new(),
+            active_rungs: BTreeMap::new(),
+            size_factor: mandate_num::Ratio::parse("1")?,
+            agent_mode: mandate_risk::AgentMode::Normal,
+        },
+        mode: mandate_risk::AgentMode::Normal,
+        instrument_restrictions: BTreeMap::new(),
+    };
+    deployment.read(BTreeMap::from([(agent(), risk.clone())]));
+    assert_eq!(deployment.risk(&agent()), Some(risk));
+    assert_eq!(deployment.risk(&AgentId(OTHER_AGENT.to_owned())), None);
+    deployment.read(BTreeMap::new());
+    assert_eq!(deployment.risk(&agent()), None);
+    Ok(())
+}
+
+/// DEC-2279 Safety: the model gateway writes research artifacts to a store of their own, which the
+/// executor never reads. A cold-started executor resolves a research agent's mandate, snapshots and
+/// admitted instrument, and maps the broker's ticker to it for exits, the same whether the gateway's
+/// objects are all there, all gone, or all corrupted, and its production wiring asks for the shared
+/// store alone, never the research store.
+#[test]
+fn a_cold_start_resolves_the_same_with_every_research_object_gone_or_corrupted() -> Result<(), Error>
+{
+    let research_objects: [&[u8]; 4] = [
+        b"{\"kind\":\"observation\",\"text\":\"SPY closed at 150\"}",
+        b"{\"kind\":\"prompt\",\"turn\":0}",
+        b"{\"kind\":\"response\",\"turn\":0}",
+        b"{\"kind\":\"run_summary\",\"run_id\":\"01RUN\"}",
+    ];
+    let (journal, gone) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    let (without, _) = self::deployment(&journal, gone.clone());
+    let (journal, mut there) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    for bytes in research_objects {
+        assert!(!gone.contains_key(&Digest::of(bytes)));
+        there.insert(Digest::of(bytes), bytes.to_vec());
+    }
+    let (with, _) = self::deployment(&journal, there);
+    let (journal, mut corrupted) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    for bytes in research_objects {
+        corrupted.insert(
+            Digest::of(bytes),
+            b"not the bytes the gateway was sent".to_vec(),
+        );
+    }
+    let (damaged, _) = self::deployment(&journal, corrupted);
+    assert_eq!(answers(&without)?, (true, true, true, true, true, true));
+    assert_eq!(answers(&with)?, answers(&without)?);
+    assert_eq!(answers(&damaged)?, answers(&without)?);
+    assert_eq!(with.version(&agent()), without.version(&agent()));
+    assert_eq!(damaged.version(&agent()), without.version(&agent()));
+
+    let asked = std::cell::RefCell::new(Vec::new());
+    let dir = std::env::temp_dir().join(format!("executord-research-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    mandate_artifacts_fs::FsArtifactStore::open(&dir)?;
+    let root = dir.to_string_lossy().into_owned();
+    let none = || -> Result<mandate_executord::deployment::Rows, &'static str> {
+        Ok(Box::new(|_: &StreamId| None))
+    };
+    let production = mandate_executord::deployment::production(
+        |name| {
+            asked.borrow_mut().push(name.to_owned());
+            (name != "MANDATE_BARS").then(|| root.clone())
+        },
+        none,
+    )?;
+    assert!(production.is_some());
+    assert!(
+        !asked.borrow().iter().any(|name| name.contains("RESEARCH")),
+        "the executor never asks for the research store: {:?}",
+        asked.borrow()
+    );
+    std::fs::remove_dir_all(&dir).ok();
     Ok(())
 }
