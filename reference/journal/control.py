@@ -28,7 +28,9 @@ import yaml
 from common import (
     BOOL,
     DEC,
+    DEFERRED_PARTS,
     ENVELOPE,
+    LIQUIDITY_PAIR,
     ULID,
     INT,
     REF,
@@ -1546,13 +1548,26 @@ REQUEST_TOP = (
 )
 VERSIONED_VERSIONS[("ctl", "CredentialEnrolled")] = (1, 2)
 VERSIONED_SCHEMAS[("ctl", "CredentialEnrolled", 2)] = CREDENTIAL_ENROLLED_V2
-VERSIONED_VERSIONS[("agent", "ApprovalRequested")] = (1, 2)
+VERSIONED_VERSIONS[("agent", "ApprovalRequested")] = (1, 2, 3)
 VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 1)] = rec(
     *REQUEST_TOP, ("content", REQUEST_CONTENT_V1), ("content_hash", REF)
 )
 VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 2)] = rec(
     *REQUEST_TOP,
     ("content", rec(*REQUEST_CONTENT_V1.fields, ("execution", REQUEST_EXECUTION))),
+    ("content_hash", REF),
+)
+# v0.92 (DEC-2515): version 2's content, then the checks the dry run deferred to the binding gate.
+VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 3)] = rec(
+    *REQUEST_TOP,
+    (
+        "content",
+        rec(
+            *REQUEST_CONTENT_V1.fields,
+            ("execution", REQUEST_EXECUTION),
+            ("deferred_to_binding", list_of(one_of(*DEFERRED_PARTS))),
+        ),
+    ),
     ("content_hash", REF),
 )
 # §9.6's mirrors: each top-level member and the content member it repeats.
@@ -2275,7 +2290,8 @@ def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
 
 def request_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
     """§9.6's `ApprovalRequested` rules, on a well-typed payload, in the journal's order: each mirror,
-    then rule 136 (version 2's plan names the order's asset class), the deadline, the label, the
+    then rule 136 (version 2's plan names the order's asset class), rule 291 (version 3's deferrals
+    are ascending, never empty, and pair the liquidity checks), the deadline, the label, the
     default, the choices, and last the content hash over the whole content, the plan included."""
     if event_type != "ApprovalRequested":
         return []
@@ -2295,6 +2311,13 @@ def request_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
     if "execution" in content:
         same = content["execution"]["asset_class"] == p["asset_class"]
         rule("136", same, "payload.content.execution.asset_class")
+    if "deferred_to_binding" in content:
+        named = content["deferred_to_binding"]
+        path = "payload.content.deferred_to_binding"
+        if not ascending(named) and "rule.291.ascending" not in skip:
+            out.append(Violation("rule.291.ascending", "non_canonical", path))
+        rule("291.nonempty", bool(named), path)
+        rule("291.pair", len(set(LIQUIDITY_PAIR) & set(named)) != 1, path)
     rule("9.6.deadline", p["deadline"] == epoch_seconds(content["deadline"]), "payload.deadline")
     label = content["evidence"]["combined_score"]["label"]
     rule("9.6.label", label == "combined model score, not a probability of profit", "payload.content.evidence.combined_score.label")

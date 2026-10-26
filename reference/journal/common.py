@@ -269,6 +269,29 @@ def digest_strings(value) -> set[str]:
     return set()
 
 
+# Journal spec v0.85 (DEC-2388 item 10) and v0.92 (DEC-2515): the checks, or parts of checks, the
+# cell's runtime's advisory dry run deferred to the executor's binding gate, in strictly ascending
+# byte order: `DecisionMade` version 3's and `ApprovalRequested` version 3's names.
+DEFERRED_PARTS = (
+    "account_exposure",
+    "agent_equity",
+    "agent_mode",
+    "conduct_history",
+    "day_trade_budget",
+    "eligibility",
+    "fee_reservation",
+    "halt",
+    "liquidity_floor",
+    "other_orders",
+    "participation",
+    "quote_ask",
+    "reentry_cooldown",
+    "related_accounts",
+)
+assert list(DEFERRED_PARTS) == sorted(DEFERRED_PARTS, key=str.encode), "listed in byte order"
+LIQUIDITY_PAIR = ("liquidity_floor", "participation")
+
+
 def ascending(items: list) -> bool:
     """Strictly ascending, so a repeat is refused as well as a swap."""
     return all(a < b for a, b in itertools.pairwise(items))
