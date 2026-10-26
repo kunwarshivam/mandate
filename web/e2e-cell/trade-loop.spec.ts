@@ -138,7 +138,7 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     const first = await Promise.race([recorded.then(() => "sent" as const), passkey.waitFor({ state: "visible" }).then(() => "passkey" as const)]);
     if (first === "passkey") await passkey.getByRole("button", { name: "Use passkey" }).click();
     const answer = await Promise.race([recorded, page.waitForEvent("requestfailed", { predicate: () => wrongScope, timeout: 30_000 }).then(() => null)]);
-    if (answer === null) refuse(`the kill switch was sent for ${JSON.stringify(scope)}, not agent ${AGENT} alone, and was stopped`);
+    if (answer === null) return refuse(`the kill switch was sent for ${JSON.stringify(scope)}, not agent ${AGENT} alone, and was stopped`);
     if (!answer.ok()) refuse(`the API answered ${answer.status()} for the kill switch`);
     step("kill_switch", ((await answer.json()) as { command_id?: string }).command_id ?? "");
   });
