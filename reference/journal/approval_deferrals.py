@@ -337,6 +337,18 @@ def range_cases() -> list[dict]:
         case("a_full_chain_request_names_no_event_in_it", [request(2, None, ids["elsewhere"])], [0]),
         case("a_later_range_request_whose_decision_is_before_it", [request(2, None, ids["elsewhere"])], [], 40),
         case("a_later_range_holds_its_decision_and_disagrees", [deferring, request(2, None, ids["deferring"])], [1], 40),
+        case("a_later_range_request_before_its_decision_is_unchecked", [request(2, None, ids["deferring"]), deferring], [], 40),
+        case("an_empty_list_reads_as_an_absent_one", [plain, request(2, [], ids["plain"])], []),
+        case(
+            "a_decision_with_an_empty_list_reads_as_one_with_none",
+            [range_event(ids["plain"], "DecisionMade", 1, {"deferred_to_binding": []}), request(2, None, ids["plain"])],
+            [],
+        ),
+        case(
+            "the_same_names_in_another_order_disagree",
+            [deferring, request(3, list(reversed(NAMED)), ids["deferring"])],
+            [1],
+        ),
         case(
             "two_requests_both_reported",
             [deferring, request(2, None, ids["deferring"]), request(3, ["halt"], ids["deferring"])],
@@ -394,7 +406,8 @@ def expected_batch(section: dict, case: dict) -> dict:
 
 def expected_range(case: dict) -> list[int]:
     """The oracle's own reading of §11's check: each request's cause looked up among every event
-    before it by index, and the two sides' deferrals compared as sets."""
+    before it by index, and the two sides' deferrals compared as tuples, absent as the empty one,
+    since rules 269 and 291 fix each side's order, so another order is another list."""
     out = []
     events = case["events"]
     for i, event in enumerate(events):
@@ -408,7 +421,7 @@ def expected_range(case: dict) -> list[int]:
                 out.append(i)
         elif before[-1]["event_type"] != "DecisionMade":
             out.append(i)
-        elif set(before[-1]["payload"].get("deferred_to_binding") or ()) != set(
+        elif tuple(before[-1]["payload"].get("deferred_to_binding") or ()) != tuple(
             event["payload"]["content"].get("deferred_to_binding") or ()
         ):
             out.append(i)
