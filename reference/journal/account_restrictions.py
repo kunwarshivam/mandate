@@ -1,6 +1,7 @@
 """Journal spec §9.5's reference vectors for `AccountRestrictionChanged` (DEC-2137): an account
 restriction the executor detected (trading spec §7.3), with its closed `cause` (DEC-441 item 23),
-journaled before the modes it applies.
+journaled before the modes it applies. v0.96 (DEC-2816) journals every cause in force, and stream
+rule 309 keeps each on the stream once: the `streams` here are account streams of restrictions.
 
 The schema and rules 279 and 280 live in `control.py`, beside §9.5's other account-stream records,
 so one validator judges every closed schema. This module builds the `account_restrictions` section:
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import copy
 
+import account_activity
 from common import change, delete
 from control import (
     ACCOUNT_STREAM_REF,
@@ -30,7 +32,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2137)"
+SPEC = "docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2137) and stream rule 309 (DEC-2816)"
 ACCOUNT = f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}"
 AT = "2026-10-26T15:00:00.250000000Z"
 RISK_CLOCK = "2026-10-26T15:00:01.000000000Z"
@@ -41,6 +43,8 @@ CAUSES = ("broker_reject", "broker_notice", "connection_unavailable")
 CODES = ("account_trading_blocked", "account_restricted")
 RULE_279 = "rule 279"
 RULE_280 = "rule 280"
+RULE_309 = "rule 309"
+NOTICE, REJECT, CONNECTION = CAUSES[1], CAUSES[0], CAUSES[2]
 
 
 def restricted(event_id: str, restriction: str, cause: str, code: str) -> dict:
@@ -121,9 +125,88 @@ def valid_drafts() -> list[dict]:
     ]
 
 
+# --------------------------------------------------------------------------- rule 309
+
+STRICTNESS = {CLOSING: 1, BLOCKED: 2}
+
+
+def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> dict | None:
+    """Rule 309 over an account stream: the first `AccountRestrictionChanged` whose cause an
+    earlier one of the stream raised at the same restriction or a stricter one, reported at its
+    `payload.cause`. Every other record is passed over."""
+    in_force: dict[str, int] = {}
+    for i, record in enumerate(records):
+        if record["event_type"] != "AccountRestrictionChanged":
+            continue
+        p = record["payload"]
+        cause = None if "stream.309.any_cause" in skip else p["cause"]
+        level = STRICTNESS[p["restriction"]]
+        held = in_force.get(cause)
+        stricter = level > held if held is not None else True
+        if "boundary.stream_309_equal" in skip:
+            stricter = level >= held if held is not None else True
+        if not stricter and "stream.309.once" not in skip:
+            return {"index": i, "reason": "schema", "path": "payload.cause"}
+        in_force[cause] = level
+    return None
+
+
+def stream_cases() -> list[dict]:
+    def on(n: int, restriction: str, cause: str) -> dict:
+        code = "account_trading_blocked" if restriction == BLOCKED else "account_restricted"
+        return restricted(f"01JAE2R0A0000000000000S0{n:02d}"[-26:], restriction, cause, code)
+
+    mark = copy.deepcopy(account_activity.base_drafts()[account_activity.REJECT])
+    mark["stream_id"] = ACCOUNT
+
+    def case(name, clause, records, index):
+        expect = (
+            {"outcome": "Valid"}
+            if index is None
+            else {"outcome": "Invalid", "index": index, "reason": "schema", "path": "payload.cause"}
+        )
+        return {"name": name, "clause": clause, "records": records, "expect": expect}
+
+    return [
+        case("one_cause", f"{RULE_309}: a cause raised once", [on(1, CLOSING, REJECT)], None),
+        case("a_second_cause_while_restricted",
+             f"{RULE_309}: another cause at the same restriction is journaled (DEC-2816)",
+             [on(1, CLOSING, REJECT), on(2, CLOSING, NOTICE)], None),
+        case("a_cause_restricts_further",
+             f"{RULE_309}: the same cause again at a stricter restriction (§7.3 rows 4 then 1)",
+             [on(1, CLOSING, NOTICE), on(2, BLOCKED, NOTICE)], None),
+        case("a_looser_cause_beside_a_block",
+             f"{RULE_309}: a reject's closing-only beside a notice's block, which leaves the state unchanged",
+             [on(1, BLOCKED, NOTICE), on(2, CLOSING, REJECT)], None),
+        case("every_cause", f"{RULE_309}: each of the three causes once",
+             [on(1, CLOSING, REJECT), on(2, CLOSING, CONNECTION), on(3, BLOCKED, NOTICE)], None),
+        case("another_record_between",
+             f"{RULE_309}: a record of another type between two restrictions changes nothing",
+             [on(1, CLOSING, REJECT), mark, on(2, CLOSING, REJECT)], 2),
+        case("the_same_cause_twice", f"{RULE_309}: a cause in force is journaled once",
+             [on(1, CLOSING, REJECT), on(2, CLOSING, REJECT)], 1),
+        case("a_block_twice", f"{RULE_309}: a cause blocking the account is journaled once",
+             [on(1, BLOCKED, NOTICE), on(2, BLOCKED, NOTICE)], 1),
+        case("a_cause_restricts_less",
+             f"{RULE_309}: the same cause at a looser restriction is already in force",
+             [on(1, BLOCKED, NOTICE), on(2, CLOSING, NOTICE)], 1),
+        case("a_repeat_after_others",
+             f"{RULE_309}: earlier records count, not only the last",
+             [on(1, CLOSING, CONNECTION), on(2, CLOSING, REJECT), on(3, BLOCKED, NOTICE), on(4, CLOSING, CONNECTION)], 3),
+    ]
+
+
 # --------------------------------------------------------------------------- independent oracle
 
-ORACLE_CHECKS = ("drafts.valid", "invalid_drafts", "valid_drafts", "pairs.oracle")
+ORACLE_CHECKS = (
+    "drafts.valid",
+    "invalid_drafts",
+    "valid_drafts",
+    "pairs.oracle",
+    "streams.records",
+    "streams.rule",
+    "streams.oracle",
+)
 
 
 def found(check: str, message: str) -> str:
@@ -138,6 +221,19 @@ def admitted(restriction: str, cause: str, code: str) -> bool:
     if restriction == BLOCKED:
         return (cause, code) == ("broker_notice", "account_trading_blocked")
     return code == "account_restricted"
+
+
+def oracle_309(records: list[dict]) -> int | None:
+    """Rule 309 counted apart from `stream_failure`: each restriction against every earlier one of
+    its cause, by §7.3's order of the account states, blocked over closing only."""
+    restrictions = [(i, r["payload"]) for i, r in enumerate(records) if r["event_type"] == "AccountRestrictionChanged"]
+    for i, p in restrictions:
+        for j, q in restrictions:
+            if j >= i or q["cause"] != p["cause"]:
+                continue
+            if q["restriction"] == BLOCKED or p["restriction"] == CLOSING:
+                return i
+    return None
 
 
 def check_section(section: dict) -> list[str]:
@@ -161,12 +257,23 @@ def check_section(section: dict) -> list[str]:
                 draft = restricted("01JAE2R0A000000000000000R9", restriction, cause, code)
                 if (not violations(draft)) != admitted(restriction, cause, code):
                     problems.append(found("pairs.oracle", f"{restriction}/{cause}/{code}: the rules and §7.3 disagree"))
+    for case in section["streams"]:
+        for i, record in enumerate(case["records"]):
+            got = violations(record)
+            if got:
+                problems.append(found("streams.records", f"{case['name']} record {i}: {got}"))
+        want = None if case["expect"]["outcome"] == "Valid" else {k: case["expect"][k] for k in ("index", "reason", "path")}
+        if stream_failure(case["records"]) != want:
+            problems.append(found("streams.rule", f"{case['name']}: expected {case['expect']}"))
+        if oracle_309(case["records"]) != (None if want is None else want["index"]):
+            problems.append(found("streams.oracle", f"{case['name']}: the oracle disagrees on rule 309"))
     return problems
 
 
 # --------------------------------------------------------------------------- seeded bugs
 
 VALIDATOR_MUTANTS = ("rule.279", "rule.280", "rule.279.closing_only_any_code", "rule.280.any_reject")
+STREAM_MUTANTS = ("stream.309.once", "stream.309.any_cause", "boundary.stream_309_equal")
 
 
 def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
@@ -187,6 +294,12 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
          mutated(lambda s: case(s, "invalid_drafts", "blocked_by_a_reject")["expect"].update(path="payload.reason_code"))),
         ("a valid draft blocks on a reject", "valid_drafts",
          mutated(lambda s: case(s, "valid_drafts", "live")["changes"].append(change("payload.cause", "broker_reject")))),
+        ("a stream record blocks on a reject", "streams.records",
+         mutated(lambda s: case(s, "streams", "a_cause_restricts_further")["records"][1]["payload"].update(cause="broker_reject"))),
+        ("a stream's expectation differs", "streams.rule",
+         mutated(lambda s: case(s, "streams", "the_same_cause_twice")["expect"].update(outcome="Valid"))),
+        ("a stream's second cause becomes the first's", "streams.oracle",
+         mutated(lambda s: case(s, "streams", "a_second_cause_while_restricted")["records"][1]["payload"].update(cause="broker_reject"))),
     ]
 
 
@@ -204,6 +317,14 @@ def run_mutants(section: dict) -> list[str]:
             caught |= bool(got) if want is None else not reported(got, want)
         if not caught:
             escaped.append(f"restriction validator mutant {mutant}")
+    for mutant in STREAM_MUTANTS:
+        skip = frozenset([mutant])
+        caught = False
+        for stream in section["streams"]:
+            want = None if stream["expect"]["outcome"] == "Valid" else {k: stream["expect"][k] for k in ("index", "reason", "path")}
+            caught |= stream_failure(stream["records"], skip) != want
+        if not caught:
+            escaped.append(f"restriction stream mutant {mutant}")
     registered = vector_mutants(section)
     for check in ORACLE_CHECKS:
         if check != "pairs.oracle" and not any(c == check for _, c, _ in registered):
@@ -221,4 +342,5 @@ def build_section() -> dict:
         "drafts": base_drafts(),
         "invalid_drafts": invalid_drafts(),
         "valid_drafts": valid_drafts(),
+        "streams": stream_cases(),
     }

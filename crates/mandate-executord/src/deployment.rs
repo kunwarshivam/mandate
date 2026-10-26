@@ -16,7 +16,9 @@
 //! version, the instrument's class, grid and fill references, the instrument marked) falls back
 //! to the agent's last deployment that read, so a later unreadable row or a store outage never
 //! takes from a held position what its exit and its fills need (rule 13). The binding gate's
-//! input is never answered for an exit, which reads nothing here.
+//! input is never answered for an exit, which reads nothing here. The broker's answers are read
+//! through [`Named`], which names each deployed instrument by its asset id, as the executor sent it,
+//! wherever the broker names it by its ticker (DEC-938 item 1, [DEC-2813](../../../docs/project/decisions/DEC-2813.md)).
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -26,10 +28,12 @@ use std::rc::Rc;
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Value, parse};
+use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    AccountFillRefs, AccountScope, AgentId, BindingGateInput, BindingGateRequest,
-    BindingGateSource, ExitTier, FillConfigRefs, InstrumentSnapshot, MandateVersion, MandateView,
-    MarketObservation, ProtectionPrices,
+    AccountDeclaration, AccountFillRefs, AccountScope, AgentId, BindingGateInput, BindingGateRequest,
+    BindingGateSource, BrokerOutcome, BrokerRequest, BrokerSymbols, ConnectorError, ExitTier,
+    FillConfigRefs, InstrumentSnapshot, MandateVersion, MandateView, MarketObservation,
+    ProtectionPrices,
 };
 use mandate_gate_context::{Freshness, Journaled, Row};
 use mandate_gate_inputs::control::{
@@ -46,7 +50,7 @@ use crate::follow::agents_of;
 use crate::gate::{AccountRules, AgentRisk, AssetRecord, DeployedGate, Liquidity, OrderFacts};
 use crate::marks::Marked;
 use crate::quotes::QuoteFeed;
-use crate::{Protections, Unplanned, Wiring};
+use crate::{Broker, Protections, Unplanned, Wiring};
 
 /// How fresh, in risk-clock seconds, the journal's facts an opening reads must be: a mark within a
 /// minute, as the executor marks each deployed instrument at every tick, and the account's
@@ -218,14 +222,15 @@ impl Deployment {
 
     /// `wiring` with every production port read from the deployment over `rows`, `artifacts`,
     /// `liquidity` and `broker`; its quote feed is the deployment's too, so the binding gate reads
-    /// the quote the process hands the core.
+    /// the quote the process hands the core. The deployment is handed back too, for the broker's
+    /// answers to be read through ([`Named`]).
     pub fn wired(
         wiring: Wiring,
         scope: &AccountScope,
         rows: Rows,
         artifacts: Box<dyn ArtifactSource>,
         (liquidity, broker): (Box<dyn LiquidityRead>, Box<dyn BrokerFacts>),
-    ) -> Wiring {
+    ) -> (Wiring, Self) {
         let deployment = Self::new(
             scope,
             Sources {
@@ -236,15 +241,30 @@ impl Deployment {
                 broker,
             },
         );
-        Wiring {
+        let wired = Wiring {
             mandates: Box::new(deployment.clone()),
             instruments: Box::new(deployment.clone()),
             gate: Box::new(deployment.clone()),
             protections: Box::new(deployment.clone()),
             quotes: Box::new(deployment.clone()),
-            marked: Box::new(deployment),
+            marked: Box::new(deployment.clone()),
             ..wiring
-        }
+        };
+        (wired, deployment)
+    }
+
+    /// The broker's ticker of each instrument an exit, a fill or a mark reads, mapped to the
+    /// asset id the deployment names it by: each followed agent's current deployment, else its
+    /// last that read, so a held position's own orders and fills keep their asset id through a
+    /// store outage (`AGENTS.md` rule 13). A ticker a current deployment names is that
+    /// deployment's, over a stopped agent's last: the current ones are registered last.
+    pub fn symbols(&self) -> BrokerSymbols {
+        BrokerSymbols::registered(self.lasting_all().into_iter().rev().filter_map(|resolved| {
+            Some((
+                InstrumentId::new(&resolved.symbol).ok()?,
+                resolved.instrument.clone(),
+            ))
+        }))
     }
 
     fn rows(&self, stream: Option<&StreamId>) -> Option<Vec<StoredEvent>> {
@@ -632,6 +652,41 @@ impl BindingGateSource for Deployment {
             journaled: facts,
         };
         resolved.gate.input(&order, request)
+    }
+}
+
+/// A broker whose answers name each deployed instrument by its asset id wherever the broker named
+/// it by its ticker, as the shell's paper run reads Alpaca's (DEC-938 item 1): the executor sends
+/// the asset id, and Alpaca answers an order read back, a position and a `FILL` by the ticker, so
+/// read as they come, the run's own fill would be another instrument's. A ticker no deployment
+/// names stays as the broker spelled it ([DEC-2813](../../../docs/project/decisions/DEC-2813.md)).
+pub struct Named<B> {
+    broker: B,
+    deployment: Option<Deployment>,
+}
+
+impl<B> Named<B> {
+    /// `broker`, read through `deployment`'s tickers; through none when `None`.
+    pub fn new(broker: B, deployment: Option<Deployment>) -> Self {
+        Self { broker, deployment }
+    }
+}
+
+impl<B: Broker> Broker for Named<B> {
+    fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
+        self.broker.profile()
+    }
+
+    fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
+        let answered = self.broker.call(request)?;
+        Ok(match &self.deployment {
+            Some(deployment) => deployment.symbols().outcome(answered),
+            None => answered,
+        })
+    }
+
+    fn declared(&self) -> Option<AccountDeclaration> {
+        self.broker.declared()
     }
 }
 

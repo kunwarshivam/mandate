@@ -19,13 +19,13 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use super::executor::{CONNECTION, connect_check, executor_live};
+use super::executor::{CONNECTION, RESEARCH_CONNECTION, connect_check, executor_live};
 use super::{
     API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_OWNER, DEPLOY_MANAGER_PROCESS,
-    ImageSource, NAMESPACE, NODE, WORKSPACE_CHART, api_diagnosis, api_image_tag, api_port_forward,
-    helm, host_image_source, http, kubectl, open_session, processes, render, render_with,
-    reply_body, run_id, run_job, session_cookie, signed_in, stub_image_tag, stub_token,
-    template_args, tools_missing, up, web,
+    ImageSource, MODEL_GATEWAY_PROCESS, NAMESPACE, NODE, RESEARCH_MANAGER_PROCESS, WORKSPACE_CHART,
+    api_diagnosis, api_image_tag, api_port_forward, helm, host_image_source, http, kubectl,
+    open_session, processes, render, render_with, reply_body, run_id, run_job, session_cookie,
+    signed_in, stub_image_tag, stub_token, template_args, tools_missing, up, web,
 };
 use crate::output;
 
@@ -106,12 +106,27 @@ pub fn account_of(id: &str) -> String {
     format!("01KDEA{id:0>10.10}000000000A")
 }
 
-/// The demo's paper connection as the executor's connect check left it: the account the
-/// connection binds and the passing `ConnectionChecked` the record names as its cause.
+/// The research workspace's own account stream for the run (DEC-2247 item 3): a ULID of its own,
+/// so its connection binds an account no other workspace's connection does.
+pub fn research_account_of(id: &str) -> String {
+    format!("01KDER{id:0>10.10}000000000A")
+}
+
+/// A paper connection as the executor's connect check left it: the connection, the account it
+/// binds and the passing `ConnectionChecked` the record names as its cause.
 #[derive(Debug, Clone)]
 pub struct Connected {
+    pub connection: &'static str,
     pub account: String,
     pub checked: String,
+}
+
+/// The run's two paper connections, each from its own connect check: the demo workspace's, which
+/// step 2 records, and the research workspace's, which step 3 records there.
+#[derive(Debug, Clone)]
+pub struct Connections {
+    pub demo: Connected,
+    pub research: Connected,
 }
 
 /// The run's workspace (DEC-2010): a ULID, since the API hosts only a ULID, fresh for each run id
@@ -270,9 +285,8 @@ const DR_RESEARCH: Wait = Wait {
     lane: "DR",
     story: "E21-54",
     pr: None,
-    lands: "the research workspace's own connect check and connection record, as step 2 runs \
-            for the demo's workspace, so its deployment is written at version 2 and the manager \
-            starts its runtime (DEC-1171)",
+    lands: "a check that the research agent's runtime, which the manager starts from its \
+            version-2 deployment, journals its first research run over the recorded bundle",
 };
 const DR_CONNECT: Wait = Wait {
     lane: "DR",
@@ -294,13 +308,6 @@ const W2_WEB: Wait = Wait {
     pr: None,
     lands: "web/ sends the demo's gestures through the API, and `cell demo` drives web/ against \
             the cell (claim #1443)",
-};
-const X_EXECUTOR: Wait = Wait {
-    lane: "X",
-    story: "E21-30",
-    pr: None,
-    lands: "slice X1b-3: paper fills on the fixture; the executor already takes the \
-            runtime's orders (#1736)",
 };
 const P5_HOOK: Wait = Wait {
     lane: "D1",
@@ -481,7 +488,7 @@ pub(super) fn confirm_code(version: &str) -> String {
 /// The code `connection record` shows for the demo's paper connection on `account`, caused by the
 /// connect check `checked`, for the owner `user` (DEC-530 item 4): its record's members, the
 /// cause and the gesture, as canonical JSON.
-pub fn record_code(account: &str, checked: &str, user: &str) -> String {
+pub fn record_code(connection: &str, account: &str, checked: &str, user: &str) -> String {
     code(&format!(
         concat!(
             r#"{{"account_ref":"{account}","broker":"alpaca","causation_id":"{checked}","#,
@@ -491,7 +498,7 @@ pub fn record_code(account: &str, checked: &str, user: &str) -> String {
         ),
         account = account,
         checked = checked,
-        connection = CONNECTION,
+        connection = connection,
         user = user,
     ))
 }
@@ -582,13 +589,14 @@ pub(super) fn deploy_code(agent: &str, version: &str) -> String {
 }
 
 /// The demo's steps for `workspace`, given the bytes of the demo's mandate, of
-/// [`RESEARCH_AGENT`]'s, and the paper connection the executor's connect
-/// check left `connected`.
+/// [`RESEARCH_AGENT`]'s, and the paper connections the executor's connect checks left
+/// `connected`.
 pub fn plan(
     workspace: &str,
     (mandate, research_mandate): (&[u8], &[u8]),
-    connected: Option<&Connected>,
+    connections: Option<&Connections>,
 ) -> Vec<Step> {
+    let connected = connections.map(|c| &c.demo);
     let version = reference(mandate);
     let research_version = reference(research_mandate);
     let research_workspace = research_workspace_of(workspace);
@@ -643,29 +651,38 @@ pub fn plan(
         confirm_code(&research_version),
         deploy_code(RESEARCH_AGENT, &research_version),
     );
-    let record_args = |connected: &Connected, extra: &[&str]| {
-        owner(
+    let record_words = |connected: &Connected, extra: &[&str]| -> Vec<String> {
+        [
             &[
-                &[
-                    "connection",
-                    "record",
-                    "--environment",
-                    "paper",
-                    "--connection",
-                    CONNECTION,
-                    "--broker",
-                    "alpaca",
-                    "--scope",
-                    "trading",
-                    "--account-ref",
-                    &connected.account,
-                    "--checked",
-                    &connected.checked,
-                ][..],
-                extra,
-            ]
-            .concat(),
-        )
+                "connection",
+                "record",
+                "--environment",
+                "paper",
+                "--connection",
+                connected.connection,
+                "--broker",
+                "alpaca",
+                "--scope",
+                "trading",
+                "--account-ref",
+                &connected.account,
+                "--checked",
+                &connected.checked,
+            ][..],
+            extra,
+        ]
+        .concat()
+        .iter()
+        .map(|a| a.to_string())
+        .collect()
+    };
+    let record_args = |connected: &Connected, extra: &[&str]| {
+        let words = record_words(connected, extra);
+        owner(&words.iter().map(String::as_str).collect::<Vec<_>>())
+    };
+    let research_record_args = |connected: &Connected, extra: &[&str]| {
+        let words = record_words(connected, extra);
+        researcher(&words.iter().map(String::as_str).collect::<Vec<_>>())
     };
     let steps = vec![
         Step {
@@ -739,7 +756,7 @@ pub fn plan(
             parts: [
                 match connected {
                     Some(connected) => {
-                        let recorded = record_code(&connected.account, &connected.checked, &user);
+                        let recorded = record_code(connected.connection, &connected.account, &connected.checked, &user);
                         vec![
                             gesture(
                                 "the paper connection's record, its code shown (nothing \
@@ -750,7 +767,7 @@ pub fn plan(
                             gesture(
                                 "the paper connection, recorded with the code shown",
                                 record_args(connected, &["--code", &recorded]),
-                                format!("recorded {CONNECTION} as event"),
+                                format!("recorded {} as event", connected.connection),
                             ),
                         ]
                     }
@@ -853,7 +870,8 @@ pub fn plan(
         Step {
             number: 3,
             title: "the research loop reads news and filings and asks the model",
-            parts: vec![
+            parts: [
+                vec![
                 gesture(
                     "the research agent's own paper workspace, opened (DEC-2247 item 2)",
                     with(
@@ -884,6 +902,36 @@ pub fn plan(
                     ),
                     format!("founded ctl:{research_workspace} for member {FOUNDER}"),
                 ),
+                ],
+                match connections.map(|c| &c.research) {
+                    Some(connected) => {
+                        let recorded =
+                            record_code(connected.connection, &connected.account, &connected.checked, &user);
+                        vec![
+                            gesture(
+                                "the research workspace's own paper connection's record, its \
+                                 code shown (nothing committed), naming its own connect check",
+                                research_record_args(connected, &[]),
+                                format!("code {recorded}"),
+                            ),
+                            gesture(
+                                "that connection, recorded there with the code shown, so the \
+                                 research agent's deployment is written at version 2",
+                                research_record_args(connected, &["--code", &recorded]),
+                                format!("recorded {} as event", connected.connection),
+                            ),
+                        ]
+                    }
+                    None => vec![Part::Gap(Gap {
+                        what: "the research workspace's own paper connection, recorded from its \
+                               connect, so its deployment is written at version 2",
+                        on_main: "the executor's connect check and its record in the local cell \
+                                  (#1759, #1763), which a run with the executor's image runs for \
+                                  each workspace",
+                        waits: vec![DR_CONNECT],
+                    })],
+                },
+                vec![
                 gesture(
                     "the moving-average crossover model, registered there",
                     researcher(&["model", "register", "quant.ma_crossover", "1.0.0"]),
@@ -946,6 +994,18 @@ pub fn plan(
                     ]),
                     "deployed as event".into(),
                 ),
+                ],
+                connections
+                    .map(|c| {
+                        vec![Part::Executor(ExecutorCheck {
+                            shows: "the research workspace's executor, started by the deployment \
+                                    manager from the research agent's version-2 deployment, \
+                                    running and live",
+                            account: c.research.account.clone(),
+                        })]
+                    })
+                    .unwrap_or_default(),
+                vec![
                 Part::Gap(Gap {
                     what: "a research run in the research agent's runtime, over the recorded \
                            bundle its image carries, through mandate-gateway's recorded fake",
@@ -953,10 +1013,14 @@ pub fn plan(
                               bundle in the interim runtime image (#1769), every managed runtime \
                               pod handed it (#1774), and the research model's registration \
                               (#1779, #1782), and the connect check and record that write a \
-                              deployment at version 2 (#1759, #1763), which step 2 runs",
+                              deployment at version 2 (#1759, #1763)",
                     waits: vec![DR_RESEARCH],
                 }),
-            ],
+                ],
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
         },
         Step {
             number: 4,
@@ -1008,9 +1072,21 @@ pub fn plan(
                     what: "the paper fill and the protective stop on a fixture broker",
                     on_main: "the executor process (#1596, binary #1694) and its interim image \
                               in the cell on the fixture paper broker (#1702, DEC-2031), handing \
-                              its agents' orders to the core (#1736), with the runtime proposing \
-                              nothing on the deny-all wiring (DEC-1013)",
-                    waits: vec![X_EXECUTOR, P5_HOOK],
+                              its agents' orders to the core (#1736); the fixture fills, and the \
+                              executor reads each deployment's mandate, gate and protection \
+                              (#2547, #2605) and its broker by asset id, so a deployed opening is \
+                              gated, filled, booked and protected in process (#2624, DEC-2813); \
+                              the cell's daemon asks on a deferring opening (#2538), and, in \
+                              process, the runtime's production wiring decides, asks and \
+                              proposes the opening once granted, on the demo envelope (#2637); \
+                              the cell's runtime is wired by the gap above",
+                    waits: vec![wait(
+                        "E2E",
+                        "E21-54",
+                        None,
+                        "a gesture that shows the granted opening's fill and resting stop in the \
+                         cell, in place of this gap",
+                    )],
                 }),
             ],
         },
@@ -1513,12 +1589,40 @@ pub fn run_in(name: &str) -> Result<String> {
         None
     } else {
         let account = account_of(&id);
-        let checked = match connect_check(&format!("{id}c"), &workspace, &account)? {
+        let checked = match connect_check(&format!("{id}c"), &workspace, &account, CONNECTION)? {
             Ok(checked) => checked,
             Err(logs) => bail!("the executor's connect check for the demo did not pass:\n{logs}"),
         };
         eprintln!("    connect check: passed as {checked} for account {account}");
-        Some(Connected { account, checked })
+        let research_workspace = research_workspace_of(&workspace);
+        let research_account = research_account_of(&id);
+        let research_checked = match connect_check(
+            &format!("{id}r"),
+            &research_workspace,
+            &research_account,
+            RESEARCH_CONNECTION,
+        )? {
+            Ok(checked) => checked,
+            Err(logs) => bail!(
+                "the executor's connect check for the research workspace did not pass:\n{logs}"
+            ),
+        };
+        eprintln!(
+            "    connect check: passed as {research_checked} for the research workspace's account \
+             {research_account}"
+        );
+        Some(Connections {
+            demo: Connected {
+                connection: CONNECTION,
+                account,
+                checked,
+            },
+            research: Connected {
+                connection: RESEARCH_CONNECTION,
+                account: research_account,
+                checked: research_checked,
+            },
+        })
     };
     let steps = plan(&workspace, inputs.envelopes(), connected.as_ref());
     let all = gestures(&steps);
@@ -1761,32 +1865,53 @@ fn api_unaskable() -> Result<Option<String>> {
     Ok(None)
 }
 
-/// Points the cell's API and deployment manager at the run's `workspace` (DEC-2010): a `helm
-/// upgrade` of the workspace release that keeps every other value, then a wait until both
-/// Deployments have rolled out, so no pod of an earlier run still serves another workspace; and
+/// The Deployments [`point_api`] points at the run and waits on: the API and the first manager on
+/// the run's workspace, the second manager and the model gateway on its research workspace.
+const POINTED: [&str; 4] = [
+    API_PROCESS,
+    DEPLOY_MANAGER_PROCESS,
+    RESEARCH_MANAGER_PROCESS,
+    MODEL_GATEWAY_PROCESS,
+];
+
+/// The chart values [`point_api`] sets for the run's `workspace`: the API on it, and the second
+/// manager and the model gateway on its research workspace, the same ULID with `r`, the one value
+/// the chart takes for either (DEC-2070 items 1 and 5).
+fn pointed_values(workspace: &str) -> [String; 3] {
+    let research = research_workspace_of(workspace);
+    [
+        format!("api.workspace={workspace}"),
+        format!("deployManager.researchWorkspace={research}"),
+        format!("modelGateway.workspace={research}"),
+    ]
+}
+
+/// Points the cell's API and deployment manager at the run's `workspace` (DEC-2010), and the second
+/// manager and the model gateway at its research workspace (DEC-2070, DEC-2397 item 6): a `helm
+/// upgrade` of the workspace release that keeps every other value, then a wait until each of those
+/// Deployments the cell holds has rolled out, so no pod of an earlier run still serves another
+/// workspace; and
 /// any earlier `kubectl port-forward` to the API is stopped, so the checks never reach an old pod
 /// through it (`api_port_forward` would reuse a forward that still answers its 401).
 pub(super) fn point_api(workspace: &str) -> Result<()> {
-    let hosted = format!("api.workspace={workspace}");
-    let upgraded = helm(&[
-        "upgrade",
-        "workspace",
-        WORKSPACE_CHART,
-        "--namespace",
-        NAMESPACE,
-        "--reuse-values",
-        "--set",
-        &hosted,
-        "--wait",
-        "--wait-for-jobs",
-        "--timeout",
-        "3m",
-    ]);
+    let mut args = vec![
+        "upgrade".to_owned(),
+        "workspace".to_owned(),
+        WORKSPACE_CHART.to_owned(),
+        "--namespace".to_owned(),
+        NAMESPACE.to_owned(),
+        "--reuse-values".to_owned(),
+    ];
+    for value in pointed_values(workspace) {
+        args.extend(["--set".to_owned(), value]);
+    }
+    args.extend(["--wait", "--wait-for-jobs", "--timeout", "3m"].map(str::to_owned));
+    let upgraded = helm(&args.iter().map(String::as_str).collect::<Vec<_>>());
     if upgraded.is_err() {
         api_diagnosis();
     }
     upgraded?;
-    for process in [API_PROCESS, DEPLOY_MANAGER_PROCESS] {
+    for process in POINTED {
         let deployment = format!("deployment/{process}");
         let present = kubectl(&[
             "get",
@@ -2292,17 +2417,32 @@ mod tests {
     /// The connect check a run's plan names: run 1's account, and a passing check's event id.
     fn connected() -> Connected {
         Connected {
+            connection: CONNECTION,
             account: account_of("1"),
             checked: "01KDEC0000000000000000000C".into(),
         }
     }
 
-    /// The plan for `workspace` on the demo's three envelopes, after [`connected`]'s check.
+    /// The research workspace's connect check a run's plan names: run 1's research account, and
+    /// a passing check's event id.
+    fn research_connected() -> Connected {
+        Connected {
+            connection: RESEARCH_CONNECTION,
+            account: research_account_of("1"),
+            checked: "01KDEC0000000000000000000R".into(),
+        }
+    }
+
+    /// The plan for `workspace` on the demo's three envelopes, after [`connected`]'s and
+    /// [`research_connected`]'s checks.
     fn planned(workspace: &str) -> Vec<Step> {
         plan(
             workspace,
             (&mandate(), &research_mandate()),
-            Some(&connected()),
+            Some(&Connections {
+                demo: connected(),
+                research: research_connected(),
+            }),
         )
     }
 
@@ -2429,6 +2569,7 @@ mod tests {
     fn the_codes_are_the_first_eight_hex_digits_of_the_gestures_hash() {
         assert_eq!(
             record_code(
+                CONNECTION,
                 "01J0ACC0VNT000000000000000",
                 "10000000000000000000000001",
                 "user-owner"
@@ -2444,10 +2585,10 @@ mod tests {
         let research = reference(&research_mandate());
         assert_eq!(
             research,
-            "sha256:c6c2018e6f60482ac6ae838f2535e92036f21c6638f9818df5028d45537cd9de"
+            "sha256:d64d0988e24fa754e0e64acad129d378eed55297e3b28cb82d0b1587ebe54a60"
         );
-        assert_eq!(confirm_code(&research), "9d06451c");
-        assert_eq!(deploy_code(RESEARCH_AGENT, &research), "a45a1728");
+        assert_eq!(confirm_code(&research), "2e7bcfa5");
+        assert_eq!(deploy_code(RESEARCH_AGENT, &research), "5ae8bd0c");
     }
 
     /// The steps run 1 to 7 in order, then the record; a shown code precedes the gesture that types
@@ -2777,14 +2918,21 @@ mod tests {
             models,
             [("llm.research_agent", true), ("quant.ma_crossover", false)]
         );
-        assert_eq!(m["connection_id"], parsed(MANDATE_FILE)["connection_id"]);
+        assert_eq!(m["connection_id"], RESEARCH_CONNECTION);
+        assert_ne!(
+            m["connection_id"],
+            parsed(MANDATE_FILE)["connection_id"],
+            "a connection of its own (DEC-2070 item 2)"
+        );
     }
 
-    /// Step 3 opens and founds the research agent's own workspace, registers its two models
-    /// there, the research one from the recorded entry, then creates, confirms and deploys its
-    /// envelope, every gesture in that workspace and none in the run's, so the research agent is
-    /// alone on its control stream (DEC-2214 item 1, DEC-2247 item 2). What is left waits on the
-    /// manager starting a runtime from the deployment only (DEC-2247 item 3).
+    /// Step 3 opens and founds the research agent's own workspace, records there the paper
+    /// connection of its own connect check, registers its two models, the research one from the
+    /// recorded entry, then creates, confirms and deploys its envelope, every gesture in that
+    /// workspace and none in the run's, so the research agent is alone on its control stream and
+    /// its deployment is written at version 2 (DEC-2214 item 1, DEC-2247 items 2 and 3). The
+    /// executor the manager starts for that account is checked after the Job; what is left is a
+    /// check of the research run itself.
     #[test]
     fn step_three_deploys_the_research_agent_alone_in_its_own_workspace() {
         let steps = planned("demo3");
@@ -2807,6 +2955,8 @@ mod tests {
             [
                 ["workspace", "open"],
                 ["workspace", "found"],
+                ["connection", "record"],
+                ["connection", "record"],
                 ["model", "register"],
                 ["model", "register"],
                 ["version", "create"],
@@ -2816,12 +2966,59 @@ mod tests {
                 ["agent", "deploy"],
             ]
         );
+        let research = research_connected();
+        let code = record_code(
+            RESEARCH_CONNECTION,
+            &research.account,
+            &research.checked,
+            &FOUNDER.to_ascii_lowercase(),
+        );
+        assert_eq!(gestures[2].expect, format!("code {code}"));
+        assert!(
+            !gestures[2].args.iter().any(|a| a == "--code"),
+            "the shown record commits nothing"
+        );
+        for g in &gestures[2..4] {
+            assert!(
+                g.args
+                    .windows(2)
+                    .any(|w| w == ["--connection", RESEARCH_CONNECTION]),
+                "{:?}",
+                g.args
+            );
+        }
+        assert!(research.account.starts_with("01KDER"));
+        assert_ne!(
+            research.account,
+            connected().account,
+            "an account of its own"
+        );
+        assert_ne!(research_account_of("7"), account_of("7"));
+        assert!(
+            gestures[3]
+                .args
+                .windows(2)
+                .any(|w| w == ["--code", code.as_str()])
+        );
+        for pair in [
+            ["--account-ref", research.account.as_str()],
+            ["--checked", research.checked.as_str()],
+        ] {
+            assert!(gestures[3].args.windows(2).any(|w| w == pair), "{pair:?}");
+        }
+        assert!(
+            matches!(
+                step.parts.iter().rev().nth(1),
+                Some(Part::Executor(e)) if e.account == research.account
+            ),
+            "the research workspace's executor is checked before the research run's gap"
+        );
         for g in &gestures {
             let at = g.args.iter().position(|a| a == "--workspace").unwrap();
             assert_eq!(g.args[at + 1], "demo3r", "{:?}", g.args);
         }
         assert_eq!(
-            gestures[3].args[2..6],
+            gestures[5].args[2..6],
             [
                 "llm.research_agent",
                 "0.1.0",
@@ -2830,8 +3027,8 @@ mod tests {
             ]
         );
         let version = reference(&research_mandate());
-        assert_eq!(gestures[4].expect, format!("created {version}"));
-        let deployed = &gestures[8].args;
+        assert_eq!(gestures[6].expect, format!("created {version}"));
+        let deployed = &gestures[10].args;
         assert_eq!(deployed[2..4], [RESEARCH_AGENT, version.as_str()]);
         assert_eq!(
             lanes(step),
@@ -3381,7 +3578,7 @@ mod tests {
 
     /// The slices a wait has named that are on `main`, with the PR that landed each: a lane that
     /// lands one adds its row here, so no wait can go on saying it is still to come.
-    const LANDED_SLICES: &[(&str, u32)] = &[("X1a", 1596), ("X1b", 1736)];
+    const LANDED_SLICES: &[(&str, u32)] = &[("X1a", 1596), ("X1b", 1736), ("X1b-3", 2624)];
 
     /// The slices `text` names as still to land: each word that follows `slice `, up to the
     /// first character that is not a letter, a digit or a hyphen, so `X1b-3` is not `X1b`.
@@ -3464,10 +3661,19 @@ mod tests {
         };
         let shown = all
             .iter()
-            .position(|g| g.args[..2] == ["connection", "record"])
+            .position(|g| {
+                g.args[..2] == ["connection", "record"] && g.args.iter().any(|a| a == "demo1")
+            })
             .unwrap();
-        let typed = at(&["connection", "record"], "--code");
-        let code = record_code(&c.account, &c.checked, &user);
+        let typed = all
+            .iter()
+            .position(|g| {
+                g.args[..2] == ["connection", "record"]
+                    && g.args.iter().any(|a| a == "demo1")
+                    && g.args.iter().any(|a| a == "--code")
+            })
+            .unwrap();
+        let code = record_code(CONNECTION, &c.account, &c.checked, &user);
         assert_eq!(all[shown].expect, format!("code {code}"));
         assert!(
             all[typed]
@@ -3508,16 +3714,54 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(executors.len(), 1);
-        assert_eq!(executors[0].account, c.account);
+        assert_eq!(
+            executors
+                .iter()
+                .map(|e| e.account.as_str())
+                .collect::<Vec<_>>(),
+            [c.account.as_str(), research_connected().account.as_str()],
+            "the demo's executor, then the research workspace's"
+        );
         assert!(matches!(step2.parts.last(), Some(Part::Executor(_))));
         let dry = unconnected("demo1");
         let dry_all = gestures(&dry);
         assert!(dry_all.iter().all(|g| g.args[0] != "connection"));
         assert!(
+            dry[2].parts.iter().any(|p| matches!(
+                p,
+                Part::Gap(gap) if gap.waits.iter().any(|w| w.lands == DR_CONNECT.lands)
+            )),
+            "step 3 names the research connection's gap"
+        );
+        assert!(
             dry.iter()
                 .flat_map(|s| &s.parts)
                 .all(|p| !matches!(p, Part::Executor(_) | Part::Applied(_)))
+        );
+    }
+
+    /// DEC-2070 items 1 and 5: the cell is pointed at the run's workspace and, for the second
+    /// manager and the model gateway alike, at its research workspace, the run's with `r`, which
+    /// the chart's schema and guard take; and each of those Deployments is waited on.
+    #[test]
+    fn the_cell_is_pointed_at_the_run_and_its_research_workspace() {
+        let run = workspace_of("12");
+        assert_eq!(
+            pointed_values(&run),
+            [
+                format!("api.workspace={run}"),
+                format!("deployManager.researchWorkspace={run}r"),
+                format!("modelGateway.workspace={run}r"),
+            ]
+        );
+        assert_eq!(
+            POINTED,
+            [
+                "api",
+                "deploy-manager",
+                "deploy-manager-research",
+                "model-gateway"
+            ]
         );
     }
 

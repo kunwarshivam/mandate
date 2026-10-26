@@ -148,11 +148,11 @@ fn an_uninterpreted_broker_field_names_its_story() {
     let risk_state = event(
         ACCOUNT_STREAM,
         2,
-        "RiskLimitTriggered",
-        with_clock(&[("limit", text("daily_loss"))], 10),
+        "MandateVersionApplied",
+        with_clock(&[("result", text("applied"))], 10),
     );
     let error = fold(&mut state, &risk_state)
-        .expect_err("a risk-state record stream F owns is not interpreted here yet");
+        .expect_err("a version record stream F owns is not interpreted here yet");
     assert_eq!(error.code(), "not_interpreted", "{error}");
     let message = format!("{error}");
     assert!(

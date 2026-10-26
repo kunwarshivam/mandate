@@ -86754,7 +86754,7 @@ real_money:
     expect:
       enabled: true
 account_restrictions:
-  spec: docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2137)
+  spec: docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2137) and stream rule 309 (DEC-2816)
   drafts:
     blocked:
       envelope_version: 1
@@ -87050,6 +87050,602 @@ account_restrictions:
       value: live
     expect:
       outcome: Valid
+  streams:
+  - name: one_cause
+    clause: 'rule 309: a cause raised once'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: a_second_cause_while_restricted
+    clause: 'rule 309: another cause at the same restriction is journaled (DEC-2816)'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_notice
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: a_cause_restricts_further
+    clause: 'rule 309: the same cause again at a stricter restriction (§7.3 rows 4 then 1)'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_notice
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: a_looser_cause_beside_a_block
+    clause: 'rule 309: a reject''s closing-only beside a notice''s block, which leaves the state unchanged'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: every_cause
+    clause: 'rule 309: each of the three causes once'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: connection_unavailable
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S003
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: another_record_between
+    clause: 'rule 309: a record of another type between two restrictions changes nothing'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE3A0A000000000000000X3
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RejectObserved
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        http_status: 403
+        code: '40310000'
+        message: insufficient buying power
+        client_order_id: md-01JAE3A0A000000000000000N1
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: payload.cause
+  - name: the_same_cause_twice
+    clause: 'rule 309: a cause in force is journaled once'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.cause
+  - name: a_block_twice
+    clause: 'rule 309: a cause blocking the account is journaled once'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.cause
+  - name: a_cause_restricts_less
+    clause: 'rule 309: the same cause at a looser restriction is already in force'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_notice
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.cause
+  - name: a_repeat_after_others
+    clause: 'rule 309: earlier records count, not only the last'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: connection_unavailable
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S003
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S004
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: connection_unavailable
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 3
+      reason: schema
+      path: payload.cause
 account_switches:
   spec: docs/specs/journal.md §9.5 rules 281, 282 and 293 to 296 (DEC-2139)
   drafts:

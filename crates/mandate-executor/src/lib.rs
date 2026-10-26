@@ -99,6 +99,7 @@ mod session;
 mod shape;
 mod state;
 mod step;
+mod symbols;
 pub mod tripwire;
 mod types;
 
@@ -125,6 +126,7 @@ pub use state::{
     fold,
 };
 pub use step::handle;
+pub use symbols::BrokerSymbols;
 pub use types::{
     AccountDeclaration, AccountRef, AccountScope, AccountState, AccountWide, AccountWideScope,
     ActivityCursor, AgentId, BracketLegs, BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome,
