@@ -1016,3 +1016,30 @@ fn a_restarted_process_starts_no_second_run_on_the_item() {
         "the same record, stored again by the new process"
     );
 }
+
+/// An arrived item no thesis covers journals nothing and is not retried into a run (DEC-2275 item
+/// 3): the core refuses it, and the same pass goes on to its scheduled run, whose research call
+/// then makes the item inert.
+#[test]
+fn an_item_no_thesis_covers_journals_nothing_and_the_pass_goes_on() {
+    let rig = Rig::default();
+    let wired = Wired::agentic(&rig);
+    evented(&wired);
+    if let Some(evented) = wired.source.evented.borrow_mut().as_mut() {
+        evented.active.clear();
+    }
+    let mut process = running(&rig, &wired);
+    tick(&rig, NOW + 60);
+    assert!(process.step(at(NOW + 60)).is_empty());
+    assert!(stored(&rig, "ObservationRecorded").is_empty());
+    let started = run_started(&rig);
+    assert_eq!(started.len(), 1, "{:?}", kinds(&rig));
+    assert_eq!(
+        started[0]
+            .get("payload")
+            .and_then(|p| p.get("trigger"))
+            .and_then(|t| t.get("kind"))
+            .and_then(Value::as_str),
+        Some("schedule")
+    );
+}
