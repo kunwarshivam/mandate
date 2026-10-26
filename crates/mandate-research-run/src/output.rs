@@ -7,6 +7,8 @@ use std::collections::BTreeSet;
 use mandate_canon::{Object, Value, parse};
 use mandate_num::{Conviction, Unit};
 
+use crate::agentic::RunKind;
+
 /// The output schema's bounds, inside the research entry's content hash (§6.5, §7.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OutputBounds {
@@ -96,23 +98,34 @@ impl OutputRejection {
     }
 }
 
-/// Parses `bytes` against `bounds`.
+/// Parses `bytes` against `bounds`, as the output schema of a `kind` run pins it (agent harness spec
+/// §6.5, §6.9): an `ideate` run's output is exactly `theses` and `invalidations`, and a `monitor`
+/// run's exactly `invalidations`, so a thesis from a monitor run is refused, as the gateway's
+/// `schema_invalid` refuses it, and its invalidations are never lost to a member it cannot have.
 ///
 /// # Errors
 /// [`OutputRejection`] for anything but an exact schema-valid output within its bounds.
 pub fn parse_output(
     bytes: &[u8],
     bounds: &OutputBounds,
+    kind: RunKind,
 ) -> Result<CandidateOutput, OutputRejection> {
     if bytes.len() > usize::try_from(bounds.max_output_bytes).unwrap_or(usize::MAX) {
         return Err(OutputRejection::TooLong);
     }
     let value = parse(bytes).map_err(|_| OutputRejection::NotJson)?;
-    let top = exact(&value, &["invalidations", "theses"], &[], "output")?;
-    let theses = list(top, "theses", bounds.max_theses)?
-        .iter()
-        .map(|thesis| candidate_thesis(thesis, bounds))
-        .collect::<Result<Vec<_>, _>>()?;
+    let required: &[&str] = match kind {
+        RunKind::Ideate => &["invalidations", "theses"],
+        RunKind::Monitor => &["invalidations"],
+    };
+    let top = exact(&value, required, &[], "output")?;
+    let theses = match kind {
+        RunKind::Ideate => list(top, "theses", bounds.max_theses)?
+            .iter()
+            .map(|thesis| candidate_thesis(thesis, bounds))
+            .collect::<Result<Vec<_>, _>>()?,
+        RunKind::Monitor => Vec::new(),
+    };
     let invalidations = list(top, "invalidations", bounds.max_invalidations)?
         .iter()
         .map(|invalidation| candidate_invalidation(invalidation, bounds))

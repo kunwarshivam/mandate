@@ -16,6 +16,7 @@ use mandate_research::{
     ProposedThesis, RefusalReason, ResearchEvent, SchemaDec, SourceId as ResearchSource, Thesis,
     ThesisEntry, ThesisId, WorkingUniverse, fold_theses,
 };
+use mandate_research_run::agentic::RunKind;
 use mandate_research_run::{CandidateThesis, InstrumentFact, ItemKind, Symbol, parse_output};
 use mandate_time::UtcNanos;
 
@@ -85,15 +86,18 @@ pub(super) struct ThesisDraft {
 
 /// What judging decided: one verdict per candidate in response order, theses first (rule 151), the
 /// accepted invalidations' `ThesisInvalidated` bodies, and the thesis records to journal. All are
-/// empty when nothing can be judged.
+/// empty when nothing can be judged, and `refused` says the output was there and the strict read
+/// refused it, as one outside its run kind's schema is.
 #[derive(Default)]
 pub(super) struct Judged {
     pub(super) verdicts: Vec<Verdict>,
     pub(super) invalidations: Vec<Value>,
     pub(super) theses: Vec<ThesisDraft>,
+    pub(super) refused: bool,
 }
 
-/// Judges the `ok` record of `run`'s call under the version in effect (HI-17). An output the
+/// Judges the `ok` record of `run`'s call, a `kind` run's, under the version in effect (HI-17), its
+/// output read as that kind's schema pins it (§6.9). An output the
 /// harness's strict read refuses, or one whose candidates the platform cannot fill or admission
 /// cannot decide, is judged as nothing: no verdict and no thesis record, so nothing reaches the
 /// order path (HI-6, DEC-1120 item 4).
@@ -107,6 +111,7 @@ pub(super) fn judge(
     config: &ResearchConfig,
     context: &ResearchContext<'_>,
     batch: &Batch<'_>,
+    kind: RunKind,
 ) -> Result<Judged, RuntimeError> {
     let (Some(output), Some(prompt), Some(response)) = (
         record.output.as_ref(),
@@ -115,8 +120,11 @@ pub(super) fn judge(
     ) else {
         return Ok(Judged::default());
     };
-    let Ok(output) = parse_output(&to_canonical(output), &config.bounds) else {
-        return Ok(Judged::default());
+    let Ok(output) = parse_output(&to_canonical(output), &config.bounds, kind) else {
+        return Ok(Judged {
+            refused: true,
+            ..Judged::default()
+        });
     };
     let refs = Refs { prompt, response };
     let first_invalidation = output.theses.len();
@@ -267,6 +275,7 @@ pub(super) fn judge(
         verdicts,
         invalidations,
         theses,
+        refused: false,
     })
 }
 
