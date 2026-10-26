@@ -39,12 +39,13 @@ const MANAGED_BY: &str = "app.kubernetes.io/managed-by=mandate-vault-provision";
 /// The Secrets of the identities that are not per connection, as `mandate_vault::kube::secret_name`
 /// names them, the role provisioner's among them, which `--secrets-namespace` issues (DEC-2350). A
 /// vault provisioned before it was listed lacks it, so the next apply provisions once more.
-const PLATFORM_SECRETS: [&str; 7] = [
+const PLATFORM_SECRETS: [&str; 8] = [
     "vault-approle-api",
     "vault-approle-connection-manager",
     "vault-approle-runtime",
     "vault-approle-secret-import",
     "vault-approle-model-gateway",
+    "vault-approle-news-reader",
     "vault-approle-email-sender",
     "vault-approle-provisioner",
 ];
@@ -521,6 +522,29 @@ pub(crate) fn kubernetes_command(host: &str) -> Vec<String> {
 /// The `mandate vault put` name of the model provider's key (DEC-2630).
 pub(crate) const MODEL_KEY_SECRET: &str = "model-provider-key";
 
+/// The `mandate vault put` name of the news reader's Alpaca paper data key (DEC-2277).
+pub(crate) const NEWS_KEY_SECRET: &str = "news-data-key";
+
+/// The one line `mandate vault put news-data-key` writes, `<key id>:<secret>`, from the two
+/// environment secrets: empty when both are, so the vault keeps what it holds. One without the
+/// other, or a part that holds `:`, whitespace or a control character, as a paste can leave, fails
+/// the step, so a key the reader would refuse is never written (DEC-2277).
+pub(crate) fn news_data_key(key_id: &str, secret: &str) -> Result<String> {
+    let clean = |part: &str| {
+        !part.is_empty()
+            && part
+                .chars()
+                .all(|c| c != ':' && !c.is_whitespace() && !c.is_control())
+    };
+    match (key_id.is_empty(), secret.is_empty()) {
+        (true, true) => Ok(String::new()),
+        _ if clean(key_id) && clean(secret) => Ok(format!("{key_id}:{secret}")),
+        _ => bail!(
+            "the news data key needs both ALPACA_NEWS_KEY_ID and ALPACA_NEWS_SECRET, each one line with no `:`"
+        ),
+    }
+}
+
 /// The `mandate vault put` name of the Alpaca OAuth client secret (DEC-2636).
 pub(crate) const ALPACA_CLIENT_SECRET: &str = "alpaca-oauth-client-secret";
 
@@ -558,7 +582,8 @@ fn secret_import(steps: &Steps<'_>) -> Result<String> {
 /// Service's address, unless every Secret is already there; sets Kubernetes auth alone up when
 /// they are but [`MARKER`] does not name that address; records the address once either is done;
 /// and revokes the root token on every path, a failure's included. Then it writes
-/// each of `model_key` (DEC-2630) and `alpaca_client_secret` (DEC-2636) that is not empty through
+/// each of `model_key` (DEC-2630), `alpaca_client_secret` (DEC-2636) and `news_key` (DEC-2277) that
+/// is not empty through
 /// the secret-import identity on every run, so a rotation is the secret replaced and the apply run
 /// again; an empty one is left as the vault holds it, never deleted. Answers the status words to
 /// print.
@@ -567,6 +592,7 @@ pub(crate) fn vault_provision(
     connections: &[&str],
     model_key: &str,
     alpaca_client_secret: &str,
+    news_key: &str,
 ) -> Result<Vec<&'static str>> {
     let mut words = Vec::new();
     let host = kubernetes_host(steps)?;
@@ -611,6 +637,12 @@ pub(crate) fn vault_provision(
             "alpaca oauth client secret: not set",
             "alpaca oauth client secret: written",
         ],
+    )?);
+    words.push(import(
+        steps,
+        NEWS_KEY_SECRET,
+        news_key,
+        ["news data key: not set", "news data key: written"],
     )?);
     Ok(words)
 }
@@ -671,6 +703,7 @@ mod tests {
         revoke_spawn_failures: Cell<u32>,
         model_key: &'static str,
         client_secret: &'static str,
+        news_key: &'static str,
         /// What `kubectl` reads as the `kubernetes` Service's address; empty is `10.43.0.1:443`.
         api_server: &'static str,
         /// What [`MARKER`] names; `None` is the default address, as a provisioned vault records.
@@ -768,6 +801,7 @@ mod tests {
                 connections,
                 self.model_key,
                 self.client_secret,
+                self.news_key,
             )
         }
 
@@ -857,7 +891,8 @@ mod tests {
                 "credentials: present",
                 "kubernetes auth: present",
                 "model provider key: not set",
-                "alpaca oauth client secret: not set"
+                "alpaca oauth client secret: not set",
+                "news data key: not set"
             ]
         );
         assert_eq!(fake.calls.borrow().len(), 3);
@@ -906,7 +941,8 @@ mod tests {
                 "kubernetes auth: set up",
                 "root token: revoked",
                 "model provider key: not set",
-                "alpaca oauth client secret: not set"
+                "alpaca oauth client secret: not set",
+                "news data key: not set"
             ]
         );
         let updates = fake.calls_with("sys/generate-root/update");
@@ -977,7 +1013,8 @@ mod tests {
                     "kubernetes auth: set up",
                     "root token: revoked",
                     "model provider key: not set",
-                    "alpaca oauth client secret: not set"
+                    "alpaca oauth client secret: not set",
+                    "news data key: not set"
                 ],
                 "{marker:?}"
             );
@@ -1172,7 +1209,8 @@ mod tests {
                 "credentials: present",
                 "kubernetes auth: present",
                 "model provider key: written",
-                "alpaca oauth client secret: not set"
+                "alpaca oauth client secret: not set",
+                "news data key: not set"
             ]
         );
         assert_eq!(
@@ -1227,7 +1265,8 @@ mod tests {
                 "credentials: present",
                 "kubernetes auth: present",
                 "model provider key: not set",
-                "alpaca oauth client secret: written"
+                "alpaca oauth client secret: written",
+                "news data key: not set"
             ]
         );
         assert_eq!(
@@ -1288,6 +1327,72 @@ mod tests {
         assert!(fake.run(&[]).is_err());
     }
 
+    /// DEC-2277: the news data key set is written through the secret-import identity on every run,
+    /// as one line `<key id>:<secret>` on the CLI's stdin alone, after the other two, and no part of
+    /// it reaches an argument.
+    #[test]
+    fn a_set_news_data_key_is_written_on_every_run() -> Result<()> {
+        const NEWS_KEY: &str = "PKCANARYKEYID:news-secret-canary";
+        let fake = Fake {
+            present: all_present(&["c1"]),
+            news_key: NEWS_KEY,
+            ..Fake::default()
+        };
+        assert_eq!(
+            fake.run(&["c1"])?,
+            [
+                "credentials: present",
+                "kubernetes auth: present",
+                "model provider key: not set",
+                "alpaca oauth client secret: not set",
+                "news data key: written"
+            ]
+        );
+        assert_eq!(
+            *fake.put_with.borrow(),
+            [format!("news-data-key:{IMPORT}\n{NEWS_KEY}\n")]
+        );
+        for (args, _) in fake.calls.borrow().iter() {
+            assert!(
+                !args
+                    .iter()
+                    .any(|arg| arg.contains("canary") || arg.contains("PKCANARY")),
+                "{args:?}"
+            );
+        }
+        let failing = Fake {
+            present: all_present(&[]),
+            news_key: NEWS_KEY,
+            put_fails: true,
+            ..Fake::default()
+        };
+        assert!(failing.run(&[]).is_err());
+        Ok(())
+    }
+
+    /// The two environment secrets make one line, both or neither: a half key, or a part holding
+    /// the separator or a line break, fails the step rather than writing a key the reader cannot
+    /// use (DEC-2277).
+    #[test]
+    fn the_news_data_key_is_both_parts_or_nothing() -> Result<()> {
+        assert_eq!(news_data_key("", "")?, "");
+        assert_eq!(news_data_key("PKID", "secret")?, "PKID:secret");
+        for (id, secret) in [
+            ("PKID", ""),
+            ("", "secret"),
+            ("PK:ID", "secret"),
+            ("PKID", "sec:ret"),
+            ("PKID\n", "secret"),
+            ("PKID", "secret\r"),
+            ("PKID ", "secret"),
+            ("PKID", " secret"),
+            ("PKID", "sec\tret"),
+        ] {
+            assert!(news_data_key(id, secret).is_err(), "{id:?} {secret:?}");
+        }
+        Ok(())
+    }
+
     #[test]
     fn the_commands_are_the_clis() {
         assert_eq!(
@@ -1318,6 +1423,7 @@ mod tests {
             put_command(ALPACA_CLIENT_SECRET),
             ["put", "alpaca-oauth-client-secret"]
         );
+        assert_eq!(put_command(NEWS_KEY_SECRET), ["put", "news-data-key"]);
     }
 
     /// A generation that completes with a token the pad cannot decode fails saying the token may
