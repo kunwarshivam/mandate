@@ -128,14 +128,14 @@ fn ended(records: &[ThesisRow], thesis: &str, lineage: &str) -> Option<(&'static
     admitting(records, thesis).map(|cause| ("thesis_expired", cause))
 }
 
-/// The last record that admitted `thesis`.
+/// The last record that admitted `thesis`: a `ThesisInvalidated` has no `admitted`, so it is
+/// never one.
 fn admitting(records: &[ThesisRow], thesis: &str) -> Option<EventId> {
     records
         .iter()
         .rev()
         .find(|row| {
-            row.event_type != "ThesisInvalidated"
-                && row.payload.get("admitted") == Some(&Value::Bool(true))
+            row.payload.get("admitted") == Some(&Value::Bool(true))
                 && row.payload.get("thesis_id").and_then(Value::as_str) == Some(thesis)
         })
         .map(|row| row.event_id.clone())
@@ -456,6 +456,44 @@ mod tests {
             ]
         );
         assert_eq!(size(&both), [Some(0), Some(1)]);
+        Ok(())
+    }
+
+    /// DEC-2823 item 3: an expiry has no record, so its removal names the record that admitted the
+    /// thesis that expired, not a later one admitting another thesis.
+    #[test]
+    fn an_expiry_names_the_record_that_admitted_its_thesis() -> Result<(), ExecutorError> {
+        let (mut executor, config, fees) = harness()?;
+        let ports = ports_of(&config, &fees);
+        let agent = AgentId(AGENT.to_owned());
+        executor.run(Input::Tick(RiskClock::from_secs(START)), &ports)?;
+        let records = vec![
+            proposed(1, "th-1", "ln-1", 0, START.saturating_add(60), None),
+            proposed(2, "th-2", "ln-2", 1, START.saturating_add(3600), None),
+        ];
+        let theses = || Input::Theses {
+            agent: agent.clone(),
+            records: records.clone(),
+        };
+        executor.run(theses(), &ports)?;
+        executor.run(
+            Input::Tick(RiskClock::from_secs(START.saturating_add(120))),
+            &ports,
+        )?;
+        let expired = executor.run(theses(), &ports)?;
+        assert_eq!(
+            copies(&expired)?,
+            [(
+                "removed".to_owned(),
+                "thesis_expired".to_owned(),
+                instrument(0)
+            )]
+        );
+        let named = expired.iter().find_map(|effect| match effect {
+            Effect::Journal(draft) => draft.causation_id.clone(),
+            _ => None,
+        });
+        assert_eq!(named, records.first().map(|row| row.event_id.clone()));
         Ok(())
     }
 
