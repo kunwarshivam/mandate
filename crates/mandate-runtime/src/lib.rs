@@ -74,6 +74,6 @@ pub use types::{
     FlattenRequest, FoldedEvent, Handoff, Initiator, Input, IntentBody, IntentHandoff, KillScope,
     LocalHold, MandateView, Mode, ModelDirection, ModelOutput, ModelOutputIgnored, NotificationRef,
     Observation, OrderExecution, Outstanding, OwnerConfirmation, Proposal, ProtectionPrices,
-    Purpose, RiskClock, Seq, SignalInputs, TimeInForce, TimerId, TimerRequest, WorkspaceId,
-    WriterEpoch,
+    Purpose, RiskClock, RuntimeAlert, Seq, SignalInputs, TimeInForce, TimerId, TimerRequest,
+    WorkspaceId, WriterEpoch,
 };

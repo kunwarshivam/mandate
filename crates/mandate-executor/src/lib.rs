@@ -109,6 +109,7 @@ pub use fees::{
 };
 pub use gate::PartialGateDecision;
 pub use ids::{ClientOrderId, IntentId, PREFIX};
+pub use mandate_notify::OwnerAlertKind;
 pub use opening::equity_bracket_prices;
 pub use own::{book_own_fills, owed_orders, recorded_fills};
 pub use ports::{

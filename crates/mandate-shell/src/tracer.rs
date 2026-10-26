@@ -1216,7 +1216,7 @@ impl<'s> Session<'s> {
                 }
                 Effect::Intent(handoff) => self.hand(&handoff)?,
                 Effect::Timer(_) => {}
-                Effect::Notify(notification) => self.report.alerts.push(notification.message_key),
+                Effect::Notify(notification) => self.report.alerts.push(notification.kind.key()),
                 Effect::NotifyApproval(_) => self.report.alerts.push("approval_needed"),
             }
         }
@@ -1249,10 +1249,17 @@ impl<'s> Session<'s> {
         effects: Vec<mandate_executor::Effect>,
     ) -> Result<(), ShellError> {
         let mut queue = VecDeque::from(effects);
+        let mut interval_limits: Vec<mandate_executor::EventId> = Vec::new();
         while let Some(effect) = queue.pop_front() {
             match effect {
                 mandate_executor::Effect::Journal(draft) => {
                     let drafts = consecutive_executor_journals(draft, &mut queue);
+                    interval_limits.extend(
+                        drafts
+                            .iter()
+                            .filter(|draft| interval_limit_record(draft))
+                            .map(|draft| draft.event_id.clone()),
+                    );
                     self.append_account(&drafts)?;
                 }
                 mandate_executor::Effect::Broker(request) => {
@@ -1267,7 +1274,12 @@ impl<'s> Session<'s> {
                 }
                 mandate_executor::Effect::Timer(_) => {}
                 mandate_executor::Effect::Notify(notification) => {
-                    self.report.alerts.push(notification.message_key);
+                    let key = if interval_limits.contains(&notification.subject_event) {
+                        INTERVAL_LIMIT_ALERT
+                    } else {
+                        notification.kind.key()
+                    };
+                    self.report.alerts.push(key);
                 }
             }
         }
@@ -1582,6 +1594,23 @@ fn planned_request_version(draft: &EventDraft) -> u64 {
     if planned { 2 } else { 1 }
 }
 
+/// The report's key for an owner alert about an unprotected interval that reached its bound: LT-10
+/// releases an uncovered run on it alone (`crate::lt10::watch_may_end`), and the alert's kind,
+/// `protection`, is shared with the stop watchdog's, so the key is read from the record the alert
+/// names (DEC-2514).
+pub(crate) const INTERVAL_LIMIT_ALERT: &str = "unprotected_interval_limit";
+
+/// Whether `draft` is the executor's record of an unprotected interval at its bound
+/// (`ProtectionChanged` with the action `interval_limit`, trading-domain spec §5.4).
+fn interval_limit_record(draft: &mandate_executor::EventDraft) -> bool {
+    draft.event_type == "ProtectionChanged"
+        && draft
+            .payload
+            .get("action")
+            .and_then(mandate_canon::Value::as_str)
+            == Some("interval_limit")
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -1702,7 +1731,7 @@ mod tests {
         let submitted = draft("submitted", "OrderSubmitted", 2);
         let boundary = Effect::Notify(NotificationRef {
             subject_event: EventId("submitted".to_owned()),
-            message_key: "submitted",
+            kind: mandate_executor::OwnerAlertKind::Protection,
         });
         let mut effects = VecDeque::from([Effect::Journal(submitted), boundary]);
         let drafts = consecutive_executor_journals(companion, &mut effects);

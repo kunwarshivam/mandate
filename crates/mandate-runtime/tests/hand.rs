@@ -1902,7 +1902,7 @@ fn a_notification_carries_only_opaque_ids() {
 
     for effect in &ran.effects {
         if let Effect::Notify(reference) = effect {
-            let rendered = format!("{} {}", reference.subject_event.0, reference.message_key);
+            let rendered = format!("{} {}", reference.subject_event.0, reference.kind.key());
             for secret in ["AAPL", "150", "10", "buy"] {
                 assert!(
                     !rendered.contains(secret),

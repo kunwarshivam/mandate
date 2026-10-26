@@ -13,7 +13,7 @@ use crate::types::{
     Autonomy, Classified, Command, DecisionClip, DryRunVerdict, Effect, EventDraft, EventId,
     ExitOrigin, FlattenRequest, Initiator, Input, IntentBody, IntentHandoff, KillScope, Mode,
     ModelOutput, NotificationRef, Observation, OwnerConfirmation, Proposal, Purpose, RiskClock,
-    Seq, TimeInForce, TimerId, TimerRequest, WriterEpoch,
+    RuntimeAlert, Seq, TimeInForce, TimerId, TimerRequest, WriterEpoch,
 };
 
 /// One step of the runtime (ADR-0001 ES-06).
@@ -520,7 +520,7 @@ fn decide(
         DryRunVerdict::Deny { .. } => {
             batch.notify(NotificationRef {
                 subject_event: decision,
-                message_key: "decision_skipped",
+                kind: RuntimeAlert::DecisionSkipped,
             });
             Ok(())
         }

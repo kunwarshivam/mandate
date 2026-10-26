@@ -602,7 +602,7 @@ impl<'p> Drive<'p> {
                     _ => {}
                 },
                 Effect::Notify(reference) => {
-                    seen.push(Seen::Alert(reference.message_key.to_owned()))
+                    seen.push(Seen::Alert(reference.kind.key().to_owned()))
                 }
                 Effect::Broker(_) | Effect::Timer(_) => {}
             }
@@ -1244,7 +1244,7 @@ impl Drive<'_> {
                 .submitted
                 .get(id)
                 .is_some_and(|order| order.side == Side::Sell),
-            ("alert_owner", Seen::Alert(key)) => named == Some(key.as_str()),
+            ("alert_owner", Seen::Alert(key)) => named.and_then(alert_kind) == Some(key.as_str()),
             ("refresh_account", Seen::RefreshAccount) => true,
             _ => false,
         }
@@ -2143,4 +2143,17 @@ fn a_proposal_is_named_when_made_only_where_no_submission_is_expected() {
         None,
         "a step that expects its submission binds the name there"
     );
+}
+
+/// The notice kind notifications spec §3.2 gives each alert a case names by its reason (DEC-2514):
+/// a restriction is `account_restriction`, an agent the platform held is `agent_held`, and
+/// external activity is itself. Written from the spec's table, not from the executor's sites, so
+/// the case checks the kind the executor chose.
+fn alert_kind(reason: &str) -> Option<&'static str> {
+    match reason {
+        "account_restricted" | "account_trading_blocked" => Some("account_restriction"),
+        "conduct_limit_breached" => Some("agent_held"),
+        "external_activity" => Some("external_activity"),
+        _ => None,
+    }
 }

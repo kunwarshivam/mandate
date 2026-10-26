@@ -2,6 +2,7 @@
 //! DEC-485): the final mode first, then the agent's own orders cancelled by id, then its
 //! sub-ledger sold through the executor's own flatten intents, each step journaled.
 
+use mandate_notify::OwnerAlertKind;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
@@ -104,7 +105,9 @@ pub(crate) fn kill_switch(
             ),
         ],
     )?;
-    batch.notify(switch, KILL_SWITCH);
+    if initiator == Initiator::RiskLimit {
+        batch.notify(switch, OwnerAlertKind::KillSwitch);
+    }
     cancel_each(batch, cancels)
 }
 
@@ -180,7 +183,9 @@ fn account(
             ),
         ],
     )?;
-    batch.notify(switch, KILL_SWITCH);
+    if initiator == Initiator::RiskLimit {
+        batch.notify(switch, OwnerAlertKind::KillSwitch);
+    }
     batch.broker(BrokerRequest::CancelAll(AccountWideScope::new(
         AccountWide::Account(reference),
     )));
@@ -587,7 +592,7 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
                         Vec::new(),
                         Some(id.clone()),
                     )?;
-                    batch.notify(alerted, "exit_unpriced");
+                    batch.notify(alerted, OwnerAlertKind::ExitStalled);
                 }
                 continue;
             };
@@ -1013,11 +1018,17 @@ mod tests {
             let alerts: Vec<(&EventId, &str)> = effects
                 .iter()
                 .filter_map(|effect| match effect {
-                    Effect::Notify(alert) => Some((&alert.subject_event, alert.message_key)),
+                    Effect::Notify(alert) => Some((&alert.subject_event, alert.kind.key())),
                     _ => None,
                 })
                 .collect();
-            assert_eq!(alerts, vec![(&record.event_id, "kill_switch")], "{name}");
+            let automated = (name == "risk_limit").then_some((&record.event_id, "kill_switch"));
+            assert_eq!(
+                alerts,
+                automated.into_iter().collect::<Vec<_>>(),
+                "{name}: only an automated switch is alerted here; a user's is the API's, and an \
+                 operator's the operator action's (notifications spec §3.2, §3.4)"
+            );
             assert_eq!(
                 raised(&effects),
                 vec![format!("k-{}-0", record.event_id.0)],
