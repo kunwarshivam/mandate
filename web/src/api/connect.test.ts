@@ -99,7 +99,7 @@ describe("the start's answer and the connection reads (DEC-2620, DEC-2623)", () 
 
   it("sends the browser only to an https page", () => {
     expect(connectStarted(started, "").ok).toBe(true);
-    for (const url of ["http://paper-api.alpaca.markets/oauth/authorize", "javascript:alert(1)", "https://", "https://a b", "/relative", 7]) expect(connectStarted({ ...started, authorization_url: url }, "").ok, String(url)).toBe(false);
+    for (const url of ["http://paper-api.alpaca.markets/oauth/authorize", "javascript:alert(1)", "https://", "https://a b", "HTTPS://paper-api.alpaca.markets/", "https://[", "/relative", 7]) expect(connectStarted({ ...started, authorization_url: url }, "").ok, String(url)).toBe(false);
   });
 
   it("reads a connection as its schema states it: a refusal exactly when refused, a revoke reason only when revoked", () => {

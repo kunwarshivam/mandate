@@ -40,12 +40,13 @@ const fail = (path: string, problem: DecodeProblem, value: string | null = null)
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const id: Decoder<string> = (value, path) => (typeof value !== "string" ? fail(path, value === undefined ? "missing" : "wrong_type") : ID.test(value) ? { ok: true, value } : fail(path, "not_canonical", value));
 
-/** An `https` URL with no whitespace (the schema's pattern), parsed: the one place the browser is sent off the app. */
+/** An `https` URL with no whitespace (the schema's pattern) that also parses as a URL: the one place the browser is sent off the app. The pattern's lowercase `https://` is the scheme check; the parse refuses what the pattern lets through but no browser could open. */
 const authorizationUrl: Decoder<string> = (value, path) => {
   if (typeof value !== "string") return fail(path, value === undefined ? "missing" : "wrong_type");
   if (!/^https:\/\/[^\s]+$/.test(value)) return fail(path, "not_canonical", null);
   try {
-    return new URL(value).protocol === "https:" ? { ok: true, value } : fail(path, "not_canonical", null);
+    new URL(value);
+    return { ok: true, value };
   } catch {
     return fail(path, "not_canonical", null);
   }
