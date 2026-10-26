@@ -373,7 +373,7 @@ def member_drafts() -> list[dict]:
             invalid("step_up.method.empty", "§9.7's step-up: text is non-empty", base, [change(f"{step_up}.method", "")], "non_canonical", f"{step_up}.method"),
             invalid("step_up.extra", "§9.7's step-up is closed", base, [change(f"{step_up}.subject", REQUESTER)], "schema", f"{step_up}.subject"),
             invalid("step_up.missing_member", "§9.7's step-up: every member", base, [delete(f"{step_up}.method")], "schema", f"{step_up}.method"),
-            invalid("at_version_2", "§9.28: schema version 1 only", base, [change("schema_version", 2)], "unknown_schema", "payload"),
+            invalid("at_version_3", "§9.28: schema versions 1 and 2 only (v0.100)", base, [change("schema_version", 3)], "unknown_schema", "payload"),
             invalid("on_an_agent_stream", "§9 rows: control and account streams only", base, [change("stream_id", AGENT_STREAM)], "wrong_stream", "event_type"),
             invalid("by_a_client", "rule 83: a client never acknowledges (identity ID-11)", base, [change("actor", dict(CLIENT))], "schema", "actor.kind"),
         ]
