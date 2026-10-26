@@ -348,12 +348,12 @@ const W2_WEB: Wait = Wait {
     lands: "web/ sends the demo's gestures through the API, and `cell demo` drives web/ against \
             the cell (claim #1443)",
 };
-const DR_REPORT_VISIT: Wait = Wait {
-    lane: "DR",
-    story: "E21-54",
+const W2_REPORT_VISIT: Wait = Wait {
+    lane: "W2",
+    story: "E11-9",
     pr: None,
-    lands: "`cell demo`'s web run visits the backtest's report screen and reads the stored report \
-            there",
+    lands: "a browser visit of web/'s report screen at `/backtests/bt-demo-01` in `cell demo`'s web \
+            run, reading the stored report, and a link to it",
 };
 const E2E_FILL: Wait = Wait {
     lane: "E2E",
@@ -1227,7 +1227,7 @@ pub fn plan(
                     on_main: "the API's backtest read (#1555), web/'s report screen (#1549), \
                               which renders this report over the API, and the owner's session \
                               through the stub issuer (#1591)",
-                    waits: vec![DR_REPORT_VISIT],
+                    waits: vec![W2_REPORT_VISIT],
                 }),
             ],
         },
@@ -3371,7 +3371,7 @@ mod tests {
             .collect();
         assert_eq!(
             lanes,
-            ["DR"],
+            ["W2"],
             "only the web run's visit to the report screen is left"
         );
     }

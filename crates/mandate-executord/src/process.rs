@@ -7,12 +7,13 @@ use mandate_accounting::InstrumentId;
 use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    AccountDeclaration, AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOrder,
-    BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect,
-    EventDraft, EventId, ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input,
-    InstrumentSnapshot, IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion,
-    MandateView, OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, ThesisRow,
-    WriterEpoch, fold, handle, limit_fills, recorded_fills,
+    AccountDeclaration, AccountScope, AcknowledgmentHandoff, ActivityCursor, AgentId,
+    BindingGateSource, BrokerOrder, BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate,
+    Command, ConnectionTrouble, ConnectorError, Effect, EventDraft, EventId, ExecutorConfig,
+    ExecutorError, ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot, IntentBody,
+    IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, OrderState, Ports,
+    ProtectionPrices, ReconcileReason, RiskClock, Seq, SuspendReason, ThesisRow, WriterEpoch, fold,
+    handle, limit_fills, recorded_fills,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
@@ -21,7 +22,9 @@ use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::{ExchangeCalendar, UtcNanos};
 
-use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches, theses};
+use crate::follow::{
+    Proposal, Switch, Unreadable, agents_of, bounded, folded, proposals, switches, theses,
+};
 use crate::health::{Health, PROBE_EVERY_S};
 use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
@@ -249,6 +252,9 @@ struct Followed {
     /// Whether every followed agent's stream parsed and read: one that did not may hold a switch,
     /// so it holds the exit (DEC-2347 item 3.3).
     all_read: bool,
+    /// The owner's acknowledgments and requests the account stream holds no copy of yet, in the
+    /// control stream's order (journal spec §9.28, DEC-2828, DEC-2830).
+    acknowledgments: Vec<AcknowledgmentHandoff>,
 }
 
 impl<S: Store, B: Broker> ExecutorProcess<S, B> {
@@ -403,6 +409,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             unreadable,
             released,
             all_read,
+            acknowledgments,
         }) = self.switches(now, &mut alerts)
         else {
             return alerts;
@@ -427,6 +434,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             && !self.hand(now, now, Input::Tick(tick), &mut alerts, 0)
         {
             return alerts;
+        }
+        for handoff in acknowledgments {
+            if !self.hand(now, now, Input::Acknowledgment(handoff), &mut alerts, 0) {
+                return alerts;
+            }
         }
         for (agent, proposal) in proposed {
             let action = if proposal.purpose.adds_risk() {
@@ -727,7 +739,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// read. An unreadable control stream yields nothing this pass, and so does an agent stream
     /// that cannot be read. A control record that does not read stops the process at once, since
     /// the agents it names are unknown; a row on one agent's stream that does not read stops it only
-    /// after the other agents' switches are applied (DEC-85, `AGENTS.md` rule 13).
+    /// after the other agents' switches are applied (DEC-85, `AGENTS.md` rule 13). An owner's
+    /// acknowledgment, its request, or a record that spends a step-up that does not read holds
+    /// every opening and hands no acknowledgment, and every exit still goes (journal spec §9.28,
+    /// DEC-2830).
     fn switches(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> Option<Followed> {
         let control = self.control.clone()?;
         let rows = self.follow(&control, alerts)?;
@@ -812,6 +827,19 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     .map(|switch| (agent.clone(), switch)),
             );
         }
+        let agents: BTreeSet<AgentId> = following.agents.keys().cloned().collect();
+        let processed_at = RiskClock::from_secs(now.secs());
+        let acknowledgments = crate::acknowledgments::acknowledgments(
+            &rows,
+            &agents,
+            self.environment,
+            processed_at,
+            |original| self.state.copied_acknowledgment(original),
+        )
+        .unwrap_or_else(|Unreadable| {
+            proposed.retain(|(_, proposal)| !proposal.purpose.adds_risk());
+            Vec::new()
+        });
         Some(Followed {
             switches: pending,
             proposals: proposed,
@@ -819,6 +847,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             unreadable,
             released: following.released(),
             all_read,
+            acknowledgments,
         })
     }
 
@@ -1214,6 +1243,33 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let answer = self.broker.call(request);
         self.health.observe(&answer);
         answer
+    }
+
+    /// Tells the core the run's credential is lost (DEC-2839). Connections spec §9.2 treats a lease
+    /// that expired as `suspended` for openings (reason `lease_expired`, DEC-800), so before the
+    /// run drains, the account is restricted to closing with cause `connection_unavailable`. The
+    /// connection's state change follows in a later batch (DEC-2826), so both are on the stream
+    /// when the supervisor restarts the process.
+    ///
+    /// An input already in doubt is handed again first, as a pass does, so it is never replaced.
+    /// While it stays in doubt nothing more is handed, and the drain retries it. A process that has
+    /// exited hands nothing. A core error on the trouble is held, never a stop (DEC-2821).
+    pub fn credential_lost(&mut self, now: UtcNanos) {
+        if self.exited() {
+            return;
+        }
+        let mut alerts = Vec::new();
+        if let Some((input, at)) = self.pending.take()
+            && !self.hand(now, at, input, &mut alerts, 0)
+        {
+            return;
+        }
+        for _batch in ["restriction", "state change"] {
+            let lost = Input::Connection(ConnectionTrouble::Suspended(SuspendReason::LeaseExpired));
+            if !self.hand(now, now, lost, &mut alerts, 0) {
+                return;
+            }
+        }
     }
 
     /// Tells the core of every trouble the connection's health holds (DEC-2832): after the pass's

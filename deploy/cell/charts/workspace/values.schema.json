@@ -19,6 +19,7 @@
     "deploymentTier",
     "api",
     "artifacts",
+    "researchArtifacts",
     "founding",
     "executor",
     "alpacaOAuth",
@@ -627,6 +628,32 @@
         "size": {
           "type": "string",
           "pattern": "^[1-9][0-9]*(Mi|Gi|Ti)$"
+        },
+        "storageClass": {
+          "type": "string",
+          "pattern": "^([a-z0-9]([a-z0-9.-]*[a-z0-9])?)?$"
+        },
+        "accessMode": {
+          "enum": [
+            "ReadWriteOnce",
+            "ReadWriteMany"
+          ]
+        }
+      }
+    },
+    "researchArtifacts": {
+      "description": "The research store (DEC-2279 item 5), which only the model gateway writes. Its size is whole gibibytes or tebibytes, at least 1Gi, so it is always at least twice the gateway's fixed 512 MiB cap (item 4)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "size",
+        "storageClass",
+        "accessMode"
+      ],
+      "properties": {
+        "size": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(Gi|Ti)$"
         },
         "storageClass": {
           "type": "string",

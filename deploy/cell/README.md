@@ -21,7 +21,7 @@ runner that proves it (E21-37), with no cloud account, no broker credential and 
 | `images/role-provisioner.Dockerfile` | The role provisioner's image (`mandate-provisionerd`, DEC-2350), built beside it the same way |
 | `images/scheduler.Dockerfile` | The workspace scheduler's image (`mandate-scheduler`, E21-29), built beside it the same way: the single writer of the hosted workspace's (`api.workspace`) `clock:` stream, asking no time server, so every measurement is out of tolerance |
 | `images/dispatcher.Dockerfile` | The workspace notification dispatcher's image (`mandate-dispatcher`, DEC-2500, DEC-2516), built beside it the same way: the single writer of the hosted workspace's `ntf:` stream, following every stream its control stream names, mailing only through the recorded transport, which sends nothing, with web push off. Its configuration file is the ConfigMap `dispatcher-config` (`templates/dispatcher.yaml`), and `cell up` sets its binary's digest as `dispatcher.build` |
-| `images/data.Dockerfile` | The workspace data process's image (`mandate-datad`), built beside it the same way: each listed instrument's daily bars and its latest trading day's minute bars from the cell's recorded series (`data.instruments`, each `{symbol, assetId, anchor}`; only the local cell's values list any: SPY and the second agent's QQQ), stored as `mandate-marketdata`'s datasets under the artifact store's `datasets/cell-recorded/`, with each instrument's closes object, which the runtime and the executor read read-only. A recording, never market data; it reaches no host |
+| `images/data.Dockerfile` | The workspace data process's image (`mandate-datad`), built beside it the same way: each listed instrument's daily bars and its latest trading day's minute bars from the cell's recorded series (`data.instruments`, each `{symbol, assetId, anchor}`; only the local cell's values list any: SPY, and QQQ, a test fixture now), stored as `mandate-marketdata`'s datasets under the artifact store's `datasets/cell-recorded/`, with each instrument's closes object, which the runtime and the executor read read-only. A recording, never market data; it reaches no host |
 | `../tests/test_cell.py` | The chart's and the Compose file's invariants, each shown failing on a seeded bug |
 | `../tests/test_artifacts.py` | The shared artifact store: each process mounts it as it may, or not at all, each shown failing on a seeded bug |
 | `../tests/test_vault.py` | The vault chart's invariants, each shown failing on a seeded bug |
@@ -85,8 +85,7 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
   class and access mode are values (`artifacts`). The claim, and every mount of it, renders only
   with the API server, its one long-running writer, since local-path binds on first use and `helm
   --wait` waits for that, and a reader alone would wait for a layout no writer makes; so a cell
-  without the API server's image gives the control run and the runtime no store. The deployment
-  manager's read-only access applies once that process is in `processes.json`. It is
+  without the API server's image gives the control run and the runtime no store. It is
   ReadWriteOnce on local-path, so every pod that mounts it runs on one node; a hosted cell names a
   class that can, or the store moves to E21-40's object store. The Compose file has none yet
   (`deploy/tests/test_artifacts.py`).
@@ -114,7 +113,7 @@ Needs docker, plus k3d, helm and kubeconform at the versions in `.github/workflo
 
 ```bash
 cargo xtask cell up               # build the image, start k3d, install the operator, its backup plugin, the test store, journal-db, vault, workspace
-cargo xtask cell drill            # boot, journal, egress, compose, restart, kill-switch, admission, standby-down, archive, executor
+cargo xtask cell drill            # every drill: boot, journal, egress, compose, standby-down, archive, restart, kill-switch, admission, ticks, executor, vault, exchange, exchange-late
 cargo xtask cell drill --seeded   # each drill with its bug planted; fails if one still holds
 cargo xtask cell down
 cargo xtask ci cell               # what CI runs: chart checks, up, drills
@@ -125,6 +124,7 @@ cargo xtask ci cell-failover      # and beside it: up, then restart (a failover 
 cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch and admission, plain and seeded (DEC-2602)
 cargo xtask ci cell-executor      # and beside it: up, then executor, plain and seeded (DEC-2615, DEC-2035)
 cargo xtask ci cell-vault         # and beside it: up, then vault, plain and seeded (DEC-2616, DEC-2022)
+cargo xtask ci cell-exchange      # and beside it: up, then exchange and exchange-late, plain and seeded (DEC-2063, DEC-2363)
 ```
 
 Each of these drill jobs runs both variants locally. In CI each runs once per variant, on a runner
@@ -174,8 +174,11 @@ below.
 credential. It runs `cell up`, opens the demo workspace (`01KDEM0000000000000000000W`, the one the
 cell's API server hosts) and verifies its control stream in the cell, and prints each part as `ready` or `skipped` with the lane it waits on. Then it runs `web/`
 at http://127.0.0.1:4317 in the foreground (Ctrl-C stops it; the cell keeps running). With
-`--no-web` it stops after the summary; CI runs it that way at the end of the `cell` job, which also
-upgrades every release in place.
+`--no-web` it stops after the summary; CI runs it that way in the `cell-upgrade` job, whose second
+`up` upgrades every release in place. In plain `cell demo` the runtime, the paper agent, research's
+model gateway and the founding membership always read `skipped`: only `--scenario demo` deploys at
+version 2 and founds the workspace, and the printed reasons for the runtime and the membership are
+stale (the connect check is on `main`, and founding is `mandate workspace found`).
 
 | Part | Ready when |
 |---|---|
@@ -185,7 +188,8 @@ upgrades every release in place.
 | The agent runtime, on the deny-all wiring until the post-R0 hook | `runtime` is built in `processes.json` and `cell up` built its image (DEC-1013); with the deployment manager built, the manager starts it, which it does once it reads a deployment's account from `AgentDeployed` version 2 (DEC-1171) |
 | Sign-in as the demo owner, through the local stub issuer | Lane SI's stub issuer (E21-52) and the server's key-set tier check (E21-53) are both on `main` |
 | A paper agent on rh-sim and recorded Alpaca fixtures | `runtime` and `executor` are built (the executor's interim image runs its fixture paper broker, DEC-2031), the runtime proposes orders once the post-R0 hook wires its ports (DEC-1013), and the executor takes them (#1736) and fills, books and protects them on the fixture (slice X1b-3 of E21-30, #2624); until a gesture shows the fill in the cell (E21-54) the part stays a named gap |
-| The founding membership | Lane ID1's `mandate membership` gesture is in the CLI |
+| Research's model gateway, the recorded fake | The post-R0 hook wires its ports; until then always skipped |
+| The founding membership | There is no `mandate membership` command (founding is `mandate workspace found`, which `--scenario demo` runs), so this part always reads skipped |
 | `web/` against the cell's API | The API server is ready; until then `web/` runs on its own fixtures |
 
 The API server listens only on its pod's loopback, so nothing in the cluster reaches it until the
@@ -224,12 +228,15 @@ state, logs and the namespace's events. A cell that pulls its `mandate` image (`
 skips the API's parts.
 
 A part whose lane is not on `main` is named as skipped, never faked. `web/` needs Node.js at the
-release in `web/.nvmrc` and npm; the first run does `npm ci`.
+release in `web/.nvmrc` and npm; plain `cell demo`'s first run does `npm ci`. Before
+`--scenario demo` or `journey`, run `npm ci` in `web/` and install Playwright's Chromium (`npx
+playwright install chromium`, from `cdn.playwright.dev`): the scenario installs neither, and without
+npm, `web/node_modules`, Playwright's Chromium or openssl its `web/` steps read `not run`.
 
 ### The demo's scenario
 
 `cargo xtask cell demo --scenario demo` (E21-54, DEC-2002) runs the demo's story on the cell in
-order, the story's six steps with the owner's exit as step 6, read from step 4's trade loop, before the kill switch (step 7), with
+order, the story's eight steps: 1 to 5, the owner's exit as step 6, read from step 4's trade loop, the kill switch (step 7), and the closing export and verify (step 8), with
 paper and demo data only and no credential. Each gesture whose pieces are on `main` runs in the cell, in one Job of the `control` process, and passes only when it printed
 what its success prints. Each missing link prints as `gap` (DEC-2004): what of it is already on
 `main`, citing its PRs, and every lane it still waits on, with that lane's story, its open PR when
@@ -267,9 +274,10 @@ The run's own report is the up-to-date list; on 2026-10-26, with DEC-2379, it re
 | 2. Deploy under a confirmed envelope | partial | `connection record` of the paper connection the connect check passed, then `config register` of the reviewed rule set, fee schedule and trading calendar and of SPY's snapshot, `model register`, `version create`, `version confirm` and `agent deploy` of the run's workspace's one agent, `agt_01KDEM00000000000000000WEB` (the only agent id shape `web/`'s routes open; backlog E11-13), on the demo's envelope at version 2, each code shown then typed; after the Job, the manager's executor for the account running and answering `livez` | W2 (E11-9): the same from `web/` |
 | 3. Research, through the gateway's recorded fake | partial | In the same owner's second workspace, `<workspace>r`: `workspace open` (paper) and `workspace found`, `connection record` of the paper connection that workspace's own connect check passed, on an account of its own (`01KDER<run id>000000000A`), `config register` of the same rule set, fee schedule, trading calendar and SPY's snapshot there, before any version, since the research workspace's runtime and executor read its own control stream's (DEC-2819 item 3), `model register` of `quant.ma_crossover` and of `llm.research_agent` from the recorded bundle's entry (`--entry`, its hash recomputed), then `version create`, `version confirm` and `agent deploy` of `demo-research` on `deploy/cell/demo/research-mandate.json`, each code shown then typed, so it is the only agent on its control stream (DEC-2247), and the deployment is written at version 2; after the Job, the second manager's executor for that account running and answering `livez`, then the research loop, each link its own part read from the journal: the research run on the workspace's own clock (DEC-2071) and its admitted thesis, the opening asked, the owner's grant on the CLI (`approvals list`, `show` of an opening, `approve --code`, each its own Job, read as granted only when the CLI says it was admitted), the runtime's record of it admitted, the opening's order request and its fill on the fixture, the protective stop placed as the bracket's legs, the monitor run the news item triggers (its trigger kind `event`, rule 271), the thesis's invalidation, and the thesis exit's order request and its fill, each after the link before it on its stream. A link not seen within 60 seconds (or `MANDATE_CELL_LOOP_WAIT_S`, up to 1800, which a rehearsal sets to reach the recorded news item 900 seconds after the research deployment) reads as its gap, naming its lanes, and every later link as not reached; a journal or CLI that cannot be read fails the run when the cell is required | GW (E21-62): a run showing the research run and its thesis; D1 (E21-2): the runtime sizes and asks; E2E (E21-54): the fill and resting stop in the cell. The news item reaches the runtime from the bundle's recorded feed (#2653). An opening is decided only in the regular session |
 | 4. Sized, gated, asked, approved, filled, protected | partial | no read of the inbox in the Job, which would race the runtime's first ask; where `web/` runs, lane W's trade loop (`web/e2e-cell/trade-loop.spec.ts`) on that agent, its step-up code confirmed on the host with `mandate step-up confirm` as a control gesture, read `ran` only when every step it names was reached, the approval, the fill, the position, the journal, the positions screen, the owner's exit (step 6's), the audit timeline, the kill switch and its alert, `pending` while the spec is not on main, or while no approval request reaches web/ and the API, read with the owner's session, lists no approval of that agent in any state, and `failed` for any other loop that stopped, at its approval included; a loop that pressed the kill switch hands step 7 its command | D1 (E21-2, the post-R0 hook, DEC-2378): the runtime step 2 starts sizes and asks; L1 (E9-4) and W2: step-up for the approval; E2E (E21-54): a gesture that shows the paper fill and its stop in the cell; the executor fills, books and protects a deployed opening on its fixture paper broker (DEC-2031, X1b-3, #2624) |
-| 5. A backtest of the same version | partial | `mandate-backtest-runner run` on its committed demo inputs, `backtest record` of the payload it stores, which the closing verify checks, and the owner's signed-in read of it through the API (completed, with the stored report) | DR (E21-54): `cell demo`'s web run visits the report screen (#1549 renders it over the API), from a link, since the API lists no backtests |
+| 5. A backtest of the same version | partial | `mandate-backtest-runner run` on its committed demo inputs, `backtest record` of the payload it stores, which the closing verify checks, and the owner's signed-in read of it through the API (completed, with the stored report) | W2: a browser visit of `web/`'s report screen, which renders over the API at `/backtests/bt-demo-01`, and a link to it (the API lists no backtests) |
 | 6. The owner's exit from the web app | ready | No gesture of the Job exits: an exit before the trade loop's fill sells nothing. Where `web/` runs, the trade loop's `owner_exit`, read from step 4's one run: the owner presses Exit on the agent's position on `/positions`, the API answers 202 (`POST /agents/{id}/exits`, bid null, so it fills in the regular session; outside it the loop fails at its fill wait), and a new filled sell shows on the agent's orders, before the audit timeline and the kill switch (#2645) | Step 4's loop reaching its fill |
 | 7. The kill switch | ready | The agent's kill switch pressed in `web/` after the gestures' Job, last: the trade loop's own, which then finds it as one alert on `web/`'s alerts screen (#2638), or, when the loop stopped before it, lane W2's `kill_switch_from_web` alone; its command read back with the owner's session from the run's control stream (not run on a machine without npm, `web/node_modules`, Playwright's Chromium or openssl, unless `MANDATE_DEMO_WEB_REQUIRED` is set, which makes it fail; that switch alone still reads an unreachable API as not run, so a job that must run the gesture sets it with `MANDATE_CELL_REQUIRED`); then read back until it is `applied`, the runtime step 2's deployment started having journaled its `KillSwitchActivated` (up to 90 s). No CLI kill switch runs: every gesture runs in the Job before the browser, so it would stop the agent before the trade loop (web/'s kill switch comes after the closing export and verify, so the read stands in for the verify) | |
+| 8. The record | ready | The workspace's control stream exported and verified by journal spec §11 | |
 
 The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY (Alpaca asset id
 `b28f4066-5c6d-479b-a2af-85dc1a8f16fb`) on the moving-average crossover, every opening asked,
@@ -278,7 +286,8 @@ whole share fits. It is the run's workspace's one agent's: one agent to an accou
 (V-048), and one Alpaca paper connection to a workspace until the account fingerprint tells two
 apart (DEC-802 item 3). `deploy/cell/demo/web-mandate.json`, the same envelope on QQQ
 (`web-instrument.json`), is no longer deployed; `mandate-runtime-models`' tests read it. CI's `cell-demo` job, which no required check depends on, runs
-the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecting proxy, set
+the scenario (`cargo xtask ci cell-demo`) whenever the diff selects the cell jobs, and
+`cell-demo-web` runs it again with the `web/` gesture required (`MANDATE_DEMO_WEB_REQUIRED`). Behind a TLS-inspecting proxy, set
 `MANDATE_CELL_CA_BUNDLE` to the proxy's CA bundle first.
 
 ### The customer journey
@@ -286,8 +295,8 @@ the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecti
 `cargo xtask cell journey` (lane GL, [DEC-2134](../../docs/project/decisions/DEC-2134.md)) runs
 the demo's scenario above, and then two more steps in the same workspace:
 
-1. On the host, the owner accepts the go-live disclosure with `mandate disclosure accept
-   go_live_risk`, typing the code it shows. The disclosure is `fixtures/disclosures/go_live_risk.json`,
+1. The driver accepts the go-live disclosure as the owner, running `mandate disclosure accept
+   go_live_risk --code <code>` in a control Job in the cell with the code the CLI would show. The disclosure is `fixtures/disclosures/go_live_risk.json`,
    a placeholder pending counsel. This journals `DisclosureAccepted` with `cli_confirm` step-up.
 2. In `web/`, `web/e2e-cell/customer-journey.spec.ts` drives the owner through four things:
    - **Connections:** the Alpaca paper connection is listed, and Robinhood is shown as real money,
@@ -299,7 +308,8 @@ the demo's scenario above, and then two more steps in the same workspace:
    - **The refusal:** it is read back from the control stream as `RealMoneyRefused`.
 
 `cargo xtask cell journey <workspace> <agent>` runs only those two steps, against a cell that has
-already run the scenario. Every order is still paper on the fixture broker. The customer real-money
+already run the scenario and has not run `cell up` since: an `up` points the API back at the demo
+workspace, and `journey` does not re-point it. Every order is still paper on the fixture broker. The customer real-money
 gate stays off, and no step reaches a live venue.
 
 For staging, `cargo xtask cell demo --scenario demo --dry-run --image <ref@sha256:...> --workspace
@@ -320,19 +330,22 @@ that one workspace.
 | `journal` | The CLI opens a control stream in the cell's journal, and a Job exports it and verifies it by journal spec §11 | One byte of the segment changed before it is verified |
 | `compose` | The Compose file on the host's docker: Postgres initializes the roles, the migration applies, the CLI opens a control stream and commits each scope's kill switch and an agent pause through `docker compose run control agent …` (E21-34), and its export verifies and holds every one | The first event's hash changed before it is verified |
 | `restart` | A control stream written before the journal's Postgres primary pod is deleted still exports and verifies by journal spec §11 once CloudNativePG has the cluster Ready again | A stream id the restart never held is verified, which must read as lost (`export_stream_empty`): it proves the drill sees a lost stream, not a loss the restart itself caused |
-| `kill-switch` | With every pod of `api`, `deploy-manager`, `exporter`, `model-gateway` and `control-plane` gone (scaled to zero, then back), `mandate agent kill` at agent, connection and workspace scope and `mandate agent pause` commit through one-off `control` Jobs, and the control stream exports, verifies and holds each (OPS-4, E21-34). Each stream owner's `KillSwitchActivated` is reported `skipped` until the runtime and executor run in the cell ([DEC-2000](../../docs/project/decisions/DEC-2000.md) item 6) | The connection-scope kill switch never committed: the check must name `no kill_switch of scope connection` |
+| `kill-switch` | With every pod of `api`, `deploy-manager`, `exporter`, `model-gateway` and `control-plane` gone (scaled to zero, then back), `mandate agent kill` at agent, connection and workspace scope and `mandate agent pause` commit through one-off `control` Jobs, and the control stream exports, verifies and holds each (OPS-4, E21-34). Each stream owner's `KillSwitchActivated` is reported `skipped` until the drill deploys an agent for the runtime and executor to start ([DEC-2000](../../docs/project/decisions/DEC-2000.md) item 6) | The connection-scope kill switch never committed: the check must name `no kill_switch of scope connection` |
 | `admission` | The hosted clusters' kill-switch admission policies (`deploy/gitops/base/kill-switch-admission.yaml`), applied as they are with a signature webhook that is down and fails closed: the founder's kill-switch Job is admitted and its pod made; an unlabelled pod, a person's or a service account's `control` pod, a service account's control Job, the control label a service account gives its suspended Job, a service account's change to a person's control Job, a labelled Deployment's pod, a CronJob's control Job (another API group's included), the label added to a pod later, and a changed image or an ephemeral container in the kill switch's pod are each refused; a second workspace's namespace is covered by its label; and a finished kill-switch Job is removed by foreground deletion ([DEC-2045](../../docs/project/decisions/DEC-2045.md), [DEC-2046](../../docs/project/decisions/DEC-2046.md)) | The Job policy firing on update only for a newly control label: the check must name `admitted a service account's change to a person's control Job` |
 | `egress` | From a pod of every process type, each live trading host (`agent.robinhood.com`, `api.robinhood.com`, `api.alpaca.markets`) fails at the network layer, and the journal is reachable exactly from the rendered processes whose egress names Postgres (OPS-5) | Every network policy deleted |
 | `standby-down` | With the synchronous standby fenced, an append neither commits nor becomes visible on the primary, and its Job ends on its deadline; once the standby is back and streams synchronously, a new append commits and every stream written verifies by journal spec §11 (OPS-2, E21-41) | The cluster's durability set to `preferred`, so the primary commits alone: `committed with the standby fenced` |
-| `vault` | `mandate vault provision` sets the cell's vault up (DEC-2022), then from a pod labelled as the executor each AppRole logs in and reads: a runtime nothing, an executor exactly its own connection's token and not `drill-other`'s, the model gateway its key; and no `mandate-*` policy holds `*` or `+`, but for the role provisioner's two role paths ("The vault" below). It runs in `cell-kill-switch`, after the kill switch's drill | The runtime's policy rewritten to read every connection's token through `+`: the check must name `wildcard in mandate-runtime` |
+| `vault` | `mandate vault provision` sets the cell's vault up (DEC-2022), then from a pod labelled as the executor each AppRole logs in and reads: a runtime nothing, an executor exactly its own connection's token and not `drill-other`'s, the model gateway its key; and no `mandate-*` policy holds `*` or `+`, but for the role provisioner's two role paths ("The vault" below). It runs in its own job, `cell-vault` (DEC-2616) | The runtime's policy rewritten to read every connection's token through `+`: the check must name `wildcard in mandate-runtime` |
+| `exchange` | After a connect the CLI confirmed and the API started, the real token-exchange pod the deployment manager starts redeems a code the cell's `oauth-fixture` issued, against the cell's vault (E10-22, DEC-2063) | The connect's step-up never confirmed in the CLI, so the API must refuse its start: `step_up_missing` |
+| `exchange-late` | The same connect with the owner authorizing only once the manager's exchange pod runs, as at Alpaca, so the exchange waits for its code until the request's deadline (DEC-2363) | As `exchange`'s: `step_up_missing` |
 | `archive` | A closed WAL segment is reported archived by Postgres, a base backup completes, and Barman's own tools, reading the store with the archive's key, list the backup and fetch the segment back (E21-41) | The archive pointed at another bucket of the same store, which Postgres cannot tell: `not in the archive` |
 | `ticks` | The chart pointed at a fresh workspace restarts the scheduler on it, and its `clock:` stream, exported twice by one-off Jobs three seconds apart, has grown (E21-29) | The scheduler scaled to zero once a first export shows it ticking, so its stream stops: `the scheduler is not ticking`; it is scaled back before the verdict |
 | `executor` | The scheduler ticking the run's workspace: its `clock:` stream, exported twice by one-off Jobs three seconds apart, has grown (E21-29); and the data process's daily bars, `mandate inspect`ed in the artifact store with no problem and at least 30 sessions. Then an agent deployed on a recorded paper connection, and the deployment manager starting that account's executor until its pod runs and its process answers `livez` (E21-30, [DEC-2035](../../docs/project/decisions/DEC-2035.md)). Three more one-off Jobs: the executor's connect check on its in-process fixture broker, which prints the passing `ConnectionChecked`; the workspace opened and founded and the record's code shown; then the record committed and the demo's mandate registered, created, confirmed and deployed, so `AgentDeployed` is version 2 (journal spec §9.24 rule 201). No credential, no broker host | The connect check skipped, so the connection is never recorded and the agent deploys at version 1: `no executor pod` |
 
 A seeded run counts as caught only when its report names the planted bug's own symptom
 (`rehash_mismatch`, a live host reached, the deleted policy missing, `export_stream_empty`, the
-missing kill switch, a commit with the standby fenced, a segment not in the archive, no executor
-pod), never any
+missing kill switch, `admitted a service account's change to a person's control Job`, a commit
+with the standby fenced, a segment not in the archive, `the scheduler is not ticking`, no executor
+pod, `wildcard in mandate-runtime`, `step_up_missing`), never any
 failure. `standby-down` and `archive` run in CI's `cell-journal` job and `restart`, which with the
 synchronous standby is a failover and the old primary's rejoin, in `cell-failover`, each beside
 `cell`, so each stays within ten minutes (DEC-464). A part of a drill that cannot run yet is reported
@@ -371,7 +384,8 @@ In `deploy/tests/test_vault.py`:
 
 `cargo xtask cell up` installs it, initializes it once with one unseal key, kept with the root
 token in `target/cell/vault-init.json` (mode 0600; this cell holds fake secrets only), unseals it,
-and refuses a vault on any storage but raft. `cell down` discards both.
+and refuses a vault on any storage but raft. `cell down` deletes the vault with the cluster; the
+file stays until the next `cell up` overwrites it.
 
 Where it builds the role provisioner's image (DEC-2350), `cell up` then provisions the vault as
 staging's apply does (DEC-2630), before the workspace chart: it copies its static `mandate` CLI into
@@ -387,7 +401,7 @@ parameter as written, in that one policy, beside DEC-2349's grants. Kubernetes a
 the executors' templated policy, whose two one-segment `create` grants below the executor's own
 connection, its account and fingerprint entries (DEC-2339, DEC-2345), the drill admits whole too,
 with only the mount's accessor, which each vault names afresh, read as a placeholder. It then
-reads thirteen `mandate-*` policies, not ten.
+reads fourteen `mandate-*` policies, not eleven.
 
 A production cell is initialized and unsealed by the founder, by hand (DEC-977 item 5):
 
@@ -435,12 +449,15 @@ vault's audit device.
 
 ## The Compose file
 
-For one host: `docker compose -f deploy/cell/compose/compose.json up` with `MANDATE_WORKSPACE`
-and `MANDATE_IMAGE_MANDATE` (pinned by digest) set, and under `deploy/cell/compose/secrets/`
-(never committed) `postgres-superuser` and one `journal-role-<role>.pgpass` per role holding
-`*:*:mandate:<role>:<password>`, owned by uid 999 with mode 0600, which libpq and sqlx require.
-Every Compose service runs as that one non-root user, the library Postgres image's, so its
-first-start script and each process can read the same files.
+For one host: `docker compose -f deploy/cell/compose/compose.json up` with `MANDATE_WORKSPACE`,
+`MANDATE_IMAGE_MANDATE` and `MANDATE_IMAGE_RUNTIME` (pinned by digest), the runtime's
+`MANDATE_RUNTIME_AGENT`, `MANDATE_RUNTIME_CONNECTION` and `MANDATE_RUNTIME_OWNER`, and every `api`
+setting below set: the file interpolates every variable it names for any `up` or `run`. Under
+`deploy/cell/compose/secrets/` (never committed) go `postgres-superuser` and one
+`journal-role-mandate-<x>.pgpass` per role holding `*:*:mandate:mandate_<x>:<password>`, owned by
+uid 999 with mode 0600, which libpq and sqlx require. Every Compose service but `postgres`, whose
+image drops to that user itself, runs as that one non-root user, so its first-start script and each
+process can read the same files.
 `docker compose run control workspace open …` runs the CLI. The `api` service also needs
 `MANDATE_IMAGE_API`, the settings `MANDATE_API_ORG`, `MANDATE_API_WORKSPACE`, `MANDATE_API_ISSUER`,
 `MANDATE_API_AUDIENCE`, `MANDATE_API_JWKS_URL`, `MANDATE_API_APP_ORIGIN` and
@@ -449,7 +466,8 @@ uid 999 with mode 0600. It listens on its container's loopback and mounts no sub
 every sign-in is refused there until a later change adds both.
 
 The deployment manager is not in the Compose file (`"compose": false` in `processes.json`): it
-drives Kubernetes only (DEC-1172), so on one host the runtime and executor are Compose services.
+drives Kubernetes only (DEC-1172). On one host the runtime is a Compose service; the executor,
+scheduler, dispatcher, data process, model gateway and token exchange are not in it yet.
 
 `docker compose run` of `control` or `journal-verify` needs a writable `/work`, given with
 `-v <dir>:/work`, as `cargo xtask cell drill compose` does.

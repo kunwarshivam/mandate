@@ -537,6 +537,19 @@ pub(crate) struct Decided {
     event_id: String,
     /// Whether a re-run finds this command or commits another, which the exhausted report says.
     repeat: Repeat,
+    /// The schema version [`commit`] writes the event at: 1 unless [`Decided::at_version`] says.
+    schema_version: u64,
+}
+
+impl Decided {
+    /// The same command, written at `schema_version` (journal spec §9.28's version 2, DEC-2824).
+    #[must_use]
+    pub(crate) fn at_version(self, schema_version: u64) -> Self {
+        Self {
+            schema_version,
+            ..self
+        }
+    }
 }
 
 /// What [`decide`] found: a command to commit, or the same command already committed as the
@@ -607,6 +620,7 @@ pub(crate) fn decide(
         stepped_up,
         event_id,
         repeat,
+        schema_version: 1,
     }))
 }
 
@@ -862,6 +876,7 @@ fn drafted(
         stepped_up,
         event_id,
         repeat,
+        schema_version,
     } = decided;
     same_environment(journal, &stream, owner)?;
     for name in timed {
@@ -882,7 +897,7 @@ fn drafted(
     let mut referenced = BTreeSet::new();
     digest_refs(&payload, &mut referenced);
     let shape = Shape {
-        schema_version: 1,
+        schema_version,
         artifact_refs: referenced.into_iter().collect(),
         config_refs: Vec::new(),
     };

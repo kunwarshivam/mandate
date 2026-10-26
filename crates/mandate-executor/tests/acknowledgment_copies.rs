@@ -407,13 +407,34 @@ fn an_original_already_copied_is_not_copied_again() {
             })
             .collect();
         for handoff in &handed {
+            if !shell
+                .state
+                .copied_acknowledgment(&handoff.original.event_id)
+            {
+                failed.push(format!("{} not read as copied", name(&vector)));
+            }
             let again = shell.run(Input::Acknowledgment(handoff.clone()), &ports);
             if !again.drafts.is_empty() {
                 failed.push(format!("{} live: {:?}", name(&vector), again.drafts));
             }
         }
         let mut restarted = shell.restart_ready(&ports);
+        if restarted
+            .state
+            .copied_acknowledgment(&EventId("01JNEVERCOPIED000000000000".to_owned()))
+        {
+            failed.push(format!(
+                "{}: an original never copied reads as copied",
+                name(&vector)
+            ));
+        }
         for handoff in handed {
+            if !restarted
+                .state
+                .copied_acknowledgment(&handoff.original.event_id)
+            {
+                failed.push(format!("{} restarted: not read as copied", name(&vector)));
+            }
             let again = restarted.run(Input::Acknowledgment(handoff), &ports);
             if !again.drafts.is_empty() {
                 failed.push(format!("{} restarted: {:?}", name(&vector), again.drafts));
