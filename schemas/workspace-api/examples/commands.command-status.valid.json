@@ -55,11 +55,5 @@
     "set": {
       "/steps/0/reason": null
     }
-  },
-  {
-    "label": "an acknowledgment of a restriction, accepted (DEC-2144)",
-    "set": {
-      "/phase": "accepted"
-    }
   }
 ]

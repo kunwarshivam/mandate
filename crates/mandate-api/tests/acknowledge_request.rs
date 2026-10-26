@@ -1,11 +1,12 @@
-//! An acknowledgment's optional members, ahead of the schema that names them (journal spec §9.28
-//! version 2, DEC-2523; the struct first, as DEC-2126 and DEC-2128 order it): `subject` is one of
+//! An acknowledgment's members beside the event, `record`, and `step_up` (journal spec §9.28 version
+//! 2, DEC-2523, DEC-2144): `subject` is one of
 //! `limit`, `restriction`, and `reconciliation`; `request` is an event id; and `step_up_assertion`
 //! is carried only beside `passkey` evidence (DEC-2128 item 1), else one violation at
-//! `/step_up_assertion`. Each is read as `null` when absent, so the body the schema serves today
-//! decodes as before.
+//! `/step_up_assertion`. Each is read as `null` when absent: the schema requires `subject`, and the
+//! type does too once the server serves the route (DEC-2144 item 8).
 //!
-//! The base body is the schema's example; every expected outcome is written here by hand.
+//! The base body is the schema's example without its optional members; every expected outcome is
+//! written here by hand.
 
 use mandate_api::envelope::{StepUpAssertion, StepUpMethod};
 use mandate_api::problem::Violation;
@@ -16,11 +17,17 @@ use serde_json::{Value, json};
 const PASSKEY_ID: &str = "AAECAwQFBgcICQoLDA0ODw";
 const REQUEST: &str = "01JBH3BTZ8K2M4N6P8R0S2T4V7";
 
+/// The schema's example without its optional members, so each test sets only what it names.
 fn base() -> Value {
-    serde_json::from_str(include_str!(
+    let mut body: Value = serde_json::from_str(include_str!(
         "../../../schemas/workspace-api/examples/commands.acknowledge-request.json"
     ))
-    .expect("JSON")
+    .expect("JSON");
+    let object = body.as_object_mut().expect("an object");
+    for member in ["subject", "request", "step_up_assertion"] {
+        object.remove(member);
+    }
+    body
 }
 
 fn assertion() -> Value {
@@ -75,7 +82,7 @@ fn one(path: &str, code: &str) -> Option<Vec<(String, String)>> {
 }
 
 #[test]
-fn the_schema_s_body_decodes_as_before_with_every_new_member_null() {
+fn a_body_without_the_optional_members_reads_each_as_null() {
     let request = decode::<AcknowledgeRequest>(&with(&[])).expect("decodes");
     assert_eq!(
         (request.subject, request.request, request.step_up_assertion),
