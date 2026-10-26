@@ -43,7 +43,7 @@ type Store = BTreeMap<Digest, Vec<u8>>;
 const NOW: i64 = 1_790_000_000;
 const AGENT: &str = "agent-a";
 const MANDATE: &str = include_str!("fixtures/spy_mandate.json");
-const SPY: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-10-05T13:30:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","symbol":"SPY"}"#;
+const SPY: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-10-05T13:30:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b28f4066-5c6d-479b-a2af-85dc1a8f16fb","symbol":"SPY"}"#;
 /// The fixture's model hash, E7-7's, which the binary test swaps for the host's.
 const FIXTURE_HASH: &str = "4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc";
 const MODEL: &str = r#"{"admits_instruments":false,"content_hash":"sha256:4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc","kind":"model_version","model_id":"quant.ma_crossover","model_version":"1.0.0","params":["fast_periods","slow_periods"]}"#;
@@ -150,7 +150,7 @@ fn a_deployed_agent_shows_its_version_and_refuses_another() {
     let (mut ids, owner) = (FixedIds::default(), owner());
     let other = SPY
         .replace(
-            "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+            "b28f4066-5c6d-479b-a2af-85dc1a8f16fb",
             "a1a1a1a1-8b9b-48a9-ba46-b9d54906e416",
         )
         .replace("SPY", "QQQ");
@@ -162,7 +162,7 @@ fn a_deployed_agent_shows_its_version_and_refuses_another() {
     );
     let second = MANDATE
         .replace(
-            "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+            "b28f4066-5c6d-479b-a2af-85dc1a8f16fb",
             "a1a1a1a1-8b9b-48a9-ba46-b9d54906e416",
         )
         .replace("SPY", "QQQ");
