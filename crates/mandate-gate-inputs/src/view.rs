@@ -5,8 +5,8 @@
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_executor::{
-    AgentId, BindingGateConfigRefs, ExitTier, FillConfigRefs, InstrumentSnapshot, MandateVersion,
-    MandateView, ProtectionPrices, equity_bracket_prices,
+    AccountFillRefs, AgentId, BindingGateConfigRefs, ExitTier, FillConfigRefs, InstrumentSnapshot,
+    MandateVersion, MandateView, ProtectionPrices, equity_bracket_prices,
 };
 use mandate_num::{Fraction, Price, ShareIncrement};
 use mandate_spec::document::Protection;
@@ -24,6 +24,19 @@ pub fn fill_refs(refs: &BindingGateConfigRefs) -> Option<FillConfigRefs> {
         settlement_calendar: calendar.clone(),
         trading_calendar: calendar,
         instrument_snapshot: refs.instrument_snapshot.clone()?,
+    })
+}
+
+/// The account's own fill configuration from the registered references: the fee configuration and
+/// the trading calendar, which also settles the paper run (DEC-938 item 2), or none when either is
+/// missing. An unattributed fill in an instrument with no snapshot is accounted under it
+/// (DEC-2817).
+pub fn account_fill_refs(refs: &BindingGateConfigRefs) -> Option<AccountFillRefs> {
+    let calendar = refs.trading_calendar.clone()?;
+    Some(AccountFillRefs {
+        fee_config: refs.fee_config.clone()?,
+        settlement_calendar: calendar.clone(),
+        trading_calendar: calendar,
     })
 }
 
@@ -162,5 +175,11 @@ impl InstrumentSnapshot for DeployedView {
         self.instrument(instrument)
             .then(|| fill_refs(&self.config_refs))
             .flatten()
+    }
+
+    /// The deployment's registered fee configuration and calendar, whatever the instrument
+    /// (DEC-2817).
+    fn account_fill_refs(&self) -> Option<AccountFillRefs> {
+        account_fill_refs(&self.config_refs)
     }
 }

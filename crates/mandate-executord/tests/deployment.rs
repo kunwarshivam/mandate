@@ -49,6 +49,12 @@ const CONTENT: &str =
 const AAPL_ID: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
 const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 const SNAPSHOT: &str = r#"{"asset_class":"us_equity","etp":"plain","etp_classified_at":"2026-09-21T00:00:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b28f4066-5c6d-479b-a2af-85dc1a8f16fb","symbol":"SPY"}"#;
+const DEMO_MANDATE: &str = include_str!("../../../deploy/cell/demo/mandate.json");
+const DEMO_FEE: &str = include_str!("../../../deploy/cell/demo/fee-config.json");
+const DEMO_CALENDAR: &str = include_str!("../../../deploy/cell/demo/trading-calendar.json");
+const DEMO_RULES: &str = include_str!("../../../deploy/cell/demo/rule-set.json");
+const DEMO_SNAPSHOT: &str = include_str!("../../../deploy/cell/demo/instrument.json");
+const DEMO_MODEL: &str = "cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d";
 const ENVELOPE: &str = "autonomy behavior capital connection_id environment goal name notifications protection risk universe";
 /// Monday 12:00 in New York, inside the regular session.
 const MONDAY: &str = "2026-09-21T16:00:00Z";
@@ -75,6 +81,7 @@ struct Variant {
     offset: Option<&'static str>,
     retired_loss: Option<&'static str>,
     max_order: Option<&'static str>,
+    demo: bool,
 }
 
 /// The account's journal with the agent's SPY mandate registered, created, confirmed and deployed
@@ -109,7 +116,14 @@ fn deployed_as(variant: Variant) -> Result<(Journal, Artifacts, String), Error> 
         )?;
     }
     let mut store = Artifacts::new();
-    let mandate = MANDATE
+    let mandate = if variant.demo {
+        DEMO_MANDATE
+            .replace("conn_demo_paper_01", CONNECTION)
+            .replace(DEMO_MODEL, &Digest::of(CONTENT.as_bytes()).to_hex())
+    } else {
+        MANDATE.to_owned()
+    };
+    let mandate = mandate
         .replace(AAPL_ID, SPY)
         .replace(r#""AAPL""#, r#""SPY""#)
         .replace(
@@ -148,12 +162,20 @@ fn deployed_as(variant: Variant) -> Result<(Journal, Artifacts, String), Error> 
             put(&mut store, CONTENT)
         ),
     )];
+    let configs = if variant.demo {
+        [DEMO_FEE, DEMO_CALENDAR, DEMO_RULES, DEMO_SNAPSHOT]
+    } else {
+        [FEE, CALENDAR, RULES, SNAPSHOT]
+    };
     for (kind, object) in [
-        ("fee_config", FEE.trim()),
-        ("trading_calendar", CALENDAR.trim()),
-        ("rule_set", RULES.trim()),
-        ("instrument_snapshot", SNAPSHOT),
-    ] {
+        "fee_config",
+        "trading_calendar",
+        "rule_set",
+        "instrument_snapshot",
+    ]
+    .into_iter()
+    .zip(configs.map(str::trim))
+    {
         let hash = put(&mut store, object);
         payloads.push((
             "ConfigSnapshotRegistered",
@@ -437,6 +459,18 @@ fn a_deployed_agent_is_answered_from_its_reviewed_artifacts() -> Result<(), Erro
     assert_eq!(deployment.asset_class(&spy), Some(AssetClass::UsEquity));
     assert!(deployment.increment(&spy).is_some());
     assert!(deployment.fill_refs(&spy).is_some());
+    assert_eq!(deployment.fill_refs(&InstrumentId::new(AAPL_ID)?), None);
+    let account = deployment
+        .account_fill_refs()
+        .ok_or("the one deployment names the account's fill configuration")?;
+    let of_spy = deployment
+        .fill_refs(&spy)
+        .ok_or("SPY's fill configuration")?;
+    assert_eq!(
+        (account.fee_config, account.trading_calendar),
+        (of_spy.fee_config, of_spy.trading_calendar),
+        "an instrument no deployment holds is accounted under the deployment's fee and calendar"
+    );
     assert_eq!(deployment.asset_class(&InstrumentId::new(AAPL_ID)?), None);
     let entry = Price::parse("100")?;
     assert!(matches!(
@@ -1193,7 +1227,26 @@ fn a_deployment_not_read_in_full_is_read_again() -> Result<(), Error> {
 /// another instrument's.
 #[test]
 fn a_deployed_opening_fills_and_rests_its_protective_stop() -> Result<(), Error> {
-    let (journal, mut process, paper) = trade_loop()?;
+    the_loop(Variant {
+        max_order: Some("1000"),
+        ..Variant::default()
+    })
+}
+
+/// The same loop on the cell's demo deployment as it is checked in (`deploy/cell/demo`): its
+/// mandate, caps and protection, its SPY snapshot under SPY's asset id, its fee, calendar and rule
+/// set. Only the model's content object is the tests', which the loop never reads.
+#[test]
+fn the_demos_own_deployment_fills_and_rests_its_protective_stop() -> Result<(), Error> {
+    the_loop(Variant {
+        demo: true,
+        ..Variant::default()
+    })
+}
+
+/// The trade loop over `variant`'s deployment, asserted end to end.
+fn the_loop(variant: Variant) -> Result<(), Error> {
+    let (journal, mut process, paper) = trade_loop(variant)?;
     for second in (5..120).step_by(5) {
         let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
         tick(&journal, &format!("tl{second}"), &now)?;
@@ -1282,14 +1335,11 @@ type LoopProcess = mandate_executord::ExecutorProcess<
     mandate_executord::deployment::Named<mandate_executord::alpaca::AlpacaBroker<FixturePaper>>,
 >;
 
-/// The account journaled and SPY's opening of one share at the fixture's ask proposed, under a
-/// mandate whose order cap admits one share; a process over the deployed fixture run, started at
+/// The account journaled and SPY's opening of one share at the fixture's ask proposed, under
+/// `variant`'s deployment; a process over the deployed fixture run, started at
 /// `MONDAY`; and the fixture it trades on.
-fn trade_loop() -> Result<(Journal, LoopProcess, FixturePaper), Error> {
-    let (journal, store, _) = deployed_as(Variant {
-        max_order: Some("1000"),
-        ..Variant::default()
-    })?;
+fn trade_loop(variant: Variant) -> Result<(Journal, LoopProcess, FixturePaper), Error> {
+    let (journal, store, _) = deployed_as(variant)?;
     journaled(&journal)?;
     let paper = mandate_executord::paper::FixturePaper::filling(at(MONDAY)?).quoting(wall_clock);
     let broker = mandate_executord::alpaca::AlpacaBroker::new(paper.clone())?;

@@ -655,6 +655,11 @@ pub(crate) fn fill(
             ],
         )?;
         pairs.push(("client_order_id", Value::Null));
+        let refs = if refs.is_empty() {
+            account_fill_config(batch)?
+        } else {
+            refs
+        };
         batch.journal_with_refs("FillApplied", None, refs, pairs)?;
         every_agent_alerted(
             batch,
@@ -767,6 +772,23 @@ fn fill_config(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Result<Objec
             "instrument_snapshot",
             Some(refs.instrument_snapshot.as_str()),
         ),
+        (
+            "settlement_calendar",
+            Some(refs.settlement_calendar.as_str()),
+        ),
+        ("trading_calendar", Some(refs.trading_calendar.as_str())),
+    ])
+}
+
+/// The `config_refs` an unattributed fill in an instrument with no snapshot is journaled with: the
+/// account's fee configuration and both calendars, and no instrument snapshot (journal spec §9.5
+/// rule 300, DEC-2817); none when the port knows none, which the journal refuses as before.
+fn account_fill_config(batch: &Batch<'_, '_>) -> Result<Object, ExecutorError> {
+    let Some(refs) = batch.ports.instruments.account_fill_refs() else {
+        return Ok(Object::new());
+    };
+    config_refs(&[
+        ("fee_config", Some(refs.fee_config.as_str())),
         (
             "settlement_calendar",
             Some(refs.settlement_calendar.as_str()),

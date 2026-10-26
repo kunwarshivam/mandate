@@ -150,6 +150,12 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "AccountCloseRequested" => account_close_requested(state, event),
         "OwnerConfirmationReceived" => owner_confirmation_received(state, payload),
         "ClockAdvanced" | "MarkUpdated" | "ConductBreachDetected" => Ok(()),
+        "RiskDayStarted"
+        | "RiskLimitTriggered"
+        | "RiskLimitLifted"
+        | "HighWaterMarkReset"
+        | "InstrumentRestrictionChanged"
+        | "GoalCompleted" => risk_record(),
         "TradingDayStarted" => {
             let date = Date::parse(required_text(payload, "date")?)?;
             state.trading_day = Some(state.trading_day.map_or(date, |current| current.max(date)));
@@ -208,6 +214,14 @@ fn net_after(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorE
         Some(instrument) => net_unattributed(state, &instrument),
         None => Ok(()),
     }
+}
+
+/// The account risk fold's records (journal spec §9.27) fold as records here (DEC-2804 item 1):
+/// `mandate_executor::risk_state` is their reader, which finds each one where it owes it
+/// (DEC-2399), and the mode one of them changes reaches this state through its own
+/// `AgentModeApplied`, as every originated mode record does.
+fn risk_record() -> Result<(), ExecutorError> {
+    Ok(())
 }
 
 /// The executor's own `ConnectionChecked` folds as a record only (journal spec §9.8): into
@@ -273,14 +287,14 @@ fn owner_elsewhere(kind: &str) -> Option<&'static str> {
         | "AccountCloseRequested"
         | "ConnectionChecked"
         | "ConnectionEstablished"
-        | "PositionReleased" => None,
-        "RelatedAccountsCoordination" => Some("E7-5"),
-        "MandateVersionApplied"
+        | "PositionReleased"
         | "RiskLimitTriggered"
         | "RiskLimitLifted"
         | "HighWaterMarkReset"
         | "InstrumentRestrictionChanged"
-        | "GoalCompleted" => Some("E6-4"),
+        | "GoalCompleted" => None,
+        "RelatedAccountsCoordination" => Some("E7-5"),
+        "MandateVersionApplied" => Some("E6-4"),
         "UniverseChanged" => Some("E17-3"),
         _ => Some("E7-2"),
     }

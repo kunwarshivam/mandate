@@ -433,7 +433,7 @@ pub(crate) fn payload(
         RESTRICTION => restriction_rules(p)?,
         KILL_SWITCH => kill_switch_rules(p, causation_id)?,
         EXTERNAL => external_rules(p)?,
-        FILL if schema_version == 2 => fill_rules(p)?,
+        FILL if schema_version == 2 => fill_rules(p, config_refs)?,
         "ProtectionChanged" => protection_changed_rules(p)?,
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
@@ -697,10 +697,12 @@ fn external_rules(p: Payload<'_>) -> Result<(), Invalid> {
     Ok(())
 }
 
-/// Rule 299 (DEC-2812): a `FillApplied` version 2 that names an order names one of ours, as trading
-/// spec §2.3 states it: `md-`, then one or more ASCII letters, digits or hyphens, at most 128
-/// characters in all. A fill that names no order of ours is `null`.
-fn fill_rules(p: Payload<'_>) -> Result<(), Invalid> {
+/// Rules 299 (DEC-2812) and 300 (DEC-2817): a `FillApplied` version 2 that names an order names
+/// one of ours, as trading spec §2.3 states it: `md-`, then one or more ASCII letters, digits or
+/// hyphens, at most 128 characters in all; and names the instrument snapshot its order was gated
+/// on. A fill that names no order of ours is `null`, and may be in an instrument the platform
+/// holds no snapshot of.
+fn fill_rules(p: Payload<'_>, config_refs: Option<&Value>) -> Result<(), Invalid> {
     if p.is_null("client_order_id") {
         return Ok(());
     }
@@ -709,19 +711,58 @@ fn fill_rules(p: Payload<'_>) -> Result<(), Invalid> {
         && named.strip_prefix("md-").is_some_and(|body| {
             !body.is_empty() && body.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
         });
-    ensure(ours, InvalidReason::Schema, "payload.client_order_id")
+    ensure(ours, InvalidReason::Schema, "payload.client_order_id")?;
+    ensure(
+        config_refs
+            .and_then(|refs| refs.get(crate::catalogue::INS))
+            .is_some(),
+        InvalidReason::MissingConfigRef,
+        "config_refs.instrument_snapshot",
+    )
 }
 
 /// The longest client order id of ours, Alpaca's bound (trading spec §2.3).
 const OUR_CLIENT_ORDER_ID_MAX: usize = 128;
 
+/// §9.5's stream rules on the account stream: rule 260 on an `AccountCloseRequested`, rule 309 on
+/// an `AccountRestrictionChanged`.
+pub(crate) fn stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
+    match draft.event_type() {
+        CLOSE => close_stream_rule(before, draft),
+        RESTRICTION => restriction_stream_rule(before, draft),
+        _ => Ok(()),
+    }
+}
+
+/// Rule 309 (v0.96, DEC-2816): an `AccountRestrictionChanged` names a cause no earlier one of its
+/// stream raised at the same restriction or a stricter one, `blocked` over `closing_only`, so each
+/// cause in force is on the stream once per restriction.
+fn restriction_stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
+    let raised = |d: &Draft| {
+        let payload = d.fields().get("payload").cloned().unwrap_or(Value::Null);
+        let p = Payload(&payload);
+        (
+            p.text("cause").to_owned(),
+            p.text("restriction") == "blocked",
+        )
+    };
+    let (cause, blocks) = raised(draft);
+    ensure(
+        !before.iter().any(|d| {
+            d.event_type() == RESTRICTION && {
+                let (earlier, blocked) = raised(d);
+                earlier == cause && (blocked || !blocks)
+            }
+        }),
+        InvalidReason::Schema,
+        "payload.cause",
+    )
+}
+
 /// Rule 260 (DEC-2337 item 2), a stream rule: an `AccountCloseRequested` names a switch,
 /// instrument, and attempt no earlier one of its stream names together, so a duplicate request is
 /// refused and its second send never happens.
-pub(crate) fn stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
-    if draft.event_type() != CLOSE {
-        return Ok(());
-    }
+fn close_stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
     let request = |d: &Draft| {
         let payload = d.fields().get("payload").cloned().unwrap_or(Value::Null);
         let p = Payload(&payload);

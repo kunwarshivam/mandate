@@ -310,13 +310,6 @@ const W2_WEB: Wait = Wait {
     lands: "web/ sends the demo's gestures through the API, and `cell demo` drives web/ against \
             the cell (claim #1443)",
 };
-const X_EXECUTOR: Wait = Wait {
-    lane: "X",
-    story: "E21-30",
-    pr: None,
-    lands: "slice X1b-3: paper fills on the fixture; the executor already takes the \
-            runtime's orders (#1736)",
-};
 const P5_HOOK: Wait = Wait {
     lane: "D1",
     story: "E21-2",
@@ -1080,9 +1073,21 @@ pub fn plan(
                     what: "the paper fill and the protective stop on a fixture broker",
                     on_main: "the executor process (#1596, binary #1694) and its interim image \
                               in the cell on the fixture paper broker (#1702, DEC-2031), handing \
-                              its agents' orders to the core (#1736), with the runtime proposing \
-                              nothing on the deny-all wiring (DEC-1013)",
-                    waits: vec![X_EXECUTOR, P5_HOOK],
+                              its agents' orders to the core (#1736); the fixture fills, and the \
+                              executor reads each deployment's mandate, gate and protection \
+                              (#2547, #2605) and its broker by asset id, so a deployed opening is \
+                              gated, filled, booked and protected in process (#2624, DEC-2813); \
+                              the cell's daemon asks on a deferring opening (#2538), and, in \
+                              process, the runtime's production wiring decides, asks and \
+                              proposes the opening once granted, on the demo envelope (#2637); \
+                              the cell's runtime is wired by the gap above",
+                    waits: vec![wait(
+                        "E2E",
+                        "E21-54",
+                        None,
+                        "a gesture that shows the granted opening's fill and resting stop in the \
+                         cell, in place of this gap",
+                    )],
                 }),
             ],
         },
@@ -3577,7 +3582,7 @@ mod tests {
 
     /// The slices a wait has named that are on `main`, with the PR that landed each: a lane that
     /// lands one adds its row here, so no wait can go on saying it is still to come.
-    const LANDED_SLICES: &[(&str, u32)] = &[("X1a", 1596), ("X1b", 1736)];
+    const LANDED_SLICES: &[(&str, u32)] = &[("X1a", 1596), ("X1b", 1736), ("X1b-3", 2624)];
 
     /// The slices `text` names as still to land: each word that follows `slice `, up to the
     /// first character that is not a letter, a digit or a hyphen, so `X1b-3` is not `X1b`.
