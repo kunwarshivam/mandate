@@ -1009,8 +1009,9 @@ per workspace deployment (item 6).
         `{restriction, kind, instrument}` for a reconciliation hold, `kind` one of `instrument`,
         `cash`, `external_activity`, and `incomplete`, read from `restriction`, and `instrument` the
         held asset or `null`;
-      - `mode`, the agent mode the hold holds: for a restriction, the one trading spec §7.3 gives its
-        `restriction` (`closing_only` holds `exits_only`, `blocked` holds `paused`), and for a
+      - `mode`, the agent mode the hold holds: for a restriction, the one trading spec §7.3 gives the account
+        state its `AccountRestrictionChanged` records (`closing_only` holds `exits_only`, `blocked`
+        holds `paused`), and for a
         reconciliation hold, its `AgentModeApplied`'s `to`; `null` for a limit;
       - `raised_at`, the hold record's `recorded_at`;
       - `independent_required`: the workspace's effective `independent_approval_required` (mandate
