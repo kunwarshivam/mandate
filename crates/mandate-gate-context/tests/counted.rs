@@ -195,7 +195,13 @@ impl Rig {
 /// Whether an opening on the traded account may be answered from the fold: the account is flat
 /// and its counters read, at a tick later the same day.
 fn answers(rig: &Rig) -> bool {
-    rig.0.flat() && rig.0.counted(instant(START + 600)).is_some()
+    let answers = rig.0.flat() && rig.0.counted(instant(START + 600)).is_some();
+    assert_eq!(
+        rig.0.opening_hold(true),
+        (!answers).then_some(OpeningHold::AccountTraded),
+        "the hold is exactly the fold's answer (DEC-2833 item 8)"
+    );
+    answers
 }
 
 /// After one round trip the account is flat, and an opening is held for nothing the fold reads:

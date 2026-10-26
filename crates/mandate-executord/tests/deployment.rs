@@ -61,6 +61,8 @@ const LLM_CONTENT: &str =
 const ENVELOPE: &str = "autonomy behavior capital connection_id environment goal name notifications protection risk universe";
 /// Monday 12:00 in New York, inside the regular session.
 const MONDAY: &str = "2026-09-21T16:00:00Z";
+/// [`MONDAY`] as a journaled `risk_clock`.
+const MONDAY_NANOS: &str = "2026-09-21T16:00:00.000000000Z";
 
 type Artifacts = BTreeMap<Digest, Vec<u8>>;
 
@@ -629,13 +631,9 @@ fn a_traded_account_holds_the_opening() -> Result<(), Error> {
     Ok(())
 }
 
-/// A traded account that is flat again, its counters read, is still held until the account risk
-/// view's snapshot is wired into the gate: the allocation is no longer the agent's equity
-/// (DEC-2833 item 2).
-#[test]
-fn a_traded_flat_account_is_held_until_its_risk_is_read() -> Result<(), Error> {
-    let (journal, store, _) = deployed()?;
-    journaled(&journal)?;
+/// A round trip in SPY on the account at `clock`: an unattributed buy and sell, as the reconciler
+/// applies fills it did not originate.
+fn round_trip(journal: &Journal, clock: &str) -> Result<(), Error> {
     let text = |value: &str| Value::Str(value.to_owned());
     for (id, fill, side) in [("a4", "f1", "buy"), ("a5", "f2", "sell")] {
         journal.write(
@@ -651,14 +649,124 @@ fn a_traded_flat_account_is_held_until_its_risk_is_read() -> Result<(), Error> {
                 ("instrument_id", text(SPY)),
                 ("price", text("500")),
                 ("qty_gross", text("1")),
-                ("risk_clock", text("2026-09-21T16:00:00.000000000Z")),
+                ("risk_clock", text(clock)),
                 ("side", text(side)),
                 ("trade_date", text("2026-09-21")),
             ])?,
         )?;
     }
+    Ok(())
+}
+
+/// What the account risk book reads for the agent: equity 990 of a 1000 allocation, mode `mode`.
+fn book(mode: mandate_risk::AgentMode) -> Result<mandate_executord::risk::GateRisk, Error> {
+    Ok(mandate_executord::risk::GateRisk {
+        risk: mandate_risk::RiskSnapshot {
+            agent_equity: Usd::parse("990")?,
+            high_water_mark: Usd::parse("1000")?,
+            day_start_equity: Usd::parse("995")?,
+            capital_base: Usd::parse("1000")?,
+            inherited_loss: Usd::ZERO,
+            latched: BTreeSet::new(),
+            active_rungs: BTreeMap::new(),
+            size_factor: mandate_num::Ratio::parse("1")?,
+            agent_mode: mode,
+        },
+        mode,
+        instrument_restrictions: BTreeMap::new(),
+    })
+}
+
+/// DEC-2833 items 1 to 3: a traded account that is flat again opens on what the account risk book
+/// reads for the agent, never its allocation, and the counters folded from the account stream pace
+/// it. Right after the round trip's sell the opening is denied, as the trading-domain reference
+/// case denies one within 60 s of an opposite-side fill; past the cooldown it is allowed. With no
+/// risk read the opening is held.
+#[test]
+fn a_traded_flat_account_opens_on_its_risk_book_and_its_counters_pace_it() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    round_trip(&journal, MONDAY_NANOS)?;
     let (deployment, _) = deployment(&journal, store);
-    assert!(opening(&deployment)?.is_none());
+    assert!(opening(&deployment)?.is_none(), "no risk read: held");
+    deployment.read(BTreeMap::from([(
+        agent(),
+        book(mandate_risk::AgentMode::Normal)?,
+    )]));
+    let snapshot = opening(&deployment)?.ok_or("answered on the book's risk")?;
+    assert_eq!(snapshot.risk.agent_equity, Usd::parse("990")?);
+    let spy_asset = mandate_risk::AssetId::new(SPY)?;
+    assert!(snapshot.agent.last_exit_fill_at.contains_key(&spy_asset));
+    let (verdict_now, reason) = verdict(&snapshot)?;
+    assert_eq!(verdict_now, Verdict::Deny, "{reason:?}");
+    assert!(
+        matches!(
+            reason,
+            Some(ReasonCode::OppositeFillInterval | ReasonCode::ReentryCooldown)
+        ),
+        "{reason:?}"
+    );
+    tick(&journal, "t-later", "2026-09-21T17:01:00Z")?;
+    journaled_at(&journal, "later", "2026-09-21T17:01:00.000000000Z")?;
+    let snapshot = opening(&deployment)?.ok_or("answered later")?;
+    assert_eq!(verdict(&snapshot)?, (Verdict::Allow, None));
+    deployment.read(BTreeMap::new());
+    assert!(
+        opening(&deployment)?.is_none(),
+        "an unreadable view holds again"
+    );
+    Ok(())
+}
+
+/// A traded account holding a position, or whose workspace relates a second account, is held
+/// whatever the risk book reads (DEC-2833 items 1 and 4).
+#[test]
+fn a_position_or_a_second_connection_holds_the_traded_opening() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    round_trip(&journal, MONDAY_NANOS)?;
+    journal.write(
+        CONTROL_STREAM,
+        "c2",
+        "ConnectionEstablished",
+        2,
+        None,
+        json(r#"{"account_ref":"acct9","broker":"alpaca","connection_id":"conn9","environment":"paper","scopes":["trading"],"user":"user_other"}"#)?,
+    )?;
+    let (deployment, _) = deployment(&journal, store);
+    deployment.read(BTreeMap::from([(
+        agent(),
+        book(mandate_risk::AgentMode::Normal)?,
+    )]));
+    assert!(opening(&deployment)?.is_none(), "a second connection");
+
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    let text = |value: &str| Value::Str(value.to_owned());
+    journal.write(
+        ACCOUNT_STREAM,
+        "a4",
+        "FillApplied",
+        2,
+        None,
+        object(vec![
+            ("client_order_id", Value::Null),
+            ("fees", Value::Array(Vec::new())),
+            ("fill_id", text("f1")),
+            ("instrument_id", text(SPY)),
+            ("price", text("500")),
+            ("qty_gross", text("1")),
+            ("risk_clock", text(MONDAY_NANOS)),
+            ("side", text("buy")),
+            ("trade_date", text("2026-09-21")),
+        ])?,
+    )?;
+    let (deployment, _) = self::deployment(&journal, store);
+    deployment.read(BTreeMap::from([(
+        agent(),
+        book(mandate_risk::AgentMode::Normal)?,
+    )]));
+    assert!(opening(&deployment)?.is_none(), "a position");
     Ok(())
 }
 
