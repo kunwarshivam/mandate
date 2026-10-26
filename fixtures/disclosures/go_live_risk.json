@@ -1,0 +1,35 @@
+{
+  "document": "go_live_risk",
+  "status": "Pending counsel — not for real-money use",
+  "sections": [
+    {
+      "id": "risk_automated_trading",
+      "title": "Automated trading",
+      "paragraphs": [
+        "Placeholder. Your agent places orders in your account without asking you each time, within the limits you confirm. Orders it places can lose money.",
+        "Placeholder. Paper trading uses simulated money. Results on paper do not show what would happen with real money."
+      ]
+    },
+    {
+      "id": "risk_model_error",
+      "title": "Model error",
+      "paragraphs": [
+        "Placeholder. The models your agent reads can be wrong, late, or unavailable. A score is not a probability of profit."
+      ]
+    },
+    {
+      "id": "risk_venue_connectivity",
+      "title": "Broker and connectivity",
+      "paragraphs": [
+        "Placeholder. Your broker, market data, or network can fail or be delayed, and an order can be filled at a worse price than shown."
+      ]
+    },
+    {
+      "id": "risk_leverage",
+      "title": "Leverage",
+      "paragraphs": [
+        "Placeholder. Agents trade at one times your equity with no borrowing, and leveraged products are off. Counsel will set what live trading allows."
+      ]
+    }
+  ]
+}
