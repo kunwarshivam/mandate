@@ -1,5 +1,7 @@
 //! The core's vocabulary: what goes in, what comes out, and the order states in between.
 
+use std::collections::BTreeSet;
+
 use mandate_accounting::{AccountType, AssetClass, InstrumentId, Side};
 use mandate_canon::{Object, Value};
 use mandate_num::{Fraction, Price, Qty, SignedQty, Usd};
@@ -945,6 +947,40 @@ pub struct FoldedEvent {
     pub payload: Value,
 }
 
+/// The control stream's `OwnerAcknowledged` or `OwnerAcknowledgmentRequested` the shell hands the
+/// executor to copy into the account stream and judge (journal spec §9.28, DEC-2828), with what the
+/// judgment needs that the account stream does not hold. The shell computes each member from the
+/// control stream and the effective policy at the original's position, so the judgment the copy's
+/// batch records is the same on every retry, and a replay reads that record rather than judging
+/// again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcknowledgmentHandoff {
+    /// The control-stream record, as journaled: its `event_id` becomes the copy's `causation_id`.
+    pub original: FoldedEvent,
+    /// The original's `schema_version`, which the copy keeps.
+    pub schema_version: u64,
+    /// The whole second the shell hands the original at, from its clock: the copy is judged at the
+    /// later of this and the executor's risk clock, so a risk clock behind the shell's never judges
+    /// a step-up fresher than it is at processing (§9.28 check 3, DEC-2828 item 3).
+    pub processed_at: RiskClock,
+    /// Every step-up `assertion_id` an `ApprovalResponseSubmitted`, `OwnerCommandIssued`,
+    /// `OwnerAcknowledgmentRequested` or `OwnerAcknowledged` on the control stream spent before the
+    /// original (mandate spec §6.1's reuse check).
+    pub spent: BTreeSet<String>,
+    /// For an acknowledgment that names a request, the same set before that request's original on
+    /// the control stream, which check 4 judges the request's own step-up against. `None` for a
+    /// request, and for an acknowledgment whose request the control stream does not hold. Handed
+    /// with the acknowledgment so a restart between the two copies loses nothing.
+    pub request_spent: Option<BTreeSet<String>>,
+    /// The policy overlay's `independent_approval_required` at processing, the strictest of every
+    /// agent the acknowledgment's subject belongs to (§9.28 check 4). The shell keeps the handoff
+    /// it built until the copy's batch resolves, so a retry hands it unchanged.
+    pub independent_overlay: bool,
+    /// The step-up methods the environment allows: `cli_confirm` in paper, and in live only on the
+    /// founder's own connection (mandate spec §6.1, DEC-529 item 3).
+    pub methods: BTreeSet<String>,
+}
+
 /// A command addressed to this account's executor. The shell reads kill switches and risk exits
 /// from a priority channel before ordinary inputs, and what gets journaled is the order in which
 /// [`crate::handle`] saw them (ADR-0001 ES-06, interpretation 30).
@@ -1063,6 +1099,9 @@ pub enum Input {
     /// An event tailed from a stream the executor follows, in `seq` order. The agent streams it
     /// follows are where `IntentProposed` arrives from.
     Journal(FoldedEvent),
+    /// An owner's acknowledgment, or its request, from the control stream, to copy and judge
+    /// (journal spec §9.28, DEC-2828).
+    Acknowledgment(AcknowledgmentHandoff),
     /// An intent the shell's adapter took from stream I's `IntentSink`. It carries no authority:
     /// it is journaled as `IntentReceived` and then gated like any other.
     Intent(IntentHandoff),

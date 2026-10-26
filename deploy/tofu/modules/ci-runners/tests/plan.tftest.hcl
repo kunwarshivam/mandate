@@ -27,6 +27,8 @@ variables {
   runner_sha256              = "08e9ccb3604d2462c24b5e33604dc30810296ca15cc65f23cffd4317eb144c37"
   sysbox_version             = "0.7.1"
   sysbox_sha256              = "9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5"
+  kubectl_version            = "1.35.9"
+  kubectl_sha256             = "3cfeaf80be482b435b0aa214aff6e0b2c312ee23c0ff20810c75517b6004c6eb"
   base_image                 = "ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac"
   toolchain_ref              = "main"
 }
@@ -99,4 +101,34 @@ run "refuses_a_base_image_not_pinned_by_digest" {
   }
 
   expect_failures = [var.base_image]
+}
+
+# E21-64d: the job image installs kubectl at infra.yml's pin, checked against its SHA-256.
+run "the_image_installs_kubectl_at_its_pin_and_checks_it" {
+  command = plan
+
+  assert {
+    condition     = strcontains(local.image_build, "release/v1.35.9/bin/linux/amd64/kubectl") && strcontains(local.image_build, "3cfeaf80be482b435b0aa214aff6e0b2c312ee23c0ff20810c75517b6004c6eb  /usr/local/bin/kubectl") && strcontains(local.image_build, "sha256sum --check") && strcontains(local.image_build, "chmod 0755 /usr/local/bin/kubectl")
+    error_message = "The image downloads the pinned kubectl and checks its SHA-256 before using it."
+  }
+}
+
+run "refuses_a_kubectl_version_that_is_not_exact" {
+  command = plan
+
+  variables {
+    kubectl_version = "latest"
+  }
+
+  expect_failures = [var.kubectl_version]
+}
+
+run "refuses_a_kubectl_checksum_that_is_not_one" {
+  command = plan
+
+  variables {
+    kubectl_sha256 = "not-a-checksum"
+  }
+
+  expect_failures = [var.kubectl_sha256]
 }

@@ -835,16 +835,30 @@ fn hash(byte: &str) -> String {
     format!("sha256:{}", byte.repeat(32))
 }
 
-/// `agt_a`'s stream with one approval request bound to [`DOCUMENT`], and Alice an approver.
+/// The `DecisionMade` [`APPROVAL`] names as its cause, deferring nothing, as the runtime writes a
+/// version 1 request's (DEC-2521).
+const DECISION: &str = "01JBH3BTZ8K2M4N6P8R0S2T7A9";
+
+/// `agt_a`'s stream with one approval request bound to [`DOCUMENT`], after the decision that asked
+/// it, and Alice an approver.
 fn approvable(f: &Fixture) {
     let stream = format!("agent:{WORKSPACE}:agt_a");
+    let decided = format!(
+        r#"{{"environment":"paper","event_id":"{DECISION}","event_type":"DecisionMade","payload":{{"dry_run":"allow"}},"stream_id":"{stream}"}}"#
+    );
+    let decided = to_canonical(&parse(decided.as_bytes()).expect("JSON"));
+    let mut decision = row(1, "DecisionMade", "{}");
+    decision.stream_id = stream.clone();
+    decision.event_id = DECISION.to_owned();
+    decision.hash = Digest::of(&decided);
+    decision.body = decided;
     let text = format!(
-        r#"{{"environment":"paper","event_id":"{APPROVAL}","event_type":"ApprovalRequested","payload":{{"content":{{"trigger":{{"mandate_version":"{}"}}}},"content_hash":"{}","deadline":900}},"stream_id":"{stream}"}}"#,
+        r#"{{"causation_id":"{DECISION}","environment":"paper","event_id":"{APPROVAL}","event_type":"ApprovalRequested","payload":{{"content":{{"trigger":{{"mandate_version":"{}"}}}},"content_hash":"{}","deadline":900}},"stream_id":"{stream}"}}"#,
         bound_version(),
         hash("ab")
     );
     let body = to_canonical(&parse(text.as_bytes()).expect("JSON"));
-    let mut requested = row(1, "ApprovalRequested", "{}");
+    let mut requested = row(2, "ApprovalRequested", "{}");
     requested.stream_id = stream.clone();
     requested.event_id = APPROVAL.to_owned();
     requested.hash = Digest::of(&body);
@@ -853,7 +867,7 @@ fn approvable(f: &Fixture) {
         .streams
         .lock()
         .expect("unpoisoned")
-        .insert(stream, vec![requested]);
+        .insert(stream, vec![decision, requested]);
     *f.records.lock().expect("unpoisoned") = Ok(vec![
         activated(1, alice(), &[Role::Approver]),
         activated(2, bob(), &[Role::Operator]),

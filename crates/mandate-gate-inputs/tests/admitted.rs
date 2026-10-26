@@ -7,7 +7,7 @@
 mod common;
 
 use common::{SNAPSHOT, SPY, Store, deployed, deployed_with, origin, text};
-use mandate_canon::Digest;
+use mandate_canon::{Digest, Value, parse};
 use mandate_domain::Environment;
 use mandate_gate_inputs::Reviewed;
 use mandate_gate_inputs::control::{
@@ -18,8 +18,6 @@ use mandate_spec::context::{AgentId, Membership};
 use mandate_time::Date;
 
 const RESEARCH: &str = include_str!("../../../deploy/cell/demo/research-mandate.json");
-const LLM_HASH: &str = "40f446f7858575d2c66a223f747348b3a91ef83e844e13815e527f4d181e5283";
-const QUANT_HASH: &str = "cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d";
 const LLM: &str =
     r#"{"kind":"research_model_content","model_id":"llm.research_agent","model_version":"0.1.0"}"#;
 const QUANT: &str =
@@ -30,12 +28,37 @@ fn day() -> Result<Date, String> {
     Date::parse("2026-09-28").map_err(text)
 }
 
+/// The hex content hash the demo's research envelope pins for `model`, read from the envelope itself,
+/// so a recomputed pin there needs no change here.
+fn pinned(model: &str) -> Result<String, String> {
+    let envelope = parse(RESEARCH.as_bytes()).map_err(text)?;
+    envelope
+        .get("behavior")
+        .and_then(|behavior| behavior.get("signal_models"))
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .find(|signal| signal.get("id").and_then(Value::as_str) == Some(model))
+        .and_then(|signal| signal.get("content_hash"))
+        .and_then(Value::as_str)
+        .and_then(|hash| hash.strip_prefix("sha256:"))
+        .filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+        .map(str::to_owned)
+        .ok_or_else(|| format!("research-mandate.json pins no content hash for {model}"))
+}
+
 /// The demo's research version deployed, each of its models registered under the tests' content,
 /// with `snapshots` registered.
 fn research(snapshots: &[&str]) -> Result<(Vec<ControlRecord>, Store), String> {
     let mandate = RESEARCH
-        .replace(LLM_HASH, &Digest::of(LLM.as_bytes()).to_hex())
-        .replace(QUANT_HASH, &Digest::of(QUANT.as_bytes()).to_hex());
+        .replace(
+            &pinned("llm.research_agent")?,
+            &Digest::of(LLM.as_bytes()).to_hex(),
+        )
+        .replace(
+            &pinned("quant.ma_crossover")?,
+            &Digest::of(QUANT.as_bytes()).to_hex(),
+        );
     deployed_with(
         &mandate,
         snapshots,

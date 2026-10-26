@@ -735,7 +735,7 @@ fn seed_documents(f: &Fixture, deployed_version: &str) {
             seq,
             "BrokerPositionObserved",
             &format!(
-                r#"{{"instrument":"{instrument}","broker_qty":"{qty}","model_qty":"{qty}","mismatch":false,"risk_clock":"2026-10-17T10:00:00Z"}}"#
+                r#"{{"instrument":"{instrument}","broker_qty":"{qty}","model_qty":"{qty}","mismatch":false,"risk_clock":"2026-10-17T10:00:00.000000000Z"}}"#
             ),
         )
     };
@@ -876,7 +876,7 @@ fn seed_orders(f: &Fixture) {
             seq,
             "OrderRequestRecorded",
             &format!(
-                r#"{{"agent_id":"{agent}","intent_id":null,"purpose":"open","extended_hours":false,"stop_price":null,"order_class":null,"take_profit":null,"stop":null,"rung":null,"at_floor":null,"risk_clock":"2026-10-17T10:00:00Z"}}"#
+                r#"{{"agent_id":"{agent}","intent_id":null,"purpose":"open","extended_hours":false,"stop_price":null,"order_class":null,"take_profit":null,"stop":null,"rung":null,"at_floor":null,"risk_clock":"2026-10-17T10:00:00.000000000Z"}}"#
             ),
         )
     };
@@ -887,7 +887,7 @@ fn seed_orders(f: &Fixture) {
                 seq,
                 "OrderSubmitted",
                 &format!(
-                    r#"{{"client_order_id":"{id}","attempt":1,"instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"buy","type":"limit","tif":"day","qty":"3","limit_price":"101.5","risk_clock":"2026-10-17T10:00:00Z"}}"#
+                    r#"{{"client_order_id":"{id}","attempt":1,"instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"buy","type":"limit","tif":"day","qty":"3","limit_price":"101.5","risk_clock":"2026-10-17T10:00:00.000000000Z"}}"#
                 ),
             ),
             &cause.event_id,
@@ -983,7 +983,7 @@ fn an_agents_positions_are_its_own_fills_beside_the_accounts_holdings() {
             seq,
             "FillApplied",
             &format!(
-                r#"{{"fill_id":"f-{seq}","client_order_id":"{id}","instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"buy","qty_gross":"{qty}","price":"101.5","trade_date":"2026-10-17","risk_clock":"2026-10-17T10:00:00Z","fees":[]}}"#
+                r#"{{"fill_id":"f-{seq}","client_order_id":"{id}","instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"buy","qty_gross":"{qty}","price":"101.5","trade_date":"2026-10-17","risk_clock":"2026-10-17T10:00:00.000000000Z","fees":[]}}"#
             ),
         )
     };
@@ -1067,7 +1067,7 @@ fn an_agents_positions_are_its_own_fills_beside_the_accounts_holdings() {
             &acct,
             9,
             "FillApplied",
-            r#"{"fill_id":"f-9","client_order_id":"o-1","instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"short","qty_gross":"1","price":"1","trade_date":"2026-10-17","risk_clock":"2026-10-17T10:00:00Z","fees":[]}"#,
+            r#"{"fill_id":"f-9","client_order_id":"o-1","instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"short","qty_gross":"1","price":"1","trade_date":"2026-10-17","risk_clock":"2026-10-17T10:00:00.000000000Z","fees":[]}"#,
         ));
     let unreadable = get(&f, &ws("/agents/agt_a/positions"), Some(&cookie));
     assert_eq!(unreadable.status, 503, "no position from part of its fills");
@@ -1370,4 +1370,142 @@ fn a_member_without_the_view_row_reads_no_alerts() {
     members(&f, Ok(vec![activated(1, alice(), &[])]));
     let cookie = signed_in(&f, alice());
     assert_eq!(get(&f, &ws("/alerts"), Some(&cookie)).status, 403);
+}
+
+/// The agent read's `openings_held` for `agent` (DEC-2143).
+fn openings_held(f: &Fixture, cookie: &str, agent: &str) -> Option<Value> {
+    json(&get(f, &ws(&format!("/agents/{agent}")), Some(cookie)))
+        .get("agent")
+        .and_then(|a| a.get("openings_held"))
+        .cloned()
+}
+
+fn reason(code: &str) -> Value {
+    parse(format!(r#"{{"reason":"{code}"}}"#).as_bytes()).expect("JSON")
+}
+
+/// Appends `event_type` with `payload` to the account stream `acct_1`.
+fn on_account(f: &Fixture, event_type: &str, payload: &str) {
+    let acct = format!("acct:{WORKSPACE}:acct_1");
+    let mut streams = f.journal.streams.lock().expect("unpoisoned");
+    let rows = streams.entry(acct.clone()).or_default();
+    let seq = u64::try_from(rows.len()).expect("small") + 1;
+    rows.push(row(&acct, seq, event_type, payload));
+}
+
+#[test]
+fn openings_are_not_held_while_the_account_is_untraded_and_held_once_any_agent_has_traded() {
+    let (bytes, version) = document();
+    let f = fixture_with(stored(bytes));
+    seed_documents(&f, &version);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_a"),
+        Some(Value::Null),
+        "a reconciliation is not a trade"
+    );
+    on_account(
+        &f,
+        "OrderRequestRecorded",
+        r#"{"agent_id":"agt_other","purpose":"open","risk_clock":"2026-10-17T10:00:00.000000000Z"}"#,
+    );
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_a"),
+        Some(reason("account_traded")),
+        "another agent's order on the account holds a pinned agent's openings until the account risk view reads them"
+    );
+}
+
+#[test]
+fn openings_held_is_unknown_never_null_when_it_cannot_be_judged() {
+    let (bytes, version) = document();
+    let f = fixture_with(stored(bytes));
+    seed_documents(&f, &version);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_b"),
+        Some(reason("unknown")),
+        "no stored document, so neither its universe nor its account is known"
+    );
+    on_account(
+        &f,
+        "FillApplied",
+        r#"{"fill_id":"f1","client_order_id":null,"instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"buy","qty_gross":"not a quantity","price":"100","risk_clock":"2026-10-17T10:00:00.000000000Z"}"#,
+    );
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_a"),
+        Some(reason("unknown")),
+        "a row the fold cannot read holds every opening, so it is never null"
+    );
+}
+
+#[test]
+fn openings_held_is_unknown_for_an_empty_account_stream_and_a_body_that_does_not_parse() {
+    let (bytes, version) = document();
+    let f = fixture_with(stored(bytes));
+    seed_documents(&f, &version);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    let acct = format!("acct:{WORKSPACE}:acct_1");
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .insert(acct.clone(), Vec::new());
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_a"),
+        Some(reason("unknown")),
+        "an account stream with no row is not found, as account_positions reads it"
+    );
+    on_account(&f, "StreamOpened", "{}");
+    let mut broken = row(&acct, 2, "StreamOpened", "{}");
+    broken.body = b"not json".to_vec();
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .get_mut(&acct)
+        .expect("seeded")
+        .push(broken);
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_a"),
+        Some(reason("unknown")),
+        "a body that does not parse is a row the fold cannot read"
+    );
+}
+
+#[test]
+fn without_a_store_openings_held_is_unknown() {
+    let (_, version) = document();
+    let f = fixture();
+    seed_documents(&f, &version);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    assert_eq!(openings_held(&f, &cookie, "agt_a"), Some(reason("unknown")));
+}
+
+const RESEARCH_DOCUMENT: &str = include_str!("fixtures/research_mandate.json");
+
+#[test]
+fn a_research_agents_openings_are_held_for_want_of_a_multi_instrument_risk_state_once_the_account_traded()
+ {
+    let bytes = to_canonical(&parse(RESEARCH_DOCUMENT.as_bytes()).expect("JSON"));
+    let version = format!("sha256:{}", Digest::of(&bytes).to_hex());
+    let f = fixture_with(stored(bytes));
+    seed_documents(&f, &version);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    assert_eq!(openings_held(&f, &cookie, "agt_a"), Some(Value::Null));
+    on_account(
+        &f,
+        "OrderRequestRecorded",
+        r#"{"agent_id":"agt_a","purpose":"open","risk_clock":"2026-10-17T10:00:00.000000000Z"}"#,
+    );
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_a"),
+        Some(reason("research_agent_traded")),
+        "an unpinned mandate binds no instrument for the account risk view (DEC-2819 item 4)"
+    );
 }
