@@ -6,8 +6,8 @@
 mod common;
 
 use common::{
-    FixedInstruments, FixedMandate, OTHER_AGENT, Shell, TestIds, agent, broker_account,
-    broker_reject, config, ports,
+    ACCOUNT_STREAM, FixedInstruments, FixedMandate, OTHER_AGENT, Shell, TestIds, agent,
+    broker_account, broker_reject, config, event, ports, text, with_clock,
 };
 use mandate_canon::Value;
 use mandate_executor::{AccountState, BrokerAccount, BrokerUpdate, Effect, Input, Mode};
@@ -147,4 +147,46 @@ fn a_cause_already_in_force_is_journaled_once() {
         assert!(restrictions(&again).is_empty(), "{:?}", again.draft_types());
         assert_eq!(alerts(&again), 0);
     }
+}
+
+/// A second cause at the restriction already in force leaves the account state unchanged: a
+/// connection's closing-only restriction on the stream (E7-2z's writer, read back by a replay),
+/// then a reject's, is journaled and alerted and moves no agent, since every agent already holds
+/// the mode the account imposes.
+#[test]
+fn a_second_cause_at_the_same_restriction_moves_no_agent() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FixedInstruments::LIQUID_EQUITY]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = opened(&ports);
+    let seq = shell.head().0.saturating_add(1);
+    shell
+        .fold_one(&event(
+            ACCOUNT_STREAM,
+            seq,
+            "AccountRestrictionChanged",
+            with_clock(
+                &[
+                    ("restriction", text("closing_only")),
+                    ("cause", text("connection_unavailable")),
+                    ("reason_code", text("account_restricted")),
+                ],
+                1,
+            ),
+        ))
+        .expect("the connection's restriction folds");
+    assert_eq!(shell.state.account_state(), AccountState::ClosingOnly);
+    let ran = shell.run(closing(), &ports);
+    assert_eq!(
+        restrictions(&ran),
+        [("closing_only".to_owned(), "broker_reject".to_owned())]
+    );
+    assert_eq!(
+        modes(&ran),
+        0,
+        "the account state is unchanged, so no agent moves"
+    );
+    assert_eq!(alerts(&ran), 1);
 }

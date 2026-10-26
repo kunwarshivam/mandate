@@ -1044,8 +1044,8 @@ fn restrict(
 /// closing only (§7.3) by DEC-143's reading: a message that says `closing` or `restricted`, since
 /// no connector reject table maps a `code` yet, or the configured run of consecutive 403s, every
 /// 403 counting, a named order's included. A reject naming an id we do not know counts toward
-/// that run and is nothing more. The account is asked for again once, when the run restricts it,
-/// not at every 403 after.
+/// that run and is nothing more. The account is asked for again once, when the run journals the
+/// reject as a cause in force, even beside a stricter one (DEC-2816), not at every 403 after.
 pub(crate) fn reject(
     batch: &mut Batch<'_, '_>,
     reject: &BrokerReject,
