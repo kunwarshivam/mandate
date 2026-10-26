@@ -759,7 +759,12 @@ per workspace deployment (item 6).
       document itself, as `mandate version create` reads it from a file. It must parse as a
       mandate (mandate spec §3) in the control stream's environment: `paper`. A `live` document is
       refused `live_unavailable`, and any other environment, or one unlike the stream's,
-      `invalid`. It must pass every V-rule but V-002 as if every envelope path were confirmed
+      `invalid`. The customer real-money gate ([DEC-2134](../project/decisions/DEC-2134.md), journal
+      spec §9.36) judges a `live` document first: while the workspace's setting is off, the API
+      appends `RealMoneyRefused` (action `create_version`), under the id §3.4 derives for operation
+      `real_money_refused_create_version`, before it answers; if that append fails the answer is
+      `journal_unavailable`. While the setting is on, nothing is appended and the answer is the
+      same. It must pass every V-rule but V-002 as if every envelope path were confirmed
       (the confirmation's own check), and every pinned instrument must be registered, as the CLI
       checks at confirmation; a failure is `invalid` with each V-code in `violations`. The server
       stores the canonical document under its version (mandate spec §9.1) and the CLI's record,
@@ -796,8 +801,11 @@ per workspace deployment (item 6).
       `backtest_id` (an id or `null`: backtests are not served, and the id is recorded, never
       read), `record`, `step_up`, and the optional `step_up_assertion` (§3.6,
       [DEC-2128](../project/decisions/DEC-2128.md)); its request schema lands with its `mandate-api` type. The checks are the CLI's, in its order: an agent id that
-      names no agent stream is `invalid`; a version not recorded or not stored `not_found`; one
-      never confirmed `invalid` at `/mandate_version`; one the control stream has confirmed a
+      names no agent stream is `invalid`; a version not recorded or not stored `not_found`; a
+      version whose document names `live` is `live_unavailable`, judged first by the real-money
+      gate, which while off appends `RealMoneyRefused` (action `deploy`, operation
+      `real_money_refused_deploy`) before it answers ([DEC-2134](../project/decisions/DEC-2134.md));
+      one never confirmed `invalid` at `/mandate_version`; one the control stream has confirmed a
       later version over `stale_base`, naming the latest; an agent already deployed with the same
       version answers `200` with its `AgentDeployed`, and with another version `invalid` at
       `/agent_id`; an agent an `AgentStopped` names is `invalid` at `/agent_id` too, since an
@@ -860,7 +868,12 @@ per workspace deployment (item 6).
       - Both read the control stream, and `as_of` names it; the instrument snapshots and the
         model content come from the content-addressed store (item 2).
     - **Go live** answers `409` `live_unavailable` to every principal the deploy row authorizes,
-      after item 10's checks and before the body is read (B5, rule 8).
+      after item 10's checks and before the body is read (B5, rule 8). The customer real-money gate
+      ([DEC-2134](../project/decisions/DEC-2134.md), journal spec §9.36) judges it first: while the
+      workspace's setting is off, the API appends `RealMoneyRefused` (action `go_live`), under the
+      id §3.4 derives for operation `real_money_refused_go_live`, before it answers; if that append
+      fails the answer is `journal_unavailable`. While the setting is on, nothing is appended and
+      the answer is the same.
     - The content-addressed store (item 2) is written only by these routes, and only by adding an
       object under its own digest. Without `MANDATE_API_ARTIFACTS`, they answer
       `journal_unavailable`.
@@ -938,7 +951,7 @@ define yet; §11's E10-15 adds them before the operation ships.
 | List, read agents | `GET /agents`, `GET /agents/{id}` | — | Read model (§4.7) |
 | Run a backtest | `POST /backtests` | `BacktestRunRecorded` when done | Version and data snapshot (B1); report at `GET /backtests/{id}` |
 | Deploy to paper | `POST /agents` | `AgentDeployed` or `DeploymentRejected` | Confirmed version, backtest id shown, rendered go-live record, step-up. V-032, V-006, V-002 rejections in words (B3) |
-| Go live | `POST /agents/{id}/go-live` | — | Always `live_unavailable` until counsel signs off (B5, DEC-98). The route exists so the refusal is tested |
+| Go live | `POST /agents/{id}/go-live` | `RealMoneyRefused` while the real-money gate is off | Always `live_unavailable` until counsel signs off (B5, DEC-98); the gate journals the refusal first (DEC-2134). The route exists so the refusal is tested |
 | Pause, resume | `POST /agents/{id}/pause`, `.../resume` | `OwnerCommandIssued` | Pause: no step-up, API-7. Resume: step-up, judged by the runtime |
 | Hold new openings | `POST /agents/{id}/hold` | `OwnerCommandIssued` with command `hold_openings` (journal spec §9.11) | DEC-191. Sets `exits_only` and nothing else. Lifting it is the owner's alone, with step-up, as a `lift_hold` command (journal spec §9.11); it lifts only the hold, never a latched limit (MI-3) |
 | Lift a hold | `POST /agents/{id}/hold/lift` | `OwnerCommandIssued` with command `lift_hold` (journal spec §9.11) | (planned: E10-12) Users only, never a client; step-up required (`lift_hold`); not an API-7 operation, since it adds risk back (DEC-684 item 1) |
@@ -1034,8 +1047,10 @@ restrictions, and the loss carry are planned as optional members. **(planned: E1
 `connection_id`. One code per response, in this order: §3.4's session, CSRF mark, key, and body
 checks; the `BrokerConnection` permission, and `live_unavailable` for a `live` workspace; `invalid`
 at `/disclosure` for a version other than the current one; §3.5's step-up codes; then
-`live_unavailable` for `environment` `live`, `journal_unavailable` for a control-stream fold that
-cannot answer, and `idempotency_conflict` for a request already open, an establishment, or a used
+`live_unavailable` for `environment` `live` (judged first by the real-money gate, which while off
+appends `RealMoneyRefused`, action `connect`, under operation `real_money_refused_connect`, the one
+record a refused start leaves; [DEC-2134](../project/decisions/DEC-2134.md)), `journal_unavailable`
+for a control-stream fold that cannot answer, and `idempotency_conflict` for a request already open, an establishment, or a used
 `account_ref` under the key's derived ids. A refused start appends nothing; a passing one under
 passkey step-up appends `StepUpAsserted` right after `ConnectionRequested` (§3.6). The `connection_id` and
 `account_ref` are derived from the key, so a retry names the same pending connection; while its
