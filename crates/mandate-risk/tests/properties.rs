@@ -376,6 +376,9 @@ proptest! {
                 CheckOutcome::Passed(_) => prop_assert!(
                     !seen_failure, "a check after the failure never reads as Passed"
                 ),
+                CheckOutcome::Deferred(check) => prop_assert!(
+                    false, "the binding gate defers nothing, yet {:?} was deferred", check
+                ),
             }
         }
     }

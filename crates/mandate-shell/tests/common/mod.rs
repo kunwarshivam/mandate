@@ -236,9 +236,16 @@ impl Stream {
         reference(object.as_bytes())
     }
 
+    /// Appends a record at the next `seq`, committed a second after the one before it, from
+    /// 2026-09-20 (DEC-2384: the membership fold reads each record's `event_time`).
     pub fn record(&mut self, event_type: &str, payload: &str) {
+        let seq = u64::try_from(self.records.len()).unwrap() + 1;
+        let start = UtcNanos::parse_rfc3339("2026-09-20T00:00:00Z").unwrap();
         self.records.push(ControlRecord {
-            seq: u64::try_from(self.records.len()).unwrap() + 1,
+            seq,
+            event_time: Some(
+                UtcNanos::from_parts(start.secs() + i64::try_from(seq).unwrap(), 0).unwrap(),
+            ),
             event_type: event_type.to_owned(),
             payload: json(payload),
             origin: self.origin.clone(),

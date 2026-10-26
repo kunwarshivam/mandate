@@ -82,6 +82,7 @@ impl Stream {
     fn then(mut self, event_type: &str, payload: &str) -> Self {
         self.records.push(ControlRecord {
             seq: u64::try_from(self.records.len()).unwrap() + 1,
+            event_time: None,
             event_type: event_type.to_owned(),
             payload: json(payload),
             origin: Origin {

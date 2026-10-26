@@ -23,11 +23,13 @@
 mod context;
 mod error;
 mod gate;
+mod mandate;
 mod plan;
 mod view;
 
 pub use context::{AdvisoryGateContext, AdvisoryOrderFacts, BuilderContext, DecisionContext};
 pub use error::PortError;
-pub use gate::{evaluate, proposed_order};
-pub use plan::{classify, size, validate_order_execution};
+pub use gate::{evaluate, evaluate_deferring, proposed_order};
+pub use mandate::gate_mandate;
+pub use plan::{POLICY_OVERLAY, auto_not_allowed, classify, size, validate_order_execution};
 pub use view::{ViewFacts, runtime_view};

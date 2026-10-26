@@ -318,6 +318,34 @@ impl Challenges {
         }
     }
 
+    /// The registration challenge held under `id` for `principal` in `workspace`, unexpired at
+    /// `now`, taken out of the store and kept as a tombstone, so it serves one enrolment whatever
+    /// follows and its key never revives it (DEC-2108 item 5, DEC-2118 item 1); `None` for an id
+    /// held for anything else, which stays held, or for none.
+    pub fn take_registration(
+        &self,
+        id: &str,
+        principal: PrincipalId,
+        workspace: WorkspaceId,
+        now: UtcNanos,
+    ) -> Option<Registration> {
+        let mut store = self.store();
+        store.sweep(now);
+        let bound = matches!(
+            store.held.get(id),
+            Some(Held::Registration(registration))
+                if registration.principal == principal && registration.workspace == workspace
+        );
+        if !bound {
+            return None;
+        }
+        let Some(Held::Registration(registration)) = store.held.remove(id) else {
+            return None;
+        };
+        store.bury(principal, registration.id.clone(), now);
+        Some(registration)
+    }
+
     /// Drops the challenge held under `id` once a grant verifies with it (DEC-2104 item 6), and
     /// whether it was still held: a second grant racing the first finds it gone.
     pub fn take(&self, id: &str) -> bool {

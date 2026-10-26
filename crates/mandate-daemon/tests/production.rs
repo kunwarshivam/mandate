@@ -229,7 +229,8 @@ fn before_the_account_is_known_the_flatten_has_nothing_to_sell() {
 
 /// S3a: a resolved paper deployment's wiring sells its pinned universe's sub-ledger under each
 /// instrument's class from the stored mandate; a holding outside it has no class to sell under.
-/// The plan and the gate stay the fixture's deny-all ones until S2b wires them.
+/// The view and every draft's references name the deployed version, and the gate's dry run stays
+/// the fixture's deny-all one until its deferred checks can be journaled (DEC-2378 item 11).
 #[test]
 fn a_resolved_deployment_is_wired_with_the_fold_and_the_flatten_over_its_universe() {
     let document = mandate_canon::parse(
@@ -244,11 +245,55 @@ fn a_resolved_deployment_is_wired_with_the_fold_and_the_flatten_over_its_univers
         mandate_daemon::production::classes(&document),
         BTreeMap::from([(SPY.to_owned(), AssetClass::UsEquity)])
     );
+    let version = "sha256:19dd24280000000000000000000000000000000000000000000000000000092e6";
     let wiring = mandate_daemon::production::wired(
         mandate_daemon::fixture::wiring("user-owner"),
+        version,
         &document,
+        None,
         CLOCK,
         AGENT,
+    );
+    assert_eq!(wiring.view.version, version);
+    let opening = mandate_runtime::Proposal {
+        instrument: InstrumentId::new(SPY).unwrap(),
+        asset_class: AssetClass::UsEquity,
+        side: mandate_accounting::Side::Buy,
+        qty: mandate_num::Qty::parse("1").unwrap(),
+        limit: mandate_num::Price::parse("99.95").unwrap(),
+        purpose: Purpose::Open,
+        exit_origin: None,
+        exit_conviction: None,
+        buy_conviction: None,
+        combined_score: mandate_canon::Value::Null,
+        outputs_used: Default::default(),
+        model_weights: Default::default(),
+        clips_applied: Vec::new(),
+        execution: None,
+    };
+    assert_eq!(
+        wiring.gate.check(&opening),
+        mandate_runtime::DryRunVerdict::Deny {
+            reason_code: "rule_set_unavailable".into()
+        },
+        "the gate is the fold's, not the fixture's"
+    );
+    assert_eq!(
+        wiring.view.working_universe,
+        [InstrumentId::new(SPY).unwrap()].into()
+    );
+    assert_eq!(wiring.view.approval.timeout_s, 600);
+    let draft = mandate_runtime::EventDraft {
+        event_id: mandate_runtime::EventId("e1".into()),
+        event_type: "DecisionMade".into(),
+        causation_id: None,
+        payload: mandate_canon::Value::Null,
+    };
+    let (schema_version, refs) = wiring.refs.refs(&draft).unwrap();
+    assert_eq!(schema_version, 1);
+    assert_eq!(
+        refs.get("mandate_version"),
+        Some(&mandate_canon::Value::Str(version.to_owned()))
     );
     let facts = wiring.facts.clone().unwrap();
     facts.follow(ACCOUNT);

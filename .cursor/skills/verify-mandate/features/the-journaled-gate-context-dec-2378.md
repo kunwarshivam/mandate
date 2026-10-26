@@ -9,7 +9,12 @@
   agent's sub-ledger a flatten sells, and `working`, its orders no terminal state has ended).
   The cell's runtime reads it through `mandate-daemon`'s `src/production.rs`: `Facts`, the one
   fold the process feeds every control, account and clock row it reads, and `Flatten`, the
-  flatten planner over it.
+  flatten planner over it, and `src/production/plan.rs`: `Plan`, the order plan over the fold
+  (DEC-2378 item 10), with the bracket from `mandate-num`'s `Price::equity_bracket`, and
+  `src/production/gate.rs`: `Gate`, the gate's dry run over the fold with DEC-2378 item 11's four
+  checks deferred and every opening still denied while any is (DEC-2388), configured by
+  `src/deployment.rs`'s `rule_set`. `src/rule_set.rs`'s `gate_rule_set` is the one reading of the
+  rule set's gate configuration, shared with `mandate-gate-inputs`.
 - **Tests:** `crates/mandate-gate-context/tests/facts.rs`: one test a fail-closed rule (no clock,
   no mandate, another agent's deployment, a rejected or another stream's version, a stopped agent,
   no or stale snapshot, no, stale or insane mark, scheduler ticks ageing the facts while the
@@ -23,4 +28,15 @@
   working orders, an owner exit only its instrument's, rows fed twice count once, an unreadable
   row holds openings and never the flatten; `crates/mandate-daemon/tests/runtime.rs`'s
   `the_production_fold_is_fed_the_named_account_and_the_clock_once_each`.
+- `crates/mandate-daemon/tests/plan.rs`: on the demo mandate, a flat agent with every fact
+  journaled is proposed an opening never above the bid and asked about it; no opening outside the
+  regular session, in its close window from 15:50, while held or working, or with any fact
+  missing or a mark not sane.
+- `crates/mandate-daemon/tests/gate.rs`: the plan's own opening passes the gate's checks, is
+  reported deferred on each of the four, and is denied `deferred_to_binding`; the gate's own
+  reason first (order and position caps, the collar, a blocked account, the 1x buying power); no
+  rule set, a missing fact, or a working order denies; an exit is never denied; a property test
+  against the checks computed independently. `crates/mandate-daemon/tests/deployment.rs`: the
+  latest registered rule set of the environment, never an older one past an unreadable latest.
+  `crates/mandate-gate-context/tests/rule_set.rs`: the rule set's identity and exact members.
 - **Run:** `cargo nextest run -p mandate-gate-context -p mandate-daemon`.

@@ -2,7 +2,9 @@
 //! the deployment manager starting that account's executor, which the drill waits on until its pod
 //! runs and its process answers `livez`. Before it, the scheduler's ticks (E21-29): the run's
 //! workspace is the one the chart names the scheduler, and its clock stream, exported twice a few
-//! seconds apart, must have grown, so the ticks the runtime and the executor read arrive. Paper and
+//! seconds apart, must have grown, so the ticks the runtime and the executor read arrive; and the
+//! data process's daily bars, inspected in the artifact store with no problem and at least
+//! [`BAR_SESSIONS`] sessions, so the bars the runtime's model host reads are there. Paper and
 //! fixtures only: the connect check and the executor reach the in-process fixture broker
 //! (DEC-2007), and no credential is read.
 //!
@@ -41,6 +43,29 @@ const SUBJECT: &str = "mandate.dev/subject";
 const TICK_GAP: Duration = Duration::from_secs(3);
 /// The export's file, in the Job's own `/work`.
 const CLOCK_SEGMENT: &str = "/work/clock.seg";
+/// Where the data process stores its datasets (`processes.json`'s `data` args and
+/// `mandate-datad`'s layout), in the artifact store the control Job mounts.
+pub const BARS_ROOT: &str = "/var/lib/mandate/artifacts/datasets/cell-recorded/alpaca/iex";
+/// The instruments the local cell's values list for the data process (`values/k3d.yaml`'s
+/// `data.instruments`): the demo agent's SPY and the second agent's QQQ.
+pub const BAR_SYMBOLS: [&str; 2] = ["SPY", "QQQ"];
+/// The sessions the data process stores (`mandate_datad::series::SESSIONS`).
+pub const BAR_SESSIONS: u64 = 30;
+
+/// Each dataset the drill inspects, with the fewest days it must list: every instrument's daily
+/// bars, [`BAR_SESSIONS`] of them, and its minute bars, which hold at least the latest trading
+/// day's session on any day (`mandate_datad::series::minute_day`).
+pub fn bar_datasets() -> Vec<(String, u64)> {
+    BAR_SYMBOLS
+        .iter()
+        .flat_map(|symbol| {
+            [
+                (format!("{BARS_ROOT}/bars-1Day/{symbol}"), BAR_SESSIONS),
+                (format!("{BARS_ROOT}/bars-1Min/{symbol}"), 1),
+            ]
+        })
+        .collect()
+}
 /// The executor's own probe, as its pod's `livez` probe runs it (`processes.json`, DEC-994 item 5).
 const LIVEZ: [&str; 5] = [
     "/mandate-executord",
@@ -128,6 +153,25 @@ pub fn connect_check(run: &str, workspace: &str, account: &str) -> Result<Result
         .filter(|_| done)
         .map(str::to_owned)
         .ok_or(logs))
+}
+
+/// The days each dataset of an inspection's logs lists, in the report's order, when the report
+/// covers `datasets` datasets and counts no problem: `None` for any other total, or when a
+/// dataset's coverage line is missing.
+pub fn inspected_days(logs: &str, datasets: usize) -> Option<Vec<u64>> {
+    let total = format!("total: {datasets} datasets, 0 problems");
+    if !logs.lines().any(|l| l.ends_with(&total)) {
+        return None;
+    }
+    let days: Vec<u64> = logs
+        .lines()
+        .filter_map(|l| {
+            let (_, rest) = l.split_once("coverage: ")?;
+            let (_, listed) = rest.split_once(", ")?;
+            listed.strip_suffix(" days listed")?.trim().parse().ok()
+        })
+        .collect();
+    (days.len() == datasets).then_some(days)
 }
 
 /// The event id a connect check's logs name as passing.
@@ -381,6 +425,9 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
     if let Some(broken) = ticks(&id, &workspace)? {
         return Ok(Verdict::Broken(broken));
     }
+    if let Some(broken) = bars(&id)? {
+        return Ok(Verdict::Broken(broken));
+    }
     let recorded = recorded
         .as_ref()
         .map(|(checked, code)| (account.as_str(), checked.as_str(), code.as_str()));
@@ -550,6 +597,42 @@ fn ticks(id: &str, workspace: &str) -> Result<Option<String>> {
     Ok(None)
 }
 
+/// The data process's daily and minute bars (E21-29 lane SC): one `mandate inspect` of every
+/// [`bar_datasets`] dataset in a one-off `control` Job, which reports them in the order given;
+/// `None` when it counts no problem and each dataset lists at least its fewest days.
+fn bars(id: &str) -> Result<Option<String>> {
+    let datasets = bar_datasets();
+    let args: Vec<&str> = std::iter::once("inspect")
+        .chain(datasets.iter().map(|(dir, _)| dir.as_str()))
+        .collect();
+    let inspect = render(
+        &[
+            format!("run.id=\"{id}b\""),
+            format!("run.args={}", json!(args)),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    let (done, logs) = run_job(inspect)?;
+    let listed = inspected_days(&logs, datasets.len()).filter(|_| done);
+    match listed {
+        Some(days)
+            if days
+                .iter()
+                .zip(&datasets)
+                .all(|(listed, (_, fewest))| listed >= fewest) =>
+        {
+            eprintln!(
+                "    the data process stores {} instruments' daily and minute bars ({days:?} days), no problem",
+                BAR_SYMBOLS.len()
+            );
+            Ok(None)
+        }
+        _ => Ok(Some(format!(
+            "the data process's daily or minute bars are missing or have problems:\n{logs}"
+        ))),
+    }
+}
+
 /// Runs `all` as one gestures Job of the `control` process, run `{id}{suffix}`.
 pub(super) fn gestures(
     id: &str,
@@ -622,6 +705,56 @@ mod tests {
         let args = clock_export_args("w");
         assert_eq!(args[..3], ["journal", "export", "clock:w"]);
         assert!(args.windows(2).any(|w| w == ["--journal", JOURNAL]));
+    }
+
+    /// The inspection's report is read for each dataset's listed days only when it covers every
+    /// dataset asked and counts no problem.
+    #[test]
+    fn the_bars_inspection_is_read_from_the_logs() {
+        let clean = "[pod/x/run] alpaca iex bars-1Day SPY\n\
+                     [pod/x/run] coverage: 2026-09-14 to 2026-10-23, 30 days listed\n\
+                     [pod/x/run] problems: 0\n\
+                     [pod/x/run] alpaca iex bars-1Min SPY\n\
+                     [pod/x/run] coverage: 2026-10-23 to 2026-10-23, 1 days listed\n\
+                     [pod/x/run] problems: 0\n\
+                     [pod/x/run] total: 2 datasets, 0 problems";
+        assert_eq!(inspected_days(clean, 2), Some(vec![30, 1]));
+        assert_eq!(inspected_days(clean, 4), None, "fewer datasets than asked");
+        let flawed = clean.replace(
+            "total: 2 datasets, 0 problems",
+            "total: 2 datasets, 2 problems",
+        );
+        assert_eq!(inspected_days(&flawed, 2), None);
+        let uncovered = clean.replace(
+            "coverage: 2026-10-23 to 2026-10-23, 1 days listed",
+            "rows: 0",
+        );
+        assert_eq!(inspected_days(&uncovered, 2), None);
+        assert_eq!(
+            inspected_days("Error: inspecting /var/lib/mandate: missing", 2),
+            None
+        );
+    }
+
+    /// The drill inspects every instrument the local cell's values list, daily and minute bars
+    /// each, under the data process's store.
+    #[test]
+    fn the_drill_inspects_every_recorded_instrument() {
+        let values = fs::read_to_string("../deploy/cell/values/k3d.yaml").unwrap();
+        let listed: Vec<&str> = values
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("- symbol: "))
+            .collect();
+        assert_eq!(listed, BAR_SYMBOLS);
+        let datasets = bar_datasets();
+        assert_eq!(datasets.len(), 2 * BAR_SYMBOLS.len());
+        for symbol in BAR_SYMBOLS {
+            for (kind, fewest) in [("bars-1Day", BAR_SESSIONS), ("bars-1Min", 1)] {
+                let dir = format!("{BARS_ROOT}/{kind}/{symbol}");
+                assert!(datasets.contains(&(dir, fewest)), "{kind} {symbol}");
+            }
+        }
+        assert!(BARS_ROOT.starts_with("/var/lib/mandate/artifacts/datasets/cell-recorded/"));
     }
 
     /// Ticking is a second export strictly past a first that holds a record after the stream's

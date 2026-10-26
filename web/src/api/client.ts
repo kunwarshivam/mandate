@@ -26,6 +26,7 @@ import {
   type Violation,
   type Watermark,
 } from "./types";
+import { CONNECT_START_ROUTE, type ConnectStartBody, type ConnectStarted, connectStarted } from "./connect";
 import { type StepUpAction, type StepUpChallenge, sessionPrincipal, stepUpChallenge } from "./step-up";
 
 export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
@@ -91,7 +92,22 @@ export interface WorkspaceClient {
   askChallenge(action: StepUpAction): Promise<ReadOutcome<StepUpChallenge>>;
   /** `GET /v1/me/session` (§4.10, DEC-2113): the session's own principal, outside the workspace prefix. */
   readSession(): Promise<ReadOutcome<{ principal_id: string }>>;
+  /** Fixes the key and body of one connect's start (§4.5, DEC-2623); sending it again is a retry that answers the same start (item 8). */
+  prepareConnect(body: ConnectStartBody): PreparedConnect;
+  /**
+   * Sends a prepared start. It commits `ConnectionRequested`, so an answer that does not say nothing
+   * was recorded is `effect: "unknown"`, never "nothing happened" (API-13).
+   */
+  sendConnect(prepared: PreparedConnect): Promise<ConnectOutcome>;
 }
+
+/** One connect's start: its key and body, fixed when prepared. */
+export interface PreparedConnect {
+  readonly idempotency_key: string;
+  readonly body: string;
+}
+
+export type ConnectOutcome = { ok: true; value: ConnectStarted } | { ok: false; error: ApiError };
 
 /** The step-up challenge route under the workspace (§3.6). It is not a command: it records nothing. */
 export const STEP_UP_CHALLENGE_ROUTE = "/step-up/challenges";
@@ -325,5 +341,34 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
 
   const readSession = () => answered(() => fetch(baseUrl + SESSION_ROUTE, { method: "GET", credentials, headers: { Accept: "application/json" } }), sessionPrincipal);
 
-  return Object.freeze({ workspaceId, path, read, prepare, prepareKillSwitch, send, commandStatus, askChallenge, readSession });
+  function prepareConnect(body: ConnectStartBody): PreparedConnect {
+    const key = newKey();
+    if (!isIdempotencyKey(key)) throw new Error("not an idempotency key");
+    return Object.freeze({ idempotency_key: key, body: JSON.stringify(body) });
+  }
+
+  async function sendConnect(prepared: PreparedConnect): Promise<ConnectOutcome> {
+    let response: Response;
+    try {
+      response = await fetch(baseUrl + path(CONNECT_START_ROUTE), {
+        method: "POST",
+        credentials,
+        headers: { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": prepared.idempotency_key, [CSRF_HEADER]: "1" },
+        body: prepared.body,
+      });
+    } catch {
+      return { ok: false, error: networkError("unknown") };
+    }
+    const body = await parseBody(response);
+    if (!response.ok) {
+      const doc = decodeProblem(body);
+      const error = doc ? problemError(response.status, doc, "unknown") : invalidResponse(response.status, "unknown", UNREADABLE, null);
+      noteAuth(error);
+      return { ok: false, error };
+    }
+    const started = connectStarted(body, "");
+    return started.ok ? { ok: true, value: started.value } : { ok: false, error: invalidResponse(response.status, "unknown", started.issue, null) };
+  }
+
+  return Object.freeze({ workspaceId, path, read, prepare, prepareKillSwitch, send, commandStatus, askChallenge, readSession, prepareConnect, sendConnect });
 }
