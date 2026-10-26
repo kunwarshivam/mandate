@@ -408,6 +408,18 @@ impl World {
         content: &serde_json::Value,
         decision: Option<(u64, serde_json::Value)>,
     ) {
+        self.requested(environment, content, (1, Some(DECISION)), decision);
+    }
+
+    /// `agt_a`'s stream: the decision, at `version` with `payload`, or none when `None`, then the
+    /// approval at `request.0` with `content`, naming `request.1` as its cause.
+    fn requested(
+        &self,
+        environment: &str,
+        content: &serde_json::Value,
+        request: (u64, Option<&str>),
+        decision: Option<(u64, serde_json::Value)>,
+    ) {
         let mut rows = Vec::new();
         if let Some((version, payload)) = decision {
             let mut decided = envelope(
@@ -431,7 +443,10 @@ impl World {
             json!({"content": content, "content_hash": self.hash, "deadline": DEADLINE}),
         );
         requested["event_id"] = json!(APPROVAL);
-        requested["causation_id"] = json!(DECISION);
+        requested["schema_version"] = json!(request.0);
+        if let Some(cause) = request.1 {
+            requested["causation_id"] = json!(cause);
+        }
         rows.push(stored(2, &requested));
         let mut streams = self.journal.streams.lock().expect("unpoisoned");
         streams.insert(agent_stream(), rows);
@@ -1089,6 +1104,109 @@ fn a_grant_of_a_request_that_disagrees_with_its_decision_is_refused_and_a_skip_i
         let skip = w.respond(ALICE, "k1Z-9_grant00002", &skipped(&w));
         recorded(&w, &skip);
         assert_eq!(w.answers().len(), 1, "{case}: the Skip is recorded");
+    }
+}
+
+/// One request-side case: its name, the request's list (absent when `None`), its version and
+/// cause, and the decision on the stream, if any.
+type RequestCase<'a> = (
+    &'a str,
+    Option<serde_json::Value>,
+    (u64, Option<&'a str>),
+    Option<(u64, serde_json::Value)>,
+);
+
+/// The request's own side: a version 3 request whose list is exactly its deferring decision's is
+/// granted, as the runtime writes every deferring ask; a list on version 1 or 2, an empty or absent
+/// one on version 3, another order, a version past 3, a name the journal never writes, and a
+/// cause that names no decision are each refused `deferral_mismatch` before the port (DEC-2521).
+#[test]
+fn a_grant_is_judged_by_the_requests_own_list_against_its_decisions() {
+    let deferred = json!(["halt", "liquidity_floor", "participation"]);
+    let with = |list: Option<serde_json::Value>| {
+        let mut content = content(Some(&reference(&document(&["role:approver"]))));
+        if let Some(list) = list {
+            content["deferred_to_binding"] = list;
+        }
+        content
+    };
+    let deferring = Some((3, json!({"deferred_to_binding": deferred})));
+    let w = world();
+    w.requested(
+        "paper",
+        &with(Some(deferred.clone())),
+        (3, Some(DECISION)),
+        deferring.clone(),
+    );
+    let issued = w.challenge();
+    w.confirm(&issued);
+    recorded(&w, &w.respond(ALICE, KEY, &grant(&w, &issued)));
+    assert_eq!(
+        w.answers().len(),
+        1,
+        "an agreeing version 3 request is granted"
+    );
+    let plain = Some((1, json!({"dry_run": "allow"})));
+    let cases: [RequestCase<'_>; 8] = [
+        (
+            "a list on version 2",
+            Some(json!(["halt"])),
+            (2, Some(DECISION)),
+            Some((3, json!({"deferred_to_binding": ["halt"]}))),
+        ),
+        (
+            "an empty list on version 3",
+            Some(json!([])),
+            (3, Some(DECISION)),
+            plain.clone(),
+        ),
+        (
+            "no list on version 3",
+            None,
+            (3, Some(DECISION)),
+            deferring.clone(),
+        ),
+        (
+            "the decision's list in another order",
+            Some(json!(["participation", "liquidity_floor", "halt"])),
+            (3, Some(DECISION)),
+            deferring.clone(),
+        ),
+        (
+            "a version past 3",
+            Some(deferred.clone()),
+            (4, Some(DECISION)),
+            deferring.clone(),
+        ),
+        (
+            "a name the journal never writes, on both",
+            Some(json!(["Halt", "Halt"])),
+            (3, Some(DECISION)),
+            Some((3, json!({"deferred_to_binding": ["Halt", "Halt"]}))),
+        ),
+        ("no cause", None, (1, None), plain.clone()),
+        (
+            "a cause that is not a decision",
+            None,
+            (1, Some(APPROVAL)),
+            plain.clone(),
+        ),
+    ];
+    for (case, list, request, decision) in cases {
+        let w = world();
+        w.requested("paper", &with(list), request, decision);
+        let issued = w.challenge();
+        w.confirm(&issued);
+        let reply = w.respond(ALICE, KEY, &grant(&w, &issued));
+        assert_eq!(
+            code(&reply),
+            (409, ProblemCode::DeferralMismatch),
+            "{case}: {}",
+            w.said()
+        );
+        assert!(w.answers().is_empty(), "{case}: nothing is committed");
+        assert!(w.asked().is_empty(), "{case}: the port is never asked");
+        assert!(w.held(&issued), "{case}: the challenge stays unspent");
     }
 }
 

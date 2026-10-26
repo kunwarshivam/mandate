@@ -290,7 +290,8 @@ fn decided_for(event: &Value, decisions: &std::collections::BTreeMap<String, Val
 /// Whether `request`, an `ApprovalRequested` row among `agent_rows`, names exactly the deferred
 /// checks of the decision it names as its cause: version 3's non-empty list, or none for versions 1
 /// and 2, against the decision's list. A decision not on the stream, a version 3 decision without its
-/// list, and any other request disagree, so a grant of it is refused (DEC-2521).
+/// list, a list that is not distinct check names, and any other request disagree, so a grant of it
+/// is refused (DEC-2521).
 pub fn deferrals_agree(request: &StoredEvent, agent_rows: &[StoredEvent]) -> bool {
     let Some(event) = envelope(request) else {
         return false;
@@ -301,11 +302,27 @@ pub fn deferrals_agree(request: &StoredEvent, agent_rows: &[StoredEvent]) -> boo
         .and_then(|c| c.get("deferred_to_binding"))
         .cloned();
     let requested = match (request.schema_version, named) {
-        (3, Some(Value::Array(list))) if !list.is_empty() => Value::Array(list),
+        (3, Some(Value::Array(list))) if !list.is_empty() && check_names(&list) => {
+            Value::Array(list)
+        }
         (1 | 2, None) => Value::Array(Vec::new()),
         _ => return false,
     };
     decided_for(&event, &decision_deferrals(agent_rows)) == requested
+}
+
+/// Whether `list` holds distinct check names as the journal writes them, a lower-case letter then
+/// lower-case letters, digits, and underscores, as the web app reads them (DEC-2519).
+fn check_names(list: &[Value]) -> bool {
+    let mut seen = std::collections::BTreeSet::new();
+    list.iter().all(|item| {
+        item.as_str().is_some_and(|name| {
+            let mut chars = name.chars();
+            chars.next().is_some_and(|first| first.is_ascii_lowercase())
+                && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                && seen.insert(name)
+        })
+    })
 }
 
 /// The bound order of an `ApprovalRequested` payload (DEC-1021): `content.action`'s members, and
