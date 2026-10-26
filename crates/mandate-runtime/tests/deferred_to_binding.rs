@@ -474,10 +474,8 @@ proptest! {
         planned in any::<bool>(),
     ) {
         let mut plan = if opening { FixedPlan::opening(autonomy) } else { exiting(Autonomy::Auto) };
-        if !planned {
-            if let Some(proposal) = plan.proposal.as_mut() {
-                proposal.execution = None;
-            }
+        if !planned && let Some(proposal) = plan.proposal.as_mut() {
+            proposal.execution = None;
         }
         let ran = evaluated(&FixedGate(verdict.clone()), &plan);
         let made = decision(&ran);
