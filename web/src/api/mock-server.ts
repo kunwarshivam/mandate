@@ -269,8 +269,9 @@ export function createMockServer(options: MockServerOptions): MockServer {
   }
 
   /**
-   * An agent stream's events as the mock tells them (`agent:{ws}:{agent}`): the deployment, then each
-   * order submitted and each filled, in time order. Types and times only; the body is a stand-in.
+   * An agent stream's events as the mock tells them (`agent:{ws}:{agent}`): the deployment, each gate
+   * decision the fixtures hold with its `DecisionMade` payload (journal spec §9.1), and each order
+   * submitted and filled, in time order. Each body is `{event_type, payload}`, hashed.
    */
   function agentStream(streamId: string) {
     if (streamId === `ctl:${workspaceId}`) return controlStream(streamId);
@@ -279,9 +280,37 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const agent = match && match[1] === workspaceId ? agentOf(match[2]) : undefined;
     if (!agent) return null;
     const orders = [...agent.past_orders, ...agent.orders].sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at));
-    const told = [{ type: "AgentDeployed", at: orders[0]?.submitted_at ?? workspace.now }, ...orders.flatMap((o) => [{ type: "OrderSubmitted", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])])];
+    const decided = workspace.decisions
+      .filter((d) => d.agent_id === agent.agent_id)
+      .map((d) => ({
+        type: "DecisionMade",
+        at: d.at,
+        payload: {
+          instrument_id: d.action.symbol,
+          side: d.action.side,
+          type: "limit",
+          tif: "day",
+          qty: canon(d.action.qty),
+          limit_price: canon(d.action.limit_price),
+          purpose: d.action.purpose,
+          exit_origin: null,
+          dry_run: d.verdict,
+          reason_code: d.reason_code,
+          autonomy: d.verdict === "allow" ? (d.approval_id ? "ask" : "auto") : null,
+          ask_suppressed: null,
+          decided_by: d.verdict === "allow" ? "default" : null,
+          delegation_id: null,
+          requested_by: "agent",
+          client_id: null,
+        } as Record<string, unknown>,
+      }));
+    const told: Array<{ type: string; at: string; payload?: Record<string, unknown> }> = [
+      { type: "AgentDeployed", at: orders[0]?.submitted_at ?? workspace.now },
+      ...decided,
+      ...orders.flatMap((o) => [{ type: "OrderSubmitted", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])]),
+    ].sort((x, y) => Date.parse(x.at) - Date.parse(y.at));
     return told.map((e, i) => {
-      const body = JSON.stringify({ event_type: e.type, payload: {} });
+      const body = JSON.stringify({ event_type: e.type, payload: e.payload ?? {} });
       return { seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: sha256Hex(body), body: Buffer.from(body, "utf8").toString("base64") };
     });
   }

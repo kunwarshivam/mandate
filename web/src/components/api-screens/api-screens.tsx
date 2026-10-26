@@ -13,7 +13,7 @@ import { type ShownChallenge, approvalConfirmCommand } from "@/api/step-up";
 import { HostConfirm } from "./host-confirm";
 import { APPROVER_SENTENCE, type DeferredChecks, deferredCheckLabel, deferredChecks } from "@/lib/deferred-checks";
 import { clock, percent, price, quantity, usd } from "@/lib/format";
-import { FINAL_UNDELIVERED, refusedText, undeliveredText } from "@/lib/grant-refusals";
+import { APPROVE_REFUSED, FINAL_UNDELIVERED, refusedText, undeliveredText } from "@/lib/grant-refusals";
 import { type ActivityAnswer, type ApprovalRecord, type ApprovalResponse, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { cn } from "@/lib/utils";
@@ -500,6 +500,9 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
   const approval = view?.approvals.find((a) => a.approval_id === approvalId);
   const agent = view?.agents.find((a) => a.agent_id === approval?.agent_id);
   const response = approval ? responses[approval.approval_id] : undefined;
+  const refusedNow = response?.phase === "undelivered" && APPROVE_REFUSED.has(response.reason ?? "");
+  const [approveClosed, setApproveClosed] = useState(false);
+  if (refusedNow && !approveClosed) setApproveClosed(true);
   if (!approval) {
     return <WorkspaceGate api>{view ? <h1 className="text-h1">Request not found</h1> : null}</WorkspaceGate>;
   }
@@ -535,7 +538,8 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
   const submit = (shownChallenge: ShownChallenge) => respond(approval.approval_id, "approve", record, shownChallenge.challenge);
   const settled = response && (response.phase !== "undelivered" || FINAL_UNDELIVERED.has(response.reason ?? ""));
   const open = approval.state === "pending" && canRespond && !settled;
-  const approvable = deferred.kind !== "unreadable";
+  const approveRefused = refusedNow || approveClosed;
+  const approvable = deferred.kind !== "unreadable" && !approveRefused;
   return (
     <WorkspaceGate api>
       <article className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-6" aria-labelledby="api-request-title">
@@ -561,7 +565,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
         {deferred.kind !== "none" ? <DeferredChecksPanel deferred={deferred} /> : null}
         {approval.state !== "pending" ? <p className="text-h3">{ENDED[approval.state]}</p> : null}
         {response ? (
-          <p role={response.phase === "refused" || (response.phase === "undelivered" && FINAL_UNDELIVERED.has(response.reason ?? "")) ? "alert" : "status"} data-phase={response.phase} className="text-sm">
+          <p role={response.phase === "refused" || (response.phase === "undelivered" && (FINAL_UNDELIVERED.has(response.reason ?? "") || APPROVE_REFUSED.has(response.reason ?? ""))) ? "alert" : "status"} data-phase={response.phase} className="text-sm">
             {responseText(response)}
           </p>
         ) : null}
@@ -578,7 +582,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
         {open && approvable && asking?.phase === "shown" && response?.phase !== "sent" ? (
           <HostConfirm key={asking.shown.challenge.challenge_id} shown={asking.shown} command={asking.command} submitLabel="Approve" onSubmit={() => submit(asking.shown)} onCancel={() => setAsking(null)} />
         ) : null}
-        {open && asking?.phase !== "shown" && asking?.phase !== "asking" ? (
+        {open && (asking?.phase !== "shown" || approveRefused) && asking?.phase !== "asking" ? (
           <div className={cn("grid gap-3", approvable ? "grid-cols-2" : "grid-cols-1")}>
             {approvable ? (
               <button type="button" className={DECISION_KEY} onClick={approve}>

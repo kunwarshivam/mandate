@@ -11,9 +11,9 @@ use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::shape::transitional_alpaca;
 use crate::types::{
-    AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId,
-    IntentBody, MarketObservation, Mode, OcoLegs, Order, OrderState, Protection, ProtectionPrices,
-    Purpose, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
+    AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BracketLegs, ConnectionHealth,
+    EventId, FillId, IntentBody, MarketObservation, Mode, OcoLegs, Order, OrderState, Protection,
+    ProtectionPrices, Purpose, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
 };
 
 pub use crate::fold::fold;
@@ -58,6 +58,9 @@ pub struct ExecutorState {
     /// interval ends (DEC-348 item 2).
     pub(crate) awaiting: BTreeMap<InstrumentId, BTreeSet<ClientOrderId>>,
     pub(crate) copied: BTreeMap<EventId, EventId>,
+    /// What journal spec §9.28's judgment of an owner's acknowledgment reads from the account
+    /// stream (DEC-2828).
+    pub(crate) acknowledgments: crate::acknowledge::Acknowledgments,
     /// Each instrument's running exit sequence, `unprotected_start` to `unprotected_end` (§5.4).
     pub(crate) exiting: BTreeMap<InstrumentId, ExitSequence>,
     /// Each instrument whose protection is being re-placed before its GTC expiry: cancelled, and
@@ -109,6 +112,10 @@ pub struct ExecutorState {
     /// Each account-restriction cause in force, by its `cause`, at the strictest restriction its
     /// records set. Nothing lifts one yet (backlog E7-2y), so a cause stays once raised.
     pub(crate) causes: BTreeMap<String, AccountState>,
+    /// The connection this account stream names, once its copy of `ConnectionEstablished` folds
+    /// (rule 68), with the state its `ConnectionStateChanged` records last set and the reasons
+    /// journaled since it entered that state (DEC-2826). `None` before the copy.
+    pub(crate) connection: Option<ConnectionView>,
     pub(crate) consecutive_403s: u32,
     pub(crate) observed: Option<ObservedAccount>,
     /// The account-stream `seq` of the report `observed` holds: the base the model's cash moves
@@ -387,6 +394,16 @@ pub(crate) struct PriorBase {
     pub(crate) fill_notional: Usd,
 }
 
+/// The account's connection as its stream records it (journal spec §9.8, DEC-2826).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct ConnectionView {
+    pub(crate) id: String,
+    pub(crate) health: ConnectionHealth,
+    /// The reasons journaled since the connection entered [`Self::health`], so a cause is recorded
+    /// once per stay (connections spec §8.2, DEC-687).
+    pub(crate) reasons: BTreeSet<String>,
+}
+
 impl ExecutorState {
     /// An empty state for one broker account, before any event is folded. Reads nothing: there is
     /// no constructor that touches a clock, a file, or a random number.
@@ -407,6 +424,7 @@ impl ExecutorState {
             unprotected: Vec::new(),
             awaiting: BTreeMap::new(),
             copied: BTreeMap::new(),
+            acknowledgments: crate::acknowledge::Acknowledgments::default(),
             exiting: BTreeMap::new(),
             replacing: BTreeMap::new(),
             trading_day: None,
@@ -422,6 +440,7 @@ impl ExecutorState {
             modes: BTreeMap::new(),
             account_state: AccountState::Active,
             causes: BTreeMap::new(),
+            connection: None,
             consecutive_403s: 0,
             observed: None,
             observed_at: None,
@@ -916,7 +935,8 @@ pub(crate) struct Ladder {
 }
 
 /// The restriction a reconciliation places for one subject — an instrument, or external activity
-/// on the account — and the only one an owner acknowledgment of that subject lifts (§11).
+/// on the account — which an owner's acknowledgment naming the hold lifts (§11, DEC-2830; backlog
+/// E7-4b, until the executor reads it).
 pub(crate) fn restriction_for(subject: &str) -> String {
     format!("reconciliation:{subject}")
 }
