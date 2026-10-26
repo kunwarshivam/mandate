@@ -284,5 +284,92 @@
     "set": {
       "/approval/order": "x"
     }
+  },
+  {
+    "label": "a missing schema_version",
+    "remove": [
+      "/approval/schema_version"
+    ]
+  },
+  {
+    "label": "schema_version 0",
+    "set": {
+      "/approval/schema_version": 0
+    }
+  },
+  {
+    "label": "schema_version 4",
+    "set": {
+      "/approval/schema_version": 4
+    }
+  },
+  {
+    "label": "schema_version as text",
+    "set": {
+      "/approval/schema_version": "3"
+    }
+  },
+  {
+    "label": "a version-3 request without its deferred checks",
+    "set": {
+      "/approval/schema_version": 3
+    }
+  },
+  {
+    "label": "a version-3 request with no deferred checks",
+    "set": {
+      "/approval/schema_version": 3,
+      "/approval/content": {
+        "action": {
+          "side": "buy"
+        },
+        "deferred_to_binding": []
+      }
+    }
+  },
+  {
+    "label": "a version-3 request whose deferred checks are not a list",
+    "set": {
+      "/approval/schema_version": 3,
+      "/approval/content": {
+        "action": {
+          "side": "buy"
+        },
+        "deferred_to_binding": "halt"
+      }
+    }
+  },
+  {
+    "label": "a version-3 request naming an empty check",
+    "set": {
+      "/approval/schema_version": 3,
+      "/approval/content": {
+        "action": {
+          "side": "buy"
+        },
+        "deferred_to_binding": [
+          ""
+        ]
+      }
+    }
+  },
+  {
+    "label": "a version-2 request naming deferred checks",
+    "set": {
+      "/approval/content": {
+        "action": {
+          "side": "buy"
+        },
+        "deferred_to_binding": [
+          "halt"
+        ]
+      }
+    }
+  },
+  {
+    "label": "schema_version a value no version has",
+    "set": {
+      "/approval/schema_version": "mutant_value"
+    }
   }
 ]

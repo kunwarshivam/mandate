@@ -49,7 +49,14 @@ describe("the read models as the API serves them (#1446, #1499; DEC-1096)", () =
     expect(ok(agentRead({ agent: { ...ROW, account_positions: null } }, ""))).toBe(true);
     expect(approvalsRead({ approvals: [APPROVAL] }, "")).toEqual({ ok: true, value: { approvals: [APPROVAL] } });
     const protectedOrder = { ...ORDER, tif: "day", protection: { stop: "54000", take_profit: null } };
-    expect(ok(approvalRead({ approval: { ...APPROVAL, order: protectedOrder, content: { action: { side: "buy" } } } }, ""))).toBe(true);
+    expect(ok(approvalRead({ approval: { ...APPROVAL, order: protectedOrder, content: { action: { side: "buy" } }, schema_version: 2 } }, ""))).toBe(true);
+  });
+
+  it("reads the ApprovalRequested version an approval's content comes from, and refuses a read without one (DEC-2518)", () => {
+    const detail = { ...APPROVAL, content: { action: { side: "buy" } } };
+    for (const version of [1, 2, 3]) expect(approvalRead({ approval: { ...detail, schema_version: version } }, ""), String(version)).toMatchObject({ ok: true, value: { approval: { schema_version: version } } });
+    expect(problem(approvalRead({ approval: detail }, ""))).toBe("missing /approval/schema_version");
+    for (const version of [0, 4, "3", null, 2.5]) expect(problem(approvalRead({ approval: { ...detail, schema_version: version } }, "")), String(version)).toMatch(/^(unknown_enum_value|wrong_type) \/approval\/schema_version$/);
   });
 
   it("refuses a decimal sent as a JSON number, and a count that is not one", () => {

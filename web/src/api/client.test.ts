@@ -313,6 +313,7 @@ describe("no order ticket (DEC-528)", () => {
    */
   const EXPORTS: Record<string, string[]> = {
     activity: ["activityRead", "holdingsRead", "journalPageRead"],
+    alerts: ["ALERT_KINDS", "alertsRead", "subjectHref"],
     backtest: ["ABSENT", "DISCLOSURES", "LIMITATIONS", "MODES", "OUTCOMES", "PURPOSES", "backtestNotFound", "backtestRead", "readBacktestFrom", "servedBacktest"],
     client: ["CSRF_HEADER", "OPERATIONS", "SESSION_ROUTE", "STEP_UP_CHALLENGE_ROUTE", "createWorkspaceClient", "isIdempotencyKey", "newIdempotencyKey"],
     connect: ["API_CONNECTION_ID", "CONNECTION_STATES", "CONNECT_START_ROUTE", "connectStartBody", "connectStarted", "connectionDetail", "connectionRead", "connectionsRead"],
@@ -322,7 +323,7 @@ describe("no order ticket (DEC-528)", () => {
     decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],
     "mock-server": ["MOCK_AUTHORIZATION_ORIGIN", "MOCK_PASSKEY_ID", "MOCK_PRINCIPAL", "MOCK_RP_ID", "MOCK_USER_HANDLE", "createMockServer"],
     operations: ["NOT_COMMANDS", "WEB_OPERATIONS", "operationFor"],
-    passkey: ["ASSERTION_TIMEOUT_MS", "assertPasskey", "browserAuthenticator", "deployStepUpDigest", "fromBase64url", "passkeysRead", "toBase64url", "usablePasskeys"],
+    passkey: ["ASSERTION_TIMEOUT_MS", "assertPasskey", "browserAuthenticator", "deployStepUpDigest", "fromBase64url", "ownerCommandStepUpDigest", "passkeysRead", "toBase64url", "usablePasskeys"],
     "read-models": ["agentRead", "agentsRead", "approvalRead", "approvalsRead", "deadlineIso", "loadApi", "reconciledHolding"],
     reads: ["emptyWorkspace"],
     session: ["REFRESH_EVERY_MS", "SESSION_LOCK", "createSessionKeeper"],
