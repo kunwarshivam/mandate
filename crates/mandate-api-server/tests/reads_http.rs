@@ -569,6 +569,8 @@ fn one_approval_names_its_decisions_deferred_checks_or_null_without_one() {
             request(5, 2, Some(&id(99))),
             request(6, 2, None),
             request(7, 2, Some(&id(4))),
+            decision(8, 3, r#"{"dry_run":"allow"}"#),
+            request(9, 2, Some(&id(8))),
         ],
     );
     let named = |seq: u64| -> Option<Value> {
@@ -596,11 +598,16 @@ fn one_approval_names_its_decisions_deferred_checks_or_null_without_one() {
             "{seq}: no DecisionMade by that id on the stream"
         );
     }
+    assert_eq!(
+        named(9),
+        Some(Value::Null),
+        "a version 3 decision without its list is never read as deferring nothing"
+    );
     let reply = get(&f, &ws("/approvals"), Some(&cookie));
     let Some(Value::Array(listed)) = json(&reply).get("approvals").cloned() else {
         panic!("approvals");
     };
-    assert_eq!(listed.len(), 5);
+    assert_eq!(listed.len(), 6);
     assert!(
         listed
             .iter()

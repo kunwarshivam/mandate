@@ -258,18 +258,24 @@ pub fn agent(deployment: &Deployment, agent_rows: &[StoredEvent]) -> AgentView {
 }
 
 /// Each `DecisionMade` on the stream by event id, with its `payload.deferred_to_binding` as
-/// journaled, or an empty list when it names none (versions 1 and 2, DEC-2519).
+/// journaled; an empty list when a version 1 or 2 decision names none, and `null` when a version 3
+/// one, which always carries the member (rule 269), does not, so it is never read as agreeing
+/// (DEC-2519).
 fn decision_deferrals(agent_rows: &[StoredEvent]) -> std::collections::BTreeMap<String, Value> {
     agent_rows
         .iter()
         .filter(|row| row.event_type == "DecisionMade")
         .filter_map(|row| {
             let event = envelope(row)?;
-            let deferred = event
+            let named = event
                 .get("payload")
                 .and_then(|p| p.get("deferred_to_binding"))
-                .cloned()
-                .unwrap_or_else(|| Value::Array(Vec::new()));
+                .cloned();
+            let deferred = match named {
+                Some(list) => list,
+                None if row.schema_version >= 3 => Value::Null,
+                None => Value::Array(Vec::new()),
+            };
             Some((row.event_id.clone(), deferred))
         })
         .collect()

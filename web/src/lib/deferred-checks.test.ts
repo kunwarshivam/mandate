@@ -19,6 +19,13 @@ const vectors = JSON.parse(readFileSync(new URL("../../../fixtures/refcases/jour
 };
 const section = vectors.approval_deferrals;
 
+/**
+ * The vectors' batch whose request names a decision outside it: the journal admits it, since rule
+ * 292 judges one batch, but no such decision is on the stream, so the read serves `null` and the
+ * screen refuses it (DEC-2519).
+ */
+const ELSEWHERE = "request_naming_another_decision";
+
 /** The version of a case's draft. */
 const versionOf = (c: Case) => section.drafts[c.base_draft].schema_version;
 
@@ -97,7 +104,7 @@ describe("the checks an approval's dry run deferred (DEC-2515 item 5, mandate sp
       const content = contentOf({ name: b.name, ...b.request });
       const version = section.drafts[b.request.base_draft].schema_version;
       const own = deferredChecks(content, version, (content.deferred_to_binding as string[] | undefined) ?? []);
-      if (b.name === "request_naming_another_decision") {
+      if (b.name === ELSEWHERE) {
         expect(deferredChecks(content, version, null), b.name).toEqual({ kind: "unreadable" });
         continue;
       }
@@ -106,9 +113,23 @@ describe("the checks an approval's dry run deferred (DEC-2515 item 5, mandate sp
       if (b.expect.outcome === "Invalid") expect(read, b.name).toEqual({ kind: "unreadable" });
       else expect(read, b.name).toEqual(own);
     }
+    expect(section.batches.map((b) => b.name), "the vector whose decision is elsewhere, which the read serves as null").toContain(ELSEWHERE);
+    const decidedBy = (b: Batch) => {
+      const content = contentOf({ name: b.name, ...b.request });
+      return deferredChecks(content, section.drafts[b.request.base_draft].schema_version, (content.deferred_to_binding as string[] | undefined) ?? []).kind;
+    };
+    expect(
+      section.batches.filter((b) => b.expect.outcome === "Invalid" && decidedBy(b) !== "unreadable").map((b) => b.name),
+      "pairings the request alone reads as fine, so only the comparison refuses them",
+    ).toEqual(expect.arrayContaining(["v2_request_hides_a_deferral", "v1_request_hides_a_deferral", "v3_request_names_another_deferral", "v3_request_on_a_plain_decision"]));
     expect(section.batches.filter((b) => b.expect.outcome === "Invalid").map((b) => b.name)).toEqual(
       expect.arrayContaining(["v2_request_hides_a_deferral", "v1_request_hides_a_deferral", "v3_request_names_another_deferral", "v3_request_on_a_plain_decision"]),
     );
+  });
+
+  it("compares the lists in order, so the same names in another order disagree", () => {
+    expect(deferredChecks({ deferred_to_binding: ["halt", "liquidity_floor", "participation"] }, 3, ["participation", "liquidity_floor", "halt"])).toEqual({ kind: "unreadable" });
+    expect(deferredChecks({ deferred_to_binding: ["halt", "participation"] }, 3, ["halt", "liquidity_floor", "participation"])).toEqual({ kind: "unreadable" });
   });
 
   it("never reads a request as nothing deferred when its decision cannot be found or its list cannot be read", () => {
