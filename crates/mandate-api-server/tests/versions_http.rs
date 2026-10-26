@@ -2457,7 +2457,7 @@ fn resume_body(evidence: &str, assertion: Option<serde_json::Value>) -> String {
 fn stop_body(evidence: &str, assertion: Option<serde_json::Value>) -> String {
     let warning = format!(
         "sha256:{}",
-        Digest::of(mandate_api_server::commands::release_warning().as_bytes()).to_hex()
+        Digest::of(mandate_api_server::commands::RELEASE_WARNING.as_bytes()).to_hex()
     );
     with_assertion(
         &format!(

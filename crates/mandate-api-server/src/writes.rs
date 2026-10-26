@@ -15,7 +15,7 @@ use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
-use mandate_api::envelope::StepUpEvidence;
+use mandate_api::envelope::{StepUpAssertion, StepUpEvidence};
 use mandate_api::idempotency::{Derivation, IdempotencyKey, event_id};
 use mandate_api::lenient::{Api7, ApprovalAnswer, Kept, decode_lenient};
 use mandate_api::problem::Violation;
@@ -42,7 +42,7 @@ use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
 use crate::session::Authenticated;
-use crate::stepup::{Action, Judged, Unverified, journaled};
+use crate::stepup::{Action, Asserted, Judged, Unverified, journaled};
 use crate::versions::stored;
 
 /// The `Idempotency-Key` request header (§3.4).
@@ -214,6 +214,32 @@ async fn committed(
     dropped: &[String],
     status: Option<&str>,
 ) -> Response {
+    commit_with(app, gate, reader, command, (dropped, status), None).await
+}
+
+/// [`committed`] for a command a passkey step-up authorized: its `StepUpAsserted`, under §3.4's id
+/// for the operation named beside it, follows the command in its batch ([DEC-2128] item 3).
+///
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
+async fn committed_asserted(
+    app: &App,
+    gate: &Gate,
+    reader: &Reader,
+    command: &Command,
+    asserted: Option<(&Asserted, &'static str)>,
+) -> Response {
+    commit_with(app, gate, reader, command, (&[], None), asserted).await
+}
+
+/// The record [`committed`] and [`committed_asserted`] share.
+async fn commit_with(
+    app: &App,
+    gate: &Gate,
+    reader: &Reader,
+    command: &Command,
+    (dropped, status): (&[String], Option<&str>),
+    asserted: Option<(&Asserted, &'static str)>,
+) -> Response {
     let Some(environment) = reader.control.first().map(|row| row.environment.as_str()) else {
         return Refused::NotFound.response();
     };
@@ -241,8 +267,18 @@ async fn committed(
         },
         _ => None,
     };
+    let assertion = match asserted {
+        Some((asserted, operation)) => {
+            match assertion_draft(app, gate, &issued, asserted, operation) {
+                Some(assertion) => Some(assertion),
+                None => return Refused::JournalUnavailable.response(),
+            }
+        }
+        None => None,
+    };
     let batch: Vec<&[u8]> = std::iter::once(bytes.as_slice())
         .chain(alert.as_deref())
+        .chain(assertion.as_deref())
         .collect();
     match appended_batch_at(app, reader, (&text, &batch), gate.now, None).await {
         Settled::Stored(row) => accepted(command.id_member(), &row, gate.now, dropped, status),
@@ -254,6 +290,34 @@ async fn committed(
         Settled::Unavailable => Refused::JournalUnavailable.response(),
     }
 }
+
+/// The `StepUpAsserted` recording the passkey step-up that authorized `issued`, its id derived under
+/// `operation`, its raw assertion stored first. `None` when no id derives, no store is bound, or
+/// the store refuses it.
+fn assertion_draft(
+    app: &App,
+    gate: &Gate,
+    issued: &Issued<'_>,
+    asserted: &Asserted,
+    operation: &str,
+) -> Option<Vec<u8>> {
+    let (_, id) = derived_for(gate, issued.workspace, operation)?;
+    let writer = Writer {
+        workspace: issued.workspace,
+        principal: issued.principal,
+        event_id: &id,
+        environment: issued.environment,
+        now: issued.now,
+    };
+    asserted.drafted(app.objects.as_deref()?, &writer, issued.event_id)
+}
+
+/// The operation §3.4 derives a resume's `StepUpAsserted` id under ([DEC-2128] item 3).
+///
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
+pub const RESUME_ASSERTED: &str = "resume_step_up_asserted";
+/// The operation §3.4 derives a Stop's `StepUpAsserted` id under.
+pub const STOP_ASSERTED: &str = "stop_step_up_asserted";
 
 /// The operation §3.4 derives a user kill switch's `OwnerAlertSent` id under, distinct from the
 /// command's own `kill_switch` (E8-9k).
@@ -656,6 +720,8 @@ pub async fn resume(
         kind: StepUpActionKind::Resume,
         bound,
         presented: request.step_up.as_ref(),
+        assertion: request.step_up_assertion.as_ref(),
+        asserted_as: RESUME_ASSERTED,
     };
     stepped(&app, &gate, &workspace, &make, &forwarded).await
 }
@@ -690,6 +756,8 @@ pub async fn stop(
         kind: StepUpActionKind::Stop,
         bound: Bound::command(confirms, &agent),
         presented: request.step_up.as_ref(),
+        assertion: request.step_up_assertion.as_ref(),
+        asserted_as: STOP_ASSERTED,
     };
     stepped(&app, &gate, &workspace, &make, &forwarded).await
 }
@@ -798,16 +866,23 @@ fn text_value(value: &str) -> Value {
     Value::Str(value.to_owned())
 }
 
-/// What a step-up command forwards: its kind, its bound object, and the evidence presented.
+/// What a step-up command forwards: its kind, its bound object, the evidence presented, the passkey
+/// assertion beside it, and the operation §3.4 derives that assertion's `StepUpAsserted` id under.
 struct Forwarded<'a> {
     kind: StepUpActionKind,
     bound: Bound,
     presented: Option<&'a StepUpEvidence>,
+    assertion: Option<&'a StepUpAssertion>,
+    asserted_as: &'static str,
 }
 
 /// Authorizes the command `make` builds and records it with the presented evidence when the port
-/// verifies it, else with `null` (DEC-2102 item 4). A repeat whose key holds the command with the
-/// evidence as presented replays before the port is asked again (§3.4 step 1).
+/// verifies it, else with `null` (DEC-2102 item 4). Evidence with a passkey assertion beside it is
+/// judged by the port's `asserted`, and a verified one commits its `StepUpAsserted` after the
+/// command in the same batch ([DEC-2128] items 2 and 3). A repeat whose key holds the command with
+/// the evidence as presented replays before the port is asked again (§3.4 step 1).
+///
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
 async fn stepped(
     app: &App,
     gate: &Gate,
@@ -840,23 +915,41 @@ async fn stepped(
         return accepted(as_presented.id_member(), &row, gate.now, &[], None);
     }
     let head = reader.control.last().map_or(0, |row| row.seq);
-    let verified = match (forwarded.presented, forwarded.bound.digest(head)) {
-        (Some(evidence), Some(digest)) => {
-            let action = Action {
-                kind: forwarded.kind,
-                digest,
-            };
-            let judged = Judged {
-                tenant: &reader.tenant,
-                control: &reader.control,
-                now: gate.now,
-            };
-            app.step_up.verify(evidence, &action, &judged).is_ok()
+    let verified: Option<Option<Asserted>> =
+        match (forwarded.presented, forwarded.bound.digest(head)) {
+            (Some(evidence), Some(digest)) => {
+                let action = Action {
+                    kind: forwarded.kind,
+                    digest,
+                };
+                let judged = Judged {
+                    tenant: &reader.tenant,
+                    control: &reader.control,
+                    now: gate.now,
+                };
+                match forwarded.assertion {
+                    Some(assertion) => app
+                        .step_up
+                        .asserted(evidence, Some(assertion), &action, &judged)
+                        .ok()
+                        .flatten()
+                        .map(Some),
+                    None => app
+                        .step_up
+                        .verify(evidence, &action, &judged)
+                        .is_ok()
+                        .then_some(None),
+                }
+            }
+            _ => None,
+        };
+    match verified {
+        Some(asserted) => {
+            let asserted = asserted.as_ref().map(|a| (a, forwarded.asserted_as));
+            committed_asserted(app, gate, &reader, &as_presented, asserted).await
         }
-        _ => false,
-    };
-    let command = if verified { as_presented } else { null };
-    committed(app, gate, &reader, &command, &[], None).await
+        None => committed(app, gate, &reader, &null, &[], None).await,
+    }
 }
 
 /// The row the gate's key already holds for `command`, when it is that command.
