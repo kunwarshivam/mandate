@@ -3,7 +3,8 @@
 //! A range's lifecycle run starts from its connection anchor, or fails closed without one (journal
 //! spec v0.35, DEC-885). Journal spec v0.54 §9.24 (DEC-1171) adds stream rule 201, which the same
 //! check judges from the same fold: a version-2 `AgentDeployed` names a connection established on
-//! its control stream at version 2 and not since revoked. A version-1 `AgentDeployed` is not read.
+//! its control stream at version 2 and not since revoked; a version 3 is read as a version 2
+//! (v0.84, DEC-2131). A version-1 `AgentDeployed` is not read.
 //! `append` folds no stream, so these rules are not `append`'s: the connection manager and the
 //! executor check them against their own fold before appending, and verification runs them here
 //! over the stored rows.
@@ -439,7 +440,8 @@ impl<'r> Row<'r> {
 
     /// Whether a range rule judges the record: every connection record on an account stream, and
     /// a request, establishment, rotation, or refusal on a control stream (DEC-885 item 4, DEC-888),
-    /// and there a version-2 `AgentDeployed`, the only version [`connection_rows`] keeps (DEC-1171).
+    /// and there a version-2 or version-3 `AgentDeployed`, the only versions [`connection_rows`]
+    /// keeps (DEC-1171, DEC-2131).
     fn judged(&self) -> bool {
         self.stream != StreamType::Control
             || JUDGED_ON_CONTROL.contains(&self.stored.event_type.as_str())
@@ -455,8 +457,14 @@ impl<'r> Row<'r> {
     }
 }
 
+/// Whether an `AgentDeployed` names its connection: version 2, and version 3, which every reader
+/// reads as version 2 (journal spec v0.84, DEC-2131 item 4).
+fn names_connection(stored: &StoredEvent) -> bool {
+    matches!(stored.schema_version, 2 | 3)
+}
+
 /// The rows the connection rules read: the connection records of the control and account streams,
-/// and the control stream's version-2 `AgentDeployed`s; a version-1 deployment names no connection,
+/// and the control stream's version-2 and version-3 `AgentDeployed`s; a version-1 deployment names no connection,
 /// so rule 201 never judges it.
 fn connection_rows(rows: &[StoredEvent]) -> Vec<Row<'_>> {
     rows.iter()
@@ -468,7 +476,7 @@ fn connection_rows(rows: &[StoredEvent]) -> Vec<Row<'_>> {
                 StreamType::Account => &ACCOUNT_RECORDS,
                 _ => &[],
             };
-            let deployment_v1 = stored.event_type == DEPLOYED && stored.schema_version != 2;
+            let deployment_v1 = stored.event_type == DEPLOYED && !names_connection(stored);
             (records.contains(&stored.event_type.as_str()) && !deployment_v1).then_some(())?;
             let body = parse(&stored.body).ok()?;
             Some(Row {

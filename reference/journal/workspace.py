@@ -353,9 +353,9 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "confirmed_unknown_version",
-            "§9.9: versions 1 and 2 are registered",
+            "§9.9 v0.84: versions 1 to 3 are registered",
             conf,
-            [change("schema_version", 3)],
+            [change("schema_version", 4)],
             "unknown_schema",
             "payload",
         ),
