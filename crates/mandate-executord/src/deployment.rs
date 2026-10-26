@@ -1005,8 +1005,8 @@ impl BindingGateSource for Deployment {
 
 impl Deployment {
     /// `agent`'s risk on a traded account that is flat again (DEC-2833 items 1 to 3), which
-    /// `Journaled::opening_hold` has already found flat: the account risk book's snapshot, mode and
-    /// restrictions, with the counters `journaled` folds from the account stream at `now`. `None`
+    /// `Journaled::opening_hold` has already found flat: the account risk book's snapshot, whose
+    /// mode is the book's, and restrictions, with the counters `journaled` folds from the account stream at `now`. `None`
     /// while the counters do not read, or the book reads no risk for the agent, which holds the
     /// opening and never an exit. The day-trade ledger is empty: the gate answers only where day
     /// trades cannot bind (item 5).
@@ -1014,14 +1014,11 @@ impl Deployment {
         let counted = journaled.counted(now)?;
         let GateRisk {
             risk,
-            mode,
             instrument_restrictions,
+            ..
         } = self.risk(agent)?;
         Some(AgentRisk {
-            risk: RiskSnapshot {
-                agent_mode: mode,
-                ..risk
-            },
+            risk,
             conduct: counted.conduct,
             instrument_restrictions,
             last_exit_fill_at: counted.last_exit_fill_at,

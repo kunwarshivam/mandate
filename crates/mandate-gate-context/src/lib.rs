@@ -44,8 +44,9 @@ pub use rule_set::{RuleSetError, gate_rule_set};
 /// order, not one of these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpeningHold {
-    /// The account has traded, and the account risk view, which must then read every opening,
-    /// does not yet read this agent's (DEC-2380 item 2, DEC-2804).
+    /// The account has traded, and the fold cannot answer an opening beside the account risk
+    /// view's snapshot (DEC-2380 item 2, DEC-2804, DEC-2833): the account holds a position or
+    /// works an order, the counters do not read, or the workspace relates another account.
     AccountTraded,
     /// The account has traded and the agent's mandate is unpinned: the account risk view binds an
     /// instrument at deployment, and a research agent has none (DEC-2819 item 4).
