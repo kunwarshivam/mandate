@@ -32,6 +32,7 @@ from fractions import Fraction
 from pathlib import Path
 
 import account
+import account_activity
 import account_closes
 import account_restrictions
 import acknowledgments
@@ -4261,6 +4262,7 @@ def render(
     stepped_up_section: dict,
     account_restrictions_section: dict,
     snapshots_section: dict,
+    account_activity_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -4315,6 +4317,7 @@ def render(
             "connection_roles": connection_roles_section,
             "stepped_up_records": stepped_up_section,
             "account_restrictions": account_restrictions_section,
+            "account_activity": account_activity_section,
             "snapshot_prior_close": snapshots_section,
         },
         Dumper=Dumper,
@@ -4401,6 +4404,7 @@ def main(argv: list[str] | None = None) -> int:
     connection_roles_section = connection_roles.build_section()
     stepped_up_section = stepped_up.build_section()
     account_restrictions_section = account_restrictions.build_section()
+    account_activity_section = account_activity.build_section()
     snapshots_section = snapshots.build_section()
 
     problems = check_chain(section, v3)
@@ -4473,6 +4477,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += stepped_up.run_mutants(stepped_up_section)
     problems += account_restrictions.check_section(account_restrictions_section)
     problems += account_restrictions.run_mutants(account_restrictions_section)
+    problems += account_activity.check_section(account_activity_section)
+    problems += account_activity.run_mutants(account_activity_section)
     problems += snapshots.check_section(snapshots_section)
     problems += snapshots.run_mutants(snapshots_section)
     problems += connection_requested.check_section(connection_requested_section)
@@ -4563,6 +4569,7 @@ def main(argv: list[str] | None = None) -> int:
         stepped_up_section,
         account_restrictions_section,
         snapshots_section,
+        account_activity_section,
     )
     reread = yaml.safe_load(rendered)
     canonical_self_test()
@@ -4617,6 +4624,7 @@ def main(argv: list[str] | None = None) -> int:
         or account_closes.check_section(reread["account_closes"])
         or stepped_up.check_section(reread["stepped_up_records"])
         or account_restrictions.check_section(reread["account_restrictions"])
+        or account_activity.check_section(reread["account_activity"])
         or snapshots.check_section(reread["snapshot_prior_close"])
         or connection_roles.check_section(reread["connection_roles"])
         or connection_requested.check_section(reread["connection_requested"])
@@ -4714,6 +4722,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(account_restrictions_section['invalid_drafts'])} invalid and {len(account_restrictions_section['valid_drafts'])} valid "
         f"AccountRestrictionChanged drafts, {len(account_restrictions.VALIDATOR_MUTANTS)} validator and "
         f"{len(account_restrictions.vector_mutants(account_restrictions_section))} vector mutants caught; "
+        f"{len(account_activity_section['invalid_drafts'])} invalid and {len(account_activity_section['valid_drafts'])} valid "
+        f"account activity drafts, {len(account_activity.VALIDATOR_MUTANTS)} validator and "
+        f"{len(account_activity.vector_mutants(account_activity_section))} vector mutants caught; "
         f"{len(snapshots_section['invalid_drafts'])} invalid and {len(snapshots_section['valid_drafts'])} valid "
         f"version-2 AccountSnapshotRecorded drafts, {len(snapshots_section['readings'])} readings, "
         f"{len(snapshots.VALIDATOR_MUTANTS)} validator, {len(snapshots.READING_MUTANTS)} reading and "
