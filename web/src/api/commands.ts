@@ -40,16 +40,22 @@ export function recordRef(record: CommandRecord | ApprovalRecord | ConfirmRecord
 
 const one = (command: PreparedCommand): Prepared => ({ ok: true, commands: [command] });
 
-export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, kind: CommandKind, agentId: string | null, record?: CommandRecord): Prepared {
+/**
+ * An owner command as its route takes it. A resume or a plain Stop carries the owner's passkey
+ * evidence and its assertion when `stepUp` is given (DEC-2140 item 1), and `null` evidence otherwise,
+ * which the runtime refuses (DEC-2102 item 4).
+ */
+export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, kind: CommandKind, agentId: string | null, record?: CommandRecord, stepUp: PasskeyStepUp | null = null): Prepared {
   const agentCommand = (operation: "pause" | "resume" | "stop", body: JsonObject): Prepared =>
     agentId ? one(client.prepare(operation, { agent: agentId }, body)) : { ok: false, reason: "no_agent" };
+  const evidence: JsonObject = stepUp ? { step_up: { ...stepUp.step_up }, step_up_assertion: { ...stepUp.step_up_assertion } } : { step_up: null };
   switch (kind) {
     case "pause":
       return agentCommand("pause", { record: null });
     case "resume":
-      return agentCommand("resume", { record: null, step_up: null });
+      return agentCommand("resume", { record: null, ...evidence });
     case "stop":
-      return agentCommand("stop", { release: false, warning_shown: null, record: null, step_up: null });
+      return agentCommand("stop", { release: false, warning_shown: null, record: null, ...evidence });
     case "release":
       if (!record) return { ok: false, reason: "no_warning_shown" };
       return agentCommand("stop", { release: true, warning_shown: ref(JSON.stringify(record.shown)), record: null, step_up: null });

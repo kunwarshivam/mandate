@@ -156,7 +156,48 @@ pub enum Part {
     WebTradeLoop(WebCheck),
     Executor(ExecutorCheck),
     Applied(AppliedCheck),
+    Loop(LoopCheck),
+    Grant(GrantCheck),
     Gap(Gap),
+}
+
+impl Part {
+    /// The gap a part names: a [`Part::Gap`] itself, or the gap a link of the research loop stands
+    /// for until a run of the cell shows it, so the plan's lanes and readiness count its waits.
+    pub fn gap(&self) -> Option<&Gap> {
+        match self {
+            Part::Gap(gap) => Some(gap),
+            Part::Loop(check) => Some(&check.gap),
+            Part::Grant(check) => Some(&check.gap),
+            _ => None,
+        }
+    }
+}
+
+/// A link of the research workspace's trade loop, read from the journal after the gestures' Job
+/// (DEC-2071): an event of `event_type` on `stream` whose stored body holds `holding` when it names
+/// one, after the last link seen on that stream, so each link follows the one before it, polled
+/// until it is there or the loop's wait is spent. Until a run of the cell shows it, it
+/// stands for `gap`, so a link not yet reached is named with the lanes it waits on, never failed.
+#[derive(Debug)]
+pub struct LoopCheck {
+    pub shows: &'static str,
+    pub stream: String,
+    pub event_type: &'static str,
+    pub holding: Option<&'static str>,
+    pub gap: Gap,
+}
+
+/// The owner's grant of the research agent's pending opening, on the CLI, after the gestures' Job,
+/// since no approval exists before the runtime asks: `approvals list` finds it, `approvals show`
+/// shows its code, and `approvals approve` types that code (mandate spec §6.4). It stands for `gap`
+/// until a run of the cell shows it.
+#[derive(Debug)]
+pub struct GrantCheck {
+    pub shows: &'static str,
+    pub workspace: String,
+    pub agent: &'static str,
+    pub gap: Gap,
 }
 
 /// The deployment manager's executor for `account`, started from the agent's version-2
@@ -235,11 +276,7 @@ impl Readiness {
 
 /// A step is ready with no gap, skipped when it is nothing but gaps, and partial otherwise.
 pub fn readiness(step: &Step) -> Readiness {
-    let gaps = step
-        .parts
-        .iter()
-        .filter(|p| matches!(p, Part::Gap(_)))
-        .count();
+    let gaps = step.parts.iter().filter(|p| p.gap().is_some()).count();
     match gaps {
         0 => Readiness::Ready,
         n if n == step.parts.len() => Readiness::Skipped,
@@ -251,7 +288,7 @@ pub fn readiness(step: &Step) -> Readiness {
 pub fn lanes(step: &Step) -> Vec<&'static str> {
     let mut lanes = Vec::new();
     for part in &step.parts {
-        if let Part::Gap(gap) = part {
+        if let Some(gap) = part.gap() {
             for wait in &gap.waits {
                 if !lanes.contains(&wait.lane) {
                     lanes.push(wait.lane);
@@ -267,7 +304,7 @@ pub fn by_lane(steps: &[Step]) -> BTreeMap<&'static str, Vec<(u8, &Gap, &Wait)>>
     let mut lanes: BTreeMap<&'static str, Vec<(u8, &Gap, &Wait)>> = BTreeMap::new();
     for step in steps {
         for part in &step.parts {
-            if let Part::Gap(gap) = part {
+            if let Some(gap) = part.gap() {
                 for wait in &gap.waits {
                     lanes
                         .entry(wait.lane)
@@ -289,12 +326,13 @@ const DR_RESEARCH: Wait = Wait {
     lands: "a check that the research agent's runtime, which the manager starts from its \
             version-2 deployment, journals its first research run over the recorded bundle",
 };
-const DR_RESEARCH_TRADES: Wait = Wait {
-    lane: "DR",
-    story: "E21-54",
+const GW_RESEARCH: Wait = Wait {
+    lane: "GW",
+    story: "E21-62",
     pr: None,
-    lands: "the research workspace's own trade loop: its runtime's opening asked, approved and \
-            filled under the thesis, so the feed's news item has a held position to sell",
+    lands: "a run of the cell that shows the research agent's runtime, ticking on its own \
+            workspace's clock (DEC-2071), research over the recorded bundle through the model \
+            gateway and propose its thesis",
 };
 const DR_CONNECT: Wait = Wait {
     lane: "DR",
@@ -303,19 +341,19 @@ const DR_CONNECT: Wait = Wait {
     lands: "a connection the dry run can name: staging's comes from the owner's OAuth connect, \
             which the scenario does not run yet",
 };
-const WB_EXIT: Wait = Wait {
-    lane: "WB",
-    story: "E11-9",
-    pr: None,
-    lands: "web/'s owner exit gesture with its bid confirmation, and the trade loop's \
-            `owner_exit` step between the protective stop and the kill switch",
-};
 const W2_WEB: Wait = Wait {
     lane: "W2",
     story: "E11-9",
     pr: None,
     lands: "web/ sends the demo's gestures through the API, and `cell demo` drives web/ against \
             the cell (claim #1443)",
+};
+const E2E_FILL: Wait = Wait {
+    lane: "E2E",
+    story: "E21-54",
+    pr: None,
+    lands: "a gesture that shows the granted opening's fill and resting stop in the cell, in place \
+            of this gap",
 };
 const P5_HOOK: Wait = Wait {
     lane: "D1",
@@ -1013,28 +1051,19 @@ pub fn plan(
                         })]
                     })
                     .unwrap_or_default(),
-                vec![
-                Part::Gap(Gap {
-                    what: "a research run in the research agent's runtime, over the recorded \
-                           bundle its image carries, through mandate-gateway's recorded fake",
-                    on_main: "the runtime opted into research over the bundle (#1757), the \
-                              bundle in the interim runtime image (#1769), every managed runtime \
-                              pod handed it (#1774), and the research model's registration \
-                              (#1779, #1782), and the connect check and record that write a \
-                              deployment at version 2 (#1759, #1763)",
-                    waits: vec![DR_RESEARCH],
-                }),
-                Part::Gap(Gap {
-                    what: "the agent acting on news: the feed's SPY item, arriving 900 seconds \
-                           after the deployment, brings a monitoring run forward, whose recorded \
-                           reply invalidates the thesis, and the position the thesis held is sold",
-                    on_main: "event-triggered monitoring runs in the research core (#2558), the \
-                              recorded feed offered each pass (#2575), the thesis exit (#2578), \
-                              a monitor run's invalidations journaled (#2626), and the recorded \
-                              monitor reply naming the thesis it was shown (#2632)",
-                    waits: vec![DR_RESEARCH, DR_RESEARCH_TRADES],
-                }),
-                ],
+                match connections {
+                    Some(c) => research_loop(&research_workspace, &c.research.account),
+                    None => vec![Part::Gap(Gap {
+                        what: "a research run in the research agent's runtime, over the recorded \
+                               bundle its image carries, through mandate-gateway's recorded fake",
+                        on_main: "the runtime opted into research over the bundle (#1757), the \
+                                  bundle in the interim runtime image (#1769), every managed \
+                                  runtime pod handed it (#1774), and the research model's \
+                                  registration (#1779, #1782), and the connect check and record \
+                                  that write a deployment at version 2 (#1759, #1763)",
+                        waits: vec![DR_RESEARCH],
+                    })],
+                },
             ]
             .into_iter()
             .flatten()
@@ -1083,7 +1112,8 @@ pub fn plan(
                 Part::WebTradeLoop(WebCheck {
                     shows: "the trade loop from web/ on the agent: its approval request \
                             shown, approved with the code the host confirms, the order filled, \
-                            the position and the journal shown, then its kill switch",
+                            the position, the journal and the positions screen shown, the \
+                            owner's exit filled, the audit timeline shown, then its kill switch",
                     agent: WEB_AGENT,
                 }),
                 Part::Gap(Gap {
@@ -1098,13 +1128,7 @@ pub fn plan(
                               process, the runtime's production wiring decides, asks and \
                               proposes the opening once granted, on the demo envelope (#2637); \
                               the cell's runtime is wired by the gap above",
-                    waits: vec![wait(
-                        "E2E",
-                        "E21-54",
-                        None,
-                        "a gesture that shows the granted opening's fill and resting stop in the \
-                         cell, in place of this gap",
-                    )],
+                    waits: vec![E2E_FILL],
                 }),
             ],
         },
@@ -1168,15 +1192,14 @@ pub fn plan(
         },
         Step {
             number: 6,
-            title: "the owner exits the agent's instrument at a confirmed floor",
-            parts: vec![Part::Gap(Gap {
-                what: "the owner's exit of the agent's position from web/, at a confirmed bid, \
-                       after the trade loop's fill and its protective stop, so the sale shows in \
-                       its positions and audit before the kill switch",
-                on_main: "the owner's exit over the API (#2501), handed to the executor's core and \
-                          priced at the floor it confirmed (#1736, DEC-2033 item 4); an exit \
-                          before the fill sells nothing, so no gesture of the Job runs one",
-                waits: vec![WB_EXIT],
+            title: "the owner exits the agent's position from the web app",
+            parts: vec![Part::WebTradeLoop(WebCheck {
+                shows: "the owner's exit of the agent's position from web/'s positions screen, \
+                        after step 4's fill, its sell filled on the agent's orders before the \
+                        audit and the kill switch: the trade loop's `owner_exit`, read from step \
+                        4's one run (no gesture of the Job exits, since an exit before the fill \
+                        sells nothing)",
+                agent: WEB_AGENT,
             })],
         },
         Step {
@@ -1242,9 +1265,163 @@ pub fn gestures(steps: &[Step]) -> Vec<&Gesture> {
             | Part::WebTradeLoop(_)
             | Part::Executor(_)
             | Part::Applied(_)
+            | Part::Loop(_)
+            | Part::Grant(_)
             | Part::Gap(_) => None,
         })
         .collect()
+}
+
+/// The research workspace's trade loop after its executor is live (DEC-2071, DEC-2394), each link
+/// its own part, in the order the story runs: the agent's research run and thesis on its own
+/// stream, the opening it asks, the owner's grant on the CLI, the runtime's record of it, the
+/// paper fill and the protective stop on `account`'s stream, then the news item that ends the
+/// thesis, its invalidation, and the thesis exit's sell. Every link until a run of the cell shows
+/// it names the lanes it waits on; an opening is decided only in the regular session.
+fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
+    let agent = format!("agent:{workspace}:{RESEARCH_AGENT}");
+    let acct = format!("acct:{workspace}:{account}");
+    let link = |shows: &'static str,
+                stream: &str,
+                event_type: &'static str,
+                holding: Option<&'static str>,
+                what: &'static str,
+                on_main: &'static str,
+                waits: Vec<Wait>| {
+        Part::Loop(LoopCheck {
+            shows,
+            stream: stream.to_owned(),
+            event_type,
+            holding,
+            gap: Gap {
+                what,
+                on_main,
+                waits,
+            },
+        })
+    };
+    let session = "an opening is decided only in the regular session, 13:30 to 20:00 UTC on a \
+                   trading day, so outside it this link waits for the next";
+    vec![
+        link(
+            "the research agent's runtime starts a research run on its own clock",
+            &agent,
+            "RunStarted",
+            None,
+            "a research run in the research agent's runtime, over the recorded bundle its image \
+             carries, through the model gateway's recorded fake",
+            "the runtime calls the model gateway (#2636) and ticks on its own workspace's clock \
+             (DEC-2071)",
+            vec![GW_RESEARCH],
+        ),
+        link(
+            "its research proposes a thesis, admitted",
+            &agent,
+            "ThesisProposed",
+            Some(r#""admitted":true"#),
+            "the research run's thesis, admitted through the eligibility floor and the autonomy \
+             rules",
+            "the recorded bundle's reply and the core's thesis lifecycle (DEC-2246)",
+            vec![GW_RESEARCH],
+        ),
+        link(
+            "the runtime sizes the opening and the gate and autonomy rules ask",
+            &agent,
+            "ApprovalRequested",
+            Some(r#""purpose":"open""#),
+            "the opening the runtime sizes for the thesis, asked under the envelope's autonomy \
+             rules",
+            session,
+            vec![P5_HOOK],
+        ),
+        Part::Grant(GrantCheck {
+            shows: "the owner grants it on the CLI, its code shown and then typed",
+            workspace: workspace.to_owned(),
+            agent: RESEARCH_AGENT,
+            gap: Gap {
+                what: "the owner's grant of the asked opening",
+                on_main: "`mandate approvals list`, `show` and `approve` (K1a, DEC-533)",
+                waits: vec![P5_HOOK],
+            },
+        }),
+        link(
+            "the runtime records the grant, admitted",
+            &agent,
+            "ApprovalResponded",
+            Some(r#""result":"admitted""#),
+            "the runtime's record of the owner's grant",
+            "the core's approval flow (mandate spec §6.4)",
+            vec![P5_HOOK],
+        ),
+        link(
+            "the executor submits the opening",
+            &acct,
+            "OrderRequestRecorded",
+            Some(r#""purpose":"open""#),
+            "the opening, through the account ledger to the fixture broker",
+            "the executor takes the runtime's orders (#1736)",
+            vec![E2E_FILL, P5_HOOK],
+        ),
+        link(
+            "the opening fills on the fixture",
+            &acct,
+            "FillApplied",
+            Some(r#""side":"buy""#),
+            "the paper fill of the opening on the fixture broker",
+            "the executor on its fixture paper broker (DEC-2031)",
+            vec![E2E_FILL],
+        ),
+        link(
+            "the protective stop goes out",
+            &acct,
+            "ProtectionChanged",
+            Some(r#""action":"placed""#),
+            "the protective stop on the filled position, placed as the bracket's legs",
+            "protective-exit sequencing in the executor (trading spec §5.4)",
+            vec![E2E_FILL],
+        ),
+        link(
+            "the news item starts a monitor run over the held thesis",
+            &agent,
+            "RunStarted",
+            Some(r#""kind":"event""#),
+            "the monitor run the news item triggers, whose trigger names the item's \
+             ObservationRecorded (rule 271); the recorded item arrives 900 seconds after the \
+             research agent is deployed, so a run waits for it only with \
+             MANDATE_CELL_LOOP_WAIT_S",
+            "the research pass offers arrived items to the core (#2575), and the recorded feed's \
+             item in the runtime image's bundle (#2653)",
+            vec![GW_RESEARCH],
+        ),
+        link(
+            "the monitor run invalidates the thesis",
+            &agent,
+            "ThesisInvalidated",
+            None,
+            "the monitor run's verdict that ends the thesis",
+            "a monitor run's invalidations journaled (#2626), and the bundle's recorded monitor \
+             reply naming the thesis it was shown (#2632, #2653)",
+            vec![GW_RESEARCH],
+        ),
+        link(
+            "the thesis exit submits its sell",
+            &acct,
+            "OrderRequestRecorded",
+            Some(r#""purpose":"discretionary_exit""#),
+            "the thesis exit's sell of the position",
+            "the order builder's signal exit (trading spec §8.3 step 2)",
+            vec![E2E_FILL],
+        ),
+        link(
+            "the sell fills on the fixture",
+            &acct,
+            "FillApplied",
+            Some(r#""side":"sell""#),
+            "the paper fill of the thesis exit",
+            "the executor on its fixture paper broker (DEC-2031)",
+            vec![E2E_FILL],
+        ),
+    ]
 }
 
 /// The gestures' Job: the chart's own `control` run Job for the first gesture, its container
@@ -1678,6 +1855,8 @@ pub fn run_in(name: &str) -> Result<String> {
     let mut gaps = 0;
     let mut browsed: Option<WebOutcome> = None;
     let mut traded: Option<TradeOutcome> = None;
+    let mut looped = Looped::Open;
+    let mut linked = BTreeMap::<String, u64>::new();
     for step in &steps {
         let waiting = lanes(step);
         let on = if waiting.is_empty() {
@@ -1799,6 +1978,27 @@ pub fn run_in(name: &str) -> Result<String> {
                         failed.get_or_insert_with(|| format!("web/ {}: {said}", check.agent));
                     }
                 }
+                Part::Loop(_) | Part::Grant(_) => {
+                    let (shows, gap) = match part {
+                        Part::Loop(check) => (check.shows, &check.gap),
+                        Part::Grant(check) => (check.shows, &check.gap),
+                        _ => continue,
+                    };
+                    let seen = match (&failed, &looped, part) {
+                        (None, Looped::Open, Part::Loop(check)) => {
+                            Some(journaled(check, &mut linked))
+                        }
+                        (None, Looped::Open, Part::Grant(check)) => Some(grant(check, &id, &files)),
+                        _ => None,
+                    };
+                    let required = env::var_os(CELL_REQUIRED_ENV).is_some();
+                    let (word, said) =
+                        link_verdict(failed.is_some(), required, &mut looped, seen, gap);
+                    if word == "failed" {
+                        failed.get_or_insert_with(|| format!("research loop: {said}"));
+                    }
+                    eprintln!("    {word:<8} {shows}: {said}");
+                }
                 Part::Gap(gap) => {
                     gaps += 1;
                     eprintln!("    gap      {}", gap.what);
@@ -1860,6 +2060,328 @@ fn poll_applied(check: &ApiCheck) -> Result<(&'static str, String, bool)> {
 
 /// How long [`poll_applied`] waits for the kill switch to read back applied.
 const APPLIED_WITHIN: Duration = Duration::from_secs(90);
+
+/// How long the research loop waits for each of its links to appear in the journal by default: one
+/// research pass at the runtime's tick, or the executor's next reconciliation, with the Job's ten
+/// minutes in mind, since a link not seen stops the loop's later reads.
+const LINK_WITHIN: Duration = Duration::from_secs(60);
+
+/// The variable a rehearsal sets to wait longer for each link, in whole seconds, up to
+/// [`LINK_WITHIN_MAX`]: the recorded news item arrives 900 seconds after the research agent is
+/// deployed (#2653), which a CI run's wait does not reach.
+pub const LOOP_WAIT_ENV: &str = "MANDATE_CELL_LOOP_WAIT_S";
+
+/// The longest a rehearsal may wait for one link, so a mistyped value never holds a run for hours.
+const LINK_WITHIN_MAX: Duration = Duration::from_secs(1_800);
+
+/// The wait for each link: `set`, the variable's value, in whole seconds from 1 to
+/// [`LINK_WITHIN_MAX`]'s, or [`LINK_WITHIN`] when it is unset or not such a number.
+pub fn link_within(set: Option<&str>) -> Duration {
+    set.and_then(|text| text.trim().parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .filter(|wait| !wait.is_zero() && *wait <= LINK_WITHIN_MAX)
+        .unwrap_or(LINK_WITHIN)
+}
+
+/// Whether the research loop's later links are read: `Open` until a link is not seen, then
+/// `Stopped` with that link, so every later link reads as not reached rather than spending its own
+/// wait on what cannot follow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Looped {
+    Open,
+    Stopped(&'static str),
+}
+
+/// What a read of a link found: the line that shows it, that it is not there, or why it could not
+/// be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Seen {
+    There(String),
+    Absent,
+    Unread(String),
+}
+
+/// A link's word and what it says, given whether an earlier part failed, whether the cell is required
+/// (`CELL_REQUIRED_ENV`), the loop so far, what its read found (`None` when it was not read), and the
+/// gap it stands for. A link seen ran; one not seen stops the loop and reads as its gap, so a link
+/// not yet on main is named, never failed; one that could not be read fails when the cell is
+/// required, since the journal or the CLI broke, and otherwise reads as its gap with why; every
+/// later link reads as not reached.
+pub fn link_verdict(
+    earlier_failed: bool,
+    required: bool,
+    looped: &mut Looped,
+    seen: Option<Seen>,
+    gap: &Gap,
+) -> (&'static str, String) {
+    if earlier_failed {
+        return ("not run", "an earlier part failed".to_owned());
+    }
+    if let Looped::Stopped(at) = looped {
+        return ("not reached", format!("the loop stopped at: {at}"));
+    }
+    let waits = || {
+        gap.waits
+            .iter()
+            .map(|w| format!("{}: {}", w.named(), w.lands))
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    match seen {
+        Some(Seen::There(line)) => ("ran", line),
+        Some(Seen::Unread(why)) if required => {
+            *looped = Looped::Stopped(gap.what);
+            ("failed", format!("{}, not read: {why}", gap.what))
+        }
+        Some(Seen::Unread(why)) => {
+            *looped = Looped::Stopped(gap.what);
+            (
+                "gap",
+                format!("{}, not read: {why} (waits on {})", gap.what, waits()),
+            )
+        }
+        Some(Seen::Absent) | None => {
+            *looped = Looped::Stopped(gap.what);
+            ("gap", format!("{} (waits on {})", gap.what, waits()))
+        }
+    }
+}
+
+/// The text as SQL quotes it.
+fn sql_quoted(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "''"))
+}
+
+/// The query that finds `check`'s first event after `after` on its stream: of its type, its stored
+/// body holding its fragment as a plain substring (no pattern), every literal quoted as SQL quotes
+/// it; it answers that event's sequence number, or nothing.
+pub fn link_query(check: &LoopCheck, after: u64) -> String {
+    let holding = check
+        .holding
+        .map(|fragment| {
+            format!(
+                " AND position({} in convert_from(body, 'UTF8')) > 0",
+                sql_quoted(fragment)
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        "SELECT seq FROM journal.events WHERE stream_id = {} AND event_type = {}{holding} AND \
+         seq > {after} ORDER BY seq LIMIT 1",
+        sql_quoted(&check.stream),
+        sql_quoted(check.event_type)
+    )
+}
+
+/// Reads `check`'s first event after the last link seen on its stream, `after`'s, from the journal's
+/// primary every two seconds until one is there or [`link_within`]'s wait has passed, and records its
+/// sequence number there: what Postgres holds, not what a process reports.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the host-side scenario bounds its wait for a live cell by the host's clock"
+)]
+fn journaled(check: &LoopCheck, after: &mut BTreeMap<String, u64>) -> Seen {
+    let since = after.get(&check.stream).copied().unwrap_or(0);
+    let query = link_query(check, since);
+    let wait = link_within(env::var(LOOP_WAIT_ENV).ok().as_deref());
+    let deadline = Instant::now() + wait;
+    loop {
+        match super::on_primary(&query) {
+            Ok(answer) => match answer.trim().parse::<u64>() {
+                Ok(seq) => {
+                    after.insert(check.stream.clone(), seq);
+                    return Seen::There(format!(
+                        "{} at seq {seq} of {}",
+                        check.event_type, check.stream
+                    ));
+                }
+                Err(_) if Instant::now() < deadline => sleep(Duration::from_secs(2)),
+                Err(_) => return Seen::Absent,
+            },
+            Err(why) => return Seen::Unread(format!("{why:#}")),
+        }
+    }
+}
+
+/// The owner's arguments for a CLI gesture in `workspace`, as the plan's gestures carry them.
+fn owner_in(workspace: &str, args: &[&str]) -> Vec<String> {
+    let user = FOUNDER.to_ascii_lowercase();
+    args.iter()
+        .copied()
+        .chain([
+            "--workspace",
+            workspace,
+            "--user",
+            &user,
+            "--journal",
+            JOURNAL,
+            "--store",
+            STORE,
+        ])
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The first pending approval of `agent` that `approvals list` printed.
+pub fn pending_approval(lines: &[&str], agent: &str) -> Option<String> {
+    lines.iter().find_map(|line| {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        match words.as_slice() {
+            [approval, of, "pending", ..] if *of == agent => Some((*approval).to_owned()),
+            _ => None,
+        }
+    })
+}
+
+/// Whether the content `approvals show` printed asks an opening, the one approval the research loop
+/// grants (mandate spec §6.4: only `open` and `increase` are ever asked).
+pub fn shows_opening(lines: &[&str]) -> bool {
+    lines
+        .iter()
+        .any(|line| line.starts_with('{') && line.contains(r#""purpose":"open""#))
+}
+
+/// What `approvals approve` printed: its `granted` line when the line after it says the grant was
+/// admitted or is not recorded yet (`approvals::message`), the runtime's record being the next
+/// link; else why not, a refusal, a count short of the approvers, or a skip on re-validation, each a
+/// grant that did not do what it shows.
+pub fn granted(lines: &[&str], approval: &str) -> Seen {
+    let head = format!("granted {approval} as event ");
+    let Some(at) = lines.iter().position(|l| l.starts_with(&head)) else {
+        return Seen::Unread(format!("`approvals approve {approval}` granted nothing"));
+    };
+    match lines.get(at + 1) {
+        Some(said)
+            if said.starts_with("Admitted and sent")
+                || said.starts_with("Admitted, not yet re-validated")
+                || said.starts_with("Not recorded yet") =>
+        {
+            Seen::There(format!("{}; {said}", lines[at]))
+        }
+        Some(said) => Seen::Unread(format!("{}; {said}", lines[at])),
+        None => Seen::Unread(format!("{}; no outcome printed", lines[at])),
+    }
+}
+
+/// The code `approvals show` printed.
+pub fn shown_code(lines: &[&str]) -> Option<String> {
+    lines
+        .iter()
+        .find_map(|line| line.strip_prefix("code "))
+        .map(str::to_owned)
+}
+
+/// Runs one CLI gesture as its own Job after the gestures' Job, as `confirm_on_host` does, and
+/// returns its lines when it exited cleanly.
+fn control_gesture(
+    gesture: &Gesture,
+    run: &str,
+    files: &[(&str, String)],
+) -> std::result::Result<Vec<String>, String> {
+    let ran = || -> Result<(bool, String)> {
+        let rendered = render(
+            &[
+                format!("run.id=\"{run}\""),
+                format!("run.args={}", json!(gesture.args)),
+            ],
+            Some("templates/run.yaml"),
+        )?;
+        run_job(gestures_job(
+            rendered,
+            &[gesture],
+            &format!("demo-in-{run}"),
+            files,
+            NAMESPACE,
+        )?)
+    };
+    match ran() {
+        Ok((true, logs)) => Ok(lines_of(&logs, &gesture.container)
+            .iter()
+            .map(|l| (*l).to_owned())
+            .collect()),
+        Ok((false, logs)) => Err(format!(
+            "`mandate {}` failed:\n{logs}",
+            gesture.args.join(" ")
+        )),
+        Err(why) => Err(format!("{why:#}")),
+    }
+}
+
+/// The owner's grant of `check`'s agent's pending opening: `approvals list` finds it, `approvals
+/// show` shows its code, and `approvals approve` types that code, each its own Job in the research
+/// workspace. A list with no pending approval is the link not seen.
+fn grant(check: &GrantCheck, id: &str, files: &[(&str, String)]) -> Seen {
+    let step = |n: u8, container: &str, args: &[&str], expect: &str| Gesture {
+        container: format!("g9{n}-{container}"),
+        shows: check.shows,
+        command: None,
+        args: owner_in(&check.workspace, args),
+        expect: expect.to_owned(),
+    };
+    let listed = match control_gesture(
+        &step(
+            5,
+            "approvals-list",
+            &["approvals", "list", "--agent", check.agent],
+            "pending",
+        ),
+        &format!("{id}l"),
+        files,
+    ) {
+        Ok(lines) => lines,
+        Err(why) => return Seen::Unread(why),
+    };
+    let lines: Vec<&str> = listed.iter().map(String::as_str).collect();
+    let Some(approval) = pending_approval(&lines, check.agent) else {
+        return Seen::Absent;
+    };
+    let shown = match control_gesture(
+        &step(
+            6,
+            "approvals-show",
+            &["approvals", "show", &approval, "--agent", check.agent],
+            "code ",
+        ),
+        &format!("{id}w"),
+        files,
+    ) {
+        Ok(lines) => lines,
+        Err(why) => return Seen::Unread(why),
+    };
+    let lines: Vec<&str> = shown.iter().map(String::as_str).collect();
+    if !shows_opening(&lines) {
+        return Seen::Unread(format!(
+            "`approvals show {approval}` shows no opening, so it is not granted"
+        ));
+    }
+    let Some(code) = shown_code(&lines) else {
+        return Seen::Unread(format!("`approvals show {approval}` showed no code"));
+    };
+    match control_gesture(
+        &step(
+            7,
+            "approvals-approve",
+            &[
+                "approvals",
+                "approve",
+                &approval,
+                "--agent",
+                check.agent,
+                "--code",
+                &code,
+            ],
+            "granted ",
+        ),
+        &format!("{id}g"),
+        files,
+    ) {
+        Ok(lines) => granted(
+            &lines.iter().map(String::as_str).collect::<Vec<_>>(),
+            &approval,
+        ),
+        Err(why) => Seen::Unread(why),
+    }
+}
 
 /// Why the cell's API cannot be asked, or `None` when it can: no API in the process list, a cell
 /// that pulled its images and has no API image, or no `kubectl` on this machine to forward with.
@@ -2229,8 +2751,11 @@ pub fn trade_verdict(outcome: &TradeOutcome, required: Required) -> (&'static st
         TradeOutcome::Ran(t) if t.whole() => (
             "ran",
             format!(
-                "approval {}, approved {}, kill switch {}",
-                t.reached["approval"], t.reached["approved"], t.reached["kill_switch"]
+                "approval {}, approved {}, owner exit {}, kill switch {}",
+                t.reached["approval"],
+                t.reached["approved"],
+                t.reached["owner_exit"],
+                t.reached["kill_switch"]
             ),
             false,
         ),
@@ -3046,22 +3571,61 @@ mod tests {
         ] {
             assert!(gestures[3].args.windows(2).any(|w| w == pair), "{pair:?}");
         }
-        let last_checked = step
+        let executor = step
             .parts
             .iter()
-            .rposition(|part| !matches!(part, Part::Gap(_)))
-            .unwrap();
-        assert!(
-            matches!(
-                &step.parts[last_checked],
-                Part::Executor(e) if e.account == research.account
-            ),
-            "the research workspace's executor is checked before the step's gaps"
-        );
+            .position(|p| matches!(p, Part::Executor(e) if e.account == research.account))
+            .expect("the research workspace's executor is checked");
+        let acct = format!("acct:demo3r:{}", research.account);
+        let agent = format!("agent:demo3r:{RESEARCH_AGENT}");
+        let links: Vec<(String, &str, Option<&str>)> = step.parts[executor + 1..]
+            .iter()
+            .map(|p| match p {
+                Part::Loop(l) => (l.stream.clone(), l.event_type, l.holding),
+                Part::Grant(g) => {
+                    assert_eq!((g.workspace.as_str(), g.agent), ("demo3r", RESEARCH_AGENT));
+                    ("ctl:demo3r".to_owned(), "grant", None)
+                }
+                other => panic!("after the executor, only the loop's links: {other:?}"),
+            })
+            .collect();
         assert_eq!(
-            step.parts.len() - last_checked - 1,
-            2,
-            "the research run's gap, then the agent acting on news"
+            links,
+            [
+                (agent.clone(), "RunStarted", None),
+                (agent.clone(), "ThesisProposed", Some(r#""admitted":true"#)),
+                (
+                    agent.clone(),
+                    "ApprovalRequested",
+                    Some(r#""purpose":"open""#)
+                ),
+                ("ctl:demo3r".to_owned(), "grant", None),
+                (
+                    agent.clone(),
+                    "ApprovalResponded",
+                    Some(r#""result":"admitted""#)
+                ),
+                (
+                    acct.clone(),
+                    "OrderRequestRecorded",
+                    Some(r#""purpose":"open""#)
+                ),
+                (acct.clone(), "FillApplied", Some(r#""side":"buy""#)),
+                (
+                    acct.clone(),
+                    "ProtectionChanged",
+                    Some(r#""action":"placed""#)
+                ),
+                (agent.clone(), "RunStarted", Some(r#""kind":"event""#)),
+                (agent.clone(), "ThesisInvalidated", None),
+                (
+                    acct.clone(),
+                    "OrderRequestRecorded",
+                    Some(r#""purpose":"discretionary_exit""#)
+                ),
+                (acct, "FillApplied", Some(r#""side":"sell""#)),
+            ],
+            "each link of the research loop, in the story's order, after the executor is live"
         );
         for g in &gestures {
             let at = g.args.iter().position(|a| a == "--workspace").unwrap();
@@ -3082,8 +3646,9 @@ mod tests {
         assert_eq!(deployed[2..4], [RESEARCH_AGENT, version.as_str()]);
         assert_eq!(
             lanes(step),
-            ["DR"],
-            "only its own connection, so the manager starts its runtime"
+            ["GW", "D1", "E2E"],
+            "the loop's links wait on the research run, the ask and the fill; the news item is the \
+             bundle's recorded feed (#2653)"
         );
         let others: Vec<&Gesture> = gestures_of(&steps, |n| n != 3);
         assert!(
@@ -3111,23 +3676,32 @@ mod tests {
             .collect()
     }
 
-    /// Step 6 runs no gesture in the Job: an owner's exit before the trade loop's fill sells
-    /// nothing, so it is a gap until web/'s exit runs after the fill, in the browser.
+    /// Step 6 runs no gesture in the Job, since an owner's exit before the trade loop's fill sells
+    /// nothing: it reads the trade loop's `owner_exit`, which web/ reaches after the fill and
+    /// before the audit timeline and the kill switch, and it waits on no lane.
     #[test]
-    fn step_six_waits_on_web_s_exit_after_the_fill() {
+    fn step_six_reads_web_s_exit_after_the_fill() {
         let steps = planned("demo1");
         let step6 = &steps[5];
         assert_eq!(step6.number, 6);
         assert!(
-            step6.parts.iter().all(|p| matches!(p, Part::Gap(_))),
-            "no gesture of the Job exits"
+            matches!(&step6.parts[..], [Part::WebTradeLoop(c)] if c.agent == WEB_AGENT),
+            "step 6 is the trade loop's own exit on the run's one agent"
         );
         assert!(
             gestures(&steps)
                 .iter()
-                .all(|g| g.args[..2] != ["agent", "exit"])
+                .all(|g| g.args[..2] != ["agent", "exit"]),
+            "no gesture of the Job exits"
         );
-        assert_eq!(lanes(step6), ["WB"]);
+        assert!(lanes(step6).is_empty());
+        let at = |step: &str| web::TRADE_LOOP_STEPS.iter().position(|s| *s == step);
+        assert!(
+            at("positions_screen") < at("owner_exit")
+                && at("owner_exit") < at("audit_timeline")
+                && at("audit_timeline") < at("kill_switch"),
+            "the exit follows the fill's position and comes before the audit and the kill switch"
+        );
         let pinned = parsed(INSTRUMENT_FILE);
         assert_eq!(pinned["instrument_id"], SPY, "SPY's Alpaca asset id");
         assert_eq!(pinned["symbol"], "SPY");
@@ -3581,8 +4155,8 @@ mod tests {
     }
 
     /// Which steps run today: the sign-in, through the API and web/, runs whole; the gestures on
-    /// `main` make steps 2 to 5 partial, step 3's research gestures among them; step 6 is skipped
-    /// until web/'s exit runs after the fill; the kill switch,
+    /// `main` make steps 2 to 5 partial, step 3's research gestures among them; step 6, the trade
+    /// loop's own exit after the fill, runs whole; the kill switch,
     /// applied by the runtime step 2's deployment starts, and the record run whole. Without a
     /// connect check (the staging dry run) step 7 is partial.
     #[test]
@@ -3592,14 +4166,14 @@ mod tests {
         assert_eq!(
             read,
             [
-                Ready, Partial, Partial, Partial, Partial, Skipped, Ready, Ready
+                Ready, Partial, Partial, Partial, Partial, Ready, Ready, Ready
             ]
         );
         let dry: Vec<Readiness> = unconnected("demo1").iter().map(readiness).collect();
         assert_eq!(
             dry,
             [
-                Ready, Partial, Partial, Partial, Partial, Skipped, Partial, Ready
+                Ready, Partial, Partial, Partial, Partial, Ready, Partial, Ready
             ]
         );
         let step = |parts: Vec<Part>| Step {
@@ -3788,6 +4362,249 @@ mod tests {
                 .flat_map(|s| &s.parts)
                 .all(|p| !matches!(p, Part::Executor(_) | Part::Applied(_)))
         );
+    }
+
+    /// A link seen ran; the first not seen reads as its gap, naming its lanes, and stops the loop,
+    /// so every later link reads as not reached; a link that could not be read is a gap too, with
+    /// why; and after an earlier part failed, no link is run.
+    #[test]
+    fn a_link_not_seen_names_its_gap_and_stops_the_loop() {
+        let gap = Gap {
+            what: "the fill",
+            on_main: "x",
+            waits: vec![E2E_FILL, GW_RESEARCH],
+        };
+        let mut looped = Looped::Open;
+        assert_eq!(
+            link_verdict(
+                false,
+                false,
+                &mut looped,
+                Some(Seen::There("1 FillApplied".into())),
+                &gap
+            ),
+            ("ran", "1 FillApplied".to_owned())
+        );
+        assert_eq!(looped, Looped::Open);
+        let (word, said) = link_verdict(false, false, &mut looped, Some(Seen::Absent), &gap);
+        assert_eq!(word, "gap");
+        assert!(
+            said.starts_with("the fill (waits on E2E (E21-54): "),
+            "{said}"
+        );
+        assert!(said.contains("GW (E21-62): "), "{said}");
+        assert_eq!(looped, Looped::Stopped("the fill"));
+        assert_eq!(
+            link_verdict(false, false, &mut looped, None, &gap),
+            ("not reached", "the loop stopped at: the fill".to_owned())
+        );
+        let mut open = Looped::Open;
+        let (word, said) = link_verdict(
+            false,
+            false,
+            &mut open,
+            Some(Seen::Unread("no pod".into())),
+            &gap,
+        );
+        assert_eq!(word, "gap");
+        assert!(
+            said.starts_with("the fill, not read: no pod (waits on "),
+            "{said}"
+        );
+        assert_eq!(open, Looped::Stopped("the fill"));
+        let mut after = Looped::Open;
+        assert_eq!(
+            link_verdict(true, false, &mut after, Some(Seen::There("x".into())), &gap),
+            ("not run", "an earlier part failed".to_owned())
+        );
+        assert_eq!(after, Looped::Open);
+        let mut required = Looped::Open;
+        assert_eq!(
+            link_verdict(
+                false,
+                true,
+                &mut required,
+                Some(Seen::Unread("no pod".into())),
+                &gap
+            ),
+            ("failed", "the fill, not read: no pod".to_owned())
+        );
+        assert_eq!(required, Looped::Stopped("the fill"));
+        let mut absent = Looped::Open;
+        assert_eq!(
+            link_verdict(false, true, &mut absent, Some(Seen::Absent), &gap).0,
+            "gap",
+            "a link not seen is its gap even when the cell is required"
+        );
+        let mut both = Looped::Stopped("the fill");
+        assert_eq!(
+            link_verdict(true, false, &mut both, None, &gap).0,
+            "not run",
+            "an earlier failure reads first"
+        );
+    }
+
+    /// A link's query counts its type on its stream, its body holding the fragment when it names
+    /// one, every literal quoted as SQL quotes it.
+    #[test]
+    fn a_link_reads_its_type_on_its_stream_from_the_journal() {
+        let check = |holding| LoopCheck {
+            shows: "x",
+            stream: "acct:demo1r:01KDER0000000001000000000A".into(),
+            event_type: "FillApplied",
+            holding,
+            gap: Gap {
+                what: "x",
+                on_main: "x",
+                waits: vec![],
+            },
+        };
+        assert_eq!(
+            link_query(&check(None), 0),
+            "SELECT seq FROM journal.events WHERE stream_id = \
+             'acct:demo1r:01KDER0000000001000000000A' AND event_type = 'FillApplied' AND seq > 0 \
+             ORDER BY seq LIMIT 1"
+        );
+        assert_eq!(
+            link_query(&check(Some(r#""side":"buy""#)), 7),
+            "SELECT seq FROM journal.events WHERE stream_id = \
+             'acct:demo1r:01KDER0000000001000000000A' AND event_type = 'FillApplied' AND \
+             position('\"side\":\"buy\"' in convert_from(body, 'UTF8')) > 0 AND seq > 7 ORDER BY \
+             seq LIMIT 1"
+        );
+        assert!(link_query(&check(Some("o'clock")), 0).contains("position('o''clock' in"));
+    }
+
+    /// A rehearsal waits as long as it sets, from a second to half an hour; anything else waits the
+    /// default, so a CI run's wait never grows by accident.
+    #[test]
+    fn a_rehearsal_sets_how_long_each_link_is_waited_for() {
+        assert_eq!(link_within(None), LINK_WITHIN);
+        assert_eq!(link_within(Some("1200")), Duration::from_secs(1_200));
+        assert_eq!(link_within(Some(" 1 ")), Duration::from_secs(1));
+        assert_eq!(link_within(Some("1800")), LINK_WITHIN_MAX);
+        for refused in ["0", "1801", "-5", "20m", ""] {
+            assert_eq!(link_within(Some(refused)), LINK_WITHIN, "{refused}");
+        }
+    }
+
+    /// The grant reads the CLI's own lines (`mandate_cli::inbox`): the first of the agent's
+    /// approvals that is pending, and the code `approvals show` printed.
+    #[test]
+    fn the_grant_reads_the_pending_approval_and_its_code() {
+        let listed = [
+            "01KAPPROVED00000000000000A demo-research acted deadline 600 remaining 0",
+            "01KOTHER0000000000000000AA demo-spy pending deadline 600 remaining 500",
+            "01KPENDING00000000000000AA demo-research pending deadline 600 remaining 540",
+        ];
+        assert_eq!(
+            pending_approval(&listed, RESEARCH_AGENT).as_deref(),
+            Some("01KPENDING00000000000000AA")
+        );
+        assert_eq!(pending_approval(&["no approvals"], RESEARCH_AGENT), None);
+        let shown = [
+            "approval 01KPENDING00000000000000AA deadline 540",
+            "{}",
+            "content_hash sha256:00",
+            "code 1a2b3c4d",
+        ];
+        assert_eq!(shown_code(&shown).as_deref(), Some("1a2b3c4d"));
+        assert_eq!(shown_code(&shown[..3]), None);
+        assert!(!shows_opening(&shown), "an empty content asks nothing");
+        assert!(shows_opening(&[r#"{"purpose":"open","side":"buy"}"#]));
+        assert!(!shows_opening(&[r#"{"purpose":"increase","side":"buy"}"#]));
+        let id = "01KPENDING00000000000000AA";
+        let line = format!("granted {id} as event 01KEV at seq 9 for sha256:00");
+        for (said, seen) in [
+            (
+                "Admitted and sent to the executor; the gate still decides.",
+                true,
+            ),
+            ("Admitted, not yet re-validated; nothing was sent.", true),
+            ("Not recorded yet. If the runtime does not record it", true),
+            ("Refused (step_up_stale); nothing was sent.", false),
+            (
+                "Counted, short of the approvers required; nothing was sent.",
+                false,
+            ),
+            (
+                "Admitted, then skipped on re-validation (x); nothing was sent.",
+                false,
+            ),
+        ] {
+            let got = granted(&[line.as_str(), said], id);
+            assert_eq!(matches!(got, Seen::There(_)), seen, "{said}: {got:?}");
+            if !seen {
+                assert!(
+                    matches!(got, Seen::Unread(ref why) if why.contains(said)),
+                    "{got:?}"
+                );
+            }
+        }
+        assert!(matches!(granted(&[line.as_str()], id), Seen::Unread(_)));
+        assert!(matches!(
+            granted(&["granted 01KOTHER as event x"], id),
+            Seen::Unread(_)
+        ));
+    }
+
+    /// The grant's gestures carry the owner's arguments exactly as the plan's research gestures do.
+    #[test]
+    fn the_grant_acts_as_the_owner_in_the_research_workspace() {
+        let steps = planned("demo3");
+        let registered = gestures_of(&steps, |n| n == 3)
+            .into_iter()
+            .find(|g| g.args[..2] == ["model", "register"])
+            .expect("a research gesture");
+        let at = registered
+            .args
+            .iter()
+            .position(|a| a == "--workspace")
+            .unwrap();
+        assert_eq!(
+            owner_in("demo3r", &["approvals", "list"])[2..],
+            registered.args[at..],
+            "the same workspace, user, journal and store"
+        );
+    }
+
+    /// Each link's event and the member its fragment names are the journal's own: the catalogue row
+    /// of the event (journal spec §9) names the member, or, for `FillApplied`'s side, which the row
+    /// leaves to §9.5, the executor's writer journals it; read from those files, not from the plan.
+    #[test]
+    fn each_link_reads_a_member_its_event_carries() {
+        let spec = fs::read_to_string("../docs/specs/journal.md").unwrap();
+        let writer = fs::read_to_string("../crates/mandate-executor/src/orders.rs").unwrap();
+        let steps = planned("demo3");
+        let checks: Vec<&LoopCheck> = steps[2]
+            .parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Loop(l) => Some(l),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(checks.len(), 11);
+        for check in checks {
+            let named = format!("`{}`", check.event_type);
+            let row = spec
+                .lines()
+                .find(|l| {
+                    l.starts_with("| `") && l.split('|').nth(1).is_some_and(|n| n.contains(&named))
+                })
+                .unwrap_or_else(|| panic!("{} has a catalogue row", check.event_type));
+            let Some(fragment) = check.holding else {
+                continue;
+            };
+            let member = fragment.split('"').nth(1).unwrap();
+            let written =
+                check.event_type == "FillApplied" && writer.contains(&format!("(\"{member}\", "));
+            assert!(
+                row.contains(member) || written,
+                "{}: {member}",
+                check.event_type
+            );
+        }
     }
 
     /// DEC-2070 items 1 and 5: the cell is pointed at the run's workspace and, for the second
@@ -3982,9 +4799,15 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(loops.len(), 1);
-        assert_eq!(loops[0].0, 4);
-        assert_eq!(loops[0].1.agent, WEB_AGENT, "never the agent the CLI kills");
+        assert_eq!(
+            loops.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+            [4, 6],
+            "step 4 runs the loop and step 6 reads its owner exit from the same run"
+        );
+        assert!(
+            loops.iter().all(|(_, c)| c.agent == WEB_AGENT),
+            "never the agent the CLI kills"
+        );
         let reached = |steps: &[&str], error: Option<&str>| {
             TradeOutcome::Ran(web::TradeLoop {
                 reached: steps
@@ -4007,7 +4830,10 @@ mod tests {
             let (word, said, fails) =
                 trade_verdict(&reached(&web::TRADE_LOOP_STEPS, None), required);
             assert_eq!((word, fails), ("ran", false), "{said}");
-            assert!(said.contains("v-kill_switch"), "{said}");
+            assert!(
+                said.contains("v-kill_switch") && said.contains("owner exit v-owner_exit"),
+                "{said}"
+            );
             let (word, said, fails) =
                 trade_verdict(&reached(&[], Some("no approval within 20000 ms")), required);
             assert_eq!(
@@ -4079,7 +4905,7 @@ mod tests {
         let mut counted = BTreeMap::<&str, usize>::new();
         for step in &steps {
             for part in &step.parts {
-                if let Part::Gap(gap) = part {
+                if let Some(gap) = part.gap() {
                     for wait in &gap.waits {
                         *counted.entry(wait.lane).or_default() += 1;
                         let listed = &grouped[wait.lane];

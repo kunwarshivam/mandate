@@ -124,6 +124,12 @@ function undeliveredWords(reason: string | undefined): string {
     case "step_up_stale":
     case "step_up_method":
       return "Not recorded: your deployment did not accept the passkey check.";
+    case "second_instrument":
+      return "Not recorded: an agent trades one instrument for now, and this version allows more.";
+    case "second_agent_on_account":
+      return "Not recorded: another agent that has not stopped trades on this account. Stop it first.";
+    case "connection_unrecorded":
+      return "Not recorded: the account this version names is not connected, or its connection was revoked. Connect it again in Connections.";
     case "passkey_unavailable":
       return "Not sent: this browser can't use a passkey.";
     case "no_passkey":
