@@ -2068,10 +2068,13 @@ dependencies = [
  "mandate-canon",
  "mandate-domain",
  "mandate-executor",
+ "mandate-journal",
  "mandate-num",
  "mandate-risk",
+ "mandate-runtime",
  "mandate-spec",
  "mandate-time",
+ "proptest",
  "thiserror",
 ]
 

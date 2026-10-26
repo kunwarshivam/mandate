@@ -3,7 +3,7 @@
 - **Spec:** `docs/project/decisions/DEC-957.md` (the R0 rehearsal's R9); DEC-952 item 1 (paper
   and live never share a stream); DEC-924 items 1 and 2 (a live version only on all four
   conditions); DEC-526 item 4 (the paper-only fee schedule refuses a live one).
-- **Code:** `crates/mandate-shell/src/control.rs` — `Origin` (`Origin::of`), carried by
+- **Code:** `crates/mandate-gate-inputs/src/control.rs` — `Origin` (`Origin::of`), carried by
   `ControlRecord`, `Registered` and `ConfirmedVersion::deployed_on`;
   `crates/mandate-shell/src/paper/artifacts.rs` — `Artifacts::from_registered`'s provenance and
   fee-environment checks; `crates/mandate-paper/src/lib.rs` (`control_record`) and
@@ -15,4 +15,4 @@
   over every environment and workspace combination against an origin-equality oracle); the
   `control_record` test in `crates/mandate-paper/src/tests.rs` and the grant-fold origin test
   in `crates/mandate-paper/src/wiring.rs`.
-- **Run:** `cargo nextest run -p mandate-shell -p mandate-paper`.
+- **Run:** `cargo nextest run -p mandate-gate-inputs -p mandate-shell -p mandate-paper`.

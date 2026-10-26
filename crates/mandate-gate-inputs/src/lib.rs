@@ -17,6 +17,8 @@
 //! nothing here computes a money or quantity figure (DEC-138 item 3): the fee reservation is
 //! `mandate-accounting`'s and the fee schedule is `mandate-executor`'s.
 
+pub mod approvers;
+pub mod control;
 mod error;
 mod mandate;
 mod rules;
