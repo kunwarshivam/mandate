@@ -1609,6 +1609,66 @@ fn a_second_running_agent_on_the_account_is_refused_at_deploy() {
     );
 }
 
+/// DEC-2809 item 2's edges, each judged before any V-rule: an agent running on another account
+/// does not hold this one; a connection established only at version 1 names no account; and a
+/// version-1 deployment, which names no connection the executor follows, holds no account.
+#[test]
+fn another_account_or_a_version_1_record_holds_no_account() {
+    let other = |establish_v2: bool, deployed_v2: bool, named: &str| {
+        let f = fixture();
+        let cookie = signed_in(&f, alice());
+        seed_control_v2(&f, "ConnectionEstablished", &established_payload());
+        f.journal.streams.lock().expect("unpoisoned").insert(
+            account(),
+            vec![row(
+                &account(),
+                1,
+                "AccountSnapshotRecorded",
+                r#"{"equity":"25000"}"#,
+            )],
+        );
+        confirmed(&f, &cookie, "v1");
+        let sibling = established_payload()
+            .replace(CONNECTION, "conn_other")
+            .replace(ACCOUNT, named);
+        if establish_v2 {
+            seed_control_v2(&f, "ConnectionEstablished", &sibling);
+        } else {
+            seed_control(&f, "ConnectionEstablished", &sibling);
+        }
+        let deployed = format!(
+            r#"{{"agent_id":"agt_a","connection_id":"conn_other","mandate_version":"{}","record_ref":"{}"}}"#,
+            version("v1"),
+            reference("{}")
+        );
+        if deployed_v2 {
+            seed_control_v2(&f, "AgentDeployed", &deployed);
+        } else {
+            seed_control(&f, "AgentDeployed", &deployed);
+        }
+        let reply = deploy(&f, &cookie, KEY, &deploy_body("agt_b", "v1", EVIDENCE));
+        violations(&reply)
+            .into_iter()
+            .any(|(_, code)| code == "second_agent_on_account")
+    };
+    assert!(
+        other(true, true, ACCOUNT),
+        "the same account through a sibling connection is held"
+    );
+    assert!(
+        !other(true, true, "acct_elsewhere"),
+        "another account is not"
+    );
+    assert!(
+        !other(false, true, ACCOUNT),
+        "a version-1 establishment names no account"
+    );
+    assert!(
+        !other(true, false, ACCOUNT),
+        "a version-1 deployment holds no account"
+    );
+}
+
 /// A connection established and then revoked fails rule 201, but is never deployed at version 1:
 /// the fold knows it with no environment, so V-001 refuses the deployment, 422, and nothing is
 /// written (journal spec §9.24, "Revoked").

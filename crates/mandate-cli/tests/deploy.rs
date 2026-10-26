@@ -732,3 +732,52 @@ fn a_second_running_agent_on_the_account_is_refused_at_deploy() {
         "another account is free"
     );
 }
+
+/// DEC-2809 item 2's edges: a version-1 establishment names no account, so another agent's
+/// deployment on a connection established only at version 1 meets none; and a version-1
+/// deployment names no connection the executor follows, so it holds no account.
+#[test]
+fn a_version_1_establishment_or_deployment_holds_no_account() {
+    let sibling = ESTABLISHED.replace("conn_alpaca_paper_01", "conn_alpaca_paper_02");
+    let mut world = World::new();
+    for step in [
+        SeedV2("ConnectionEstablished", ESTABLISHED),
+        Seed("ConnectionEstablished", &sibling),
+        Created("v1"),
+        Confirmed("v1"),
+        Deploy(AGENT, "v1", None),
+        Created("conn2"),
+        Confirmed("conn2"),
+    ] {
+        world.run(step).unwrap();
+    }
+    assert!(
+        world.run(Deploy(OTHER_AGENT, "conn2", None)).is_ok(),
+        "a connection established only at version 1 names no account"
+    );
+
+    let unfollowed = format!(
+        r#"{{"agent_id":"{AGENT}","connection_id":"conn_alpaca_paper_01","mandate_version":"{}","record_ref":"{}"}}"#,
+        reference(&document("v1")),
+        reference("{}")
+    );
+    let mut world = World::new();
+    for step in [
+        SeedV2("ConnectionEstablished", ESTABLISHED),
+        Seed("AgentDeployed", &unfollowed),
+        Created("v1"),
+        Confirmed("v1"),
+    ] {
+        world.run(step).unwrap();
+    }
+    let second = world.run(Deploy(OTHER_AGENT, "v1", None));
+    assert!(
+        !matches!(
+            &second,
+            Err(ControlError::Refused {
+                reason: "second_agent_on_account"
+            })
+        ),
+        "a version-1 deployment holds no account: {second:?}"
+    );
+}
