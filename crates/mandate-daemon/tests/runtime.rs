@@ -1225,7 +1225,7 @@ impl ArtifactSink for Closes {
     }
 }
 
-const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 
 /// The host's daily output for SPY cut off at `as_of`.
 fn daily(as_of: i64) -> Evaluated {
@@ -2142,7 +2142,7 @@ fn a_deferring_opening_is_journaled_at_version_3_and_asked_never_proposed() {
     assert_eq!(asked, named, "rule 292: exactly the decision's");
 }
 
-const RESEARCH_SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+const RESEARCH_SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 
 /// An admitted thesis on SPY (journal spec §9.4) as of `as_of`, expiring an hour later at
 /// `expires_at`, appended to the agent stream through the journal's own append as the research
