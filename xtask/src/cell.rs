@@ -123,6 +123,11 @@ const DEMO_RESEARCH_FILES: [&str; 5] = [
     "instruments.json",
 ];
 const EXECUTOR_DOCKERFILE: &str = "deploy/cell/images/executor.Dockerfile";
+/// The workspace scheduler's image (E21-29): the single writer of the hosted workspace's clock
+/// stream, whose ticks the runtime and the executor read.
+const SCHEDULER_DOCKERFILE: &str = "deploy/cell/images/scheduler.Dockerfile";
+const SCHEDULER_PROCESS: &str = "scheduler";
+const SCHEDULER_PACKAGE: &str = "mandate-scheduler";
 /// The token-exchange process's image (DEC-1175), which the deployment manager starts once per
 /// OAuth connect.
 const EXCHANGE_DOCKERFILE: &str = "deploy/cell/images/token-exchange.Dockerfile";
@@ -180,9 +185,9 @@ pub enum Drill {
     /// archived, and Barman's own tools, reading the store with the archive's key, list the backup
     /// and fetch the segment back (E21-41).
     Archive,
-    /// An agent deployed on a recorded paper connection, and the deployment manager starting that
-    /// account's executor until its pod runs and answers `livez`, not `readyz`, which needs a
-    /// scheduler tick the cell does not journal yet (E21-30, DEC-2035); see [`executor`].
+    /// The scheduler ticking the run's workspace's clock stream (E21-29), then an agent deployed on
+    /// a recorded paper connection, and the deployment manager starting that account's executor
+    /// until its pod runs and answers `livez` (E21-30, DEC-2035); see [`executor`].
     Executor,
     /// `mandate vault provision` sets the cell's vault up, then each AppRole logs in from a pod
     /// labelled as the executor and reads only what DEC-977 item 2's table gives it: a runtime
@@ -620,7 +625,7 @@ const RUNNER: &str = "mandate-backtest-runner";
 
 /// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
 /// them.
-const BUILT_PACKAGES: [&str; 8] = [
+const BUILT_PACKAGES: [&str; 9] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
@@ -629,6 +634,7 @@ const BUILT_PACKAGES: [&str; 8] = [
     "mandate-executord",
     "mandate-provisionerd",
     EXCHANGE_PACKAGE,
+    SCHEDULER_PACKAGE,
 ];
 
 /// The token exchange's package (DEC-1175), a dev-profile build like the rest, so its cell token
@@ -641,7 +647,7 @@ const STUB_PACKAGE: &str = "mandate-stub-issuer";
 /// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
 /// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
 /// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
-pub const IMAGE_PACKAGES: [&str; 9] = [
+pub const IMAGE_PACKAGES: [&str; 10] = [
     BUILT_PACKAGES[0],
     BUILT_PACKAGES[1],
     BUILT_PACKAGES[2],
@@ -650,6 +656,7 @@ pub const IMAGE_PACKAGES: [&str; 9] = [
     BUILT_PACKAGES[5],
     BUILT_PACKAGES[6],
     BUILT_PACKAGES[7],
+    BUILT_PACKAGES[8],
     STUB_PACKAGE,
 ];
 
@@ -837,6 +844,15 @@ fn executor_image() -> Result<Option<String>> {
     local_tag("executor", &["mandate-executord"]).map(Some)
 }
 
+/// The cell's `scheduler` image (E21-29): this checkout's `mandate-scheduler`. `None` where the
+/// `mandate` image is pulled, as for the runtime and executor, whose ticks it writes.
+fn scheduler_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag(SCHEDULER_PROCESS, &[SCHEDULER_PACKAGE]).map(Some)
+}
+
 /// The cell's `token-exchange` image, this checkout's build of `mandate-token-exchange`: none
 /// without the deployment manager, the one process that starts it, as for the manager itself.
 fn exchange_image() -> Result<Option<String>> {
@@ -912,11 +928,14 @@ fn image_sets() -> Result<Vec<String>> {
     if let Some(executor) = executor_image()? {
         sets.push(format!("images.executor={executor}"));
     }
+    if let Some(scheduler) = scheduler_image()? {
+        sets.push(format!("images.{SCHEDULER_PROCESS}={scheduler}"));
+    }
     Ok(sets)
 }
 
-/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `deploy-manager` and
-/// `role-provisioner` images from this checkout (never with the `live` feature), bring up the k3d
+/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `scheduler`,
+/// `deploy-manager` and `role-provisioner` images from this checkout (never with the `live` feature), bring up the k3d
 /// cluster if it is not up, install the CloudNativePG operator, the journal's Postgres and the
 /// vault, issue the vault's AppRole Secrets once the provisioner runs ([`provision_vault`]), install
 /// the workspace chart, and wait until every pod is ready and the migration Job has finished.
@@ -931,6 +950,7 @@ pub fn up() -> Result<()> {
     let provisioner = role_provisioner_image_tag()?;
     let runtime = runtime_image()?;
     let executor = executor_image()?;
+    let scheduler = scheduler_image()?;
     let stub = stub_image_tag()?;
     let exchange = exchange_image()?;
     if source == ImageSource::Build {
@@ -947,6 +967,9 @@ pub fn up() -> Result<()> {
     }
     if let Some(executor) = &executor {
         build_image(executor, EXECUTOR_DOCKERFILE, "mandate-executord", &[])?;
+    }
+    if let Some(scheduler) = &scheduler {
+        build_image(scheduler, SCHEDULER_DOCKERFILE, SCHEDULER_PACKAGE, &[])?;
     }
     if let Some(stub) = &stub {
         build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
@@ -982,6 +1005,7 @@ pub fn up() -> Result<()> {
         api.as_ref(),
         runtime.as_ref(),
         executor.as_ref(),
+        scheduler.as_ref(),
         stub.as_ref(),
         exchange.as_ref(),
         manager.as_ref(),
@@ -1199,11 +1223,12 @@ const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
 /// `mandate-cli`, the backtest runner, `mandate-api-server` and the runtime's `mandate-daemon`
-/// (DEC-1013), the deployment manager's `mandate-deployd` (DEC-1172) and the executor's
-/// `mandate-executord` (DEC-2031) linked statically, so their images need no base (DEC-993 item
-/// 9), with no feature at all: never `live`; with them the stub issuer once [`stub_ready`], which
-/// the dev profile's debug assertions are what compile in (DEC-2100 item 2). The dev profile, for
-/// the CI job's ten minutes (DEC-464): it keeps overflow checks, and the cell's journals are small.
+/// (DEC-1013), the deployment manager's `mandate-deployd` (DEC-1172), the executor's
+/// `mandate-executord` (DEC-2031) and the scheduler's `mandate-scheduler` (E21-29) linked
+/// statically, so their images need no base (DEC-993 item 9), with no feature at all: never
+/// `live`; with them the stub issuer once [`stub_ready`], which the dev profile's debug assertions
+/// are what compile in (DEC-2100 item 2). The dev profile, for the CI job's ten minutes (DEC-464):
+/// it keeps overflow checks, and the cell's journals are small.
 fn build_binary() -> Result<()> {
     let mut args = vec!["build", "--locked"];
     for package in BUILT_PACKAGES {
@@ -3624,9 +3649,10 @@ fn compose_api(service: &mut Value) -> Result<()> {
     Ok(())
 }
 
-/// A service's `args` or `probe` from processes.json for Compose (DEC-1013): `{workspace}` and the
-/// `runtime` values' placeholders become the variables the operator sets, each required, and
-/// `{probe}` becomes `probe`.
+/// A service's `args` or `probe` from processes.json for Compose (DEC-1013): `{workspace}`, and
+/// `{hosted_workspace}`, which is the same one workspace there, and the `runtime` values'
+/// placeholders become the variables the operator sets, each required, and `{probe}` becomes
+/// `probe`.
 fn compose_words(words: &[Value], probe: &str) -> Result<Vec<String>> {
     words
         .iter()
@@ -3634,6 +3660,10 @@ fn compose_words(words: &[Value], probe: &str) -> Result<Vec<String>> {
             let word = w.as_str().context("a launch word is not a string")?;
             Ok(word
                 .replace("{workspace}", "${MANDATE_WORKSPACE:?set the workspace}")
+                .replace(
+                    "{hosted_workspace}",
+                    "${MANDATE_WORKSPACE:?set the workspace}",
+                )
                 .replace(
                     "{agent}",
                     "${MANDATE_RUNTIME_AGENT:?set the runtime's agent}",
@@ -6120,6 +6150,34 @@ mod tests {
             .context("processes.json has no role provisioner")?;
         assert_eq!(process["image"], ROLE_PROVISIONER_PROCESS);
         assert_eq!(process["built"], true);
+        Ok(())
+    }
+
+    /// The scheduler's image (E21-29): its package is built with the cell's others and is one the
+    /// cell jobs follow, its Dockerfile copies exactly that binary, its key is the chart's process
+    /// and image name, and `cell up` names it, so the clock stream the runtime and executor read
+    /// is ticked in the cell.
+    #[test]
+    fn the_cell_builds_the_schedulers_image() -> Result<()> {
+        assert!(BUILT_PACKAGES.contains(&SCHEDULER_PACKAGE));
+        assert!(IMAGE_PACKAGES.contains(&SCHEDULER_PACKAGE));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dockerfile = fs::read_to_string(root.join(SCHEDULER_DOCKERFILE))?;
+        assert!(
+            dockerfile.contains("COPY mandate-scheduler /mandate-scheduler"),
+            "{dockerfile}"
+        );
+        assert!(
+            dockerfile.contains("FROM scratch") && dockerfile.contains("USER 65532:65532"),
+            "{dockerfile}"
+        );
+        let process = processes_in(&root)?
+            .into_iter()
+            .find(|p| p["name"] == SCHEDULER_PROCESS)
+            .context("processes.json has no scheduler")?;
+        assert_eq!(process["image"], SCHEDULER_PROCESS);
+        assert_eq!(process["built"], true);
+        assert_eq!(process["probe"][0], "/mandate-scheduler");
         Ok(())
     }
 

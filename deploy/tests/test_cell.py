@@ -648,6 +648,7 @@ the processes it starts render as Deployments of their own; its pod templates ar
         assert not [x for x in words if "{" in x], words
         assert c["args"][: len(p["args"])] == [
             x.replace("{workspace}", "ws1")
+            .replace("{hosted_workspace}", HOSTED)
             .replace("{agent}", "demo-agent")
             .replace("{connection}", "demo-paper")
             .replace("{owner}", "demo-owner")
@@ -655,6 +656,44 @@ the processes it starts render as Deployments of their own; its pod templates ar
         ]
         assert c["readinessProbe"]["exec"]["command"] == [x.replace("{probe}", "readyz") for x in p["probe"]]
         assert c["livenessProbe"]["exec"]["command"] == [x.replace("{probe}", "livez") for x in p["probe"]]
+
+
+HOSTED = "01KDEM0000000000000000000W"
+SCHEDULER = ("--set", f"images.scheduler={PLACEHOLDER.format('scheduler')}")
+
+
+def test_the_scheduler_writes_the_clock_stream_the_manager_s_processes_read():
+    """One scheduler per workspace writes `clock:{workspace_id}` (journal spec §2, E21-29), and the
+    runtime and executor the manager starts read the clock stream of the manager's own `--workspace`
+    (`MANDATE_WORKSPACE`), so the scheduler is named the same workspace: the hosted one,
+    `api.workspace`, never the namespace's short name. It asks no time server (`egress.time` is
+    empty in the cell), so every measurement is journaled out of tolerance (AGENTS.md rule 3)."""
+    docs = render_all(*SCHEDULER)
+    by_name = {w["metadata"]["name"]: w for w in workloads(docs)}
+    scheduler = by_name["scheduler"]
+    assert scheduler["kind"] == "Deployment" and scheduler["spec"]["replicas"] == 1
+    c = first_container(scheduler)
+    assert c["image"] == PLACEHOLDER.format("scheduler")
+    assert c["args"] == ["run", "--workspace", HOSTED, "--probe", "/tmp/process.sock"]
+    manager_args = first_container(by_name[MANAGER])["args"]
+    assert manager_args[manager_args.index("--workspace") + 1] == HOSTED
+    dsn = next(e["value"] for e in c["env"] if e["name"] == "MANDATE_JOURNAL_DSN")
+    assert dsn.startswith("postgres://mandate_scheduler@")
+    for k, asked in (("readinessProbe", "readyz"), ("livenessProbe", "livez")):
+        assert c[k]["exec"]["command"] == ["/mandate-scheduler", "probe", asked, "--probe", "/tmp/process.sock"]
+    volumes = {v["name"] for v in pod_spec(scheduler).get("volumes", [])}
+    assert not [v for v in volumes if "vault" in v or v == "artifacts"], volumes
+    for check in (hardened, gated, default_deny, secrets_as_files, migration_first):
+        assert check(docs) == [], check.__name__
+    assert egress_exact(docs) == []
+
+
+def test_the_scheduler_never_renders_for_no_hosted_workspace():
+    """Naming the scheduler's image without the hosted workspace fails the render, rather than
+    ticking a clock stream no process reads (AGENTS.md rule 3)."""
+    done = helm(CHART, *SCHEDULER, "--set", "api.workspace=")
+    assert done.returncode != 0
+    assert "api.workspace" in done.stderr and "scheduler" in done.stderr
 
 
 def test_the_runtime_never_renders_for_no_deployment():
