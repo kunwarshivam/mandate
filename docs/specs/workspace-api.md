@@ -822,7 +822,7 @@ per workspace deployment (item 6).
       whose `universe.max_instruments` is above 1 is `invalid` at `/mandate_version`, code
       `second_instrument`, and an account with another deployed agent that has not stopped is
       `invalid` at `/agent_id`, code `second_agent_on_account`: the executor's risk fold reads one
-      agent's one instrument
+      agent per account, and that agent's one instrument
       ([DEC-2809](../project/decisions/DEC-2809.md), [DEC-2804](../project/decisions/DEC-2804.md)
       item 8); every
       V-rule for the agent (V-002, V-006, and V-032 included) and the pinned instruments, else
