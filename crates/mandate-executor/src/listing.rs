@@ -121,24 +121,28 @@ pub(crate) fn query_unknown(
 /// One listing of `id`'s instrument from DEC-862 item 2's margin before its `OrderSubmitted`, or
 /// nothing when the order or its submission is not in the fold.
 fn list(batch: &mut Batch<'_, '_>, id: ClientOrderId) {
-    let Some(order) = batch.view.orders.get(&id) else {
-        return;
-    };
-    let Some(at) = batch
-        .view
-        .details
-        .get(&id)
-        .and_then(|detail| detail.submitted_at)
-    else {
-        return;
-    };
-    let listing = OrderListing {
-        client_order_id: id,
-        instrument: order.instrument.clone(),
-        origin: OrderOrigin::Agentic,
-        created_since: RiskClock::from_secs(at.secs().saturating_sub(LISTING_MARGIN_S)),
-    };
-    batch.broker(BrokerRequest::ListOrders(listing));
+    if let Some(listing) = batch.view.listing(&id) {
+        batch.broker(BrokerRequest::ListOrders(listing));
+    }
+}
+
+impl ExecutorState {
+    /// The listing of `id`'s instrument the core asks for when it lists `id` (DEC-862 item 2):
+    /// orders an agent placed, from the margin before its `OrderSubmitted`. `None` when the order
+    /// or its submission is not in the fold.
+    pub fn listing(&self, id: &ClientOrderId) -> Option<OrderListing> {
+        let order = self.orders.get(id)?;
+        let at = self
+            .details
+            .get(id)
+            .and_then(|detail| detail.submitted_at)?;
+        Some(OrderListing {
+            client_order_id: id.clone(),
+            instrument: order.instrument.clone(),
+            origin: OrderOrigin::Agentic,
+            created_since: RiskClock::from_secs(at.secs().saturating_sub(LISTING_MARGIN_S)),
+        })
+    }
 }
 
 /// DEC-863 item 3: another order the account stream holds that a record with no client order id

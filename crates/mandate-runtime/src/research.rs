@@ -1310,7 +1310,16 @@ fn called(
                 observations,
                 items,
             };
-            judge::judge(&run, &called, record, config, context, batch).unwrap_or_default()
+            judge::judge(
+                &run,
+                &called,
+                record,
+                config,
+                context,
+                batch,
+                RunKind::Ideate,
+            )
+            .unwrap_or_default()
         }
         _ => Judged::default(),
     };

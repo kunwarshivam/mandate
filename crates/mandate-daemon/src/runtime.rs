@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use mandate_canon::{Digest, Object, parse};
 
+use crate::deployment::ApproverSource;
 use crate::production::Facts;
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_process::{Input as Lifecycled, Kind, Lifecycle, State};
@@ -47,6 +48,10 @@ pub struct Wiring {
     /// The fold the production ports read (DEC-2378 S2), fed every row the process reads from the
     /// control, account and clock streams; `None` for the fixture wiring, which reads nothing.
     pub facts: Option<Facts>,
+    /// What the view's approvers are narrowed from at every read of the control stream (DEC-2818):
+    /// a member deactivated, removed, or stripped of the role since the start stops approving
+    /// before the next input is handed. `None`, the fixture wiring's, keeps the view's approvers.
+    pub approvers: Option<ApproverSource>,
 }
 
 /// The model host's port and the store the closes each evaluation read go to before its
@@ -314,6 +319,12 @@ impl<S: Store> RuntimeProcess<S> {
         &self.lifecycle
     }
 
+    /// The mandate view the core decides on: before the first control pass, the approvers the
+    /// deployment resolved at the start; after it, those the latest control pass left (DEC-2818).
+    pub fn view(&self) -> &MandateView {
+        &self.wiring.view
+    }
+
     pub fn state(&self) -> &RuntimeState {
         &self.state
     }
@@ -333,6 +344,9 @@ impl<S: Store> RuntimeProcess<S> {
     fn control_pass(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> Option<Vec<StoredEvent>> {
         let control = self.control.clone()?;
         let rows = self.store.rows(&control)?;
+        if let Some(source) = &self.wiring.approvers {
+            self.wiring.view.approval.approvers = source.current(&rows);
+        }
         self.feed(&rows);
         let events = tailed(&rows).ok()?;
         let head = events.last().map_or(0, |e| e.seq.0);

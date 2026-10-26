@@ -1252,3 +1252,20 @@ fn an_end_naming_a_bracket_ends_that_brackets_interval() {
         "mdt-b's ended; the other stays"
     );
 }
+
+/// A fill that names no order is the account's, no agent's (DEC-2812): the agent's read passes
+/// over it, and its sub-ledger and net filled quantity are as before.
+#[test]
+fn an_unattributed_fill_is_passed_over() {
+    let mut read = bought();
+    let mut external = fill("f9", "unused", ASSET, "sell", "4", "520");
+    if let Value::Object(members) = &mut external {
+        members.insert(Key::new("client_order_id").unwrap(), Value::Null);
+    }
+    on(&mut read, "FillApplied", &external);
+    assert_eq!(read.cost_basis(ASSET), Some(position("10", "5122.5")));
+    assert_eq!(
+        read.filled().collect::<Vec<_>>(),
+        vec![(ASSET, SignedQty::from(qty("10")))]
+    );
+}

@@ -372,16 +372,60 @@ fn the_paper_run_reads_quotes_over_its_broker() -> Result<(), Error> {
     Ok(())
 }
 
-/// DEC-2359 item 9: the fixture run's wiring reads no quote.
+/// DEC-2359 item 9 as G2b-2 extends it: the fixture run's wiring reads the fixture's own quotes,
+/// over the fixture's data host, and nothing else. A fixture that does not quote answers none,
+/// and neither does a quoting fixture for a symbol it does not list.
 #[test]
-fn the_fixture_run_reads_no_quote() -> Result<(), Error> {
+fn the_fixture_run_reads_only_the_fixtures_own_quotes() -> Result<(), Error> {
     let now = at(NOON)?;
-    let run = run::fixture(AlpacaBroker::new(FixturePaper::new(now))?, &quoted_scope())?;
+    let silent = run::fixture(AlpacaBroker::new(FixturePaper::new(now))?, &quoted_scope())?;
     assert_eq!(
-        run.wiring().quotes.observe(&InstrumentId::new(AAPL)?, now),
-        Err("no_quotes")
+        silent
+            .wiring()
+            .quotes
+            .observe(&InstrumentId::new("SPY")?, now),
+        Err("quote_unread")
+    );
+    let quoting = run::fixture(
+        AlpacaBroker::new(FixturePaper::new(now).quoting(host_clock))?,
+        &quoted_scope(),
+    )?;
+    assert_eq!(
+        quoting
+            .wiring()
+            .quotes
+            .observe(&InstrumentId::new(AAPL)?, now),
+        Err("quote_unread")
+    );
+    let spy = quoting
+        .wiring()
+        .quotes
+        .observe(&InstrumentId::new("SPY")?, now)?;
+    assert_eq!(
+        (spy.bid, spy.ask, spy.sane),
+        (
+            Some(Price::parse("580.11")?),
+            Some(Price::parse("580.13")?),
+            true
+        )
     );
     Ok(())
+}
+
+/// The host's clock, which the fixture run's quote feed judges age on.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the fixture run's feed judges a quote's age on the host clock, so its quotes are stamped by it"
+)]
+fn host_clock() -> UtcNanos {
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    UtcNanos::from_parts(
+        i64::try_from(since.as_secs()).unwrap_or(i64::MAX),
+        since.subsec_nanos(),
+    )
+    .unwrap_or(UtcNanos::EPOCH)
 }
 
 /// Lane LV's case (DEC-2361), with `quotes` as the feed: the agent's ten AAPL bought and filled

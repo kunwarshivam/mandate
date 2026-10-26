@@ -384,6 +384,7 @@ fn only_the_executors_create_reaches_the_personal_data_vault() {
         Identity::Runtime,
         Identity::SecretImport,
         Identity::ModelGateway,
+        Identity::NewsReader,
         Identity::EmailSender,
         Identity::TokenExchange(c("c1")),
         Identity::Executor(c("c1")),

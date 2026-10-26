@@ -18,17 +18,17 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mandate_canon::{Object, Value, parse};
-use mandate_domain::{AgentMode, AssetId, MarketSession, Side};
+use mandate_domain::{AgentMode, AssetClass, AssetId, MarketSession, Side};
 use mandate_journal::StoredEvent;
 use mandate_num::{Price, Qty, Usd};
 use mandate_spec::SpecError;
 use mandate_spec::document::{LadderAction, OnComplete};
 use mandate_spec::risk::{
-    GoalReason, Input, LiftReason, Opening, Outcome, RemovalReason, RestrictionReason, RiskEvent,
-    RiskState, SessionClock, Snapshot, Step, ThenAction, TriggerReason, risk_day,
+    GoalReason, Input, LiftReason, LimitKey, Opening, Outcome, RemovalReason, RestrictionReason,
+    RiskEvent, RiskState, SessionClock, Snapshot, Step, ThenAction, TriggerReason, risk_day,
 };
 use mandate_spec::validate::ValidatedMandate;
-use mandate_time::UtcNanos;
+use mandate_time::{ExchangeCalendar, Session, UtcNanos};
 
 use crate::ExecutorError;
 use crate::payload::{int, object, text};
@@ -259,6 +259,16 @@ fn order_version(event_type: &str, version: u64) -> bool {
     }
 }
 
+/// The versions of the fill records the fold reads (journal spec §9.5): `FillApplied` at 1 and 2,
+/// whose `client_order_id` is `null` for a fill that names no order (DEC-2812), and
+/// `LateFillApplied` at 1. Any other is one it does not know, and the view fails closed.
+fn fill_version(event_type: &str, version: u64) -> bool {
+    match event_type {
+        "FillApplied" => matches!(version, 1 | 2),
+        _ => version == 1,
+    }
+}
+
 /// The sum of a fill's `fees` charged in `USD` (DEC-2393 item 3). A fee in any other asset moves
 /// the quantity received by a rule the fold does not apply, so it is a refusal to decide.
 fn usd_fees(payload: &Object) -> Result<Usd, UnreadableCause> {
@@ -386,6 +396,9 @@ pub struct AccountRiskFold<'c> {
     #[expect(dead_code, reason = "the fold steps the tripwires from E6-15 B2b on")]
     tripwires: TripwireState,
     view: RiskView,
+    /// The opening instant: a row whose clock precedes it is from before the agent was deployed,
+    /// and is not the agent's (DEC-2804 item 3).
+    opened_at: UtcNanos,
     /// The last tick's clock, or the opening instant before any tick, from which the next tick
     /// crosses midnight. A mark does not move it (§5.4 starts the day at a tick).
     clock: UtcNanos,
@@ -465,6 +478,7 @@ impl<'c> AccountRiskFold<'c> {
             calendar,
             tripwires,
             view,
+            opened_at: opening.at,
             clock: opening.at,
             instrument: instrument.map(str::to_owned),
             requests: BTreeMap::new(),
@@ -547,7 +561,9 @@ impl<'c> AccountRiskFold<'c> {
                 self.order(row, &body, payload)?;
                 Ok(Vec::new())
             }
-            (Some(Reading::Fill), 1) => self.fill(row, payload),
+            (Some(Reading::Fill), version) if fill_version(&row.event_type, version) => {
+                self.fill(row, payload)
+            }
             (Some(Reading::Fee), 1) => self.fee(row, payload),
             (Some(_), _) => Err(UnreadableCause::UnknownSchemaVersion),
         }
@@ -667,6 +683,9 @@ impl<'c> AccountRiskFold<'c> {
             .ok_or(UnreadableCause::Undecodable)?;
         let fees = usd_fees(payload)?;
         let clock = whole_second(payload, "risk_clock")?;
+        if clock < self.opened_at {
+            return Err(UnreadableCause::RefusedToDecide);
+        }
         self.bind(instrument)?;
         self.fills.insert(fill_id.to_owned());
         let session = self.calendar.session(clock).map_err(refused)?;
@@ -711,6 +730,9 @@ impl<'c> AccountRiskFold<'c> {
             return Ok(Vec::new());
         }
         let clock = whole_second(payload, "risk_clock")?;
+        if clock < self.opened_at {
+            return Err(UnreadableCause::RefusedToDecide);
+        }
         let session = self.calendar.session(clock).map_err(refused)?;
         let outcome = self.step(clock, session, Input::Fee { usd: charged })?;
         self.records(row, clock, &outcome)
@@ -737,6 +759,10 @@ impl<'c> AccountRiskFold<'c> {
             .get("instrument_id")
             .and_then(Value::as_str)
             .ok_or(UnreadableCause::Undecodable)?;
+        let clock = whole_second(payload, "risk_clock")?;
+        if clock < self.opened_at {
+            return Ok(Vec::new());
+        }
         self.bind(instrument)?;
         let sane = match payload.get("sane") {
             Some(Value::Bool(sane)) => *sane,
@@ -762,7 +788,6 @@ impl<'c> AccountRiskFold<'c> {
                     .find(|session| session.as_str() == name)
             })
             .ok_or(UnreadableCause::Undecodable)?;
-        let clock = whole_second(payload, "risk_clock")?;
         let outcome = self.step(clock, session, Input::Mark { bid, sane })?;
         self.records(row, clock, &outcome)
     }
@@ -778,6 +803,9 @@ impl<'c> AccountRiskFold<'c> {
         payload: &Object,
     ) -> Result<Vec<RiskAppend>, UnreadableCause> {
         let clock = whole_second(payload, "clock")?;
+        if clock < self.opened_at {
+            return Ok(Vec::new());
+        }
         let session = self.calendar.session(clock).map_err(refused)?;
         let mut appends = Vec::new();
         if clock >= risk_day(self.clock).map_err(refused)?.ends_at {
@@ -1007,6 +1035,117 @@ impl<'c> AccountRiskFold<'c> {
                 mode: snapshot.agent_mode.max(AgentMode::ExitsOnly),
             };
         }
+    }
+}
+
+/// The binding gate's risk snapshot of `view` (DEC-2804 item 7): the risk state's E, H, E₀, C, L,
+/// latched limits, active rungs, size factor and mode, with the mode beside it, for a readable
+/// view; `None` for an unreadable one, which holds the opening and never an exit (`AGENTS.md`
+/// rules 3 and 13).
+pub fn risk_snapshot(
+    view: &RiskView,
+) -> Option<(mandate_risk::RiskSnapshot, mandate_risk::AgentMode)> {
+    let RiskView::Readable { snapshot, .. } = view else {
+        return None;
+    };
+    let mode = match snapshot.agent_mode {
+        AgentMode::Normal => mandate_risk::AgentMode::Normal,
+        AgentMode::ExitsOnly => mandate_risk::AgentMode::ExitsOnly,
+        AgentMode::Paused => mandate_risk::AgentMode::Paused,
+        AgentMode::Stopped => mandate_risk::AgentMode::Stopped,
+    };
+    let latched = snapshot
+        .latched
+        .iter()
+        .map(|limit| match limit {
+            LimitKey::MaxDailyLoss => mandate_risk::spec_types::LimitKey::MaxDailyLoss,
+            LimitKey::DrawdownRung(rung) => mandate_risk::spec_types::LimitKey::DrawdownRung(*rung),
+            LimitKey::LifetimeFloor => mandate_risk::spec_types::LimitKey::LifetimeFloor,
+            LimitKey::ProfitStop => mandate_risk::spec_types::LimitKey::ProfitStop,
+        })
+        .collect();
+    let risk = mandate_risk::RiskSnapshot {
+        agent_equity: snapshot.agent_equity,
+        high_water_mark: snapshot.high_water_mark,
+        day_start_equity: snapshot.day_start_equity,
+        capital_base: snapshot.capital_base,
+        inherited_loss: snapshot.inherited_loss,
+        latched,
+        active_rungs: snapshot.active_rungs.clone(),
+        size_factor: snapshot.size_factor,
+        agent_mode: mode,
+    };
+    Some((risk, mode))
+}
+
+/// The calendar the deployed fold steps on (DEC-2804 item 6), from `mandate-time`'s US-equities
+/// exchange calendar. For an equity it counts regular-session seconds (mandate spec §5.2,
+/// DEC-2305 item 8) and answers the session an instant is in; while the market is closed it
+/// answers `overnight`. Only a mark reads its step's session, and a mark carries its own (DEC-2305
+/// item 1), so that answer moves no figure. For crypto it counts every second and answers `crypto`.
+pub struct ExchangeRiskCalendar {
+    calendar: ExchangeCalendar,
+    crypto: bool,
+}
+
+impl ExchangeRiskCalendar {
+    /// The calendar for a position of `class`.
+    ///
+    /// # Errors
+    /// Whatever `mandate-time` refuses when its calendar cannot load.
+    pub fn new(class: AssetClass) -> Result<Self, mandate_time::CalendarDataError> {
+        Ok(Self {
+            calendar: ExchangeCalendar::us_equities()?,
+            crypto: class == AssetClass::Crypto,
+        })
+    }
+}
+
+/// The whole seconds `[start, end)` and `[from, to)` share; none when they do not meet, which the
+/// difference shows as negative.
+fn overlap(start: UtcNanos, end: UtcNanos, from: UtcNanos, to: UtcNanos) -> u64 {
+    let shared = end.min(to).secs().saturating_sub(start.max(from).secs());
+    u64::try_from(shared).unwrap_or(0)
+}
+
+fn whole_seconds(from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
+    to.secs()
+        .checked_sub(from.secs())
+        .and_then(|seconds| u64::try_from(seconds).ok())
+        .ok_or(SpecError::ClockWentBackwards)
+}
+
+impl SessionClock for ExchangeRiskCalendar {
+    fn seconds_between(&self, from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
+        let every_second = whole_seconds(from, to)?;
+        if self.crypto {
+            return Ok(every_second);
+        }
+        let mut total: u64 = 0;
+        let mut date = from.date();
+        while date <= to.date() {
+            for span in self.calendar.sessions(date)? {
+                if span.session() == Session::Regular {
+                    total = total.saturating_add(overlap(span.start(), span.end(), from, to));
+                }
+            }
+            date = date.next()?;
+        }
+        Ok(total)
+    }
+}
+
+impl RiskCalendar for ExchangeRiskCalendar {
+    fn session(&self, at: UtcNanos) -> Result<MarketSession, SpecError> {
+        if self.crypto {
+            return Ok(MarketSession::Crypto);
+        }
+        Ok(match self.calendar.session_at(at)? {
+            Some(Session::PreMarket) => MarketSession::PreMarket,
+            Some(Session::Regular) => MarketSession::Regular,
+            Some(Session::AfterHours) => MarketSession::AfterHours,
+            Some(Session::Overnight) | None => MarketSession::Overnight,
+        })
     }
 }
 

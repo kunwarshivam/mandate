@@ -316,7 +316,7 @@ describe("no order ticket (DEC-528)", () => {
     backtest: ["ABSENT", "DISCLOSURES", "LIMITATIONS", "MODES", "OUTCOMES", "PURPOSES", "backtestNotFound", "backtestRead", "readBacktestFrom", "servedBacktest"],
     client: ["CSRF_HEADER", "OPERATIONS", "SESSION_ROUTE", "STEP_UP_CHALLENGE_ROUTE", "createWorkspaceClient", "isIdempotencyKey", "newIdempotencyKey"],
     connect: ["API_CONNECTION_ID", "CONNECTION_STATES", "CONNECT_START_ROUTE", "connectStartBody", "connectStarted", "connectionDetail", "connectionRead", "connectionsRead"],
-    commands: ["UI_BUILD", "prepareApprovalResponse", "prepareConfirm", "prepareDeploy", "prepareOwnerCommand", "recordRef"],
+    commands: ["UI_BUILD", "isAssetId", "prepareApprovalResponse", "prepareConfirm", "prepareDeploy", "prepareOwnerCommand", "prepareOwnerExit", "recordRef"],
     confirm: ["APPLIES", "CLASSIFICATIONS", "confirmAccepted", "confirmStepUpDigest"],
     enrol: ["CREATE_TIMEOUT_MS", "ENROL_ROUTE", "REGISTRATION_ROUTE", "browserCreator", "createPasskey", "enrolBody", "enrolStepUpDigest", "enrolled", "passkeyList", "registrationChallenge"],
     decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],
