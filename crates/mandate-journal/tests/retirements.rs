@@ -363,3 +363,69 @@ fn the_fold_and_the_oracle_both_refuse_a_record_broken_out_of_every_valid_stream
     assert!(failed.is_empty(), "{}", failed.join("\n"));
     assert!(seeded >= 20, "{seeded} seeded bugs; never fewer");
 }
+
+/// The vectors' first valid stream: one period and its alert.
+fn one_period(section: &Value) -> Vec<Value> {
+    let stream = list(section, "streams")
+        .iter()
+        .find(|s| text(s, "name") == "one_period")
+        .unwrap();
+    list(stream, "records").to_vec()
+}
+
+fn record(json: &str) -> Value {
+    parse(json.as_bytes()).unwrap()
+}
+
+/// Rule 266(a) at its edges, which no vector reaches: an owner alert of another kind is no
+/// retirement's and is not read; a `retirement_held` alert naming the record before it is refused
+/// unless that record is a `RetirementHeld`; and a held record is answered only by its own alert,
+/// `retirement_held` and naming it, so an alert of another kind or naming another record leaves it
+/// unanswered (§9.34: "its `OwnerAlertSent` (`retirement_held`, `subject` it)", DEC-2831). The fold and the
+/// oracle agree on each.
+#[test]
+fn a_held_record_is_answered_only_by_its_own_retirement_held_alert() {
+    let section = section();
+    let base = one_period(&section);
+    assert_eq!(retirement_failure(AGENT, &base), None);
+    let held_id = text(&base[0], "event_id").to_owned();
+
+    let mut other_kind = base.clone();
+    other_kind.push(record(
+        r#"{"event_id":"01J8Z5RHB00000000000000000","event_type":"OwnerAlertSent","causation_id":"01J8Z5RHC00000000000000000","config_refs":{},"payload":{"subject":"01J8Z5RHC00000000000000000","kind":"kill_switch","owner_command":null}}"#,
+    ));
+    assert_eq!(
+        retirement_failure(AGENT, &other_kind),
+        None,
+        "another kind's alert is not read"
+    );
+
+    let mut names_another_record = base.clone();
+    names_another_record.push(record(
+        r#"{"event_id":"01J8Z5RHD00000000000000000","event_type":"ApprovalTimedOut","causation_id":null,"config_refs":{},"payload":{}}"#,
+    ));
+    names_another_record.push(record(
+        r#"{"event_id":"01J8Z5RHG00000000000000000","event_type":"OwnerAlertSent","causation_id":"01J8Z5RHD00000000000000000","config_refs":{},"payload":{"subject":"01J8Z5RHD00000000000000000","kind":"retirement_held","owner_command":null}}"#,
+    ));
+    let at = Some(names_another_record.len() - 1);
+    assert_eq!(retirement_failure(AGENT, &names_another_record), at);
+    assert_eq!(oracle(&names_another_record), at);
+
+    for (case, change) in [
+        ("of another kind", ("kind", "kill_switch")),
+        (
+            "naming another record",
+            ("subject", "01J8Z5RHF00000000000000000"),
+        ),
+    ] {
+        let mut unanswered = base.clone();
+        if let Some(Value::Object(alert)) = unanswered.get_mut(1) {
+            set_payload(alert, change.0, Value::Str(change.1.into()));
+        }
+        assert_eq!(
+            retirement_failure(AGENT, &unanswered),
+            Some(0),
+            "a held record followed by an alert {case} is unanswered: {held_id}"
+        );
+    }
+}

@@ -138,8 +138,10 @@ struct Open<'a> {
 /// agent's `AgentStopped`, or an owner's `resume` or `stop` scoped to it, ends the sequence, and no
 /// record of an ended sequence's cause follows. A record of another cause is refused while one is
 /// open, unless a version was applied since its last record: then the open one has ended and the new
-/// one begins from 1. Each record is followed by its `OwnerAlertSent` (`retirement_held`), and each
-/// such alert follows the record it names. Another agent's records, another command, and a rejected
+/// one begins from 1. Each record is followed by its `OwnerAlertSent` (`retirement_held`, naming
+/// it), and each such alert follows the record it names; an alert of another kind answers no record
+/// here, which reads §9.34's "its `OwnerAlertSent` (`retirement_held`, `subject` it)" as written, a
+/// check the reference fold leaves to rule 130's one-subject-one-kind (DEC-2831). Another agent's records, another command, and a rejected
 /// version end and move nothing.
 ///
 /// Returns the index of the first record that breaks the rule, or `None`; later records are not read.
@@ -213,7 +215,9 @@ fn held<'a>(
 ) -> bool {
     let p = payload(record);
     let alerted = next.is_some_and(|n| {
-        text(n, "event_type") == ALERT && text(payload(n), "subject") == text(record, "event_id")
+        text(n, "event_type") == ALERT
+            && text(payload(n), "kind") == ALERT_KIND
+            && text(payload(n), "subject") == text(record, "event_id")
     });
     let (Some(period), Some(at)) = (
         p.get("period").and_then(Value::as_int),
