@@ -634,6 +634,15 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+# The binding gate's reviewed inputs (DEC-2380 item 5): the rule set, the fee schedule and the
+# mandate's limits, moved out of mandate-shell so the executor process reads them through the same
+# functions without reaching the shell. Above mandate-executor, whose configuration it parses.
+[crates.mandate-gate-inputs]
+layer = 7
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
 [crates.mandate-vault-local]
 layer = 7
 safety_critical = true

@@ -2061,6 +2061,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-gate-inputs"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-executor",
+ "mandate-num",
+ "mandate-risk",
+ "mandate-spec",
+ "mandate-time",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-gateway"
 version = "0.0.0"
 dependencies = [
@@ -2561,6 +2576,7 @@ dependencies = [
  "mandate-canon",
  "mandate-domain",
  "mandate-executor",
+ "mandate-gate-inputs",
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-liquidity",
