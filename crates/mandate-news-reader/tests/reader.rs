@@ -594,3 +594,91 @@ fn a_failed_request_ends_the_round_and_journals_nothing() {
     assert!(journal.news().is_empty());
     assert_eq!(reader.lifecycle().state(), State::Ready);
 }
+
+#[test]
+fn each_follow_names_an_agent_and_its_account_and_a_malformed_one_is_refused() {
+    let args = |text: &str| -> Vec<String> { text.split(' ').map(str::to_owned).collect() };
+    assert_eq!(
+        mandate_news_reader::reader::parse_follows(&args(
+            "run --follow a1=acct1 --workspace ws --follow a2=acct2"
+        )),
+        Ok(vec![
+            mandate_news_reader::Follow {
+                agent: "a1".to_owned(),
+                account: "acct1".to_owned()
+            },
+            mandate_news_reader::Follow {
+                agent: "a2".to_owned(),
+                account: "acct2".to_owned()
+            },
+        ])
+    );
+    assert_eq!(
+        mandate_news_reader::reader::parse_follows(&args("run --workspace ws")),
+        Ok(vec![])
+    );
+    for malformed in [
+        "run --follow a1",
+        "run --follow =acct",
+        "run --follow a1=",
+        "run --follow",
+    ] {
+        assert_eq!(
+            mandate_news_reader::reader::parse_follows(&args(malformed)),
+            Err("follow_malformed"),
+            "{malformed}"
+        );
+    }
+}
+
+#[test]
+fn only_a_paper_workspace_s_reader_starts() {
+    let (journal, shelf) = (Journal::default(), Shelf::default());
+    spy(&journal, &shelf);
+    let mut config = config();
+    config.environment = mandate_journal::Environment::Live;
+    let transport = Recorded::default();
+    let mut reader = NewsReader::start(
+        journal.clone(),
+        shelf,
+        transport.clone(),
+        &config,
+        Ok(paper_auth()),
+        t0(),
+    );
+    block_on(reader.step(t0()));
+    assert_eq!(
+        mandate_news_reader::reader::exit(&reader),
+        Some(Exit::Refused)
+    );
+    assert!(transport.sent().is_empty());
+    assert!(journal.news().is_empty());
+}
+
+#[test]
+fn the_reader_reports_its_exit_and_its_stream_s_last_known_time() {
+    let (journal, shelf) = (Journal::default(), Shelf::default());
+    spy(&journal, &shelf);
+    let transport = Recorded::answering(&[page(
+        &[item(
+            1,
+            "2026-10-26T12:00:00Z",
+            "2026-10-26T12:00:00Z",
+            &["SPY"],
+        )],
+        None,
+    )]);
+    let mut reader = started(&journal, &shelf, &transport, t0());
+    assert_eq!(reader.last_known(), None);
+    assert_eq!(mandate_news_reader::reader::exit(&reader), None);
+    block_on(reader.step(t0()));
+    assert_eq!(reader.last_known(), Some(t0()));
+    assert_eq!(reader.counts().unreadable_snapshots, 0);
+    let restarted = started(&journal, &shelf, &transport, plus(t0(), 1));
+    assert_eq!(restarted.last_known(), Some(t0()), "folded at start");
+    reader.drain(plus(t0(), 2));
+    assert_eq!(
+        mandate_news_reader::reader::exit(&reader),
+        Some(Exit::Drained)
+    );
+}

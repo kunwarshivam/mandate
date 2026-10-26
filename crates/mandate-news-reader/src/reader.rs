@@ -66,6 +66,30 @@ pub struct Follow {
     pub account: String,
 }
 
+/// Each `--follow <agent>=<account>` in `args`, in order: an agent id and its account, neither
+/// empty.
+///
+/// # Errors
+/// `follow_malformed` for a `--follow` with no value, no `=`, or an empty side.
+pub fn parse_follows(args: &[String]) -> Result<Vec<Follow>, &'static str> {
+    args.iter()
+        .enumerate()
+        .filter(|(_, flag)| *flag == "--follow")
+        .map(|(at, _)| {
+            let (agent, account) = at
+                .checked_add(1)
+                .and_then(|next| args.get(next))
+                .and_then(|value| value.split_once('='))
+                .filter(|(agent, account)| !agent.is_empty() && !account.is_empty())
+                .ok_or("follow_malformed")?;
+            Ok(Follow {
+                agent: agent.to_owned(),
+                account: account.to_owned(),
+            })
+        })
+        .collect()
+}
+
 /// What a reader runs.
 #[derive(Debug, Clone)]
 pub struct Config {

@@ -30,7 +30,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_journal::{ArtifactStore, Environment};
 use mandate_news_reader::reader::exit;
-use mandate_news_reader::{Config, Follow, KeyRefusal, NewsReader, read_key};
+use mandate_news_reader::reader::parse_follows;
+use mandate_news_reader::{Config, KeyRefusal, NewsReader, read_key};
 use mandate_process::probe::{self, Probe, Status};
 use mandate_sources::allowlist::Allowlist;
 use mandate_sources::fetch::{NewsAuth, Transport};
@@ -94,24 +95,6 @@ fn host_now() -> UtcNanos {
     UtcNanos::from_parts(secs, since.subsec_nanos()).unwrap_or(UtcNanos::EPOCH)
 }
 
-/// Each `--follow <agent>=<account>`, in order.
-fn follows(args: &[String]) -> Result<Vec<Follow>, &'static str> {
-    args.windows(2)
-        .filter(|pair| pair.first().is_some_and(|f| f == "--follow"))
-        .map(|pair| {
-            let (agent, account) = pair
-                .get(1)
-                .and_then(|value| value.split_once('='))
-                .filter(|(agent, account)| !agent.is_empty() && !account.is_empty())
-                .ok_or("follow_malformed")?;
-            Ok(Follow {
-                agent: agent.to_owned(),
-                account: account.to_owned(),
-            })
-        })
-        .collect()
-}
-
 fn run(
     args: &[String],
     flag: &dyn Fn(&str) -> Option<String>,
@@ -132,7 +115,7 @@ fn run(
         workspace,
         environment: Environment::Paper,
         allowlist,
-        follows: follows(args)?,
+        follows: parse_follows(args)?,
         liveness: LIVENESS,
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
