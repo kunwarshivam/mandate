@@ -1456,8 +1456,8 @@ after U-A1 to U-A5 are recorded.
     (`AgentStopped`, a resume, a version applied), the next period after downtime, and none twice
     across a restart.
   - Status (2026-10-26): done are the kinds (#2676), the manager's `kill_switch_unapplied`
-    (#2690), and `RetirementHeld`'s schema with rules 265 and 266 (#2697). Left: the verifier's
-    `retirement_held_silent`, and the runtime's writer, which waits on E6-5's retirement of an
+    (#2690), `RetirementHeld`'s schema with rules 265 and 266 (#2697), and the verifier's
+    `retirement_held_silent` (DEC-2835). Left: the runtime's writer, which waits on E6-5's retirement of an
     agent that still holds something (DEC-2344 item 2).
 
 ### E9 Identity, tenancy, and policy

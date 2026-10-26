@@ -124,7 +124,6 @@ fn first_pass_over(root: &Path, script: Script) -> (Rig, Vec<&'static str>) {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_put_the_service_stored_and_the_runtime_read_back_lets_the_run_start() {
     let (rig, alerts) = first_pass("honest", Script::Honest);
     assert!(alerts.is_empty(), "{alerts:?}");
@@ -132,7 +131,6 @@ fn a_put_the_service_stored_and_the_runtime_read_back_lets_the_run_start() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_put_whose_answer_or_read_back_fails_halts_research_and_journals_nothing() {
     for script in [Script::WrongHash, Script::Lies, Script::Damages] {
         let (rig, alerts) = first_pass(&format!("{script:?}"), script);
@@ -169,7 +167,6 @@ fn objects(root: &Path) -> Vec<PathBuf> {
 /// stay as they were, for an operator to find. The hashes are learned from the same run against a
 /// store of its own.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_squatted_object_at_a_puts_hash_halts_research_and_journals_nothing() {
     let probe = store("squat-probe");
     let (_, alerts) = first_pass_over(&probe, Script::Honest);

@@ -20,10 +20,12 @@ use std::num::{NonZeroU16, NonZeroU64};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::Digest;
 use mandate_gateway::frame;
+use mandate_gateway::wire::PutRequest;
 use mandate_gateway::{CallRecord, CallRequest, RequestError};
-use mandate_journal::ArtifactRef;
+use mandate_journal::{ArtifactRef, get_artifact};
 use mandate_research_run::ModelCalls;
 use mandate_time::UtcNanos;
 
@@ -125,13 +127,22 @@ impl RemoteGateway {
     /// `None` when it refused, or the exchange did not bring back the whole reply within its put
     /// timeout, connect included (DEC-2279 items 1 and 3). The answer is the service's claim only:
     /// [`RemoteSink`] checks it.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn put(&self, workspace: &str, bytes: &[u8]) -> Option<Digest> {
-        let _ = (workspace, bytes, after((self.clock)(), self.put_timeout));
-        todo!()
+        let address = self.address.resolve()?;
+        let deadline = after((self.clock)(), self.put_timeout)?;
+        let left = remaining((self.clock)(), deadline)?;
+        let stream = TcpStream::connect_timeout(&address, left).ok()?;
+        let mut bounded = Bounded {
+            stream,
+            clock: self.clock,
+            deadline,
+            grace: Duration::ZERO,
+        };
+        let put = PutRequest {
+            workspace_id: workspace.to_owned(),
+            bytes: bytes.to_vec(),
+        };
+        frame::put(&mut bounded, &put).ok()?.ok()
     }
 }
 
@@ -158,13 +169,9 @@ impl RemoteSink {
     }
 
     /// The checked read of `reference` from the research store, opened for this read.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     fn read(&self, reference: &ArtifactRef) -> Option<Vec<u8>> {
-        let _ = (reference, &self.research);
-        todo!()
+        let store = FsArtifactStore::open_existing(&self.research).ok()?;
+        get_artifact(&store, reference).ok()
     }
 }
 

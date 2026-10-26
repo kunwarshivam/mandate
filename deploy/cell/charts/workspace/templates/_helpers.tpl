@@ -155,7 +155,8 @@ fixed path. Who may write it is fixed here, by process type, not a value, so no 
 the control runs write ("rw"); the API server only reads, but its pod lays the store out before it
 starts ("seed": the pod's volume is writable, the server's own mount is not); the runtime, the
 deployment manager and the model gateway, for each agent's research cap (DEC-2272), read ("ro");
-every other process has no store at all.
+every other process has no store at all. The model gateway writes only the research store
+("mandate.researchArtifactsRole", DEC-2279), never this one.
 */}}
 {{- define "mandate.artifactsRole" -}}
 {{- $access := dict "api" "seed" "control" "rw" "runtime" "ro" "executor" "ro" "deploy-manager" "ro" "deploy-manager-research" "ro" "model-gateway" "ro" "data" "rw" -}}
@@ -196,10 +197,66 @@ follows. So a node's loss takes the whole group down together, until the store m
 attaches to many nodes or to the object store (E21-40).
 */}}
 {{- define "mandate.colocated" -}}
-{{- if or .p.colocate (include "mandate.artifactsAccess" .) -}}true{{- end -}}
+{{- if or .p.colocate (include "mandate.artifactsAccess" .) (include "mandate.researchArtifactsAccess" .) -}}true{{- end -}}
 {{- end -}}
 
 {{- define "mandate.artifactsPath" -}}/var/lib/mandate/artifacts{{- end -}}
+
+{{/*
+The research store (DEC-2279 item 5): a store of its own for the research runtime's artifacts, which
+only the model gateway writes ("rw"), create-only and capped, and the runtime reads back ("ro"). No
+other process mounts it, so nothing the executor, the gate, the managers or a mandate read is within
+the gateway's reach. Fixed here, by process type, never a value.
+*/}}
+{{- define "mandate.researchArtifactsRole" -}}
+{{- $access := dict "model-gateway" "rw" "runtime" "ro" -}}
+{{- get $access .p.name -}}
+{{- end -}}
+
+{{/*
+Whether the research claim renders: with the shared store's, and only when the model gateway, its
+one writer, renders and lays it out. "true" or empty.
+*/}}
+{{- define "mandate.researchArtifactsClaimed" -}}
+{{- if include "mandate.artifactsClaimed" . -}}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) -}}
+{{- if eq .name "model-gateway" -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Process `p`'s access to the research store, "rw" or "ro", or empty. */}}
+{{- define "mandate.researchArtifactsAccess" -}}
+{{- if include "mandate.researchArtifactsClaimed" .root -}}
+{{- include "mandate.researchArtifactsRole" . -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "mandate.researchArtifactsPath" -}}/var/lib/mandate/research-artifacts{{- end -}}
+
+{{/*
+The research store's layout, made by its one writer's pod before the gateway starts. A reader's pod
+never waits for it: the runtime opens the store at each read, so one not yet laid out is a failed
+read-back that halts research, never a runtime that does not start (DEC-2279 item 5).
+*/}}
+{{- define "mandate.researchArtifactsLayout" -}}
+{{- $path := include "mandate.researchArtifactsPath" . -}}
+- name: research-artifacts-layout
+  image: {{ .root.Values.images.postgres | quote }}
+  imagePullPolicy: IfNotPresent
+  command:
+    - bash
+    - -c
+    - {{ printf "mkdir -p %s/sha256 %s/tmp" $path $path | quote }}
+  securityContext:
+    {{- include "mandate.containerSecurity" . | nindent 4 }}
+  resources:
+    limits: {cpu: "50m", memory: "32Mi"}
+    requests: {cpu: "50m", memory: "32Mi"}
+  volumeMounts:
+    - name: research-artifacts
+      mountPath: {{ $path | quote }}
+{{- end -}}
 
 {{/*
 The store's layout, before the process starts: the API server refuses a root without `sha256/`,
@@ -295,6 +352,10 @@ budgets, rendered only when named, so an unnamed one stops its start with its co
 - name: {{ ternary "MANDATE_API_ARTIFACTS" "MANDATE_ARTIFACTS" (eq .p.name "api") }}
   value: {{ include "mandate.artifactsPath" . | quote }}
 {{- end }}
+{{- if include "mandate.researchArtifactsAccess" . }}
+- name: MANDATE_RESEARCH_ARTIFACTS
+  value: {{ include "mandate.researchArtifactsPath" . | quote }}
+{{- end }}
 {{- /* The stored bars' root the runtime's dry run and the executor's binding gate read their
 liquidity figures from (DEC-2274), only where the data process stores them. */}}
 {{- if and (has .p.name (list "runtime" "executor")) .root.Values.images.data (include "mandate.artifactsAccess" .) }}
@@ -317,6 +378,11 @@ liquidity figures from (DEC-2274), only where the data process stores them. */}}
 {{- with include "mandate.artifactsAccess" . }}
 - name: artifacts
   mountPath: {{ include "mandate.artifactsPath" $ | quote }}
+  readOnly: {{ ne . "rw" }}
+{{- end }}
+{{- with include "mandate.researchArtifactsAccess" . }}
+- name: research-artifacts
+  mountPath: {{ include "mandate.researchArtifactsPath" $ | quote }}
   readOnly: {{ ne . "rw" }}
 {{- end }}
 {{- if include "mandate.vaultToken" . }}
@@ -460,6 +526,9 @@ spec:
     {{- if include "mandate.artifactsAccess" . }}
     {{- include "mandate.artifactsLayout" . | nindent 4 }}
     {{- end }}
+    {{- if eq (include "mandate.researchArtifactsAccess" .) "rw" }}
+    {{- include "mandate.researchArtifactsLayout" . | nindent 4 }}
+    {{- end }}
     {{- if include "mandate.publicTls" . }}
     - name: ca-bundle
       image: {{ $root.Values.images.postgres | quote }}
@@ -517,6 +586,12 @@ spec:
       persistentVolumeClaim:
         claimName: artifacts
         readOnly: {{ eq (include "mandate.artifactsAccess" .) "ro" }}
+    {{- end }}
+    {{- with include "mandate.researchArtifactsAccess" . }}
+    - name: research-artifacts
+      persistentVolumeClaim:
+        claimName: research-artifacts
+        readOnly: {{ eq . "ro" }}
     {{- end }}
     {{- if include "mandate.vaultToken" . }}
     - name: vault-token
