@@ -632,6 +632,35 @@ fn only_the_agent_s_orders_count_and_a_replacement_is_one() {
     );
 }
 
+/// A replacement is submitted when it is journaled, not when the order it replaces was: one
+/// replacing yesterday's order today counts toward today's orders, and the order it replaced does
+/// not.
+#[test]
+fn a_replacement_counts_on_its_own_day() {
+    let mut rig = Rig::new();
+    let yesterday = MIDNIGHT - 600;
+    rig.order("o0", SPY, "open", yesterday, yesterday);
+    rig.on(
+        ACCOUNT,
+        "OrderStateChanged",
+        &object(&[
+            ("client_order_id", text("o0")),
+            ("state", text("replaced")),
+            ("ignored", Value::Bool(false)),
+            ("replaced_by", text("o0-r")),
+            ("risk_clock", clock(START)),
+        ]),
+        Some(START),
+    );
+    rig.state("o0-r", "canceled", START + 1);
+    let counted = rig.0.counted(instant(START + 10)).unwrap();
+    assert_eq!(counted.orders_today, 1);
+    assert_eq!(
+        counted.conduct.orders_today_per_instrument,
+        BTreeMap::from([(asset(SPY), 1)])
+    );
+}
+
 /// One generated event: a round trip in SPY (`false`) or QQQ, starting `offset` seconds after the
 /// risk day began (negative is yesterday), each fill recorded `lag` seconds after its risk clock;
 /// or an opening that is rejected.
