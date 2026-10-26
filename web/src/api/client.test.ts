@@ -317,6 +317,7 @@ describe("no order ticket (DEC-528)", () => {
     commands: ["UI_BUILD", "prepareApprovalResponse", "prepareConfirm", "prepareOwnerCommand", "recordRef"],
     confirm: ["APPLIES", "CLASSIFICATIONS", "confirmAccepted", "confirmStepUpDigest"],
     decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],
+    memberships: ["MY_WORKSPACES_ROUTE", "myWorkspaces", "pickWorkspace", "resolveWorkspace"],
     "mock-server": ["MOCK_PRINCIPAL", "createMockServer"],
     operations: ["NOT_COMMANDS", "WEB_OPERATIONS", "operationFor"],
     "read-models": ["agentRead", "agentsRead", "approvalRead", "approvalsRead", "deadlineIso", "loadApi"],

@@ -6,6 +6,7 @@
  * is no order ticket (DEC-528).
  */
 import { OPERATIONS, SESSION_ROUTE, STEP_UP_CHALLENGE_ROUTE } from "./client";
+import { MY_WORKSPACES_ROUTE } from "./memberships";
 import type { Operation } from "./types";
 
 export interface DocumentedOperation {
@@ -66,6 +67,7 @@ const COMMAND_SECTIONS: Readonly<Record<Operation, string>> = {
 const OTHERS: readonly DocumentedOperation[] = [
   { id: "step_up_challenge", method: "POST", route: STEP_UP_CHALLENGE_ROUTE, query: [], section: "§3.6" },
   { id: "session", method: "GET", route: SESSION_ROUTE, query: [], section: "§4.10", outside: true },
+  { id: "my_workspaces", method: "GET", route: MY_WORKSPACES_ROUTE, query: [], section: "§4.10, DEC-2113", outside: true },
 ];
 
 /** The ids of `OTHERS`, which are not commands of `client.ts`'s `OPERATIONS`. */

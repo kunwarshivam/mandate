@@ -55,7 +55,8 @@ export function ApiRuntimeProvider({
   session,
   keepAliveMs = REFRESH_EVERY_MS,
 }: {
-  source: Pick<ApiSource, "origin" | "workspaceId">;
+  /** The workspace is named by then: by the configuration, or by the session's one membership (`ApiProviders`). */
+  source: { origin: ApiSource["origin"]; workspaceId: string };
   children: ReactNode;
   fetch?: Fetch;
   refreshMs?: number;

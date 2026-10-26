@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiRuntimeProvider } from "./api-runtime";
-import { type Runtime, useRuntime } from "./mock-runtime";
+import { type Runtime, RuntimeProvider, useRuntime } from "./mock-runtime";
+import { emptyWorkspace } from "@/api/reads";
 import { type Fetch } from "@/api/client";
 import { createMockServer } from "@/api/mock-server";
 import type { SessionKeeper, SessionState } from "@/api/session";
@@ -373,5 +374,29 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     await ready();
     await waitFor(() => expect(asked.filter((a) => a === "refresh").length).toBeGreaterThanOrEqual(3));
     expect(current().ws.status).toBe("ready");
+  });
+});
+
+describe("the stand-in while no workspace is named (offline)", () => {
+  it.each(["loading", "signed_out", "membership_unavailable"] as const)("records no command and no answer while %s", async (status) => {
+    let runtime: Runtime | null = null;
+    function Probe() {
+      const value = useRuntime();
+      useEffect(() => {
+        runtime = value;
+      });
+      return null;
+    }
+    render(
+      <RuntimeProvider initial={emptyWorkspace(status, "2026-10-26T14:00:00.000Z")} tick={false} recordAfterMs={5} offline>
+        <Probe />
+      </RuntimeProvider>,
+    );
+    act(() => {
+      runtime!.send("stop_all", null);
+    });
+    await waitFor(() => expect(runtime!.commands.at(-1)?.phase).toBe("undelivered"));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(runtime!.commands.some((c) => c.phase === "recorded")).toBe(false);
   });
 });
