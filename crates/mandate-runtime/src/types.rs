@@ -439,12 +439,38 @@ pub enum TimerRequest {
     Cancel { id: TimerId },
 }
 
-/// An owner alert. It carries opaque ids and a message key only: no instrument, quantity, price, or
-/// thesis content ever reaches a notification (`AGENTS.md` rule 6). The type is the enforcement.
+/// An alert the runtime raises. It carries an opaque id and a closed kind only: no instrument,
+/// quantity, price, or thesis content ever reaches a notification (`AGENTS.md` rule 6), and no
+/// alert outside [`RuntimeAlert`] can be raised (DEC-2514). The type is the enforcement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationRef {
     pub subject_event: EventId,
-    pub message_key: &'static str,
+    pub kind: RuntimeAlert,
+}
+
+/// The runtime's alerts. None is an owner notice kind of notifications spec §3.2, so the runtime
+/// journals no `OwnerAlertSent` for them (DEC-2514): a dry run's deny waits on the founder's
+/// DEC-723 and is raised as it was until then, and the two research alerts are the operator's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeAlert {
+    /// The gate's dry run denied a decision (DEC-723, Proposed).
+    DecisionSkipped,
+    /// A model call the research run made was refused.
+    ResearchCallRefused,
+    /// Three research deadlines in a row passed.
+    ResearchDeadlineStreak,
+}
+
+impl RuntimeAlert {
+    /// The alert's fixed key, the only text a process reports for it.
+    #[must_use]
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::DecisionSkipped => "decision_skipped",
+            Self::ResearchCallRefused => "research_call_refused",
+            Self::ResearchDeadlineStreak => "research_deadline_streak",
+        }
+    }
 }
 
 /// What one step asks the shell to do, in order.
@@ -632,6 +658,9 @@ pub struct SignalInputs {
     /// Per instrument, the sells this runtime proposed that are still working, which a plan takes
     /// off the position before it proposes an exit (§8.3 step 2, "minus working exits").
     pub working_exits: BTreeMap<InstrumentId, Qty>,
+    /// The asset class of each instrument an admitted thesis named (journal spec §9.4), which a
+    /// plan reads to price and route an exit of an instrument the mandate does not pin.
+    pub thesis_classes: BTreeMap<InstrumentId, mandate_accounting::AssetClass>,
 }
 
 /// Whether the executor is known to hold an intent yet.

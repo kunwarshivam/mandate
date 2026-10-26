@@ -1,9 +1,9 @@
 //! The records journal spec v0.50 §9.23 closes for an agentic research run (agent harness spec
 //! §6.9, DEC-2203): the agent stream's `RunStarted`, `ToolCallRecorded`, `ToolResultRecorded`,
 //! `RunSummaryRecorded`, and `RunEnded`. Rules 171 and 172 are the draft's ([`rules`]); rules 173 to
-//! 183 are stream rules ([`stream_rule`]), which [`crate::check_stream`] runs with the stream's
-//! earlier records, rule 183 on the agent stream's `ModelInvocationRecorded`. Every rule only
-//! refuses a draft.
+//! 183, and rule 271 on an event run's start (journal spec v0.87, DEC-2392), are stream rules
+//! ([`stream_rule`]), which [`crate::check_stream`] runs with the stream's earlier records, rule 183
+//! on the agent stream's `ModelInvocationRecorded`. Every rule only refuses a draft.
 
 use mandate_canon::Value;
 
@@ -16,6 +16,7 @@ const RESULT: &str = "ToolResultRecorded";
 const SUMMARY: &str = "RunSummaryRecorded";
 const ENDED: &str = "RunEnded";
 const INVOCATION: &str = "ModelInvocationRecorded";
+const OBSERVED: &str = "ObservationRecorded";
 
 /// The event types §9.23 closes, all on the agent stream.
 pub(crate) const RUN_RECORDS: [&str; 5] = [STARTED, CALLED, RESULT, SUMMARY, ENDED];
@@ -141,6 +142,9 @@ pub(crate) fn stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invali
                     p.text("kind") == kind && p.member("trigger").text("cause") == cause
                 });
             ensure(!answered, "payload.trigger.cause")?;
+        }
+        if m.member("trigger").text("kind") == "event" {
+            return event_cause(before, draft);
         }
         return Ok(());
     }
@@ -329,6 +333,41 @@ fn late_turn(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
         matches!(View(&end).text("reason"), "deadline" | "mode") && m.list("verdicts").is_empty(),
         "correlation_id",
     )
+}
+
+/// Rule 271 (DEC-2392) on an event-triggered `RunStarted`, after rule 173: its `trigger.cause` is
+/// an earlier `ObservationRecorded` of its own run naming an instrument, and no earlier event run's
+/// cause observation holds the same item (`data_ref`), so one item starts at most one run. A
+/// cause that names no such record, or one whose item started a run before, is refused at
+/// `payload.trigger.cause`.
+fn event_cause(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
+    let path = "payload.trigger.cause";
+    let observation = |id: &str| {
+        before
+            .iter()
+            .find(|d| d.event_type() == OBSERVED && d.event_id() == id)
+            .copied()
+    };
+    let started = payload_of(draft);
+    let cause = View(&started).member("trigger").text("cause").to_owned();
+    let Some(seen) = observation(&cause) else {
+        return Err(Invalid::new(InvalidReason::Schema, path));
+    };
+    ensure(correlation(seen) == correlation(draft), path)?;
+    let item = payload_of(seen);
+    ensure(!View(&item).is_null("instrument_id"), path)?;
+    let data = View(&item).text("data_ref").to_owned();
+    let repeated = before
+        .iter()
+        .filter(|d| d.event_type() == STARTED)
+        .filter_map(|d| {
+            let p = payload_of(d);
+            let trigger = View(&p).member("trigger");
+            (trigger.text("kind") == "event").then(|| trigger.text("cause").to_owned())
+        })
+        .filter_map(|earlier| observation(&earlier))
+        .any(|earlier| View(&payload_of(earlier)).text("data_ref") == data);
+    ensure(!repeated, path)
 }
 
 fn correlation(draft: &Draft) -> Option<&str> {

@@ -31,8 +31,10 @@ use mandate_canon::Value;
 use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_time::UtcNanos;
 
+mod positions;
 mod rule_set;
 
+pub use positions::{CountedSession, Positions, Protection, RiskMark};
 pub use rule_set::{RuleSetError, gate_rule_set};
 
 /// One journal row, as its store hands it over, in journal order.
@@ -462,28 +464,11 @@ impl Journaled {
     }
 
     fn mark(&mut self, payload: &Payload<'_>, at: UtcNanos) -> Result<(), Unreadable> {
-        let Some(sane) = payload.value.get("sane") else {
-            return Ok(());
-        };
-        let counted = match payload.text("session")? {
-            "regular" | "crypto" => true,
-            "overnight" | "pre_market" | "after_hours" => false,
-            _ => return Err((payload.refused)("session")),
-        };
-        let latest = match sane {
-            Value::Bool(true) => {
-                let bid = payload
-                    .text("bid")
-                    .ok()
-                    .and_then(|bid| Price::parse(bid).ok())
-                    .ok_or_else(|| (payload.refused)("bid"))?;
-                Latest::Sane(Mark { bid, at })
-            }
-            Value::Bool(false) => Latest::NotSane,
-            _ => return Err((payload.refused)("sane")),
-        };
-        if counted {
-            let instrument = payload.text("instrument_id")?.to_owned();
+        if let Some((instrument, mark)) = positions::counted_mark(payload, at)? {
+            let latest = match mark.bid.filter(|_| mark.sane) {
+                Some(bid) => Latest::Sane(Mark { bid, at }),
+                None => Latest::NotSane,
+            };
             self.marks.insert(instrument, latest);
         }
         Ok(())

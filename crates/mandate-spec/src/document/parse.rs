@@ -14,11 +14,11 @@ use mandate_time::{Date, UtcNanos};
 
 use super::{
     AgentName, Approval, ApprovalId, ApproverRef, Autonomy, Behavior, Cadence, Capital, Channel,
-    ConnectionId, Delegation, DelegationId, EventSource, Goal, HourMinute, InstrumentRef,
-    LadderAction, LadderRung, Lifts, LimitAction, Mandate, ModelId, ModelParam, Notifications,
-    OnComplete, OnTimeout, ParamValue, Protection, QuietHours, Research, Risk, Rule, RuleId,
-    ScaleAction, SignalModel, Sizing, SizingMethod, Tripwire, TripwireAction, TripwireId,
-    TripwireMetric, Universe,
+    ConnectionId, Delegation, DelegationId, EventSource, EventTrigger, EventTriggers, Goal,
+    HourMinute, InstrumentRef, LadderAction, LadderRung, Lifts, LimitAction, Mandate, ModelId,
+    ModelParam, Notifications, OnComplete, OnTimeout, ParamValue, Protection, QuietHours, Research,
+    Risk, Rule, RuleId, ScaleAction, SignalModel, Sizing, SizingMethod, Tripwire, TripwireAction,
+    TripwireId, TripwireMetric, Universe,
 };
 use crate::condition::{
     Condition, ConditionField, ConditionValue, FieldKind, MAX_CONDITION_DEPTH, Operator,
@@ -570,11 +570,35 @@ fn param(node: &Node<'_>) -> Parsed<ModelParam> {
 }
 
 fn research(node: &Node<'_>) -> Parsed<Research> {
-    let m = node.members("interval_s cost_cap_usd_per_day max_revisions_per_lineage")?;
+    let m =
+        node.members("interval_s cost_cap_usd_per_day max_revisions_per_lineage event_triggers")?;
     Ok(Research {
         interval_s: m.int("interval_s", 300, 604_800)?,
         cost_cap_usd_per_day: m.dec("cost_cap_usd_per_day", DecGrammar::PositiveDecimal)?,
         max_revisions_per_lineage: m.int("max_revisions_per_lineage", 0, 10)?,
+        event_triggers: m
+            .optional("event_triggers")
+            .map(|node| node.nullable(event_triggers))
+            .transpose()?
+            .flatten(),
+    })
+}
+
+/// `behavior.research.event_triggers` (§8.4, DEC-2392): the one member of `research` the schema
+/// does not require, so a version written before it keeps its hash; absent and `null` are both
+/// off.
+fn event_triggers(node: &Node<'_>) -> Parsed<EventTriggers> {
+    let m = node.members("sources debounce_s max_runs_per_day")?;
+    Ok(EventTriggers {
+        sources: m.get("sources")?.set_of(
+            1,
+            &[
+                ("filings", EventTrigger::Filings),
+                ("news", EventTrigger::News),
+            ],
+        )?,
+        debounce_s: m.int("debounce_s", 300, 86_400)?,
+        max_runs_per_day: m.int("max_runs_per_day", 1, 24)?,
     })
 }
 

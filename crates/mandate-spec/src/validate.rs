@@ -722,6 +722,7 @@ fn document_rules(
         && ascending(m.autonomy.approval.approvers.iter().map(|a| a.as_str()))
         && [
             "/behavior/cadence/event_sources",
+            "/behavior/research/event_triggers/sources",
             "/notifications/channels",
             "/universe/asset_classes",
         ]

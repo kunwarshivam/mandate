@@ -18,5 +18,60 @@
     "set": {
       "/account_positions": []
     }
+  },
+  {
+    "label": "nothing the journal says: no basis, no mark, no protection",
+    "set": {
+      "/positions/0/cost_basis": null,
+      "/positions/0/risk_mark": null,
+      "/positions/0/market_value": null,
+      "/positions/0/unrealized_pnl": null,
+      "/positions/0/protection": {
+        "orders": [],
+        "covered_qty": "0",
+        "stop": null,
+        "take_profit": null,
+        "unprotected_since": null
+      }
+    }
+  },
+  {
+    "label": "a latest mark that is not sane, with no bid",
+    "set": {
+      "/positions/0/risk_mark/sane": false,
+      "/positions/0/risk_mark/bid": null,
+      "/positions/0/market_value": null,
+      "/positions/0/unrealized_pnl": null
+    }
+  },
+  {
+    "label": "a crypto mark",
+    "set": {
+      "/positions/0/risk_mark/session": "crypto"
+    }
+  },
+  {
+    "label": "a loss",
+    "set": {
+      "/positions/0/unrealized_pnl": "-12.25"
+    }
+  },
+  {
+    "label": "an open unprotected interval with no order resting",
+    "set": {
+      "/positions/0/protection": {
+        "orders": [],
+        "covered_qty": "0",
+        "stop": null,
+        "take_profit": null,
+        "unprotected_since": "2026-10-19T14:29:30.000000000Z"
+      }
+    }
+  },
+  {
+    "label": "a stop with no take-profit",
+    "set": {
+      "/positions/0/protection/take_profit": null
+    }
   }
 ]

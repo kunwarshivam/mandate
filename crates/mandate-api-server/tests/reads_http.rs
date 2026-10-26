@@ -872,7 +872,22 @@ fn an_agents_positions_are_its_own_fills_beside_the_accounts_holdings() {
         .expect("unpoisoned")
         .get_mut(&acct)
         .expect("seeded")
-        .extend([fill(7, "o-1", "2"), fill(8, "o-2", "1")]);
+        .extend([
+            fill(7, "o-1", "2"),
+            fill(8, "o-2", "1"),
+            row(
+                &acct,
+                9,
+                "MarkUpdated",
+                r#"{"instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","price":"103","source":"quote","feed":"iex","bid":"103","sane":true,"session":"regular","risk_clock":"2026-10-17T10:00:05.000000000Z"}"#,
+            ),
+            row(
+                &acct,
+                10,
+                "ProtectionChanged",
+                r#"{"instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","action":"placed","orders":["o-1-p1"],"awaiting":[],"qty":"2","stop":"95","take_profit":"110","intent_id":null,"bracket":null,"entry":null,"agent_id":null,"replacing":null,"created_on":"2026-10-17","sent":null,"uncovered":null,"acknowledged":null,"risk_clock":"2026-10-17T10:00:06.000000000Z"}"#,
+            ),
+        ]);
     members(&f, Ok(vec![activated(1, alice(), &[Role::Viewer])]));
     let cookie = signed_in(&f, alice());
     let reply = get(&f, &ws("/agents/agt_a/positions"), Some(&cookie));
@@ -886,13 +901,13 @@ fn an_agents_positions_are_its_own_fills_beside_the_accounts_holdings() {
     assert_eq!(text(&served, "agent_id"), "agt_a");
     assert_eq!(text(&served, "account_ref"), "acct_1");
     let positions = parse(
-        br#"[{"instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","filled_qty":"2","cost_basis":null,"risk_mark":null,"protection":null}]"#,
+        br#"[{"instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","filled_qty":"2","cost_basis":{"qty":"2","basis":"203"},"risk_mark":{"bid":"103","sane":true,"session":"regular","marked_at":"2026-10-17T10:00:05.000000000Z"},"market_value":"206","unrealized_pnl":"3","protection":{"orders":["o-1-p1"],"covered_qty":"2","stop":"95","take_profit":"110","unprotected_since":null}}]"#,
     )
     .expect("JSON");
     assert_eq!(
         served.get("positions"),
         Some(&positions),
-        "agt_b's fill is not agt_a's"
+        "agt_b's fill is not agt_a's; its basis is 2 × 101.5, worth 2 × 103 at the sane bid (DEC-2138)"
     );
     let holdings = parse(
         br#"[{"instrument":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","qty":"3","broker_qty":"3","mismatch":false,"observed_at":"2026-10-17T10:00:02.000000000Z"}]"#,
