@@ -76,5 +76,35 @@
     "set": {
       "/step_up/mutant_member": 1
     }
+  },
+  {
+    "label": "no subject",
+    "remove": [
+      "/subject"
+    ]
+  },
+  {
+    "label": "a subject no hold has",
+    "set": {
+      "/subject": "mutant_value"
+    }
+  },
+  {
+    "label": "a request that is not an event id",
+    "set": {
+      "/request": "req_1"
+    }
+  },
+  {
+    "label": "an assertion beside cli_confirm",
+    "set": {
+      "/step_up/method": "cli_confirm"
+    }
+  },
+  {
+    "label": "an assertion missing its signature",
+    "remove": [
+      "/step_up_assertion/signature"
+    ]
   }
 ]

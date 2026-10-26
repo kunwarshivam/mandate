@@ -1,0 +1,52 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-08T14:30:00.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 312,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+    },
+    {
+      "stream_id": "acct:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:01JB3K6F0C9R2V7N4M8Q1T5W40",
+      "seq": 41,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+    }
+  ],
+  "acknowledgments": [
+    {
+      "event": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "subject": "reconciliation",
+      "agent_id": "agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
+      "account": "acct:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:01JB3K6F0C9R2V7N4M8Q1T5W40",
+      "reason": {
+        "restriction": "reconciliation:b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081",
+        "kind": "instrument",
+        "instrument": "b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081"
+      },
+      "mode": "exits_only",
+      "raised_at": "2026-10-08T14:29:00.000000000Z",
+      "independent_required": null,
+      "request": null
+    },
+    {
+      "event": "01JBH3BTZ8K2M4N6P8R0S2T4V8",
+      "subject": "limit",
+      "agent_id": "agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
+      "account": "acct:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:01JB3K6F0C9R2V7N4M8Q1T5W40",
+      "reason": {
+        "limit": "max_daily_loss"
+      },
+      "mode": null,
+      "raised_at": "2026-10-08T14:29:00.000000000Z",
+      "independent_required": true,
+      "request": {
+        "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V9",
+        "requested_by": "user_owner_01"
+      }
+    }
+  ]
+}
