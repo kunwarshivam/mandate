@@ -12,8 +12,22 @@ How this was checked: code reading and grep on main, plus CI run evidence where 
 | X4 | **The runtime is deny-all.** daemon/src/fixture.rs:26-65 has DenyAll, NoPlan (`classify` = Deny) and NothingHeld, and a fake mandate_version (`:67-77`), used on every path (main.rs:204, 210) | 3, 6 | D1 (DEC-2378; S1 = #2432 open) | L |
 | X5 | **The executor knows nothing.** executord/src/fixture.rs:29-101 has NoMandate, NoInstruments, NoFacts, NoProtection and NoQuotes; "This wiring books no fill" (`:106`); the fixture broker never fills (paper.rs:8-9, 239-240) | 3, 4, 6 | X (E21-30 X1b-3) | L |
 | X6 | **Step-up.** The passkey verifier is a stub (api-server/src/methods.rs:41 always `StepUpMissing`; `:51,:81` `Unimplemented{E9-4}`). `CliConfirm` accepts only Approve and Connection actions (confirm.rs:75-80). Every approval grant answers 401 before any verifier runs (writes.rs:397-403) | 1, 7 | L1 (E9-4 S4: #2391, #2403) | L |
-| X7 | **Exits never reach the executor.** The daemon drops `Effect::Intent` (daemon/src/runtime.rs:435), and the core journals `IntentProposed` only for builder proposals and approvals (step.rs:607, escalation.rs:722), never for flatten or owner-exit legs. So even the confirmed owner exit (journaled as `OwnerExitRequested`, escalation.rs:978) is never sold | 6, 7 | **unowned** (D1/X boundary) | M |
+| X7 | **Exits never reach the executor.** Mapped by lane EX at 4e98608 (see "X7 by path" below): only the owner's exit of one instrument is unwired. The runtime journals its `OwnerExitRequested` copy (escalation.rs:978) and hands an `IntentBody::Flatten` the daemon drops by design (daemon/src/runtime.rs:472), and that the executor's core would refuse anyway (executor/src/intent.rs:182, `Unimplemented E7-4`). No `IntentProposed` is ever written for it, though journal spec §9.1 allows one caused by the copy and executord already prices one from that chain (follow.rs:517-605) | 6, 7 | **EX** (DEC-2387) | M |
 | X8 | **Alerts are dropped.** Both binaries discard `step()`'s alerts (executord/src/serve.rs:205; daemon/src/main.rs:256), and no dispatcher process exists (`mandate-dispatcher` is library only) | 4, 7 | **unowned** (E8-10) | S to stop dropping them, M for a dispatcher |
+
+## X7 by path (lane EX, main at 4e98608)
+
+The journal is the only channel from the runtime to the executor in the cell (design §3.1); the daemon drops every `Effect::Intent` (daemon/src/runtime.rs:472) by design. Each exit therefore reaches the executor only through a record executord reads (follow.rs).
+
+| Exit | Runtime writes | Executor reads | Reaches the executor? |
+|---|---|---|---|
+| Owner's exit of one instrument | `OwnerExitRequested` (escalation.rs:978), plus a `Flatten` handoff the daemon drops | `IntentProposed` only (follow.rs:`proposals`); it never reads an instrument-scope `OwnerExitRequested` as an order | **no**: fixed by DEC-2387, one `IntentProposed` per sell leg caused by the copy |
+| Kill switch (any scope reaching the agent) | `KillSwitchActivated` (step.rs:`switched`) | `switches` (follow.rs:359), applied as the core's own agent-scoped switch (process.rs:`apply`, kill.rs:37): cancel by id, confirm, sell the sub-ledger | yes, once the executor has started (X1) |
+| Discretionary exit (signal, goal, removed instrument) | `DecisionMade` and `IntentProposed` (step.rs:607) | `proposals`, handed whenever a risk exit is permitted (process.rs:362-371) | yes, once the plan proposes (X2, X4) |
+| Builder risk exit (`trim_to_target`) and an approved exit | `IntentProposed` (step.rs:607, escalation.rs:722) | `proposals` | yes, as above |
+| Executor-originated risk exits (watchdog, unprotected bound, drawdown flatten) | none: the executor originates them | its own state | in the executor already; the drawdown ladder is not yet called (risk_state.rs:7-9, lane TW) |
+
+Once handed, the core runs trading spec §5.4's marketable exit sequence (cancel protection, confirm, re-gate, submit, priced by §5.6), and cancels the agent's resting opening buys first (§5.3 rule 5). The in-process path (mandate-paper) had the same hole: the core refuses every `Flatten` handoff, so DEC-2387 hands the legs as orders there too.
 
 ## Step 1: the owner creates an agent in web (envelope, confirm, deploy)
 Today: web can create a version through the API, but no confirm or deploy can succeed. The CLI path works in the cell (cell-demo 981eb90: version create, confirm and deploy all ran; DR-1 makes the deployment v2).
@@ -89,7 +103,7 @@ Today: no sell path runs deployed.
 | Thesis exit | no anywhere | ThesisInvalidated journaled (research.rs:1097), but the runtime fold ignores it (state.rs:758); no UniverseChanged producer | — | I2 / **unowned** | L |
 | Risk exits (ladder, flatten_and_pause) | library yes | risk_state.rs | not called; rung C5 and fail-closed B2b-2b (`:549-562`) | TW | L |
 | Agent flatten planner | deployed no | mandate_risk::agent_flatten (lib.rs:993) used only by the shell | NothingHeld (daemon fixture.rs:53-65) | D1 (S2) | M |
-| Owner exit | journaled, never sold | X7 | — | unowned | M |
+| Owner exit | journaled, never sold | X7 | — | EX (DEC-2387) | M |
 | Exit priced at the confirmed floor | library yes | follow.rs:455-480; executord/tests/owner_exits.rs | never reached (X1, X5, X7) | — | — |
 
 ## Step 7: the owner sees everything in web, and approves, intervenes or kills
@@ -107,7 +121,7 @@ Today: web reads agents and approvals, and pause, kill switch and approval skip 
 | `/v1/me/workspaces` and `/v1/me/session` | served, unused | http.rs:132-139 | web reads `OWLHEAD_WORKSPACE_ID` (data-source.ts:23-50) | W | S |
 
 ## Unowned today (need an owner)
-1. X7: owner-exit and flatten legs never journaled as `IntentProposed`, so no deployed sell exists (M).
+1. X7: taken by lane EX (DEC-2387).
 2. X8: alerts dropped, and no dispatcher process (S/M).
 3. E19-12: event-triggered research, which has no spec (L).
 4. Thesis exit end to end (`UniverseChanged` producer, runtime fold of `ThesisInvalidated`) (L).
