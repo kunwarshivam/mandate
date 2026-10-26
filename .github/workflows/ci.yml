@@ -377,8 +377,8 @@ jobs:
 
   fast:
     # DEC-2065, DEC-2072: on `select`'s runner, so `main`'s verdict waits on the self-hosted pool
-    # rather than on GitHub's; `ubuntu-24.04` when `select` gave none, as for a fork, an unset
-    # CI_RUNNER, or a `select` that failed.
+    # rather than on GitHub's; `ubuntu-24.04` for a fork or while CI_RUNNER is unset, and when
+    # `select` produced no outputs (skipped, or cancelled before it ran).
     runs-on: ${{ needs.select.outputs.runner || 'ubuntu-24.04' }}
     timeout-minutes: 1
     permissions: {}
