@@ -584,8 +584,11 @@ caller (DEC-132 item 13). The harness supplies it like this:
   `invalidations`, with the item ids that show the condition holds.
 - An accepted invalidation removes the instrument at once, exactly as §8.6 says: the verdict is
   journaled, the executor copies `UniverseChanged` (`thesis_invalidated`), and the instrument is
-  exits-only from then on (MI-19, HI-19). Removal adds no risk, so the verdict is taken on the
-  model's word, with no corroboration and no approval (rule 2).
+  exits-only from then on (MI-19, HI-19). While the agent holds it, the order builder sells it at
+  its next evaluation, without waiting for that copy (mandate spec §8.3 step 2, MI-34,
+  [DEC-2391](../project/decisions/DEC-2391.md)): the run gives an opinion, and deterministic code
+  sizes and places the exit (rule 4). Removal adds no risk, so the verdict is taken on the model's
+  word, with no corroboration and no approval (rule 2).
 - In `exits_only`, a run is review-only: its theses are discarded unjudged and only its
   invalidations count.
 - **The judging order.** The harness judges a response's invalidations first, against the run's
