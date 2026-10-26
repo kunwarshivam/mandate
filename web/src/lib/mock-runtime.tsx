@@ -14,6 +14,7 @@ import type { Applies, Classification } from "@/api/confirm";
 import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-up";
 import type { AgentHolding, AgentOrder, JournalLine } from "@/api/activity";
 import type { ConnectionDetail } from "@/api/connect";
+import type { Alerts } from "@/api/alerts";
 
 /**
  * A stand-in for the workspace deployment. Commands and approval responses are held in memory
@@ -200,6 +201,8 @@ export interface Runtime {
   holdings: ((agentId: string) => Promise<PositionsAnswer>) | null;
   /** A stream's latest `count` records, oldest first (§4.8.1), for the audit screens; `null` over the fixtures. */
   streamTail: ((streamId: string, count: number) => Promise<ActivityAnswer["journal"]>) | null;
+  /** The owner alerts about the workspace's agents and accounts (`GET /alerts`, DEC-2141); `null` over the fixtures. */
+  alerts: (() => Promise<AlertsAnswer>) | null;
   /** The member's workspace passkeys (§3.6); `null` over the fixtures. */
   passkeys: PasskeyPort | null;
   setUps: SetUp[];
@@ -253,6 +256,8 @@ export interface ConnectPort {
 }
 
 /** An agent's own positions with its account's holdings from the same read (DEC-2111), or why not. */
+export type AlertsAnswer = { ok: true; read: Alerts } | { ok: false; reason: string };
+
 export type PositionsAnswer = { ok: true; account_ref: string | null; items: AgentHolding[]; account_positions: ReadPosition[] | null } | { ok: false; reason: string };
 
 /** The member's own workspace passkeys over the API (§3.6): the list, and adding one. */
@@ -662,7 +667,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, streamTail: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, streamTail: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
