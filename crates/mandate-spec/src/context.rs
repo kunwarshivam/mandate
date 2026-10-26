@@ -534,8 +534,9 @@ impl ValidationContext {
 /// The model registry V-007 reads, folded from `facts` in journal order by the same fold
 /// [`ValidationContext::from_journal`] runs: the latest [`JournaledFact::ModelRegistered`] per
 /// model id, whatever its version, less every id a later [`JournaledFact::ModelWithdrawn`]
-/// withdrew. A reader that lists what V-007 admits reads it here rather than folding again
-/// (DEC-2136).
+/// withdrew, when its caller's facts hold one: the API server's control fold maps no
+/// `model_withdrawn` row yet, so a withdrawn model stays listed until E10-11w. A reader that
+/// lists what V-007 admits reads it here rather than folding again (DEC-2136).
 pub fn registry<'a>(
     facts: impl IntoIterator<Item = &'a JournaledFact>,
 ) -> BTreeMap<ModelId, RegisteredModel> {
