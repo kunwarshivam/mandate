@@ -3,6 +3,9 @@
 //! that holds the gateway, and writes its reply. A peer that stalls is cut off at the timeout, a
 //! connection past the cap is closed unread, and the log carries only codes, never a byte of a
 //! frame, prompt, response, input or output.
+//!
+//! The same exchange carries a research artifact's put (DEC-2279 item 1), answered on the same one
+//! thread, so the writer's count of the stored bytes has one holder (item 4).
 
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
@@ -15,7 +18,10 @@ use mandate_gateway::CallRequest;
 use mandate_gateway::frame::{
     FrameError, MAX_REPLY_FRAME, MAX_REQUEST_FRAME, read_frame, write_frame,
 };
-use mandate_gateway::wire::{PutReply, PutRequest, Reply, reply_bytes, request_from};
+use mandate_gateway::wire::{
+    PutRefusal, PutReply, PutRequest, Reply, Request, any_request_from, put_reply_bytes,
+    reply_bytes,
+};
 
 /// The serve loop's bounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,8 +56,14 @@ pub struct Stopper {
 
 /// One decoded request waiting for the gateway's reply.
 struct Job {
-    request: CallRequest,
-    reply: Sender<Reply>,
+    request: Request,
+    reply: Sender<Answer>,
+}
+
+/// The reply to one [`Request`], of its kind.
+enum Answer {
+    Call(Box<Reply>),
+    Put(PutReply),
 }
 
 impl Server {
@@ -78,8 +90,18 @@ impl Server {
     /// Serves until stopped, answering each request that decoded whole with `answer`, one at a
     /// time and on this thread, so the gateway it holds never crosses a thread. If `answer`
     /// panics, the listener is stopped as the panic unwinds, so no connection is accepted that
-    /// nothing would answer.
-    pub fn run(self, mut answer: impl FnMut(CallRequest) -> Reply) {
+    /// nothing would answer. A put is refused `store_unavailable`: this server stores nothing.
+    pub fn run(self, answer: impl FnMut(CallRequest) -> Reply) {
+        self.run_storing(answer, |_| Err(PutRefusal::StoreUnavailable));
+    }
+
+    /// As [`Server::run`], and answers each put that decoded whole with `store`, on the same
+    /// thread (DEC-2279 items 1 and 4).
+    pub fn run_storing(
+        self,
+        mut answer: impl FnMut(CallRequest) -> Reply,
+        mut store: impl FnMut(&PutRequest) -> PutReply,
+    ) {
         let (jobs, queue) = mpsc::channel::<Job>();
         let Self {
             listener,
@@ -94,23 +116,8 @@ impl Server {
             })
         });
         let acceptor = thread::spawn(move || accept(&listener, limits, &log, &stopping, &jobs));
-        answer_all(&queue, &mut answer);
+        answer_all(&queue, &mut answer, &mut store);
         let _ = acceptor.join();
-    }
-
-    /// As [`Server::run`], and answers each put that decoded whole with `store`, on the same
-    /// thread (DEC-2279 items 1 and 4).
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    pub fn run_storing(
-        self,
-        answer: impl FnMut(CallRequest) -> Reply,
-        store: impl FnMut(&PutRequest) -> PutReply,
-    ) {
-        let _ = (self, answer, store);
-        todo!()
     }
 }
 
@@ -132,9 +139,17 @@ impl Drop for StopOnDrop {
     }
 }
 
-fn answer_all(queue: &Receiver<Job>, answer: &mut impl FnMut(CallRequest) -> Reply) {
+fn answer_all(
+    queue: &Receiver<Job>,
+    answer: &mut impl FnMut(CallRequest) -> Reply,
+    store: &mut impl FnMut(&PutRequest) -> PutReply,
+) {
     for job in queue {
-        let _ = job.reply.send(answer(job.request));
+        let answered = match job.request {
+            Request::Call(request) => Answer::Call(Box::new(answer(*request))),
+            Request::Put(put) => Answer::Put(store(&put)),
+        };
+        let _ = job.reply.send(answered);
     }
 }
 
@@ -196,7 +211,7 @@ fn exchange(mut connection: TcpStream, timeout: Duration, log: &dyn Log, jobs: &
         return;
     }
     let request = match read_frame(&mut connection, MAX_REQUEST_FRAME)
-        .and_then(|body| request_from(&body).map_err(FrameError::Wire))
+        .and_then(|body| any_request_from(&body).map_err(FrameError::Wire))
     {
         Ok(request) => request,
         Err(error) => {
@@ -213,11 +228,23 @@ fn exchange(mut connection: TcpStream, timeout: Duration, log: &dyn Log, jobs: &
         log.line("request dropped: stopping");
         return;
     };
-    let answered = match &reply {
-        Ok(record) => format!("call answered: {}", record.outcome.code()),
-        Err(refusal) => format!("call refused: {}", refusal.code()),
+    let (answered, body) = match &reply {
+        Answer::Call(call) => (
+            match call.as_ref() {
+                Ok(record) => format!("call answered: {}", record.outcome.code()),
+                Err(refusal) => format!("call refused: {}", refusal.code()),
+            },
+            reply_bytes(call),
+        ),
+        Answer::Put(put) => (
+            match put {
+                Ok(_) => "put stored".to_owned(),
+                Err(refusal) => format!("put refused: {}", refusal.code()),
+            },
+            put_reply_bytes(put),
+        ),
     };
-    match write_frame(&mut connection, &reply_bytes(&reply), MAX_REPLY_FRAME) {
+    match write_frame(&mut connection, &body, MAX_REPLY_FRAME) {
         Ok(()) => log.line(&answered),
         Err(error) => log.line(&format!("reply lost: {}", frame_code(&error))),
     }

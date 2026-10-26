@@ -538,7 +538,6 @@ fn dropping_service(
 /// worker builds no gateway and so writes nothing to the workspace's meter stream, the service's;
 /// a lost exchange is `gateway_unreachable`.
 #[test]
-#[ignore = "pending E21-62"]
 fn research_through_the_service_calls_it_and_writes_no_meter_record() {
     let (root, control, _, _) = deployed("remote");
     let (address, service) = dropping_service(&root);
@@ -604,7 +603,6 @@ fn research_through_the_service_calls_it_and_writes_no_meter_record() {
 /// its own mount: with no service there, a put stores nothing and leaves nothing in the store, so
 /// research halts rather than journal what was not stored.
 #[test]
-#[ignore = "pending E21-62"]
 fn research_through_the_service_stores_its_artifacts_only_through_it() {
     let (root, control, _, _) = deployed("remote-put");
     let address = std::net::TcpListener::bind("127.0.0.1:0")

@@ -113,7 +113,6 @@ fn sink(root: &Path, script: Script) -> (RemoteSink, mpsc::Receiver<PutRequest>)
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_put_the_service_stored_and_the_runtime_read_back_is_stored() {
     let root = store("honest");
     let (mut sink, sent) = sink(&root, Script::Honest);
@@ -130,7 +129,6 @@ fn a_put_the_service_stored_and_the_runtime_read_back_is_stored() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn an_answer_without_the_object_stored_is_a_failed_put() {
     let root = store("lies");
     let (mut sink, _) = sink(&root, Script::Lies);
@@ -138,7 +136,6 @@ fn an_answer_without_the_object_stored_is_a_failed_put() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn an_answer_naming_another_reference_is_a_failed_put() {
     let root = store("wrong-hash");
     let (mut sink, _) = sink(&root, Script::WrongHash);
@@ -149,7 +146,6 @@ fn an_answer_naming_another_reference_is_a_failed_put() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_refused_put_is_a_failed_put() {
     for refusal in PutRefusal::ALL {
         let root = store(refusal.code());
@@ -159,7 +155,6 @@ fn a_refused_put_is_a_failed_put() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_read_back_that_does_not_re_hash_is_a_failed_put() {
     let root = store("damaged");
     let (mut sink, _) = sink(&root, Script::Damages);
@@ -168,7 +163,6 @@ fn a_read_back_that_does_not_re_hash_is_a_failed_put() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_lost_answer_is_a_failed_put() {
     let root = store("dropped");
     let (mut sink, _) = sink(&root, Script::Drops);
@@ -176,7 +170,6 @@ fn a_lost_answer_is_a_failed_put() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_service_that_is_not_there_is_a_failed_put() {
     let root = store("absent");
     let address = TcpListener::bind("127.0.0.1:0")
@@ -190,7 +183,6 @@ fn a_service_that_is_not_there_is_a_failed_put() {
 /// DEC-2279 item 5: the runtime opens the research store at each read, never at start, so a sink
 /// over a store that is not there, or not yet laid out, is made, and its puts fail closed.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_research_store_not_there_or_not_laid_out_is_a_failed_put_never_a_failed_start() {
     let root = store("unlaid");
     for research in [root.join("nowhere"), root.join("bare")] {
@@ -206,7 +198,6 @@ fn a_research_store_not_there_or_not_laid_out_is_a_failed_put_never_a_failed_sta
 
 /// DEC-2279 item 6: the runtime's research reads read the research store alone.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_sink_reads_the_research_store_alone() {
     let shared = store("shared");
     let research = store("research-alone");
@@ -231,7 +222,6 @@ fn the_sink_reads_the_research_store_alone() {
 /// DEC-2279 item 3: a service that takes the put but answers past the put's timeout is a failed put,
 /// and the runtime gives up at the timeout, not at the answer.
 #[test]
-#[ignore = "pending E21-62"]
 fn an_answer_past_the_put_timeout_is_a_failed_put() {
     let root = store("stalled");
     let (address, _) = serve(&root, Script::Stalls);

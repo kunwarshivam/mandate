@@ -81,62 +81,69 @@ pub enum Request {
 }
 
 /// `put`'s frame body.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn put_bytes(put: &PutRequest) -> Vec<u8> {
-    let _ = put;
-    todo!()
+    to_canonical(&object([
+        ("put", text(&hex(&put.bytes))),
+        ("wire_version", int(WIRE_VERSION)),
+        ("workspace_id", text(&put.workspace_id)),
+    ]))
 }
 
 /// The put a frame body holds.
 ///
 /// # Errors
 /// [`WireError`] for any body [`put_bytes`] would not write.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn put_from(bytes: &[u8]) -> Result<PutRequest, WireError> {
-    let _ = bytes;
-    todo!()
+    let frame = canonical(bytes)?;
+    let m = Members(&frame);
+    let put = PutRequest {
+        workspace_id: m.text("workspace_id")?,
+        bytes: unhex(&m.text("put")?).ok_or(WireError::Member("put"))?,
+    };
+    exact(put_bytes(&put) == bytes, put)
 }
 
 /// The request a frame body holds, a put when it has a `put` member and a call otherwise.
 ///
 /// # Errors
 /// [`WireError`] for any body neither [`put_bytes`] nor [`request_bytes`] would write.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn any_request_from(bytes: &[u8]) -> Result<Request, WireError> {
-    let _ = bytes;
-    todo!()
+    if canonical(bytes)?.get("put").is_some() {
+        put_from(bytes).map(Request::Put)
+    } else {
+        request_from(bytes).map(|call| Request::Call(Box::new(call)))
+    }
 }
 
 /// `reply`'s frame body.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn put_reply_bytes(reply: &PutReply) -> Vec<u8> {
-    let _ = reply;
-    todo!()
+    let (name, value) = match reply {
+        Ok(digest) => ("stored", text(&reference(*digest))),
+        Err(refusal) => ("refused", text(refusal.code())),
+    };
+    to_canonical(&object([
+        (name, value),
+        ("wire_version", int(WIRE_VERSION)),
+    ]))
 }
 
 /// The put reply a frame body holds.
 ///
 /// # Errors
 /// [`WireError`] for any body [`put_reply_bytes`] would not write.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn put_reply_from(bytes: &[u8]) -> Result<PutReply, WireError> {
-    let _ = bytes;
-    todo!()
+    let frame = canonical(bytes)?;
+    let reply = match (frame.get("stored"), frame.get("refused")) {
+        (Some(Value::Str(stored)), None) => {
+            Ok(from_reference(stored).ok_or(WireError::Member("stored"))?)
+        }
+        (None, Some(Value::Str(code))) => Err(PutRefusal::ALL
+            .into_iter()
+            .find(|refusal| refusal.code() == code)
+            .ok_or(WireError::Member("refused"))?),
+        _ => return Err(WireError::Member("stored")),
+    };
+    exact(put_reply_bytes(&reply) == bytes, reply)
 }
 
 /// `request`'s frame body.
