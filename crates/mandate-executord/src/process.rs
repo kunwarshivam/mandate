@@ -1013,8 +1013,14 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             .cloned()
             .unwrap_or_else(|| ActivityCursor(String::new()));
         if let Some(read) = self.broker.account_reads() {
-            let reads = read.map_err(read_error)?;
-            self.list_unlisted(&reads.open_orders, now, alerts, depth)?;
+            let mut reads = read.map_err(read_error)?;
+            if self.list_unlisted(&reads.open_orders, now, alerts, depth)? {
+                reads = self
+                    .broker
+                    .account_reads()
+                    .ok_or(Read::Unusable)?
+                    .map_err(read_error)?;
+            }
             let mut fills = recorded_fills(&self.state, &reads.positions);
             fills.extend(limit_fills(&self.state, &reads.positions).map_err(|_| Read::Unusable)?);
             return Ok(BrokerSnapshot {
@@ -1058,7 +1064,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// core, which adopts the one record naming it at our prices (DEC-862, DEC-1150 item 2,
     /// DEC-2395 item 2). Robinhood reports a fill only on the order's record, so this is what
     /// books an order that filled between two reads before its position is compared: without it,
-    /// every fill would read as an unexplained position and pause the agent (DEC-2396).
+    /// every fill would read as an unexplained position and pause the agent (DEC-2800).
+    ///
+    /// Returns whether any answer was handed: its effects may have journaled and sent more (a
+    /// protective order placed on the fill), so the snapshot then reads the account again, and its
+    /// reads are never older than the head it is taken at.
     ///
     /// # Errors
     /// [`Read::Lost`] for a listing whose answer was lost, [`Read::Unusable`] for one that could
@@ -1069,7 +1079,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         now: UtcNanos,
         alerts: &mut Vec<Alert>,
         depth: usize,
-    ) -> Result<(), Read> {
+    ) -> Result<bool, Read> {
         let listed: BTreeSet<&str> = working
             .iter()
             .filter_map(|order| order.client_order_id.as_deref())
@@ -1082,6 +1092,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             .filter(|order| !listed.contains(order.client_order_id.as_str()))
             .filter_map(|order| self.state.listing(&order.client_order_id))
             .collect();
+        let handed = !listings.is_empty();
         for listing in listings {
             let answer = self.read(&BrokerRequest::ListOrders(listing))?;
             if !self.hand(
@@ -1094,7 +1105,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 return Err(Read::Halted);
             }
         }
-        Ok(())
+        Ok(handed)
     }
 
     fn read(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, Read> {
