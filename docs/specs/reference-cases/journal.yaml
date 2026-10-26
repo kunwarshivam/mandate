@@ -85267,6 +85267,810 @@ stepped_up_records:
       pii_refs: []
     expect: *id178
     processes: *id179
+real_money:
+  spec: docs/specs/journal.md v0.91 §9.36 (DEC-2134)
+  drafts:
+    real_money_gate_changed:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAA3G4A000000000000000G1
+      stream_id: ctl:ws_01J8Z2
+      event_type: RealMoneyGateChanged
+      schema_version: 1
+      event_time: '2026-10-26T09:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: platform_operator
+        id: 01JAA3G0A000000000000000P1
+        version: '1'
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        enabled: false
+        operator: 01JAA3G0A000000000000000P1
+        decision: null
+      artifact_refs: []
+      pii_refs: []
+    real_money_refused:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAA3G4A000000000000000R1
+      stream_id: ctl:ws_01J8Z2
+      event_type: RealMoneyRefused
+      schema_version: 1
+      event_time: '2026-10-26T09:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA3G0A000000000000000M1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        action: deploy
+        requested: live
+        principal: 01JAA3G0A000000000000000M1
+        reason: gate_off
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: gate.enabled.kind
+    clause: §9.36 types
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.enabled
+      value: 'true'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.enabled
+  - name: gate.enabled.int
+    clause: §9.36 types
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.enabled
+      value: 1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.enabled
+  - name: gate.operator.kind
+    clause: §9.36 types
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.operator
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.operator
+  - name: gate.operator.form
+    clause: §9.36 types
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.operator
+      value: operator_01
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.operator
+  - name: gate.decision.kind
+    clause: §9.36 types
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.decision
+      value: 2134
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.decision
+  - name: gate.missing
+    clause: §9.36 closed
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.decision
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.decision
+  - name: gate.extra
+    clause: §9.36 closed
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.workspace
+      value: 01JAA3G0A000000000000000M1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.workspace
+  - name: refused.principal.kind
+    clause: §9.36 types
+    base_draft: real_money_refused
+    changes:
+    - path: payload.principal
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.principal
+  - name: refused.principal.form
+    clause: §9.36 types
+    base_draft: real_money_refused
+    changes:
+    - path: payload.principal
+      value: user_owner_01
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.principal
+  - name: refused.missing
+    clause: §9.36 closed
+    base_draft: real_money_refused
+    changes:
+    - path: payload.reason
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: refused.extra
+    clause: §9.36 closed
+    base_draft: real_money_refused
+    changes:
+    - path: payload.mandate_version
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.mandate_version
+  - name: gate.enabled.null
+    clause: §9.36 types
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.enabled
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.enabled
+  - name: gate.operator.null
+    clause: §9.36 types
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.operator
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.operator
+  - name: refused.action.null
+    clause: §9.36 types
+    base_draft: real_money_refused
+    changes:
+    - path: payload.action
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.action
+  - name: refused.requested.null
+    clause: §9.36 types
+    base_draft: real_money_refused
+    changes:
+    - path: payload.requested
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.requested
+  - name: refused.principal.null
+    clause: §9.36 types
+    base_draft: real_money_refused
+    changes:
+    - path: payload.principal
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.principal
+  - name: refused.reason.null
+    clause: §9.36 types
+    base_draft: real_money_refused
+    changes:
+    - path: payload.reason
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: refused.action.live
+    clause: §9.36 vocabulary
+    base_draft: real_money_refused
+    changes:
+    - path: payload.action
+      value: live
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.action
+  - name: refused.action.Deploy
+    clause: §9.36 vocabulary
+    base_draft: real_money_refused
+    changes:
+    - path: payload.action
+      value: Deploy
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.action
+  - name: refused.action.deploy_padded
+    clause: §9.36 vocabulary
+    base_draft: real_money_refused
+    changes:
+    - path: payload.action
+      value: 'deploy '
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.action
+  - name: refused.action.approve
+    clause: §9.36 vocabulary
+    base_draft: real_money_refused
+    changes:
+    - path: payload.action
+      value: approve
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.action
+  - name: refused.requested.paper
+    clause: §9.36 vocabulary
+    base_draft: real_money_refused
+    changes:
+    - path: payload.requested
+      value: paper
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.requested
+  - name: refused.requested.simulated
+    clause: §9.36 vocabulary
+    base_draft: real_money_refused
+    changes:
+    - path: payload.requested
+      value: simulated
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.requested
+  - name: refused.requested.Live
+    clause: §9.36 vocabulary
+    base_draft: real_money_refused
+    changes:
+    - path: payload.requested
+      value: Live
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.requested
+  - name: refused.reason.gate_on
+    clause: §9.36 vocabulary
+    base_draft: real_money_refused
+    changes:
+    - path: payload.reason
+      value: gate_on
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reason
+  - name: refused.reason.Gate_off
+    clause: §9.36 vocabulary
+    base_draft: real_money_refused
+    changes:
+    - path: payload.reason
+      value: Gate_off
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reason
+  - name: gate.decision.form.DEC-0
+    clause: §9.36 `decision_id`
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.enabled
+      value: true
+    - path: payload.decision
+      value: DEC-0
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.decision
+  - name: gate.decision.form.DEC-02134
+    clause: §9.36 `decision_id`
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.enabled
+      value: true
+    - path: payload.decision
+      value: DEC-02134
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.decision
+  - name: gate.decision.form.dec-2134
+    clause: §9.36 `decision_id`
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.enabled
+      value: true
+    - path: payload.decision
+      value: dec-2134
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.decision
+  - name: gate.decision.form.DEC2134
+    clause: §9.36 `decision_id`
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.enabled
+      value: true
+    - path: payload.decision
+      value: DEC2134
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.decision
+  - name: gate.decision.form.DEC-123456
+    clause: §9.36 `decision_id`
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.enabled
+      value: true
+    - path: payload.decision
+      value: DEC-123456
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.decision
+  - name: gate.decision.form.DEC-2134_padded
+    clause: §9.36 `decision_id`
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.enabled
+      value: true
+    - path: payload.decision
+      value: 'DEC-2134 '
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.decision
+  - name: set_by_a_user
+    clause: 'rule 273: a platform operator sets the gate'
+    base_draft: real_money_gate_changed
+    changes:
+    - path: actor
+      value:
+        kind: user
+        id: 01JAA3G0A000000000000000P1
+        version: '1'
+        build: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: set_by_a_service
+    clause: 'rule 273: no service sets it'
+    base_draft: real_money_gate_changed
+    changes:
+    - path: actor
+      value:
+        kind: system
+        id: 01JAA3G0A000000000000000P1
+        version: '1'
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: set_for_another_operator
+    clause: 'rule 273: the actor''s id is the operator'
+    base_draft: real_money_gate_changed
+    changes:
+    - path: actor.id
+      value: 01JAA3G0A000000000000000P2
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.id
+  - name: on_without_a_decision
+    clause: 'rule 273: on names its decision'
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.enabled
+      value: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.decision
+  - name: refused_by_an_operator
+    clause: 'rule 274: the refusal is the principal''s'
+    base_draft: real_money_refused
+    changes:
+    - path: actor
+      value:
+        kind: platform_operator
+        id: 01JAA3G0A000000000000000M1
+        version: '1'
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: refused_for_another_principal
+    clause: 'rule 274: the actor''s id is the principal'
+    base_draft: real_money_refused
+    changes:
+    - path: actor.id
+      value: 01JAA3G0A000000000000000M2
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.id
+  - name: gate.at_version_2
+    clause: '§9.36: closed at schema version 1 only'
+    base_draft: real_money_gate_changed
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: refused.at_version_2
+    clause: '§9.36: closed at schema version 1 only'
+    base_draft: real_money_refused
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  valid_drafts:
+  - name: on_with_a_decision
+    clause: 'rule 273: on with its decision'
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.enabled
+      value: true
+    - path: payload.decision
+      value: DEC-2134
+    expect:
+      outcome: Valid
+  - name: off_with_a_decision
+    clause: 'rule 273: off may cite one'
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.decision
+      value: DEC-1
+    expect:
+      outcome: Valid
+  - name: on_with_the_largest_number
+    clause: '§9.36 `decision_id`: five digits'
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.enabled
+      value: true
+    - path: payload.decision
+      value: DEC-99999
+    expect:
+      outcome: Valid
+  - name: another_operator_as_itself
+    clause: 'rule 273: any operator, as itself'
+    base_draft: real_money_gate_changed
+    changes:
+    - path: payload.operator
+      value: 01JAA3G0A000000000000000P2
+    - path: actor.id
+      value: 01JAA3G0A000000000000000P2
+    expect:
+      outcome: Valid
+  - name: another_principal_as_itself
+    clause: 'rule 274: any principal, as itself'
+    base_draft: real_money_refused
+    changes:
+    - path: payload.principal
+      value: 01JAA3G0A000000000000000M2
+    - path: actor.id
+      value: 01JAA3G0A000000000000000M2
+    expect:
+      outcome: Valid
+  - name: refused_create_version
+    clause: '§9.36: every action'
+    base_draft: real_money_refused
+    changes:
+    - path: payload.action
+      value: create_version
+    expect:
+      outcome: Valid
+  - name: refused_connect
+    clause: '§9.36: every action'
+    base_draft: real_money_refused
+    changes:
+    - path: payload.action
+      value: connect
+    expect:
+      outcome: Valid
+  - name: refused_go_live
+    clause: '§9.36: every action'
+    base_draft: real_money_refused
+    changes:
+    - path: payload.action
+      value: go_live
+    expect:
+      outcome: Valid
+  streams:
+  - name: none
+    clause: '§9.36: a stream with no setting is off'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3G4A000000000000000R1
+      stream_id: ctl:ws_01J8Z2
+      event_type: RealMoneyRefused
+      schema_version: 1
+      event_time: '2026-10-26T09:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA3G0A000000000000000M1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        action: deploy
+        requested: live
+        principal: 01JAA3G0A000000000000000M1
+        reason: gate_off
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      enabled: false
+  - name: 'off'
+    clause: '§9.36: an off setting'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3G4A000000000000000G1
+      stream_id: ctl:ws_01J8Z2
+      event_type: RealMoneyGateChanged
+      schema_version: 1
+      event_time: '2026-10-26T09:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: platform_operator
+        id: 01JAA3G0A000000000000000P1
+        version: '1'
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        enabled: false
+        operator: 01JAA3G0A000000000000000P1
+        decision: null
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      enabled: false
+  - name: 'on'
+    clause: '§9.36: an on setting'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3G4A000000000000000G1
+      stream_id: ctl:ws_01J8Z2
+      event_type: RealMoneyGateChanged
+      schema_version: 1
+      event_time: '2026-10-26T09:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: platform_operator
+        id: 01JAA3G0A000000000000000P1
+        version: '1'
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        enabled: false
+        operator: 01JAA3G0A000000000000000P1
+        decision: null
+      artifact_refs: []
+      pii_refs: []
+    - &id180
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAA3G4A000000000000000G2
+      stream_id: ctl:ws_01J8Z2
+      event_type: RealMoneyGateChanged
+      schema_version: 1
+      event_time: '2026-10-26T09:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: platform_operator
+        id: 01JAA3G0A000000000000000P1
+        version: '1'
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        enabled: true
+        operator: 01JAA3G0A000000000000000P1
+        decision: DEC-2134
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      enabled: true
+  - name: on_then_off
+    clause: '§9.36: the latest setting, not the first'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3G4A000000000000000G1
+      stream_id: ctl:ws_01J8Z2
+      event_type: RealMoneyGateChanged
+      schema_version: 1
+      event_time: '2026-10-26T09:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: platform_operator
+        id: 01JAA3G0A000000000000000P1
+        version: '1'
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        enabled: true
+        operator: 01JAA3G0A000000000000000P1
+        decision: DEC-2134
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3G4A000000000000000G2
+      stream_id: ctl:ws_01J8Z2
+      event_type: RealMoneyGateChanged
+      schema_version: 1
+      event_time: '2026-10-26T09:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: platform_operator
+        id: 01JAA3G0A000000000000000P1
+        version: '1'
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        enabled: false
+        operator: 01JAA3G0A000000000000000P1
+        decision: null
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      enabled: false
+  - name: off_on_off_on
+    clause: '§9.36: the latest of several'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3G4A000000000000000G1
+      stream_id: ctl:ws_01J8Z2
+      event_type: RealMoneyGateChanged
+      schema_version: 1
+      event_time: '2026-10-26T09:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: platform_operator
+        id: 01JAA3G0A000000000000000P1
+        version: '1'
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        enabled: false
+        operator: 01JAA3G0A000000000000000P1
+        decision: null
+      artifact_refs: []
+      pii_refs: []
+    - *id180
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3G4A000000000000000G3
+      stream_id: ctl:ws_01J8Z2
+      event_type: RealMoneyGateChanged
+      schema_version: 1
+      event_time: '2026-10-26T09:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: platform_operator
+        id: 01JAA3G0A000000000000000P1
+        version: '1'
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        enabled: false
+        operator: 01JAA3G0A000000000000000P1
+        decision: null
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3G4A000000000000000G4
+      stream_id: ctl:ws_01J8Z2
+      event_type: RealMoneyGateChanged
+      schema_version: 1
+      event_time: '2026-10-26T09:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: platform_operator
+        id: 01JAA3G0A000000000000000P1
+        version: '1'
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        enabled: true
+        operator: 01JAA3G0A000000000000000P1
+        decision: DEC-2134
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      enabled: true
+  - name: refused_after_on
+    clause: '§9.36: a refusal changes no setting'
+    records:
+    - *id180
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3G4A000000000000000R1
+      stream_id: ctl:ws_01J8Z2
+      event_type: RealMoneyRefused
+      schema_version: 1
+      event_time: '2026-10-26T09:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA3G0A000000000000000M1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        action: deploy
+        requested: live
+        principal: 01JAA3G0A000000000000000M1
+        reason: gate_off
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      enabled: true
 account_restrictions:
   spec: docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2137)
   drafts:
