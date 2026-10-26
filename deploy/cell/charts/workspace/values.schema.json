@@ -354,6 +354,35 @@
         }
       }
     },
+    "modelGateway": {
+      "description": "The model-gateway service's workspace and deployment, ids only, and its two monthly budgets, which only the local cell's values name (E21-62, DEC-2326)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace",
+        "deployment",
+        "workspaceMonthlyUsd",
+        "deploymentMonthlyUsd"
+      ],
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "pattern": "^$|^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "deployment": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "workspaceMonthlyUsd": {
+          "type": "string",
+          "pattern": "^$|^[0-9]{1,6}(\\.[0-9]{1,6})?$"
+        },
+        "deploymentMonthlyUsd": {
+          "type": "string",
+          "pattern": "^$|^[0-9]{1,6}(\\.[0-9]{1,6})?$"
+        }
+      }
+    },
     "data": {
       "description": "The data process's recorded series (mandate-datad): each instrument it stores, with its asset id, which the closes object names, and its series' anchor, `<YYYY-MM-DD>=<close>`; a recording, so only the local cell's values list any",
       "type": "object",
