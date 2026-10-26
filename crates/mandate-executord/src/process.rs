@@ -26,6 +26,10 @@ use crate::quotes::{QuoteFeed, QuotePoll};
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// How often, in seconds, a process with an order working asks for a reconciliation (X1b-3): four
+/// broker reads, well inside Alpaca's limit of 200 requests a minute.
+pub const SCHEDULED_RECONCILE_S: i64 = 10;
+
 /// The broker as the process calls it: one request, one answer, in order. The connector is
 /// `mandate_executor::BrokerConnector`; an adapter that owns its runtime drives it (X2).
 pub trait Broker {
@@ -159,6 +163,11 @@ pub struct ExecutorProcess<S, B> {
     outbox: VecDeque<BrokerRequest>,
     /// Whether the core asked for a reconciliation that has not been handed yet.
     reconcile: bool,
+    /// When the last scheduled reconciliation was asked for (X1b-3): while an order works, the
+    /// process reads the broker every [`SCHEDULED_RECONCILE_S`], so a fill the broker reports
+    /// after the order's answer is booked without a restart. The start's own reconciliation
+    /// counts as the first.
+    scheduled: UtcNanos,
     /// The followed streams that did not read on their last read, each alerted once.
     unreadable: BTreeSet<String>,
     /// The handoffs the core refused for a missing binding-gate input, each alerted once by
@@ -216,6 +225,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             pending: None,
             outbox: VecDeque::new(),
             reconcile: false,
+            scheduled: now,
             unreadable: BTreeSet::new(),
             held: BTreeSet::new(),
             journal_down: false,
@@ -364,6 +374,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         if nothing_read && all_read && released && self.owes_nothing() {
             self.lifecycle.observe(now, Lifecycled::Completed);
         }
+        self.reconcile_on_schedule(now, &mut alerts);
         alerts
     }
 
@@ -783,6 +794,26 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         self.flush(now, alerts, depth)
     }
 
+    /// Asks for a reconciliation once [`SCHEDULED_RECONCILE_S`] have passed since the last one this
+    /// asked for, while any order the account stream holds may still work (X1b-3). The broker
+    /// reports a fill only on a read, so without it an order accepted and filled later is booked
+    /// only by the next start's reconciliation. It runs last in a pass that went through, so no
+    /// read goes ahead of what the pass sent, and none while the journal is down; a run that does
+    /// not commit has already told the lifecycle, and the next pass picks up what it left.
+    fn reconcile_on_schedule(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) {
+        let working = self
+            .state
+            .orders()
+            .values()
+            .any(|order| !order.state.is_terminal());
+        let due = now.secs().saturating_sub(self.scheduled.secs()) >= SCHEDULED_RECONCILE_S;
+        if working && due {
+            self.reconcile = true;
+            self.scheduled = now;
+            self.flush(now, alerts, 0);
+        }
+    }
+
     /// Sends the requests left in the outbox in order, handing each answer to the core, then the
     /// reconciliation if one is due. A request that cannot be sent, or an answer that cannot be
     /// read, stops the process (DEC-85); whether everything handed committed.
@@ -808,12 +839,14 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     }
 
     /// The reconciliation the core asked for (trading spec §11): the broker's four reads as one
-    /// snapshot, its account reported first, as the shell's start does, so the reconciliation
-    /// runs at the head the report left. A read whose answer is lost leaves it due for the next
-    /// pass, since a read changes nothing at the broker, and the pass goes on, so a kill switch
+    /// snapshot, its account reported first, as the shell's start does. The snapshot keeps the
+    /// head it was taken at, before its own report, so the reconciliation reads that report as
+    /// the snapshot's own and counts every fill since the base it replaced once (DEC-948 item 5);
+    /// a fill the broker already booked in the reported cash is never subtracted twice. A read
+    /// whose answer is lost leaves it due for the next pass, since a read changes nothing at the broker, and the pass goes on, so a kill switch
     /// never waits on it (`AGENTS.md` rule 13). It stays due until its snapshot is handed.
     fn reconciliation(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>, depth: usize) -> bool {
-        let mut snapshot = match self.snapshot() {
+        let snapshot = match self.snapshot() {
             Ok(snapshot) => snapshot,
             Err(Read::Lost) => return true,
             Err(Read::Unusable) => {
@@ -827,7 +860,6 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             self.reconcile = true;
             return false;
         }
-        snapshot.taken_at_head = Seq(self.account_head());
         self.hand(
             now,
             self.written_at,

@@ -11,6 +11,7 @@ import { backtestOfVersion, servedBacktestFixture } from "@/fixtures/backtests";
 import type { ApiView } from "@/api/read-models";
 import type { Applies, Classification } from "@/api/confirm";
 import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-up";
+import type { AgentHolding, AgentOrder, JournalLine } from "@/api/activity";
 import type { ConnectionDetail } from "@/api/connect";
 
 /**
@@ -184,6 +185,8 @@ export interface Runtime {
   stepUp: ((action: StepUpAction) => Promise<ChallengeAnswer>) | null;
   /** The Alpaca paper connect over the API (§4.5, DEC-2623); `null` over the fixtures, which connect nothing. */
   connect: ConnectPort | null;
+  /** An agent's orders and own positions over the API (§4.7 D3, DEC-2111); `null` over the fixtures, whose screens show their own. */
+  activity: ((agentId: string) => Promise<ActivityAnswer>) | null;
   setUps: SetUp[];
   /** Step 1: `POST /mandate-drafts/{id}/versions`. */
   createVersion: (request: NewAgent) => SetUp;
@@ -215,6 +218,14 @@ export interface ConnectPort {
   read: (connectionId: string) => Promise<ConnectionAnswer>;
   /** `GET /connections`. */
   list: () => Promise<{ ok: true; connections: ConnectionDetail[] } | { ok: false; reason: string }>;
+}
+
+/** Each list as served, or not reported: a list that cannot be read is never shown as empty. */
+export interface ActivityAnswer {
+  orders: { ok: true; account_ref: string | null; items: AgentOrder[] } | { ok: false; reason: string };
+  holdings: { ok: true; account_ref: string | null; items: AgentHolding[] } | { ok: false; reason: string };
+  /** The agent stream's latest events, newest last; `forbidden` for a role that may not read records (§4.8.1). */
+  journal: { ok: true; items: JournalLine[] } | { ok: false; reason: string };
 }
 
 export const RuntimeContext = createContext<Runtime | null>(null);
@@ -609,7 +620,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, activity: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

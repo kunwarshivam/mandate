@@ -11,11 +11,13 @@ workspace = true
 
 [dependencies]
 mandate-accounting.workspace = true
+mandate-bars.workspace = true
 mandate-alpaca.workspace = true
 mandate-builder.workspace = true
 mandate-canon.workspace = true
 mandate-domain.workspace = true
 mandate-executor.workspace = true
+mandate-gate-inputs.workspace = true
 mandate-journal.workspace = true
 mandate-journal-pg.workspace = true
 mandate-liquidity.workspace = true
