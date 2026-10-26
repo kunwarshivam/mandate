@@ -77,7 +77,7 @@ export function PendingPolicy() {
 
 const ACCEPTANCE_TEXT: Readonly<Record<Acceptance, string>> = {
   accepted: "Accepted: your acceptance of this version is recorded in your journal.",
-  not_accepted: "Not yet accepted. Accept it on the host before your agent trades.",
+  not_accepted: "Not yet accepted by you. Accept it on the host; it is recorded in your journal with step-up.",
   unknown: "Your deployment did not report whether you accepted it.",
 };
 

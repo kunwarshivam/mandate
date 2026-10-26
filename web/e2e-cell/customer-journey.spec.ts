@@ -84,7 +84,15 @@ test("the customer's journey on Alpaca paper: connections, going live, and real 
     step("disclosures", String(await disclosures.getByRole("article").count()));
     const acceptance = page.getByRole("region", { name: "Your acceptance" }).getByRole("status");
     await expect(acceptance).toHaveAttribute("data-state", "accepted", { timeout: 30_000 });
-    step("disclosure_accepted");
+    const principal = await page.evaluate(async (api) => {
+      const response = await fetch(`${api}/v1/me/session`, { credentials: "include", headers: { Accept: "application/json" } });
+      return response.ok ? ((await response.json()) as { principal_id?: string }).principal_id ?? "" : "";
+    }, API);
+    const accepted = (await controlEvents(page, "DisclosureAccepted")).filter((e) => e.payload.document === "go_live_risk" && e.payload.user === principal);
+    const last = accepted.at(-1);
+    const method = (last?.payload.step_up as { method?: string } | null | undefined)?.method;
+    if (!last || method !== "cli_confirm") refuse(`no DisclosureAccepted of go_live_risk by ${principal || "the owner"} with cli_confirm step-up`);
+    step("disclosure_accepted", last?.event_id ?? "");
   });
 
   await test.step("asking for real money is refused, and the agent stays on paper", async () => {

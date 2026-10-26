@@ -2618,10 +2618,6 @@ mod tests {
         assert_eq!(payload["mandate_version"], reference(&mandate()));
     }
 
-    /// Step 5 runs the runner on the confirmed version in the pod's store and records the payload
-    /// it prints, after the confirmation and before the kill switch, under the rule set step 2
-    /// registered before the version; the API read and web/'s report wait on the membership
-    /// parser and web/.
     /// The journey accepts the version `mandate disclosure accept` stores, which its own test pins,
     /// with the code the CLI shows for it.
     #[test]
@@ -2639,6 +2635,10 @@ mod tests {
         Ok(())
     }
 
+    /// Step 5 runs the runner on the confirmed version in the pod's store and records the payload
+    /// it prints, after the confirmation and before the kill switch, under the rule set step 2
+    /// registered before the version; the API read and web/'s report wait on the membership
+    /// parser and web/.
     #[test]
     fn step_five_runs_the_backtest_under_the_registered_rule_set_and_records_it() {
         let steps = planned("demo5");

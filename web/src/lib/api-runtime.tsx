@@ -40,19 +40,27 @@ const JOURNAL_TAIL = 20;
 /** The most control-stream pages the disclosure read walks, 1000 events each. */
 const DISCLOSURE_PAGES = 50;
 
-/** One served event's `payload.document` and `payload.version`, decoded from its base64 body; `null` for a body that names neither. */
-const acceptedRead: Decoder<{ document: string; version: string } | null> = (value, path) => {
+/** What an acceptance names: the document, its version, the user who accepted, and the step-up method; `null` for a body that names any of them wrongly. */
+type Accepted = { document: string; version: string; user: string; method: string };
+
+/** One served event's acceptance, decoded from its base64 body (journal spec §9.2 `DisclosureAccepted`). */
+const acceptedRead: Decoder<Accepted | null> = (value, path) => {
   const body = typeof value === "object" && value !== null ? (value as Record<string, unknown>).body : undefined;
   if (typeof body !== "string") return { ok: false, issue: { path: `${path}/body`, problem: "wrong_type", value: null, allowed: null } };
   try {
     const bytes = Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
     const payload = (JSON.parse(new TextDecoder().decode(bytes)) as { payload?: Record<string, unknown> }).payload;
-    const { document, version } = payload ?? {};
-    return { ok: true, value: typeof document === "string" && typeof version === "string" ? { document, version } : null };
+    const { document, version, user, step_up } = payload ?? {};
+    const method = typeof step_up === "object" && step_up !== null ? (step_up as Record<string, unknown>).method : undefined;
+    const named = typeof document === "string" && typeof version === "string" && typeof user === "string" && typeof method === "string";
+    return { ok: true, value: named ? { document, version, user, method } : null };
   } catch {
     return { ok: false, issue: { path: `${path}/body`, problem: "not_canonical", value: null, allowed: null } };
   }
 };
+
+/** The step-up methods an acceptance counts with (V-005: never one without step-up). */
+const STEP_UP_METHODS: ReadonlySet<string> = new Set(["passkey", "cli_confirm"]);
 
 /** How many times an unanswered command is sent again, with the same key and body (API-4), before it is called unknown. */
 const SENDS = 4;
@@ -317,23 +325,29 @@ export function ApiRuntimeProvider({
   const disclosures = useMemo<DisclosurePort>(
     () => ({
       accepted: async (document, version) => {
+        const session = await client.readSession();
+        if (!session.ok) return "unknown";
+        const principal = session.value.principal_id;
         const stream = `ctl:${client.workspaceId}`;
         const route = `/journal/streams/${encodeURIComponent(stream)}/events` as const;
         const decoder = journalPageRead(stream);
         const found: string[] = [];
         let after = 0;
-        for (let page = 0; page < DISCLOSURE_PAGES; page += 1) {
+        let complete = false;
+        for (let page = 0; page < DISCLOSURE_PAGES && !complete; page += 1) {
           const read = await client.read(`${route}?after_seq=${after}&limit=1000`, decoder);
           if (!read.ok) return "unknown";
           for (const e of read.value.events) if (e.event_type === "DisclosureAccepted") found.push(e.event_id);
           const last = read.value.events.at(-1)?.seq ?? read.value.head_seq;
-          if (last >= read.value.head_seq) break;
+          complete = last >= read.value.head_seq;
           after = last;
         }
+        if (!complete) return "unknown";
         for (const eventId of found.reverse()) {
           const one = await client.read(`/journal/events/${encodeURIComponent(eventId)}`, acceptedRead);
           if (!one.ok) return "unknown";
-          if (one.value?.document === document && one.value.version === version) return "accepted";
+          const a = one.value;
+          if (a && a.document === document && a.version === version && a.user === principal && STEP_UP_METHODS.has(a.method)) return "accepted";
         }
         return "not_accepted";
       },

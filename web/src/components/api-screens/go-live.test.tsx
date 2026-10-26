@@ -14,8 +14,10 @@ import { type Role, RoleProvider } from "@/lib/roles";
 const WS = "ws_01J9ZQ4M0000000000000000AB";
 const ORIGIN = "https://api.owlhead.ai";
 
-function mount(node: React.ReactNode, role: Role = "owner") {
-  const server = createMockServer({ workspaceId: WS, scenario: "normal" });
+type Acceptances = NonNullable<Parameters<typeof createMockServer>[0]["acceptances"]>;
+
+function mount(node: React.ReactNode, role: Role = "owner", acceptances?: Acceptances) {
+  const server = createMockServer({ workspaceId: WS, scenario: "normal", acceptances });
   const posts: string[] = [];
   const fetch: Fetch = async (input, init) => {
     if (init.method === "POST") posts.push(new URL(input).pathname.slice(`/v1/workspaces/${WS}`.length));
@@ -114,5 +116,32 @@ describe("the go-live disclosure's acceptance (DEC-2134; journal spec §9.2 Disc
     const command = await within(panel).findByText(/^mandate disclosure accept go_live_risk /);
     expect(command.textContent).toContain(`--workspace ${WS} --user ${MOCK_PRINCIPAL}`);
     expect(panel.getAttribute("data-version")).toBe(GO_LIVE_RISK_VERSION);
+  });
+});
+
+describe("whose acceptance counts (DEC-2134, V-005)", () => {
+  const own = { document: GO_LIVE_RISK.document, version: GO_LIVE_RISK_VERSION, user: MOCK_PRINCIPAL, method: "cli_confirm" };
+  const state = async () => (await screen.findByRole("region", { name: "Your acceptance" })).querySelector("[role=status]")?.getAttribute("data-state");
+  const settled = async () => {
+    const panel = await screen.findByRole("region", { name: "Your acceptance" });
+    await within(panel).findByRole("status");
+    return state();
+  };
+
+  it.each<[string, Acceptances, string]>([
+    ["the signed-in owner's own, with step-up", [own], "accepted"],
+    ["the owner's own by passkey", [{ ...own, method: "passkey" }], "accepted"],
+    ["the owner's own after another record", [{ ...own, user: "01JB3K6F0C9R2V7N4M8Q1T5W99" }, own], "accepted"],
+    ["only another member's", [{ ...own, user: "01JB3K6F0C9R2V7N4M8Q1T5W99" }], "not_accepted"],
+    ["one without step-up", [{ ...own, method: null }], "not_accepted"],
+    ["one with an unknown method", [{ ...own, method: "none" }], "not_accepted"],
+    ["an earlier version's", [{ ...own, version: "sha256:" + "0".repeat(64) }], "not_accepted"],
+    ["another document's", [{ ...own, document: "leveraged_etp" }], "not_accepted"],
+    ["none at all", [], "not_accepted"],
+  ])("reads %s as %s", async (_, acceptances, want) => {
+    mount(<GoLive />, "owner", acceptances);
+    expect(await settled()).toBe(want);
+    const command = screen.queryByText(/^mandate disclosure accept go_live_risk /);
+    expect(command === null).toBe(want === "accepted");
   });
 });

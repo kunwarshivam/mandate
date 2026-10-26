@@ -212,3 +212,100 @@ fn the_binary_shows_the_code_without_a_journal_and_never_prints_the_dsn() {
     assert!(!unknown.status.success());
     assert!(String::from_utf8_lossy(&unknown.stderr).contains("document_unknown"));
 }
+
+/// A store that refuses every write: the acceptance must append nothing once the document cannot
+/// be stored, so no record names a version whose text is not kept.
+struct Refusing;
+
+impl mandate_journal::ArtifactSource for Refusing {
+    fn read_artifact(
+        &self,
+        _: &mandate_journal::ArtifactRef,
+    ) -> Result<Vec<u8>, mandate_journal::ArtifactError> {
+        Err(mandate_journal::ArtifactError::Missing)
+    }
+}
+
+impl mandate_journal::ArtifactStore for Refusing {
+    fn put_artifact(
+        &mut self,
+        _: &[u8],
+    ) -> Result<mandate_journal::ArtifactRef, mandate_journal::ArtifactError> {
+        Err(mandate_journal::ArtifactError::Unavailable)
+    }
+}
+
+#[test]
+fn a_document_the_store_cannot_keep_is_never_accepted() {
+    let (mut journal, mut ids) = (Journal::default(), FixedIds::default());
+    let doc = document("go_live_risk").unwrap();
+    let typed = gesture_code(&version());
+    let refused = accept(
+        &mut journal,
+        &mut Refusing,
+        &mut ids,
+        &owner(),
+        (&doc, &typed),
+        at(NOW),
+    );
+    assert!(refused.is_err());
+    assert!(journal.attempts.is_empty(), "nothing appended");
+}
+
+/// The same acceptance run again at the same instant finds the record it committed; at a later
+/// second it is a new gesture with fresh evidence and records again (DEC-290 item 5).
+#[test]
+fn a_rerun_finds_its_acceptance_and_a_later_one_records_again() {
+    let (mut journal, mut store, mut ids) = (Journal::default(), Store::new(), FixedIds::default());
+    let doc = document("go_live_risk").unwrap();
+    let typed = gesture_code(&version());
+    let first = accept(
+        &mut journal,
+        &mut store,
+        &mut ids,
+        &owner(),
+        (&doc, &typed),
+        at(NOW),
+    )
+    .unwrap();
+    let mut again_ids = FixedIds::default();
+    let again = accept(
+        &mut journal,
+        &mut store,
+        &mut again_ids,
+        &owner(),
+        (&doc, &typed),
+        at(NOW),
+    )
+    .unwrap();
+    assert_eq!(again, first, "the same gesture finds its record");
+    let accepted = |journal: &Journal| {
+        journal
+            .rows(&stream(CONTROL))
+            .unwrap()
+            .iter()
+            .filter(|r| r.event_type == "DisclosureAccepted")
+            .count()
+    };
+    assert_eq!(accepted(&journal), 1);
+    let later = accept(
+        &mut journal,
+        &mut store,
+        &mut ids,
+        &owner(),
+        (&doc, &typed),
+        at(NOW + 1),
+    )
+    .unwrap();
+    assert_ne!(later.event_id, first.event_id);
+    assert_eq!(accepted(&journal), 2);
+    let row = journal
+        .rows(&stream(CONTROL))
+        .unwrap()
+        .into_iter()
+        .find(|r| r.event_id == first.event_id)
+        .unwrap();
+    let body = parse(&row.body).unwrap();
+    assert_eq!(body.get("schema_version").and_then(Value::as_int), Some(1));
+    assert_eq!(body.get("config_refs"), Some(&parse(b"{}").unwrap()));
+}
