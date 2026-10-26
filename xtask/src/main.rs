@@ -673,10 +673,27 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
                 );
                 filtered(&mut args, &filter);
             }
-            sh(
-                "cargo",
-                &args.iter().map(String::as_str).collect::<Vec<_>>(),
-            )
+            let Ok(spec) = env::var(NEXTEST_RUNNER_ENV) else {
+                return sh(
+                    "cargo",
+                    &args.iter().map(String::as_str).collect::<Vec<_>>(),
+                );
+            };
+            let (name, runner) = nextest_runner(&spec)?;
+            eprintln!(
+                "    test-nextest: {NEXTEST_RUNNER_ENV} runs each test process through `{runner}` \
+                 (DEC-2644)"
+            );
+            eprintln!("    $ {name}='{runner}' cargo {}", args.join(" "));
+            let status = Command::new("cargo")
+                .args(&args)
+                .env(name, runner)
+                .status()
+                .context("starting `cargo`")?;
+            if !status.success() {
+                bail!("`cargo {}` failed with {status}", args.join(" "));
+            }
+            Ok(())
         }
         "test-doc" => {
             let selected = selection()?;
@@ -805,6 +822,29 @@ const NEXTEST_CONFIG: &str = "xtask/nextest.toml";
 /// test that failed as root, over the same packages, build and environment as the run it failed
 /// in. Exactly the filtered tests, or it fails: a filter that selects none is no pass.
 const NEXTEST_FILTER_ENV: &str = "MANDATE_NEXTEST_FILTER";
+
+/// The target runner a nextest run's test processes start through (DEC-2644), as
+/// `CARGO_TARGET_<HOST>_RUNNER=<command>`: `ci test-nextest` sets it on its `cargo nextest` alone.
+/// Set on the `cargo xtask` that runs the job, the runner would start xtask itself too, which as
+/// uid 65534 cannot start the toolchain under `/root` (lane DR's land-check of #2743).
+const NEXTEST_RUNNER_ENV: &str = "MANDATE_NEXTEST_RUNNER";
+
+/// [`NEXTEST_RUNNER_ENV`]'s value read as the target-runner variable's name and its command; any
+/// other variable, or no command, is refused.
+fn nextest_runner(spec: &str) -> Result<(&str, &str)> {
+    match spec.split_once('=') {
+        Some((name, runner))
+            if name.starts_with("CARGO_TARGET_")
+                && name.ends_with("_RUNNER")
+                && !runner.trim().is_empty() =>
+        {
+            Ok((name, runner))
+        }
+        _ => bail!(
+            "{NEXTEST_RUNNER_ENV} must read `CARGO_TARGET_<HOST>_RUNNER=<command>`, not `{spec}`"
+        ),
+    }
+}
 
 /// `args`, a nextest run's, narrowed to `filter`'s tests, refusing a run that selects none.
 fn filtered(args: &mut Vec<String>, filter: &str) {
@@ -3496,6 +3536,7 @@ fn land_check_job(dir: &Path, base_sha: &str, target: &Path, job: &str) -> Comma
         .env(NO_FAIL_FAST_ENV, "1")
         .env_remove(TEST_PARTITION_ENV)
         .env_remove(NEXTEST_FILTER_ENV)
+        .env_remove(NEXTEST_RUNNER_ENV)
         .envs(LAND_CHECK_BUILD);
     cargo
 }
@@ -3774,8 +3815,10 @@ fn unprivileged_rerun(
         format!("binary_id(={binary}) & test(={test})"),
     )
     .env(
-        runner,
-        format!("setpriv --reuid={UNPRIVILEGED_ID} --regid={UNPRIVILEGED_ID} --clear-groups --"),
+        NEXTEST_RUNNER_ENV,
+        format!(
+            "{runner}=setpriv --reuid={UNPRIVILEGED_ID} --regid={UNPRIVILEGED_ID} --clear-groups --"
+        ),
     )
     .env("TMPDIR", scratch);
     job
@@ -12887,10 +12930,10 @@ mod tests {
         references_path, select, selection_in, source_references, tokens, withhold_web_demo,
     };
     use super::{
-        CARGO_INCREMENTAL, LAND_CHECK_DIR, LAND_CHECK_JOBS, NO_FAIL_FAST_ENV, RerunUnavailable,
-        TIMED_OUT_MUTANTS, conflict_markers_in, filtered, incremental_overridden, land_check,
-        land_check_job, mutants_job_within, mutants_summary, nextest_failures, rerun_blocked,
-        root_mismatch, summarised, unprivileged_rerun,
+        CARGO_INCREMENTAL, LAND_CHECK_DIR, LAND_CHECK_JOBS, NEXTEST_RUNNER_ENV, NO_FAIL_FAST_ENV,
+        RerunUnavailable, TIMED_OUT_MUTANTS, conflict_markers_in, filtered, incremental_overridden,
+        land_check, land_check_job, mutants_job_within, mutants_summary, nextest_failures,
+        nextest_runner, rerun_blocked, root_mismatch, summarised, unprivileged_rerun,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
@@ -14632,8 +14675,11 @@ mod tests {
                 Some("binary_id(=mandate-marketdata::concurrent_writes) & test(=refuses_root)"),
             ),
             (
-                "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER",
-                Some("setpriv --reuid=65534 --regid=65534 --clear-groups --"),
+                "MANDATE_NEXTEST_RUNNER",
+                Some(
+                    "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER=setpriv --reuid=65534 \
+                     --regid=65534 --clear-groups --",
+                ),
             ),
             ("TMPDIR", Some("/tmp/scratch")),
             ("MANDATE_BASE_REF", Some("abc123")),
@@ -14647,6 +14693,55 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    /// The runner reaches only the nextest run's test processes: the `cargo xtask` that runs the
+    /// job carries no target runner, which would start xtask itself as uid 65534, and the
+    /// runner's spec names a target runner and a command or is refused.
+    #[test]
+    fn only_the_test_processes_start_through_the_unprivileged_runner() -> Result<()> {
+        let rerun = unprivileged_rerun(
+            land_check_job(Path::new("/w"), "abc", Path::new("/t"), "test-nextest"),
+            "x86_64-unknown-linux-gnu",
+            Path::new("/s"),
+            "b",
+            "t",
+        );
+        assert!(
+            !rerun.get_envs().any(|(name, value)| {
+                let name = name.to_string_lossy();
+                value.is_some() && name.starts_with("CARGO_TARGET_") && name.ends_with("_RUNNER")
+            }),
+            "a target runner on `cargo xtask` would start xtask as uid 65534"
+        );
+        let spec = rerun
+            .get_envs()
+            .find(|(name, _)| *name == OsStr::new(NEXTEST_RUNNER_ENV))
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_string_lossy().into_owned())
+            .context("the re-run names its runner")?;
+        assert_eq!(
+            nextest_runner(&spec)?,
+            (
+                "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER",
+                "setpriv --reuid=65534 --regid=65534 --clear-groups --"
+            )
+        );
+        for bad in [
+            "setpriv",
+            "PATH=/tmp",
+            "CARGO_TARGET_X_RUNNER=",
+            "CARGO_TARGET_X_RUNNER= ",
+        ] {
+            assert!(nextest_runner(bad).is_err(), "{bad}");
+        }
+        let job = land_check_job(Path::new("/w"), "abc", Path::new("/t"), "test-nextest");
+        assert!(
+            job.get_envs()
+                .any(|(name, value)| name == OsStr::new(NEXTEST_RUNNER_ENV) && value.is_none()),
+            "a job never inherits a runner"
+        );
+        Ok(())
     }
 
     /// A filtered nextest run runs exactly the filtered tests, and fails when they select none.
