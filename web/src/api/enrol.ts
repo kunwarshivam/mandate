@@ -125,7 +125,7 @@ export interface MadeCredential {
   client_data_json: string;
 }
 
-export type CreateAnswer = { ok: true; value: MadeCredential } | { ok: false; reason: "passkey_unavailable" | "passkey_canceled" | "passkey_failed" };
+export type CreateAnswer = { ok: true; value: MadeCredential } | { ok: false; reason: "passkey_unavailable" | "passkey_canceled" | "passkey_failed" | "passkey_already_held" };
 
 /** A buffer as bytes, whichever realm made it. */
 const bytesOf = (buffer: unknown): Uint8Array | null =>
@@ -168,8 +168,11 @@ export async function createPasskey(challenge: RegistrationChallenge, name: stri
         timeout: CREATE_TIMEOUT_MS,
       },
     });
-  } catch {
-    return { ok: false, reason: "passkey_canceled" };
+  } catch (error) {
+    const name = isRecord(error) && typeof error.name === "string" ? error.name : "";
+    if (name === "InvalidStateError") return { ok: false, reason: "passkey_already_held" };
+    if (name === "NotAllowedError" || name === "AbortError") return { ok: false, reason: "passkey_canceled" };
+    return { ok: false, reason: "passkey_failed" };
   }
   if (!credential || !isRecord(credential) || credential.type !== "public-key") return { ok: false, reason: "passkey_failed" };
   const raw = bytesOf((credential as unknown as { rawId?: unknown }).rawId);

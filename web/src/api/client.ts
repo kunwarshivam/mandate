@@ -304,9 +304,9 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
     } catch {
       head = { ok: false, issue: UNREADABLE };
     }
-    if (!head.ok) return { ok: false, error: invalidResponse(response.status, "none", head.issue, null) };
+    if (!head.ok) return { ok: false, error: invalidResponse(response.status, lost, head.issue, null) };
     const value = decoder(body, "");
-    if (!value.ok) return { ok: false, error: invalidResponse(response.status, "none", value.issue, null) };
+    if (!value.ok) return { ok: false, error: invalidResponse(response.status, lost, value.issue, null) };
     return { ok: true, value: value.value, as_of: head.value.as_of, api_version: head.value.api_version };
   }
 

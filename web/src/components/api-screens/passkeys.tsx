@@ -35,7 +35,11 @@ function refusedWords(reason: string): string {
     case "passkey_cooling_off":
       return "Adding another passkey needs one you already hold, past its first 24 hours.";
     case "step_up_stale":
-      return "A first passkey must be added within five minutes of signing in. Sign in again, then add it.";
+      return "The check is no longer current. A first passkey must be added within five minutes of signing in, so sign in again first; otherwise try again.";
+    case "passkey_already_held":
+      return "This authenticator already holds one of your passkeys. Use another device or security key.";
+    case "invalid":
+      return "Your deployment did not take it, perhaps because it took more than five minutes. Try again.";
     case "step_up_missing":
     case "step_up_mismatch":
     case "step_up_reused":
@@ -88,8 +92,8 @@ export function ApiPasskeys() {
     setOutcome(null);
     const answer = await passkeys.enrol();
     setOutcome(answer.ok ? { kind: "added", enrolled: answer.enrolled } : answer.effect === "unknown" ? { kind: "unknown" } : { kind: "refused", reason: answer.reason });
-    setBusy(false);
     await load();
+    setBusy(false);
   };
   return (
     <Section title="Passkeys for confirming">

@@ -66,6 +66,8 @@ describe("making the credential (DEC-2108 item 4)", () => {
   it("makes nothing without WebAuthn, and reports a canceled or unreadable answer", async () => {
     expect(await createPasskey(CHALLENGE, "x", null)).toEqual({ ok: false, reason: "passkey_unavailable" });
     expect(await createPasskey(CHALLENGE, "x", async () => Promise.reject(new DOMException("no", "NotAllowedError")))).toEqual({ ok: false, reason: "passkey_canceled" });
+    expect(await createPasskey(CHALLENGE, "x", async () => Promise.reject(new DOMException("held", "InvalidStateError")))).toEqual({ ok: false, reason: "passkey_already_held" });
+    expect(await createPasskey(CHALLENGE, "x", async () => Promise.reject(new DOMException("rp", "SecurityError")))).toEqual({ ok: false, reason: "passkey_failed" });
     for (const answer of [null, made({ type: "password" }), made({ rawId: Uint8Array.of(1).buffer }), made({ response: { clientDataJSON: Uint8Array.of(1).buffer } })]) expect(await createPasskey(CHALLENGE, "x", async () => answer)).toEqual({ ok: false, reason: "passkey_failed" });
   });
 
