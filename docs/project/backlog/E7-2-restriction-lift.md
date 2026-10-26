@@ -14,4 +14,8 @@
   removed. Slices: A, the spec and vectors; B, `mandate-journal`'s registration and rules 310 to 312;
   C, the executor's judgment and lift, which needs its copy of the control stream's acknowledgments
   (E7-4 slice 5); D, the CLI's acknowledgment of a restriction.
+  The executor's fold of `ConnectionStateChanged` (DEC-2826)
+  keeps only the causes journaled in the current state: a degrading cause held while `suspended`
+  is never journaled, and those before `degraded` to `suspended` are dropped, so the
+  acknowledgment guard needs DEC-687's outstanding set tracked across that change.
 <!-- section: E7 Alpaca connector and recovery -->
