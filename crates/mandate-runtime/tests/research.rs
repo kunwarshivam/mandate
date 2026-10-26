@@ -1646,38 +1646,42 @@ fn a_pin_the_gateway_does_not_hold_ends_the_run_and_disables_research_for_it() {
     assert_eq!(starts(&repinned).len(), 1);
 }
 
+/// A refusal, the gateway's or the caller's own `gateway_unreachable` (DEC-2397 item 3), for a run
+/// that is not in flight, or that has not asked for its call, is not interpreted, and the run stays.
 #[test]
 fn a_refusal_for_a_run_not_in_flight_is_refused() {
-    let f = Fixture::new();
-    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
-    let mut lp = Loop::new(1);
-    boot(&mut lp, &ports);
-    let world = World::open();
-    let stray = lp.step(
-        ResearchInput::Refused {
-            run_id: "01NORUN".to_owned(),
-            at: clock(CUT_OFF),
-            error: RequestError::UnknownModel,
-        },
-        &ports,
-        &world,
-    );
-    assert!(matches!(stray, Err(RuntimeError::NotInterpreted { .. })));
-    let started = starts(&lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world));
-    let early = lp.step(
-        ResearchInput::Refused {
-            run_id: started[0].0.clone(),
-            at: clock(CUT_OFF + 1),
-            error: RequestError::UnknownModel,
-        },
-        &ports,
-        &world,
-    );
-    assert!(
-        matches!(early, Err(RuntimeError::NotInterpreted { .. })),
-        "a refusal before a call was requested"
-    );
-    assert_eq!(lp.research.in_flight(), Some(started[0].0.as_str()));
+    for error in [RequestError::UnknownModel, RequestError::GatewayUnreachable] {
+        let f = Fixture::new();
+        let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+        let mut lp = Loop::new(1);
+        boot(&mut lp, &ports);
+        let world = World::open();
+        let stray = lp.step(
+            ResearchInput::Refused {
+                run_id: "01NORUN".to_owned(),
+                at: clock(CUT_OFF),
+                error,
+            },
+            &ports,
+            &world,
+        );
+        assert!(matches!(stray, Err(RuntimeError::NotInterpreted { .. })));
+        let started = starts(&lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world));
+        let early = lp.step(
+            ResearchInput::Refused {
+                run_id: started[0].0.clone(),
+                at: clock(CUT_OFF + 1),
+                error,
+            },
+            &ports,
+            &world,
+        );
+        assert!(
+            matches!(early, Err(RuntimeError::NotInterpreted { .. })),
+            "a refusal before a call was requested"
+        );
+        assert_eq!(lp.research.in_flight(), Some(started[0].0.as_str()));
+    }
 }
 
 #[test]
