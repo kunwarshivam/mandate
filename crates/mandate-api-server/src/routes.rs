@@ -19,12 +19,12 @@ use axum::response::Response;
 use mandate_api::problem::ProblemCode;
 use mandate_authn::Request;
 use mandate_canon::{Int, Key, Object, Value, to_canonical};
+use mandate_gate_context::{Journaled, Row};
 use mandate_identity::{
     Authorized, Permission, Principal, PrincipalId, Refusal, Scope, Session, TenantContext,
     WorkspaceId, authorize,
 };
 use mandate_identity_seal::Seal;
-use mandate_gate_context::{Journaled, Row};
 use mandate_journal::{ArtifactRef, StoredEvent};
 use mandate_time::UtcNanos;
 
