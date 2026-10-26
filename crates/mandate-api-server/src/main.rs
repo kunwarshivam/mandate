@@ -57,8 +57,9 @@ use mandate_api_server::journal::{Journal, JournalUnavailable, Postgres};
 use mandate_api_server::keys::{FetchedKeys, REFETCH};
 use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
 use mandate_api_server::members::{self, Hosted};
+use mandate_api_server::methods::{Methods, Passkey};
 use mandate_api_server::objects::{ObjectStore, Objects};
-use mandate_api_server::reduction::{self, Reduction};
+use mandate_api_server::reduction::{self, Reduction, rp_id};
 use mandate_api_server::session::{OsRandom, Sessions};
 use mandate_api_server::subject;
 use mandate_api_server::token::Issuer;
@@ -69,6 +70,7 @@ use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_identity::{OrgId, WorkspaceId};
 use mandate_journal::ArtifactSource;
 use mandate_journal_pg::PgJournal;
+use mandate_passkey::RelyingParty;
 use mandate_release::startup::{TIER_VAR, Tier};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
@@ -288,9 +290,24 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         }
     });
     let challenges = Arc::new(Challenges::default());
-    let step_up = CliConfirm {
-        challenges: Arc::clone(&challenges),
-        links: Arc::new(subject::Fixed),
+    let rp = RelyingParty {
+        rp_id: rp_id(&start.settings.app_origin)
+            .ok_or_else(|| io::Error::other("the app origin names no relying party"))?,
+        origin: start.settings.app_origin.clone(),
+    };
+    let step_up = Methods {
+        passkey: Passkey {
+            challenges: Arc::clone(&challenges),
+            rp,
+            keys: start.artifacts.clone().map(|store| {
+                let store: Arc<dyn ArtifactSource + Send + Sync> = store;
+                store
+            }),
+        },
+        cli_confirm: CliConfirm {
+            challenges: Arc::clone(&challenges),
+            links: Arc::new(subject::Fixed),
+        },
     };
     let app = App {
         settings: start.settings,
