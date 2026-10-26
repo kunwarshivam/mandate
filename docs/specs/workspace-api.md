@@ -1130,7 +1130,7 @@ not found). An order is the agent's when its `OrderRequestRecorded` names the ag
 first submitted, and `state` and `filled_qty` from the last `OrderStateChanged` (`null` before any;
 `unknown` served as unknown). `positions` is the net `filled_qty` of the agent's own fills per
 instrument, not the ledger's fold (an own fill that cannot be read is `journal_unavailable`, never
-skipped, [DEC-2112](../project/decisions/DEC-2112.md)). Beside it ([DEC-2136](../project/decisions/DEC-2136.md)):
+skipped, [DEC-2112](../project/decisions/DEC-2112.md)). Beside it ([DEC-2138](../project/decisions/DEC-2138.md)):
 `positions` is read over the agent's orders as the executor attributes them (its requests, their
 replacements, and the broker's legs of its entries); `cost_basis` is the agent sub-ledger's signed
 quantity and basis (trading spec §8.1), folded from the same fills through the accounting fold's
