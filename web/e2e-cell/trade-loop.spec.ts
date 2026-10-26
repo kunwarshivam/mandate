@@ -132,7 +132,7 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     const sells = page.getByRole("list", { name: "Orders" }).locator("[data-state=filled]").filter({ hasText: /^Sell / });
     await page.goto(`/agents/${AGENT}`, { timeout: 15_000 });
     await page.getByRole("list", { name: "Orders" }).waitFor({ timeout: 30_000 });
-    const before = await sells.count();
+    const before = new Set(await sells.allTextContents());
     await page.goto("/positions", { timeout: 15_000 });
     const own = page.locator(`[data-slot=agent-positions][data-agent="${AGENT}"]`);
     const exit = own.getByRole("button", { name: /^Exit / }).first();
@@ -145,7 +145,7 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     const answer = await sent;
     if (!answer.ok()) refuse(`the API answered ${answer.status()} for the owner exit: ${(await answer.text()).slice(0, 400)}`);
     await expect(page.getByRole("status", { name: /^Your exit from / })).toContainText(/Recorded in the journal: your exit|Taken by the agent's runtime/);
-    const filled = await until(page, `/agents/${AGENT}`, FILL_MS, async () => (await sells.count()) > before);
+    const filled = await until(page, `/agents/${AGENT}`, FILL_MS, async () => (await sells.allTextContents()).some((sell) => !before.has(sell)));
     if (!filled) refuse(`the owner exit was recorded but no new sell filled on the agent's orders within ${FILL_MS} ms`);
     step("owner_exit", ((await answer.json()) as { command_id?: string }).command_id ?? "");
   });

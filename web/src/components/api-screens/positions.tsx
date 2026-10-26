@@ -93,9 +93,9 @@ interface Exit {
 const exitKey = (agentId: string, instrument: string) => `${agentId}\n${instrument}`;
 
 /** An exit's outcome in words, never by a code: what the journal says, and that nothing was sold where nothing was recorded. */
-function exitWords(state: ExitStep): string {
+function exitWords(state: Exclude<ExitStep, { step: "confirming" }>): string {
   if (state.step === "sending") return "Sending your exit…";
-  if (state.step === "recorded" || state.step === "confirming") return "Recorded in the journal: your exit. Waiting for the agent's runtime to take it.";
+  if (state.step === "recorded") return "Recorded in the journal: your exit. Waiting for the agent's runtime to take it.";
   switch (state.outcome.phase) {
     case "applied":
       return "Taken by the agent's runtime. Look at the agent's orders for its sell.";
@@ -219,7 +219,7 @@ function ExitStatuses({ exits }: { exits: Exits }) {
             <span className="font-medium">
               {e.name}, {e.instrument}:
             </span>{" "}
-            {exitWords(e.state)}
+            {e.state.step === "confirming" ? null : exitWords(e.state)}
           </p>
         ))}
       </div>
