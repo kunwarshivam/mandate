@@ -195,6 +195,58 @@ fn a_held_exit_beside_its_protection_is_priced_once_its_quote_is_read() -> Resul
     Ok(())
 }
 
+/// DEC-2359 item 4: a quote the feed reads but judges not sane is never handed to the core. The
+/// exit waiting on it is read, but the core holds no quote for its instrument afterwards, so the
+/// exit stays held for want of a price and sends no sell. The same quote judged sane is handed and
+/// prices the exit.
+#[test]
+fn a_quote_judged_not_sane_is_never_handed() -> Result<(), Error> {
+    let noon = at(NOON)?.secs();
+    let aapl = InstrumentId::new(AAPL)?;
+    let insane = Recorded {
+        quote: Some(MarketObservation {
+            sane: false,
+            ..observed("150", "150.2", noon)?
+        }),
+        asked: Rc::default(),
+    };
+    let asked = Rc::clone(&insane.asked);
+    let (journal, broker, process, sold) = exit_beside_its_protection(insane)?;
+    assert!(
+        asked.borrow().iter().any(|asked| asked == &aapl),
+        "the feed was asked about the waiting exit's instrument"
+    );
+    assert_eq!(
+        process.state().latest_quote(&aapl),
+        None,
+        "no insane quote reaches the core"
+    );
+    assert_eq!(sold, [0, 0, 0, 0], "no pass prices the exit");
+    assert!(exit_sells(&broker).is_empty());
+    let held = journal
+        .payloads("GateDecided")
+        .last()
+        .is_some_and(|decided| {
+            decided.get("verdict").and_then(Value::as_str) == Some("hold")
+                && decided.get("reason_code").and_then(Value::as_str) == Some("exit_unpriced")
+        });
+    assert!(held, "the exit falls back to waiting for a price");
+    let sane = Recorded {
+        quote: Some(observed("150", "150.2", noon)?),
+        asked: Rc::default(),
+    };
+    let (_, priced, process, _) = exit_beside_its_protection(sane)?;
+    assert!(
+        process
+            .state()
+            .latest_quote(&aapl)
+            .is_some_and(|quote| quote.sane),
+        "the control: a sane quote is handed"
+    );
+    assert_eq!(exit_sells(&priced).len(), 1, "and prices the exit");
+    Ok(())
+}
+
 /// While the exit waits, its instrument is read once when first wanted and then once per
 /// `exit_step_s`, five seconds here: not again a second short of the step, and again at it.
 #[test]

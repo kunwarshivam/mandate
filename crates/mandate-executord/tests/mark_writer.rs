@@ -14,6 +14,7 @@ use mandate_executor::{ExitTier, InstrumentSnapshot, MarketObservation, RiskCloc
 use mandate_executord::marks::{self, Marked};
 use mandate_executord::quotes::QuoteFeed;
 use mandate_num::{Price, Qty, ShareIncrement};
+use mandate_process::State;
 use mandate_time::UtcNanos;
 use support::{
     AAPL, ACCOUNT_STREAM, Allowing, Error, Fault, Journal, NOON, OPENED, Paper, TwoPercentStop, at,
@@ -231,7 +232,9 @@ fn a_wiring_naming_no_instrument_marks_nothing() -> Result<(), Error> {
 }
 
 /// A mark whose append fails holds the pass and raises the journal's one opaque alert for the
-/// outage, none while it goes on; once appends succeed the instrument is marked again.
+/// outage, none while it goes on; the mark is kept and offered again, unchanged, first on each pass,
+/// so once appends succeed it commits at its own tick, and the instrument is marked again when due.
+/// Each pass's tick is handed before its marks, so a mark going in doubt never holds that tick.
 #[test]
 fn a_mark_in_doubt_raises_one_alert_an_outage() -> Result<(), Error> {
     let journal = deployed()?;
@@ -242,8 +245,9 @@ fn a_mark_in_doubt_raises_one_alert_an_outage() -> Result<(), Error> {
     wiring.marked = Box::new(Naming(vec![AAPL]));
     let mut process = start_wired(&journal, &broker, wiring)?;
     process.step(at(NOON)?);
-    journal.fail_next(&[Fault::Unavailable; 2]);
+    journal.fail_next_of("MarkUpdated", &[Fault::Unavailable; 2]);
     let mut alerts = Vec::new();
+    let mut clocks_handed = Vec::new();
     for (index, clock) in [
         "2026-09-21T15:00:15Z",
         "2026-09-21T15:00:30Z",
@@ -259,8 +263,19 @@ fn a_mark_in_doubt_raises_one_alert_an_outage() -> Result<(), Error> {
             .filter(|alert| alert.key == "journal_unavailable" && alert.subject.is_none())
             .count();
         alerts.push(raised);
+        clocks_handed.push(process.state().risk_clock());
     }
     assert_eq!(alerts, vec![1, 0, 0]);
+    let noon = at(NOON)?.secs();
+    assert_eq!(
+        clocks_handed,
+        [15, 15, 45]
+            .iter()
+            .map(|later| Some(RiskClock::from_secs(noon + later)))
+            .collect::<Vec<_>>(),
+        "the pass whose mark goes in doubt has handed its tick first (`AGENTS.md` rule 13); a pass \
+         whose retried mark is still in doubt appends nothing after it, as with any input in doubt"
+    );
     let clocks: Vec<Option<String>> = marks_of(&journal)
         .iter()
         .map(|(_, payload)| member(payload, "risk_clock"))
@@ -269,6 +284,61 @@ fn a_mark_in_doubt_raises_one_alert_an_outage() -> Result<(), Error> {
         clocks,
         vec![
             Some("2026-09-21T15:00:00.000000000Z".to_owned()),
+            Some("2026-09-21T15:00:15.000000000Z".to_owned()),
+            Some("2026-09-21T15:00:45.000000000Z".to_owned()),
+        ]
+    );
+    Ok(())
+}
+
+/// An append whose answer is lost after it committed does not stop the process: the next pass
+/// offers the journal the same mark again, which it already holds, before anything else, and goes
+/// on to mark at its own tick; each mark is journaled once.
+#[test]
+fn a_mark_committed_with_its_answer_lost_is_resent_unchanged() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    let mut wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    wiring.quotes = Box::new(Quoting(vec![AAPL]));
+    wiring.marked = Box::new(Naming(vec![AAPL]));
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    process.step(at(NOON)?);
+    journal.fail_next_of("MarkUpdated", &[Fault::LostAnswer]);
+    let mut alerts = Vec::new();
+    for (index, clock) in [
+        "2026-09-21T15:00:15Z",
+        "2026-09-21T15:00:30Z",
+        "2026-09-21T15:00:45Z",
+    ]
+    .iter()
+    .enumerate()
+    {
+        tick(&journal, &format!("a{index}"), clock)?;
+        alerts.push(
+            process
+                .step(at(clock)?)
+                .iter()
+                .filter(|alert| alert.key == "journal_unavailable")
+                .count(),
+        );
+    }
+    assert_eq!(alerts, vec![1, 0, 0]);
+    assert!(
+        !matches!(process.lifecycle().state(), State::Exited(_)),
+        "an ambiguous mark never stops the process: {:?}",
+        process.lifecycle().state()
+    );
+    let clocks: Vec<Option<String>> = marks_of(&journal)
+        .iter()
+        .map(|(_, payload)| member(payload, "risk_clock"))
+        .collect();
+    assert_eq!(
+        clocks,
+        vec![
+            Some("2026-09-21T15:00:00.000000000Z".to_owned()),
+            Some("2026-09-21T15:00:15.000000000Z".to_owned()),
+            Some("2026-09-21T15:00:30.000000000Z".to_owned()),
             Some("2026-09-21T15:00:45.000000000Z".to_owned()),
         ]
     );

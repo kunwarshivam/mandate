@@ -162,6 +162,11 @@ pub struct ExecutorProcess<S, B> {
     /// core takes no other input until it is handed again, and the retry offers the journal the
     /// same bytes (journal spec §5.1). Nothing it asks of the broker leaves before it commits.
     pending: Option<(Input, UtcNanos)>,
+    /// The mark whose append is in doubt, with the time it was first written at: offered to the
+    /// journal again, the same bytes, before any other append, so a mark that committed with its
+    /// answer lost is found already committed rather than conflicting with the next (DEC-2380
+    /// item 3, journal spec §5.1).
+    pending_mark: Option<(EventDraft, UtcNanos)>,
     /// Requests whose drafts committed and which have not been sent, in order: what an answer
     /// whose own batch went in doubt left behind (DEC-2003 item 7).
     outbox: VecDeque<BrokerRequest>,
@@ -233,6 +238,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             clock: stream(format!("clock:{workspace}")),
             epoch: 0,
             pending: None,
+            pending_mark: None,
             outbox: VecDeque::new(),
             reconcile: false,
             scheduled: now,
@@ -311,9 +317,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         self.journal(now, &[opened])
     }
 
-    /// One pass of the loop at the injected time `now`: an input in doubt first, then requests
-    /// left unsent and a due reconciliation, then (once started) every kill switch the account's
-    /// agents' streams hold that the fold has not applied, then the latest tick, then every order
+    /// One pass of the loop at the injected time `now`: an input in doubt first, then a mark in
+    /// doubt, then requests left unsent and a due reconciliation, then (once started) every kill
+    /// switch the account's agents' streams hold that the fold has not applied, then the latest
+    /// tick, then the marks due at it, so a mark never holds the tick's exit ladder, then every order
     /// they propose that the fold has not taken, an opening or an increase only while ready
     /// (DEC-2033 item 1). Before the start,
     /// the pass hands the first tick it reads and `Input::Started`. Returns the alerts whose drafts
@@ -326,6 +333,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         self.lifecycle.observe(now, Lifecycled::Heartbeat);
         if let Some((input, at)) = self.pending.take()
             && !self.hand(now, at, input, &mut alerts, 0)
+        {
+            return alerts;
+        }
+        if let Some((draft, at)) = self.pending_mark.take()
+            && !self.append_mark(now, at, draft, &mut alerts)
         {
             return alerts;
         }
@@ -369,12 +381,12 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             return alerts;
         }
         if let Some(tick) = tick
-            && !self.write_marks(now, tick, &mut alerts)
+            && !self.hand(now, now, Input::Tick(tick), &mut alerts, 0)
         {
             return alerts;
         }
         if let Some(tick) = tick
-            && !self.hand(now, now, Input::Tick(tick), &mut alerts, 0)
+            && !self.write_marks(now, tick, &mut alerts)
         {
             return alerts;
         }
@@ -517,19 +529,39 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             let Some(draft) = mark_draft(&observation, class, &calendar, feed, id, at) else {
                 continue;
             };
-            match self.journal(now, &[draft]) {
-                Ran::Committed => self.journal_down = false,
-                Ran::InDoubt => {
-                    if !self.journal_down {
-                        self.journal_down = true;
-                        alerts.push(journal_unavailable());
-                    }
-                    return false;
-                }
-                Ran::Stopped => return false,
+            if !self.append_mark(now, now, draft, alerts) {
+                return false;
             }
         }
         true
+    }
+
+    /// Journals the mark `draft` with the event time `at`; whether it committed. An append in
+    /// doubt keeps the draft, unchanged, to be offered again first on the next pass, and raises the
+    /// journal's one opaque alert for the outage.
+    fn append_mark(
+        &mut self,
+        now: UtcNanos,
+        at: UtcNanos,
+        draft: EventDraft,
+        alerts: &mut Vec<Alert>,
+    ) -> bool {
+        self.written_at = at;
+        match self.journal(now, std::slice::from_ref(&draft)) {
+            Ran::Committed => {
+                self.journal_down = false;
+                true
+            }
+            Ran::InDoubt => {
+                if !self.journal_down {
+                    self.journal_down = true;
+                    alerts.push(journal_unavailable());
+                }
+                self.pending_mark = Some((draft, at));
+                false
+            }
+            Ran::Stopped => false,
+        }
     }
 
     /// Drains at `now`: no new input; an input in doubt is handed once more, then the process exits
