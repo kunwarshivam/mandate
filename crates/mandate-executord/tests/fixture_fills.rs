@@ -99,6 +99,16 @@ fn cash(broker: &mut AlpacaBroker<FixturePaper>) -> Result<(String, String), Err
     }
 }
 
+fn open_ids(broker: &mut AlpacaBroker<FixturePaper>) -> Result<Vec<String>, Error> {
+    match broker.call(&BrokerRequest::ListOpenOrders)? {
+        BrokerOutcome::OpenOrders(orders) => Ok(orders
+            .into_iter()
+            .map(|order| order.broker_order_id)
+            .collect()),
+        other => Err(format!("open orders, not {other:?}").into()),
+    }
+}
+
 /// A limit opening fills whole at its limit when it is placed. The submission's answer is the order
 /// as Alpaca accepts it, `new` and unfilled; a later lookup reads it `filled`, one `FILL` activity
 /// names the broker's order id and no client order id (Alpaca's shape, DEC-2353),
@@ -222,8 +232,8 @@ fn a_sell_limit_fills_and_reduces_the_position() -> Result<(), Error> {
     Ok(())
 }
 
-/// Protection never fills here, since the fixture has no price: an OCO's two orders and a lone
-/// stop rest `new`, unfilled, and cancel.
+/// Protection never fills here, since the fixture has no price: an OCO's two orders rest `new`,
+/// unfilled, and cancel; then a lone stop-limit over the same shares rests `new` too.
 #[test]
 fn protection_rests_unfilled() -> Result<(), Error> {
     let mut broker = broker()?;
@@ -249,6 +259,13 @@ fn protection_rests_unfilled() -> Result<(), Error> {
     assert_eq!(
         (placed.status.as_str(), placed.filled_qty),
         ("new", Qty::ZERO)
+    );
+    let cancel = BrokerRequest::Cancel {
+        client_order_id: ClientOrderId::parse("md-01JINTENT0000000000000000A-p1")?,
+    };
+    assert!(
+        matches!(broker.call(&cancel)?, BrokerOutcome::CancelAccepted { .. }),
+        "the OCO cancels"
     );
     let mut stop = order("md-01JINTENT0000000000000000A-p2", Side::Sell, "10", "146")?;
     stop.purpose = Purpose::Protective;
@@ -306,8 +323,10 @@ fn a_duplicate_client_order_id_is_refused() -> Result<(), Error> {
     Ok(())
 }
 
-/// No short sales (`AGENTS.md` rule 12): a sell with no position, or larger than the position, is
-/// refused as Alpaca refuses it, `403` with code 40310000, and fills nothing.
+/// No short sales (`AGENTS.md` rule 12): a sell with no position, one larger than the position,
+/// and one larger than what open sells leave available are each refused as Alpaca refuses them,
+/// `403` with code 40310000, deciding before anything changes: no order is added, nothing fills,
+/// and the book stays readable.
 #[test]
 fn a_sell_beyond_the_position_is_refused() -> Result<(), Error> {
     let mut broker = broker()?;
@@ -324,6 +343,12 @@ fn a_sell_beyond_the_position_is_refused() -> Result<(), Error> {
         "150",
     )?))?;
     assert!(refused(naked.clone()), "{naked:?}");
+    assert_eq!(
+        open_ids(&mut broker)?,
+        Vec::<String>::new(),
+        "no order is added"
+    );
+    assert!(held(&mut broker)?.is_empty(), "no position is made");
     submit(
         &mut broker,
         order("md-01JINTENT0000000000000000A", Side::Buy, "10", "150")?,
@@ -335,6 +360,26 @@ fn a_sell_beyond_the_position_is_refused() -> Result<(), Error> {
         "150",
     )?))?;
     assert!(refused(beyond.clone()), "{beyond:?}");
+    assert_eq!(
+        open_ids(&mut broker)?,
+        Vec::<String>::new(),
+        "no order is added"
+    );
+    let mut resting = order("md-01JINTENT0000000000000000C", Side::Sell, "6", "160")?;
+    resting.order_type = OrderType::StopLimit;
+    resting.stop_price = Some(Price::parse("161")?);
+    let resting = submit(&mut broker, resting)?;
+    let held_for_orders = broker.call(&BrokerRequest::Submit(order(
+        "md-01JINTENT0000000000000000D",
+        Side::Sell,
+        "5",
+        "150",
+    )?))?;
+    assert!(
+        refused(held_for_orders.clone()),
+        "6 of the 10 are held for the resting sell: {held_for_orders:?}"
+    );
+    assert_eq!(open_ids(&mut broker)?, [resting.broker_order_id]);
     assert_eq!(fills(&mut broker, "")?.0.len(), 1, "only the opening fills");
     assert_eq!(
         held(&mut broker)?,
@@ -526,8 +571,9 @@ fn the_fills_one_reconciliation_books_it_and_its_cash_is_the_models() -> Result<
 }
 
 /// The scheduled reconciliation's cadence (X1b-3): with an order working (the resting fixture),
-/// a pass five seconds after the start's reconciliation reads nothing, and one ten seconds after
-/// reconciles once.
+/// a pass nine seconds after the start's reconciliation reads nothing, one at ten seconds
+/// reconciles once, another at the same second reads nothing, and the next ten seconds on
+/// reconciles once more.
 #[test]
 fn a_working_order_is_reconciled_every_ten_seconds() -> Result<(), Error> {
     let (journal, mut process) = running(FixturePaper::new(at(NOON)?), true)?;
@@ -540,10 +586,17 @@ fn a_working_order_is_reconciled_every_ten_seconds() -> Result<(), Error> {
             .any(|kind| kind == "OrderSubmitted"),
         "the opening works"
     );
-    pass(&journal, &mut process, "t1", "2026-09-21T15:00:05Z")?;
-    assert_eq!(journal.payloads("ReconciliationRun").len(), started);
+    let runs = || journal.payloads("ReconciliationRun").len();
+    pass(&journal, &mut process, "t1", "2026-09-21T15:00:09Z")?;
+    assert_eq!(runs(), started, "none before ten seconds");
     pass(&journal, &mut process, "t2", "2026-09-21T15:00:10Z")?;
-    assert_eq!(journal.payloads("ReconciliationRun").len(), started + 1);
+    assert_eq!(runs(), started + 1, "one at ten seconds");
+    pass(&journal, &mut process, "t3", "2026-09-21T15:00:10Z")?;
+    assert_eq!(runs(), started + 1, "none again in the same second");
+    pass(&journal, &mut process, "t4", "2026-09-21T15:00:19Z")?;
+    assert_eq!(runs(), started + 1, "none before the next ten seconds");
+    pass(&journal, &mut process, "t5", "2026-09-21T15:00:20Z")?;
+    assert_eq!(runs(), started + 2, "one more at twenty seconds");
     Ok(())
 }
 
