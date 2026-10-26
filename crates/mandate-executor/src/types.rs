@@ -1005,6 +1005,11 @@ pub enum Input {
     /// it committed, so the core forgets it, and holds every agent's openings and alerts the owner
     /// once, rather than stopping the process and its exits, protection and kill switch.
     BatchRefused,
+    /// The core could not apply the last broker input it was handed, which drafted nothing and
+    /// changed no journaled state (DEC-2821). It holds every agent's openings and alerts the owner
+    /// once, as for a refused batch, rather than stopping the process and its exits, protection
+    /// and kill switch on a broker answer the restart would read again.
+    InputFailed,
 }
 
 /// What one step asks the shell to do, in order. The shell runs the journal appends first and
