@@ -2841,3 +2841,34 @@ fn the_deployed_calendar_answers_sessions_and_counts_seconds() {
         MarketSession::Crypto
     );
 }
+
+/// A tick in the opening's own second is the agent's and is stepped (DEC-2804 item 3): with no
+/// breach time to confirm, a lifetime floor the inherited loss already breaches triggers at it.
+#[test]
+fn a_tick_in_the_opening_second_is_stepped() {
+    let mandate = validated(
+        "research_equity_pinned",
+        &[serde_json::json!({"op": "replace", "path": "/risk/breach_confirm_s", "value": 0})],
+    );
+    let opening = Opening {
+        inherited_loss_usd: Usd::parse("1500").unwrap(),
+        ..opening()
+    };
+    let mut fold = AccountRiskFold::open(
+        ACCOUNT,
+        1,
+        AGENT,
+        &mandate,
+        &opening,
+        Some(XYZ),
+        &Wall,
+        TripwireState::default(),
+    )
+    .unwrap();
+    let records = fold.fold(&tick(2, OPENED)).unwrap();
+    let types: Vec<&str> = records.iter().map(|record| record.event_type).collect();
+    assert!(
+        types.contains(&"RiskLimitTriggered"),
+        "the floor triggers at the opening second: {types:?}"
+    );
+}

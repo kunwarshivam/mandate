@@ -15,7 +15,6 @@
 //! a protective order, a risk exit, or a kill switch on its own account (`AGENTS.md` rules 3 and
 //! 13). It keeps `paused` or `stopped` only when the last readable view already was.
 
-use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mandate_canon::{Object, Value, parse};
@@ -792,7 +791,7 @@ impl<'c> AccountRiskFold<'c> {
         payload: &Object,
     ) -> Result<Vec<RiskAppend>, UnreadableCause> {
         let clock = whole_second(payload, "clock")?;
-        if let Ordering::Less = clock.cmp(&self.opened_at) {
+        if clock < self.opened_at {
             return Ok(Vec::new());
         }
         let session = self.calendar.session(clock).map_err(refused)?;
@@ -1090,7 +1089,8 @@ impl ExchangeRiskCalendar {
     }
 }
 
-/// The whole seconds `[start, end)` and `[from, to)` share; none when they do not meet.
+/// The whole seconds `[start, end)` and `[from, to)` share; none when they do not meet, which the
+/// difference shows as negative.
 fn overlap(start: UtcNanos, end: UtcNanos, from: UtcNanos, to: UtcNanos) -> u64 {
     let shared = end.min(to).secs().saturating_sub(start.max(from).secs());
     u64::try_from(shared).unwrap_or(0)
