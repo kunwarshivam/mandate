@@ -15,7 +15,7 @@
 //! a protective order, a risk exit, or a kill switch on its own account (`AGENTS.md` rules 3 and
 //! 13). It keeps `paused` or `stopped` only when the last readable view already was.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mandate_canon::{Object, Value, parse};
 use mandate_domain::{AgentMode, AssetId, MarketSession, Side};
@@ -240,6 +240,15 @@ fn unread_bid() -> Result<Price, UnreadableCause> {
     Price::parse("1").map_err(|_| UnreadableCause::Undecodable)
 }
 
+/// Whether `row` is the record `owed` (DEC-2301 item 2): the same type, version, cause and payload.
+fn reproduces(owed: &RiskAppend, row: &StoredEvent, body: &Value) -> bool {
+    let cause = body.get("causation_id").and_then(Value::as_str);
+    row.event_type == owed.event_type
+        && row.schema_version == owed.schema_version
+        && cause == owed.causation_id.as_deref()
+        && body.get("payload") == Some(&owed.payload)
+}
+
 /// The versions of the order records the fold reads for ownership (journal spec §9.5, §9.16):
 /// `OrderSubmitted` and `OrderStateChanged` at 1 and 2, `OrderRequestRecorded` at 1. Any other is
 /// one it does not know, and the view fails closed rather than miss whose an order is.
@@ -394,7 +403,22 @@ pub struct AccountRiskFold<'c> {
     /// The `fill_id`s of the agent's own fills already stepped, each once, as the executor's fold
     /// applies a fill once (DEC-2393 item 2).
     fills: BTreeSet<String>,
+    /// The records the fold returned and the stream has not yet carried back, in order (DEC-2301
+    /// item 2): the next risk records on the stream must be exactly these.
+    owed: VecDeque<RiskAppend>,
 }
+
+/// The records the fold returns, which it must find on the stream exactly as it returned them.
+const FOLD_RECORDS: [&str; 8] = [
+    "RiskDayStarted",
+    "RiskLimitTriggered",
+    "RiskLimitLifted",
+    "HighWaterMarkReset",
+    "PositionReleased",
+    "InstrumentRestrictionChanged",
+    "GoalCompleted",
+    "AgentModeApplied",
+];
 
 impl<'c> AccountRiskFold<'c> {
     /// Opens the fold for `agent` on `stream` after the row at `head`, with the risk state at
@@ -444,6 +468,7 @@ impl<'c> AccountRiskFold<'c> {
             requests: BTreeMap::new(),
             own: BTreeSet::new(),
             fills: BTreeSet::new(),
+            owed: VecDeque::new(),
         })
     }
 
@@ -473,6 +498,7 @@ impl<'c> AccountRiskFold<'c> {
         }
         match self.read(row) {
             Ok(appends) => {
+                self.owed.extend(appends.iter().cloned());
                 self.view = RiskView::Readable {
                     snapshot: Box::new(self.risk.snapshot().clone()),
                     head: row.seq,
@@ -494,6 +520,17 @@ impl<'c> AccountRiskFold<'c> {
             .get("payload")
             .and_then(Value::as_object)
             .ok_or(UnreadableCause::Undecodable)?;
+        let record = FOLD_RECORDS.contains(&row.event_type.as_str());
+        if let Some(owed) = self.owed.front() {
+            if !record || !reproduces(owed, row, &body) {
+                return Err(UnreadableCause::NotReproduced);
+            }
+            self.owed.pop_front();
+            return Ok(Vec::new());
+        }
+        if record && row.event_type != "AgentModeApplied" {
+            return Err(UnreadableCause::NotReproduced);
+        }
         match (reading(&row.event_type), row.schema_version) {
             (None, _) => Err(UnreadableCause::UnfoldedEventType),
             (Some(Reading::Record), _) | (Some(Reading::Mark), 1) => Ok(Vec::new()),
@@ -935,6 +972,13 @@ impl<'c> AccountRiskFold<'c> {
             });
         }
         Ok(appends)
+    }
+
+    /// The records the fold returned that the stream has not carried back yet, in the order they
+    /// are owed. At the stream's head after a restart these are the records a crash kept from
+    /// being appended after their cause, which the executor appends next (DEC-2394 item 3).
+    pub fn owed(&self) -> impl Iterator<Item = &RiskAppend> {
+        self.owed.iter()
     }
 
     /// Records that the records the fold last returned could not be appended, which makes the
