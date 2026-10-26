@@ -101,7 +101,7 @@ Today: no real model is called anywhere on main. In the cell, the research agent
 
 ## Step 3: keeps deciding until it buys (signals, builder, gate, autonomy, executor, broker)
 
-Today: in the cell, the runtime evaluates the crossover and, with a fresh output, asks (X2, X4 closed); the executor fills and protects a deployed opening on its fixture broker (X5 closed), and on a Monday no output is fresh (X11).
+Today: in the cell, the runtime evaluates the crossover and, with a fresh output, asks (X2, X4 closed); in code and in process tests the executor fills and protects a deployed opening on its fixture broker (X5 closed), not yet seen in a cell run; and on a Monday no output is fresh (X11).
 
 | Item | Wired? | Evidence | Lane | Size |
 |---|---|---|---|---|
@@ -110,7 +110,7 @@ Today: in the cell, the runtime evaluates the crossover and, with a fresh output
 | Gate dry run | deployed, asks on deferring openings | #2538 | D1 | — |
 | Autonomy: ask, `ApprovalRequested` | deployed yes, not yet seen in the cell (X11) | `Plan::classify` never auto (plan.rs:90-133); escalation.rs:288 | D1 | — |
 | Runtime to executor handoff | yes | executord reads `IntentProposed` (follow.rs:463-499) | — | — |
-| Executor opening, fill, protective stop | yes, on the fixture paper broker | X5 (#2624, #2641) | X | — |
+| Executor opening, fill, protective stop | yes on the fixture paper broker, in process tests; not yet seen in a cell run | X5 (#2624, #2641) | X | — |
 | Broker: Robinhood (rh-sim) | no | #2434 waits on the founder's three DEC-2382 answers | founder | — |
 
 ## Step 4: monitors the position (marks, protection, risk)
@@ -118,8 +118,8 @@ Today: in the cell, the runtime evaluates the crossover and, with a fresh output
 | Item | Wired? | Evidence | Lane | Size |
 |---|---|---|---|---|
 | Executor start, reconciliation, readiness | yes | ticks arrive (X1); CI step 2's executor is live | — | — |
-| Marks in the journal | deployed yes | X3 (#2449, #2547: the deployment's marks over `NoMarks`) | X | — |
-| Protection, OCO, watchdog | deployed: the protective stop | the deployment's protections (X5); the fixture broker places the stop as the bracket's legs (#2624, #2641) | X / LV | — |
+| Marks in the journal | wired in the cell's executor, not yet seen in a cell run | X3 (#2449, #2547: the deployment's marks over `NoMarks`) | X | — |
+| Protection, OCO, watchdog | the protective stop wired, in process tests; not yet seen in a cell run | the deployment's protections (X5); the fixture broker places the stop as the bracket's legs (#2624, #2641) | X / LV | — |
 | Drawdown ladder, daily loss | library yes | not called deployed | RK | L |
 | Owner sees positions | yes | The agent page reads orders, positions and the journal from the API (#2459), and `/positions` shows each position's DEC-2138 figures from the API (#2660) with the owner's exit on each of the agent's own (#2645) | WB | — |
 
@@ -134,7 +134,7 @@ Unchanged since 517ee19: news tools exist on the recorded plane only, live news 
 | Agent flatten over the journaled fold | deployed yes | production.rs `Flatten` over the agent's own fills (#2447); an owner exit's legs are journaled as `IntentProposed` (DEC-2387); a kill switch's flatten is planned by the executor itself | — | — |
 | Signal and goal exits | library yes | X2, X4 | D1 + DR | — |
 | Thesis exit | yes | the runtime fold reads `ThesisInvalidated` (runtime/src/state.rs:799, DEC-2391), end to end through the journal's own append (#2578); in the cell, step 3's research loop reads it as its own link (#2652, #2661) | NE | — |
-| Owner exit | yes, from web, journaled as its market sells | DEC-2387; the executor holds the position (X5 closed); `web/`'s positions screen sends it (#2645), and the cell's trade loop proves it as `owner_exit`, scenario step 6 (#2662) | — | — |
+| Owner exit | yes, from web, journaled as its market sells | DEC-2387; the executor holds the position (X5 closed); `web/`'s positions screen sends it (#2645), and the cell's trade loop requires it as `owner_exit`, read by scenario step 6 (#2662) | — | — |
 
 ## Step 7: the owner sees everything in web, and approves, intervenes or kills
 
@@ -143,7 +143,7 @@ Unchanged since 517ee19: news tools exist on the recorded plane only, live news 
 | Approve | web yes, server yes | X6 | L1 | S |
 | Kill switch | yes | web's and the CLI's are recorded and the runtime applies them; the executor journals its account-stream copy (X10 closed), and web/'s alerts screen shows it as one alert (#2638) | — | — |
 | Orders, positions, journal reads | used | the agent page (#2459); `/v1/me/session` by step-up (web/src/lib/api-runtime.tsx:272) | WB | — |
-| Screens still on `ApiNotYetNotice` | none | positions (#2660), alerts (#2638) and the rest read the API; `ApiNotYetNotice` is defined (screens/common.tsx) but no screen uses it | WB | — |
+| Screens still on `ApiNotYetNotice` | audit decisions, messages, backtests, settings, go-live | `WorkspaceGate` without `api` renders it on the API source (screens/common.tsx:218). The dashboard, agents, connections, approvals, alerts (#2638), positions (#2660) and the audit timeline swap in an API variant through `BySource`; the audit page's decisions and the messages, backtests, settings and go-live pages have none | WB | M |
 | Resume, release, mandate change | resume and stop yes; release and mandate change no | resume and stop from web with the owner's passkey (#2655, DEC-2140) | WB + L1 | M |
 
 ## Running the cell from a cloud session
