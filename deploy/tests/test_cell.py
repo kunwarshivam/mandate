@@ -2270,14 +2270,28 @@ def test_the_research_workspace_has_a_clock_of_its_own():
     first, second = (first_container(deployments[n]) for n in ("scheduler", "scheduler-research"))
     assert first["args"] == ["run", "--workspace", hosted, "--probe", "/tmp/process.sock"]
     assert second["args"] == ["run", "--workspace", f"{hosted}r", "--probe", "/tmp/process.sock"]
-    unnamed = lambda c: {k: v for k, v in c.items() if k not in ("name", "args")}
-    assert unnamed(first) == unnamed(second)
+
+    def masked(name: str) -> str:
+        """The Deployment whole, with its own name and workspace written as the first's."""
+        text = json.dumps(deployments[name], sort_keys=True)
+        return text.replace("scheduler-research", "scheduler").replace(f"{hosted}r", hosted)
+
+    assert masked("scheduler") == masked("scheduler-research")
+    assert deployments["scheduler-research"]["spec"]["template"]["metadata"]["labels"]["mandate.dev/process"] == (
+        "scheduler-research"
+    )
     egress = {
         n: next(d for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == f"egress-{n}")
         for n in ("scheduler", "scheduler-research")
     }
     unselected = lambda e: {k: v for k, v in e["spec"].items() if k != "podSelector"}
     assert unselected(egress["scheduler"]) == unselected(egress["scheduler-research"])
+    for name in ("scheduler", "scheduler-research"):
+        assert egress[name]["spec"]["podSelector"] == {
+            "matchLabels": {"mandate.dev/workspace": "ws1", "mandate.dev/process": name}
+        }, name
+    without_manager = render_all("--set", f"api.workspace={hosted}", "--set", f"deployManager.researchWorkspace={hosted}r", "--set", "images.deploy-manager=")
+    assert not [d for d in without_manager if "scheduler-research" in json.dumps(d)], "only beside the second manager"
     for check in (colocated, guaranteed, default_deny, egress_exact, no_ingress, hardened, gated, secrets_as_files):
         assert check(docs) == [], check.__name__
     assert not [d for d in render_all() if "scheduler-research" in json.dumps(d)]

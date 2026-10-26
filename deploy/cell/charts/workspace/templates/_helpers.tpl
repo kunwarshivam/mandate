@@ -26,7 +26,7 @@ alone (DEC-2338). */ -}}
 {{- if and (eq .name "deploy-manager") $.Values.deployManager.researchWorkspace -}}
 {{- $out = append $out (include "mandate.researchManager" (dict "root" $ "p" .) | fromJson) -}}
 {{- end -}}
-{{- if and (eq .name "scheduler") $.Values.deployManager.researchWorkspace -}}
+{{- if and (eq .name "scheduler") $.Values.deployManager.researchWorkspace (index $.Values.images "deploy-manager") -}}
 {{- $out = append $out (include "mandate.researchScheduler" (dict "root" $ "p" .) | fromJson) -}}
 {{- end -}}
 {{- end -}}
