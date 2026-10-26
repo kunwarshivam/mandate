@@ -478,8 +478,12 @@ fn a_version_3_deployment_reads_as_its_version_2() -> Result<(), String> {
     };
     let (args, mut earlier) = scene("version-2", MANDATE, WORKSPACE, connection()?)?;
     let (stepped_args, mut stepped) = scene("version-3", MANDATE, WORKSPACE, connection()?)?;
-    let deployed = String::from_utf8(to_canonical(&stepped.records[0].payload))
-        .map_err(|refused| refused.to_string())?;
+    let first = stepped
+        .records
+        .first_mut()
+        .ok_or_else(|| "the scene's deployment".to_owned())?;
+    let deployed =
+        String::from_utf8(to_canonical(&first.payload)).map_err(|refused| refused.to_string())?;
     let open = deployed
         .strip_suffix('}')
         .ok_or_else(|| "a payload is an object".to_owned())?;
@@ -496,8 +500,8 @@ fn a_version_3_deployment_reads_as_its_version_2() -> Result<(), String> {
         body: body.into_bytes(),
         ..stored_row("ctl:ws_paper", "paper")
     };
-    stepped.records[0] = crate::control_record(&row).map_err(|refused| refused.to_string())?;
-    assert!(stepped.records[0].payload.get("step_up").is_some());
+    *first = crate::control_record(&row).map_err(|refused| refused.to_string())?;
+    assert!(first.payload.get("step_up").is_some());
     let expected = run(&args, &[], &mut earlier)
         .err()
         .ok_or_else(|| "the revocation must refuse the earlier version's run".to_owned())?;
