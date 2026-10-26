@@ -1908,6 +1908,7 @@ dependencies = [
  "mandate-artifacts-fs",
  "mandate-canon",
  "mandate-domain",
+ "mandate-gate-context",
  "mandate-gateway",
  "mandate-journal",
  "mandate-journal-pg",
@@ -2069,6 +2070,21 @@ dependencies = [
  "mandate-num",
  "mandate-time",
  "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-gate-inputs"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-executor",
+ "mandate-num",
+ "mandate-risk",
+ "mandate-spec",
+ "mandate-time",
  "thiserror",
 ]
 
@@ -2573,6 +2589,7 @@ dependencies = [
  "mandate-canon",
  "mandate-domain",
  "mandate-executor",
+ "mandate-gate-inputs",
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-liquidity",

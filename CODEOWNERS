@@ -58,6 +58,7 @@
 /crates/mandate-executor/   @kunwarshivam
 /crates/mandate-executord/  @kunwarshivam
 /crates/mandate-gate-context/ @kunwarshivam
+/crates/mandate-gate-inputs/ @kunwarshivam
 /crates/mandate-gateway-http/ @kunwarshivam
 /crates/mandate-gateway/    @kunwarshivam
 /crates/mandate-gatewayd/   @kunwarshivam
