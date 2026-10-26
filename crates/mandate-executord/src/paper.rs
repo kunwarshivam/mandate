@@ -621,7 +621,7 @@ fn order_json(order: &Order, legs: Value, at: &str) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use mandate_alpaca::{HttpRequest, Method};
+    use mandate_alpaca::{HttpRequest, Method, Response};
     use mandate_canon::{Value, parse};
     use mandate_time::UtcNanos;
 
@@ -663,15 +663,26 @@ mod tests {
 
     const BUY: &str = r#"{"client_order_id":"md-01JINTENT0000000000000000A","limit_price":"150","order_class":"simple","qty":"10","side":"buy","symbol":"AAPL","time_in_force":"day","type":"limit"}"#;
     const OCO: &str = r#"{"client_order_id":"md-01JINTENT0000000000000000A-p1","order_class":"oco","qty":"10","side":"sell","stop_loss":{"stop_price":"147"},"symbol":"AAPL","take_profit":{"limit_price":"157.5"},"time_in_force":"gtc","type":"limit"}"#;
+    /// [`OCO`] with a top-level `limit_price` and a `type` of its own, which neither leg takes.
+    const OCO_WITH_TOP_LEVEL_PRICE: &str = r#"{"client_order_id":"md-01JINTENT0000000000000000A-p1","limit_price":"150","order_class":"oco","qty":"10","side":"sell","stop_loss":{"stop_price":"147"},"symbol":"AAPL","take_profit":{"limit_price":"157.5"},"time_in_force":"gtc","type":"stop_limit"}"#;
     const BRACKET: &str = r#"{"client_order_id":"md-01JINTENT0000000000000000B","order_class":"bracket","qty":"10","side":"buy","stop_loss":{"stop_price":"147"},"symbol":"AAPL","take_profit":{"limit_price":"157.5"},"time_in_force":"day","type":"market"}"#;
 
     /// An OCO is listed as Alpaca lists it: its take-profit limit first, under the client order id
     /// it was sent with, and its stop nested under it as a leg with ids of its own.
     #[test]
     fn an_oco_is_its_limit_with_its_stop_nested() -> Result<(), Error> {
+        for oco in [OCO, OCO_WITH_TOP_LEVEL_PRICE] {
+            an_oco_nests(oco)?;
+        }
+        Ok(())
+    }
+
+    /// [`an_oco_is_its_limit_with_its_stop_nested`] for one request `oco`: its legs come from
+    /// `take_profit` and `stop_loss` alone, whatever its own `type` and `limit_price` say.
+    fn an_oco_nests(oco: &str) -> Result<(), Error> {
         let paper = FixturePaper::filling(UtcNanos::parse("2026-09-21T15:00:00.000000000Z")?);
         answer(&paper, Method::Post, "/v2/orders", Some(BUY))?;
-        answer(&paper, Method::Post, "/v2/orders", Some(OCO))?;
+        answer(&paper, Method::Post, "/v2/orders", Some(oco))?;
         let listed = open(&paper)?;
         let [parent] = listed.as_slice() else {
             return Err(format!("one OCO open: {listed:?}").into());
@@ -743,16 +754,31 @@ mod tests {
         Ok(())
     }
 
-    /// A read of an order by an id it never gave, or of any other path, is `404`.
+    /// A read of an order by the id it gave answers that order with its legs nested, and a read
+    /// by an id it never gave is `404`, with an order on the book. No other path reaches it:
+    /// `HttpRequest` exists only for the table's endpoints.
     #[test]
     fn an_order_it_never_gave_is_not_found() -> Result<(), Error> {
         let paper = FixturePaper::filling(UtcNanos::parse("2026-09-21T15:00:00.000000000Z")?);
-        let request = HttpRequest::new(
-            Method::Get,
-            "/v2/orders/00000000-0000-4000-8000-000000000009",
-            None,
-        )?;
-        assert_eq!(paper.answer(&request).status, 404);
+        answer(&paper, Method::Post, "/v2/orders", Some(BRACKET))?;
+        let listed = open(&paper)?;
+        let [parent] = listed.as_slice() else {
+            return Err(format!("one bracket open: {listed:?}").into());
+        };
+        let id = text(parent, "id").ok_or("an id")?;
+        let read = |path: &str| -> Result<Response, Error> {
+            Ok(paper.answer(&HttpRequest::new(Method::Get, path, None)?))
+        };
+        let found = read(&format!("/v2/orders/{id}"))?;
+        assert_eq!(found.status, 200);
+        let order: Value = parse(&found.body)?;
+        assert_eq!(text(&order, "id"), Some(id));
+        assert_eq!(legs(&order)?.len(), 2, "its legs nested: {order:?}");
+        assert_eq!(
+            read("/v2/orders/00000000-0000-4000-8000-000000000009")?.status,
+            404,
+            "an id it never gave, beside one it did"
+        );
         Ok(())
     }
 
