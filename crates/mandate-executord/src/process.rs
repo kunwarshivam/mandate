@@ -18,10 +18,10 @@ use mandate_num::{Fraction, Price};
 use mandate_process::{Action, Input as Lifecycled, Kind, Lifecycle, State};
 use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
-use mandate_time::UtcNanos;
+use mandate_time::{ExchangeCalendar, UtcNanos};
 
 use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches};
-use crate::marks::Marked;
+use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
 
 /// The version the envelope's actor carries.
@@ -180,6 +180,12 @@ pub struct ExecutorProcess<S, B> {
     /// When each instrument whose exit waits on a price was last read, so each is read at most
     /// once per `exit_step_s` (DEC-2359).
     polled: QuotePoll,
+    /// When each marked instrument was last marked, so each is marked at most once per
+    /// [`MARK_EVERY`] (DEC-2380 item 3).
+    marked_at: QuotePoll,
+    /// The US-equities calendar a mark's session is read from; `None` when it cannot load, and then
+    /// nothing is marked, so the gate holds (`AGENTS.md` rule 3).
+    calendar: Option<ExchangeCalendar>,
     written_at: UtcNanos,
 }
 
@@ -229,6 +235,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             polled: QuotePoll::new(Duration::from_secs(
                 u64::try_from(wiring_step).unwrap_or_default(),
             )),
+            marked_at: QuotePoll::new(MARK_EVERY),
+            calendar: ExchangeCalendar::us_equities().ok(),
         };
         if config.environment != Environment::Paper {
             this.lifecycle.observe(now, Lifecycled::Failed);
@@ -351,6 +359,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             return alerts;
         }
         if let Some(tick) = tick
+            && !self.write_marks(now, tick, &mut alerts)
+        {
+            return alerts;
+        }
+        if let Some(tick) = tick
             && !self.hand(now, now, Input::Tick(tick), &mut alerts, 0)
         {
             return alerts;
@@ -457,6 +470,52 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             }
         }
         Ok(true)
+    }
+
+    /// Journals, at the tick `at`, a `MarkUpdated` version 2 for each instrument the wiring marks
+    /// that is due one (DEC-2380 item 3): at most once per [`MARK_EVERY`] of the risk clock, from
+    /// the quote the feed hands at `now`. An instrument the feed has no quote for, the snapshot no
+    /// asset class for, or no session names, is not marked. `false` when the journal stopped the
+    /// pass; an append in doubt raises the journal's one opaque alert.
+    fn write_marks(&mut self, now: UtcNanos, at: RiskClock, alerts: &mut Vec<Alert>) -> bool {
+        let Some(calendar) = self.calendar.clone() else {
+            return true;
+        };
+        let Ok(instant) = UtcNanos::from_parts(at.secs(), 0) else {
+            return true;
+        };
+        let wanted = self.wiring.marked.instruments();
+        let Ok(due) = self.marked_at.due(&wanted, instant) else {
+            return true;
+        };
+        for instrument in due {
+            let Some(class) = self.wiring.instruments.asset_class(&instrument) else {
+                continue;
+            };
+            let Ok(observation) = self.wiring.quotes.observe(&instrument, now) else {
+                continue;
+            };
+            let id = self
+                .wiring
+                .ids
+                .event_id(WriterEpoch(self.epoch), Seq(self.account_head()), 0);
+            let feed = self.wiring.quotes.feed();
+            let Some(draft) = mark_draft(&observation, class, &calendar, feed, id, at) else {
+                continue;
+            };
+            match self.journal(now, &[draft]) {
+                Ran::Committed => self.journal_down = false,
+                Ran::InDoubt => {
+                    if !self.journal_down {
+                        self.journal_down = true;
+                        alerts.push(journal_unavailable());
+                    }
+                    return false;
+                }
+                Ran::Stopped => return false,
+            }
+        }
+        true
     }
 
     /// Drains at `now`: no new input; an input in doubt is handed once more, then the process exits
