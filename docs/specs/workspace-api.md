@@ -847,7 +847,7 @@ per workspace deployment (item 6).
       that row's refusal, and a non-member the one 404), writes nothing, and is served in a `live`
       workspace too, since a read adds no risk. An empty or absent control stream answers empty
       lists, not an error. Both fold the control stream as the create does (`versions.rs`,
-      `facts`): a control-stream row that fold cannot read (a malformed `model_version`
+      `control_facts`, the control-stream half of the create's `facts`): a control-stream row that fold cannot read (a malformed `model_version`
       registration among them) makes either read `journal_unavailable`, as it makes the create
       refuse, never a list the create would then refuse.
       - `GET /instruments` returns `read-models/instruments`: the fold the create's instrument
