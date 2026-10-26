@@ -51,7 +51,8 @@ function documented(): Map<string, Set<string>> {
   return out;
 }
 
-const SCHEMA_OF: Readonly<Record<Operation, string>> = {
+/** Each command's request schema; the deploy body's lands with its `mandate-api` type (§3.11 item 11), so its members are checked against the spec's list instead. */
+const SCHEMA_OF: Readonly<Record<Exclude<Operation, "deploy">, string>> = {
   pause: "pause-request",
   resume: "resume-request",
   hold_openings: "hold-request",
@@ -78,6 +79,7 @@ interface Schema {
 }
 
 function schemaFor(operation: Operation): Schema {
+  if (operation === "deploy") throw new Error("the deploy body has no request schema yet; check it against DEPLOY_MEMBERS");
   return JSON.parse(readFileSync(join(SCHEMAS, `${SCHEMA_OF[operation]}.schema.json`), "utf8")) as Schema;
 }
 
@@ -162,7 +164,7 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
       const confirmed = prepareApprovalResponse(client, pendingOne, "approve", { screen: "D6", environment: scope.environment, shown: ["line"], modelOutputExpanded: false }, challenge.value);
       if (confirmed.ok) for (const command of confirmed.commands) sent.push(await client.send(command));
     }
-    sent.push(await client.send(prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification: "risk_increasing" } })));
+    sent.push(await client.send(prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification: "risk_increasing" }, stepUp: null })));
     const created = await client.send(prepareCreateVersion(client, buildWorkspace("normal").agents[0].mandate));
     const version = versionCreated(created.ok ? created.body : null);
     expect(version.ok).toBe(true);
@@ -205,7 +207,7 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
       expect(evidence.$defs.StepUpEvidence.properties?.method.enum).toContain(step.method);
     }
     for (const classification of ["risk_increasing", "risk_reducing", "neutral"] as const) {
-      const c = prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification } });
+      const c = prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification }, stepUp: null });
       bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
     }
     expect(new Set(bodies.map((b) => b.operation))).toEqual(new Set(["pause", "resume", "stop", "kill_switch", "approval_response", "confirm_version"]));

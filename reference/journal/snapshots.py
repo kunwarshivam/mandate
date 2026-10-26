@@ -1,4 +1,4 @@
-"""Journal spec v0.88 §9.35's reference vectors for `AccountSnapshotRecorded` version 2 (DEC-2398):
+"""Journal spec v0.89 §9.35's reference vectors for `AccountSnapshotRecorded` version 2 (DEC-2398):
 the connector's declared account type and day-trading regime, and the broker's prior-close equity
 and maintenance margin, beside version 1's members, which stay registered.
 
@@ -43,7 +43,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.88 §9.35 (DEC-2398)"
+SPEC = "docs/specs/journal.md v0.89 §9.35 (DEC-2398)"
 ACCOUNT = f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}"
 EVENT_IDS = {
     "snapshot_v2": "01JAC0S0A000000000000000S1",

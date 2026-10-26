@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/signal-models.schema.json",
+  "description": "GET /signal-models (§4.1, §3.11 item 11, DEC-2136): the registry V-007 reads: the latest ConfigSnapshotRegistered of kind model_version per model_id, whatever its version, from the facts the create folds (a withdrawal leaves both once the fold maps it, E10-11w), with a fixed projection of the content object stored under its content_hash. Sorted by model_id. Platform-authored descriptions only: no prompt, model identity, source path, performance, scorecard or recommendation (DEC-126, DEC-99). as_of names the control stream.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "models"
+  ],
+  "properties": {
+    "models": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Model"
+      }
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "$defs": {
+    "Model": {
+      "type": "object",
+      "required": [
+        "model_id",
+        "model_version",
+        "content_hash",
+        "params",
+        "admits_instruments",
+        "content",
+        "registered_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "model_id": {
+          "description": "The mandate schema's signal_model id.",
+          "type": "string",
+          "pattern": "^(fast|llm|quant)\\.[a-z0-9_]{1,48}$"
+        },
+        "model_version": {
+          "description": "The mandate schema's signal_model version.",
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$"
+        },
+        "content_hash": {
+          "description": "The value a mandate's signal_models[].content_hash names (mandate spec §8.1).",
+          "$ref": "../common.schema.json#/$defs/ContentRef"
+        },
+        "params": {
+          "description": "The registration's declared parameter names (V-007), in the order V-007 compares a document's: ascending, as registered.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "uniqueItems": true,
+          "maxItems": 32
+        },
+        "admits_instruments": {
+          "type": "boolean"
+        },
+        "content": {
+          "description": "A fixed projection of the object stored under content_hash (DEC-2136 item 4): authorship and methodology, and of params_schema only constraints and each parameter's name, type, min and max, each only when present; null when the store cannot give or parse the object. Nothing else of the object is served. The client renders it as platform-authored text, never as advice.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "authorship": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "methodology": {
+                  "type": "string",
+                  "maxLength": 4000
+                },
+                "params_schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "params": {
+                      "type": "array",
+                      "maxItems": 32,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "name"
+                        ],
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                          },
+                          "type": {
+                            "type": "string",
+                            "maxLength": 32
+                          },
+                          "min": {
+                            "type": "integer"
+                          },
+                          "max": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "constraints": {
+                      "type": "array",
+                      "maxItems": 32,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 200
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "registered_at": {
+          "description": "The ConfigSnapshotRegistered row's recorded_at.",
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        }
+      }
+    }
+  },
+  "propertyNames": {
+    "not": {
+      "pattern": "([tT][oO][kK][eE][nN]|[sS][eE][cC][rR][eE][tT]|[pP][aA][sS][sS][wW][oO][rR][dD]|[pP][aA][sS][sS][pP][hH][rR][aA][sS][eE]|[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]|[aA][pP][iI]_[kK][eE][yY]|[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]|[aA][cC][cC][oO][uU][nN][tT]_[nN][uU][mM][bB][eE][rR]|[fF][iI][nN][gG][eE][rR][pP][rR][iI][nN][tT]|[vV][aA][uU][lL][tT])"
+    }
+  },
+  "unevaluatedProperties": false
+}

@@ -52,6 +52,7 @@ mod research;
 mod state;
 mod step;
 mod tail;
+mod theses;
 mod types;
 
 pub use error::{JsonError, RuntimeError};

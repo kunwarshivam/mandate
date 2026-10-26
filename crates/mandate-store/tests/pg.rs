@@ -109,3 +109,34 @@ fn a_draft_the_journal_accepts_reads_back_as_written() {
         assert_eq!(stored.get(member), drafted.get(member), "{member}");
     }
 }
+
+/// A store holds at most one connection, however many calls it makes: each long-running process
+/// drives its stores from one thread, so a pool of sqlx's default ten per store held about twenty
+/// idle connections per runtime, and four runtimes took every slot of the cell's journal, refusing
+/// its migration (lane DR's cell run, 2026-10-26).
+#[test]
+fn a_store_holds_one_connection_however_many_calls_it_makes() {
+    let Some(db) = support::TestDb::new() else {
+        return;
+    };
+    let name = format!("{}_store", db.schema);
+    let mut store = PgStore::connect(&format!("{}&application_name={name}", dsn(&db))).unwrap();
+    let epoch = store.take_ownership(&stream()).unwrap();
+    let at = UtcNanos::from_parts(T, 0).unwrap();
+    let outcome = store.append(&stream(), 0, epoch, at, &[opened(epoch)]);
+    assert!(
+        matches!(outcome, AppendOutcome::Committed(_)),
+        "{outcome:?}"
+    );
+    for _ in 0..30 {
+        assert_eq!(store.rows(&stream()).map(|rows| rows.len()), Some(1));
+    }
+    let held: i64 = db
+        .block_on(
+            sqlx::query_scalar("SELECT count(*) FROM pg_stat_activity WHERE application_name = $1")
+                .bind(&name)
+                .fetch_one(&db.admin),
+        )
+        .unwrap();
+    assert_eq!(held, 1, "the store's connections");
+}
