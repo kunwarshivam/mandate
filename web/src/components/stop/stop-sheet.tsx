@@ -118,8 +118,8 @@ function AgentChoices({ agent, choose, leave, full }: { agent: Agent; choose: (k
       {holding ? (
         <>
           <KillSwitchButton title="Kill switch: close and stop" href={recordHref("kill", agent.agent_id)} onClick={leave}>
-            Cancels only this agent&apos;s orders, sells only its positions, and ends it. Other agents and your own holdings are untouched. Opens the full list to confirm with
-            your passkey.
+            Cancels only this agent&apos;s orders, sells only its positions, and ends it. Other agents and your own holdings are untouched. Opens the full list to confirm.
+            No passkey needed.
           </KillSwitchButton>
           <Choice tone="outline" title="Stop and release positions to me" href={recordHref("release", agent.agent_id)} onClick={leave}>
             Ends the agent and makes its positions yours, <strong className="font-semibold text-foreground">without protection</strong>: its protective orders are canceled and
@@ -132,7 +132,7 @@ function AgentChoices({ agent, choose, leave, full }: { agent: Agent; choose: (k
             Ends the agent for good. It holds nothing, so nothing is sold. Needs your passkey.
           </Choice>
           <KillSwitchButton title="Kill switch: cancel and stop" href={recordHref("kill", agent.agent_id)} onClick={leave}>
-            Cancels this agent&apos;s orders and ends it. It holds nothing to sell. Opens the full list to confirm with your passkey.
+            Cancels this agent&apos;s orders and ends it. It holds nothing to sell. Opens the full list to confirm. No passkey needed.
           </KillSwitchButton>
         </>
       )}
@@ -143,7 +143,7 @@ function AgentChoices({ agent, choose, leave, full }: { agent: Agent; choose: (k
 /**
  * The agents' choices over the workspace API (DEC-1096), from the agents it serves: pausing, resuming
  * and stopping (each with the owner's passkey, DEC-2140), and each agent's kill switch, which opens
- * its record screen. Release needs the positions it hands
+ * its record screen and needs no passkey (DEC-2410). Release needs the positions it hands
  * over, which the API does not serve per agent, so it is not offered here.
  */
 function ApiAgentChoices({
@@ -198,8 +198,8 @@ function ApiAgentChoices({
                 ) : null}
                 {full ? (
                   <KillSwitchButton title="Kill switch: close and stop" href={recordHref("kill", agent.agent_id)} onClick={leave}>
-                    Cancels only this agent&apos;s orders, sells only its positions, and ends it. Other agents and your own holdings are untouched. Opens the full list to confirm
-                    with your passkey.
+                    Cancels only this agent&apos;s orders, sells only its positions, and ends it. Other agents and your own holdings are untouched. Opens the full list to confirm.
+                    No passkey needed.
                   </KillSwitchButton>
                 ) : null}
               </>
@@ -335,22 +335,22 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
               {full ? (
                 <>
                   <KillSwitchButton appearance="outline" title="Stop all agents on this account" href={recordHref("stop_all", ws.connection.connection_id || UNREAD_CONNECTION)} onClick={leave}>
-                    Each agent&apos;s own kill switch: cancels its orders, sells its positions, and ends it. Your own holdings are untouched. Opens the full list to confirm with
-                    your passkey.
+                    Each agent&apos;s own kill switch: cancels its orders, sells its positions, and ends it. Your own holdings are untouched. Opens the full list to confirm.
+                    No passkey needed.
                   </KillSwitchButton>
                   {ws.connection.connection_id ? (
                     <KillSwitchButton appearance="outline" title="Close everything on this account" href={recordHref("close_all", ws.connection.connection_id)} onClick={leave}>
                       {source === "api" ? (
                         <>
                           From here this sends the account&apos;s kill switch: each agent on the account is stopped by its own kill switch. Orders and holdings no agent
-                          placed are left as they are. Opens the full list to confirm with your passkey.
+                          placed are left as they are. Opens the full list to confirm. No passkey needed.
                         </>
                       ) : (
                         <>
                           The broker&apos;s cancel-all and close-all: it cancels every open order, including ones Owlhead did not place, closes every position, including your
                           own
                           {own.length > 0 ? ` ${own.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(", ")}` : " holdings"} that no agent manages, and ends every
-                          agent. Opens the full list to confirm with your passkey.
+                          agent. Opens the full list to confirm. No passkey needed.
                         </>
                       )}
                     </KillSwitchButton>

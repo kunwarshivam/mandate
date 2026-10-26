@@ -1,0 +1,305 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/acknowledgments.schema.json",
+  "description": "GET /acknowledgments?state=open[&agent={id}] (\u00a73.11 item 12, DEC-2144): every hold that stands now on the workspace's account streams, by journal spec \u00a79.28's checks 1 and 2, with the agent to post an acknowledgment to and its open request. as_of names the control stream and each account stream read.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "acknowledgments"
+  ],
+  "properties": {
+    "acknowledgments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Hold"
+      }
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "Hold": {
+      "description": "One hold the owner may acknowledge.",
+      "type": "object",
+      "required": [
+        "event",
+        "subject",
+        "agent_id",
+        "account",
+        "reason",
+        "mode",
+        "raised_at",
+        "independent_required",
+        "request"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "$ref": "../common.schema.json#/$defs/EventId"
+        },
+        "subject": {
+          "enum": [
+            "limit",
+            "restriction",
+            "reconciliation"
+          ]
+        },
+        "agent_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "account": {
+          "description": "The account stream's id, acct:{workspace_id}:{account_ref} (journal spec \u00a72).",
+          "type": "string",
+          "pattern": "^acct:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$",
+          "maxLength": 200
+        },
+        "reason": {
+          "$ref": "#/$defs/Reason"
+        },
+        "mode": {
+          "oneOf": [
+            {
+              "enum": [
+                "exits_only",
+                "paused"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raised_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "independent_required": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "request": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/OpenRequest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "subject": {
+                "const": "limit"
+              }
+            },
+            "required": [
+              "subject"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "required": [
+                  "limit"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "cause"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "restriction"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "kind"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "instrument"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "mode": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subject": {
+                "const": "restriction"
+              }
+            },
+            "required": [
+              "subject"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "required": [
+                  "cause"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "limit"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "restriction"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "kind"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "instrument"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "mode": {
+                "enum": [
+                  "exits_only",
+                  "paused"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subject": {
+                "const": "reconciliation"
+              }
+            },
+            "required": [
+              "subject"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "required": [
+                  "restriction",
+                  "kind",
+                  "instrument"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "limit"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "cause"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "mode": {
+                "enum": [
+                  "exits_only",
+                  "paused"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Reason": {
+      "description": "What holds: a limit's code, a restriction's cause, or a reconciliation hold's restriction, its kind, and the instrument it holds.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "limit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "cause": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "restriction": {
+          "type": "string",
+          "pattern": "^reconciliation:.+$",
+          "maxLength": 200
+        },
+        "kind": {
+          "enum": [
+            "instrument",
+            "cash",
+            "fees",
+            "external_activity",
+            "incomplete"
+          ]
+        },
+        "instrument": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OpenRequest": {
+      "description": "The unspent OwnerAcknowledgmentRequested for this hold (journal spec rules 239 to 241).",
+      "type": "object",
+      "required": [
+        "event_id",
+        "requested_by"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "$ref": "../common.schema.json#/$defs/EventId"
+        },
+        "requested_by": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        }
+      }
+    }
+  }
+}

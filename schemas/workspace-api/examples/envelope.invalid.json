@@ -1744,6 +1744,126 @@
       "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
       "retryable": false,
       "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/acknowledgment_unavailable",
+      "status": 599,
+      "code": "acknowledgment_unavailable",
+      "title": "Nothing to acknowledge",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/acknowledgment_unavailable",
+      "status": 409,
+      "code": "acknowledgment_unavailable",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/acknowledgment_unavailable",
+      "status": 409,
+      "code": "acknowledgment_unavailable",
+      "title": "Nothing to acknowledge",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 409,
+      "code": "acknowledgment_unavailable",
+      "title": "Nothing to acknowledge",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/acknowledgment_unavailable",
+      "status": 409,
+      "code": "acknowledgment_unavailable",
+      "title": "Nothing to acknowledge",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/acknowledgment_unavailable",
+      "status": 409,
+      "code": "acknowledgment_unavailable",
+      "title": "Nothing to acknowledge",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/acknowledgment_request_invalid",
+      "status": 599,
+      "code": "acknowledgment_request_invalid",
+      "title": "Request cannot be answered",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/acknowledgment_request_invalid",
+      "status": 409,
+      "code": "acknowledgment_request_invalid",
+      "title": "Other title",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/acknowledgment_request_invalid",
+      "status": 409,
+      "code": "acknowledgment_request_invalid",
+      "title": "Request cannot be answered",
+      "effect": "none",
+      "event_id": null,
+      "retryable": true,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/other",
+      "status": 409,
+      "code": "acknowledgment_request_invalid",
+      "title": "Request cannot be answered",
+      "effect": "none",
+      "event_id": null,
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/acknowledgment_request_invalid",
+      "status": 409,
+      "code": "acknowledgment_request_invalid",
+      "title": "Request cannot be answered",
+      "effect": "recorded",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
+    },
+    {
+      "type": "https://mandate.dev/problems/acknowledgment_request_invalid",
+      "status": 409,
+      "code": "acknowledgment_request_invalid",
+      "title": "Request cannot be answered",
+      "effect": "unknown",
+      "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+      "retryable": false,
+      "violations": []
     }
   ],
   "Actor": [
