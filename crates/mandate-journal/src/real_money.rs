@@ -48,7 +48,11 @@ pub(crate) fn schema(
 
 /// Rules 269 and 270 on a payload its schema has normalized, in the spec's order: the first clause
 /// that fails is reported. `actor` is the envelope's.
-pub(crate) fn rules(event_type: &str, payload: &Value, actor: Option<&Value>) -> Result<(), Invalid> {
+pub(crate) fn rules(
+    event_type: &str,
+    payload: &Value,
+    actor: Option<&Value>,
+) -> Result<(), Invalid> {
     let (kind, member) = match event_type {
         CHANGED => ("platform_operator", "operator"),
         REFUSED => ("user", "principal"),
@@ -58,7 +62,9 @@ pub(crate) fn rules(event_type: &str, payload: &Value, actor: Option<&Value>) ->
     ensure(text(actor, "id") == text(Some(payload), member), "actor.id")?;
     if event_type == CHANGED {
         let enabled = payload.get("enabled") == Some(&Value::Bool(true));
-        let decided = payload.get("decision").is_some_and(|d| !matches!(d, Value::Null));
+        let decided = payload
+            .get("decision")
+            .is_some_and(|d| !matches!(d, Value::Null));
         ensure(!enabled || decided, "payload.decision")?;
     }
     Ok(())
