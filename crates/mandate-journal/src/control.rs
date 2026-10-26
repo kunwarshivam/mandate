@@ -72,8 +72,10 @@ const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 /// `OrderStateChanged` (journal spec §9.16, DEC-869). `OwnerConfirmationReceived` closes at
 /// version 1 (DEC-2040), and so do `AccountCloseRequested` (DEC-2337),
 /// `AccountRestrictionChanged` (DEC-2137), the account stream's `KillSwitchActivated`
-/// (DEC-2139), and `ExternalActivityIngested`, `RejectObserved` and `OrderAbandoned` (DEC-2803).
-const EXECUTOR: [&str; 16] = [
+/// (DEC-2139), `ExternalActivityIngested`, `RejectObserved` and `OrderAbandoned` (DEC-2803), and
+/// the account stream's `ClockAdvanced` copy (DEC-2808). `FillApplied` closes at version 2 and stays
+/// at version 1, and `LateFillApplied` stays at version 1 (DEC-2812).
+const EXECUTOR: [&str; 19] = [
     "IntentReceived",
     "GateDecided",
     "OrderSubmitted",
@@ -87,6 +89,9 @@ const EXECUTOR: [&str; 16] = [
     EXTERNAL,
     REJECT,
     ABANDONED,
+    CLOCK,
+    FILL,
+    "LateFillApplied",
     "BrokerPositionObserved",
     "AgentModeApplied",
     "CompensatingEvent",
@@ -118,9 +123,16 @@ const EXTERNAL: &str = "ExternalActivityIngested";
 /// members is a reject a broker may send.
 const REJECT: &str = "RejectObserved";
 
-/// An intent the executor gave up on (§9.5, DEC-2803): no rule, until trading spec §2.3 states the
-/// client order id the executor derives from an intent.
+/// An intent the executor gave up on (§9.5, DEC-2803): rule 303 (DEC-2820) binds its client order
+/// id to the one trading spec §2.3 derives from its intent, `md-` and the intent id.
 const ABANDONED: &str = "OrderAbandoned";
+
+/// The executor's copy of the scheduler's tick on the account stream (§9.5, DEC-2808): rules 301
+/// and 302. The scheduler stream's own `ClockAdvanced` is §9.20's.
+const CLOCK: &str = "ClockAdvanced";
+/// One broker fill applied to the account (§9.5, DEC-2812): version 2's `client_order_id` is `null`
+/// for a fill that names no order of ours, and rule 299 binds a named one to trading spec §2.3.
+const FILL: &str = "FillApplied";
 
 /// The companion's (§9.5): an `OrderSubmitted` at `schema_version` 2 must be immediately preceded
 /// in its `append` batch by exactly one `OrderRequestRecorded`, which its `causation_id` names.
@@ -425,6 +437,15 @@ pub(crate) fn payload(
         RESTRICTION => restriction_rules(p)?,
         KILL_SWITCH => kill_switch_rules(p, causation_id)?,
         EXTERNAL => external_rules(p)?,
+        CLOCK => clock_rules(p, causation_id)?,
+        ABANDONED => ensure(
+            p.text("client_order_id")
+                .strip_prefix("md-")
+                .is_some_and(|intent| intent == p.text("intent_id")),
+            InvalidReason::Schema,
+            "payload.client_order_id",
+        )?,
+        FILL if schema_version == 2 => fill_rules(p, config_refs)?,
         "ProtectionChanged" => protection_changed_rules(p)?,
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
@@ -654,6 +675,22 @@ fn kill_switch_rules(p: Payload<'_>, causation_id: Option<&Value>) -> Result<(),
     )
 }
 
+/// Rules 301 and 302 (DEC-2808), in that order: the copy's `risk_clock` is its tick
+/// (`payload.risk_clock`), and it names the scheduler's tick it copies (`causation_id`), whose
+/// existence `append` cannot check across streams.
+fn clock_rules(p: Payload<'_>, causation_id: Option<&Value>) -> Result<(), Invalid> {
+    ensure(
+        p.text("risk_clock") == p.text("clock"),
+        InvalidReason::Schema,
+        "payload.risk_clock",
+    )?;
+    ensure(
+        causation_id.and_then(Value::as_str).is_some(),
+        InvalidReason::Schema,
+        "causation_id",
+    )
+}
+
 /// Rules 297 and 298 (DEC-2803): a fill names only its fill id, each other member in the table's
 /// order `null`; an open order names no fill id, then always its instrument, side and quantity.
 fn external_rules(p: Payload<'_>) -> Result<(), Invalid> {
@@ -688,13 +725,72 @@ fn external_rules(p: Payload<'_>) -> Result<(), Invalid> {
     Ok(())
 }
 
+/// Rules 299 (DEC-2812) and 300 (DEC-2817): a `FillApplied` version 2 that names an order names
+/// one of ours, as trading spec §2.3 states it: `md-`, then one or more ASCII letters, digits or
+/// hyphens, at most 128 characters in all; and names the instrument snapshot its order was gated
+/// on. A fill that names no order of ours is `null`, and may be in an instrument the platform
+/// holds no snapshot of.
+fn fill_rules(p: Payload<'_>, config_refs: Option<&Value>) -> Result<(), Invalid> {
+    if p.is_null("client_order_id") {
+        return Ok(());
+    }
+    let named = p.text("client_order_id");
+    let ours = named.len() <= OUR_CLIENT_ORDER_ID_MAX
+        && named.strip_prefix("md-").is_some_and(|body| {
+            !body.is_empty() && body.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        });
+    ensure(ours, InvalidReason::Schema, "payload.client_order_id")?;
+    ensure(
+        config_refs
+            .and_then(|refs| refs.get(crate::catalogue::INS))
+            .is_some(),
+        InvalidReason::MissingConfigRef,
+        "config_refs.instrument_snapshot",
+    )
+}
+
+/// The longest client order id of ours, Alpaca's bound (trading spec §2.3).
+const OUR_CLIENT_ORDER_ID_MAX: usize = 128;
+
+/// §9.5's stream rules on the account stream: rule 260 on an `AccountCloseRequested`, rule 309 on
+/// an `AccountRestrictionChanged`.
+pub(crate) fn stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
+    match draft.event_type() {
+        CLOSE => close_stream_rule(before, draft),
+        RESTRICTION => restriction_stream_rule(before, draft),
+        _ => Ok(()),
+    }
+}
+
+/// Rule 309 (v0.96, DEC-2816): an `AccountRestrictionChanged` names a cause no earlier one of its
+/// stream raised at the same restriction or a stricter one, `blocked` over `closing_only`, so each
+/// cause in force is on the stream once per restriction.
+fn restriction_stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
+    let raised = |d: &Draft| {
+        let payload = d.fields().get("payload").cloned().unwrap_or(Value::Null);
+        let p = Payload(&payload);
+        (
+            p.text("cause").to_owned(),
+            p.text("restriction") == "blocked",
+        )
+    };
+    let (cause, blocks) = raised(draft);
+    ensure(
+        !before.iter().any(|d| {
+            d.event_type() == RESTRICTION && {
+                let (earlier, blocked) = raised(d);
+                earlier == cause && (blocked || !blocks)
+            }
+        }),
+        InvalidReason::Schema,
+        "payload.cause",
+    )
+}
+
 /// Rule 260 (DEC-2337 item 2), a stream rule: an `AccountCloseRequested` names a switch,
 /// instrument, and attempt no earlier one of its stream names together, so a duplicate request is
 /// refused and its second send never happens.
-pub(crate) fn stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
-    if draft.event_type() != CLOSE {
-        return Ok(());
-    }
+fn close_stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
     let request = |d: &Draft| {
         let payload = d.fields().get("payload").cloned().unwrap_or(Value::Null);
         let p = Payload(&payload);
@@ -1036,6 +1132,9 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         (RESTRICTION, 1) => Some(&ACCOUNT_RESTRICTION_CHANGED),
         (KILL_SWITCH, 1) => Some(&ACCOUNT_KILL_SWITCH_ACTIVATED),
         (EXTERNAL, 1) => Some(&EXTERNAL_ACTIVITY_INGESTED),
+        (CLOCK, 1) => Some(&ACCOUNT_CLOCK_ADVANCED),
+        (FILL, 1) | ("LateFillApplied", 1) => Some(&crate::schema::FILL_APPLIED_V1),
+        (FILL, 2) => Some(&FILL_APPLIED_V2),
         (REJECT, 1) => Some(&REJECT_OBSERVED),
         (ABANDONED, 1) => Some(&ORDER_ABANDONED),
         ("BrokerPositionObserved", 1) => Some(&BROKER_POSITION_OBSERVED),
@@ -1456,6 +1555,31 @@ static EXTERNAL_ACTIVITY_INGESTED: Ty = Ty::Record(&[
     ("side", Ty::Nullable(&Ty::OneOf(&["buy", "sell"]))),
     ("qty", Ty::Nullable(&Ty::Decimal)),
     ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's account-stream `ClockAdvanced` copy (DEC-2808): the tick, twice.
+static ACCOUNT_CLOCK_ADVANCED: Ty =
+    Ty::Record(&[("clock", Ty::RiskClock), ("risk_clock", Ty::RiskClock)]);
+/// §9.5's `FillApplied` version 2 (DEC-2812): version 1's members, in version 1's order, with
+/// `client_order_id` nullable.
+static FILL_APPLIED_V2: Ty = Ty::Record(&[
+    ("fill_id", Ty::Str),
+    ("client_order_id", Ty::Nullable(&Ty::Str)),
+    ("instrument_id", Ty::Str),
+    ("side", Ty::Str),
+    ("qty_gross", Ty::Decimal),
+    ("price", Ty::Decimal),
+    ("trade_date", Ty::Date),
+    ("risk_clock", Ty::RiskClock),
+    (
+        "fees",
+        Ty::List(&Ty::Record(&[
+            ("kind", Ty::Str),
+            ("amount", Ty::Decimal),
+            ("asset", Ty::Str),
+            ("status", Ty::Str),
+        ])),
+    ),
 ]);
 
 /// §9.5's `RejectObserved` (DEC-2803).

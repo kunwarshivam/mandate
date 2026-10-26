@@ -54,8 +54,9 @@
 //! nothing left to refuse, and [`evaluate`] decides every proposal itself. E6-4 adds
 //! [`trim_proposals`], mandate spec §5.5's `trim_to_target` (DEC-65, DEC-399), the last entry point
 //! #136 stubbed. E6-6's last row refuses a proposal of zero quantity as
-//! [`GateError::ZeroQuantity`] before any check (DEC-401). [`GateError::Unimplemented`] stays only for
-//! DEC-129 item 27's refusal of an opening that breaks a §5.3 rule with no registered reason code.
+//! [`GateError::ZeroQuantity`] before any check (DEC-401). DEC-2815 registers codes for §5.3
+//! rules 2 and 7, so [`evaluate`] decides those openings too, and [`GateError::Unimplemented`] names
+//! no check of the gate's own.
 
 use core::fmt::Display;
 use std::collections::{BTreeMap, BTreeSet};
@@ -85,11 +86,10 @@ pub use spec_types::{
 /// A stable reason code (ADR-0001 ES-09), registered in
 /// [the trading-domain reference cases](../../../docs/specs/reference-cases/trading-domain.yaml).
 ///
-/// Every variant is a code that file's `reason_codes` list registers. §5.3 rule 2's minimum size
-/// and increment have no registered code, which is why no variant names them: DEC-129 item 27
-/// proposes `below_min_order_size` and `quantity_off_increment` to the founder, and until they are
-/// registered the gate denies without minting one. `CryptoPairNotUsd` is §3.2 item 7's "USD pairs
-/// only" (DEC-255).
+/// Every variant is a code that file's `reason_codes` list registers. §5.3 rule 2's minimum size and
+/// increment, and rule 7, are `BelowMinOrderSize`, `QuantityOffIncrement` and
+/// `FractionalOrderTifOrBracket` (DEC-2815). `CryptoPairNotUsd` is §3.2 item 7's "USD pairs only"
+/// (DEC-255).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ReasonCode {
     AccountTradingBlocked,
@@ -112,9 +112,12 @@ pub enum ReasonCode {
     ExtendedHoursOpeningNotAllowed,
     AuctionWindow,
     InstrumentHalted,
+    BelowMinOrderSize,
+    QuantityOffIncrement,
     WouldCrossZero,
     SellExceedsAvailable,
     WorkingOrderLimit,
+    FractionalOrderTifOrBracket,
     AddBlockedByProtectiveOrder,
     UnknownOrderInFlight,
     MarketOrderNotAllowed,
@@ -140,7 +143,7 @@ impl ReasonCode {
     /// variants the enum declares by reading this file rather than by reading this array: an array
     /// compared against itself can catch a duplicate but never an omission. `as_str`'s exhaustive
     /// match forces a new variant to be named; only that count forces it in here.
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 42] = [
         Self::AccountTradingBlocked,
         Self::AccountRestricted,
         Self::CryptoAccountInactive,
@@ -161,9 +164,12 @@ impl ReasonCode {
         Self::ExtendedHoursOpeningNotAllowed,
         Self::AuctionWindow,
         Self::InstrumentHalted,
+        Self::BelowMinOrderSize,
+        Self::QuantityOffIncrement,
         Self::WouldCrossZero,
         Self::SellExceedsAvailable,
         Self::WorkingOrderLimit,
+        Self::FractionalOrderTifOrBracket,
         Self::AddBlockedByProtectiveOrder,
         Self::UnknownOrderInFlight,
         Self::MarketOrderNotAllowed,
@@ -206,9 +212,12 @@ impl ReasonCode {
             Self::ExtendedHoursOpeningNotAllowed => "extended_hours_opening_not_allowed",
             Self::AuctionWindow => "auction_window",
             Self::InstrumentHalted => "instrument_halted",
+            Self::BelowMinOrderSize => "below_min_order_size",
+            Self::QuantityOffIncrement => "quantity_off_increment",
             Self::WouldCrossZero => "would_cross_zero",
             Self::SellExceedsAvailable => "sell_exceeds_available",
             Self::WorkingOrderLimit => "working_order_limit",
+            Self::FractionalOrderTifOrBracket => "fractional_order_tif_or_bracket",
             Self::AddBlockedByProtectiveOrder => "add_blocked_by_protective_order",
             Self::UnknownOrderInFlight => "unknown_order_in_flight",
             Self::MarketOrderNotAllowed => "market_order_not_allowed",

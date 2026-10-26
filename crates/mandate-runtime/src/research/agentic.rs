@@ -543,12 +543,21 @@ fn final_output(
         items: &agentic.items,
     };
     let judged = if agentic.state.started().output == OutputMode::FinalOutput {
-        judge::judge(run, &called, record, config, context, batch).unwrap_or_default()
+        judge::judge(
+            run,
+            &called,
+            record,
+            config,
+            context,
+            batch,
+            agentic.state.started().kind,
+        )
+        .unwrap_or_default()
     } else {
         judge::Judged::default()
     };
-    if agentic.state.started().kind == RunKind::Monitor && !judged.theses.is_empty() {
-        return proposed_while_monitoring(agentic, record, turn, batch, out);
+    if agentic.state.started().kind == RunKind::Monitor && judged.refused {
+        return refused_while_monitoring(agentic, record, turn, batch, out);
     }
     let (body, invalidations, theses) = match super::invocation(record, &judged.verdicts) {
         Ok(body) => (body, judged.invalidations, judged.theses),
@@ -586,11 +595,12 @@ fn final_output(
     Ok(out)
 }
 
-/// A `monitor` reply that proposes a thesis (§6.9): the gateway pins a monitoring run's output
-/// schema without `theses`, so such a reply never reaches judging there; the core refuses it the
-/// same way, whatever the gateway did. The turn's record is journaled with no verdicts, nothing of
-/// its output is used, and the run ends `error`, as a `schema_invalid` reply's does.
-fn proposed_while_monitoring(
+/// A `monitor` reply outside its schema, as one that proposes a thesis is (§6.9): the gateway pins
+/// a monitoring run's output schema to `invalidations` alone, so such a reply never reaches judging
+/// there; the core's strict read refuses it the same way, whatever the gateway did. The turn's
+/// record is journaled with no verdicts, nothing of its output is used, and the run ends `error`,
+/// as a `schema_invalid` reply's does.
+fn refused_while_monitoring(
     agentic: &mut Agentic,
     record: &CallRecord,
     turn: u32,

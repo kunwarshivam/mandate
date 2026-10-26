@@ -99,6 +99,7 @@ mod session;
 mod shape;
 mod state;
 mod step;
+mod symbols;
 pub mod tripwire;
 mod types;
 
@@ -113,8 +114,9 @@ pub use mandate_notify::OwnerAlertKind;
 pub use opening::equity_bracket_prices;
 pub use own::{book_own_fills, limit_fills, owed_orders, recorded_fills};
 pub use ports::{
-    BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource,
-    BrokerConnector, ConnectorError, FillConfigRefs, IdGen, InstrumentSnapshot, MandateView, Ports,
+    AccountFillRefs, BindingGateConfigRefs, BindingGateInput, BindingGateRequest,
+    BindingGateSource, BrokerConnector, ConnectorError, FillConfigRefs, IdGen, InstrumentSnapshot,
+    MandateView, Ports,
 };
 pub use protection::{LadderPrice, LadderReference, is_protected};
 pub use reconcile::reconcile;
@@ -124,6 +126,7 @@ pub use state::{
     fold,
 };
 pub use step::handle;
+pub use symbols::BrokerSymbols;
 pub use types::{
     AccountDeclaration, AccountRef, AccountScope, AccountState, AccountWide, AccountWideScope,
     ActivityCursor, AgentId, BracketLegs, BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome,

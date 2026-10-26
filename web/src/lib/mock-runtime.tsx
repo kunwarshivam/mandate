@@ -199,6 +199,11 @@ export interface Runtime {
   activity: ((agentId: string) => Promise<ActivityAnswer>) | null;
   /** An agent's own positions alone (`GET /agents/{id}/positions`, DEC-2111), for the positions screen; `null` over the fixtures. */
   holdings: ((agentId: string) => Promise<PositionsAnswer>) | null;
+  /**
+   * The owner's exit from one instrument (`POST /agents/{id}/exits`, §5.4, rule 13), followed to its
+   * outcome; `onRecorded` runs once the journal holds it. `null` over the fixtures.
+   */
+  ownerExit: ((agentId: string, instrument: string, record: CommandRecord, onRecorded: () => void) => Promise<ExitOutcome>) | null;
   /** A stream's latest `count` records, oldest first (§4.8.1), for the audit screens; `null` over the fixtures. */
   streamTail: ((streamId: string, count: number) => Promise<ActivityAnswer["journal"]>) | null;
   /** The owner alerts about the workspace's agents and accounts (`GET /alerts`, DEC-2141); `null` over the fixtures. */
@@ -255,9 +260,16 @@ export interface ConnectPort {
   list: () => Promise<{ ok: true; connections: ConnectionDetail[] } | { ok: false; reason: string }>;
 }
 
-/** An agent's own positions with its account's holdings from the same read (DEC-2111), or why not. */
+/**
+ * Where an owner exit came to: settled by the agent's runtime (`applied`, `refused`, `ended`), recorded
+ * with no settled outcome read yet, not delivered with the refusal's code, or not known.
+ */
+export type ExitOutcome = { phase: "applied" | "refused" | "ended" | "recorded" } | { phase: "undelivered"; reason: string } | { phase: "unknown" };
+
+/** The owner alerts the API served (DEC-2141), or why not. */
 export type AlertsAnswer = { ok: true; read: Alerts } | { ok: false; reason: string };
 
+/** An agent's own positions with its account's holdings from the same read (DEC-2111), or why not. */
 export type PositionsAnswer = { ok: true; account_ref: string | null; items: AgentHolding[]; account_positions: ReadPosition[] | null } | { ok: false; reason: string };
 
 /** The member's own workspace passkeys over the API (§3.6): the list, and adding one. */
@@ -667,7 +679,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, streamTail: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, streamTail: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

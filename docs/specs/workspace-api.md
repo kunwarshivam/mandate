@@ -1431,7 +1431,7 @@ index on those members in the Postgres adapter; the in-memory reader scans.
 | `ApprovalRequested` | `payload.content.evidence.outputs[].event_id` | Each `ModelOutputRecorded` the approval's content cites, on the same agent stream (§9.6) |
 | `DecisionMade` | `payload.outputs_used[]` | Each `ModelOutputRecorded` on the same agent stream |
 | `ModelOutputRecorded` | `payload.evidence[]`; `payload.thesis_id` | Each event named in `evidence`, on any stream of the workspace (observations, model invocations); and the `ThesisProposed` or `ThesisRevised` with that `thesis_id` on the same agent stream |
-| Any other event, `OrderAbandoned` included | none | Only its `causation_id` (`OrderAbandoned` has no closed schema yet, so no payload member is a link; §12 question 7) |
+| Any other event, `OrderAbandoned` included | none | Only its `causation_id`. `OrderAbandoned` is closed ([journal spec](journal.md) §9.5, [DEC-2803](../project/decisions/DEC-2803.md)), and its `intent_id` names its intent and its `client_order_id` the order that intent derives (rule 303, [DEC-2820](../project/decisions/DEC-2820.md)), but the trace does not follow them yet (§12 question 7) |
 
 The chain of a fill an agent proposed with no approval runs `FillApplied` → `OrderSubmitted` →
 `OrderRequestRecorded` (`causation_id`) → `IntentReceived`, every `GateDecided`, and the agent
@@ -2539,8 +2539,8 @@ follow-ups" there (freeze rule). **SC** marks a safety-critical story.
 7. **Trace links the journal does not record yet.** `ModelInvocationRecorded` names no event it
    served, so a trace reaches it only when an output's `evidence` names it. A flatten's or a
    protective order's `OrderRequestRecorded` carries no link to the `KillSwitchActivated` or the
-   opening it serves. A version-1 `OrderSubmitted` names no intent. `OrderAbandoned` has no closed
-   schema, so no payload member of it is a link. No member the journal spec requires links an
+   opening it serves. A version-1 `OrderSubmitted` names no intent. `OrderAbandoned` names its
+   intent and order (journal spec §9.5, rule 303), but the trace does not follow it yet. No member the journal spec requires links an
    `ApprovalRequested` to its `DecisionMade`: the runtime writes the decision as its `causation_id`,
    which the spec does not require. Each needs a journal spec
    member; until then the trace reports the hop as `not_recorded` or ends (§4.8.1).

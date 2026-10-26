@@ -282,8 +282,9 @@ const RISK_STATE_ON_ACCOUNT: [(&str, &str); 2] =
 /// The agent stream's research-agent thesis records journal spec §9.4 closes (DEC-413, DEC-414).
 const THESIS_ON_AGENT: [(&str, &str); 2] = [("ThesisProposed", AGENT), ("ThesisRevised", AGENT)];
 
-/// The account stream's closed executor records (DEC-446, DEC-447, DEC-459, DEC-460).
-const EXECUTOR_ON_ACCOUNT: [(&str, &str); 14] = [
+/// The account stream's closed executor records (DEC-446, DEC-447, DEC-459, DEC-460), the
+/// `ClockAdvanced` copy among them (DEC-2808).
+const EXECUTOR_ON_ACCOUNT: [(&str, &str); 15] = [
     ("IntentReceived", ACCT),
     ("GateDecided", ACCT),
     ("OrderSubmitted", ACCT),
@@ -298,6 +299,7 @@ const EXECUTOR_ON_ACCOUNT: [(&str, &str); 14] = [
     ("ExternalActivityIngested", ACCT),
     ("RejectObserved", ACCT),
     ("OrderAbandoned", ACCT),
+    ("ClockAdvanced", ACCT),
 ];
 
 fn closed_by_section_9_2(event_type: &str, kind: &str) -> bool {

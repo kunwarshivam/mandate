@@ -59,8 +59,11 @@ use mandate_time::UtcNanos;
 
 pub mod drift;
 pub mod flow;
+mod journaled;
 pub mod score;
 pub mod spec_types;
+
+pub use journaled::{ReplayError, Replayed, ThesisRecord, replay_theses};
 
 pub use spec_types::{
     AssetClass, AssetId, AutonomyDecision, ContentHash, GroupId, InstrumentGroup,

@@ -1871,9 +1871,8 @@ mod tests {
     /// its order reaches the builder's dry run:
     /// - at a `min_order_size` of 7 it passes as stated;
     /// - at 8 the dry run reads that minimum too, so the gate meets trading spec §5.3 rule 2 for the
-    ///   opening, where a dry run on `qty_increment` would allow it. Until DEC-129 item 27 gives
-    ///   rule 2 its reason code the gate refuses to decide, naming the rule; after it, the case
-    ///   fails at `gate_dry_run`. Either names the minimum's rule or the dry run.
+    ///   opening, where a dry run on `qty_increment` would allow it: the dry run is denied
+    ///   `below_min_order_size` (DEC-2815), so the case fails at `gate_dry_run`.
     ///
     /// The scene's Holding goal and active rung reach the dry run too, but only `trim_proposals`
     /// reads either, so no dry run can show them.
@@ -1893,10 +1892,10 @@ mod tests {
             .map_err(|e| format!("MC-B01 on the trim base at a 7-share minimum: {e}"))?;
         match run(on_the_trim_base("8")?, "MC-B01") {
             Ok(()) => Err("MC-B01 on the trim base at an 8-share minimum: the case still passed")?,
-            Err(e) if e.contains("gate_dry_run") || e.contains("§5.3 rule 2") => {}
+            Err(e) if e.contains("gate_dry_run") => {}
             Err(e) => Err(format!(
-                "MC-B01 on the trim base at an 8-share minimum: the failure names neither \
-                 `gate_dry_run` nor §5.3 rule 2: {e}"
+                "MC-B01 on the trim base at an 8-share minimum: the failure does not name \
+                 `gate_dry_run`: {e}"
             ))?,
         }
         Ok(())
