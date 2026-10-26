@@ -1,4 +1,4 @@
-//! The customer real-money gate's decision ([DEC-2134] items 2, 5 and 7; journal spec v0.90
+//! The customer real-money gate's decision ([DEC-2134] items 2, 5 and 7; journal spec v0.91
 //! §9.36), over random control streams: the setting is the `enabled` of the latest
 //! `RealMoneyGateChanged` by `seq`, off with none or with one it cannot read, and a request that
 //! names any environment but `paper` is refused while it is off and admitted only to the checks

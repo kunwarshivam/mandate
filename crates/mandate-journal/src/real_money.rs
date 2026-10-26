@@ -1,4 +1,4 @@
-//! The customer real-money gate's records, which journal spec v0.90 §9.36 closes at schema version 1
+//! The customer real-money gate's records, which journal spec v0.91 §9.36 closes at schema version 1
 //! ([DEC-2134](../../../docs/project/decisions/DEC-2134.md)): `RealMoneyGateChanged`, a platform
 //! operator's setting of whether the workspace may reach an environment other than `paper`, and
 //! `RealMoneyRefused`, the workspace API's record of a request it refused while that setting was

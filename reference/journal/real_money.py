@@ -1,4 +1,4 @@
-"""Journal spec v0.90 §9.36's reference vectors for the customer real-money gate (DEC-2134):
+"""Journal spec v0.91 §9.36's reference vectors for the customer real-money gate (DEC-2134):
 `RealMoneyGateChanged`, a platform operator's setting of whether a workspace may reach an
 environment other than `paper`, and `RealMoneyRefused`, the workspace API's record of a request it
 refused while that setting was off.
@@ -31,7 +31,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.90 §9.36 (DEC-2134)"
+SPEC = "docs/specs/journal.md v0.91 §9.36 (DEC-2134)"
 AT = "2026-10-26T09:00:00.000000000Z"
 GATE_EVENT = "01JAA3G4A000000000000000G1"
 REFUSED_EVENT = "01JAA3G4A000000000000000R1"

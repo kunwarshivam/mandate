@@ -1,5 +1,5 @@
 //! The platform operator's setting of the customer real-money gate ([DEC-2134] items 3 and 6;
-//! journal spec v0.90 §9.36): off always, on only for the one workspace
+//! journal spec v0.91 §9.36): off always, on only for the one workspace
 //! `MANDATE_API_FOUNDER_WORKSPACE` names and only with a decision, written as a `platform_operator`
 //! that the journal's own validator admits, and read back by the gate. Every expectation is
 //! computed here from DEC-2134's words, not by the module's code.

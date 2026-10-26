@@ -1572,7 +1572,7 @@ fn the_step_up_confirmation_is_catalogued_and_closed_on_the_control_stream() {
     closed_on_the_control_stream(&["StepUpConfirmed"]);
 }
 
-/// Journal spec v0.90 §9.36 (DEC-2134): `RealMoneyGateChanged` and `RealMoneyRefused` are on the
+/// Journal spec v0.91 §9.36 (DEC-2134): `RealMoneyGateChanged` and `RealMoneyRefused` are on the
 /// control stream alone, with no configuration, closed there at schema version 1.
 #[test]
 fn the_real_money_gate_records_are_catalogued_and_closed_on_the_control_stream() {
