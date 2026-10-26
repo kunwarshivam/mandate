@@ -5,14 +5,16 @@
 
 #![allow(
     clippy::unwrap_used,
+    clippy::expect_used,
     clippy::disallowed_methods,
     clippy::arithmetic_side_effects,
     reason = "the tests bound their waits on a child process; no core code reads the clock"
 )]
 
 use std::io::{BufRead, BufReader, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -33,6 +35,20 @@ impl Drop for Guard {
     }
 }
 
+/// The first line of `stderr`, waited for at most [`BOUND`], and the reader for the rest.
+fn first_line(stderr: ChildStderr) -> (String, BufReader<ChildStderr>) {
+    let (sent, received) = mpsc::channel();
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut line = String::new();
+        reader.read_line(&mut line).ok();
+        sent.send((line, reader)).ok();
+    });
+    received
+        .recv_timeout(BOUND)
+        .expect("the process wrote no line on its standard error")
+}
+
 impl Guard {
     fn exited(&mut self, rest: &mut BufReader<ChildStderr>) -> (ExitStatus, String) {
         let deadline = Instant::now() + BOUND;
@@ -48,11 +64,28 @@ impl Guard {
     }
 }
 
+/// The process run with `args`, without `MANDATE_JOURNAL_DSN`, waited for at most [`BOUND`]: its
+/// exit status and its standard error.
+fn refused(args: &[String]) -> (ExitStatus, String) {
+    let mut child = Guard(
+        Command::new(BIN)
+            .args(args)
+            .env_remove("MANDATE_JOURNAL_DSN")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let mut stderr = BufReader::new(child.0.stderr.take().unwrap());
+    child.exited(&mut stderr)
+}
+
 fn scratch(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("news-reader-{}-{name}", std::process::id()))
 }
 
-fn probe(socket: &PathBuf, word: &str) -> Option<i32> {
+fn probe(socket: &Path, word: &str) -> Option<i32> {
     Command::new(BIN)
         .args(["probe", word, "--probe"])
         .arg(socket)
@@ -62,7 +95,7 @@ fn probe(socket: &PathBuf, word: &str) -> Option<i32> {
 }
 
 /// `run`'s flags for workspace `ws_1` over a fresh artifact directory, then `extra`.
-fn run_args(socket: &PathBuf, extra: &[&str]) -> Vec<String> {
+fn run_args(socket: &Path, extra: &[&str]) -> Vec<String> {
     let artifacts = scratch(&format!(
         "artifacts-{}",
         extra.join("-").replace(['=', '/'], "_")
@@ -117,24 +150,13 @@ fn a_start_it_cannot_make_is_refused_with_its_code() {
         String::from_utf8_lossy(&no_workspace.stderr),
         "news_reader_start_failed: workspace_missing\n"
     );
-    let malformed = Command::new(BIN)
-        .args(run_args(&socket, &["--fixture", "--follow", "agent_a"]))
-        .output()
-        .unwrap();
-    assert_eq!(malformed.status.code(), Some(2));
+    let (status, stderr) = refused(&run_args(&socket, &["--fixture", "--follow", "agent_a"]));
+    assert_eq!(status.code(), Some(2));
+    assert_eq!(stderr, "news_reader_start_failed: follow_malformed\n");
+    let (status, stderr) = refused(&run_args(&socket, &["--follow", "agent_a=acct_1"]));
+    assert_eq!(status.code(), Some(2));
     assert_eq!(
-        String::from_utf8_lossy(&malformed.stderr),
-        "news_reader_start_failed: follow_malformed\n"
-    );
-    let no_journal = Command::new(BIN)
-        .args(run_args(&socket, &["--follow", "agent_a=acct_1"]))
-        .env_remove("MANDATE_JOURNAL_DSN")
-        .output()
-        .unwrap();
-    assert_eq!(no_journal.status.code(), Some(2));
-    assert_eq!(
-        String::from_utf8_lossy(&no_journal.stderr),
-        "news_reader_start_failed: journal_dsn_missing\n",
+        stderr, "news_reader_start_failed: journal_dsn_missing\n",
         "without --fixture it runs only on the journal MANDATE_JOURNAL_DSN names"
     );
     let probe_word = Command::new(BIN)
@@ -160,9 +182,7 @@ fn with_no_key_it_says_why_answers_live_and_not_ready_and_drains_on_sigterm() {
             .spawn()
             .unwrap(),
     );
-    let mut stderr = BufReader::new(child.0.stderr.take().unwrap());
-    let mut reason = String::new();
-    stderr.read_line(&mut reason).unwrap();
+    let (reason, mut stderr) = first_line(child.0.stderr.take().unwrap());
     assert_eq!(reason, "no_key\n", "the reason, as its code alone");
     let deadline = Instant::now() + BOUND;
     while probe(&socket, "livez") != Some(0) {
