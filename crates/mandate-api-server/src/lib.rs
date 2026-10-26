@@ -33,7 +33,7 @@
 //! - [`confirm`]: the code the web app shows for a challenge, and the port that verifies a paper
 //!   grant's `cli_confirm` evidence against the owner's `StepUpConfirmed` (DEC-2104).
 //! - [`methods`]: the port's binding, each step-up method to its own verifier, and the passkey
-//!   verifier (DEC-2126), a stub until E9-4 S4 lands.
+//!   verifier (DEC-2126), which a connect start commits beside its request as `StepUpAsserted`.
 //! - [`writes`] also records resume, Stop, and an owner exit as the CLI records them, with step-up
 //!   forwarded only once the port verifies it, and [`status`] reports a command's phase from the
 //!   owning streams' direct causation (DEC-2102).
