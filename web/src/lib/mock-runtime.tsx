@@ -10,6 +10,7 @@ import { type BacktestRead, backtestNotFound, servedBacktest } from "@/api/backt
 import { backtestOfVersion, servedBacktestFixture } from "@/fixtures/backtests";
 import type { ApiView, ReadPosition } from "@/api/read-models";
 import type { Enrolled, ListedPasskey } from "@/api/enrol";
+import type { CatalogueAnswer } from "@/api/catalogue";
 import type { Applies, Classification } from "@/api/confirm";
 import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-up";
 import type { AgentHolding, AgentOrder, JournalLine } from "@/api/activity";
@@ -207,6 +208,8 @@ export interface Runtime {
   activity: ((agentId: string) => Promise<ActivityAnswer>) | null;
   /** An agent's own positions alone (`GET /agents/{id}/positions`, DEC-2111), for the positions screen; `null` over the fixtures. */
   holdings: ((agentId: string) => Promise<PositionsAnswer>) | null;
+  /** The registered instruments and signal models a version may name (§4.1, DEC-2136); `null` over the fixtures, whose set-up uses the fixture catalogue. */
+  catalogue: (() => Promise<CatalogueAnswer>) | null;
   /**
    * The owner's exit from one instrument (`POST /agents/{id}/exits`, §5.4, rule 13), followed to its
    * outcome; `onRecorded` runs once the journal holds it. `null` over the fixtures.
@@ -687,7 +690,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, streamTail: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, catalogue: null, streamTail: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

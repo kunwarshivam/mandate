@@ -348,13 +348,6 @@ const DR_CONNECT: Wait = Wait {
     lands: "a connection the dry run can name: staging's comes from the owner's OAuth connect, \
             which the scenario does not run yet",
 };
-const WB_EXIT: Wait = Wait {
-    lane: "WB",
-    story: "E11-9",
-    pr: None,
-    lands: "web/'s owner exit gesture with its bid confirmation, and the trade loop's \
-            `owner_exit` step between the protective stop and the kill switch",
-};
 const W2_WEB: Wait = Wait {
     lane: "W2",
     story: "E11-9",
@@ -1160,7 +1153,8 @@ pub fn plan(
                 Part::WebTradeLoop(WebCheck {
                     shows: "the trade loop from web/ on the agent: its approval request \
                             shown, approved with the code the host confirms, the order filled, \
-                            the position and the journal shown, then its kill switch",
+                            the position, the journal and the positions screen shown, the \
+                            owner's exit filled, the audit timeline shown, then its kill switch",
                     agent: WEB_AGENT,
                 }),
                 Part::Gap(Gap {
@@ -1239,15 +1233,14 @@ pub fn plan(
         },
         Step {
             number: 6,
-            title: "the owner exits the agent's instrument at a confirmed floor",
-            parts: vec![Part::Gap(Gap {
-                what: "the owner's exit of the agent's position from web/, at a confirmed bid, \
-                       after the trade loop's fill and its protective stop, so the sale shows in \
-                       its positions and audit before the kill switch",
-                on_main: "the owner's exit over the API (#2501), handed to the executor's core and \
-                          priced at the floor it confirmed (#1736, DEC-2033 item 4); an exit \
-                          before the fill sells nothing, so no gesture of the Job runs one",
-                waits: vec![WB_EXIT],
+            title: "the owner exits the agent's position from the web app",
+            parts: vec![Part::WebTradeLoop(WebCheck {
+                shows: "the owner's exit of the agent's position from web/'s positions screen, \
+                        after step 4's fill, its sell filled on the agent's orders before the \
+                        audit and the kill switch: the trade loop's `owner_exit`, read from step \
+                        4's one run (no gesture of the Job exits, since an exit before the fill \
+                        sells nothing)",
+                agent: WEB_AGENT,
             })],
         },
         Step {
@@ -2798,8 +2791,11 @@ pub fn trade_verdict(outcome: &TradeOutcome, required: Required) -> (&'static st
         TradeOutcome::Ran(t) if t.whole() => (
             "ran",
             format!(
-                "approval {}, approved {}, kill switch {}",
-                t.reached["approval"], t.reached["approved"], t.reached["kill_switch"]
+                "approval {}, approved {}, owner exit {}, kill switch {}",
+                t.reached["approval"],
+                t.reached["approved"],
+                t.reached["owner_exit"],
+                t.reached["kill_switch"]
             ),
             false,
         ),
@@ -3719,23 +3715,32 @@ mod tests {
             .collect()
     }
 
-    /// Step 6 runs no gesture in the Job: an owner's exit before the trade loop's fill sells
-    /// nothing, so it is a gap until web/'s exit runs after the fill, in the browser.
+    /// Step 6 runs no gesture in the Job, since an owner's exit before the trade loop's fill sells
+    /// nothing: it reads the trade loop's `owner_exit`, which web/ reaches after the fill and
+    /// before the audit timeline and the kill switch, and it waits on no lane.
     #[test]
-    fn step_six_waits_on_web_s_exit_after_the_fill() {
+    fn step_six_reads_web_s_exit_after_the_fill() {
         let steps = planned("demo1");
         let step6 = &steps[5];
         assert_eq!(step6.number, 6);
         assert!(
-            step6.parts.iter().all(|p| matches!(p, Part::Gap(_))),
-            "no gesture of the Job exits"
+            matches!(&step6.parts[..], [Part::WebTradeLoop(c)] if c.agent == WEB_AGENT),
+            "step 6 is the trade loop's own exit on the run's one agent"
         );
         assert!(
             gestures(&steps)
                 .iter()
-                .all(|g| g.args[..2] != ["agent", "exit"])
+                .all(|g| g.args[..2] != ["agent", "exit"]),
+            "no gesture of the Job exits"
         );
-        assert_eq!(lanes(step6), ["WB"]);
+        assert!(lanes(step6).is_empty());
+        let at = |step: &str| web::TRADE_LOOP_STEPS.iter().position(|s| *s == step);
+        assert!(
+            at("positions_screen") < at("owner_exit")
+                && at("owner_exit") < at("audit_timeline")
+                && at("audit_timeline") < at("kill_switch"),
+            "the exit follows the fill's position and comes before the audit and the kill switch"
+        );
         let pinned = parsed(INSTRUMENT_FILE);
         assert_eq!(pinned["instrument_id"], SPY, "SPY's Alpaca asset id");
         assert_eq!(pinned["symbol"], "SPY");
@@ -4189,8 +4194,8 @@ mod tests {
     }
 
     /// Which steps run today: the sign-in, through the API and web/, runs whole; the gestures on
-    /// `main` make steps 2 to 5 partial, step 3's research gestures among them; step 6 is skipped
-    /// until web/'s exit runs after the fill; the kill switch,
+    /// `main` make steps 2 to 5 partial, step 3's research gestures among them; step 6, the trade
+    /// loop's own exit after the fill, runs whole; the kill switch,
     /// applied by the runtime step 2's deployment starts, and the record run whole. Without a
     /// connect check (the staging dry run) step 7 is partial.
     #[test]
@@ -4200,14 +4205,14 @@ mod tests {
         assert_eq!(
             read,
             [
-                Ready, Partial, Partial, Partial, Partial, Skipped, Ready, Ready
+                Ready, Partial, Partial, Partial, Partial, Ready, Ready, Ready
             ]
         );
         let dry: Vec<Readiness> = unconnected("demo1").iter().map(readiness).collect();
         assert_eq!(
             dry,
             [
-                Ready, Partial, Partial, Partial, Partial, Skipped, Partial, Ready
+                Ready, Partial, Partial, Partial, Partial, Ready, Partial, Ready
             ]
         );
         let step = |parts: Vec<Part>| Step {
@@ -4833,9 +4838,15 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(loops.len(), 1);
-        assert_eq!(loops[0].0, 4);
-        assert_eq!(loops[0].1.agent, WEB_AGENT, "never the agent the CLI kills");
+        assert_eq!(
+            loops.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+            [4, 6],
+            "step 4 runs the loop and step 6 reads its owner exit from the same run"
+        );
+        assert!(
+            loops.iter().all(|(_, c)| c.agent == WEB_AGENT),
+            "never the agent the CLI kills"
+        );
         let reached = |steps: &[&str], error: Option<&str>| {
             TradeOutcome::Ran(web::TradeLoop {
                 reached: steps
@@ -4858,7 +4869,10 @@ mod tests {
             let (word, said, fails) =
                 trade_verdict(&reached(&web::TRADE_LOOP_STEPS, None), required);
             assert_eq!((word, fails), ("ran", false), "{said}");
-            assert!(said.contains("v-kill_switch"), "{said}");
+            assert!(
+                said.contains("v-kill_switch") && said.contains("owner exit v-owner_exit"),
+                "{said}"
+            );
             let (word, said, fails) =
                 trade_verdict(&reached(&[], Some("no approval within 20000 ms")), required);
             assert_eq!(
