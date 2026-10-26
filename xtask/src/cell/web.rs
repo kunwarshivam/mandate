@@ -85,11 +85,6 @@ const TRADE_LOOP_POLLS: u32 = 2_000;
 /// on the scheduler's tick every second and the browser opens after the gestures' Job, and a loop
 /// with no proposal must leave the `cell-demo-web` job its ten minutes (DEC-464).
 const PROPOSAL_MS: &str = "20000";
-/// The trade loop spec's own waits past the proposal, as `trade-loop.spec.ts` defaults them: the
-/// host's confirmation (60 s), the fill (120 s), and the 120 s it allows the rest of its steps.
-const TRADE_LOOP_SPEC_WAITS_MS: u64 = 60_000 + 120_000 + 120_000;
-/// The longest `next dev` takes to start, as `playwright.cell.config.ts`'s `webServer` bounds it.
-const NEXT_DEV_START_MS: u64 = 60_000;
 /// Playwright's bound on the whole trade loop run (`OWLHEAD_CELL_TIMEOUT_MS`, the config's
 /// `globalTimeout`): 400 seconds, past the spec's `test.setTimeout` of 320 s with `PROPOSAL_MS`
 /// and `next dev`'s start, and inside [`TRADE_LOOP_POLLS`]' 500 s, so Playwright ends the run and
@@ -651,6 +646,11 @@ mod tests {
     use super::super::{API_LOCAL_PORT, DEMO_WORKSPACE, STUB_PORT};
     use super::*;
 
+    /// The trade loop spec's own waits past the proposal, as `trade-loop.spec.ts` defaults them: the
+    /// host's confirmation (60 s), the fill (120 s), and the 120 s it allows the rest of its steps.
+    const TRADE_LOOP_SPEC_WAITS_MS: u64 = 60_000 + 120_000 + 120_000;
+    /// The longest `next dev` takes to start, as `playwright.cell.config.ts`'s `webServer` bounds it.
+    const NEXT_DEV_START_MS: u64 = 60_000;
     /// Playwright's bound on the trade loop holds the spec's own test timeout and `next dev`'s
     /// start, and ends before the driver's polls do, so a slow loop is the spec's failure with a
     /// result rather than a run the driver kills (#2466's review).
@@ -665,7 +665,10 @@ mod tests {
         let bound: u64 = handed.parse()?;
         let proposal: u64 = PROPOSAL_MS.parse()?;
         let polls_ms = u64::from(TRADE_LOOP_POLLS) * u64::try_from(POLL.as_millis())?;
-        assert_eq!(polls_ms, 500_000, "the driver's polls, as their doc gives them");
+        assert_eq!(
+            polls_ms, 500_000,
+            "the driver's polls, as their doc gives them"
+        );
         assert!(
             bound >= proposal + TRADE_LOOP_SPEC_WAITS_MS + NEXT_DEV_START_MS,
             "{bound} ms cannot hold the spec's {} ms and next dev's start",
