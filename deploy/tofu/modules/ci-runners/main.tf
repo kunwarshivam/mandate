@@ -238,7 +238,9 @@ locals {
     RUN chmod 0755 /usr/local/bin/mandate-runner-entry /usr/local/bin/mandate-runner-admit && bash /opt/build.sh && rm /opt/build.sh /opt/toolchain.sh
   DOCKER
 
-  # The host's loop, one job per run; systemd starts it again when it exits, however it exits.
+  # The host's loop, one job per run; systemd starts it again when it exits, however it exits. It
+  # registers a runner only while the repository holds every outside collaborator's fork run for
+  # approval, read with the App's token, and fails closed: a setting it cannot read registers none.
   manager = <<-MANAGER
     #!/bin/bash
     set -euo pipefail
@@ -270,6 +272,13 @@ locals {
     fi
     docker container prune --force
     token=$(curl -fsS --retry 3 -X POST -H "Authorization: Bearer $(app_jwt)" -H "Accept: application/vnd.github+json" "$api/app/installations/$INSTALLATION_ID/access_tokens" -d "$(jq -cn --arg r "$REPOSITORY_NAME" '{repositories: [$r], permissions: {administration: "write"}}')" | jq -er .token)
+    policy=$(curl -fsS --retry 3 -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$api/repos/$REPOSITORY/actions/permissions/fork-pr-contributor-approval" | jq -r '.approval_policy // ""' || true)
+    if [ "$policy" != all_external_contributors ]; then
+      curl -fsS -X DELETE -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$api/installation/token" || true
+      echo "registering no runner: fork pull requests from outside collaborators are not all held for approval (DEC-2065 item 4)" >&2
+      sleep 300
+      exit 1
+    fi
     name="$(hostname)-$(date +%s)"
     config=$(curl -fsS --retry 3 -X POST -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$api/repos/$REPOSITORY/actions/runners/generate-jitconfig" -d "$(jq -cn --arg n "$name" --arg l "$LABEL" '{name: $n, runner_group_id: 1, labels: ["self-hosted", "linux", "x64", $l], work_folder: "_work"}')" | jq -er .encoded_jit_config)
     curl -fsS -X DELETE -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$api/installation/token" || true

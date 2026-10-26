@@ -12,15 +12,32 @@ from the hosting budget of DEC-2011. Only ci.yml's eleven cell jobs move to them
 `main` and for pull requests from this repository's own branches.
 
 **The one rule.** A fork's pull request brings its own workflow files, which can ask for these
-runners by label. What stops it is the setting in step 3, and the runners refuse any job that is
+runners by label. What stops it is the setting in step 1, and the runners refuse any job that is
 not this repository's own before its first step. So **never approve a fork's workflow run while
-the runners are up** without first reading every change it makes under `.github/`. If in doubt,
-unset `CI_RUNNER` and power the droplets off before approving (step 7).
+`CI_RUNNER` is set or the runners are up.** To run one, first unset `CI_RUNNER` and power the
+droplets off (step 7).
 
 **The switch.** Nothing changes until you set the repository variable `CI_RUNNER` (step 5).
 Rolling back is deleting it (step 7).
 
-## 1. DigitalOcean: a team, a billing alert and a token
+## 1. GitHub: verify that forks are held for approval (first)
+
+The runners exist from the moment you apply, before you set `CI_RUNNER`, so confirm this before
+anything else. The runners also read it themselves before every registration and register none
+while it is anything else.
+
+1. In **Settings → Actions → General → Fork pull request workflows from outside collaborators**,
+   select **Require approval for all outside collaborators** and save.
+2. Check it took:
+   `gh api repos/kunwarshivam/mandate/actions/permissions/fork-pr-contributor-approval` must print
+   `"approval_policy":"all_external_contributors"`. Do not go on until it does.
+
+This setting is the fence against code from forks: until you approve a fork's run, none of it runs
+anywhere. ci.yml's own guard only keeps this repository's workflow from sending a fork to the
+runners, and the runners' job-started hook refuses an approved fork's job before its first step
+(DEC-2065 item 4). Keep the rule above.
+
+## 2. DigitalOcean: a team, a billing alert and a token
 
 1. **A separate team for CI.** In the DigitalOcean console, **Create a team** (for example
    `mandate-ci`) and use it for everything below. Its bill and its billing alert then cover the
@@ -43,7 +60,7 @@ Rolling back is deleting it (step 7).
    If an apply fails with a 403 that names another scope, add only that one. Keep the token in
    your password manager, or regenerate it when you next apply.
 
-## 2. GitHub: the runner App (least privilege)
+## 3. GitHub: the runner App (least privilege)
 
 The droplets need a credential that can register a new single-use runner before every job. A
 GitHub App is the least privilege available: each job's token is minted by the droplet, lives one
@@ -67,21 +84,6 @@ on every droplet as a long-lived bearer token tied to your account.
    address ends in its **installation id** (`.../settings/installations/<number>`); note the
    number.
 
-## 3. GitHub: keep forks out (before step 4, not after)
-
-The runners exist from the moment you apply, before you set `CI_RUNNER`, so confirm this first.
-
-1. In **Settings → Actions → General → Fork pull request workflows from outside collaborators**,
-   select **Require approval for all outside collaborators** and save.
-2. Check it took:
-   `gh api repos/kunwarshivam/mandate/actions/permissions/fork-pr-contributor-approval` must print
-   `"approval_policy":"all_external_contributors"`. Do not go on until it does.
-
-This setting is the fence against code from forks: until you approve a fork's run, none of it runs
-anywhere. ci.yml's own guard only keeps this repository's workflow from sending a fork to the
-runners, and the runners' job-started hook refuses an approved fork's job before its first step
-(DEC-2065 item 4). Keep the rule above.
-
 ## 4. Apply, from your own machine
 
 You need OpenTofu `1.13.1` (`bash .cursor/install.sh` installs it, or its GitHub release) and a
@@ -89,7 +91,7 @@ checkout of `main`. In a shell, so no value lands in your history or a file:
 
 ```bash
 cd deploy/tofu/environments/ci-runners
-read -rs DIGITALOCEAN_TOKEN && export DIGITALOCEAN_TOKEN       # step 1.3's token
+read -rs DIGITALOCEAN_TOKEN && export DIGITALOCEAN_TOKEN       # step 2.3's token
 read -rs TF_VAR_state_passphrase && export TF_VAR_state_passphrase   # 32+ random characters; keep it
 read -r TF_VAR_github_app_client_id && export TF_VAR_github_app_client_id
 read -r TF_VAR_github_app_installation_id && export TF_VAR_github_app_installation_id
@@ -111,7 +113,9 @@ passphrase.
 **Wait about 20 to 30 minutes.** Each droplet installs Docker and Sysbox, then builds the job image,
 which runs the repository's `.cursor/install.sh`. Then **Settings → Actions → Runners** lists one
 idle runner per droplet, named `mandate-ci-runner-<n>-<time>`, with the label `mandate-ci-do`. A
-new one appears after every job; finished ones remove themselves.
+new one appears after every job; finished ones remove themselves. If none appears within 40 minutes, check step 1
+again: a host registers no runner while the setting reads anything but
+`all_external_contributors`.
 
 ## 5. Switch the cell jobs over
 
@@ -145,6 +149,9 @@ and tell lane RN: the hook refuses whatever it cannot read.
 - **Back to GitHub's runners:** delete the `CI_RUNNER` variable (or set it empty). The next run
   uses `ubuntu-24.04` everywhere. A job already queued for `mandate-ci-do` waits for a runner:
   cancel that run and re-run it.
+- **Before approving a fork's workflow run:** delete `CI_RUNNER` and power the three droplets off
+  in the console (**Droplets → each → Power → Turn off**); power them on again after the run.
+  A powered-off droplet still bills.
 - **Stop paying:** after the rollback, run `tofu destroy` in the same directory with the same
   variables, or delete the three droplets, the firewall and the tag in the console. Then delete the
   App's private key (or uninstall the App) and revoke the DigitalOcean token.
