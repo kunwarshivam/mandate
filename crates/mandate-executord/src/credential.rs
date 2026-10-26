@@ -364,9 +364,14 @@ pub fn lease_verdict(tick: Result<Held<AccessToken>, &'static str>) -> Result<()
     match tick? {
         Held::Unchanged => Ok(()),
         Held::Rotated(_) => Err("credential_rotated"),
-        Held::Lost => Err("credential_lost"),
+        Held::Lost => Err(CREDENTIAL_LOST),
     }
 }
+
+/// The stop code of a run whose lease lost its credential: the lease expired, the vault refused a
+/// renewal, or the renewed secret does not read. The run restricts the account before it drains
+/// (DEC-2839).
+pub const CREDENTIAL_LOST: &str = "credential_lost";
 
 /// The lease a run holds its broker under, ticked once a pass until a tick stops the run.
 pub struct RunLease<V> {

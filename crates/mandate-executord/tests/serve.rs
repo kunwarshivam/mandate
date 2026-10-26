@@ -144,6 +144,22 @@ fn with_edge<T>(
     each: &dyn Fn(usize) -> Result<(), Error>,
     body: impl FnOnce(Edge<'_>, &Seen) -> T,
 ) -> Result<T, Error> {
+    with_edge_stopping(
+        stop,
+        lapse.map(|after| (after, "credential_lost")),
+        each,
+        body,
+    )
+}
+
+/// [`with_edge`] with the lease's stop code chosen: `lapse` is the pass and the code its tick
+/// answers from then on.
+fn with_edge_stopping<T>(
+    stop: usize,
+    lapse: Option<(usize, &'static str)>,
+    each: &dyn Fn(usize) -> Result<(), Error>,
+    body: impl FnOnce(Edge<'_>, &Seen) -> T,
+) -> Result<T, Error> {
     let noon = at(NOON)?;
     let seen = Seen::default();
     let failed = RefCell::new(None);
@@ -158,8 +174,8 @@ fn with_edge<T>(
             return Some(UNDRAINED);
         }
         lapse
-            .filter(|after| pass >= *after)
-            .map(|_| "credential_lost")
+            .filter(|(after, _)| pass >= *after)
+            .map(|(_, code)| code)
     };
     let terminated = || seen.passes.get() >= stop.min(PASS_BOUND);
     let mut say = |line: &str| seen.said.borrow_mut().push(line.to_owned());
@@ -287,6 +303,65 @@ fn a_lapsed_lease_drains_the_run() -> Result<(), Error> {
             vec!["credential_lost".to_owned(), "drained".to_owned()]
         )
     );
+    Ok(())
+}
+
+/// The causes of the restrictions the account stream holds, in order.
+fn restriction_causes(journal: &Journal) -> Vec<String> {
+    journal
+        .payloads("AccountRestrictionChanged")
+        .iter()
+        .filter_map(|payload| {
+            payload
+                .get("cause")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+/// DEC-2839: a credential the lease lost restricts the account to closing, cause
+/// `connection_unavailable`, before the run drains (connections spec §9.2: at lease expiry the
+/// connection is treated as `suspended` for openings), so the restart finds it in force. A
+/// rotation, or SIGTERM, drains with no restriction: neither is a trouble of the connection.
+#[test]
+fn a_lost_credential_restricts_the_account_before_the_drain() -> Result<(), Error> {
+    for (lapse, restricted) in [
+        (Some((3, "credential_lost")), true),
+        (Some((3, "credential_rotated")), false),
+        (None, false),
+    ] {
+        let journal = connecting()?;
+        establish(&journal)?;
+        let broker = Paper::new(&journal);
+        let wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+        let exit = with_edge_stopping(3, lapse, &|_| Ok(()), |edge, _| {
+            serve(
+                journal.clone(),
+                broker.clone(),
+                wiring,
+                &process_config(Environment::Paper),
+                &starting_status(),
+                edge,
+            )
+        })?;
+        assert_eq!(exit, Ok(0), "{lapse:?}");
+        let expected: &[&str] = if restricted {
+            &["connection_unavailable"]
+        } else {
+            &[]
+        };
+        assert_eq!(restriction_causes(&journal), expected, "{lapse:?}");
+        if restricted {
+            let modes = journal.payloads("AgentModeApplied");
+            assert!(
+                modes.iter().any(|payload| {
+                    payload.get("to").and_then(Value::as_str) == Some("exits_only")
+                }),
+                "every agent exits only: {modes:?}"
+            );
+        }
+    }
     Ok(())
 }
 

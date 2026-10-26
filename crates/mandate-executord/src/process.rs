@@ -8,11 +8,11 @@ use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountDeclaration, AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOrder,
-    BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect,
-    EventDraft, EventId, ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input,
-    InstrumentSnapshot, IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion,
-    MandateView, OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, ThesisRow,
-    WriterEpoch, fold, handle, limit_fills, recorded_fills,
+    BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate, Command, ConnectionTrouble,
+    ConnectorError, Effect, EventDraft, EventId, ExecutorConfig, ExecutorError, ExecutorState,
+    IdGen, Initiator, Input, InstrumentSnapshot, IntentBody, IntentHandoff, IntentId, KillScope,
+    MandateVersion, MandateView, OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock,
+    Seq, SuspendReason, ThesisRow, WriterEpoch, fold, handle, limit_fills, recorded_fills,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
@@ -1214,6 +1214,17 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let answer = self.broker.call(request);
         self.health.observe(&answer);
         answer
+    }
+
+    /// Tells the core the run's credential is lost (DEC-2839): connections spec §9.2 treats a
+    /// lease that expired as `suspended` for openings, so the account is restricted to closing,
+    /// cause `connection_unavailable`, before the run drains. The restriction is on the stream when
+    /// the supervisor restarts the process, and it lifts only as every connection restriction does
+    /// (E7-2y). A core error on it is held, never a stop (DEC-2821).
+    pub fn credential_lost(&mut self, now: UtcNanos) {
+        let lost = Input::Connection(ConnectionTrouble::Suspended(SuspendReason::LeaseExpired));
+        let mut alerts = Vec::new();
+        self.hand(now, now, lost, &mut alerts, 0);
     }
 
     /// Tells the core of every trouble the connection's health holds (DEC-2832): after the pass's
