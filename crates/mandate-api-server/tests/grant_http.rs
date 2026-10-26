@@ -20,7 +20,7 @@
 
 mod common;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -38,6 +38,7 @@ use mandate_api_server::config::{SESSION_KEY_FILE, read_session_key};
 use mandate_api_server::confirm::CliConfirm;
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
+use mandate_api_server::members::control_parser;
 use mandate_api_server::methods::{Methods, Passkey};
 use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::{COOKIE_NAME, OsRandom, Sessions};
@@ -46,9 +47,7 @@ use mandate_api_server::subject::{LinkRefusal, NamesPrincipal};
 use mandate_api_server::token::{FixedKeys, Issuer};
 use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_canon::{Digest, Value, parse, to_canonical};
-use mandate_identity::{MembershipEvent, MembershipRecord, PrincipalId, Role, StepUpActionKind};
-use mandate_identity_seal::Seal;
-use mandate_journal::StoredEvent;
+use mandate_identity::{OWNER_BUNDLE, PrincipalId, Role, StepUpActionKind, WorkspaceId};
 use mandate_time::UtcNanos;
 use serde_json::json;
 
@@ -58,6 +57,12 @@ const KEY: &str = "k1Z-9_grant00001";
 const CHALLENGE_KEY: &str = "k1Z-9_challenge1";
 const ALICE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W3Z";
 const BOB: &str = "01JB3K6F0C9R2V7N4M8Q1T5W41";
+const CAROL: &str = "01JB3K6F0C9R2V7N4M8Q1T5W42";
+const BOB_INVITATION: &str = "01JB3K6F0C9R2V7N4M8Q1T5W51";
+const CAROL_INVITATION: &str = "01JB3K6F0C9R2V7N4M8Q1T5W52";
+/// An approver invited and activated whose enrolment cool-off has not ended: `cooling_off`.
+const DAVE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W43";
+const DAVE_INVITATION: &str = "01JB3K6F0C9R2V7N4M8Q1T5W53";
 const APPROVAL: &str = "01JBH3BTZ8K2M4N6P8R0S2T7AA";
 const AGENT: &str = "agt_a";
 /// A challenge id the server never issued.
@@ -125,7 +130,6 @@ struct World {
     challenges: Arc<Challenges>,
     asked: Asked,
     linked: Arc<AtomicBool>,
-    records: Arc<Mutex<Vec<MembershipRecord>>>,
     /// The approval's content hash.
     hash: String,
 }
@@ -145,8 +149,9 @@ enum Bound {
     NoStore,
 }
 
-/// How a world is set up: its environment, the mandate's approvers, Alice's roles (Bob is an
-/// approver alone), and what the bound version is to the store.
+/// How a world is set up: its environment, the mandate's approvers, the roles of Alice's founding
+/// grant (Bob is an invited approver, Carol an invited viewer), and what the bound version is to
+/// the store.
 struct Setup<'a> {
     environment: &'a str,
     approvers: &'a [&'a str],
@@ -157,15 +162,15 @@ struct Setup<'a> {
 const PAPER: Setup<'static> = Setup {
     environment: "paper",
     approvers: &["role:approver"],
-    alice: &[Role::Approver],
+    alice: &OWNER_BUNDLE,
     bound: Bound::Stored,
 };
 
 static DIRS: Mutex<u32> = Mutex::new(0);
 
 /// A workspace whose control stream is opened in `setup.environment`, with `agt_a` deployed and
-/// one pending approval on its stream bound to a mandate listing `setup.approvers`; Alice and Bob
-/// both hold the approver role, and both are linked.
+/// one pending approval on its stream bound to a mandate listing `setup.approvers`; the members are
+/// [`World::seed`]'s, and Alice and Bob are linked.
 fn world_with(setup: &Setup<'_>) -> World {
     let mut n = DIRS.lock().expect("unpoisoned");
     *n += 1;
@@ -181,11 +186,6 @@ fn world_with(setup: &Setup<'_>) -> World {
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).expect("mode");
     let key = read_session_key(&dir).expect("the key reads");
     let journal = Arc::new(MemJournal::default());
-    let records = Arc::new(Mutex::new(vec![
-        activated(1, principal(ALICE), setup.alice),
-        activated(2, principal(BOB), &[Role::Approver]),
-    ]));
-    let read_records = Arc::clone(&records);
     let sessions = Arc::new(Sessions::new(&key, Box::new(OsRandom::new())));
     let clock = common::ManualClock::at(T0);
     let config = IssuerConfig::new(
@@ -238,9 +238,9 @@ fn world_with(setup: &Setup<'_>) -> World {
         links: Arc::new(common::LinksAt(dir.join("absent"))),
         clock: Arc::clone(&clock) as Arc<dyn mandate_api_server::clock::Clock>,
         journal: Arc::clone(&journal) as Arc<dyn mandate_api_server::journal::Journal>,
-        members: Arc::new(move |_: &[StoredEvent]| {
-            Ok(read_records.lock().expect("unpoisoned").clone())
-        }),
+        members: Arc::new(control_parser(
+            WorkspaceId::from_ulid_text(WORKSPACE).expect("a ULID"),
+        )),
         hosted: hosted(),
         artifacts: (setup.bound != Bound::NoStore).then(|| {
             Arc::clone(&objects) as Arc<dyn mandate_journal::ArtifactSource + Send + Sync>
@@ -259,10 +259,9 @@ fn world_with(setup: &Setup<'_>) -> World {
         challenges,
         asked,
         linked,
-        records,
         hash,
     };
-    w.seed(setup.environment, &content);
+    w.seed(setup, &content);
     w
 }
 
@@ -283,21 +282,6 @@ fn principal(id: &str) -> PrincipalId {
 
 fn at(secs: i64) -> UtcNanos {
     UtcNanos::from_parts(secs, 0).expect("a time")
-}
-
-fn activated(seq: u64, member: PrincipalId, roles: &[Role]) -> MembershipRecord {
-    MembershipRecord::new(
-        Seal::grant(),
-        seq,
-        at(T0 - 1_000),
-        MembershipEvent::Activated {
-            member,
-            invitation: None,
-            roles: roles.iter().copied().collect::<BTreeSet<_>>(),
-            independent_approval_required: false,
-            cool_off_ends_at: at(T0 - 1_000),
-        },
-    )
 }
 
 fn ctl() -> String {
@@ -349,14 +333,54 @@ struct Issued {
 }
 
 impl World {
-    fn seed(&self, environment: &str, content: &serde_json::Value) {
+    /// The control stream as `mandate workspace found` and two invitations leave it: Alice's
+    /// founding `MemberActivated` with `setup.alice`'s roles, then Bob invited and activated as an
+    /// approver, Carol as a viewer, and Dave as an approver still cooling off (journal spec §9.12), then `agt_a` deployed; and the approval
+    /// on `agt_a`'s stream.
+    fn seed(&self, setup: &Setup<'_>, content: &serde_json::Value) {
+        let codes = |roles: &[Role]| -> Vec<&'static str> {
+            let mut codes: Vec<&str> = roles.iter().filter_map(|role| role.code()).collect();
+            codes.sort_unstable();
+            codes
+        };
+        let since = at(T0 - 1_000).to_string();
+        let invited = |invitation: &str, roles: &[Role]| {
+            json!({"invitation": invitation, "roles": codes(roles),
+                   "expires_at": at(T0 + 86_400).to_string(), "invited_by": ALICE})
+        };
+        let accepted = |member: &str, invitation: &str, roles: &[Role]| {
+            json!({"member": member, "invitation": invitation, "reason": "invitation_accepted",
+                   "roles": codes(roles), "independent_approval_required": false,
+                   "cool_off_ends_at": since, "session_ref": null})
+        };
+        let mut cooling = accepted(DAVE, DAVE_INVITATION, &[Role::Approver]);
+        cooling["cool_off_ends_at"] = json!(at(T0 + 86_400).to_string());
         let control = [
             ("StreamOpened", json!({"stream_type": "control"})),
+            (
+                "MemberActivated",
+                json!({"member": ALICE, "invitation": null, "reason": "founding",
+                       "roles": codes(setup.alice), "independent_approval_required": false,
+                       "cool_off_ends_at": since, "session_ref": null}),
+            ),
+            ("MemberInvited", invited(BOB_INVITATION, &[Role::Approver])),
+            (
+                "MemberActivated",
+                accepted(BOB, BOB_INVITATION, &[Role::Approver]),
+            ),
+            ("MemberInvited", invited(CAROL_INVITATION, &[Role::Viewer])),
+            (
+                "MemberActivated",
+                accepted(CAROL, CAROL_INVITATION, &[Role::Viewer]),
+            ),
+            ("MemberInvited", invited(DAVE_INVITATION, &[Role::Approver])),
+            ("MemberActivated", cooling),
             (
                 "AgentDeployed",
                 json!({"agent_id": AGENT, "mandate_version": "sha256:01"}),
             ),
         ];
+        let environment = setup.environment;
         let rows = control
             .into_iter()
             .enumerate()
@@ -364,7 +388,7 @@ impl World {
                 let seq = u64::try_from(i).expect("small") + 1;
                 stored(
                     seq,
-                    &envelope(&ctl(), seq, environment, kind, T0 - 900, payload),
+                    &envelope(&ctl(), seq, environment, kind, T0 - 1_000, payload),
                 )
             })
             .collect();
@@ -916,8 +940,7 @@ fn a_live_workspace_is_live_unavailable_after_the_row_and_reads_no_evidence() {
     );
     assert!(w.asked().is_empty(), "no evidence is read");
     assert!(w.answers().is_empty());
-    w.records.lock().expect("unpoisoned")[0] = activated(1, principal(ALICE), &[Role::Viewer]);
-    let viewer = w.respond(ALICE, "k1Z-9_grant00002", &grant(&w, &evidence));
+    let viewer = w.respond(CAROL, "k1Z-9_grant00002", &grant(&w, &evidence));
     assert_eq!(
         code(&viewer),
         (403, ProblemCode::Forbidden),
@@ -1023,6 +1046,22 @@ fn a_principal_the_mandate_does_not_list_is_forbidden_and_appends_nothing() {
     assert!(w.asked().is_empty(), "no evidence is read");
     assert!(w.answers().is_empty());
     assert!(w.held(&bobs));
+
+    let listed = format!("user:{DAVE}");
+    let w = world_with(&Setup {
+        approvers: &[listed.as_str()],
+        ..PAPER
+    });
+    let body = grant(&w, &placeholder());
+    let cooling = w.respond(DAVE, KEY, &body);
+    assert_eq!(
+        cooling.status,
+        403,
+        "a member still cooling off is not an active approver: {} {}",
+        lossy(&cooling),
+        w.said()
+    );
+    assert!(w.answers().is_empty());
 }
 
 #[test]
@@ -1040,18 +1079,9 @@ fn an_approver_listed_by_user_id_is_recorded() {
 
 #[test]
 fn an_approver_listed_by_role_is_recorded_and_a_member_without_the_role_is_not() {
-    let roles: [(&str, &[Role]); 3] = [
-        ("role:approver", &[Role::Approver]),
-        (
-            "role:workspace_admin",
-            &[Role::Approver, Role::WorkspaceAdmin],
-        ),
-        ("role:owner", &[Role::Approver, Role::OrgOwner]),
-    ];
-    for (listed, alice) in roles {
+    for listed in ["role:approver", "role:workspace_admin", "role:owner"] {
         let w = world_with(&Setup {
             approvers: &[listed],
-            alice,
             ..PAPER
         });
         let issued = w.challenge();
@@ -1126,6 +1156,18 @@ fn the_first_failing_check_in_dec_2129_item_1s_order_answers() {
         code(&unknown),
         (404, ProblemCode::NotFound),
         "404 before the approvers: {}",
+        w.said()
+    );
+    let unknown = w.post(
+        &responses("01JBH3BTZ8K2M4N6P8R0S2T7AB"),
+        ALICE,
+        KEY,
+        &delegated(&body),
+    );
+    assert_eq!(
+        code(&unknown),
+        (404, ProblemCode::NotFound),
+        "404 before /delegation: {}",
         w.said()
     );
     let both = w.respond(BOB, KEY, &delegated(&body));
