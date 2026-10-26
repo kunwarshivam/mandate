@@ -142,6 +142,7 @@ const COMPANION: &str = "OrderRequestRecorded";
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     if crate::notices::governs(stream, event_type)
         || crate::gateway::governs(stream, event_type)
+        || crate::news::governs(stream)
         || crate::invalidation::governs(event_type)
         || crate::retirements::governs(event_type)
         || crate::runs::governs(event_type)
@@ -178,7 +179,8 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
         StreamType::Scheduler
         | StreamType::Notice
         | StreamType::Meter
-        | StreamType::DeploymentMeter => false,
+        | StreamType::DeploymentMeter
+        | StreamType::News => false,
     }
 }
 
@@ -198,6 +200,7 @@ pub(crate) fn closed_schema(
         .or_else(|| crate::notices::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::membership::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::gateway::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::news::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::invalidation::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::retirements::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::runs::schema(event_type, schema_version, stream_type))
@@ -265,6 +268,7 @@ pub(crate) fn payload(
     crate::control_plane::rules(event_type, &payload, actor)?;
     crate::deployment::rules(event_type, &payload, actor)?;
     crate::gateway::rules(event_type, stream_type, &payload, config_refs, actor)?;
+    crate::news::rules(event_type, stream_type, &payload, actor)?;
     crate::invalidation::rules(event_type, stream_type, &payload, actor, causation_id)?;
     crate::retirements::rules(event_type, &payload, actor, causation_id)?;
     crate::runs::rules(event_type, &payload, actor, correlation_id)?;
@@ -498,6 +502,9 @@ pub(crate) fn subject_and_copy(
     if crate::gateway::governs(stream, event_type) {
         return crate::gateway::subject(event_type, stream, payload);
     }
+    if crate::news::governs(stream) {
+        return crate::news::subject(event_type, stream, payload);
+    }
     let p = Payload(payload);
     if event_type == "StreamOpened" {
         let opened = format!("ctl:{}", p.text("workspace_id"));
@@ -517,7 +524,8 @@ pub(crate) fn subject_and_copy(
         | StreamType::Scheduler
         | StreamType::Notice
         | StreamType::Meter
-        | StreamType::DeploymentMeter => &[],
+        | StreamType::DeploymentMeter
+        | StreamType::News => &[],
     };
     ensure(
         allowed.contains(&p.text("command")),
