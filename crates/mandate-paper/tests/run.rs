@@ -925,7 +925,7 @@ fn the_shipping_adapter_selects_no_product_value() {
     let source = include_str!("../src/lib.rs");
     let body = source
         .split_once("pub fn run<P: Ports>(")
-        .and_then(|(_, after)| after.split_once("\n}\n\n/// The closes the host read"))
+        .and_then(|(_, after)| after.split_once("\n}\n\n/// The binary's ports"))
         .map(|(body, _)| body)
         .expect("the run function's body is bounded by its doc successor");
     for forbidden in [
