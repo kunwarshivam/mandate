@@ -2122,3 +2122,194 @@ fn a_deferring_opening_is_journaled_at_version_3_and_asked_never_proposed() {
     assert_eq!(count(&rig, "ApprovalRequested"), 1, "{:?}", kinds(&rig));
     assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
 }
+
+const RESEARCH_SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+
+/// An admitted thesis on SPY (journal spec §9.4) as of `as_of`, expiring an hour later at `expires_at`, appended to the
+/// agent stream through the journal's own append, as the research writer would leave it.
+fn thesis_expired_at(rig: &Rig, as_of: &str, expires_at: &str) {
+    let stream = StreamId::parse(AGENT_STREAM).unwrap();
+    let mut journal = rig.journal.clone();
+    let head = journal.rows(&stream).unwrap().len();
+    let epoch = journal.take_ownership(&stream).unwrap();
+    let hash = Digest::of(b"x").to_hex();
+    let payload = parse(format!(
+        r#"{{"model_id":"llm.research_agent","model_version":"0.1.0","content_hash":"sha256:{hash}","thesis_id":"01J8Z3MTHE5000000000000001","lineage_id":"01J8Z3MTHE5000000000000001","revision":0,"predecessor_thesis_id":null,"autopsy_ref":null,"instrument_id":"{RESEARCH_SPY}","asset_class":"us_equity","direction":"long","as_of":"{as_of}","expires_at":"{expires_at}","horizon_s":3600,"conviction":"0.6","confidence":"0.7","evidence_ref":null,"evidence_sources":["src.newswire"],"corroboration":"independent_source","invalidation":"a guidance cut","allowlist_version":3,"prompt_ref":"sha256:{hash}","response_ref":"sha256:{hash}","admitted":true,"reason":null}}"#
+    ).as_bytes())
+    .unwrap();
+    let mut refs = Object::new();
+    refs.insert(
+        Key::new("model_version").unwrap(),
+        Value::Str(format!("sha256:{hash}")),
+    );
+    refs.insert(
+        Key::new("mandate_version").unwrap(),
+        Value::Str(format!(
+            "sha256:{}",
+            Digest::of(b"research mandate").to_hex()
+        )),
+    );
+    let bytes = mandate_store::envelope::draft_bytes(
+        &mandate_store::envelope::Envelope {
+            stream: AGENT_STREAM,
+            environment: Environment::Paper,
+            actor_kind: "agent",
+            actor_id: AGENT,
+            build: "mandate-daemon/test",
+            version: "0.1.0",
+            event_time: at(NOW - 3_600),
+        },
+        &mandate_store::envelope::Fields {
+            event_id: "01J8Z3MTHE5000000000000002",
+            event_type: "ThesisProposed",
+            schema_version: 1,
+            causation_id: None,
+            correlation_id: Some("01J8Z3MRVN0000000000000001"),
+            config_refs: &refs,
+            payload: &payload,
+        },
+    )
+    .unwrap();
+    let outcome = journal.append(
+        &stream,
+        u64::try_from(head).unwrap(),
+        epoch,
+        at(NOW - 3_600),
+        &[bytes],
+    );
+    assert!(
+        matches!(outcome, AppendOutcome::Committed(_)),
+        "the journal takes the thesis: {outcome:?}"
+    );
+}
+
+/// D1's ask on #2551, end to end over the journal's own append (journal spec rule 8, DEC-2391): a
+/// held instrument whose thesis expired is sold whole by the deployed plan, and the `DecisionMade`
+/// with `exit_origin` `removed_instrument` and its `IntentProposed` commit, decided AUTO by the
+/// built-in risk-reducing rule, with the process still ready.
+#[test]
+fn a_held_instrument_whose_thesis_ended_is_proposed_for_sale_through_the_journal() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    let document = mandate_canon::parse(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deploy/cell/demo/research-mandate.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let version = format!("sha256:{}", Digest::of(b"research mandate").to_hex());
+    let wire = || {
+        mandate_daemon::production::wired(
+            fixture::wiring("user-owner", AGENT_STREAM),
+            &version,
+            &document,
+            (None, mandate_daemon::bars::BarsReader::default()),
+            CLOCK,
+            AGENT,
+        )
+    };
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    rig.control.borrow_mut().push(row(
+        CONTROL,
+        seq,
+        "AgentDeployed",
+        "user",
+        &format!(r#"{{"agent_id":"{AGENT}","mandate_version":"{version}"}}"#),
+    ));
+    drop(RuntimeProcess::start(
+        rig.clone(),
+        wire(),
+        &config(),
+        at(NOW),
+    ));
+    thesis_expired_at(
+        &rig,
+        &at(NOW - 3_660).to_string(),
+        &at(NOW - 60).to_string(),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "AccountSnapshotRecorded",
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":1,"equity":"100000","cash":"100000","buying_power":"100000","non_marginable_buying_power":"100000","risk_clock":"{}"}}"#,
+            at(NOW)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"{RESEARCH_SPY}","price":"100.05","source":"quote","feed":"fixture","bid":"99.95","sane":true,"session":"regular","risk_clock":"{}"}}"#,
+            at(NOW)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderRequestRecorded",
+        &format!(
+            r#"{{"agent_id":"{AGENT}","purpose":"open","risk_clock":"{}"}}"#,
+            at(NOW)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderSubmitted",
+        &format!(r#"{{"client_order_id":"o1","instrument_id":"{RESEARCH_SPY}","side":"buy"}}"#),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "FillApplied",
+        &format!(
+            r#"{{"fill_id":"f1","client_order_id":"o1","instrument_id":"{RESEARCH_SPY}","side":"buy","qty_gross":"3","price":"99.95","risk_clock":"{}"}}"#,
+            at(NOW)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderStateChanged",
+        r#"{"client_order_id":"o1","state":"filled","replaced_by":null,"ignored":false}"#,
+    );
+    reconciled(&rig, ACCOUNT);
+    let mut process = RuntimeProcess::start(rig.clone(), wire(), &config(), at(NOW));
+    for second in 1..4 {
+        tick(&rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+    let rows = agent_rows(&rig);
+    let decision = rows
+        .iter()
+        .find(|row| row.event_type == "DecisionMade")
+        .unwrap_or_else(|| panic!("the exit was decided: {:?}", kinds(&rig)));
+    let payload = parse(&decision.body)
+        .unwrap()
+        .get("payload")
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        payload.get("exit_origin").and_then(Value::as_str),
+        Some("removed_instrument"),
+        "{payload:?}"
+    );
+    assert_eq!(payload.get("combined_score"), Some(&Value::Null));
+    assert_eq!(
+        payload.get("decided_by").and_then(Value::as_str),
+        Some("builtin_risk_reducing")
+    );
+    assert_eq!(count(&rig, "IntentProposed"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "ApprovalRequested"), 0, "{:?}", kinds(&rig));
+}
