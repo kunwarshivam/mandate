@@ -30,9 +30,11 @@ def uid(tag: str, n: int) -> str:
     return acks.uid(tag, n)
 
 
-def held(n: int, restriction: str, agent: str = "*", to: str = "exits_only", at: int = T0 - 600) -> dict:
+def held(n: int, restriction: str, agent: str = "*", to: str = "exits_only", at: int = T0 - 600,
+         originated: bool = True) -> dict:
     """The executor's `AgentModeApplied` that holds (or, `to` `normal`, removes) a restriction."""
-    payload = {"agent": agent, "to": to, "restriction": restriction, "originated": True, "risk_clock": acks.ts(at)}
+    payload = {"agent": agent, "to": to, "restriction": restriction, "originated": originated,
+               "risk_clock": acks.ts(at)}
     return acks.envelope(uid("HD", n), "AgentModeApplied", payload, EXECUTOR, ACCOUNT, at=at)
 
 
@@ -94,10 +96,24 @@ def executor_cases() -> list[dict]:
              [refuse(2, "trigger_unknown")]),
         case("a_hold_of_another_kind", "check 1: the record named holds no reconciliation restriction",
              [acknowledgment(1, uid("HD", 1))],
-             [held(1, "kill_switch", AGENT, "stopped"), copied(acknowledgment(1, uid("HD", 1)), 1)],
+             [held(1, "account_restricted"), copied(acknowledgment(1, uid("HD", 1)), 1)],
              [refuse(1, "trigger_unknown")]),
         case("a_hold_after_the_copy", "check 1: the hold comes before the copy", [a1],
-             [copied(a1, 1), hold], [refuse(0, "trigger_unknown")]),
+             [copied(a1, 1), held(1, INCOMPLETE, at=T0 + 120)], [refuse(0, "trigger_unknown")]),
+        case("a_stop_is_not_a_hold", "check 1: a Stop under the prefix is never lifted",
+             [acknowledgment(1, uid("HD", 1))],
+             [held(1, INCOMPLETE, AGENT, "stopped"), copied(acknowledgment(1, uid("HD", 1)), 1)],
+             [refuse(1, "trigger_unknown")]),
+        case("a_copied_mode_is_not_a_hold", "check 1: only the executor's own hold",
+             [acknowledgment(1, uid("HD", 1))],
+             [held(1, INCOMPLETE, originated=False), copied(acknowledgment(1, uid("HD", 1)), 1)],
+             [refuse(1, "trigger_unknown")]),
+        case("held_again_after_a_lift", "check 2: a hold applied again after a lift needs its own acknowledgment",
+             [a1, acknowledgment(2, hold["event_id"], at=T0 + 90), acknowledgment(3, uid("HD", 2), at=T0 + 120)],
+             [hold, copied(a1, 1), held(2, INCOMPLETE, at=T0 + 70),
+              copied(acknowledgment(2, hold["event_id"], at=T0 + 90), 2),
+              copied(acknowledgment(3, uid("HD", 2), at=T0 + 120), 3)],
+             [lift(1, "*", INCOMPLETE), refuse(3, "trigger_superseded"), lift(4, "*", INCOMPLETE)]),
         case("a_limit_subject_names_the_hold", "the subject decides the record: a `limit` names no hold",
              [acknowledgment(1, hold["event_id"], "limit")],
              [hold, copied(acknowledgment(1, hold["event_id"], "limit"), 1)], [refuse(1, "trigger_unknown")]),
@@ -137,12 +153,15 @@ def judge(vector: dict, skip: frozenset[str] = frozenset()) -> list[dict]:
     out = []
     for i, r in enumerate(account):
         p = r["payload"]
-        if r["event_type"] == "OwnerAcknowledged" and r["schema_version"] == 2 and p.get("subject") == "reconciliation":
-            outcome = judged(r, records, spent, vector["overlay_independent"], methods, skip)
+        subject = p.get("subject") == "reconciliation" or "subject" in skip
+        if r["event_type"] == "OwnerAcknowledged" and r["schema_version"] == 2 and subject:
+            seen = [(j, x) for j, x in enumerate(account)] if "1.after_copy" in skip else records
+            outcome = judged(r, seen, spent, vector["overlay_independent"], methods, skip)
             entry = {"index": i, "outcome": outcome}
             if outcome == "lift":
-                named = next(h for _, h in records if h["event_id"] == p["event"])["payload"]
-                entry.update(agent=named["agent"], restriction=named["restriction"])
+                named = next(h for _, h in seen if h["event_id"] == p["event"])["payload"]
+                target = p["agent"] if "lift_target" in skip else named["agent"]
+                entry.update(agent=target, restriction=named["restriction"])
                 if "own_lift" not in skip:
                     records.append((i, held_removal(named)))
             out.append(entry)
@@ -164,7 +183,8 @@ def judged(r, records, spent, overlay, methods, skip) -> str:
     is_hold = (
         named is not None
         and named["event_type"] == "AgentModeApplied"
-        and (named["payload"]["to"] != "normal" or "1.removal" in skip)
+        and (named["payload"]["to"] in ("exits_only", "paused") or "1.to" in skip)
+        and (named["payload"]["originated"] is True or "1.originated" in skip)
         and (named["payload"]["restriction"].startswith("reconciliation:") or "1.kind" in skip)
     )
     if not is_hold:
@@ -181,7 +201,7 @@ def judged(r, records, spent, overlay, methods, skip) -> str:
     at = acks.seconds_of(r["event_time"])
     failed = acks.step_up_failure(p["step_up"], at, spent.get(r["causation_id"], set()), frozenset(), "acknowledgment",
                                   methods)
-    if failed:
+    if failed and "3" not in skip:
         return failed
     if (p["independent_required"] or overlay) and "4" not in skip:
         if p["request"] is None or p["user"] == p["requested_by"]:
@@ -209,8 +229,10 @@ def oracle(vector: dict) -> list[dict]:
             continue
         h = position.get(p["event"])
         hold = account[h] if h is not None and h < i else None
-        if not (hold and hold["event_type"] == "AgentModeApplied" and hold["payload"]["to"] != "normal"
-                and hold["payload"]["restriction"][:15] == "reconciliation:"):
+        if not (hold and hold["event_type"] == "AgentModeApplied"
+                and hold["payload"]["to"] not in ("normal", "stopped")
+                and hold["payload"].get("originated") is True
+                and hold["payload"]["restriction"].split(":", 1)[0] == "reconciliation"):
             out.append({"index": i, "outcome": "trigger_unknown"})
             continue
         key = (hold["payload"]["agent"], hold["payload"]["restriction"])
@@ -236,7 +258,8 @@ def oracle(vector: dict) -> list[dict]:
 # --------------------------------------------------------------------------- checks and seeded bugs
 
 ORACLE_CHECKS = ("records.valid", "executor.judge", "executor.oracle")
-MUTANTS = ("1.removal", "1.kind", "2", "2.any_agent", "own_lift", "4")
+MUTANTS = ("1.to", "1.originated", "1.kind", "1.after_copy", "2", "2.any_agent", "own_lift", "3", "4",
+           "lift_target", "subject")
 
 
 def found(check: str, message: str) -> str:

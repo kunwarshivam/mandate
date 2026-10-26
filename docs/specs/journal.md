@@ -6702,8 +6702,9 @@ judges the copy by the same four checks, in the same order, with the same refusa
 and 2 for the hold:
 
 1. **The hold exists:** `event` is the `event_id` of an `AgentModeApplied` on this account stream,
-   before the copy, whose `to` is not `normal` and whose `restriction` begins `reconciliation:`.
-   Otherwise `trigger_unknown`.
+   before the copy, that the executor originated (`originated` `true`), whose `to` is `exits_only`
+   or `paused`, and whose `restriction` begins `reconciliation:`. Otherwise `trigger_unknown`: a
+   copied mode, a Stop, and a removal are never holds this lifts.
 2. **The hold stands:** no later `AgentModeApplied` of the same `agent` and `restriction` comes
    between that record and the copy: neither the hold applied again nor its removal. Otherwise
    `trigger_superseded`, and a hold applied again needs a new acknowledgment.
@@ -6718,7 +6719,15 @@ restriction, or another reconciliation hold stays. A refused acknowledgment of a
 its `OwnerCommandRefused` instead, and lifts nothing. Lifting a hold only adds risk, so nothing here
 holds an exit, a protective order, or a kill switch (`AGENTS.md` rules 3 and 13).
 
-The writer offers a hold for acknowledgment only while it stands. The CLI and the workspace API
+Each hold is its own `(agent, restriction)`, so one acknowledgment lifts one: an instrument held for
+every agent (`*`) and for two agents of their own takes three. Lifting an instrument's hold,
+`reconciliation:<instrument>`, also ends that instrument's recorded mismatch: the executor's fold
+reads the lift as the owner's acknowledgment of the mismatch (trading spec §11), and the next run
+compares the position afresh. An acknowledgment resumes the agents; it does not clear the cause. A
+reconciliation that finds the cause again (a cash difference still past its runs, a position still
+mismatched) applies a new hold with a new alert, which needs its own acknowledgment.
+
+The writer offers every standing hold for acknowledgment, and only while it stands. The CLI and the workspace API
 write it as they write a limit's acknowledgment, from the authenticated principal and step-up
 (§9.28's writer binding).
 
