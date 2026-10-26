@@ -1725,6 +1725,44 @@ mod tests {
         }
     }
 
+    /// LT-10's release reads the interval's own record only (DEC-2514 item 5): a stop watchdog's
+    /// `ProtectionChanged`, which shares the alert's `protection` kind, and another record that
+    /// says `interval_limit` are not it.
+    #[test]
+    fn only_an_intervals_protection_record_at_its_bound_is_the_intervals_own() {
+        let with_action = |event_type: &str, action: &str| {
+            let mut members = Object::new();
+            if let Ok(key) = mandate_canon::Key::new("action") {
+                members.insert(key, Value::Str(action.to_owned()));
+            }
+            EventDraft {
+                payload: Value::Object(members),
+                ..draft("r", event_type, 2)
+            }
+        };
+        assert!(super::interval_limit_record(&with_action(
+            "ProtectionChanged",
+            "interval_limit"
+        )));
+        assert!(!super::interval_limit_record(&with_action(
+            "ProtectionChanged",
+            "watchdog"
+        )));
+        assert!(!super::interval_limit_record(&with_action(
+            "ProtectionChanged",
+            "expiry_unreplaceable"
+        )));
+        assert!(!super::interval_limit_record(&with_action(
+            "GateDecided",
+            "interval_limit"
+        )));
+        assert!(!super::interval_limit_record(&draft(
+            "r",
+            "ProtectionChanged",
+            2
+        )));
+    }
+
     #[test]
     fn consecutive_executor_drafts_stay_in_one_append_run() {
         let companion = draft("companion", "OrderRequestRecorded", 1);
