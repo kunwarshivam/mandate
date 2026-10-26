@@ -138,6 +138,21 @@ describe("a refused grant on the approval screen (DEC-2129 item 7, DEC-2818)", (
     expect(answers()).toHaveLength(1);
   });
 
+  it("a grant the API refused deferral_mismatch says so, offers no Approve again, and still offers Skip (DEC-2521)", async () => {
+    const mismatch = () => Promise.resolve(new Response(JSON.stringify({ type: "about:blank", status: 409, title: "Request does not match its decision", code: "deferral_mismatch", effect: "none", event_id: null, retryable: false }), { status: 409 }));
+    let refusing = true;
+    const { answers } = mount((route, init, served) => (init.method === "POST" && route.endsWith("/responses") && refusing ? mismatch() : served()));
+    await approve();
+    const status = await screen.findByText("This request does not match the decision behind it, so it can't be approved. You can skip it.");
+    expect(status.getAttribute("role")).toBe("alert");
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Confirm on the host" })).toBeNull();
+    refusing = false;
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    expect(await screen.findByText(/^Recorded in the journal: you skipped/)).toBeTruthy();
+    expect(answers()).toHaveLength(2);
+  });
+
   it("a grant the runtime admitted still reads as recorded, then approved", async () => {
     mount((_route, _init, served) => served());
     await approve();
