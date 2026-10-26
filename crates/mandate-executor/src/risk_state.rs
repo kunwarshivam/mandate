@@ -404,8 +404,9 @@ pub struct AccountRiskFold<'c> {
     /// applies a fill once (DEC-2393 item 2).
     fills: BTreeSet<String>,
     /// The records the fold returned and the stream has not yet carried back, in order (DEC-2301
-    /// item 2, DEC-2399 items 1 and 2): the next risk records on the stream must be exactly these,
-    /// and no other row may come before them.
+    /// item 2, DEC-2399 items 1 and 2): the next risk records on the stream must be exactly these.
+    /// Other rows may come before them (the rest of their cause's batch), and the caller folds
+    /// every record it appends back in, or the next risk record is `not_reproduced`.
     owed: VecDeque<RiskAppend>,
 }
 
@@ -521,16 +522,16 @@ impl<'c> AccountRiskFold<'c> {
             .get("payload")
             .and_then(Value::as_object)
             .ok_or(UnreadableCause::Undecodable)?;
-        let record = FOLD_RECORDS.contains(&row.event_type.as_str());
-        if let Some(owed) = self.owed.front() {
-            if !record || !reproduces(owed, row, &body) {
-                return Err(UnreadableCause::NotReproduced);
-            }
-            self.owed.pop_front();
-            return Ok(Vec::new());
-        }
-        if record && row.event_type != "AgentModeApplied" {
-            return Err(UnreadableCause::NotReproduced);
+        let caused = !matches!(body.get("causation_id"), None | Some(Value::Null));
+        let others_mode = row.event_type == "AgentModeApplied" && !caused;
+        if FOLD_RECORDS.contains(&row.event_type.as_str()) && !others_mode {
+            return match self.owed.front() {
+                Some(owed) if reproduces(owed, row, &body) => {
+                    self.owed.pop_front();
+                    Ok(Vec::new())
+                }
+                _ => Err(UnreadableCause::NotReproduced),
+            };
         }
         match (reading(&row.event_type), row.schema_version) {
             (None, _) => Err(UnreadableCause::UnfoldedEventType),
@@ -978,6 +979,7 @@ impl<'c> AccountRiskFold<'c> {
     /// The records the fold returned that the stream has not carried back yet, in the order they
     /// are owed. At the stream's head after a restart these are the records a crash kept from
     /// being appended after their cause, which the executor appends next (DEC-2399 item 3).
+    /// Nothing is owed by an unreadable view: what it would owe is no longer the journal's.
     pub fn owed(&self) -> impl Iterator<Item = &RiskAppend> {
         self.owed.iter()
     }
@@ -990,7 +992,9 @@ impl<'c> AccountRiskFold<'c> {
 
     /// Makes the view unreadable at its head, keeping the first cause. Its mode is at least
     /// `exits_only`, and the last readable view's when that held more (DEC-2304).
+    /// An unreadable view owes nothing (DEC-2399 item 3).
     fn unreadable(&mut self, cause: UnreadableCause) {
+        self.owed.clear();
         if let RiskView::Readable { snapshot, head } = &self.view {
             self.view = RiskView::Unreadable {
                 cause,
