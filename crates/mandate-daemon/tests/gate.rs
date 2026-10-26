@@ -2,7 +2,7 @@
 //! the gate's own checks run over the journaled facts with DEC-2378 item 11's four checks deferred,
 //! every opening is still denied while any is deferred, and an exit is never denied.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -17,7 +17,7 @@ use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{
     AssetClass as MarketAssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol,
 };
-use mandate_num::{Price, Qty};
+use mandate_num::{Fraction, Price, Qty, Usd};
 use mandate_risk::{
     Advisory, CheckOutcome, Computed, Decision, Deferred, GateConfig, Purpose as GatePurpose,
     ReasonCode, Verdict,
@@ -726,17 +726,19 @@ fn a_crypto_opening_needs_an_active_crypto_account() {
 struct Figures {
     facts: Option<LiquidityFacts>,
     reads: Rc<Cell<u32>>,
+    purposes: Rc<RefCell<Vec<GatePurpose>>>,
 }
 
 impl Liquidity for Figures {
-    fn opening(
-        &self,
-        _purpose: GatePurpose,
-        symbol: &str,
-        _now: mandate_time::UtcNanos,
-    ) -> Option<LiquidityFacts> {
+    fn opening(&self, purpose: GatePurpose, symbol: &str, now: UtcNanos) -> Option<LiquidityFacts> {
         assert_eq!(symbol, "SPY", "the pinned instrument's symbol is read");
+        assert_eq!(
+            now,
+            UtcNanos::parse(REGULAR).unwrap(),
+            "read at the fold's risk clock"
+        );
         self.reads.set(self.reads.get() + 1);
+        self.purposes.borrow_mut().push(purpose);
         self.facts.clone()
     }
 }
@@ -746,7 +748,7 @@ impl Liquidity for Figures {
 fn figures(close: &str, median: &str, adv: &str, trailing: &str) -> LiquidityFacts {
     LiquidityFacts {
         prior_close: Price::parse(close).unwrap(),
-        median_dollar_volume_20d: mandate_num::Usd::parse(median).unwrap(),
+        median_dollar_volume_20d: Usd::parse(median).unwrap(),
         adv_20d: Qty::parse(adv).unwrap(),
         trailing_5m_volume: Qty::parse(trailing).unwrap(),
     }
@@ -757,15 +759,28 @@ fn liquid() -> LiquidityFacts {
 }
 
 fn gate_reading(rows: &Rows, facts: Option<LiquidityFacts>) -> (Gate, Rc<Cell<u32>>) {
+    let (gate, reads, _) = gate_reading_under(rows, facts, config());
+    (gate, reads)
+}
+
+/// A gate over `rows` under the gate configuration `config`, reading `facts`, with the count of
+/// its reads and the purposes it read for.
+fn gate_reading_under(
+    rows: &Rows,
+    facts: Option<LiquidityFacts>,
+    config: GateConfig,
+) -> (Gate, Rc<Cell<u32>>, Rc<RefCell<Vec<GatePurpose>>>) {
     let reads = Rc::new(Cell::new(0));
+    let purposes = Rc::new(RefCell::new(Vec::new()));
     let fold = Facts::new(CLOCK, AGENT);
     fold.follow(ACCOUNT);
     fold.feed(&rows.0);
-    let gate = Gate::new(fold, version(), Some(config()), FRESH).reading(Box::new(Figures {
+    let gate = Gate::new(fold, version(), Some(config), FRESH).reading(Box::new(Figures {
         facts,
         reads: Rc::clone(&reads),
+        purposes: Rc::clone(&purposes),
     }));
-    (gate, reads)
+    (gate, reads, purposes)
 }
 
 /// DEC-2274 item 3: with the bars read, the liquidity floor and participation are evaluated,
@@ -881,10 +896,19 @@ fn the_bars_reader_reads_the_stored_root_at_the_risk_clock() {
         .reading(Box::new(BarsReader::new(root.to_str())));
     let advisory = gate.advisory(&opening("3", "99.95")).unwrap();
     assert!(
-        !advisory.deferred.contains(&Deferred::LiquidityFloor),
+        !advisory.deferred.contains(&Deferred::LiquidityFloor)
+            && !advisory.deferred.contains(&Deferred::Participation),
         "{advisory:?}"
     );
-    assert!(mandate_bars::liquidity(&root, "SPY", UtcNanos::parse(REGULAR).unwrap()).is_ok());
+    assert_eq!(
+        BarsReader::new(root.to_str()).opening(
+            GatePurpose::Open,
+            "SPY",
+            UtcNanos::parse(REGULAR).unwrap()
+        ),
+        Some(mandate_bars::liquidity(&root, "SPY", UtcNanos::parse(REGULAR).unwrap()).unwrap()),
+        "the production reader's figures are mandate-bars' at the risk clock"
+    );
     std::fs::remove_dir_all(&root).ok();
     let empty = gate_over(&rows, Some(config()));
     let none = empty.advisory(&opening("3", "99.95")).unwrap();
@@ -946,4 +970,68 @@ fn store_spy(root: &std::path::Path) {
             &Records::Bars(minutes),
         )
         .unwrap();
+}
+
+/// Each participation cap reads its own figure: under an order-size cap of 1% and a daily cap of
+/// 5%, a 3-share opening passes on 300 shares in the last five minutes and an ADV of 100, and
+/// fails on the figures swapped, so a build that filled one figure into the other's field would
+/// answer the swapped case for the true one.
+#[test]
+fn each_participation_cap_reads_its_own_figure() {
+    let mut tight = config();
+    tight.order_size_participation = Fraction::parse("0.01").unwrap();
+    let rows = journaled_with(&RICH);
+    let (passes, _, _) = gate_reading_under(
+        &rows,
+        Some(figures("99.95", "20000000000", "100", "300")),
+        tight.clone(),
+    );
+    assert_eq!(
+        passes.check(&opening("3", "99.95")),
+        denied("deferred_to_binding"),
+        "order cap 3 of 300 trailing, daily cap 5 of 100 ADV"
+    );
+    let (swapped, _, _) = gate_reading_under(
+        &rows,
+        Some(figures("99.95", "20000000000", "300", "100")),
+        tight,
+    );
+    assert_eq!(
+        swapped.check(&opening("3", "99.95")),
+        denied("conduct_limit_breached"),
+        "order cap 1 of 100 trailing"
+    );
+}
+
+/// The bars are read for the purpose the proposal is labelled with, an opening's or an
+/// increase's, once per dry run.
+#[test]
+fn the_bars_are_read_for_an_opening_or_an_increase_once() {
+    for (purpose, read_as) in [
+        (Purpose::Open, GatePurpose::Open),
+        (Purpose::Increase, GatePurpose::Increase),
+    ] {
+        let (gate, reads, purposes) =
+            gate_reading_under(&journaled_with(&RICH), Some(liquid()), config());
+        let mut proposal = opening("3", "99.95");
+        proposal.purpose = purpose;
+        let advisory = gate.advisory(&proposal).unwrap();
+        assert!(
+            !advisory.deferred.contains(&Deferred::LiquidityFloor),
+            "{purpose:?}"
+        );
+        assert_eq!(reads.get(), 1, "{purpose:?}");
+        assert_eq!(*purposes.borrow(), vec![read_as], "{purpose:?}");
+    }
+}
+
+/// The stored bars are US equities' alone, so a crypto opening never reads them and both checks
+/// stay deferred.
+#[test]
+fn a_crypto_opening_never_reads_the_equity_bars() {
+    let (gate, reads) = gate_reading(&journaled_with(&RICH), Some(liquid()));
+    let mut crypto = opening("3", "99.95");
+    crypto.asset_class = AssetClass::Crypto;
+    let _crypto_is_denied_on_the_inactive_crypto_account = gate.check(&crypto);
+    assert_eq!(reads.get(), 0);
 }

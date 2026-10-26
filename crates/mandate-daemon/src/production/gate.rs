@@ -6,6 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use mandate_accounting::AssetClass;
 use mandate_bars::LiquidityFacts;
 use mandate_gate_context::{Freshness, Journaled};
 use mandate_num::{Qty, Ratio, Usd};
@@ -290,9 +291,12 @@ impl Gate {
     }
 
     /// The liquidity figures of `proposal`'s instrument at `now`, the fold's risk clock, read only
-    /// for a proposal labelled an opening or an increase and only for a pinned instrument, by its
-    /// symbol. An exit never reads them (`AGENTS.md` rule 13, DEC-2274 item 3).
+    /// for a proposal labelled an opening or an increase in a pinned US equity, by its symbol: the
+    /// stored bars are US equities' alone. An exit never reads them (`AGENTS.md` rule 13, DEC-2274 item 3).
     fn figures(&self, proposal: &Proposal, now: UtcNanos) -> Option<LiquidityFacts> {
+        if proposal.asset_class != AssetClass::UsEquity {
+            return None;
+        }
         let purpose = match proposal.purpose {
             RuntimePurpose::Open => GatePurpose::Open,
             RuntimePurpose::Increase => GatePurpose::Increase,
