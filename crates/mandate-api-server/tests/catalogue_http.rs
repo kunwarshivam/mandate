@@ -474,7 +474,7 @@ mod instruments_read {
         );
         let short = stored(
             &f,
-            &snapshot_object("b0b6dd9d-8b9b-48a9-ba46", "SHORT", "us_equity"),
+            &snapshot_object("b0b6dd9d-8b9b-48a9-bb46", "SHORT", "us_equity"),
         );
         let extra = stored(
             &f,
