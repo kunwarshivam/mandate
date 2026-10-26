@@ -88014,7 +88014,7 @@ account_switches:
     expect:
       outcome: Valid
 account_activity:
-  spec: docs/specs/journal.md §9.5 rules 297 and 298 (DEC-2803)
+  spec: docs/specs/journal.md §9.5 rules 297, 298 and 303 (DEC-2803, DEC-2820)
   drafts:
     external_order:
       envelope_version: 1
@@ -88502,6 +88502,68 @@ account_activity:
       outcome: Invalid
       reason: schema
       path: payload.client_order_id
+  - name: abandoned_another_intents_order
+    clause: 'rule 303: the order its own intent derives'
+    base_draft: abandoned
+    changes:
+    - path: payload.client_order_id
+      value: md-01JAE3A0A000000000000000N2
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: abandoned_the_intent_alone
+    clause: 'rule 303: `md-` and the intent'
+    base_draft: abandoned
+    changes:
+    - path: payload.client_order_id
+      value: 01JAE3A0A000000000000000N1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: abandoned_a_rung
+    clause: 'rule 303: not a rung of its own'
+    base_draft: abandoned
+    changes:
+    - path: payload.client_order_id
+      value: md-01JAE3A0A000000000000000N1-l2
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: abandoned_its_protective_order
+    clause: 'rule 303: not a protective order of its own'
+    base_draft: abandoned
+    changes:
+    - path: payload.client_order_id
+      value: md-01JAE3A0A000000000000000N1-p01JAE3A0A000000000000000P1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: abandoned_upper_case_prefix
+    clause: 'rule 303: exactly `md-`'
+    base_draft: abandoned
+    changes:
+    - path: payload.client_order_id
+      value: MD-01JAE3A0A000000000000000N1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: abandoned_watchdog_without_its_prefix
+    clause: 'rule 303: the watchdog''s exit derives `md-w-…`'
+    base_draft: abandoned
+    changes:
+    - path: payload.intent_id
+      value: w-01JAE3A0A000000000000000W1
+    - path: payload.client_order_id
+      value: md-01JAE3A0A000000000000000W1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
   - name: version_2
     clause: '§9.5: registered at `schema_version` 1 only'
     base_draft: abandoned
@@ -88545,14 +88607,6 @@ account_activity:
     changes:
     - path: payload.client_order_id
       value: md-01JAE3A0A000000000000000N9
-    expect:
-      outcome: Valid
-  - name: abandoned_any_client_order_id
-    clause: '§9.5: no rule binds the id to the intent'
-    base_draft: abandoned
-    changes:
-    - path: payload.client_order_id
-      value: md-01JAE3A0A000000000000000N2
     expect:
       outcome: Valid
   - name: order_sell_fractional
