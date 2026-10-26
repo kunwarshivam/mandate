@@ -11,5 +11,5 @@ export const metadata: Metadata = { title: "Approval request" };
 export default async function ApprovalPage({ params }: { params: Promise<{ approvalId: string }> }) {
   const { approvalId } = await params;
   if (!APPROVAL_ID.test(approvalId) && !EVENT_ID.test(approvalId)) notFound();
-  return <BySource fixtures={<ApprovalRequestScreen approvalId={approvalId} />} api={<ApiApproval approvalId={approvalId} />} />;
+  return <BySource fixtures={<ApprovalRequestScreen approvalId={approvalId} />} api={<ApiApproval key={approvalId} approvalId={approvalId} />} />;
 }

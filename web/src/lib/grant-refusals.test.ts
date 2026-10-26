@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { FINAL_UNDELIVERED, refusedText, undeliveredText } from "./grant-refusals";
+import { APPROVE_REFUSED, FINAL_UNDELIVERED, refusedText, undeliveredText } from "./grant-refusals";
 
 /**
  * Every reason `ApprovalResponded` may carry, read from the journal spec's own field table (§9,
@@ -51,5 +51,12 @@ describe("a refused grant in words (DEC-2129 item 7, journal spec rule 47)", () 
     expect([...FINAL_UNDELIVERED]).toEqual(["forbidden"]);
     expect(FINAL_UNDELIVERED.has("step_up_missing"), "a missing confirmation can be confirmed and sent again").toBe(false);
     expect(undeliveredText("network")).toBe("Not recorded: your deployment answered that nothing was recorded, so nothing was approved.");
+  });
+
+  it("reads the API's refusal of a grant whose deferred checks disagree with its decision: final for Approve, never for Skip (DEC-2521)", () => {
+    expect(undeliveredText("deferral_mismatch")).toBe("This request does not match the decision behind it, so it can't be approved. You can skip it.");
+    expect(APPROVE_REFUSED.has("deferral_mismatch")).toBe(true);
+    expect(FINAL_UNDELIVERED.has("deferral_mismatch"), "a Skip of the request is never refused for this").toBe(false);
+    expect(APPROVE_REFUSED.has("step_up_missing"), "a missing confirmation can be confirmed and sent again").toBe(false);
   });
 });
