@@ -2425,7 +2425,8 @@ fn approvers_of(process: &RuntimeProcess<Rig>) -> Vec<&str> {
 
 /// Backlog `E21-30-daemon-approvers-reread` (DEC-2816): every control pass narrows the view's
 /// approvers to those the stream still resolves to, before it hands the pass's records to the core,
-/// so a connection revoked while the process runs leaves no one to approve; the fixture wiring,
+/// so a connection revoked while the process runs leaves no one to approve until the stream
+/// resolves its owner again, never beyond the set admitted at the start; the fixture wiring,
 /// which has no source, keeps its view's approvers.
 #[test]
 fn a_connection_revoked_while_running_leaves_no_approver() {
@@ -2475,5 +2476,98 @@ fn a_connection_revoked_while_running_leaves_no_approver() {
         approvers_of(&kept),
         ["user-owner"],
         "no source keeps the view"
+    );
+}
+
+/// The owner's grant of the runtime's one pending request, as the CLI commits it to the control
+/// stream at `at`, with step-up evidence from the same second.
+fn granted(rig: &Rig, at: i64) {
+    let rows = agent_rows(rig);
+    let request = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalRequested")
+        .unwrap_or_else(|| panic!("the opening was asked: {:?}", kinds(rig)));
+    let body = parse(&request.body).unwrap();
+    let hash = body
+        .get("payload")
+        .and_then(|payload| payload.get("content_hash"))
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_owned();
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    let payload = format!(
+        r#"{{"agent":"{AGENT}","approval":"{}","verdict":"approved","content_hash":"{hash}","submitted_at":{at},"step_up":{{"assertion_id":"assertion-{seq}","authenticated_at":{at},"method":"cli_confirm"}},"responder":"user-owner","role":"approver"}}"#,
+        request.event_id
+    );
+    rig.control.borrow_mut().push(row(
+        CONTROL,
+        seq,
+        "ApprovalResponseSubmitted",
+        "user",
+        &payload,
+    ));
+}
+
+/// What the runtime judged the owner's grant of a deferring opening, when the connection was or
+/// was not revoked in the same control pass the grant arrives in.
+fn judged(revoke: bool) -> (String, String) {
+    let rig = Rig::default();
+    owned(&rig, "user-owner");
+    reconciled(&rig, ACCOUNT);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"AAPL","price":"155","source":"fixture","feed":"sip","risk_clock":{NOW}}}"#
+        ),
+    );
+    let mut wiring = fixture::wiring("user-owner", AGENT_STREAM);
+    wiring.gate = Box::new(Deferring);
+    wiring.plan = Box::new(Opening);
+    wiring.view.version = format!("sha256:{}", Digest::of(b"mandate-daemon fixture").to_hex());
+    wiring.view.working_universe = BTreeSet::from([InstrumentId::new("AAPL").unwrap()]);
+    wiring.approvers = Some(ApproverSource::new(
+        ["user-owner".to_owned()].into(),
+        CONNECTION,
+        &["user:user-owner"],
+    ));
+    let mut process = RuntimeProcess::start(rig.clone(), wiring, &config(), at(NOW));
+    for second in 1..4 {
+        tick(&rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    assert_eq!(count(&rig, "ApprovalRequested"), 1, "{:?}", kinds(&rig));
+    if revoke {
+        revoked(&rig);
+    }
+    granted(&rig, NOW + 4);
+    tick(&rig, NOW + 4);
+    process.step(at(NOW + 4));
+    let rows = agent_rows(&rig);
+    let responded = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalResponded")
+        .unwrap_or_else(|| panic!("the grant was judged: {:?}", kinds(&rig)));
+    let body = parse(&responded.body).unwrap();
+    let member = |name: &str| {
+        body.get("payload")
+            .and_then(|payload| payload.get(name))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    (member("result"), member("reason"))
+}
+
+/// DEC-2816 item 3, end to end: a grant in the same control pass as the revocation of its
+/// approver's connection is judged against the narrowed set and refused, while the same grant with
+/// no revocation is admitted, so narrowing after the pass's records are handed would fail here.
+#[test]
+fn a_grant_in_the_pass_that_revokes_its_approver_is_refused() {
+    assert_eq!(judged(false).0, "admitted");
+    assert_eq!(
+        judged(true),
+        ("refused".to_owned(), "not_an_approver".to_owned())
     );
 }

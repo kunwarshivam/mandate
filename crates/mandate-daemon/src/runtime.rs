@@ -319,7 +319,8 @@ impl<S: Store> RuntimeProcess<S> {
         &self.lifecycle
     }
 
-    /// The mandate view the core decides on, with the approvers the latest control pass left.
+    /// The mandate view the core decides on: before the first control pass, the approvers the
+    /// deployment resolved at the start; after it, those the latest control pass left (DEC-2816).
     pub fn view(&self) -> &MandateView {
         &self.wiring.view
     }

@@ -29,7 +29,8 @@
   agent stream, the control stream read before the clock stream, an unreadable clock stream never
   holding the kill switch, a control stream handed again writing nothing twice, a lost answer
   written once, a hint deciding nothing, a second process fencing the first, paper only, drain, a
-  draft without references stopping the process, a property test over interleavings of kill
+  draft without references stopping the process, a connection revoked while running leaving no
+  approver and a grant in the same pass refused `not_an_approver` (DEC-2816), a property test over interleavings of kill
   switches, ticks, lost answers, and restarts with an oracle from the control rows; and for the
   account stream, the startup hold lifting on a clean reconciliation, the account folded before the
   start, the latest establishment followed and another connection's or environment's ignored, an

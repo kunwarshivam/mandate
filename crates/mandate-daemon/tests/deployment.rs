@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use mandate_canon::{Digest, parse};
+use mandate_daemon::deployment::ApproverSource;
 use mandate_daemon::deployment::{Resolved, resolved};
 use mandate_journal::{ArtifactRef, Environment, StoredEvent};
 use mandate_spec::document::Mandate;
@@ -716,19 +717,14 @@ fn the_admitted_approvers_narrow_at_each_read_and_never_grow() {
         "a row it cannot read resolves no one"
     );
 
-    let mut owner_only = World::default();
-    owner_only.established("conn_alpaca_paper_01", "user-owner");
-    let version = owner_only.version(("user", "user-author"), approvers(&["user:user-owner"]));
-    owner_only.deployed(AGENT, &version, "paper");
-    let narrow = owner_only.resolved().unwrap();
-    let mut grown = owner_only.control.clone();
-    grown.extend(world.control.iter().cloned());
-    assert!(
-        narrow
-            .source
-            .current(&grown)
-            .iter()
-            .all(|user| narrow.approvers.contains(user)),
-        "nobody outside the admitted set is ever added"
+    let one = ApproverSource::new(
+        [FOUNDER.to_owned()].into(),
+        "conn_alpaca_paper_01",
+        &["role:approver"],
+    );
+    assert_eq!(
+        one.current(&world.control).into_iter().collect::<Vec<_>>(),
+        [FOUNDER.to_owned()],
+        "the lower-case spelling resolves afresh but was never admitted, so it is never added"
     );
 }
