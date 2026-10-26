@@ -20,7 +20,8 @@ import { type PositionsAnswer, useRuntime } from "@/lib/mock-runtime";
 const POLL_MS = 5000;
 const NOT_REPORTED = "text-muted-foreground";
 
-type Holdings = PositionsAnswer;
+/** An agent's latest positions answer, with when it arrived among all the screen's reads. */
+type Holdings = PositionsAnswer & { received: number };
 
 /**
  * Every agent's own positions, read on open and every few seconds; an agent not yet answered is
@@ -35,6 +36,7 @@ function useHoldings(
   );
   const sent = useRef(new Map<string, number>());
   const shown = useRef(new Map<string, number>());
+  const arrivals = useRef(0);
   const ids = agents.map((a) => a.agent_id).join("\n");
   useEffect(() => {
     if (!holdings) return;
@@ -46,7 +48,9 @@ function useHoldings(
         void holdings(id).then((answer) => {
           if (!live || n < (shown.current.get(id) ?? 0)) return;
           shown.current.set(id, n);
-          setAnswers((all) => ({ ...all, [id]: answer }));
+          arrivals.current += 1;
+          const received = arrivals.current;
+          setAnswers((all) => ({ ...all, [id]: { ...answer, received } }));
         });
       }
     };
@@ -136,21 +140,16 @@ function OwnPositions({
   );
 }
 
-/** The newest observation in a list of holdings, or "" for none. */
-const newest = (list: readonly ReadPosition[]) =>
-  list.reduce((at, p) => (p.observed_at > at ? p.observed_at : at), "");
-
-/** What the account held at its last reconciliation: of its agents' positions reads, the one that observed it latest. */
+/**
+ * What the account held at its last reconciliation, from the latest of its agents' positions reads
+ * to arrive: each serves the same account stream's fold, so the latest is the freshest, an empty
+ * list after a full sale included.
+ */
 function AccountHoldings({ answers }: { answers: readonly Holdings[] }) {
-  const lists = answers.flatMap((a) =>
-    a.ok && a.account_positions !== null ? [a.account_positions] : [],
-  );
-  const served =
-    lists.length === 0
-      ? null
-      : lists.reduce((best, list) =>
-          newest(list) > newest(best) ? list : best,
-        );
+  const latest = answers
+    .filter((a): a is Extract<Holdings, { ok: true }> => a.ok && a.account_positions !== null)
+    .reduce<Extract<Holdings, { ok: true }> | null>((best, a) => (best === null || a.received > best.received ? a : best), null);
+  const served: readonly ReadPosition[] | null = latest?.account_positions ?? null;
   if (served === null)
     return (
       <p className={NOT_REPORTED}>
@@ -253,8 +252,7 @@ function Positions() {
         agent,
       ]);
   }
-  const names = (list: AgentDetail[]) =>
-    list.map((a) => a.label ?? a.agent_id).join(", ");
+  const names = (list: AgentDetail[]) => list.map(nameOf).join(", ");
   return (
     <div className="grid grid-cols-1 gap-(--section-gap)">
       {header}
