@@ -1088,7 +1088,10 @@ fn a_kill_switch_is_always_committed_never_reported_as_an_earlier_one() {
         );
         fx.journal.recover();
         let again = answer("kill", switch(&mut fx, ASKED_AT + 5));
-        assert_eq!(again.seq, 3, "{scope:?}: the re-run is committed after the lost pair");
+        assert_eq!(
+            again.seq, 3,
+            "{scope:?}: the re-run is committed after the lost pair"
+        );
         assert_eq!(control(&fx).len(), 2, "{scope:?}");
     }
 }
