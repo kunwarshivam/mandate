@@ -224,7 +224,7 @@ fn each_alert_carries_its_stream_subject_and_my_own_deliveries() -> Result<(), U
         "OwnerAlertSent",
         &alert_payload("protection", &protection.event_id, None),
     );
-    let command = "01JBH3BTZ8K2M4N6P8R0COMMND";
+    let command = "01JBH3BTZ8K2M4N6P8R0KXYZQW";
     let killed = j.row(&a, 1, "KillSwitchActivated", r#"{"scope":"agent"}"#);
     let kill = j.row(
         &a,
