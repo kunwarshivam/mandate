@@ -7142,7 +7142,7 @@ reader:
 
 The typed record is the bytes `mandate-research-run`'s `RetrievedItem::record` writes for the whole
 item, untrimmed. It holds the item's typed fields and, for a licensed item, no text: `headline`,
-`summary`, and `link` are `null`, with only their lengths kept. So the journal pins no licensed text.
+`summary`, and `link` are `null`, with only their combined `length_bytes` kept. So the journal pins no licensed text.
 
 The agent runtime reads the stream and offers each recorded item as an event trigger
 ([agent harness spec §5.3](agent-harness.md), [DEC-2392](../project/decisions/DEC-2392.md),
