@@ -27,7 +27,7 @@ use mandate_executord::marks::NoMarks;
 use mandate_executord::quotes::NoQuotes;
 use mandate_executord::serve::ScriptedBroker;
 use mandate_executord::{Broker, Config, ExecutorProcess, Protections, Unplanned, Wiring};
-use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, Environment, Invalid, InvalidReason, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price, Qty, Ratio, ShareIncrement, SignedQty, Usd};
 use mandate_risk::spec_types::{GoalState, RiskLimits};
 use mandate_risk::{
@@ -82,6 +82,9 @@ pub enum Fault {
     Unavailable,
     /// Written, and the answer lost.
     LostAnswer,
+    /// Nothing written: the journal refuses the batch as invalid, as it refuses a draft its schema
+    /// does not admit (DEC-2805).
+    Invalid,
 }
 
 #[derive(Default)]
@@ -331,6 +334,15 @@ impl Store for Journal {
         let fault = typed.or_else(|| rows.faults.pop_front());
         if fault == Some(Fault::Unavailable) {
             return AppendOutcome::Unavailable;
+        }
+        if fault == Some(Fault::Invalid) {
+            return AppendOutcome::Invalid {
+                draft: 0,
+                error: Invalid {
+                    reason: InvalidReason::Schema,
+                    path: "payload".to_owned(),
+                },
+            };
         }
         let stored = rows.streams.entry(stream.as_str().to_owned()).or_default();
         let ids: Vec<Option<String>> = drafts

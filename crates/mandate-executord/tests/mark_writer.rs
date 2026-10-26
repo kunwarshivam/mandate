@@ -160,6 +160,34 @@ fn member(payload: &Value, name: &str) -> Option<String> {
     }
 }
 
+/// DEC-2805 item 3: a mark the journal refuses is dropped and the process goes on, so the next
+/// interval marks again; a refused mark never stops the executor and its exits.
+#[test]
+fn a_refused_mark_is_dropped_and_the_next_interval_marks_again() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    let mut wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    wiring.quotes = Box::new(Quoting(vec![AAPL]));
+    wiring.marked = Box::new(Naming(vec![AAPL]));
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    journal.fail_next_of("MarkUpdated", &[Fault::Invalid]);
+    process.step(at(NOON)?);
+    assert!(
+        !matches!(process.lifecycle().state(), State::Exited(_)),
+        "{:?}",
+        process.lifecycle().state()
+    );
+    assert!(
+        marks_of(&journal).is_empty(),
+        "the refused mark is not written"
+    );
+    tick(&journal, "t2", "2026-09-21T15:00:15Z")?;
+    process.step(at("2026-09-21T15:00:15Z")?);
+    assert_eq!(marks_of(&journal).len(), 1, "the next interval marks again");
+    Ok(())
+}
+
 /// Noon's pass marks AAPL from its quote: a sane version-2 mark at noon's tick, in the regular
 /// session, from the fixture feed, at its bid.
 #[test]
