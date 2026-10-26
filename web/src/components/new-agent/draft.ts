@@ -242,9 +242,12 @@ export interface Draft {
  */
 export const LOSS_CEILING = dec("0.2");
 
-/** DEC-117: the platform proposes five instruments at most. */
-const PROPOSED_MAX_INSTRUMENTS = 5;
-const MAX_INSTRUMENTS = 20;
+/**
+ * One instrument per agent until the multi-instrument risk state lands (V-048, DEC-2804 item 8,
+ * DEC-2809): the executor opens no risk fold for an agent whose mandate allows more, and the
+ * deployment refuses one (`second_instrument`), so the set-up asks for one symbol and proposes one.
+ */
+const MAX_INSTRUMENTS = 1;
 const STOP_DISTANCE = dec("0.08");
 const POSITION_CAP = dec("0.25");
 const ORDER_FRACTION = dec("0.1");
@@ -450,7 +453,7 @@ export function readSymbols(text: string): CheckResult<string[]> {
   const bad = words.filter((w) => !SYMBOL.test(w));
   if (bad.length > 0) return { ok: false, error: `Not a stock symbol: ${bad.join(", ")}.` };
   const symbols = [...new Set(words)].sort();
-  if (symbols.length > MAX_INSTRUMENTS) return { ok: false, error: `At most ${MAX_INSTRUMENTS} symbols.` };
+  if (symbols.length > MAX_INSTRUMENTS) return { ok: false, error: "An agent trades one instrument for now. Name one symbol; another instrument needs an agent of its own." };
   return { ok: true, value: symbols };
 }
 
@@ -616,7 +619,7 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures, str
           ? { path: "/universe/pinned_instruments", label: "Instruments", value: symbols.join(", "), provenance: "user_entered" }
           : { path: "/universe/pinned_instruments", label: "Instruments", value: "None yet.", provenance: null },
         { path: "/universe/asset_classes", label: "Kinds of instrument", value: "US stocks and ETFs.", provenance: "platform_proposed" },
-        { path: "/universe/max_instruments", label: "Most instruments at once", value: String(Math.max(PROPOSED_MAX_INSTRUMENTS, symbols.length)), provenance: "platform_proposed" },
+        { path: "/universe/max_instruments", label: "Most instruments at once", value: String(MAX_INSTRUMENTS), provenance: "platform_proposed" },
         { path: "/universe/leveraged_etps_enabled", label: "Leveraged and inverse ETFs", value: "Off.", provenance: "platform_default" },
       ],
     },
@@ -672,7 +675,7 @@ export function mandateFrom(draft: Draft, connectionId: string, registered: Read
     universe: {
       pinned: true,
       pinned_instruments: draft.symbols.map((s) => instrumentFor(s, registered)),
-      max_instruments: Math.max(PROPOSED_MAX_INSTRUMENTS, draft.symbols.length),
+      max_instruments: MAX_INSTRUMENTS,
       asset_classes: ["us_equity"],
       leveraged_etps_enabled: false,
       leveraged_etp_disclosure_version: null,

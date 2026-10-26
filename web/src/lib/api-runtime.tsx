@@ -39,6 +39,9 @@ import {
   type SetUp,
 } from "./mock-runtime";
 
+/** Refusal codes a set-up step names in words of their own rather than as a plain `invalid` (DEC-2809 item 1, DEC-2133). */
+const NAMED_VIOLATIONS: ReadonlySet<string> = new Set(["second_instrument", "second_agent_on_account", "connection_unrecorded"]);
+
 /** How many of an agent stream's latest events its screen lists. */
 const JOURNAL_TAIL = 20;
 /** The most control-stream pages the disclosure read walks, 1000 events each. */
@@ -221,7 +224,7 @@ export function ApiRuntimeProvider({
         const outcome = await client.send(command);
         if (outcome.ok) return { phase: "recorded", eventId: outcome.accepted.event_id, body: outcome.body };
         const { error } = outcome;
-        if (error.effect === "none") return { phase: "undelivered", reason: error.code };
+        if (error.effect === "none") return { phase: "undelivered", reason: (error.code === "invalid" ? error.violations.find((v) => NAMED_VIOLATIONS.has(v.code))?.code : undefined) ?? error.code };
         eventId = error.event_id ?? eventId;
         if (error.effect === "recorded" && eventId) return { phase: "recorded", eventId };
         if (!error.retryable) break;
