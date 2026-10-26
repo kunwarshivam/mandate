@@ -69,8 +69,9 @@ const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 /// (DEC-2312); `IntentReceived`,
 /// `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1, and so does
 /// `OrderStateChanged` (journal spec §9.16, DEC-869). `OwnerConfirmationReceived` closes at
-/// version 1 (DEC-2040), and so does `AccountCloseRequested` (DEC-2337).
-const EXECUTOR: [&str; 11] = [
+/// version 1 (DEC-2040), and so do `AccountCloseRequested` (DEC-2337) and
+/// `AccountRestrictionChanged` (DEC-2137).
+const EXECUTOR: [&str; 12] = [
     "IntentReceived",
     "GateDecided",
     "OrderSubmitted",
@@ -79,6 +80,7 @@ const EXECUTOR: [&str; 11] = [
     "ProtectionChanged",
     CONFIRMATION,
     CLOSE,
+    RESTRICTION,
     "BrokerPositionObserved",
     "AgentModeApplied",
     "CompensatingEvent",
@@ -93,6 +95,10 @@ const CONFIRMATION: &str = "OwnerConfirmationReceived";
 /// One request of one instrument's close-position under an account kill switch, journaled before
 /// it is sent (§9.5, DEC-2337): rules 258 and 259 on its own members, rule 260 on the stream.
 const CLOSE: &str = "AccountCloseRequested";
+
+/// An account restriction the executor detected, with its closed cause (§9.5, DEC-2137): rules
+/// 279 and 280 bind its restriction, cause, and reason code to trading spec §7.3's table.
+const RESTRICTION: &str = "AccountRestrictionChanged";
 
 /// The companion's (§9.5): an `OrderSubmitted` at `schema_version` 2 must be immediately preceded
 /// in its `append` batch by exactly one `OrderRequestRecorded`, which its `causation_id` names.
@@ -390,6 +396,7 @@ pub(crate) fn payload(
         "IntentReceived" => intent_received_rules(p)?,
         CONFIRMATION => confirmation_rules(p)?,
         CLOSE => close_rules(p, causation_id)?,
+        RESTRICTION => restriction_rules(p)?,
         "ProtectionChanged" => protection_changed_rules(p)?,
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
@@ -554,6 +561,24 @@ fn close_rules(p: Payload<'_>, causation_id: Option<&Value>) -> Result<(), Inval
         causation_id.and_then(Value::as_str) == Some(p.text("kill_switch_event")),
         InvalidReason::Schema,
         "causation_id",
+    )
+}
+
+/// Rules 279 and 280 (DEC-2137), in that order: `restriction` is `blocked` exactly when
+/// `reason_code` is `account_trading_blocked` (`payload.reason_code`), and a `blocked`
+/// restriction's `cause` is `broker_notice` (`payload.cause`), so only trading spec §7.3's rows are
+/// admitted.
+fn restriction_rules(p: Payload<'_>) -> Result<(), Invalid> {
+    let blocked = p.text("restriction") == "blocked";
+    ensure(
+        blocked == (p.text("reason_code") == "account_trading_blocked"),
+        InvalidReason::Schema,
+        "payload.reason_code",
+    )?;
+    ensure(
+        !blocked || p.text("cause") == "broker_notice",
+        InvalidReason::Schema,
+        "payload.cause",
     )
 }
 
@@ -902,6 +927,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("ProtectionChanged", 2) => Some(&PROTECTION_CHANGED_V2),
         (CONFIRMATION, 1) => Some(&OWNER_CONFIRMATION_RECEIVED),
         (CLOSE, 1) => Some(&ACCOUNT_CLOSE_REQUESTED),
+        (RESTRICTION, 1) => Some(&ACCOUNT_RESTRICTION_CHANGED),
         ("BrokerPositionObserved", 1) => Some(&BROKER_POSITION_OBSERVED),
         ("AgentModeApplied", 1) => Some(&AGENT_MODE_APPLIED),
         ("CompensatingEvent", 1) => Some(&COMPENSATING_EVENT),
@@ -1239,6 +1265,21 @@ static OWNER_CONFIRMATION_RECEIVED: Ty = Ty::Record(&[
     ("floor", Ty::Decimal),
     ("expires_at", Ty::Int),
     ("copied_from", Ty::Ulid),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's `AccountRestrictionChanged` (DEC-2137): the restriction, its cause, §7.3's reason
+/// code, and the risk clock.
+static ACCOUNT_RESTRICTION_CHANGED: Ty = Ty::Record(&[
+    ("restriction", Ty::OneOf(&["closing_only", "blocked"])),
+    (
+        "cause",
+        Ty::OneOf(&["broker_reject", "broker_notice", "connection_unavailable"]),
+    ),
+    (
+        "reason_code",
+        Ty::OneOf(&["account_trading_blocked", "account_restricted"]),
+    ),
     ("risk_clock", Ty::RiskClock),
 ]);
 
