@@ -56,7 +56,7 @@ const DEMO_RULES: &str = include_str!("../../../deploy/cell/demo/rule-set.json")
 const DEMO_SNAPSHOT: &str = include_str!("../../../deploy/cell/demo/instrument.json");
 const DEMO_MODEL: &str = "cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d";
 const RESEARCH_MANDATE: &str = include_str!("../../../deploy/cell/demo/research-mandate.json");
-const RESEARCH_MODEL: &str = "40f446f7858575d2c66a223f747348b3a91ef83e844e13815e527f4d181e5283";
+const RESEARCH_MODEL: &str = "bff754a2e669add9a7928a4b8c71c764cfe61455e361621ae6f6c262af0824cd";
 const LLM_CONTENT: &str =
     r#"{"kind":"research_model_content","model_id":"llm.research_agent","model_version":"0.1.0"}"#;
 const ENVELOPE: &str = "autonomy behavior capital connection_id environment goal name notifications protection risk universe";
