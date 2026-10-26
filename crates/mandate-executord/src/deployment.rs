@@ -648,11 +648,6 @@ impl<B> Named<B> {
     pub fn new(broker: B, deployment: Option<Deployment>) -> Self {
         Self { broker, deployment }
     }
-
-    /// The broker read through.
-    pub fn inner(&self) -> &B {
-        &self.broker
-    }
 }
 
 impl<B: Broker> Broker for Named<B> {
