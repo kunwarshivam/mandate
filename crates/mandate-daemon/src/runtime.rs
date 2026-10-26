@@ -7,6 +7,8 @@ pub use research::{ArtifactSink, ResearchParts, ResearchSource, ResearchWiring, 
 use std::time::Duration;
 
 use mandate_canon::{Object, parse};
+
+use crate::production::Facts;
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_process::{Input as Lifecycled, Kind, Lifecycle, State};
 use mandate_runtime::{
@@ -37,6 +39,9 @@ pub struct Wiring {
     pub view: MandateView,
     /// The deployment's research (DEC-2208); `None`, the default, runs none.
     pub research: Option<ResearchWiring>,
+    /// The fold the production ports read (DEC-2378 S2), fed every row the process reads from the
+    /// control, account and clock streams; `None` for the fixture wiring, which reads nothing.
+    pub facts: Option<Facts>,
 }
 
 impl Wiring {
@@ -290,6 +295,7 @@ impl<S: Store> RuntimeProcess<S> {
     fn control_pass(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> Option<Vec<StoredEvent>> {
         let control = self.control.clone()?;
         let rows = self.store.rows(&control)?;
+        self.feed(&rows);
         let events = tailed(&rows).ok()?;
         let head = events.last().map_or(0, |e| e.seq.0);
         if self.control_handed == Some(head) {
@@ -340,6 +346,10 @@ impl<S: Store> RuntimeProcess<S> {
         let Some(rows) = self.store.rows(account) else {
             return Account::Unreadable;
         };
+        if let Some(facts) = &self.wiring.facts {
+            facts.follow(account.as_str());
+        }
+        self.feed(&rows);
         let head = self.state.head(account.as_str()).map_or(0, |seq| seq.0);
         let fresh: Vec<StoredEvent> = rows.into_iter().filter(|r| r.seq > head).collect();
         if fresh
@@ -371,6 +381,7 @@ impl<S: Store> RuntimeProcess<S> {
         let Some(rows) = self.store.rows(&clock) else {
             return false;
         };
+        self.feed(&rows);
         let latest = rows
             .iter()
             .filter(|r| r.event_type == "ClockAdvanced")
@@ -384,6 +395,13 @@ impl<S: Store> RuntimeProcess<S> {
                 alerts,
             ),
             None => true,
+        }
+    }
+
+    /// Feeds `rows` to the production ports' fold, which takes each row once (DEC-2378 S2).
+    fn feed(&self, rows: &[StoredEvent]) {
+        if let Some(facts) = &self.wiring.facts {
+            facts.feed(rows);
         }
     }
 

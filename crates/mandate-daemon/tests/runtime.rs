@@ -108,6 +108,7 @@ fn wiring() -> Wiring {
             },
         },
         research: None,
+        facts: None,
     }
 }
 
@@ -1112,4 +1113,55 @@ proptest! {
             prop_assert_eq!(process.lifecycle().state(), State::Ready, "{:?}", kinds(&rig));
         }
     }
+}
+
+/// The production ports' fold (DEC-2378 S2) is fed every row the process reads: the account the
+/// control stream names, from its start, and the scheduler's ticks, each row once however many
+/// passes read it.
+#[test]
+fn the_production_fold_is_fed_the_named_account_and_the_clock_once_each() {
+    let rig = Rig::default();
+    let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    let stamp = at(NOW).to_string();
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderRequestRecorded",
+        &format!(r#"{{"agent_id":"{AGENT}","purpose":"open","risk_clock":"{stamp}"}}"#),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderSubmitted",
+        r#"{"client_order_id":"o1","instrument_id":"spy","side":"buy"}"#,
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "FillApplied",
+        &format!(
+            r#"{{"fill_id":"f1","client_order_id":"o1","instrument_id":"spy","side":"buy","qty_gross":"3","price":"100","risk_clock":"{stamp}"}}"#
+        ),
+    );
+    on_account(&rig, OTHER_ACCOUNT, "FillApplied", r#"{"fill_id":"f9"}"#);
+    let mut process = RuntimeProcess::start(
+        rig.clone(),
+        Wiring {
+            facts: Some(facts.clone()),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 5));
+    process.step(at(NOW + 6));
+    let held = facts.read(|journaled| journaled.held());
+    let three = mandate_num::Qty::parse("3").unwrap();
+    assert_eq!(held, Some([("spy".to_owned(), three)].into()));
+    assert_eq!(
+        facts.read(|journaled| journaled.now()),
+        Some(Some(at(NOW + 5)))
+    );
 }
