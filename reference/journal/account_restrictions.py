@@ -1,6 +1,6 @@
 """Journal spec §9.5's reference vectors for `AccountRestrictionChanged` (DEC-2137): an account
 restriction the executor detected (trading spec §7.3), with its closed `cause` (DEC-441 item 23),
-journaled before the modes it applies. v0.95 (DEC-2814) journals every cause in force, and stream
+journaled before the modes it applies. v0.95 (DEC-2816) journals every cause in force, and stream
 rule 309 keeps each on the stream once: the `streams` here are account streams of restrictions.
 
 The schema and rules 279 and 280 live in `control.py`, beside §9.5's other account-stream records,
@@ -32,7 +32,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2137) and stream rule 309 (DEC-2814)"
+SPEC = "docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2137) and stream rule 309 (DEC-2816)"
 ACCOUNT = f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}"
 AT = "2026-10-26T15:00:00.250000000Z"
 RISK_CLOCK = "2026-10-26T15:00:01.000000000Z"
@@ -170,7 +170,7 @@ def stream_cases() -> list[dict]:
     return [
         case("one_cause", f"{RULE_309}: a cause raised once", [on(1, CLOSING, REJECT)], None),
         case("a_second_cause_while_restricted",
-             f"{RULE_309}: another cause at the same restriction is journaled (DEC-2814)",
+             f"{RULE_309}: another cause at the same restriction is journaled (DEC-2816)",
              [on(1, CLOSING, REJECT), on(2, CLOSING, NOTICE)], None),
         case("a_cause_restricts_further",
              f"{RULE_309}: the same cause again at a stricter restriction (§7.3 rows 4 then 1)",

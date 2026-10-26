@@ -137929,7 +137929,7 @@
   ]
  },
  "account_restrictions": {
-  "spec": "docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2137) and stream rule 309 (DEC-2814)",
+  "spec": "docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2137) and stream rule 309 (DEC-2816)",
   "drafts": {
    "blocked": {
     "envelope_version": 1,
@@ -138425,7 +138425,7 @@
    },
    {
     "name": "a_second_cause_while_restricted",
-    "clause": "rule 309: another cause at the same restriction is journaled (DEC-2814)",
+    "clause": "rule 309: another cause at the same restriction is journaled (DEC-2816)",
     "records": [
      {
       "envelope_version": 1,
