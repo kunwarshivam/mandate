@@ -16,8 +16,13 @@ use mandate_executord::health::Health;
 use mandate_process::State;
 use proptest::prelude::*;
 use support::{
-    ACCOUNT_STREAM, Error, Journal, OPENED, OPENING, Paper, at, deployed, start_allowing,
+    ACCOUNT_STREAM, AGENT, Error, Journal, OPENED, OPENING, Paper, at, deployed, propose,
+    start_allowing,
 };
+
+const FIRST: &str = "01JINTENT0000000000000000A";
+const SECOND: &str = "01JINTENT0000000000000000B";
+const THIRD: &str = "01JINTENT0000000000000000D";
 
 /// An executor up and ready with the opening still working at the broker, so every pass reads the
 /// broker for its scheduled reconciliation (X1b-3).
@@ -108,6 +113,47 @@ fn authorization_failures_restrict_the_account() -> Result<(), Error> {
     Ok(())
 }
 
+/// The pass a refused credential crosses its threshold in restricts the account before the next
+/// proposal is taken (connections spec §9.1: the restriction before anything else is sent), so an
+/// opening proposed behind it is never handed as an opening of an active account.
+#[test]
+fn a_threshold_crossed_mid_pass_restricts_before_the_next_proposal() -> Result<(), Error> {
+    let journal = deployed()?;
+    let broker = Paper::new(&journal);
+    let mut process = start_allowing(&journal, &broker)?;
+    process.step(at(support::NOON)?);
+    broker.refuse_next_with(401, 64);
+    propose(&journal, AGENT, FIRST, "buy", "10", "150", "open")?;
+    propose(&journal, AGENT, SECOND, "buy", "10", "150", "open")?;
+    propose(&journal, AGENT, THIRD, "buy", "10", "150", "open")?;
+    process.step(at(support::NOON)?);
+    let types = journal.types(ACCOUNT_STREAM);
+    let restricted = types
+        .iter()
+        .position(|kind| kind == "AccountRestrictionChanged")
+        .ok_or("the refused credential restricted nothing")?;
+    let received: Vec<usize> = types
+        .iter()
+        .enumerate()
+        .filter(|(_, kind)| *kind == "IntentReceived")
+        .map(|(at, _)| at)
+        .collect();
+    assert_eq!(received.len(), 3, "{types:?}");
+    assert!(
+        received.iter().skip(1).all(|at| *at > restricted),
+        "the openings behind the crossing are taken only after the restriction: {types:?}"
+    );
+    assert_eq!(
+        types
+            .iter()
+            .filter(|kind| *kind == "OrderSubmitted")
+            .count(),
+        1,
+        "{types:?}"
+    );
+    Ok(())
+}
+
 #[test]
 fn a_broker_s_403_is_not_an_authorization_failure() -> Result<(), Error> {
     let (journal, broker, mut process) = working()?;
@@ -160,6 +206,11 @@ fn answers() -> Vec<Classified> {
         ),
         (Err(ConnectorError::NotSent { code: "refused" }), None, None),
         (reject(401), Some(false), Some(true)),
+        (
+            Err(ConnectorError::Unknown(BrokerUnknown::Unauthorized)),
+            Some(false),
+            Some(true),
+        ),
         (reject(403), Some(false), None),
         (reject(422), Some(false), Some(false)),
         (
@@ -184,7 +235,7 @@ fn trailing(readings: &[Option<bool>]) -> usize {
 proptest! {
     #[test]
     fn the_troubles_are_the_classes_failing_at_their_thresholds(
-        picks in proptest::collection::vec(0usize..8, 0..40),
+        picks in proptest::collection::vec(0usize..9, 0..40),
     ) {
         let table = answers();
         let mut health = Health::default();

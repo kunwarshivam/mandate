@@ -770,6 +770,11 @@ pub enum BrokerUnknown {
     Ambiguous,
     #[error("the connection failed")]
     Transport,
+    /// The broker refused the request's credential (HTTP `401`). One refusal is a possible
+    /// transient (connections spec §5.4), so the outcome is unknown and resolved by query, never
+    /// read as a rejection; two in a row make the connection `suspended` (§8.2, DEC-2832).
+    #[error("the broker refused the credential")]
+    Unauthorized,
 }
 
 impl BrokerUnknown {
@@ -779,6 +784,7 @@ impl BrokerUnknown {
             Self::Timeout => "timeout",
             Self::Ambiguous => "ambiguous",
             Self::Transport => "transport",
+            Self::Unauthorized => "unauthorized",
         }
     }
 }

@@ -416,8 +416,9 @@ struct Books {
     account_wide: Option<bool>,
     /// Whether every close-position's answer is lost after the close takes effect.
     lose_closes: bool,
-    /// Requests refused unanswered with this HTTP status, before they reach the books: how a
-    /// credential the broker no longer accepts answers (`401`).
+    /// Requests refused with this HTTP status before they reach the books, as the Alpaca connector
+    /// answers them: a `401` as an unknown outcome, `Unauthorized` (connections spec §5.4), and any
+    /// other status as a rejection.
     refuse_with: Option<(u16, usize)>,
     sequence: u64,
 }
@@ -603,6 +604,9 @@ impl Broker for Paper {
             && left > 0
         {
             books.refuse_with = Some((status, left.saturating_sub(1)));
+            if status == 401 {
+                return Err(ConnectorError::Unknown(BrokerUnknown::Unauthorized));
+            }
             return Ok(BrokerOutcome::Rejected(BrokerReject {
                 client_order_id: None,
                 http_status: status,

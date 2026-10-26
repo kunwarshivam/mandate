@@ -389,11 +389,6 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 return alerts;
             }
         }
-        for trouble in self.health.troubles() {
-            if !self.hand(now, now, Input::Connection(trouble), &mut alerts, 0) {
-                return alerts;
-            }
-        }
         let Some(Followed {
             switches,
             proposals: proposed,
@@ -414,6 +409,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return alerts;
         }
+        if !self.report_troubles(now, &mut alerts) {
+            return alerts;
+        }
         if !self.read_quotes(now, &mut alerts).unwrap_or(true) {
             return alerts;
         }
@@ -428,6 +426,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             } else {
                 Action::RiskExit
             };
+            if !self.report_troubles(now, &mut alerts) {
+                return alerts;
+            }
             if self.lifecycle.permits(action) && !self.take(now, agent, proposal, &mut alerts) {
                 return alerts;
             }
@@ -1195,6 +1196,18 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let answer = self.broker.call(request);
         self.health.observe(&answer);
         answer
+    }
+
+    /// Tells the core of every trouble the connection's health holds (DEC-2832): after the pass's
+    /// kill switches, so none waits on it, and again before each proposal, so a count that crossed
+    /// its threshold earlier in the pass restricts the account before the next opening is taken.
+    /// The core journals each restriction and state change once (DEC-2826). `false` when a handoff
+    /// stopped the pass.
+    fn report_troubles(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> bool {
+        self.health
+            .troubles()
+            .into_iter()
+            .all(|trouble| self.hand(now, now, Input::Connection(trouble), alerts, 0))
     }
 
     /// A one-read broker's account reads, counted as one answer (DEC-2832).

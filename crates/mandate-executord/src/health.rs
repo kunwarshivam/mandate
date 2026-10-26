@@ -3,18 +3,20 @@
 //! and the troubles the core is told of at every pass while a count stays at its threshold.
 //!
 //! The classes read from an answer:
-//! - **network:** a lost answer (`Unknown`) or one the connector could not read (`Unreadable`) is
-//!   a failure, since an ambiguous answer is never read as healthy; any answer the broker gave,
-//!   a rejection included, is a good result;
-//! - **authorization:** a rejection with HTTP `401` is a failure; any other answer the broker gave
-//!   is a good result, except a `403`, which is the broker's refusal and counts neither way.
+//! - **network:** a lost answer (`Unknown`: a timeout, a dropped connection, a `429` or `5xx`) or
+//!   one the connector could not read (`Unreadable`) is a failure, since an ambiguous answer is
+//!   never read as healthy; any answer the broker gave, a rejection or a refused credential
+//!   included, is a good result;
+//! - **authorization:** a refused credential (`Unknown(Unauthorized)`, or a rejection with HTTP
+//!   `401` from a connector that answers it so) is a failure; any other answer the broker gave is
+//!   a good result, except a `403`, which is the broker's refusal and counts neither way.
 //!
 //! A request that never left the process (`NotSent`) says nothing about the connection and counts
 //! neither way. The counts live only in this process: a restart starts them again, and what they
 //! led to is on the stream (journal spec §9.8).
 
 use mandate_executor::{
-    BrokerOutcome, ConnectionTrouble, ConnectorError, DegradeReason, SuspendReason,
+    BrokerOutcome, BrokerUnknown, ConnectionTrouble, ConnectorError, DegradeReason, SuspendReason,
 };
 
 /// The status a broker refuses a credential it no longer accepts with: an authorization failure.
@@ -81,6 +83,9 @@ impl Health {
 
 fn readings(answer: &Result<BrokerOutcome, ConnectorError>) -> (Reading, Reading) {
     match answer {
+        Err(ConnectorError::Unknown(BrokerUnknown::Unauthorized)) => {
+            (Reading::Good, Reading::Failed)
+        }
         Err(ConnectorError::Unknown(_) | ConnectorError::Unreadable { .. }) => {
             (Reading::Failed, Reading::Silent)
         }

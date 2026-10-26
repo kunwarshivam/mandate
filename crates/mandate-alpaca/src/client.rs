@@ -264,6 +264,7 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
                 }
                 read_back => Ok(read_back),
             },
+            UNAUTHORIZED => Err(BrokerUnknown::Unauthorized.into()),
             429 | 500..=599 => Err(BrokerUnknown::Ambiguous.into()),
             _ => self.order_by_client_id(client_order_id).await,
         }
@@ -344,6 +345,7 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
         let path = format!("/v2/orders/{}", order.broker_order_id);
         let response = self.send(Method::Delete, path, None).await?;
         match response.status {
+            UNAUTHORIZED => Err(BrokerUnknown::Unauthorized.into()),
             429 | 500..=599 => Err(BrokerUnknown::Ambiguous.into()),
             _ => match self.order_by_broker_id(&order.broker_order_id).await? {
                 read if read.status == "canceled" => Ok(BrokerOutcome::CancelAccepted {
@@ -362,6 +364,7 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
         let response = self.send(Method::Get, path, None).await?;
         match response.status {
             200..=299 => Ok(wire::order(&response.body)?),
+            UNAUTHORIZED => Err(BrokerUnknown::Unauthorized.into()),
             _ => Err(BrokerUnknown::Ambiguous.into()),
         }
     }
@@ -390,6 +393,7 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
         let response = self.send(Method::Get, path_and_query, None).await?;
         match response.status {
             200..=299 => Ok(response),
+            UNAUTHORIZED => Err(BrokerUnknown::Unauthorized.into()),
             429 | 500..=599 => Err(BrokerUnknown::Ambiguous.into()),
             _ => Err(WireError::NotInterpreted {
                 field: "status",
@@ -424,6 +428,7 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
         let response = self.dispatch(&request?).await?;
         match response.status {
             200..=299 => Ok(BrokerOutcome::AccountWideAccepted),
+            UNAUTHORIZED => Err(BrokerUnknown::Unauthorized.into()),
             429 | 500..=599 => Err(BrokerUnknown::Ambiguous.into()),
             status => Ok(BrokerOutcome::Rejected(wire::reject(
                 status,
@@ -437,6 +442,11 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
         Ok(self.transport.send(request).await?)
     }
 }
+
+/// The status of a request the broker refused for its credential (connections spec §5.4,
+/// DEC-2832): one such refusal is a possible transient, so the request's outcome is unknown and
+/// resolved by query once a credential works again, never a rejection that settles an order.
+const UNAUTHORIZED: u16 = 401;
 
 /// The open-orders read: every open order, oldest first, with bracket and OCO legs nested under
 /// their parent so a leg's broker-assigned `client_order_id` is never mistaken for external
@@ -523,6 +533,7 @@ fn settle(
 ) -> Result<BrokerOutcome, ClientError> {
     match response.status {
         200..=299 => Ok(found(wire::order(&response.body)?)),
+        UNAUTHORIZED => Err(BrokerUnknown::Unauthorized.into()),
         429 | 500..=599 => Err(BrokerUnknown::Ambiguous.into()),
         status => {
             let mut reject = wire::reject(status, &response.body)?;
@@ -720,6 +731,46 @@ mod tests {
             *client.transport.sent.borrow(),
             vec!["/v2/positions/BTCUSD".to_owned()],
             "once, on the one path Alpaca answers for the pair (#195 finding 1)"
+        );
+        Ok(())
+    }
+
+    /// A credential the broker refuses answers an unknown outcome on every path, never a reject
+    /// that settles an order nor an unreadable answer that stops the executor (connections spec
+    /// §5.4: one refusal is a possible transient; DEC-2832).
+    #[tokio::test]
+    async fn a_refused_credential_is_an_unknown_outcome_on_every_path() -> Result<(), String> {
+        let id =
+            ClientOrderId::parse("md-01JINTENT0000000000000000A").map_err(|e| format!("{e:?}"))?;
+        let requests = [
+            BrokerRequest::GetAccount,
+            BrokerRequest::ListOpenOrders,
+            BrokerRequest::ListPositions,
+            BrokerRequest::GetOrderByClientId(id.clone()),
+            BrokerRequest::Cancel {
+                client_order_id: id,
+            },
+        ];
+        for request in requests {
+            let client = Answering::with(401);
+            let answer = client.call_one(&request).await;
+            assert_eq!(
+                answer.map_err(|error| error.to_connector()),
+                Err(ConnectorError::Unknown(BrokerUnknown::Unauthorized)),
+                "{request:?}"
+            );
+        }
+        let client = Answering::with(401);
+        let answer = client
+            .account_wide(HttpRequest::account_wide_for_tests(
+                Method::Delete,
+                "/v2/orders",
+            ))
+            .await;
+        assert_eq!(
+            answer.map_err(|error| error.to_connector()),
+            Err(ConnectorError::Unknown(BrokerUnknown::Unauthorized)),
+            "the cancel-all too"
         );
         Ok(())
     }
