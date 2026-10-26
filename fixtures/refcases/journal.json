@@ -4570,7 +4570,7 @@
   ]
  },
  "approval_deferrals": {
-  "spec": "docs/specs/journal.md v0.90 §9.6 rules 291 and 292 (DEC-2515)",
+  "spec": "docs/specs/journal.md v0.91 §9.6 rules 291 and 292 (DEC-2515)",
   "approver_sentence": "These checks have not been run yet. They run when the order is placed, and may still refuse it:",
   "decisions": {
    "plain": {
@@ -26745,7 +26745,7 @@
    },
    {
     "name": "at_version_4",
-    "clause": "§9.6: versions 1 to 3 only (v0.90)",
+    "clause": "§9.6: versions 1 to 3 only (v0.91)",
     "base_draft": "requested_v2",
     "changes": [
      {
@@ -137136,6 +137136,580 @@
     "name": "live",
     "clause": "§9.5: either environment",
     "base_draft": "blocked",
+    "changes": [
+     {
+      "path": "environment",
+      "value": "live"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
+ },
+ "account_switches": {
+  "spec": "docs/specs/journal.md §9.5 rules 281, 282 and 293 to 296 (DEC-2139)",
+  "drafts": {
+   "agent": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01JAF2K0A000000000000000K1",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "KillSwitchActivated",
+    "schema_version": 1,
+    "event_time": "2026-10-26T15:00:00.250000000Z",
+    "clock_source": "local",
+    "causation_id": "01JAF2M0A000000000000000M1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "scope": "agent",
+     "subject": "agent_a",
+     "initiator": "risk_limit",
+     "purpose": "risk_exit",
+     "cancels": [
+      "md-a-1"
+     ],
+     "closes": [
+      "AAPL"
+     ],
+     "deferred": [
+      "MSFT"
+     ],
+     "floor": null,
+     "bid": null,
+     "bid_size": null,
+     "copied_from": "01JAF2K0A000000000000000C1",
+     "risk_clock": "2026-10-26T15:00:01.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "account": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01JAF2K0A000000000000000K2",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "KillSwitchActivated",
+    "schema_version": 1,
+    "event_time": "2026-10-26T15:00:00.250000000Z",
+    "clock_source": "local",
+    "causation_id": "01JAF2M0A000000000000000M1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "scope": "account",
+     "subject": "01J8Z2ACCT00000000000000A1",
+     "initiator": "owner",
+     "purpose": "owner_exit",
+     "cancels": [],
+     "closes": [
+      "AAPL",
+      "MSFT"
+     ],
+     "deferred": [],
+     "floor": "180.00",
+     "bid": "190.10",
+     "bid_size": "300",
+     "copied_from": null,
+     "risk_clock": "2026-10-26T15:00:01.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "risk_limit_owner_exit",
+    "clause": "rule 281: a risk limit's switch sells as `risk_exit`",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.purpose",
+      "value": "owner_exit"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.purpose"
+    }
+   },
+   {
+    "name": "owner_risk_exit",
+    "clause": "rule 281: the owner's switch sells as `owner_exit`",
+    "base_draft": "account",
+    "changes": [
+     {
+      "path": "payload.purpose",
+      "value": "risk_exit"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.purpose"
+    }
+   },
+   {
+    "name": "operator_owner_exit",
+    "clause": "rule 281: an operator's switch sells as `risk_exit`",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.initiator",
+      "value": "platform_operator"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "owner_exit"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.purpose"
+    }
+   },
+   {
+    "name": "bid_without_floor",
+    "clause": "rule 282: the confirmation's members are null together",
+    "base_draft": "account",
+    "changes": [
+     {
+      "path": "payload.floor",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.bid"
+    }
+   },
+   {
+    "name": "no_bid",
+    "clause": "rule 282: the confirmation's members are null together",
+    "base_draft": "account",
+    "changes": [
+     {
+      "path": "payload.bid",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.bid"
+    }
+   },
+   {
+    "name": "no_bid_size",
+    "clause": "rule 282: the confirmation's members are null together",
+    "base_draft": "account",
+    "changes": [
+     {
+      "path": "payload.bid_size",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.bid_size"
+    }
+   },
+   {
+    "name": "confirmed_risk_limit",
+    "clause": "rule 293: only the owner's switch is confirmed",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.floor",
+      "value": "180"
+     },
+     {
+      "path": "payload.bid",
+      "value": "190"
+     },
+     {
+      "path": "payload.bid_size",
+      "value": "300"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.floor"
+    }
+   },
+   {
+    "name": "account_cancels",
+    "clause": "rule 294: the cancel-all cancels, not ids",
+    "base_draft": "account",
+    "changes": [
+     {
+      "path": "payload.cancels",
+      "value": [
+       "md-a-1"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cancels"
+    }
+   },
+   {
+    "name": "account_deferred",
+    "clause": "rule 294: an account switch defers nothing",
+    "base_draft": "account",
+    "changes": [
+     {
+      "path": "payload.deferred",
+      "value": [
+       "TSLA"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.deferred"
+    }
+   },
+   {
+    "name": "uncaused",
+    "clause": "rule 295: caused by the mode it applied",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "closed_and_deferred",
+    "clause": "rule 296: an instrument closes now or later, not both",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.deferred",
+      "value": [
+       "AAPL"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.deferred"
+    }
+   },
+   {
+    "name": "rules_281_and_295",
+    "clause": "rule 281 reports first",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.purpose",
+      "value": "owner_exit"
+     },
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.purpose"
+    }
+   },
+   {
+    "name": "connection_scope",
+    "clause": "§9.5: the executor's switch is an agent's or its account's",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.scope",
+      "value": "connection"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.scope"
+    }
+   },
+   {
+    "name": "other_purpose",
+    "clause": "§9.5: a switch sells to exit",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.purpose",
+      "value": "flatten"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.purpose"
+    }
+   },
+   {
+    "name": "unknown_initiator",
+    "clause": "§9.5: the three initiators",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.initiator",
+      "value": "user"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.initiator"
+    }
+   },
+   {
+    "name": "copied_not_ulid",
+    "clause": "§9.5: `copied_from` is a ulid",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.copied_from",
+      "value": "switch-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.copied_from"
+    }
+   },
+   {
+    "name": "floor_as_number",
+    "clause": "§9.5: `floor` is a decimal",
+    "base_draft": "account",
+    "changes": [
+     {
+      "path": "payload.floor",
+      "value": 180
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.floor"
+    }
+   },
+   {
+    "name": "closes_not_a_list",
+    "clause": "§9.5: `closes` is a list",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.closes",
+      "value": "AAPL"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.closes"
+    }
+   },
+   {
+    "name": "no_risk_clock",
+    "clause": "§9.5: every member present",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "no_copied_from",
+    "clause": "§9.5: every member present",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.copied_from",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.copied_from"
+    }
+   },
+   {
+    "name": "extra_mode_event",
+    "clause": "§9.5: closed; the agent stream's `mode_event` is not the account's",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.mode_event",
+      "value": "01JAF2M0A000000000000000M1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.mode_event"
+    }
+   },
+   {
+    "name": "version_2",
+    "clause": "§9.5: registered at `schema_version` 1 only",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "originated",
+    "clause": "the executor's own switch copies nothing",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.copied_from",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "operator",
+    "clause": "rule 281: an operator's switch sells as `risk_exit`",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.initiator",
+      "value": "platform_operator"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "owner_unconfirmed",
+    "clause": "rule 293: the owner's switch may be unconfirmed",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.initiator",
+      "value": "owner"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "owner_exit"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "nothing_held",
+    "clause": "a switch with nothing to cancel or close",
+    "base_draft": "agent",
+    "changes": [
+     {
+      "path": "payload.cancels",
+      "value": []
+     },
+     {
+      "path": "payload.closes",
+      "value": []
+     },
+     {
+      "path": "payload.deferred",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "account_risk_limit",
+    "clause": "rule 294: an account switch of a risk limit",
+    "base_draft": "account",
+    "changes": [
+     {
+      "path": "payload.initiator",
+      "value": "risk_limit"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "risk_exit"
+     },
+     {
+      "path": "payload.floor",
+      "value": null
+     },
+     {
+      "path": "payload.bid",
+      "value": null
+     },
+     {
+      "path": "payload.bid_size",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "live",
+    "clause": "either environment",
+    "base_draft": "account",
     "changes": [
      {
       "path": "environment",

@@ -1316,6 +1316,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "OwnerConfirmationReceived"): (1,),
     ("acct", "AccountCloseRequested"): (1,),
     ("acct", "AccountRestrictionChanged"): (1,),
+    ("acct", "KillSwitchActivated"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2, 3),
@@ -1377,6 +1378,21 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("floor", DEC),
         ("expires_at", INT),
         ("copied_from", ULID),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # §9.5 (DEC-2139): a kill switch the executor applied on its account, as it writes it.
+    ("acct", "KillSwitchActivated", 1): rec(
+        ("scope", one_of("agent", "account")),
+        ("subject", IDENT_T),
+        ("initiator", one_of("owner", "risk_limit", "platform_operator")),
+        ("purpose", one_of("risk_exit", "owner_exit")),
+        ("cancels", list_of(STR)),
+        ("closes", list_of(STR)),
+        ("deferred", list_of(STR)),
+        ("floor", opt(DEC)),
+        ("bid", opt(DEC)),
+        ("bid_size", opt(DEC)),
+        ("copied_from", opt(ULID)),
         ("risk_clock", RISK_CLOCK),
     ),
     # §9.5 (DEC-2137): an account restriction the executor detected, with its closed cause
@@ -1524,7 +1540,7 @@ VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 2)] = rec(
     ("content", rec(*REQUEST_CONTENT_V1.fields, ("execution", REQUEST_EXECUTION))),
     ("content_hash", REF),
 )
-# v0.90 (DEC-2515): version 2's content, then the checks the dry run deferred to the binding gate.
+# v0.91 (DEC-2515): version 2's content, then the checks the dry run deferred to the binding gate.
 VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 3)] = rec(
     *REQUEST_TOP,
     (
@@ -1931,6 +1947,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
         wrong = next((m for m in prices if not positive(m)), None)
         rule("247", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "KillSwitchActivated" and draft["stream_id"].startswith("acct:"):
+        account_switch_rules(draft, skip, rule)
     if event_type == "AccountRestrictionChanged":
         blocked = p["restriction"] == "blocked"
         if "rule.279.closing_only_any_code" in skip:
@@ -2640,6 +2658,40 @@ def gap_nanos(start, end) -> int | None:
     if not all(isinstance(v, str) and is_timestamp(v) for v in (start, end)):
         return None
     return instant_nanos(end) - instant_nanos(start)
+
+
+KILL_SWITCH_PURPOSE = {"owner": "owner_exit", "risk_limit": "risk_exit", "platform_operator": "risk_exit"}
+CONFIRMED = ("floor", "bid", "bid_size")
+
+
+def account_switch_rules(draft: dict, skip: frozenset[str], rule) -> None:
+    """Rules 281, 282 and 293 to 296 (DEC-2139) on the account stream's `KillSwitchActivated`, in
+    that order, the first that fails reported."""
+    p = draft["payload"]
+    owner = p["initiator"] == "owner"
+    purpose = KILL_SWITCH_PURPOSE[p["initiator"]]
+    if "rule.281.any_exit" in skip:
+        purpose = p["purpose"]
+    confirmed = [m for m in CONFIRMED if p[m] is not None]
+    if "order.rule_282_bid_first" in skip:
+        mixed = next((m for m in ("bid_size", "bid") if (p[m] is None) != (p["floor"] is None)), None)
+    else:
+        mixed = next((m for m in ("bid", "bid_size") if (p[m] is None) != (p["floor"] is None)), None)
+    account = p["scope"] == "account"
+    overlap = set(p["closes"]) & set(p["deferred"])
+    clauses = [
+        ("281", p["purpose"] == purpose, "payload.purpose"),
+        ("282", mixed is None, f"payload.{mixed}"),
+        ("293", owner or not confirmed or "rule.293.any_initiator" in skip, "payload.floor"),
+        ("294.cancels", not account or not p["cancels"], "payload.cancels"),
+        ("294.deferred", not account or not p["deferred"], "payload.deferred"),
+        ("295", draft["causation_id"] is not None, "causation_id"),
+        ("296", not overlap, "payload.deferred"),
+    ]
+    for name, holds, path in clauses:
+        if not holds and f"rule.{name}" not in skip:
+            rule(name, False, "schema", path)
+            return
 
 
 def passkey_step_up(number: str, draft: dict, skip: frozenset[str], rule) -> bool:
