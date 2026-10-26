@@ -802,10 +802,15 @@ fn decided(
                 .output_events
                 .get(model)
                 .and_then(|by_instrument| by_instrument.get(&proposal.instrument))
-                .map(|event| payload::text(&event.0))
+                .map(|event| event.0.clone())
                 .ok_or_else(|| payload::non_canonical("outputs_used"))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let outputs_used = strictly_ascending(outputs_used)
+        .ok_or_else(|| payload::non_canonical("outputs_used"))?
+        .iter()
+        .map(|event| payload::text(event))
+        .collect::<Vec<_>>();
     let model_weights = proposal
         .model_weights
         .iter()
@@ -1104,13 +1109,23 @@ impl<'a> Batch<'a> {
     }
 }
 
+/// `ids` sorted ascending by bytes, as journal spec rule 9 lists a decision's `outputs_used`, or
+/// `None` when two are the same: one output event cited for two models would hide a model the
+/// decision rests on, so it is refused rather than listed once.
+fn strictly_ascending(mut ids: Vec<String>) -> Option<Vec<String>> {
+    ids.sort_unstable();
+    ids.windows(2)
+        .all(|pair| matches!(pair, [earlier, later] if earlier < later))
+        .then_some(ids)
+}
+
 #[cfg(test)]
 mod tests {
     use mandate_accounting::InstrumentId;
     use mandate_canon::{Digest, Value};
     use mandate_num::{Conviction, Unit};
 
-    use super::{clip_name, exit_origin_name, modelled};
+    use super::{clip_name, exit_origin_name, modelled, strictly_ascending};
     use crate::payload::model_output_of;
     use crate::{
         DecisionClip, EventId, ExitOrigin, ModelDirection, ModelOutput, ModelOutputIgnored,
@@ -1259,5 +1274,17 @@ mod tests {
         assert_eq!(clip_name(DecisionClip::TargetQty), "target_qty");
         assert_eq!(clip_name(DecisionClip::MaxSpendUsd), "max_spend_usd");
         assert_eq!(clip_name(DecisionClip::MaxAvgPrice), "max_avg_price");
+    }
+
+    #[test]
+    fn outputs_used_lists_ids_ascending_and_refuses_one_cited_twice() {
+        let ids = |list: &[&str]| list.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            strictly_ascending(ids(&["01B", "01A", "01C"])),
+            Some(ids(&["01A", "01B", "01C"]))
+        );
+        assert_eq!(strictly_ascending(ids(&["01A", "01B", "01A"])), None);
+        assert_eq!(strictly_ascending(ids(&["01A"])), Some(ids(&["01A"])));
+        assert_eq!(strictly_ascending(Vec::new()), Some(Vec::new()));
     }
 }
