@@ -607,12 +607,14 @@ const PROTECTION_ACTIONS: &[&str] = &[
     "rung_short",
     "interval_limit",
     "unprotected_end",
+    "protection_gap",
 ];
 
 /// §9.5's rules 41 to 44 on a well-typed `ProtectionChanged`, each clause in the order §9.5 gives
-/// it and reported at the member it names (DEC-446 item 6): 41's two lists, 42's quantity, 43's
-/// prices, then 44's remaining members from `intent_id` to `acknowledged`, each at its own member
-/// in the table's order, and last version 2's `unprotected_fraction`: only on `unprotected_start`,
+/// it and reported at the member it names (DEC-446 item 6): 41's two lists, 42's quantity
+/// (non-null on `placed` and, journal spec v0.83, `protection_gap`, DEC-2368), 43's prices, then
+/// 44's remaining members from `intent_id` to `acknowledged`, each at its own member in the
+/// table's order, and last version 2's `unprotected_fraction`: only on `unprotected_start`,
 /// `placed` and `unprotected_end`, and strictly between 0 and 1 (journal spec v0.72, DEC-2312,
 /// DEC-2315). A version-1 record has no such member, which reads as null.
 fn protection_changed_rules(p: Payload<'_>) -> Result<(), Invalid> {
@@ -634,7 +636,7 @@ fn protection_changed_rules(p: Payload<'_>) -> Result<(), Invalid> {
     )?;
     ensure(
         match action {
-            "placed" => !p.is_null("qty"),
+            "placed" | "protection_gap" => !p.is_null("qty"),
             "cancelled" => true,
             _ => p.is_null("qty"),
         },
