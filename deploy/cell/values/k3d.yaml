@@ -20,6 +20,7 @@ runtime:
 # mandate's 300 USD order cap and the crossover's fast mean is above its slow one.
 data:
   symbol: SPY
+  assetId: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
   anchor: 2026-10-23=150
 # The workspace API server, when `cargo xtask cell up` names its image. It hosts the demo workspace
 # (`cargo xtask cell demo` opens it under this id). The issuer is the local stub of DEC-2100 on the

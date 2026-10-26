@@ -66,6 +66,10 @@ pub enum SeriesError {
     Store(#[from] DatasetError),
     #[error("a bar value is not a decimal")]
     Decimal,
+    #[error("the trust check refused the stored series")]
+    Untrusted,
+    #[error("the artifact store cannot be opened or written")]
+    Artifacts,
 }
 
 impl SeriesError {
@@ -80,6 +84,8 @@ impl SeriesError {
             Self::Model(_) => "dataset_invalid",
             Self::Store(_) => "store_refused",
             Self::Decimal => "bar_not_decimal",
+            Self::Untrusted => "series_untrusted",
+            Self::Artifacts => "artifacts_unavailable",
         }
     }
 }

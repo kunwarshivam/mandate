@@ -69,6 +69,8 @@ oauthFixture:
 # the image: a recording, never market data, so only the local and CI cell names it.
 data:
   symbol: ""
+  # The instrument's asset id, which the closes object the runtime's observation names carries.
+  assetId: ""
   anchor: ""
 
 # The workspace API server's settings (workspace API spec §3.11 item 2), each required once

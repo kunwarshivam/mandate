@@ -3,7 +3,8 @@
 One volume holds the workspace's artifacts (mandate documents, backtest reports), so a pod's restart
 loses none. Which process may write it is written out here, not read from the chart, so a chart that
 drifts fails: the control runs write, and so does the cell's data process, its recorded daily bars
-under `datasets/` (E21-29 lane SC); the API server only reads, though its pod lays the store out
+under `datasets/` (E21-29 lane SC); the executor reads them, read-only, for its gate's figures
+(G3); the API server only reads, though its pod lays the store out
 before it starts; the runtime, the deployment manager and the model gateway (its research cap,
 DEC-2272) only read; and no other process mounts it.
 Before any process starts, the store has `sha256/` and `tmp/`: the API server refuses a root without
@@ -24,6 +25,7 @@ ACCESS = {
     "control": "rw",
     "data": "rw",
     "runtime": "ro",
+    "executor": "ro",
     "deploy-manager": "ro",
     "model-gateway": "ro",
 }
@@ -131,7 +133,7 @@ def test_each_pod_gets_its_mode():
     manager's, which reads the store itself (DEC-1170, DEC-1016)."""
     docs = render_all()
     assert artifact_modes(docs) == []
-    assert rendered_with_store(docs) == {"api", "control", "data", "runtime", "deploy-manager", "model-gateway"}
+    assert rendered_with_store(docs) == {"api", "control", "data", "runtime", "executor", "deploy-manager", "model-gateway"}
 
 
 def test_the_store_size_and_class_are_values_not_its_access():

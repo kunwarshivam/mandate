@@ -109,7 +109,7 @@ def every_image() -> list[str]:
         for image in dict.fromkeys(p["image"] for p in PROCESSES)
         if image != "postgres"
     ]
-    sets += ["data.symbol=SPY", "data.anchor=2026-10-23=150"]
+    sets += ["data.symbol=SPY", f"data.assetId={SPY_ASSET}", "data.anchor=2026-10-23=150"]
     return [arg for s in sets for arg in ("--set", s)]
 
 
@@ -651,6 +651,7 @@ the processes it starts render as Deployments of their own; its pod templates ar
             x.replace("{workspace}", "ws1")
             .replace("{hosted_workspace}", HOSTED)
             .replace("{data_symbol}", "SPY")
+            .replace("{data_asset_id}", SPY_ASSET)
             .replace("{data_anchor}", "2026-10-23=150")
             .replace("{agent}", "demo-agent")
             .replace("{connection}", "demo-paper")
@@ -662,6 +663,7 @@ the processes it starts render as Deployments of their own; its pod templates ar
 
 
 HOSTED = "01KDEM0000000000000000000W"
+SPY_ASSET = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"
 SCHEDULER = ("--set", f"images.scheduler={PLACEHOLDER.format('scheduler')}")
 
 
@@ -716,8 +718,12 @@ def test_the_data_process_stores_the_recorded_series_where_the_runtime_reads_it(
         "run",
         "--store",
         "/var/lib/mandate/artifacts/datasets",
+        "--artifacts",
+        "/var/lib/mandate/artifacts",
         "--symbol",
         "SPY",
+        "--asset-id",
+        SPY_ASSET,
         "--anchor",
         "2026-10-23=150",
         "--probe",
@@ -737,7 +743,11 @@ def test_the_data_process_stores_the_recorded_series_where_the_runtime_reads_it(
 def test_the_data_process_never_renders_without_its_series_or_outside_the_cell():
     """Naming the data image without the series fails the render, and only the local cell's values
     name one: the series is a recording, never market data."""
-    for unset, said in (("data.symbol=", "data.symbol"), ("data.anchor=", "data.anchor")):
+    for unset, said in (
+        ("data.symbol=", "data.symbol"),
+        ("data.assetId=", "data.assetId"),
+        ("data.anchor=", "data.anchor"),
+    ):
         done = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *DATA, "--set", unset)
         assert done.returncode != 0 and said in done.stderr, done.stderr
     for values in ("k3s.yaml", "managed.yaml"):
@@ -2784,7 +2794,7 @@ def admission_problems(docs: list[dict]) -> Iterator[str]:
             n: sorted({"journal-ca", "journal-role-" + role(n).replace("_", "-")}) if role(n) else []
             for n in names
         },
-        "claims": {n: ["artifacts"] if n == "runtime" and claimed else [] for n in names},
+        "claims": {n: ["artifacts"] if n in ("runtime", "executor") and claimed else [] for n in names},
         "projected": {
             n: ["mandate-vault|600|token|292|namespace=metadata.namespace"]
             if n == EXCHANGE or (n == "executor" and "alpaca-paper" in json.dumps(launches(templates[n])))

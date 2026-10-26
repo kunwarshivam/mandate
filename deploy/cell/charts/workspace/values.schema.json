@@ -355,17 +355,22 @@
       }
     },
     "data": {
-      "description": "The data process's recorded series (mandate-datad): the deployed instrument and the series' anchor, `<YYYY-MM-DD>=<close>`; a recording, so only a dev or ci tier may name images.data",
+      "description": "The data process's recorded series (mandate-datad): the deployed instrument, its asset id, and the series' anchor, `<YYYY-MM-DD>=<close>`; a recording, so only the local cell's values set it",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "symbol",
+        "assetId",
         "anchor"
       ],
       "properties": {
         "symbol": {
           "type": "string",
           "pattern": "^$|^[A-Z][A-Z0-9.]{0,9}$"
+        },
+        "assetId": {
+          "type": "string",
+          "pattern": "^$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
         },
         "anchor": {
           "type": "string",

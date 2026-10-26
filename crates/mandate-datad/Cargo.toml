@@ -10,7 +10,10 @@ description = "The workspace data process in the local cell: the deployed instru
 workspace = true
 
 [dependencies]
+mandate-artifacts-fs.workspace = true
+mandate-bars.workspace = true
 mandate-canon.workspace = true
+mandate-journal.workspace = true
 mandate-marketdata.workspace = true
 mandate-num.workspace = true
 mandate-process.workspace = true

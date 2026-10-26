@@ -118,7 +118,7 @@ deployment manager and the model gateway, for each agent's research cap (DEC-227
 every other process has no store at all.
 */}}
 {{- define "mandate.artifactsRole" -}}
-{{- $access := dict "api" "seed" "control" "rw" "runtime" "ro" "deploy-manager" "ro" "model-gateway" "ro" "data" "rw" -}}
+{{- $access := dict "api" "seed" "control" "rw" "runtime" "ro" "executor" "ro" "deploy-manager" "ro" "model-gateway" "ro" "data" "rw" -}}
 {{- get $access .p.name -}}
 {{- end -}}
 
@@ -485,8 +485,8 @@ spec:
 A service's launch from processes.json (DEC-1013): its `args`, and its `probe` asked `livez` and
 `readyz` (DEC-994 item 5), with `{workspace}`, `{hosted_workspace}` (`api.workspace`, the workspace
 the deployment manager hosts and whose clock stream the scheduler writes, E21-29), and the `runtime`
-values' `{agent}`, `{connection}` and `{owner}`, and the `data` values' `{data_symbol}` and
-`{data_anchor}` filled in. A placeholder whose value is unset fails the render rather than starting a
+values' `{agent}`, `{connection}` and `{owner}`, and the `data` values' `{data_symbol}`,
+`{data_asset_id}` and `{data_anchor}` filled in. A placeholder whose value is unset fails the render rather than starting a
 process for no deployment.
 */}}
 {{- define "mandate.fill" -}}
@@ -497,6 +497,7 @@ process for no deployment.
 {{- if contains "{workspace}" $w }}{{ $w = replace "{workspace}" $v.workspace $w }}{{ end -}}
 {{- if contains "{hosted_workspace}" $w }}{{ $w = replace "{hosted_workspace}" (required "api.workspace, the hosted workspace's ULID whose clock stream the scheduler writes, is required with images.scheduler" $v.api.workspace) $w }}{{ end -}}
 {{- if contains "{data_symbol}" $w }}{{ $w = replace "{data_symbol}" (required "data.symbol, the deployed instrument whose daily bars the data process stores, is required with images.data" $v.data.symbol) $w }}{{ end -}}
+{{- if contains "{data_asset_id}" $w }}{{ $w = replace "{data_asset_id}" (required "data.assetId, the deployed instrument's asset id the closes object names, is required with images.data" $v.data.assetId) $w }}{{ end -}}
 {{- if contains "{data_anchor}" $w }}{{ $w = replace "{data_anchor}" (required "data.anchor, the recorded series' `<YYYY-MM-DD>=<close>`, is required with images.data" $v.data.anchor) $w }}{{ end -}}
 {{- if contains "{agent}" $w }}{{ $w = replace "{agent}" (required "runtime.agent is required once images.runtime is named" $v.runtime.agent) $w }}{{ end -}}
 {{- if contains "{connection}" $w }}{{ $w = replace "{connection}" (required "runtime.connection is required once images.runtime is named" $v.runtime.connection) $w }}{{ end -}}

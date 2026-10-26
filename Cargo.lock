@@ -1942,7 +1942,10 @@ dependencies = [
 name = "mandate-datad"
 version = "0.0.0"
 dependencies = [
+ "mandate-artifacts-fs",
+ "mandate-bars",
  "mandate-canon",
+ "mandate-journal",
  "mandate-marketdata",
  "mandate-num",
  "mandate-process",

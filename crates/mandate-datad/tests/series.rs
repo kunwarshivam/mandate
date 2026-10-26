@@ -6,7 +6,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use mandate_artifacts_fs::FsArtifactStore;
+use mandate_datad::observation::put_closes;
 use mandate_datad::series::{self, Anchor, SESSIONS};
+use mandate_journal::{ArtifactRef, get_artifact};
 use mandate_marketdata::inspect::{GapClass, inspect};
 use mandate_num::Usd;
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
@@ -254,6 +257,38 @@ fn the_dataset_lives_under_the_recorded_root() {
         written.dir.starts_with(root.join(series::RECORDED_ROOT)),
         "{}",
         written.dir.display()
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// The closes object in the artifact store is the closes object of the series' own closes, each
+/// session's close as `close_on` gives it, oldest first: the bytes the runtime builds from the
+/// trusted closes and confirms before it names their digest.
+#[test]
+fn the_closes_object_is_stored_for_the_trusted_closes() {
+    let root = scratch("closes");
+    let calendar = ExchangeCalendar::us_equities().unwrap();
+    let now = at("2026-10-26T01:00:00Z");
+    let written =
+        series::publish(&root.join("datasets"), "SPY", &anchor(), &calendar, now).unwrap();
+    let artifacts = root.join("artifacts");
+    let asset = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+    let stored = put_closes(&artifacts, &written.dir, "SPY", asset, now).unwrap();
+    let expected: Vec<_> = series::sessions(&calendar, now)
+        .unwrap()
+        .into_iter()
+        .map(|d| (d, series::close_on(&calendar, &anchor(), d).unwrap()))
+        .collect();
+    let bytes = mandate_bars::closes_object(&expected, asset).unwrap();
+    assert_eq!(stored, ArtifactRef::of(&bytes));
+    let store = FsArtifactStore::open_existing(&artifacts).unwrap();
+    assert_eq!(get_artifact(&store, &stored).unwrap(), bytes);
+    let again = put_closes(&artifacts, &written.dir, "SPY", asset, now).unwrap();
+    assert_eq!(again, stored, "the same bytes, the same object");
+    let later = at("2026-10-28T21:00:00Z");
+    assert!(
+        put_closes(&artifacts, &written.dir, "SPY", asset, later).is_err(),
+        "a series that no longer ends on the last completed session is not trusted"
     );
     fs::remove_dir_all(&root).ok();
 }

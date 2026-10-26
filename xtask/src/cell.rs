@@ -6252,7 +6252,7 @@ mod tests {
     /// cell jobs, its Dockerfile copies exactly that binary on an empty base as non-root, and its
     /// key is the chart's process and image name.
     #[test]
-    fn the_cell_builds_the_data_processs_image() -> Result<()> {
+    fn the_cell_builds_the_data_image() -> Result<()> {
         assert!(BUILT_PACKAGES.contains(&DATA_PACKAGE));
         assert!(IMAGE_PACKAGES.contains(&DATA_PACKAGE));
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
