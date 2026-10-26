@@ -228,9 +228,10 @@ fn alpacas_recorded_asset_record_reads_and_its_absence_is_unread() -> Result<(),
     Ok(())
 }
 
-/// Each eligibility fact is the record's own: an `ipo` or `ptp_no_exception` attribute, an
-/// inactive, untradable or unfractionable record each read as such, active and tradable apart, and a record of another
-/// symbol, one with no `attributes`, a server error, or no answer at all are unread.
+/// Each eligibility fact is the record's own: an `ipo` or `ptp_no_exception` attribute, and an
+/// inactive, untradable or unfractionable record, each read as such, active and tradable apart;
+/// and a record of another symbol, one with no `attributes`, a server error, or no answer at all
+/// are unread.
 #[test]
 fn each_asset_fact_is_the_records_own_and_a_bad_record_is_unread() -> Result<(), Error> {
     let body = |symbol: &str,

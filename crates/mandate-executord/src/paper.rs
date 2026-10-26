@@ -291,10 +291,10 @@ impl FixturePaper {
 
     fn answer(&self, request: &HttpRequest) -> Response {
         let path = request.path_and_query();
-        self.books
-            .borrow_mut()
-            .served
-            .push(format!("{:?} {path}", request.method()).to_uppercase());
+        self.books.borrow_mut().served.push(format!(
+            "{} {path}",
+            format!("{:?}", request.method()).to_uppercase()
+        ));
         let (route, query) = path.split_once('?').unwrap_or((path, ""));
         let param = |name: &str| {
             query
