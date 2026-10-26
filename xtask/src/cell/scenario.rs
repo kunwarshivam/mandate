@@ -1388,9 +1388,9 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
         link(
             "the protective stop goes out",
             &acct,
-            "OrderRequestRecorded",
-            Some(r#""purpose":"protective""#),
-            "the protective stop on the filled position",
+            "ProtectionChanged",
+            Some(r#""action":"placed""#),
+            "the protective stop on the filled position, placed as the bracket's legs",
             "protective-exit sequencing in the executor (trading spec §5.4)",
             vec![E2E_FILL],
         ),
@@ -3583,8 +3583,8 @@ mod tests {
                 (acct.clone(), "FillApplied", Some(r#""side":"buy""#)),
                 (
                     acct.clone(),
-                    "OrderRequestRecorded",
-                    Some(r#""purpose":"protective""#)
+                    "ProtectionChanged",
+                    Some(r#""action":"placed""#)
                 ),
                 (agent.clone(), "RunStarted", Some(r#""kind":"monitor""#)),
                 (agent.clone(), "ThesisInvalidated", None),
