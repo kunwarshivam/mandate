@@ -500,6 +500,11 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
   const approval = view?.approvals.find((a) => a.approval_id === approvalId);
   const agent = view?.agents.find((a) => a.agent_id === approval?.agent_id);
   const response = approval ? responses[approval.approval_id] : undefined;
+  const refusedNow = response?.phase === "undelivered" && APPROVE_REFUSED.has(response.reason ?? "");
+  const [approveClosed, setApproveClosed] = useState(false);
+  useEffect(() => {
+    if (refusedNow) setApproveClosed(true);
+  }, [refusedNow]);
   if (!approval) {
     return <WorkspaceGate api>{view ? <h1 className="text-h1">Request not found</h1> : null}</WorkspaceGate>;
   }
@@ -535,7 +540,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
   const submit = (shownChallenge: ShownChallenge) => respond(approval.approval_id, "approve", record, shownChallenge.challenge);
   const settled = response && (response.phase !== "undelivered" || FINAL_UNDELIVERED.has(response.reason ?? ""));
   const open = approval.state === "pending" && canRespond && !settled;
-  const approveRefused = response?.phase === "undelivered" && APPROVE_REFUSED.has(response.reason ?? "");
+  const approveRefused = refusedNow || approveClosed;
   const approvable = deferred.kind !== "unreadable" && !approveRefused;
   return (
     <WorkspaceGate api>

@@ -153,6 +153,25 @@ describe("a refused grant on the approval screen (DEC-2129 item 7, DEC-2818)", (
     expect(answers()).toHaveLength(2);
   });
 
+  it("after deferral_mismatch, a Skip that fails leaves Approve withheld: the request still cannot be approved", async () => {
+    const problem = (status: number, code: string) => Promise.resolve(new Response(JSON.stringify({ type: "about:blank", status, title: "Request refused", code, effect: "none", event_id: null, retryable: false }), { status }));
+    let answered = 0;
+    const { answers } = mount((route, init, served) => {
+      if (init.method !== "POST" || !route.endsWith("/responses")) return served();
+      answered += 1;
+      return answered === 1 ? problem(409, "deferral_mismatch") : problem(503, "journal_unavailable");
+    });
+    await approve();
+    await screen.findByText(/^This request does not match the decision behind it/);
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    await screen.findByText(/^Not recorded: /);
+    await new Promise((settle) => setTimeout(settle, 50));
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Confirm on the host" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Skip" })).toBeTruthy();
+    expect(answers()).toHaveLength(2);
+  });
+
   it("a grant the runtime admitted still reads as recorded, then approved", async () => {
     mount((_route, _init, served) => served());
     await approve();
