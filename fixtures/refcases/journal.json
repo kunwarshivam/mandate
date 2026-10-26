@@ -139691,7 +139691,7 @@
   ]
  },
  "account_activity": {
-  "spec": "docs/specs/journal.md §9.5 rules 297 and 298 (DEC-2803)",
+  "spec": "docs/specs/journal.md §9.5 rules 297, 298 and 303 (DEC-2803, DEC-2820)",
   "drafts": {
    "external_order": {
     "envelope_version": 1,
@@ -140425,6 +140425,106 @@
     }
    },
    {
+    "name": "abandoned_another_intents_order",
+    "clause": "rule 303: the order its own intent derives",
+    "base_draft": "abandoned",
+    "changes": [
+     {
+      "path": "payload.client_order_id",
+      "value": "md-01JAE3A0A000000000000000N2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.client_order_id"
+    }
+   },
+   {
+    "name": "abandoned_the_intent_alone",
+    "clause": "rule 303: `md-` and the intent",
+    "base_draft": "abandoned",
+    "changes": [
+     {
+      "path": "payload.client_order_id",
+      "value": "01JAE3A0A000000000000000N1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.client_order_id"
+    }
+   },
+   {
+    "name": "abandoned_a_rung",
+    "clause": "rule 303: not a rung of its own",
+    "base_draft": "abandoned",
+    "changes": [
+     {
+      "path": "payload.client_order_id",
+      "value": "md-01JAE3A0A000000000000000N1-l2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.client_order_id"
+    }
+   },
+   {
+    "name": "abandoned_its_protective_order",
+    "clause": "rule 303: not a protective order of its own",
+    "base_draft": "abandoned",
+    "changes": [
+     {
+      "path": "payload.client_order_id",
+      "value": "md-01JAE3A0A000000000000000N1-p01JAE3A0A000000000000000P1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.client_order_id"
+    }
+   },
+   {
+    "name": "abandoned_upper_case_prefix",
+    "clause": "rule 303: exactly `md-`",
+    "base_draft": "abandoned",
+    "changes": [
+     {
+      "path": "payload.client_order_id",
+      "value": "MD-01JAE3A0A000000000000000N1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.client_order_id"
+    }
+   },
+   {
+    "name": "abandoned_watchdog_without_its_prefix",
+    "clause": "rule 303: the watchdog's exit derives `md-w-…`",
+    "base_draft": "abandoned",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1"
+     },
+     {
+      "path": "payload.client_order_id",
+      "value": "md-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.client_order_id"
+    }
+   },
+   {
     "name": "version_2",
     "clause": "§9.5: registered at `schema_version` 1 only",
     "base_draft": "abandoned",
@@ -140494,20 +140594,6 @@
      {
       "path": "payload.client_order_id",
       "value": "md-01JAE3A0A000000000000000N9"
-     }
-    ],
-    "expect": {
-     "outcome": "Valid"
-    }
-   },
-   {
-    "name": "abandoned_any_client_order_id",
-    "clause": "§9.5: no rule binds the id to the intent",
-    "base_draft": "abandoned",
-    "changes": [
-     {
-      "path": "payload.client_order_id",
-      "value": "md-01JAE3A0A000000000000000N2"
      }
     ],
     "expect": {
@@ -140705,7 +140791,7 @@
   ]
  },
  "fill_applied": {
-  "spec": "docs/specs/journal.md §9.5 `FillApplied` version 2 and rule 299 (DEC-2812)",
+  "spec": "docs/specs/journal.md §9.5 `FillApplied` version 2 and rules 299 and 300 (DEC-2812, DEC-2817)",
   "drafts": {
    "attributed": {
     "envelope_version": 1,
@@ -141248,9 +141334,9 @@
     }
    },
    {
-    "name": "v2_no_instrument_snapshot",
-    "clause": "§9: `FillApplied` requires `instrument_snapshot`",
-    "base_draft": "unattributed",
+    "name": "v2_named_without_instrument_snapshot",
+    "clause": "rule 300: a fill of an order of ours names its snapshot",
+    "base_draft": "attributed",
     "changes": [
      {
       "path": "config_refs.instrument_snapshot",
@@ -141261,6 +141347,74 @@
      "outcome": "Invalid",
      "reason": "missing_config_ref",
      "path": "config_refs.instrument_snapshot"
+    }
+   },
+   {
+    "name": "v1_without_instrument_snapshot",
+    "clause": "§9: version 1 requires `instrument_snapshot`",
+    "base_draft": "version_1",
+    "changes": [
+     {
+      "path": "config_refs.instrument_snapshot",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.instrument_snapshot"
+    }
+   },
+   {
+    "name": "late_without_instrument_snapshot",
+    "clause": "§9: `LateFillApplied` requires `instrument_snapshot`",
+    "base_draft": "late",
+    "changes": [
+     {
+      "path": "config_refs.instrument_snapshot",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.instrument_snapshot"
+    }
+   },
+   {
+    "name": "v2_unattributed_without_trading_calendar",
+    "clause": "§9.5: an unattributed fill still names both calendars",
+    "base_draft": "unattributed",
+    "changes": [
+     {
+      "path": "config_refs.trading_calendar",
+      "delete": true
+     },
+     {
+      "path": "config_refs.instrument_snapshot",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.trading_calendar"
+    }
+   },
+   {
+    "name": "v2_unattributed_without_settlement_calendar",
+    "clause": "§9.5: an unattributed fill still names both calendars",
+    "base_draft": "unattributed",
+    "changes": [
+     {
+      "path": "config_refs.settlement_calendar",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.settlement_calendar"
     }
    },
    {
@@ -141486,6 +141640,24 @@
      {
       "path": "environment",
       "value": "live"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "v2_unattributed_without_instrument_snapshot",
+    "clause": "rule 300: an unattributed fill in an instrument the platform holds no snapshot of",
+    "base_draft": "unattributed",
+    "changes": [
+     {
+      "path": "config_refs.instrument_snapshot",
+      "delete": true
+     },
+     {
+      "path": "payload.instrument_id",
+      "value": "us_equity:OWNERPICK"
      }
     ],
     "expect": {

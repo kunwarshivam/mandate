@@ -847,9 +847,9 @@ per workspace deployment (item 6).
       that row's refusal, and a non-member the one 404), writes nothing, and is served in a `live`
       workspace too, since a read adds no risk. An empty or absent control stream answers empty
       lists, not an error. Both fold the control stream as the create does (`versions.rs`,
-      `facts`): a control-stream row that fold cannot read (a malformed `model_version`
+      `control_facts`, the control-stream half of the create's `facts`): a control-stream row that fold cannot read (a malformed `model_version`
       registration among them) makes either read `journal_unavailable`, as it makes the create
-      refuse, never a list the create would then refuse. **(planned: E10-11)**
+      refuse, never a list the create would then refuse.
       - `GET /instruments` returns `read-models/instruments`: the fold the create's instrument
         check reads (`versions.rs`, `instruments`), every `ConfigSnapshotRegistered` of kind
         `instrument_snapshot` in stream order, the latest per stored `instrument_id`. Each listed
@@ -866,9 +866,12 @@ per workspace deployment (item 6).
       - `GET /signal-models` returns `read-models/signal-models`: the registry the create's V-007
         reads, from the same facts folded in stream order (`mandate-spec`'s validation context):
         the latest `ConfigSnapshotRegistered` of kind `model_version` per `model_id`, whatever its
-        version. A model withdrawn by `PlatformOperatorAction` `model_withdrawn` leaves the
+        version. A model whose registration no mandate document can name (a `model_version` off the
+        mandate schema's version pattern, more than 32 parameters, or a parameter name off its key
+        pattern) is omitted, as an unpinnable instrument is ([DEC-2142](../project/decisions/DEC-2142.md)).
+        A model withdrawn by `PlatformOperatorAction` `model_withdrawn` leaves the
         registry, and so the list, once the fold maps that action (E10-11w); until then the create
-        admits it and the list shows it, the two never differing. Each listed model has that
+        admits a withdrawn model and the list shows it, the two never differing for it. Each listed model has that
         registration's `model_id`, `model_version`, `content_hash`, `params` (in the order V-007
         compares a document's, ascending as registered) and `admits_instruments`, its row's
         `recorded_at` as `registered_at`, and `content`, sorted by id. V-007 reads only the row,
@@ -876,7 +879,7 @@ per workspace deployment (item 6).
         object stored under `content_hash`, its `authorship` and `methodology` when they are
         strings, and of its `params_schema` only `constraints` (strings) and each parameter's
         `name`, `type`, `min` and `max` (DEC-518 item 3), member by member, each only when
-        present; `null` when the store cannot give or parse the object. Nothing else of the object
+        present and within `read-models/signal-models`' bounds, never cut short (DEC-2142 item 2); `null` when the store cannot give or parse the object. Nothing else of the object
         is served: no prompt template, model identity, retrieval plan, tool declaration, input or
         output declaration, or source path. It serves nothing about how a model performed (no scorecard, backtest figure or
         ranking; DEC-99, DEC-126), so the list never reads as a recommendation.
@@ -998,14 +1001,25 @@ workspace that ran it, and no route aggregates backtests across workspaces.
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
 | Inbox | `GET /approvals?state=pending\|resolved` | — | Pending by deadline, then resolved with outcome (D5) |
-| Read one | `GET /approvals/{id}` | — | The content object exactly as `ApprovalRequested` holds it, its `content_hash`, the deadline, the grants so far, and the status folded from the agent stream. Never a scorecard, profit estimate, or price target (DEC-126) |
+| Read one | `GET /approvals/{id}` | — | The content object exactly as `ApprovalRequested` holds it, the `ApprovalRequested` version it comes from (`schema_version`, [DEC-2518](../project/decisions/DEC-2518.md)), its decision's deferred checks (`decision_deferred_to_binding`, [DEC-2519](../project/decisions/DEC-2519.md)), its `content_hash`, the deadline, the grants so far, and the status folded from the agent stream. Never a scorecard, profit estimate, or price target (DEC-126) |
 | Delegation preview | `POST /approvals/{id}/delegation-previews` | — | §5.3. Offered only where mandate spec §6.4 allows a scope |
 | Respond | `POST /approvals/{id}/responses` | `ApprovalResponseSubmitted` | §5.2. Users only |
 | Resolve a notice | `GET /notices/{notice_id}` | `RecordsAccessed` | §3.9 |
 
 The inbox and the single read return `read-models/approvals` and `read-models/approval`
 ([DEC-979](../project/decisions/DEC-979.md)): each approval's id, agent, state, `requested_at`,
-`deadline` (the journaled risk-clock seconds), and `content_hash`; the single read adds `content`.
+`deadline` (the journaled risk-clock seconds), and `content_hash`; the single read adds `content`
+and `schema_version`, the `ApprovalRequested` version `content` comes from (1, 2 or 3;
+[DEC-2518](../project/decisions/DEC-2518.md)). Version 3's content names the checks its dry run
+deferred (journal spec §9.6, rule 291) and versions 1 and 2 name none, so a client tells a
+version 3 request without its list from an older one and shows it as unreadable, never as
+nothing deferred (mandate spec §6.4). The single read also adds `decision_deferred_to_binding`:
+the `deferred_to_binding` of the `DecisionMade` the request's `causation_id` names on the agent
+stream, an empty list for a decision that names none, or `null` when no such decision is there
+([DEC-2519](../project/decisions/DEC-2519.md)). A client shows the request's checks only when its
+own list (empty for versions 1 and 2) is exactly that list, and shows any other request as
+unreadable: so a request that hides or invents a deferral is caught at the read wherever the two
+were written, which rule 292 checks only within one batch.
 The state is folded from the agent stream, and the first terminal event wins: `pending` until
 re-validation acts (`acted`) or the approval ends `skipped` (by the owner's Skip or by
 re-validation), `timed_out`, or `canceled`. An admitted grant still awaiting re-validation, and a
@@ -1431,7 +1445,7 @@ index on those members in the Postgres adapter; the in-memory reader scans.
 | `ApprovalRequested` | `payload.content.evidence.outputs[].event_id` | Each `ModelOutputRecorded` the approval's content cites, on the same agent stream (§9.6) |
 | `DecisionMade` | `payload.outputs_used[]` | Each `ModelOutputRecorded` on the same agent stream |
 | `ModelOutputRecorded` | `payload.evidence[]`; `payload.thesis_id` | Each event named in `evidence`, on any stream of the workspace (observations, model invocations); and the `ThesisProposed` or `ThesisRevised` with that `thesis_id` on the same agent stream |
-| Any other event, `OrderAbandoned` included | none | Only its `causation_id` (`OrderAbandoned` has no closed schema yet, so no payload member is a link; §12 question 7) |
+| Any other event, `OrderAbandoned` included | none | Only its `causation_id`. `OrderAbandoned` is closed ([journal spec](journal.md) §9.5, [DEC-2803](../project/decisions/DEC-2803.md)), and its `intent_id` names its intent and its `client_order_id` the order that intent derives (rule 303, [DEC-2820](../project/decisions/DEC-2820.md)), but the trace does not follow them yet (§12 question 7) |
 
 The chain of a fill an agent proposed with no approval runs `FillApplied` → `OrderSubmitted` →
 `OrderRequestRecorded` (`causation_id`) → `IntentReceived`, every `GateDecided`, and the agent
@@ -2448,12 +2462,12 @@ risk-reducing call never consults one (API-7, API-8).
 | Mandate validation and classification (`mandate-spec`) | **Exists**; §4.1 calls it |
 | The web app's screens on recorded fixtures (`web/`) | **Exists**; §4.9 maps fixtures to resources |
 | The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10); the process, its sessions, the first reads of §4.3 and §4.7, pause and the kill switch, and an approval's Skip by E21-31 (§3.11) |
-| Drafts, compile, versions, confirm endpoints | **Partly served** (E10-11): creating a version from a document, the confirmation screen, and a new mandate's confirm (§3.11 item 11, DEC-2101); the catalogue reads (`GET /instruments`, `GET /signal-models`, DEC-2136), drafts, compile, validate, diffs, and an agent's later versions are planned |
+| Drafts, compile, versions, confirm endpoints | **Partly served** (E10-11): creating a version from a document, the confirmation screen, and a new mandate's confirm (§3.11 item 11, DEC-2101), and the catalogue reads (`GET /instruments`, `GET /signal-models`, §3.11 item 11, DEC-2136); drafts, compile, validate, diffs, and an agent's later versions are planned |
 | Deployment manager endpoints and the reserved kill-switch path | **Partly served** (E10-12): pause, the kill switch, and Skip (§3.11 item 10); deploy and go-live (item 11, DEC-2101); resume, Stop, owner exit, acknowledgment, and command status (item 12, DEC-2102); the hold, its lift, and backtests are planned |
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
-| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); the alerts read is specified (§4.7, [DEC-2141](../project/decisions/DEC-2141.md)) and served once lane EX's route lands; the ledger, risk-mark, and protection folds are planned |
+| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); and the alerts read (§4.7, [DEC-2141](../project/decisions/DEC-2141.md)); the ledger, risk-mark, and protection folds are planned |
 | Journal queries, trace, exports over the API | **Partly served** (E12-6): a stream's events page and one event (§4.8.1); trace, exports, and verification over the API are planned, their contracts in §4.8.1, served by the pure crate `mandate-audit` |
 | The backtest report (`read-models/backtest`) and `BacktestRunRecorded` | **Specified** (DEC-1000, DEC-1001; journal spec v0.45 §9.18); the run is **planned** (E4-4), the record's registration and the route **planned** (E4-5) |
 | The forward-paper evaluation (`read-models/evaluation`) and `EvaluationRunRecorded` | **Specified** (DEC-1002; journal spec v0.45 §9.18); the pure scorer **exists** (`mandate_research::score`); the harness, the record's registration, and the route **planned** (E17-8) |
@@ -2539,8 +2553,8 @@ follow-ups" there (freeze rule). **SC** marks a safety-critical story.
 7. **Trace links the journal does not record yet.** `ModelInvocationRecorded` names no event it
    served, so a trace reaches it only when an output's `evidence` names it. A flatten's or a
    protective order's `OrderRequestRecorded` carries no link to the `KillSwitchActivated` or the
-   opening it serves. A version-1 `OrderSubmitted` names no intent. `OrderAbandoned` has no closed
-   schema, so no payload member of it is a link. No member the journal spec requires links an
+   opening it serves. A version-1 `OrderSubmitted` names no intent. `OrderAbandoned` names its
+   intent and order (journal spec §9.5, rule 303), but the trace does not follow it yet. No member the journal spec requires links an
    `ApprovalRequested` to its `DecisionMade`: the runtime writes the decision as its `causation_id`,
    which the spec does not require. Each needs a journal spec
    member; until then the trace reports the hop as `not_recorded` or ends (§4.8.1).

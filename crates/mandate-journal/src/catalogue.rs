@@ -328,6 +328,7 @@ pub(crate) fn required_refs(
     match (event_type, schema_version) {
         ("ModelOutputRecorded", 2) => &[MAN, REG],
         ("DecisionMade", 2) => &[MAN, POL, REG],
+        ("FillApplied", 2) => &[FEE, CAL, SET],
         _ => historical,
     }
 }

@@ -215,6 +215,9 @@ pub struct ExecutorProcess<S, B> {
     journal_down: bool,
     /// Whether a refused batch was already alerted to the operator in this process (DEC-2805).
     journal_refused: bool,
+    /// Whether a broker input the core could not apply has alerted the operator, once a process
+    /// (DEC-2821).
+    input_refused: bool,
     /// Each followed agent's deployed mandate version, from its `AgentDeployed`, which the core's
     /// mandate port answers with (DEC-2034 item 1).
     deployed: BTreeMap<AgentId, MandateVersion>,
@@ -288,6 +291,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             held: BTreeSet::new(),
             journal_down: false,
             journal_refused: false,
+            input_refused: false,
             deployed: BTreeMap::new(),
             max_chain: config.max_chain,
             written_at: now,
@@ -951,8 +955,22 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     }
                     return true;
                 }
-                self.lifecycle.observe(now, Lifecycled::Failed);
-                return false;
+                if !failed_on_broker(&input) {
+                    self.lifecycle.observe(now, Lifecycled::Failed);
+                    return false;
+                }
+                if !self.input_refused {
+                    self.input_refused = true;
+                    alerts.push(Alert {
+                        key: "input_refused",
+                        subject: None,
+                    });
+                }
+                if reconciled {
+                    self.lifecycle
+                        .observe(now, Lifecycled::Reconciled { passed: false });
+                }
+                return self.hand(now, at, Input::InputFailed, alerts, depth.saturating_add(1));
             }
         };
         let mut drafts = Vec::new();
@@ -1591,6 +1609,17 @@ fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> 
     Some((key, handoff.intent_id.0.0.clone()))
 }
 
+/// Whether a core error on `input` is held and the process goes on (DEC-2821): the broker's
+/// answers, updates and snapshots, and the quotes its feed sends, which the restart would read
+/// again, so stopping on one would be a crash loop that also stops every exit, protective order and
+/// kill switch. Any other input's error, the hold's own included, stops the process as before.
+fn failed_on_broker(input: &Input) -> bool {
+    matches!(
+        input,
+        Input::Broker(_) | Input::BrokerUpdate(_) | Input::BrokerSnapshot(_) | Input::Market(_)
+    )
+}
+
 /// Whether a refusal of the batch `input` drafted is held and the process goes on (DEC-2805 item
 /// 1), or stops it (item 4). A refused hold leaves nothing safe to record. A refused start has
 /// already marked the core started and lost its recovery, the lookups of orders in doubt, the
@@ -1695,6 +1724,25 @@ mod tests {
         );
         assert!(port.covers(&agent("agenta"), &InstrumentId::new("MSFT")?));
         assert!(!port.covers(&agent("agenta"), &InstrumentId::new("AAPL")?));
+        Ok(())
+    }
+
+    /// DEC-2821: a core error is held for a broker answer, and for no other input, the hold's
+    /// own among them.
+    #[test]
+    fn a_core_error_is_held_for_a_broker_input_alone() -> Result<(), Error> {
+        assert!(failed_on_broker(&Input::Broker(Ok(
+            mandate_executor::BrokerOutcome::AccountWideAccepted
+        ))));
+        for other in [
+            Input::Tick(RiskClock::from_secs(0)),
+            Input::Started(WriterEpoch(1)),
+            Input::InputFailed,
+            Input::BatchRefused,
+            handoff(Purpose::Open)?,
+        ] {
+            assert!(!failed_on_broker(&other), "{other:?}");
+        }
         Ok(())
     }
 

@@ -918,7 +918,13 @@ fn a_gate_denial_on_re_check_abandons_the_intent() {
         ACCOUNT_STREAM,
         shell.head().0.saturating_add(1),
         "AccountRestrictionChanged",
-        with_clock(&[("restriction", text("blocked"))], 5),
+        with_clock(
+            &[
+                ("restriction", text("blocked")),
+                ("cause", text("broker_notice")),
+            ],
+            5,
+        ),
     );
     shell.fold_one(&blocked).expect("the restriction folds");
 
@@ -957,7 +963,13 @@ fn a_first_pass_gate_denial_produces_no_order_to_abandon() {
         ACCOUNT_STREAM,
         2,
         "AccountRestrictionChanged",
-        with_clock(&[("restriction", text("blocked"))], 5),
+        with_clock(
+            &[
+                ("restriction", text("blocked")),
+                ("cause", text("broker_notice")),
+            ],
+            5,
+        ),
     );
     shell.fold_one(&blocked).expect("the restriction folds");
     let (mut shell, _) = shell.restart(&ports);

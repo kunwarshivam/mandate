@@ -1,5 +1,5 @@
 import { type Dec, ONE, ZERO, dec, div, fromInt, mul, toDecimalString } from "@/lib/decimal";
-import { GOAL_WORDS, LOSS_WORDS, type Loss, MODELS, type ModelId, clauses, constraintsIn, findAmounts, findPercents, firstLoss } from "./draft";
+import { GOAL_WORDS, LOSS_WORDS, type Loss, type ModelChoice, type ModelId, clauses, constraintsIn, findAmounts, findPercents, firstLoss } from "./draft";
 
 /**
  * The compiler's model turn (mandate spec §7, inference spec INF-5, DEC-476). Each owner message goes
@@ -30,8 +30,8 @@ export interface CompilerInput {
   /** The owner's messages, oldest first. Only the last is read; the rest are context. */
   messages: readonly OwnerMessage[];
   asked: Asked;
-  /** The models the owner may choose, by name, in the registry's order. */
-  models: ReadonlyArray<{ id: ModelId; name: string }>;
+  /** The models the owner may choose, in the registry's order: the model sees their ids and names, and the guard their settings. */
+  models: readonly ModelChoice[];
 }
 
 /** A model call. Its answer is untrusted JSON, read only through `validateTurn`; a throw means the model did not answer. */
@@ -86,7 +86,7 @@ const writtenInWords = (quote: string) => findAmounts(quote).length === 0 && fin
 
 type Checked = { ok: true; reading: Reading } | { ok: false; why: string };
 
-function checkReading(raw: Record<string, unknown>, said: string): Checked {
+function checkReading(raw: Record<string, unknown>, said: string, models: readonly ModelChoice[]): Checked {
   const quote = raw.quote;
   if (typeof quote !== "string" || quote.trim() === "" || quote.length > MAX_QUOTE) return { ok: false, why: "no quote" };
   if (!said.includes(quote)) return { ok: false, why: "the quote is not in the owner's message" };
@@ -121,13 +121,13 @@ function checkReading(raw: Record<string, unknown>, said: string): Checked {
       return { ok: true, reading: { field: "symbols", quote, symbols: (symbols as string[]).map((s) => s.toUpperCase()) } };
     }
     case "model": {
-      const model = MODELS.find((m) => m.id === raw.model);
+      const model = models.find((m) => m.id === raw.model);
       if (!model) return { ok: false, why: "not a model in the registry" };
       if (!quote.toLowerCase().includes(model.name.toLowerCase()) && !quote.includes(model.id)) return { ok: false, why: "a model the owner did not name" };
       return { ok: true, reading: { field: "model", quote, model: model.id } };
     }
     case "param": {
-      if (typeof raw.key !== "string" || !MODELS.some((m) => m.params.some((p) => p.key === raw.key))) return { ok: false, why: "not a model setting" };
+      if (typeof raw.key !== "string" || !models.some((m) => m.params.some((p) => p.key === raw.key))) return { ok: false, why: "not a model setting" };
       if (typeof raw.value !== "string" || !NUMBER_TEXT.test(raw.value) || !hasNumber(quote, raw.value)) return { ok: false, why: "a value the owner did not write" };
       return { ok: true, reading: { field: "param", quote, key: raw.key, value: raw.value } };
     }
@@ -150,7 +150,7 @@ export function validateTurn(raw: unknown, input: CompilerInput): TurnResult {
   const dropped: Turn["dropped"] = [];
   for (const r of raw.readings) {
     if (!isRecord(r)) return { ok: false, error: SCHEMA_ERROR };
-    const checked = checkReading(r, said);
+    const checked = checkReading(r, said, input.models);
     if (checked.ok) readings.push(checked.reading);
     else dropped.push({ field: String(r.field), why: checked.why });
   }
@@ -220,9 +220,9 @@ const PAPER_REPLY = "Paper means simulated funds on your broker's paper account.
 function explanation(text: string, models: CompilerInput["models"]): string | null {
   if (!QUESTION.test(text.trim())) return null;
   const lower = text.toLowerCase();
-  const model = MODELS.find((m) => models.some((n) => n.id === m.id) && lower.includes(m.name.toLowerCase()));
+  const model = models.find((m) => lower.includes(m.name.toLowerCase()));
   if (model) return `${model.name}: ${model.what} You set ${model.params.map((p) => p.label.toLowerCase()).join(" and ")}. ${model.params.map((p) => p.hint).join(" ")}`;
-  const param = MODELS.flatMap((m) => m.params).find((p) => lower.includes(p.label.split(",")[0].toLowerCase()));
+  const param = models.flatMap((m) => m.params).find((p) => lower.includes(p.label.split(",")[0].toLowerCase()));
   if (param) return param.hint;
   if (/\bmandate\b/.test(lower)) return MANDATE_REPLY;
   if (/\bpaper\b/.test(lower)) return PAPER_REPLY;

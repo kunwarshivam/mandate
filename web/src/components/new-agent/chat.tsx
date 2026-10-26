@@ -9,7 +9,7 @@ import { KEY } from "@/components/kumo/key";
 import type { NewAgent } from "@/lib/fixture-journey";
 import { type SetUp, useRuntime } from "@/lib/mock-runtime";
 import { type Conversation, type Entry, currentSummary, nextStep } from "./conversation";
-import { type Draft, MODELS, type ModelId } from "./draft";
+import { type Draft, type ModelChoice, type ModelId } from "./draft";
 import { StepHeading } from "./steps";
 import { SetUpSteps, isBound } from "./set-up-steps";
 import { Summary } from "./summary";
@@ -30,10 +30,11 @@ function Platform({ children, slot }: { children: ReactNode; slot?: string }) {
 const CHOICE =
   "press grid content-start gap-0.5 rounded-2xl border border-foreground/25 bg-card px-4 py-3 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-55 min-h-11";
 
-function ModelChoices({ busy, onChoose }: { busy: boolean; onChoose: (id: ModelId) => void }) {
+function ModelChoices({ models, busy, onChoose }: { models: readonly ModelChoice[]; busy: boolean; onChoose: (id: ModelId) => void }) {
+  if (models.length === 0) return <p className="text-sm text-muted-foreground">Your deployment lists no model this page can set up yet.</p>;
   return (
     <div role="group" aria-label="Models" className="grid gap-2 sm:grid-cols-2" data-slot="model-choices">
-      {MODELS.map((m) => (
+      {models.map((m) => (
         <button key={m.id} type="button" className={CHOICE} disabled={busy} onClick={() => onChoose(m.id)} data-slot="model-choice">
           <span className="font-semibold">{m.name}</span>
           <span className="text-sm text-pretty text-muted-foreground">{m.what}</span>
@@ -95,7 +96,7 @@ function EntryView({ entry, c, last, busy, creation, actions }: { entry: Entry; 
       return (
         <Platform slot="said">
           <Markdown text={entry.lines.join("\n\n")} links="show" />
-          {last && entry.asks.kind === "model" && nextStep(c).kind === "model" ? <ModelChoices busy={busy} onChoose={actions.onChoose} /> : null}
+          {last && entry.asks.kind === "model" && nextStep(c).kind === "model" ? <ModelChoices models={c.models} busy={busy} onChoose={actions.onChoose} /> : null}
         </Platform>
       );
     case "summary": {

@@ -70,6 +70,21 @@ export function deployStepUpDigest(agentId: string, version: ContentRef): Conten
   return `sha256:${sha256Hex(JSON.stringify({ agent_id: agentId, mandate_version: version }))}`;
 }
 
+/** What a resume or Stop step-up confirms (DEC-2102 item 1): a Stop with release is its own action. */
+export type OwnerCommandConfirms = "resume" | "stop" | "stop_release";
+
+/**
+ * The digest a resume's or Stop's step-up binds (spec §3.6, DEC-2102 item 1, DEC-2140 item 2):
+ * SHA-256 of the canonical object of what it confirms, the agent, and the control stream's head as
+ * text, its other members `null`, in journal spec §4's key order. The server binds the head at the
+ * command's receipt, so the head must be read just before the challenge is asked; one appended in
+ * between leaves the evidence unbound, and the runtime refuses the command. Agent ids are plain
+ * ASCII, so this is the canonical form.
+ */
+export function ownerCommandStepUpDigest(confirms: OwnerCommandConfirms, agentId: string, controlHead: number): ContentRef {
+  return `sha256:${sha256Hex(JSON.stringify({ agent: agentId, bid: null, bid_size: null, confirms, control_head: String(controlHead), event: null, floor: null, instrument: null }))}`;
+}
+
 const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /** Bytes as unpadded base64url (RFC 4648 §5), as the server reads each member of the assertion. */

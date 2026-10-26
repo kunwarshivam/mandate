@@ -22,6 +22,9 @@ const order = {
   updated_at: "2026-10-26T14:00:05.000000000Z",
 };
 
+/** A position as `read-models/positions` serves it with nothing the journal says beyond its quantity (DEC-2138). */
+const POSITION: Record<string, unknown> = { instrument_id: "XYZ", filled_qty: "2", cost_basis: null, risk_mark: null, market_value: null, unrealized_pnl: null, protection: { orders: [], covered_qty: "0", stop: null, take_profit: null, unprotected_since: null } };
+
 describe("an agent's activity (read-models/orders and /positions, DEC-2111)", () => {
   const { orders, holdings } = activityRead(AGENT);
 
@@ -39,7 +42,20 @@ describe("an agent's activity (read-models/orders and /positions, DEC-2111)", ()
 
   it("keeps a missing account apart from an empty list", () => {
     expect(holdings({ agent_id: AGENT, account_ref: null, positions: [], account_positions: null }, "")).toEqual({ ok: true, value: { agent_id: AGENT, account_ref: null, items: [] } });
-    expect(holdings({ agent_id: AGENT, account_ref: "a", positions: [{ instrument_id: "XYZ", filled_qty: "2", cost_basis: null, risk_mark: null, protection: null }] }, "")).toMatchObject({ ok: true, value: { items: [{ instrument_id: "XYZ", filled_qty: "2" }] } });
+    expect(holdings({ agent_id: AGENT, account_ref: "a", positions: [{ ...POSITION, instrument_id: "XYZ", filled_qty: "2" }] }, "")).toMatchObject({ ok: true, value: { items: [{ instrument_id: "XYZ", filled_qty: "2" }] } });
+  });
+
+  it("requires every DEC-2138 member as the schema does, with protection always served, and refuses a sane mark with no bid", () => {
+    const one = (over: Record<string, unknown>) => holdings({ agent_id: AGENT, account_ref: "a", positions: [{ ...POSITION, ...over }], account_positions: null }, "");
+    expect(one({}).ok).toBe(true);
+    for (const member of ["cost_basis", "risk_mark", "market_value", "unrealized_pnl", "protection"]) {
+      const rest = Object.fromEntries(Object.entries(POSITION).filter(([name]) => name !== member));
+      expect(holdings({ agent_id: AGENT, account_ref: "a", positions: [rest], account_positions: null }, ""), member).toMatchObject({ ok: false, issue: { path: `/positions/0/${member}`, problem: "missing" } });
+    }
+    expect(one({ protection: null }).ok).toBe(false);
+    expect(one({ risk_mark: { bid: null, sane: true, session: "regular", marked_at: "2026-10-26T14:30:00.000000000Z" } }).ok).toBe(false);
+    expect(one({ risk_mark: { bid: null, sane: false, session: "regular", marked_at: "2026-10-26T14:30:00.000000000Z" } }).ok).toBe(true);
+    expect(one({ market_value: 1012.5 }).ok).toBe(false);
   });
 
   it("decodes what the mock serves for every fixture agent", async () => {

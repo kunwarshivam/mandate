@@ -151,9 +151,21 @@ fn ws(path: &str) -> String {
 }
 
 fn row(stream: &str, seq: u64, event_type: &str, payload: &str) -> StoredEvent {
+    caused_row(stream, seq, event_type, payload, None)
+}
+
+/// A row whose envelope names `causation` as its `causation_id`.
+fn caused_row(
+    stream: &str,
+    seq: u64,
+    event_type: &str,
+    payload: &str,
+    causation: Option<&str>,
+) -> StoredEvent {
     let event_id = format!("01JBH3BTZ8K2M4N6P8R0S2T{seq:03}");
+    let caused_by = causation.map_or_else(String::new, |id| format!(r#""causation_id":"{id}","#));
     let text = format!(
-        r#"{{"environment":"paper","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{stream}"}}"#
+        r#"{{{caused_by}"environment":"paper","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{stream}"}}"#
     );
     let body = to_canonical(&parse(text.as_bytes()).expect("JSON"));
     StoredEvent {
@@ -225,15 +237,18 @@ fn seed(f: &Fixture) {
                     version(7)
                 ),
             ),
-            row(
-                &a,
-                3,
-                "ApprovalRequested",
-                &format!(
-                    r#"{{"content":{{{ACTION}}},"content_hash":"{}","deadline":800}}"#,
-                    version(8)
-                ),
-            ),
+            StoredEvent {
+                schema_version: 3,
+                ..row(
+                    &a,
+                    3,
+                    "ApprovalRequested",
+                    &format!(
+                        r#"{{"content":{{{ACTION}}},"content_hash":"{}","deadline":800}}"#,
+                        version(8)
+                    ),
+                )
+            },
             row(
                 &a,
                 4,
@@ -259,11 +274,12 @@ fn unauthenticated(f: &Fixture) -> Vec<u8> {
     send(f.addr, "GET", "/nowhere", &[], b"").body
 }
 
-const READS: [&str; 4] = [
+const READS: [&str; 5] = [
     "/agents",
     "/agents/agt_a",
     "/approvals",
     "/approvals/01JBH3BTZ8K2M4N6P8R0S2T002",
+    "/alerts",
 ];
 
 #[test]
@@ -462,6 +478,10 @@ fn the_approvals_inbox_and_one_approval_read_from_the_agent_streams() {
                 .iter()
                 .map(|a| {
                     assert!(a.get("content").is_none(), "the inbox carries no content");
+                    assert!(
+                        a.get("schema_version").is_none(),
+                        "nor the version its content comes from"
+                    );
                     assert_eq!(a.get("order"), Some(&bound_order()), "but its order");
                     text(a, "approval_id").to_owned()
                 })
@@ -487,6 +507,20 @@ fn the_approvals_inbox_and_one_approval_read_from_the_agent_streams() {
         Some(&parse(format!("{{{ACTION}}}").as_bytes()).expect("JSON"))
     );
     assert_eq!(approval.get("order"), Some(&bound_order()));
+    assert_eq!(
+        approval.get("schema_version").and_then(Value::as_int),
+        Some(3),
+        "the single read names the ApprovalRequested version its content comes from (DEC-2518)"
+    );
+    let reply = get(&f, &ws(&format!("/approvals/{pending}")), Some(&cookie));
+    assert_eq!(
+        json(&reply)
+            .get("approval")
+            .and_then(|a| a.get("schema_version"))
+            .and_then(Value::as_int),
+        Some(1),
+        "a version 1 request reads as version 1"
+    );
     for absent in ["01JBH3BTZ8K2M4N6P8R0S2T099", "not-an-id"] {
         assert_eq!(
             get(&f, &ws(&format!("/approvals/{absent}")), Some(&cookie)).status,
@@ -494,6 +528,93 @@ fn the_approvals_inbox_and_one_approval_read_from_the_agent_streams() {
             "{absent}"
         );
     }
+}
+
+/// The single read names the deferred checks of the `DecisionMade` its request's `causation_id`
+/// names, on the agent stream: its list, empty for a decision without one, and `null` when no such
+/// decision is there, so a reader can tell a request that hides its decision's deferrals across
+/// batches (DEC-2519). The inbox carries no content and none of this.
+#[test]
+fn one_approval_names_its_decisions_deferred_checks_or_null_without_one() {
+    let f = fixture();
+    seed(&f);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Approver])]));
+    let cookie = signed_in(&f, alice());
+    let a = agent_stream("agt_a");
+    let deferring = r#"{"deferred_to_binding":["halt","liquidity_floor","participation"]}"#;
+    let request = |seq, schema_version, causation: Option<&str>| StoredEvent {
+        schema_version,
+        ..caused_row(
+            &a,
+            seq,
+            "ApprovalRequested",
+            &format!(
+                r#"{{"content":{{{ACTION}}},"content_hash":"{}","deadline":900}}"#,
+                version(u8::try_from(seq).expect("small"))
+            ),
+            causation,
+        )
+    };
+    let decision = |seq, schema_version, payload| StoredEvent {
+        schema_version,
+        ..row(&a, seq, "DecisionMade", payload)
+    };
+    let id = |seq: u64| format!("01JBH3BTZ8K2M4N6P8R0S2T{seq:03}");
+    f.journal.streams.lock().expect("unpoisoned").insert(
+        a.clone(),
+        vec![
+            decision(1, 3, deferring),
+            request(2, 2, Some(&id(1))),
+            decision(3, 1, r#"{"dry_run":"allow"}"#),
+            request(4, 2, Some(&id(3))),
+            request(5, 2, Some(&id(99))),
+            request(6, 2, None),
+            request(7, 2, Some(&id(4))),
+            decision(8, 3, r#"{"dry_run":"allow"}"#),
+            request(9, 2, Some(&id(8))),
+        ],
+    );
+    let named = |seq: u64| -> Option<Value> {
+        let reply = get(&f, &ws(&format!("/approvals/{}", id(seq))), Some(&cookie));
+        assert_eq!(reply.status, 200, "{seq}");
+        json(&reply)
+            .get("approval")
+            .and_then(|a| a.get("decision_deferred_to_binding"))
+            .cloned()
+    };
+    assert_eq!(
+        named(2),
+        Some(parse(br#"["halt","liquidity_floor","participation"]"#).expect("JSON")),
+        "a request across from a deferring decision is served that decision's list"
+    );
+    assert_eq!(
+        named(4),
+        Some(parse(b"[]").expect("JSON")),
+        "a decision without a list deferred nothing"
+    );
+    for seq in [5, 6, 7] {
+        assert_eq!(
+            named(seq),
+            Some(Value::Null),
+            "{seq}: no DecisionMade by that id on the stream"
+        );
+    }
+    assert_eq!(
+        named(9),
+        Some(Value::Null),
+        "a version 3 decision without its list is never read as deferring nothing"
+    );
+    let reply = get(&f, &ws("/approvals"), Some(&cookie));
+    let Some(Value::Array(listed)) = json(&reply).get("approvals").cloned() else {
+        panic!("approvals");
+    };
+    assert_eq!(listed.len(), 6);
+    assert!(
+        listed
+            .iter()
+            .all(|a| a.get("decision_deferred_to_binding").is_none()),
+        "the inbox carries none of it"
+    );
 }
 
 #[test]
@@ -951,4 +1072,302 @@ fn an_agents_positions_are_its_own_fills_beside_the_accounts_holdings() {
     let unreadable = get(&f, &ws("/agents/agt_a/positions"), Some(&cookie));
     assert_eq!(unreadable.status, 503, "no position from part of its fills");
     assert_eq!(text(&json(&unreadable), "code"), "journal_unavailable");
+}
+
+/// A row with an event id unique across streams (`n`), at `seq` on `stream`.
+fn unique(stream: &str, seq: u64, n: u64, event_type: &str, payload: &str) -> StoredEvent {
+    let mut laid = row(stream, seq, event_type, payload);
+    let event_id = format!("01JBH3BTZ8K2M4N6P8R0A{n:05}");
+    let text = format!(
+        r#"{{"environment":"paper","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{stream}"}}"#
+    );
+    laid.body = to_canonical(&parse(text.as_bytes()).expect("JSON"));
+    laid.hash = Digest::of(&laid.body);
+    laid.event_id = event_id;
+    laid.recorded_at = format!("2026-10-17T11:00:{n:02}.000000000Z");
+    laid
+}
+
+fn account_stream(account: &str) -> String {
+    format!("acct:{WORKSPACE}:{account}")
+}
+
+fn notice_stream() -> String {
+    format!("ntf:{WORKSPACE}")
+}
+
+/// `seed`'s workspace with alerts (workspace API spec §4.7, DEC-2141): a user's kill switch on the
+/// control stream, a protection alert on the account a connection request names, and a
+/// `recovery_used` alert, which the read withholds. The kill switch's notice was attempted to
+/// alice by email (failed, then delivered) and to bob, whose attempt alice never sees.
+fn seed_alerts(f: &Fixture) -> [String; 4] {
+    seed(f);
+    let acct = account_stream("ACCT1");
+    let alice = format!(
+        "p_{}",
+        alice().to_ulid_text().expect("a ULID").to_lowercase()
+    );
+    let bob = format!("p_{}", bob().to_ulid_text().expect("a ULID").to_lowercase());
+    let mut streams = f.journal.streams.lock().expect("unpoisoned");
+    let control = streams.get_mut(&ctl()).expect("the control stream");
+    let command = unique(
+        &ctl(),
+        4,
+        1,
+        "OwnerCommandIssued",
+        r#"{"command":"kill_switch"}"#,
+    );
+    let kill = unique(
+        &ctl(),
+        5,
+        2,
+        "OwnerAlertSent",
+        &format!(
+            r#"{{"kind":"kill_switch","owner_command":"{0}","subject":"{0}"}}"#,
+            command.event_id
+        ),
+    );
+    let requested = unique(
+        &ctl(),
+        6,
+        3,
+        "ConnectionRequested",
+        r#"{"account_ref":"ACCT1","connection_id":"c1"}"#,
+    );
+    let recovery = unique(&ctl(), 7, 4, "RecoveryUsed", "{}");
+    let withheld = unique(
+        &ctl(),
+        8,
+        5,
+        "OwnerAlertSent",
+        &format!(
+            r#"{{"kind":"recovery_used","owner_command":null,"subject":"{}"}}"#,
+            recovery.event_id
+        ),
+    );
+    control.extend([command.clone(), kill.clone(), requested, recovery, withheld]);
+    let protection = unique(&acct, 1, 6, "ProtectionChanged", r#"{"action":"placed"}"#);
+    let protected = unique(
+        &acct,
+        2,
+        7,
+        "OwnerAlertSent",
+        &format!(
+            r#"{{"kind":"protection","owner_command":null,"subject":"{}"}}"#,
+            protection.event_id
+        ),
+    );
+    streams.insert(acct, vec![protection, protected.clone()]);
+    let notice = "0123456789abcdef0123456789abcdef";
+    let attempt = |seq, n, who: &str, number, status| {
+        unique(
+            &notice_stream(),
+            seq,
+            n,
+            "NoticeAttempted",
+            &format!(
+                r#"{{"attempt":{number},"channel":"email","coalesced_into":null,"notice":"{notice}","provider_message_id":"pm-{n}","reason":null,"recipient":"{who}","status":"{status}"}}"#
+            ),
+        )
+    };
+    let delivered = attempt(4, 11, &alice, 2, "delivered");
+    streams.insert(
+        notice_stream(),
+        vec![
+            unique(
+                &notice_stream(),
+                1,
+                8,
+                "NoticeIssued",
+                &format!(
+                    r#"{{"cause":"{}","cause_stream":"{}","class":"safety","kind":"kill_switch","notice":"{notice}","recipients":["{alice}","{bob}"]}}"#,
+                    kill.event_id,
+                    ctl()
+                ),
+            ),
+            attempt(2, 9, &alice, 1, "failed"),
+            attempt(3, 10, &bob, 1, "delivered"),
+            delivered.clone(),
+        ],
+    );
+    [
+        kill.event_id,
+        command.event_id,
+        protected.event_id,
+        delivered.recorded_at,
+    ]
+}
+
+#[test]
+fn the_alerts_are_the_workspaces_newest_first_with_only_my_own_deliveries() {
+    let f = fixture();
+    let [kill, command, protected, delivered_at] = seed_alerts(&f);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Viewer])]));
+    let cookie = signed_in(&f, alice());
+    let reply = get(&f, &ws("/alerts"), Some(&cookie));
+    assert_eq!(
+        reply.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let body = json(&reply);
+    assert_eq!(body.get("truncated"), Some(&Value::Bool(false)));
+    let Some(Value::Array(listed)) = body.get("alerts") else {
+        panic!("alerts")
+    };
+    let ids: Vec<&str> = listed.iter().map(|a| text(a, "alert_id")).collect();
+    assert_eq!(
+        ids,
+        [protected.as_str(), kill.as_str()],
+        "newest first, recovery_used withheld"
+    );
+    let want_protection = format!(
+        r#"{{"alert_id":"{protected}","class":"safety","kind":"protection","notice":null,"owner_command":null,"raised_at":"2026-10-17T11:00:07.000000000Z","stream":{{"account_ref":"ACCT1","agent_id":null,"type":"account"}},"subject":{{"event_id":"01JBH3BTZ8K2M4N6P8R0A00006","event_type":"ProtectionChanged"}}}}"#
+    );
+    assert_eq!(listed[0], parse(want_protection.as_bytes()).expect("JSON"));
+    let want_kill = format!(
+        r#"{{"alert_id":"{kill}","class":"safety","kind":"kill_switch","notice":{{"delivery":[{{"attempt":2,"channel":"email","recorded_at":"{delivered_at}","status":"delivered"}}],"issued_at":"2026-10-17T11:00:08.000000000Z"}},"owner_command":"{command}","raised_at":"2026-10-17T11:00:02.000000000Z","stream":{{"account_ref":null,"agent_id":null,"type":"control"}},"subject":{{"event_id":"{command}","event_type":"OwnerCommandIssued"}}}}"#
+    );
+    assert_eq!(listed[1], parse(want_kill.as_bytes()).expect("JSON"));
+    let raw = String::from_utf8_lossy(&reply.body).into_owned();
+    for never in ["pm-", "recipient", "0123456789abcdef", "p_01"] {
+        assert!(!raw.contains(never), "{never} in {raw}");
+    }
+    let Some(Value::Array(as_of)) = body.get("as_of") else {
+        panic!("as_of")
+    };
+    let read: BTreeSet<&str> = as_of.iter().map(|w| text(w, "stream_id")).collect();
+    let want: BTreeSet<String> = [
+        ctl(),
+        agent_stream("agt_a"),
+        account_stream("ACCT1"),
+        notice_stream(),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        read,
+        want.iter().map(String::as_str).collect::<BTreeSet<_>>(),
+        "every stream read that holds a row; agt_b's never ran"
+    );
+}
+
+#[test]
+fn bobs_read_shows_his_own_delivery_and_the_limit_truncates() {
+    let f = fixture();
+    seed_alerts(&f);
+    members(
+        &f,
+        Ok(vec![
+            activated(1, alice(), &[Role::Operator]),
+            activated(2, bob(), &[Role::Approver]),
+        ]),
+    );
+    let cookie = signed_in(&f, bob());
+    let reply = get(&f, &ws("/alerts?limit=1"), Some(&cookie));
+    assert_eq!(reply.status, 200);
+    let body = json(&reply);
+    assert_eq!(body.get("truncated"), Some(&Value::Bool(true)));
+    let Some(Value::Array(listed)) = body.get("alerts") else {
+        panic!("alerts")
+    };
+    assert_eq!(listed.len(), 1);
+    assert_eq!(text(&listed[0], "kind"), "protection");
+    let reply = get(&f, &ws("/alerts?limit=2"), Some(&cookie));
+    assert_eq!(
+        json(&reply).get("truncated"),
+        Some(&Value::Bool(false)),
+        "exactly the limit is not truncated"
+    );
+    let reply = get(&f, &ws("/alerts?limit=200"), Some(&cookie));
+    let body = json(&reply);
+    let Some(Value::Array(listed)) = body.get("alerts") else {
+        panic!("alerts")
+    };
+    let delivery = listed[1]
+        .get("notice")
+        .and_then(|n| n.get("delivery"))
+        .and_then(Value::as_array)
+        .expect("bob's delivery");
+    assert_eq!(delivery.len(), 1);
+    assert_eq!(delivery[0].get("attempt").and_then(Value::as_int), Some(1));
+    assert_eq!(text(&delivery[0], "status"), "delivered");
+}
+
+#[test]
+fn a_limit_out_of_range_or_another_query_member_is_invalid() {
+    let f = fixture();
+    seed_alerts(&f);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    for query in [
+        "?limit=0",
+        "?limit=201",
+        "?limit=abc",
+        "?limit=",
+        "?limit=1&limit=2",
+        "?state=pending",
+        "?limit=01",
+    ] {
+        let reply = get(&f, &ws(&format!("/alerts{query}")), Some(&cookie));
+        assert_eq!(reply.status, 422, "{query}");
+        assert!(
+            String::from_utf8_lossy(&reply.body).contains(r#""code":"invalid""#),
+            "{query}"
+        );
+    }
+}
+
+#[test]
+fn an_account_or_notice_stream_that_cannot_be_read_is_503_never_a_shorter_list() {
+    let f = fixture();
+    seed_alerts(&f);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    for stream in [account_stream("ACCT1"), notice_stream()] {
+        f.journal
+            .failing
+            .lock()
+            .expect("unpoisoned")
+            .insert(stream.clone());
+        let reply = get(&f, &ws("/alerts"), Some(&cookie));
+        assert_eq!(reply.status, 503, "{stream}");
+        assert!(
+            String::from_utf8_lossy(&reply.body).contains(r#""code":"journal_unavailable""#),
+            "{stream}"
+        );
+        f.journal
+            .failing
+            .lock()
+            .expect("unpoisoned")
+            .remove(&stream);
+    }
+}
+
+#[test]
+fn an_alert_whose_subject_its_stream_lacks_is_503() {
+    let f = fixture();
+    seed_alerts(&f);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .get_mut(&account_stream("ACCT1"))
+        .expect("the account stream")
+        .remove(0);
+    let reply = get(&f, &ws("/alerts"), Some(&cookie));
+    assert_eq!(reply.status, 503);
+    assert!(String::from_utf8_lossy(&reply.body).contains(r#""code":"journal_unavailable""#));
+}
+
+#[test]
+fn a_member_without_the_view_row_reads_no_alerts() {
+    let f = fixture();
+    seed_alerts(&f);
+    members(&f, Ok(vec![activated(1, alice(), &[])]));
+    let cookie = signed_in(&f, alice());
+    assert_eq!(get(&f, &ws("/alerts"), Some(&cookie)).status, 403);
 }

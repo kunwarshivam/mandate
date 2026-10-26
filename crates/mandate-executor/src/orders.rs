@@ -655,6 +655,11 @@ pub(crate) fn fill(
             ],
         )?;
         pairs.push(("client_order_id", Value::Null));
+        let refs = if refs.is_empty() {
+            account_fill_config(batch)?
+        } else {
+            refs
+        };
         batch.journal_with_refs("FillApplied", None, refs, pairs)?;
         every_agent_alerted(
             batch,
@@ -767,6 +772,23 @@ fn fill_config(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Result<Objec
             "instrument_snapshot",
             Some(refs.instrument_snapshot.as_str()),
         ),
+        (
+            "settlement_calendar",
+            Some(refs.settlement_calendar.as_str()),
+        ),
+        ("trading_calendar", Some(refs.trading_calendar.as_str())),
+    ])
+}
+
+/// The `config_refs` an unattributed fill in an instrument with no snapshot is journaled with: the
+/// account's fee configuration and both calendars, and no instrument snapshot (journal spec §9.5
+/// rule 300, DEC-2817); none when the port knows none, which the journal refuses as before.
+fn account_fill_config(batch: &Batch<'_, '_>) -> Result<Object, ExecutorError> {
+    let Some(refs) = batch.ports.instruments.account_fill_refs() else {
+        return Ok(Object::new());
+    };
+    config_refs(&[
+        ("fee_config", Some(refs.fee_config.as_str())),
         (
             "settlement_calendar",
             Some(refs.settlement_calendar.as_str()),
@@ -998,18 +1020,22 @@ impl Cause {
     }
 }
 
-/// Stores a detected restriction as account state and applies its agent effect to every agent
-/// (§7.3), alerting the owner. A restriction already in force is not journaled again, and the
-/// answer says whether this one was new.
+/// Journals a detected restriction's cause when it is not already in force at that restriction or
+/// a stricter one (journal spec v0.96 rule 309, DEC-2816), alerting the owner. Only a restriction
+/// that makes the account state stricter applies its agent effect to every agent (§7.3); one
+/// beside a stricter cause moves no agent, which already holds the stricter mode. The answer says
+/// whether a cause was journaled.
 fn restrict(
     batch: &mut Batch<'_, '_>,
     restriction: Restriction,
     cause: Cause,
     reason: &'static str,
 ) -> Result<bool, ExecutorError> {
-    if batch.view.account_state >= restriction.state() {
+    let held = batch.view.causes.get(cause.name()).copied();
+    if held.is_some_and(|held| held >= restriction.state()) {
         return Ok(false);
     }
+    let tightens = batch.view.account_state < restriction.state();
     let changed = batch.journal(
         "AccountRestrictionChanged",
         None,
@@ -1019,13 +1045,17 @@ fn restrict(
             ("reason_code", text(reason)),
         ],
     )?;
-    every_agent_alerted(
-        batch,
-        restriction.mode(),
-        reason,
-        changed,
-        OwnerAlertKind::AccountRestriction,
-    )?;
+    if tightens {
+        every_agent_alerted(
+            batch,
+            restriction.mode(),
+            reason,
+            changed,
+            OwnerAlertKind::AccountRestriction,
+        )?;
+    } else {
+        batch.notify(changed, OwnerAlertKind::AccountRestriction);
+    }
     Ok(true)
 }
 
@@ -1036,8 +1066,8 @@ fn restrict(
 /// closing only (§7.3) by DEC-143's reading: a message that says `closing` or `restricted`, since
 /// no connector reject table maps a `code` yet, or the configured run of consecutive 403s, every
 /// 403 counting, a named order's included. A reject naming an id we do not know counts toward
-/// that run and is nothing more. The account is asked for again once, when the run restricts it,
-/// not at every 403 after.
+/// that run and is nothing more. The account is asked for again once, when the run journals the
+/// reject as a cause in force, even beside a stricter one (DEC-2816), not at every 403 after.
 pub(crate) fn reject(
     batch: &mut Batch<'_, '_>,
     reject: &BrokerReject,

@@ -496,7 +496,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
     ["Protection", o.protection ? `Stop at ${price(o.protection.stop)}${o.protection.take_profit ? `, take profit at ${price(o.protection.take_profit)}` : ""}` : "Not reported"],
     ["Deadline", clock(deadlineIso(approval.deadline))],
   ];
-  const deferred = deferredChecks(approval.content);
+  const deferred = deferredChecks(approval.content, approval.schema_version, approval.decision_deferred_to_binding);
   const shown = [nameOf(agent) ?? "Name not reported", line, ...facts.map(([term, value]) => `${term}: ${value}`), ...deferredLines(deferred)];
   const environment = agent?.environment ?? "unknown";
   const record: ApprovalRecord = { screen: "D6", environment, shown, modelOutputExpanded: false };
