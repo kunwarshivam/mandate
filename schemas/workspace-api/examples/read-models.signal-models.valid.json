@@ -1,0 +1,21 @@
+[
+  {
+    "label": "no models registered",
+    "set": {
+      "/models": []
+    }
+  },
+  {
+    "label": "a research model that admits instruments and declares no parameters",
+    "set": {
+      "/models/0/model_id": "llm.research_agent",
+      "/models/0/params": [],
+      "/models/0/admits_instruments": true,
+      "/models/0/content": {
+        "kind": "research_model_content",
+        "model_id": "llm.research_agent",
+        "model_version": "1.0.0"
+      }
+    }
+  }
+]

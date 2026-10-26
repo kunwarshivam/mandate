@@ -1,0 +1,74 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-26T14:30:00.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 12,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-26T14:00:00.000000000Z"
+    }
+  ],
+  "models": [
+    {
+      "model_id": "quant.ma_crossover",
+      "model_version": "1.0.0",
+      "content_hash": "sha256:cfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcf",
+      "params": [
+        "fast_periods",
+        "slow_periods"
+      ],
+      "admits_instruments": false,
+      "content": {
+        "authorship": "platform",
+        "code": [
+          {
+            "path": "crates/mandate-modelhost/src/ma_crossover.rs",
+            "sha256": "3434343434343434343434343434343434343434343434343434343434343434"
+          }
+        ],
+        "content_version": 1,
+        "inputs": {
+          "bars": "daily_close",
+          "instrument": "pinned",
+          "minimum_count": "slow_periods",
+          "trading_day": "us_equity_regular_session"
+        },
+        "kind": "quant_model_content",
+        "methodology": "Long when the mean of the last fast_periods daily closes is strictly above the mean of the last slow_periods daily closes; otherwise no output.",
+        "model_id": "quant.ma_crossover",
+        "model_version": "1.0.0",
+        "output": {
+          "flat": "none",
+          "long": {
+            "confidence": "1",
+            "conviction": "1",
+            "direction": "long"
+          },
+          "undecided": "none"
+        },
+        "params_schema": {
+          "constraints": [
+            "fast_periods < slow_periods"
+          ],
+          "params": [
+            {
+              "max": 1000,
+              "min": 1,
+              "name": "fast_periods",
+              "type": "integer"
+            },
+            {
+              "max": 1000,
+              "min": 2,
+              "name": "slow_periods",
+              "type": "integer"
+            }
+          ]
+        }
+      },
+      "registered_at": "2026-10-26T14:00:00.000000000Z"
+    }
+  ]
+}

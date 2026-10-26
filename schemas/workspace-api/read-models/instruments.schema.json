@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/instruments.schema.json",
+  "description": "GET /instruments (§4.1, §3.11 item 11, DEC-2136): the instruments a version may pin in this workspace, from the control stream's ConfigSnapshotRegistered of kind instrument_snapshot, the latest registration per instrument id, as the create and deploy checks read them (versions.rs `instruments`). Sorted by symbol, then instrument_id. as_of names the control stream. A registration whose stored snapshot cannot be read makes the whole read journal_unavailable, never a shorter list.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "instruments"
+  ],
+  "properties": {
+    "instruments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Instrument"
+      }
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "$defs": {
+    "Instrument": {
+      "type": "object",
+      "required": [
+        "instrument_id",
+        "symbol",
+        "asset_class",
+        "snapshot",
+        "registered_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "instrument_id": {
+          "$ref": "../common.schema.json#/$defs/AssetId"
+        },
+        "symbol": {
+          "description": "The snapshot's symbol, which a pinned instrument must name with its id (the mandate schema's instrument_ref symbol).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "asset_class": {
+          "enum": [
+            "us_equity",
+            "crypto"
+          ]
+        },
+        "snapshot": {
+          "description": "The registration's content_hash: the instrument snapshot the checks read.",
+          "$ref": "../common.schema.json#/$defs/ContentRef"
+        },
+        "registered_at": {
+          "description": "The ConfigSnapshotRegistered row's recorded_at.",
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        }
+      }
+    }
+  },
+  "propertyNames": {
+    "not": {
+      "pattern": "([tT][oO][kK][eE][nN]|[sS][eE][cC][rR][eE][tT]|[pP][aA][sS][sS][wW][oO][rR][dD]|[pP][aA][sS][sS][pP][hH][rR][aA][sS][eE]|[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]|[aA][pP][iI]_[kK][eE][yY]|[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]|[aA][cC][cC][oO][uU][nN][tT]_[nN][uU][mM][bB][eE][rR]|[fF][iI][nN][gG][eE][rR][pP][rR][iI][nN][tT]|[vV][aA][uU][lL][tT])"
+    }
+  },
+  "unevaluatedProperties": false
+}
