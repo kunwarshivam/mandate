@@ -43,7 +43,8 @@ commands:
                         provisionerd-release | api-release | mutants |
                         schema-mutants | cell | cell-seeded | cell-upgrade | cell-demo |
                         cell-journal | cell-failover |
-                        cell-kill-switch | cell-executor | cell-vault | sweep; or
+                        cell-kill-switch | cell-executor | cell-vault | cell-exchange |
+                        sweep; or
                         one part of test: test-nextest | test-doc | test-rh-sim | test-python.
                         Tests, pending tests,
                         doctests, the rehearsal, Postgres, OpenBao and object-store runs and
@@ -193,6 +194,7 @@ const PR_JOBS: &[&str] = &[
     "cell-kill-switch",
     "cell-executor",
     "cell-vault",
+    "cell-exchange",
 ];
 
 /// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
@@ -439,6 +441,7 @@ fn run() -> Result<()> {
                     .chain(cell::KILL_SWITCH_DRILLS)
                     .chain(cell::EXECUTOR_DRILLS)
                     .chain(cell::VAULT_DRILLS)
+                    .chain(cell::EXCHANGE_DRILLS)
                     .collect()
             } else {
                 names
@@ -458,7 +461,7 @@ fn run() -> Result<()> {
 fn ci(job: &str) -> Result<()> {
     eprintln!("==> ci {job}");
     match job {
-        "lint" => lint(Path::new("."), workspace_lint),
+        "lint" => ci_lint(Path::new("."), |name| env::var(name).ok(), workspace_lint),
         "test" => {
             for part in TEST_PARTS {
                 eprintln!("==> ci {part}");
@@ -483,6 +486,7 @@ fn ci(job: &str) -> Result<()> {
         "cell-kill-switch" => cell::ci_drills(job, &cell::KILL_SWITCH_DRILLS),
         "cell-executor" => cell::ci_drills(job, &cell::EXECUTOR_DRILLS),
         "cell-vault" => cell::ci_drills(job, &cell::VAULT_DRILLS),
+        "cell-exchange" => cell::ci_drills(job, &cell::EXCHANGE_DRILLS),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -2814,10 +2818,11 @@ const KNOWN_OUTSIDE_CRATES: [&str; 17] = [
 /// (DEC-1190 item 2): every spec, `check_planned.py` globbing `docs/specs/*.md` (the journal
 /// spec among them), the backlog it checks planned operations against, and the requirements file
 /// that pins their Python environment ([`pinned_python`]).
-const SCHEMA_SWEEP_INPUTS: [&str; 4] = [
+const SCHEMA_SWEEP_INPUTS: [&str; 5] = [
     "schemas/",
     "docs/specs/",
     "docs/project/06-backlog-v1.md",
+    "docs/project/backlog/",
     "reference/mandate/requirements.txt",
 ];
 
@@ -3391,13 +3396,34 @@ fn output_in(dir: &Path, program: &str, args: &[&str]) -> Result<String> {
     String::from_utf8(out.stdout).context("non-UTF-8 output")
 }
 
+/// `ci lint`: the lint job over the repository at `root`, its backlog check against the diff base
+/// that `var` reads from `MANDATE_BASE_REF` and `GITHUB_EVENT_NAME`, as every diff-based job
+/// resolves it (DEC-2373). `ci` passes the process environment, which a test pins.
+fn ci_lint(
+    root: &Path,
+    var: impl Fn(&str) -> Option<String>,
+    workspace_checks: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let base = base_ref_in(
+        root,
+        var("MANDATE_BASE_REF").as_deref(),
+        var("GITHUB_EVENT_NAME").as_deref(),
+    )?;
+    lint(root, base.as_deref(), workspace_checks)
+}
+
 /// The lint job over the repository at `root` (ADR-0001 ES-12): ShellCheck over its
 /// `.github/scripts/` (DEC-329), `deploy/` (the demo host's runbook, DEC-822) and `scripts/` (the
 /// founder's runbooks, R0's rehearsal first), actionlint over its `.github/workflows/` (DEC-330), then
 /// `workspace_checks`, the checks that need the Cargo and uv workspaces, which `ci lint` passes as
 /// [`workspace_lint`]. The job takes the repository it runs in, so a fixture repository drives it
 /// and neither tool's result can be dropped without a test failing (DEC-331, the DEC-139 pattern).
-fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()> {
+/// `base` is the diff base the backlog check compares against, `None` to skip it (DEC-2373).
+fn lint(
+    root: &Path,
+    base: Option<&str>,
+    workspace_checks: impl FnOnce() -> Result<()>,
+) -> Result<()> {
     shellcheck_scripts(&root.join(".github/scripts"))?;
     shellcheck_scripts(&root.join("deploy"))?;
     shellcheck_scripts(&root.join("scripts"))?;
@@ -3406,7 +3432,138 @@ fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()
     infra_workflow_in(root)?;
     mail::guard_in(root)?;
     leak::guard_in(root)?;
+    backlog_rows_in(root, base)?;
     workspace_checks()
+}
+
+/// The backlog every story and debt row was written to until DEC-2373.
+const BACKLOG: &str = "docs/project/06-backlog-v1.md";
+
+/// Where a new backlog row goes since DEC-2373: one file each, so two PRs adding rows never touch
+/// the same lines.
+const BACKLOG_ROWS: &str = "docs/project/backlog/";
+
+/// DEC-2373: a change adds no row to [`BACKLOG`]; a new row is a file under [`BACKLOG_ROWS`]. A
+/// row is folded in, not new, only when a row file the change deletes, not moves, held that very
+/// row at `base` under a name that starts with its story. Skipped with no diff base, as on a push
+/// to `main`.
+fn backlog_rows_in(root: &Path, base: Option<&str>) -> Result<()> {
+    eprintln!("    backlog: checking that new rows go one file each under {BACKLOG_ROWS}");
+    let Some(base) = base else {
+        return Ok(());
+    };
+    let before =
+        output_in(root, "git", &["show", &format!("{base}:{BACKLOG}")]).unwrap_or_default();
+    let after = fs::read_to_string(root.join(BACKLOG)).context("reading the backlog")?;
+    let changed = output_in(
+        root,
+        "git",
+        &["diff", "--name-status", "--find-renames", base],
+    )?;
+    let mut folded = Vec::new();
+    for path in changed
+        .lines()
+        .filter_map(|line| line.strip_prefix("D\t"))
+        .filter(|path| is_backlog_row(path))
+    {
+        let held = output_in(root, "git", &["show", &format!("{base}:{path}")])?;
+        folded.push((path.to_owned(), held));
+    }
+    if let Some(problem) = backlog_row_problem(&before, &after, &folded) {
+        bail!("backlog: {problem}");
+    }
+    Ok(())
+}
+
+/// The rows a backlog text holds, each as its key and its trimmed opening line. A row is a bullet
+/// opening in bold at the margin, an indented bold bullet naming a story, or a table row naming
+/// one. Its key is the story it names in bold, else its bold lead, else a table row's first cell,
+/// so editing a row's text keeps its key and only a row new to the text adds one.
+fn backlog_rows(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            let indented = line.starts_with(char::is_whitespace);
+            let key = if let Some(lead) = trimmed
+                .strip_prefix("- **")
+                .or_else(|| trimmed.strip_prefix("* **"))
+            {
+                match story_id(lead) {
+                    Some(story) if lead.starts_with(story.as_str()) => Some(story),
+                    _ if indented => None,
+                    _ => Some(lead.split("**").next().unwrap_or(lead).to_owned()),
+                }
+            } else if trimmed.starts_with('|') && story_id(trimmed).is_some() {
+                trimmed.split('|').nth(1).map(|cell| cell.trim().to_owned())
+            } else {
+                None
+            };
+            key.map(|key| (key, trimmed.to_owned()))
+        })
+        .collect()
+}
+
+/// The first story id, `E<n>-<n>`, that `text` names.
+fn story_id(text: &str) -> Option<String> {
+    let digits = |s: &str| s.len() - s.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+    text.match_indices('E').find_map(|(at, _)| {
+        let rest = &text[at + 1..];
+        let epic = digits(rest);
+        let story = rest[epic..].strip_prefix('-').map(digits)?;
+        let before_ok = !text[..at].ends_with(|c: char| c.is_ascii_alphanumeric());
+        (epic > 0 && story > 0 && before_ok).then(|| text[at..at + 2 + epic + story].to_owned())
+    })
+}
+
+/// Whether `path` is a row file under [`BACKLOG_ROWS`], not its README.
+fn is_backlog_row(path: &str) -> bool {
+    path.strip_prefix(BACKLOG_ROWS)
+        .is_some_and(|name| name.ends_with(".md") && name != "README.md" && !name.contains('/'))
+}
+
+/// The refusal for a backlog that went from `before` to `after` while the change deleted the row
+/// files `folded`, each its path and the text it held at the base, or `None` when every row new
+/// to the backlog is one of those files' rows, each file's row folded once, under a file name
+/// that starts with the row's story.
+fn backlog_row_problem(before: &str, after: &str, folded: &[(String, String)]) -> Option<String> {
+    let mut known: Vec<String> = backlog_rows(before)
+        .into_iter()
+        .map(|(key, _)| key)
+        .collect();
+    let mut files: Vec<(&str, (String, String))> = folded
+        .iter()
+        .flat_map(|(path, held)| {
+            let name = path.rsplit('/').next().unwrap_or(path);
+            backlog_rows(held).into_iter().map(move |row| (name, row))
+        })
+        .collect();
+    let mut unfolded = Vec::new();
+    for (key, line) in backlog_rows(after) {
+        if let Some(at) = known.iter().position(|old| *old == key) {
+            known.swap_remove(at);
+            continue;
+        }
+        let names_story =
+            |name: &str| story_id(&key).is_none_or(|story| name.starts_with(&format!("{story}-")));
+        match files
+            .iter()
+            .position(|(name, (_, held))| *held == line && names_story(name))
+        {
+            Some(at) => {
+                files.swap_remove(at);
+            }
+            None => unfolded.push(key),
+        }
+    }
+    (!unfolded.is_empty()).then(|| {
+        format!(
+            "{BACKLOG} gains {} row(s) no deleted row file held ({}); add a new row as its own \
+             file under {BACKLOG_ROWS}, and fold one in only by deleting the file that holds it \
+             (DEC-2373)",
+            unfolded.len(),
+            unfolded.join(", ")
+        )
+    })
 }
 
 /// The lint job's checks over the Cargo and uv workspaces in the current directory: fmt, clippy
@@ -9107,9 +9264,7 @@ fn gate_run(
     let unmutated = UnmutatedSource::read(root, &diff.touched)?;
     let before = launched_after(root, started);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let stop = (per_shard > 1)
-        .then(|| Duration::from_millis(mutant_costs::STOP_AFTER_MS).saturating_sub(before));
-    record_unfinished(root, shard, in_shard.clone(), per_shard);
+    let stop = launch_stop(root, shard, in_shard.clone(), per_shard, before);
     let status = match stop {
         Some(left) => mutants_job_within(root, &args, left),
         None => mutants_job_cargo(root, &args),
@@ -9178,6 +9333,21 @@ fn launched_after(root: &Path, started: SystemTime) -> Duration {
         .ok()
         .and_then(|launched| launched.duration_since(started).ok())
         .unwrap_or_default()
+}
+
+/// How long a shard of `per_shard` mutants may run from now, `before` having gone since the gate
+/// started, with its provisional record written first (DEC-2607 item 5, DEC-2367 item 2): `None`
+/// for a shard of one, which runs to its end and writes none.
+fn launch_stop(
+    root: &Path,
+    shard: Option<MutantShard>,
+    packages: Vec<String>,
+    per_shard: usize,
+    before: Duration,
+) -> Option<Duration> {
+    record_unfinished(root, shard, packages, per_shard);
+    (per_shard > 1)
+        .then(|| Duration::from_millis(mutant_costs::STOP_AFTER_MS).saturating_sub(before))
 }
 
 /// Writes the record a shard of more than one mutant leaves if GitHub stops its job before
@@ -11954,7 +12124,303 @@ mod tests {
         TOFU_DIR, committed_working_dirs, guarded_word_problems, tofu_committed_working_dirs,
         tofu_forbidden_blocks, tofu_sources, tofu_symlinks,
     };
+    use super::{
+        backlog_row_problem, backlog_rows, backlog_rows_in, ci_lint, is_backlog_row, story_id,
+    };
     use super::{unoptimised_config, unoptimised_packages};
+
+    /// DEC-2373: each row shape counts, keyed so an edit keeps its key; a row new to the backlog
+    /// is refused unless a deleted row file named for its story held that very row, each file's
+    /// row folding once.
+    #[test]
+    fn a_new_backlog_row_goes_in_its_own_file() {
+        let base = "# Backlog\n\n- **E1-1 (Must)** a\n  more of a\n- **A debt row.** b\n";
+        let rows = |text: &str| -> Vec<String> {
+            backlog_rows(text).into_iter().map(|(key, _)| key).collect()
+        };
+        assert_eq!(
+            rows(concat!(
+                "- **E1-1 (Must)** a\n",
+                "* **E1-2** b\n",
+                "  - **E1-3** an indented row naming a story\n",
+                "  - **not a row**, an indented detail\n",
+                "- **A debt row.** c\n",
+                "| E15 Signals | M5 | Must (E15-1) |\n",
+                "|---|---|---|\n",
+                "text - **E1-4** in prose\n",
+                "- **XE1-5** no story\n",
+                "- **Debt from E1-7's review.** d\n",
+            )),
+            [
+                "E1-1",
+                "E1-2",
+                "E1-3",
+                "A debt row.",
+                "E15 Signals",
+                "XE1-5",
+                "Debt from E1-7's review."
+            ]
+        );
+        assert_eq!(story_id("see E21-30's row"), Some("E21-30".to_owned()));
+        assert_eq!(story_id("E21- E-3 XE1-2"), None);
+        let edited = base
+            .replace("(Must)", "(Must, done)")
+            .replace("debt row.** b", "debt row.** b2");
+        assert_eq!(
+            backlog_row_problem(base, &edited, &[]),
+            None,
+            "an edit adds no row"
+        );
+        assert_eq!(
+            backlog_row_problem(base, "# Backlog\n", &[]),
+            None,
+            "a removal adds none"
+        );
+        let added = |row: &str| format!("{base}{row}\n");
+        for row in [
+            "- **E1-2** new",
+            "- **E1-1 (Should)** a second row for one story",
+            "  - **E1-2** indented",
+            "| E2 Epic | M1 | Must (E2-1) |",
+            "- **Another debt row.**",
+        ] {
+            let problem = backlog_row_problem(base, &added(row), &[]);
+            assert!(
+                problem
+                    .as_deref()
+                    .is_some_and(|p| p.contains("gains 1 row(s)")),
+                "{row:?} is a new row, got {problem:?}"
+            );
+        }
+        let file =
+            |name: &str, held: &str| (format!("docs/project/backlog/{name}"), held.to_owned());
+        let row = "- **E1-2 (Must)** new";
+        assert_eq!(
+            backlog_row_problem(
+                base,
+                &added(row),
+                &[file("E1-2-new.md", &format!("{row}\n"))]
+            ),
+            None,
+            "a row folded from its own deleted file"
+        );
+        for (why, folded) in [
+            (
+                "an unrelated file",
+                vec![file("E1-9-other.md", "- **E1-9** other\n")],
+            ),
+            (
+                "a file for another story",
+                vec![file("E1-9-new.md", &format!("{row}\n"))],
+            ),
+            (
+                "other text",
+                vec![file("E1-2-new.md", "- **E1-2 (Must)** changed\n")],
+            ),
+        ] {
+            assert!(
+                backlog_row_problem(base, &added(row), &folded).is_some(),
+                "{why} licenses no row"
+            );
+        }
+        let two = format!("{base}{row}\n{row}\n");
+        assert!(
+            backlog_row_problem(base, &two, &[file("E1-2-new.md", &format!("{row}\n"))]).is_some(),
+            "one file folds its row once"
+        );
+        assert!(is_backlog_row("docs/project/backlog/E7-4-a-row.md"));
+        assert!(!is_backlog_row("docs/project/backlog/README.md"));
+        assert!(!is_backlog_row("docs/project/backlog/nested/E7-4.md"));
+        assert!(!is_backlog_row("docs/project/backlog/E7-4.txt"));
+        assert!(!is_backlog_row("docs/project/06-backlog-v1.md"));
+    }
+
+    /// A fixture git repository at `root` whose committed backlog holds one row, with one row file
+    /// beside it; returns the commit, the diff base the backlog tests compare against.
+    fn backlog_repository(root: &Path) -> Result<String> {
+        fs::create_dir_all(root.join("docs/project/backlog"))?;
+        fs::write(
+            root.join("docs/project/06-backlog-v1.md"),
+            "# Backlog\n\n- **E1-1** a\n",
+        )?;
+        fs::write(
+            root.join("docs/project/backlog/E1-2-new.md"),
+            "- **E1-2** new\n",
+        )?;
+        fs::write(
+            root.join("docs/project/backlog/README.md"),
+            "# New backlog rows\n",
+        )?;
+        for args in [
+            &["init", "-q", "-b", "main"][..],
+            &["add", "-A"],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-qm",
+                "base",
+            ],
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        ] {
+            git_in(root, args)?;
+        }
+        git_in(root, &["rev-parse", "HEAD"]).map(|sha| sha.trim().to_owned())
+    }
+
+    fn git_in(root: &Path, args: &[&str]) -> Result<String> {
+        let out = Command::new("git").args(args).current_dir(root).output()?;
+        if !out.status.success() {
+            bail!("git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        }
+        Ok(String::from_utf8(out.stdout)?)
+    }
+
+    /// DEC-2373, the git half: against a real diff base, a row added to 06 is refused, a fold
+    /// that deletes the row's file passes, adding two rows while deleting one file is refused, a
+    /// row file moved out of the directory folds nothing, and a push to main, with no diff base,
+    /// skips the check.
+    #[test]
+    fn the_backlog_check_reads_the_change_from_git() -> Result<()> {
+        let root = env::temp_dir().join(format!("mandate-xtask-backlog-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        fs::create_dir_all(&root)?;
+        let base = backlog_repository(&root)?;
+        let backlog = root.join("docs/project/06-backlog-v1.md");
+        let check =
+            |base: Option<&str>| backlog_rows_in(&root, base).map_err(|err| format!("{err:#}"));
+        let reset = || -> Result<()> {
+            git_in(&root, &["reset", "-q", "--hard", &base])?;
+            Ok(())
+        };
+        let mut outcomes = Vec::new();
+
+        fs::write(&backlog, "# Backlog\n\n- **E1-1** a\n- **E1-3** added\n")?;
+        outcomes.push(("an added row", check(Some(&base))));
+        let push_base = base_ref_in(&root, None, Some("push"))?;
+        outcomes.push(("a push with no diff base", check(push_base.as_deref())));
+        reset()?;
+
+        fs::write(&backlog, "# Backlog\n\n- **E1-1** a\n- **E1-2** new\n")?;
+        git_in(&root, &["rm", "-q", "docs/project/backlog/E1-2-new.md"])?;
+        outcomes.push(("a fold", check(Some(&base))));
+        fs::write(
+            &backlog,
+            "# Backlog\n\n- **E1-1** a\n- **E1-2** new\n- **E1-3** x\n",
+        )?;
+        outcomes.push(("two added, one folded", check(Some(&base))));
+        reset()?;
+
+        fs::write(&backlog, "# Backlog\n\n- **E1-1** a\n- **E1-2** new\n")?;
+        git_in(
+            &root,
+            &["mv", "docs/project/backlog/E1-2-new.md", "docs/E1-2-new.md"],
+        )?;
+        outcomes.push(("a move out", check(Some(&base))));
+        fs::remove_dir_all(&root).ok();
+
+        let refused = |outcome: &Result<(), String>| {
+            outcome.as_ref().is_err_and(|err| err.contains("backlog:"))
+        };
+        assert_eq!(push_base, None, "a push on main has no diff base");
+        for (case, outcome) in &outcomes {
+            let passes = matches!(*case, "a fold" | "a push with no diff base");
+            assert_eq!(outcome.is_ok(), passes, "{case}: {outcome:?}");
+            assert!(
+                passes || refused(outcome),
+                "{case} is refused by the check: {outcome:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// `ci lint` runs the backlog check against the diff base it resolves (DEC-2373): a row added
+    /// to 06 fails the job naming the check, before the workspace checks run, whether the base is
+    /// given explicitly or, on a `pull_request` event, is the CI merge commit's first parent.
+    #[test]
+    fn the_lint_job_runs_the_backlog_check_on_its_repository() -> Result<()> {
+        let root =
+            env::temp_dir().join(format!("mandate-xtask-lint-backlog-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        fixture_workspace(&root)?;
+        for dir in [".github/workflows", ".github/scripts", "deploy", "scripts"] {
+            fs::create_dir_all(root.join(dir))?;
+        }
+        let base = backlog_repository(&root)?;
+        let explicit = |name: &str| (name == "MANDATE_BASE_REF").then(|| base.clone());
+        let clean = ci_lint(&root, explicit, || Ok(())).map_err(|err| format!("{err:#}"));
+        fs::write(
+            root.join("docs/project/06-backlog-v1.md"),
+            "# Backlog\n\n- **E1-1** a\n- **E1-3** added\n",
+        )?;
+        let reached = Cell::new(false);
+        let planted = ci_lint(&root, explicit, || {
+            reached.set(true);
+            Ok(())
+        })
+        .map_err(|err| format!("{err:#}"))
+        .err();
+        let commit = |args: &[&str]| {
+            let mut all = vec!["-c", "user.name=t", "-c", "user.email=t@t"];
+            all.extend_from_slice(args);
+            git_in(&root, &all)
+        };
+        git_in(&root, &["checkout", "-q", "-b", "pr"])?;
+        git_in(&root, &["add", "-A"])?;
+        commit(&["commit", "-qm", "the change"])?;
+        git_in(&root, &["checkout", "-q", "--detach", "main"])?;
+        commit(&["merge", "-q", "--no-ff", "--no-edit", "pr"])?;
+        let pull_request =
+            |name: &str| (name == "GITHUB_EVENT_NAME").then(|| "pull_request".to_owned());
+        let on_pull_request = ci_lint(&root, pull_request, || Ok(()))
+            .map_err(|err| format!("{err:#}"))
+            .err();
+        fs::remove_dir_all(&root).ok();
+        assert_eq!(clean, Ok(()), "a clean fixture repository passes");
+        assert!(
+            planted
+                .as_deref()
+                .is_some_and(|err| err.contains("backlog:")),
+            "a row added to 06 fails the lint job naming the check, got {planted:?}"
+        );
+        assert!(
+            on_pull_request
+                .as_deref()
+                .is_some_and(|err| err.contains("backlog:")),
+            "on a pull_request event the job compares against the merge's first parent, got \
+             {on_pull_request:?}"
+        );
+        assert!(
+            !reached.get(),
+            "the workspace checks run only after it passes"
+        );
+        Ok(())
+    }
+
+    /// `ci lint` hands [`ci_lint`] the process environment, so the backlog check reads the diff
+    /// base every diff-based job reads; a dispatch that handed it none would skip the check
+    /// everywhere (DEC-2373).
+    #[test]
+    fn ci_lint_reads_the_process_environment() -> Result<()> {
+        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"))?;
+        let arms: Vec<&str> = source
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("\"lint\" =>"))
+            .collect();
+        assert_eq!(
+            arms,
+            ["\"lint\" => ci_lint(Path::new(\".\"), |name| env::var(name).ok(), workspace_lint),"],
+            "ci's one lint arm passes the process environment"
+        );
+        Ok(())
+    }
 
     #[test]
     fn finds_plain_comments_but_not_docs_or_literals() {
@@ -13331,12 +13797,30 @@ mod tests {
         }
         fs::create_dir_all(&dir)?;
         let shard = crate::MutantShard { index: 0, total: 2 };
-        crate::record_unfinished(&dir, Some(shard), vec!["mandate-executor".to_owned()], 1);
+        let one = crate::launch_stop(
+            &dir,
+            Some(shard),
+            vec!["mandate-executor".to_owned()],
+            1,
+            Duration::from_secs(30),
+        );
+        assert_eq!(one, None, "a shard of one runs to its end");
         assert!(
             !dir.join(crate::mutant_costs::COST_FILE).exists(),
             "a shard of one leaves none"
         );
-        crate::record_unfinished(&dir, Some(shard), vec!["mandate-executor".to_owned()], 5);
+        let five = crate::launch_stop(
+            &dir,
+            Some(shard),
+            vec!["mandate-executor".to_owned()],
+            5,
+            Duration::from_secs(30),
+        );
+        assert_eq!(
+            five,
+            Some(Duration::from_secs(450)),
+            "480 s from the gate's start"
+        );
         let left: crate::mutant_costs::ShardCost = serde_json::from_str(&fs::read_to_string(
             dir.join(crate::mutant_costs::COST_FILE),
         )?)?;
@@ -17389,7 +17873,7 @@ mod tests {
     }
 
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
-    const SELECT_GATES: [(&str, &str); 19] = [
+    const SELECT_GATES: [(&str, &str); 20] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
         ("fast-python", "python"),
@@ -17409,6 +17893,7 @@ mod tests {
         ("cell-kill-switch", "cell"),
         ("cell-executor", "cell"),
         ("cell-vault", "cell"),
+        ("cell-exchange", "cell"),
     ];
 
     /// DEC-1190 in `ci.yml`: `select` runs `cargo xtask ci select` into its outputs and exposes each
@@ -19673,13 +20158,13 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            25,
+            26,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
              `full-checks`, `full-checks-2`, `full-checks-3` (DEC-2334), the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
              `schema-mutants`, `cell`, `cell-seeded` and `cell-upgrade` (DEC-464), `cell-demo` (DEC-2002), `cell-demo-web` (DEC-2609), \
              `cell-journal`, `cell-failover`, `cell-kill-switch` (DEC-2602), `cell-executor` \
-             (DEC-2615), `cell-vault` (DEC-2616), and `hosted-k3d` \
+             (DEC-2615), `cell-vault` (DEC-2616), `cell-exchange` (DEC-2063), and `hosted-k3d` \
              (E21-51)"
         );
         for checkout in checkouts {
@@ -20539,7 +21024,7 @@ jq -r "$filter" "$src"
             ),
         )?;
         let reached = Cell::new(false);
-        lint(&root, || {
+        lint(&root, None, || {
             reached.set(true);
             Ok(())
         })
@@ -20550,19 +21035,19 @@ jq -r "$filter" "$src"
         );
 
         fs::write(scripts.join("planted.sh"), "#!/usr/bin/env bash\nrm $1\n")?;
-        let shellcheck = lint(&root, || Ok(()))
+        let shellcheck = lint(&root, None, || Ok(()))
             .map_err(|err| format!("{err:#}"))
             .err();
         fs::remove_file(scripts.join("planted.sh"))?;
 
         fs::write(deploy.join("planted.sh"), "#!/usr/bin/env bash\nrm $1\n")?;
-        let deploy_shellcheck = lint(&root, || Ok(()))
+        let deploy_shellcheck = lint(&root, None, || Ok(()))
             .map_err(|err| format!("{err:#}"))
             .err();
         fs::remove_file(deploy.join("planted.sh"))?;
 
         fs::write(runbooks.join("planted.sh"), "#!/usr/bin/env bash\nrm $1\n")?;
-        let runbook_shellcheck = lint(&root, || Ok(()))
+        let runbook_shellcheck = lint(&root, None, || Ok(()))
             .map_err(|err| format!("{err:#}"))
             .err();
         fs::remove_file(runbooks.join("planted.sh"))?;
@@ -20577,7 +21062,7 @@ jq -r "$filter" "$src"
                 "    badopt: 1\n",
             ),
         )?;
-        let actionlint = lint(&root, || Ok(()))
+        let actionlint = lint(&root, None, || Ok(()))
             .map_err(|err| format!("{err:#}"))
             .err();
         fs::remove_dir_all(&root).ok();
@@ -25634,13 +26119,13 @@ jq -r "$filter" "$src"
             )
         };
         fs::write(workflows.join("ci.yml"), workflow("cargo check -p a"))?;
-        let clean = lint(&root, || Ok(())).map_err(|err| format!("{err:#}"));
+        let clean = lint(&root, None, || Ok(())).map_err(|err| format!("{err:#}"));
         fs::write(
             workflows.join("ci.yml"),
             workflow("cargo run -p a --features live"),
         )?;
         let reached = Cell::new(false);
-        let planted = lint(&root, || {
+        let planted = lint(&root, None, || {
             reached.set(true);
             Ok(())
         })
@@ -25674,13 +26159,13 @@ jq -r "$filter" "$src"
         for dir in [".github/workflows", ".github/scripts", "deploy", "scripts"] {
             fs::create_dir_all(root.join(dir))?;
         }
-        let clean = lint(&root, || Ok(())).map_err(|err| format!("{err:#}"));
+        let clean = lint(&root, None, || Ok(())).map_err(|err| format!("{err:#}"));
         fs::write(
             root.join("a/src/lib.rs"),
             "//! A fixture crate.\npub trait MailTransport {}\npub struct Leak;\nimpl MailTransport for Leak {}\n",
         )?;
         let reached = Cell::new(false);
-        let planted = lint(&root, || {
+        let planted = lint(&root, None, || {
             reached.set(true);
             Ok(())
         })
