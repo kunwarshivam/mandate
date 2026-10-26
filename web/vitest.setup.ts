@@ -26,8 +26,17 @@ vi.mock("@number-flow/react", async () => {
   return { default: NumberFlowMock };
 });
 
+/**
+ * Unmounts each test's tree, then cuts every iframe it held out of that removed tree. jsdom keeps an
+ * iframe's window alive after the element goes, and the window's `_frameElement` still links the
+ * iframe to its old parent and siblings, so without this every removed tree with an iframe in it
+ * (the landing page's app tab) stays in memory with its React fibers: about 50 MB a render, until
+ * the worker runs out of heap and its remaining tests never run.
+ */
 afterEach(() => {
+  const frames = typeof document === "undefined" ? [] : [...document.querySelectorAll("iframe")];
   cleanup();
+  for (const frame of frames) frame.remove();
   resetCharts();
 });
 
