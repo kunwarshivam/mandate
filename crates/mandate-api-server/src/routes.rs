@@ -19,6 +19,7 @@ use axum::response::Response;
 use mandate_api::problem::ProblemCode;
 use mandate_authn::Request;
 use mandate_canon::{Int, Key, Object, Value, to_canonical};
+use mandate_gate_context::{Journaled, Row};
 use mandate_identity::{
     Authorized, Permission, Principal, PrincipalId, Refusal, Scope, Session, TenantContext,
     WorkspaceId, authorize,
@@ -531,10 +532,16 @@ pub async fn one_agent(
         return Refused::NotFound.response();
     };
     let found = document(&app, deployment);
-    let account = match account_of(&app, &reader, found.as_ref()).await {
-        Ok(account) => account.map(|(_, rows)| rows),
+    let read_account = match account_of(&app, &reader, found.as_ref()).await {
+        Ok(account) => account,
         Err(refusal) => return refusal.response(),
     };
+    let account_stream = read_account
+        .as_ref()
+        .map(|(reference, _)| format!("acct:{workspace}:{reference}"));
+    let account = read_account.map(|(_, rows)| rows);
+    let clock_stream = format!("clock:{workspace}");
+    let clock = app.journal.rows(&clock_stream).await.ok();
     let mut members = agent_members(&agent(deployment, rows), found.as_ref());
     members.push((
         "account_positions",
@@ -543,9 +550,66 @@ pub async fn one_agent(
             .filter(|rows| !rows.is_empty())
             .map_or(Value::Null, |rows| Value::Array(account_positions(rows))),
     ));
+    members.push((
+        "openings_held",
+        openings_held(
+            &reader.control,
+            account_stream
+                .as_deref()
+                .zip(account.as_deref().filter(|rows| !rows.is_empty())),
+            clock.as_deref().map(|rows| (clock_stream.as_str(), rows)),
+            &deployment.0,
+            found.as_ref().map(|document| document.pinned),
+        ),
+    ));
     let mut streams: Vec<&[StoredEvent]> = vec![rows.as_slice()];
     streams.extend(account.as_deref());
     served(&reader, &streams, vec![("agent", object(members))])
+}
+
+/// One stream the fold reads: its id and its rows, or `None` when it could not be read.
+type FoldStream<'a> = Option<(&'a str, &'a [StoredEvent])>;
+
+/// `read-models/agent`'s `openings_held` (DEC-2143): the binding gate's source's own answer,
+/// [`Journaled::opening_hold`], folded from the streams the executor folds for it, in its order
+/// (the control stream, the account stream, the scheduler's clock stream), and whether the
+/// deployed document pins its universe, as `{"reason": <code>}`, or `null` exactly when no such
+/// hold applies. When the account stream is not found or holds no row (as `account_positions`
+/// reads it), the clock stream is not read, the document cannot
+/// be read, or a row cannot be read, it is `{"reason": "unknown"}`, never `null`: the fold then
+/// holds every opening, so openings may be held.
+fn openings_held(
+    control: &[StoredEvent],
+    account: FoldStream<'_>,
+    clock: FoldStream<'_>,
+    agent_id: &str,
+    pinned: Option<bool>,
+) -> Value {
+    let reason = |code: &str| object(vec![("reason", string(code))]);
+    let (Some((account_stream, account_rows)), Some((clock_stream, clock_rows)), Some(pinned)) =
+        (account, clock, pinned)
+    else {
+        return reason("unknown");
+    };
+    let mut fold = Journaled::new(account_stream, clock_stream, agent_id);
+    for row in control.iter().chain(account_rows).chain(clock_rows) {
+        let Some(payload) = mandate_canon::parse(&row.body)
+            .ok()
+            .and_then(|event| event.get("payload").cloned())
+        else {
+            return reason("unknown");
+        };
+        let read = fold.fold(Row {
+            stream: &row.stream_id,
+            event_type: &row.event_type,
+            payload: &payload,
+        });
+        if read.is_err() {
+            return reason("unknown");
+        }
+    }
+    fold.opening_hold(pinned)
+        .map_or(Value::Null, |hold| reason(hold.code()))
 }
 
 /// Every approval of every deployed agent, with the streams read.

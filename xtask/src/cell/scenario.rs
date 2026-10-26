@@ -1803,8 +1803,8 @@ pub fn run_in(name: &str) -> Result<String> {
             SCENARIOS.join(", ")
         );
     }
-    if let Some(reason) = tools_missing() {
-        bail!("the scenario needs docker, k3d and helm: {reason} (deploy/cell/README.md)");
+    if let Some(reason) = scenario_tools_missing(tools_missing(), kubectl_answers()) {
+        bail!("the scenario needs docker, k3d, helm and kubectl: {reason} (deploy/cell/README.md)");
     }
     up()?;
     let id = run_id()?;
@@ -2973,10 +2973,24 @@ pub fn signin_verdict(
     }
 }
 
-/// `cargo xtask ci cell-demo`: the scenario on the CI runner's cell. Skipped without docker, k3d
-/// and helm unless CI requires it.
+/// Why the scenario cannot run on this machine: the cell's own tools ([`tools_missing`]'s
+/// reason), else no `kubectl`. Without `kubectl` the run could neither point the API and the
+/// deployment managers at its workspace nor read a pod, so the managers would watch the chart's
+/// default workspace and step 2 would blame them for an executor they were never told to start
+/// (lane IAC's run at 876438b, 2026-10-26).
+fn scenario_tools_missing(cell: Option<String>, kubectl: bool) -> Option<String> {
+    cell.or_else(|| (!kubectl).then(|| "`kubectl version --client` did not succeed".to_owned()))
+}
+
+/// Whether `kubectl version --client` succeeds on this machine.
+fn kubectl_answers() -> bool {
+    output("kubectl", &["version", "--client"]).is_ok()
+}
+
+/// `cargo xtask ci cell-demo`: the scenario on the CI runner's cell. Skipped without docker, k3d,
+/// helm and kubectl unless CI requires it.
 pub fn ci() -> Result<()> {
-    if let Some(reason) = tools_missing() {
+    if let Some(reason) = scenario_tools_missing(tools_missing(), kubectl_answers()) {
         if std::env::var_os(CELL_REQUIRED_ENV).is_some() {
             bail!("{CELL_REQUIRED_ENV} is set but {reason}");
         }
@@ -2990,6 +3004,22 @@ pub fn ci() -> Result<()> {
 mod tests {
     use super::Readiness::{Partial, Ready, Skipped};
     use super::*;
+
+    /// The scenario needs `kubectl` beside the cell's own tools, and names whichever is missing
+    /// first, the cell's before `kubectl`'s.
+    #[test]
+    fn the_scenario_refuses_a_machine_without_kubectl() {
+        assert_eq!(super::scenario_tools_missing(None, true), None);
+        assert_eq!(
+            super::scenario_tools_missing(None, false).as_deref(),
+            Some("`kubectl version --client` did not succeed")
+        );
+        assert_eq!(
+            super::scenario_tools_missing(Some("`helm version` did not succeed".into()), false)
+                .as_deref(),
+            Some("`helm version` did not succeed")
+        );
+    }
 
     fn mandate() -> Vec<u8> {
         fs::read(format!("../{MANDATE_FILE}")).unwrap()
