@@ -1009,8 +1009,10 @@ The inbox and the single read return `read-models/approvals` and `read-models/ap
 and `schema_version`, the `ApprovalRequested` version `content` comes from (1, 2 or 3;
 [DEC-2518](../project/decisions/DEC-2518.md)). Version 3's content names the checks its dry run
 deferred (journal spec §9.6, rule 291) and versions 1 and 2 name none, so a client tells a
-version 3 request without its list from an older one, and shows it as unreadable, never as
-nothing deferred (mandate spec §6.4).
+version 3 request without its list from an older one and shows it as unreadable, never as
+nothing deferred (mandate spec §6.4). A version 1 or 2 request whose decision, written in another
+batch, deferred checks is not caught here: that is rule 292's cross-batch debt
+(`E21-30-approval-deferral-range-check`).
 The state is folded from the agent stream, and the first terminal event wins: `pending` until
 re-validation acts (`acted`) or the approval ends `skipped` (by the owner's Skip or by
 re-validation), `timed_out`, or `canceled`. An admitted grant still awaiting re-validation, and a
