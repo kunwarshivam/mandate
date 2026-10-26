@@ -140,7 +140,10 @@ On a host that refuses any process a negative `oom_score_adj`, even as root (som
 every pod then fails with `failed to update /proc/self/oom_score_adj: Permission denied`), set
 `MANDATE_CELL_RESTRICT_OOM=1` before the cluster is created (`cargo xtask cell down` first if one
 is running): the node's containerd then keeps each container's score at or above its own
-(`restrict_oom_score_adj`). These are local-cell results, never staging's (DEC-967 item 5).
+(`restrict_oom_score_adj`). In a cloud session whose small disk allowance sits under the kubelet's
+default hard-eviction thresholds (the node takes a `disk-pressure` taint and evicts the cell's pods
+with disk to spare), set `MANDATE_CELL_LOW_EVICTION=1` before the cluster is created: it lowers the
+`nodefs` and `imagefs` thresholds to 1%. It is off by default and never for CI or a laptop. These are local-cell results, never staging's (DEC-967 item 5).
 
 ### On a laptop
 

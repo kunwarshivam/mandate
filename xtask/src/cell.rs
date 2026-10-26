@@ -164,6 +164,14 @@ const RESTRICT_OOM_ENV: &str = "MANDATE_CELL_RESTRICT_OOM";
 /// The k3s containerd drop-in [`RESTRICT_OOM_ENV`] mounts, and where k3s imports it from.
 const RESTRICT_OOM_DROPIN: &str =
     "[plugins.'io.containerd.cri.v1.runtime']\n  restrict_oom_score_adj = true\n";
+/// Set on a sandbox whose small disk allowance sits under the kubelet's default hard-eviction
+/// thresholds (free `nodefs` and `imagefs`): the node then takes a disk-pressure taint and evicts
+/// the cell's pods although the disk still has room. Lowers both thresholds to 1% on the cluster
+/// it creates; default off, for cloud sessions only, never CI or a laptop.
+const LOW_EVICTION_ENV: &str = "MANDATE_CELL_LOW_EVICTION";
+/// The kubelet's hard-eviction thresholds under [`LOW_EVICTION_ENV`].
+const LOW_EVICTION_ARG: &str =
+    "--kubelet-arg=eviction-hard=nodefs.available<1%,imagefs.available<1%@server:0";
 const CONTAINERD_DROPINS: &str = "/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d";
 /// Set by CI: a missing docker, k3d or helm fails the cell job instead of skipping it.
 pub const CELL_REQUIRED_ENV: &str = "MANDATE_CELL_REQUIRED";
@@ -1601,27 +1609,9 @@ fn cluster_exists() -> Result<bool> {
 /// `cloudflared` pod (DEC-967 item 6), never a k3s add-on. On a cgroup v1 host k3s 1.35's
 /// kubelet must be told to start anyway.
 fn create_cluster() -> Result<()> {
-    let mut args: Vec<String> = [
-        "cluster",
-        "create",
-        CLUSTER,
-        "--image",
-        K3S_IMAGE,
-        "--no-lb",
-        "--k3s-arg",
-        "--disable=traefik@server:0",
-        "--k3s-arg",
-        "--disable=servicelb@server:0",
-        "--kubeconfig-update-default=false",
-        "--wait",
-        "--timeout",
-        "180s",
-    ]
-    .map(String::from)
-    .to_vec();
-    if env::consts::OS == "linux" && !Path::new("/sys/fs/cgroup/cgroup.controllers").exists() {
-        args.extend(["--k3s-arg", "--kubelet-arg=fail-cgroupv1=false@server:0"].map(String::from));
-    }
+    let cgroup_v1 =
+        env::consts::OS == "linux" && !Path::new("/sys/fs/cgroup/cgroup.controllers").exists();
+    let mut args = cluster_args(cgroup_v1, env::var_os(LOW_EVICTION_ENV).is_some());
     if let Some(bundle) = env::var_os(EXTRA_CA_ENV) {
         let bundle = PathBuf::from(bundle);
         args.push("--volume".into());
@@ -1645,6 +1635,37 @@ fn create_cluster() -> Result<()> {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     sh("k3d", &args)?;
     api_server_ready()
+}
+
+/// `k3d cluster create`'s arguments before the volumes: the cell's one-node cluster, told to start
+/// on a cgroup v1 host, and with the kubelet's hard-eviction thresholds lowered under
+/// [`LOW_EVICTION_ENV`].
+fn cluster_args(cgroup_v1: bool, low_eviction: bool) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "cluster",
+        "create",
+        CLUSTER,
+        "--image",
+        K3S_IMAGE,
+        "--no-lb",
+        "--k3s-arg",
+        "--disable=traefik@server:0",
+        "--k3s-arg",
+        "--disable=servicelb@server:0",
+        "--kubeconfig-update-default=false",
+        "--wait",
+        "--timeout",
+        "180s",
+    ]
+    .map(String::from)
+    .to_vec();
+    if cgroup_v1 {
+        args.extend(["--k3s-arg", "--kubelet-arg=fail-cgroupv1=false@server:0"].map(String::from));
+    }
+    if low_eviction {
+        args.extend(["--k3s-arg", LOW_EVICTION_ARG].map(String::from));
+    }
+    args
 }
 
 /// A chart from its GitHub release, kept under `target/cell` as `name` and checked by SHA-256
@@ -5872,6 +5893,49 @@ mod tests {
 
     /// A drill job runs both variants locally, and one each in CI's matrix; any other value is
     /// refused rather than running nothing.
+    /// The cluster's default arguments are exactly the ones before [`LOW_EVICTION_ENV`] existed, so
+    /// CI and a laptop create the same cluster; the switch adds only the kubelet's lowered
+    /// hard-eviction thresholds, and the cgroup v1 argument is independent of it.
+    #[test]
+    fn the_low_eviction_switch_is_off_by_default_and_adds_only_its_kubelet_arg() {
+        let base = [
+            "cluster",
+            "create",
+            "mandate-cell",
+            "--image",
+            K3S_IMAGE,
+            "--no-lb",
+            "--k3s-arg",
+            "--disable=traefik@server:0",
+            "--k3s-arg",
+            "--disable=servicelb@server:0",
+            "--kubeconfig-update-default=false",
+            "--wait",
+            "--timeout",
+            "180s",
+        ];
+        assert_eq!(
+            cluster_args(false, false),
+            base,
+            "the default cluster changed"
+        );
+        let cgroup_v1 = ["--k3s-arg", "--kubelet-arg=fail-cgroupv1=false@server:0"];
+        assert_eq!(
+            cluster_args(true, false),
+            [&base[..], &cgroup_v1[..]].concat()
+        );
+        let low = [
+            "--k3s-arg",
+            "--kubelet-arg=eviction-hard=nodefs.available<1%,imagefs.available<1%@server:0",
+        ];
+        assert_eq!(cluster_args(false, true), [&base[..], &low[..]].concat());
+        assert_eq!(
+            cluster_args(true, true),
+            [&base[..], &cgroup_v1[..], &low[..]].concat()
+        );
+        assert_eq!(LOW_EVICTION_ENV, "MANDATE_CELL_LOW_EVICTION");
+    }
+
     #[test]
     fn a_drill_job_runs_the_drills_its_matrix_names() -> Result<()> {
         assert_eq!(
