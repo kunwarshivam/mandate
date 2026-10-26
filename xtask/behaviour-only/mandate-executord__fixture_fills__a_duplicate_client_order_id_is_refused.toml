@@ -1,0 +1,7 @@
+file = "crates/mandate-executord/tests/fixture_fills.rs"
+test = "a_duplicate_client_order_id_is_refused"
+reason = """
+`FixturePaper::filling` is a stub that rests every order as `FixturePaper::new` does: the
+duplicate is refused, but nothing fills, so the one fill the test expects is missing. The test
+fails on that behaviour, not at a stub's report. X1b-3's implementation deletes this row.
+"""

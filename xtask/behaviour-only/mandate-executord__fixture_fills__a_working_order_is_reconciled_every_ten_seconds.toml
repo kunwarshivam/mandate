@@ -1,0 +1,7 @@
+file = "crates/mandate-executord/tests/fixture_fills.rs"
+test = "a_working_order_is_reconciled_every_ten_seconds"
+reason = """
+The process schedules no reconciliation while an order works, so the pass ten seconds on reads
+nothing. The test fails on that behaviour, not at a stub's report. X1b-3's implementation
+schedules one every ten seconds and deletes this row.
+"""

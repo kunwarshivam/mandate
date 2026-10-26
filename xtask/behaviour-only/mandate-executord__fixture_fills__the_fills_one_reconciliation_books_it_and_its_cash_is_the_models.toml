@@ -1,0 +1,7 @@
+file = "crates/mandate-executord/tests/fixture_fills.rs"
+test = "the_fills_one_reconciliation_books_it_and_its_cash_is_the_models"
+reason = """
+`FixturePaper::filling` is a stub that rests every order, and the process schedules no
+reconciliation: no fill is booked. The test fails on that behaviour, not at a stub's report.
+X1b-3's implementation fills the order, schedules the reconciliation, and deletes this row.
+"""
