@@ -14,6 +14,7 @@ mandate-audit = { path = "crates/mandate-audit", version = "0.0.0" }
 mandate-artifacts-fs = { path = "crates/mandate-artifacts-fs", version = "0.0.0" }
 mandate-authn = { path = "crates/mandate-authn", version = "0.0.0" }
 mandate-backtest = { path = "crates/mandate-backtest", version = "0.0.0" }
+mandate-bars = { path = "crates/mandate-bars", version = "0.0.0" }
 mandate-builder = { path = "crates/mandate-builder", version = "0.0.0" }
 mandate-canon = { path = "crates/mandate-canon", version = "0.0.0" }
 mandate-cp-agent = { path = "crates/mandate-cp-agent", version = "0.0.0" }
