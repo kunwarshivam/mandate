@@ -41,6 +41,7 @@ import canceled
 import confirmations
 import credentials
 import step_up_assertions
+import stepped_up
 import connection_roles
 import control_plane
 import deployed
@@ -3914,6 +3915,7 @@ def render(
     step_up_assertions_section: dict,
     account_closes_section: dict,
     connection_roles_section: dict,
+    stepped_up_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3965,6 +3967,7 @@ def render(
             "step_up_assertions": step_up_assertions_section,
             "account_closes": account_closes_section,
             "connection_roles": connection_roles_section,
+            "stepped_up_records": stepped_up_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -4047,6 +4050,7 @@ def main(argv: list[str] | None = None) -> int:
     step_up_assertions_section = step_up_assertions.build_section()
     account_closes_section = account_closes.build_section()
     connection_roles_section = connection_roles.build_section()
+    stepped_up_section = stepped_up.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -4112,6 +4116,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += owner_confirmations.run_mutants(owner_confirmations_section)
     problems += account_closes.check_section(account_closes_section)
     problems += account_closes.run_mutants(account_closes_section)
+    problems += stepped_up.check_section(stepped_up_section)
+    problems += stepped_up.run_mutants(stepped_up_section)
     problems += connection_requested.check_section(connection_requested_section)
     problems += connection_requested.run_mutants(connection_requested_section)
     problems += check_broker_profile(broker_profile)
@@ -4196,6 +4202,7 @@ def main(argv: list[str] | None = None) -> int:
         step_up_assertions_section,
         account_closes_section,
         connection_roles_section,
+        stepped_up_section,
     )
     reread = yaml.safe_load(rendered)
     canonical_self_test()
@@ -4247,6 +4254,7 @@ def main(argv: list[str] | None = None) -> int:
         or market_intents.check_section(reread["market_intents"])
         or owner_confirmations.check_section(reread["owner_confirmations"])
         or account_closes.check_section(reread["account_closes"])
+        or stepped_up.check_section(reread["stepped_up_records"])
         or connection_roles.check_section(reread["connection_roles"])
         or connection_requested.check_section(reread["connection_requested"])
     ):
@@ -4333,6 +4341,11 @@ def main(argv: list[str] | None = None) -> int:
         f"AccountCloseRequested drafts and {len(account_closes_section['streams'])} rule-260 streams, "
         f"{len(account_closes.VALIDATOR_MUTANTS)} validator, {len(account_closes.STREAM_MUTANTS)} stream and "
         f"{len(account_closes.vector_mutants(account_closes_section))} vector mutants caught; "
+        f"{len(stepped_up_section['invalid_drafts'])} invalid and {len(stepped_up_section['valid_drafts'])} valid "
+        f"version-3 MandateConfirmed and AgentDeployed drafts, {len(stepped_up_section['batches'])} rule-253 batches, "
+        f"{len(stepped_up_section['mappings'])} mappings and {len(stepped_up_section['streams'])} rule-201 streams, "
+        f"{len(stepped_up.VALIDATOR_MUTANTS)} validator, {len(stepped_up.READER_MUTANTS)} reader and "
+        f"{len(stepped_up.vector_mutants(stepped_up_section))} vector mutants caught; "
         f"{len(connection_requested_section['invalid_drafts'])} invalid and {len(connection_requested_section['valid_drafts'])} valid "
         f"rule-255 ConnectionRequested drafts, {len(connection_requested.VALIDATOR_MUTANTS)} validator and "
         f"{len(connection_requested.vector_mutants(connection_requested_section))} vector mutants caught; "

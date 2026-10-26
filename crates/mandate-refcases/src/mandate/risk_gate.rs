@@ -286,7 +286,9 @@ fn failed_checks(checks: &[CheckOutcome]) -> Vec<(Check, ReasonCode)> {
         .iter()
         .filter_map(|outcome| match outcome {
             CheckOutcome::Failed(check, reason) => Some((*check, *reason)),
-            CheckOutcome::Passed(_) | CheckOutcome::NotReached(_) => None,
+            CheckOutcome::Passed(_) | CheckOutcome::NotReached(_) | CheckOutcome::Deferred(_) => {
+                None
+            }
         })
         .collect()
 }

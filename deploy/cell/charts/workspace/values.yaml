@@ -63,15 +63,14 @@ alpacaOAuth:
 oauthFixture:
   enabled: false
 
-# The data process (mandate-datad), once images.data is named: the deployed instrument whose
-# daily bars it stores from the cell's recorded series, and the series' anchor, the close it has on
-# one session, `<YYYY-MM-DD>=<close>`; each session after it closes 0.1 higher. Both required with
-# the image: a recording, never market data, so only the local and CI cell names it.
+# The data process (mandate-datad), once images.data is named: each instrument whose daily and
+# minute bars it stores from the cell's recorded series, as `{symbol, assetId, anchor}`. The asset
+# id is the one the instrument's closes object names; the anchor is the close the series has on one
+# session, `<YYYY-MM-DD>=<close>`, and each session after it closes 0.1 higher. At least one is
+# required with the image, each symbol once: a recording, never market data, so only the local and
+# CI cell lists any.
 data:
-  symbol: ""
-  # The instrument's asset id, which the closes object the runtime's observation names carries.
-  assetId: ""
-  anchor: ""
+  instruments: []
 
 # The workspace API server's settings (workspace API spec §3.11 item 2), each required once
 # images.api is named. None is a secret: the session signing key is made in the pod's memory at

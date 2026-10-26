@@ -17,15 +17,14 @@ use mandate_datad::series::RECORDED_ROOT;
 
 const BIN: &str = env!("CARGO_BIN_EXE_mandate-datad");
 const BOUND: Duration = Duration::from_secs(20);
-/// The demo instrument's series, as the chart starts the process.
-const SERIES: [&str; 6] = [
-    "--symbol",
-    "SPY",
-    "--asset-id",
-    "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
-    "--anchor",
-    "2026-01-02=600",
+/// The demo instruments' series, as the chart starts the process.
+const SERIES: [&str; 2] = [
+    "--instruments",
+    "SPY:b0b6dd9d-8b9b-48a9-ba46-b9d54906e415:2026-01-02=600,\
+     QQQ:eb82ffb0-efd6-4f4e-9307-8fead28e04f6:2026-01-02=500",
 ];
+/// The symbols [`SERIES`] names, in its order.
+const SYMBOLS: [&str; 2] = ["SPY", "QQQ"];
 
 /// A child process that is killed when the test ends, passing or not.
 struct Guard(Child);
@@ -79,30 +78,53 @@ fn without_its_arguments_the_process_refuses() {
     for (args, said) in [
         (
             [&["run", "--artifacts", "/a"][..], &SERIES].concat(),
-            "store_symbol_or_anchor_missing\n",
+            "store_or_instruments_missing\n",
         ),
         (
             [&["run", "--store", "/x"][..], &SERIES].concat(),
-            "store_symbol_or_anchor_missing\n",
+            "store_or_instruments_missing\n",
         ),
         (
-            [
-                &["run", "--store", "/x", "--artifacts", "/a"][..],
-                &SERIES[..4],
-                &["--anchor", "2026-01-02"],
-            ]
-            .concat(),
-            "anchor_malformed\n",
+            vec!["run", "--store", "/x", "--artifacts", "/a"],
+            "store_or_instruments_missing\n",
+        ),
+        (
+            vec![
+                "run",
+                "--store",
+                "/x",
+                "--artifacts",
+                "/a",
+                "--instruments",
+                "SPY:b0b6dd9d-8b9b-48a9-ba46-b9d54906e415:2026-01-02",
+            ],
+            "instruments_malformed\n",
+        ),
+        (
+            vec![
+                "run",
+                "--store",
+                "/x",
+                "--artifacts",
+                "/a",
+                "--instruments",
+                "SPY:a:2026-01-02=600,SPY:b:2026-01-02=600",
+            ],
+            "instruments_malformed\n",
         ),
     ] {
-        let output = Command::new(BIN)
+        let child = Command::new(BIN)
             .args(&args)
             .arg("--probe")
             .arg(&socket)
-            .output()
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
             .unwrap();
-        assert_eq!(output.status.code(), Some(2), "{args:?}");
-        assert_eq!(String::from_utf8_lossy(&output.stderr), said, "{args:?}");
+        let (status, stderr) = Guard(child).exited();
+        assert_eq!(status.code(), Some(2), "{args:?}");
+        assert_eq!(stderr, said, "{args:?}");
     }
 }
 
@@ -131,10 +153,12 @@ fn a_store_it_cannot_write_refuses_the_start() {
         stderr.starts_with("series_not_stored: store_refused\n"),
         "{stderr}"
     );
-    assert!(
-        !stderr.contains("SPY") && !stderr.contains("spy"),
-        "{stderr}"
-    );
+    for symbol in SYMBOLS {
+        assert!(
+            !stderr.contains(symbol) && !stderr.contains(&symbol.to_lowercase()),
+            "{stderr}"
+        );
+    }
 }
 
 #[test]
@@ -164,14 +188,18 @@ fn the_ready_process_has_stored_the_series_and_drains_on_sigterm() {
         thread::sleep(Duration::from_millis(50));
     }
     assert_eq!(probe(&socket, "livez"), Some(0));
-    let manifest = store
-        .join(RECORDED_ROOT)
-        .join("alpaca/iex/bars-1Day/SPY/manifest.json");
-    assert!(
-        manifest.is_file(),
-        "ready only once stored: {}",
-        manifest.display()
-    );
+    for symbol in SYMBOLS {
+        for kind in ["bars-1Day", "bars-1Min"] {
+            let manifest = store
+                .join(RECORDED_ROOT)
+                .join(format!("alpaca/iex/{kind}/{symbol}/manifest.json"));
+            assert!(
+                manifest.is_file(),
+                "ready only once stored: {}",
+                manifest.display()
+            );
+        }
+    }
     let killed = Command::new("kill")
         .args(["-TERM", &child.0.id().to_string()])
         .status()
@@ -180,14 +208,19 @@ fn the_ready_process_has_stored_the_series_and_drains_on_sigterm() {
     let (status, stderr) = child.exited();
     assert_eq!(status.code(), Some(0));
     let lines: Vec<&str> = stderr.lines().collect();
-    assert_eq!(lines.len(), 2, "{stderr}");
-    let digest = lines[0]
-        .strip_prefix("closes_stored sha256:")
-        .expect("the closes object's digest, once");
-    assert_eq!(digest.len(), 64, "a digest and nothing else: {stderr}");
-    let object = dir.join("artifacts/sha256").join(&digest[..2]).join(digest);
-    assert!(object.is_file(), "{}", object.display());
-    assert_eq!(lines[1], "drained");
+    assert_eq!(lines.len(), SYMBOLS.len() + 1, "{stderr}");
+    let mut digests = Vec::new();
+    for line in &lines[..SYMBOLS.len()] {
+        let digest = line
+            .strip_prefix("closes_stored sha256:")
+            .expect("each instrument's closes object's digest, once");
+        assert_eq!(digest.len(), 64, "a digest and nothing else: {stderr}");
+        let object = dir.join("artifacts/sha256").join(&digest[..2]).join(digest);
+        assert!(object.is_file(), "{}", object.display());
+        digests.push(digest);
+    }
+    assert_ne!(digests[0], digests[1], "each instrument has its own closes");
+    assert_eq!(lines[SYMBOLS.len()], "drained");
     assert_eq!(
         probe(&socket, "readyz"),
         Some(1),

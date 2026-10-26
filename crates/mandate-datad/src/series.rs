@@ -50,6 +50,32 @@ pub fn due(since_last: Option<Duration>) -> bool {
     since_last.is_none_or(|elapsed| elapsed >= REFRESH)
 }
 
+/// How far back, in calendar days, [`minute_day`] looks for a trading day: past any run of
+/// closed days the calendar holds.
+pub const MINUTE_LOOKBACK_DAYS: i64 = 10;
+
+/// The latest trading day on or before `now`'s New York date, within [`MINUTE_LOOKBACK_DAYS`]:
+/// the day whose minute bars [`publish_minutes`] stores.
+///
+/// # Errors
+/// [`SeriesError::Calendar`] past the calendar's range.
+pub fn minute_day(calendar: &ExchangeCalendar, now: UtcNanos) -> Result<Option<Date>, SeriesError> {
+    let (today, _) = new_york_date_and_hour(now)?;
+    let back = MINUTE_LOOKBACK_DAYS
+        .checked_mul(DAY_S)
+        .and_then(|span| now.secs().checked_sub(span))
+        .ok_or(SeriesError::OutOfReach)?;
+    let (mut day, _) = new_york_date_and_hour(UtcNanos::from_parts(back, 0)?)?;
+    let mut latest = None;
+    while day <= today {
+        if calendar.is_trading_day(day)? {
+            latest = Some(day);
+        }
+        day = day.next()?;
+    }
+    Ok(latest)
+}
+
 /// How far back the walk for the sessions starts, in days: comfortably more than [`SESSIONS`]
 /// sessions, holidays included.
 const LOOKBACK_DAYS: i64 = 60;
@@ -78,6 +104,8 @@ pub enum SeriesError {
     Untrusted,
     #[error("the artifact store cannot be opened or written")]
     Artifacts,
+    #[error("the instruments are not `<symbol>:<asset-id>:<anchor>`, comma-separated, each once")]
+    Instruments,
 }
 
 impl SeriesError {
@@ -94,6 +122,7 @@ impl SeriesError {
             Self::Decimal => "bar_not_decimal",
             Self::Untrusted => "series_untrusted",
             Self::Artifacts => "artifacts_unavailable",
+            Self::Instruments => "instruments_malformed",
         }
     }
 }
@@ -116,6 +145,59 @@ impl Anchor {
         Price::parse(close).map_err(|_| SeriesError::Anchor)?;
         let close = Usd::parse(close).map_err(|_| SeriesError::Anchor)?;
         Ok(Self { date, close })
+    }
+}
+
+/// One instrument the process stores: its symbol, the asset id its closes object names, and its
+/// series' anchor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Instrument {
+    pub symbol: String,
+    pub asset_id: String,
+    pub anchor: Anchor,
+}
+
+impl Instrument {
+    /// `<symbol>:<asset-id>:<YYYY-MM-DD>=<close>`, the symbol one the dataset admits and the asset
+    /// id not empty.
+    ///
+    /// # Errors
+    /// [`SeriesError::Instruments`] for a malformed symbol, asset id or shape, and
+    /// [`SeriesError::Anchor`] for a malformed anchor.
+    pub fn parse(text: &str) -> Result<Self, SeriesError> {
+        let mut parts = text.split(':');
+        let (Some(symbol), Some(asset_id), Some(anchor), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return Err(SeriesError::Instruments);
+        };
+        Symbol::parse(symbol).map_err(|_| SeriesError::Instruments)?;
+        if asset_id.is_empty() {
+            return Err(SeriesError::Instruments);
+        }
+        Ok(Self {
+            symbol: symbol.to_owned(),
+            asset_id: asset_id.to_owned(),
+            anchor: Anchor::parse(anchor)?,
+        })
+    }
+
+    /// The chart's `--instruments`: one or more [`Instrument::parse`] texts, comma-separated, no
+    /// symbol twice, in the order given.
+    ///
+    /// # Errors
+    /// [`SeriesError::Instruments`] for an empty list or a symbol named twice, and any error of
+    /// [`Instrument::parse`].
+    pub fn parse_list(text: &str) -> Result<Vec<Self>, SeriesError> {
+        let mut all: Vec<Self> = Vec::new();
+        for one in text.split(',') {
+            let instrument = Self::parse(one)?;
+            if all.iter().any(|seen| seen.symbol == instrument.symbol) {
+                return Err(SeriesError::Instruments);
+            }
+            all.push(instrument);
+        }
+        Ok(all)
     }
 }
 
@@ -301,9 +383,12 @@ pub fn session_minutes(
     Ok(bars)
 }
 
-/// Stores today's regular-session minute bars for `symbol` under `root`'s [`RECORDED_ROOT`], today
-/// being `now`'s New York date: `None` on a closed day, which stores nothing. Idempotent: the day's
-/// bars never change, so a second write leaves them as they are.
+/// Stores the regular-session minute bars of the latest trading day up to `now`'s New York date
+/// ([`minute_day`]) for `symbol` under `root`'s [`RECORDED_ROOT`]: today's on a trading day, and the
+/// last session's on a closed one, so the dataset is there to inspect on any day, and a reader at
+/// a closed day's clock finds none of its bars inside the trailing window. `None` only when no
+/// trading day lies within [`MINUTE_LOOKBACK_DAYS`]. Idempotent: a day's bars never change, so a
+/// second write leaves them as they are.
 ///
 /// # Errors
 /// Any [`SeriesError`], the store's conflict included.
@@ -314,7 +399,9 @@ pub fn publish_minutes(
     calendar: &ExchangeCalendar,
     now: UtcNanos,
 ) -> Result<Option<Published>, SeriesError> {
-    let (day, _) = new_york_date_and_hour(now)?;
+    let Some(day) = minute_day(calendar, now)? else {
+        return Ok(None);
+    };
     let bars = session_minutes(calendar, anchor, day)?;
     let Some(first) = bars.first() else {
         return Ok(None);

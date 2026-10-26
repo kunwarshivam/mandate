@@ -701,6 +701,7 @@ fn push(records: &mut Vec<ControlRecord>, event_type: &str, payload: &str) {
     let (event_type, payload) = (event_type.to_owned(), json(payload));
     records.push(ControlRecord {
         seq,
+        event_time: None,
         event_type,
         payload,
         origin: Origin {

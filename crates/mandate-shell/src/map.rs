@@ -58,7 +58,7 @@ pub fn decided(decision: &Decision, purpose: Purpose) -> DryRunVerdict {
 fn is_not_reached(outcome: &CheckOutcome) -> bool {
     match outcome {
         CheckOutcome::NotReached(_) => true,
-        CheckOutcome::Passed(_) | CheckOutcome::Failed(..) => false,
+        CheckOutcome::Passed(_) | CheckOutcome::Failed(..) | CheckOutcome::Deferred(_) => false,
     }
 }
 

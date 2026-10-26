@@ -35,6 +35,15 @@ claim issue or the decision file, not here.
 
 ## Sessions
 
+- **2026-10-26, 02:00 to 06:00 UTC, the coordinator on the new account.** It took over from the
+  handover with one builder and independent Sonnet reviewers, and landed #2450, #2465, #2479,
+  #2462, #2466, #2468, #2467, #2471, #2453, #2480, #2457, #2482 and #2483 (#2456 closed as
+  superseded). Reviews found and the session fixed: four passkey-enrolment test gaps; two fixture
+  mutants #2442 left; the cell plan's AUTO on unseen facts, then its DENY rules on them; the
+  approvers fold judging a grant against the read's last roster; and the cell's API refusing its
+  own origin since #2403 (DEC-2132). #2475's passkey confirm cannot commit on a real journal, since
+  rule 253 reads a `step_up` that `MandateConfirmed` lacks; DEC-2131 orders the fix. The handover
+  file now holds the state.
 - **2026-10-20 and 21, the autonomous coordinator session.** The founder's Claude usage ran out at 2026-10-19 18:17Z and twenty PRs sat behind a red `main`. The session repaired four independent faults (DEC-2632: a passkey schema with no `.valid.json`, two schema-ahead stems after `SCHEMA_AHEAD_OF_TYPE` was emptied, 54 secret-scan false positives, `RUSTSEC-2026-0382`), then found why nothing could merge: `cell-demo-web` is in neither aggregate's `needs` but `merge-approved.sh` judged the whole run, and the job had never passed since #1666 (DEC-2634). Seventeen PRs landed across lanes LV, X, V2, L1, TW, AH, I2 and D1, most through the `merge` workflow. Nine were closed as superseded with evidence rather than merged: the lane-X stack's three duplicates (contained in #2036), the vault tests halves (their implementations had landed, and the drafts would have deleted main's lines), and three tests halves of new crates that cannot pass the mutation gate at all — a crate with no live test is one `unjudged_mutants` refuses to judge (DEC-139), which collides with DEC-77's tests-first order. DEC-917 makes a crate's `tests/` directory not-code to the ES-22 split guard, and DEC-2635 gives the guard a finite PR-numbered exception list for J1. One correction is on the record: the session closed #2022 claiming its halves split cleanly, CI disproved it, and it was reopened with the finding written down.
 - **2026-10-19, the approval request.** The founder asked about the approval page after the gate decision was tightened. The action was display size, so the risk sat under Approve and Skip. It is now one line at the page title, and Skip stays the refusal (DEC-2409). `web/` only.
 - **2026-10-18, late evening: the founder's decisions, the demo's checks, staging's first

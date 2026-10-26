@@ -221,9 +221,21 @@ fn the_rp_id_is_the_app_origins_host() {
         reduction::rp_id("https://app-staging.owlhead.ai:8443").as_deref(),
         Some("app-staging.owlhead.ai")
     );
+    for (local, id) in [
+        ("https://localhost", "localhost"),
+        ("https://localhost:4317", "localhost"),
+    ] {
+        assert_eq!(
+            reduction::rp_id(local).as_deref(),
+            Some(id),
+            "the local cell's origin (DEC-2132): {local}"
+        );
+    }
     for refused in [
         "http://app.owlhead.ai",
-        "https://localhost",
+        "http://localhost:4317",
+        "https://intranet",
+        "https://xlocalhost",
         "app.owlhead.ai",
         "https://",
     ] {

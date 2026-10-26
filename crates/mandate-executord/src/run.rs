@@ -5,6 +5,7 @@
 //! serve path cannot pair the paper broker with a wiring that reads no quote.
 
 use mandate_alpaca::{DataTransport, Pause, TradingTransport};
+use mandate_executor::AccountScope;
 
 use crate::Wiring;
 use crate::alpaca::AlpacaBroker;
@@ -36,10 +37,11 @@ impl<B> Run<B> {
 /// The fixture wiring's refusal.
 pub fn fixture(
     broker: AlpacaBroker<FixturePaper>,
+    scope: &AccountScope,
 ) -> Result<Run<AlpacaBroker<FixturePaper>>, &'static str> {
     Ok(Run {
         broker,
-        wiring: fixture::wiring()?,
+        wiring: fixture::wiring(scope)?,
     })
 }
 
@@ -48,11 +50,15 @@ pub fn fixture(
 ///
 /// # Errors
 /// The paper wiring's refusal.
-pub fn paper<T, P>(broker: AlpacaBroker<T>, clock: P) -> Result<Run<AlpacaBroker<T>>, &'static str>
+pub fn paper<T, P>(
+    broker: AlpacaBroker<T>,
+    clock: P,
+    scope: &AccountScope,
+) -> Result<Run<AlpacaBroker<T>>, &'static str>
 where
     T: TradingTransport + DataTransport + Clone + 'static,
     P: Pause + 'static,
 {
-    let wiring = paper_wiring(&broker, clock)?;
+    let wiring = paper_wiring(&broker, clock, scope)?;
     Ok(Run { broker, wiring })
 }

@@ -27,6 +27,10 @@ pub enum BarsError {
     Model(#[from] ModelError),
     #[error(transparent)]
     Num(#[from] NumError),
+    /// A liquidity rule refused its figure: too few sessions, or no complete minute in the
+    /// trailing window (DEC-2274).
+    #[error(transparent)]
+    Liquidity(#[from] mandate_liquidity::LiquidityError),
 }
 
 fn untrusted(what: &'static str) -> BarsError {
