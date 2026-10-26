@@ -215,7 +215,7 @@ fn serve<S: Store>(
     let terminated = || terminate.load(Ordering::SeqCst);
     let mut say = |line: &str| eprintln!("{line}");
     let Some(mount) = paper else {
-        let run = run::fixture(AlpacaBroker::new(FixturePaper::new(host_now()))?)?;
+        let run = run::fixture(AlpacaBroker::new(FixturePaper::filling(host_now()))?)?;
         let edge = Edge {
             now: &host_now,
             tick: &mut |_| None,

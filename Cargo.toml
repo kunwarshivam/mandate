@@ -49,6 +49,7 @@ mandate-notify = { path = "crates/mandate-notify", version = "0.0.0" }
 mandate-telemetry = { path = "crates/mandate-telemetry", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
 mandate-passkey = { path = "crates/mandate-passkey", version = "0.0.0" }
+mandate-gate-context = { path = "crates/mandate-gate-context", version = "0.0.0" }
 mandate-ports = { path = "crates/mandate-ports", version = "0.0.0" }
 mandate-process = { path = "crates/mandate-process", version = "0.0.0" }
 mandate-provisioner = { path = "crates/mandate-provisioner", version = "0.0.0" }
