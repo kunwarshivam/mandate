@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Value};
-use mandate_daemon::production::{Facts, Gate, UNJOURNALED, verdict};
+use mandate_daemon::production::{Facts, Gate, UNJOURNALED, UNSEEN, verdict};
 use mandate_gate_context::{Freshness, gate_rule_set};
 use mandate_journal::StoredEvent;
 use mandate_num::{Price, Qty};
@@ -176,8 +176,37 @@ fn an_opening_the_gate_allows_is_still_denied_while_its_checks_are_deferred() {
     let proposal = opening("3", "99.95");
     let advisory = gate.advisory(&proposal).unwrap();
     assert_eq!(advisory.decision.verdict, Verdict::Allow, "{advisory:?}");
-    assert_eq!(advisory.deferred, BTreeSet::from(UNJOURNALED));
-    for deferred in UNJOURNALED {
+    let every: BTreeSet<Deferred> = UNJOURNALED.into_iter().chain(UNSEEN).collect();
+    assert_eq!(
+        every,
+        BTreeSet::from([
+            Deferred::Eligibility,
+            Deferred::LiquidityFloor,
+            Deferred::Participation,
+            Deferred::DayTradeBudget,
+            Deferred::AgentMode,
+            Deferred::AgentEquity,
+            Deferred::ReentryCooldown,
+            Deferred::Halt,
+            Deferred::OtherOrders,
+            Deferred::QuoteAsk,
+            Deferred::ConductHistory,
+            Deferred::RelatedAccounts,
+            Deferred::FeeReservation,
+            Deferred::AccountExposure,
+        ]),
+        "DEC-2378 item 11's four and DEC-2388 item 8's ten, pinned by name"
+    );
+    assert_eq!(advisory.deferred, every);
+    assert!(
+        !advisory
+            .decision
+            .checks
+            .iter()
+            .any(|outcome| matches!(outcome, CheckOutcome::Passed(_))),
+        "nothing the dry run cannot see is reported passed: {advisory:?}"
+    );
+    for deferred in every {
         assert!(
             advisory
                 .decision
@@ -461,21 +490,15 @@ fn order(rows: &mut Rows, id: &str, purpose: &str, side: &str, fill: Option<(&st
 /// refuse the plan's own opening is never answered an allow with nothing deferred.
 #[test]
 fn no_unseen_fact_that_should_refuse_is_answered_an_allow_with_nothing_deferred() {
-    let thirty_seconds_ago = "2026-10-26T14:59:30.000000000Z";
+    let filled_now = REGULAR;
     let mut exited = journaled_with(&RICH);
-    order(
-        &mut exited,
-        "o1",
-        "open",
-        "buy",
-        Some(("1", thirty_seconds_ago)),
-    );
+    order(&mut exited, "o1", "open", "buy", Some(("1", filled_now)));
     order(
         &mut exited,
         "o2",
         "discretionary_exit",
         "sell",
-        Some(("1", thirty_seconds_ago)),
+        Some(("1", filled_now)),
     );
     let mut busy = journaled_with(&RICH);
     for n in 0..50 {
@@ -495,21 +518,25 @@ fn no_unseen_fact_that_should_refuse_is_answered_an_allow_with_nothing_deferred(
             r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":1,"equity":"299.85","cash":"299.85","buying_power":"299.85","non_marginable_buying_power":"299.85","risk_clock":"{REGULAR}"}}"#
         ),
     );
-    for (fact, rows) in [
+    for (fact, part, rows) in [
         (
             "the last exit fill, inside the re-entry cooldown and the opposite-fill interval",
+            Deferred::ReentryCooldown,
             exited,
         ),
         (
             "50 orders today, at the cap and with no fill against them",
+            Deferred::ConductHistory,
             busy,
         ),
         (
             "a related account's sell resting in the instrument",
+            Deferred::RelatedAccounts,
             related,
         ),
         (
             "cash for the order's notional and nothing for its fees",
+            Deferred::FeeReservation,
             cash_without_fees,
         ),
     ] {
@@ -521,6 +548,20 @@ fn no_unseen_fact_that_should_refuse_is_answered_an_allow_with_nothing_deferred(
             "{fact}: {advisory:?}"
         );
         assert_ne!(gate.check(&proposal), DryRunVerdict::Allow, "{fact}");
+        assert!(
+            advisory.is_ok(),
+            "{fact}: evaluated, not held: {advisory:?}"
+        );
+        if let Ok(advisory) = &advisory {
+            assert!(advisory.deferred.contains(&part), "{fact}: {advisory:?}");
+            assert!(
+                !advisory
+                    .decision
+                    .checks
+                    .contains(&CheckOutcome::Passed(part.check())),
+                "{fact}: its check is never reported passed: {advisory:?}"
+            );
+        }
     }
 }
 

@@ -626,8 +626,13 @@ proptest! {
                 Just(Deferred::LiquidityFloor),
                 Just(Deferred::Participation),
                 Just(Deferred::DayTradeBudget),
+                Just(Deferred::ReentryCooldown),
+                Just(Deferred::Halt),
+                Just(Deferred::ConductHistory),
+                Just(Deferred::RelatedAccounts),
+                Just(Deferred::FeeReservation),
             ],
-            0..=4,
+            0..=9,
         ),
     ) {
         let qty = if varied.fractional { format!("{units}.5") } else { units.to_string() };

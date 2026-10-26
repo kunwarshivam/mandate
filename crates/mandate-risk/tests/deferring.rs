@@ -58,6 +58,7 @@ fn fail(s: &mut Scenario, check: Deferred) -> ReasonCode {
             };
             ReasonCode::LegacyPdtDayTradeBudget
         }
+        unseen => panic!("{unseen:?} is never skipped, so no fact of it is lifted"),
     }
 }
 
@@ -210,6 +211,179 @@ proptest! {
         if expected.verdict == Verdict::Deny {
             let binding = evaluate(&s.input()).unwrap();
             prop_assert_eq!(binding.verdict, Verdict::Deny, "deny under deferral is deny binding");
+        }
+    }
+}
+
+/// The parts of a check the cell's runtime cannot see a fact for (DEC-2388 item 8): the gate
+/// evaluates them on what its caller gives, so a refusal still refuses, but never reports them
+/// passed.
+const UNSEEN: [Deferred; 10] = [
+    Deferred::AgentMode,
+    Deferred::AgentEquity,
+    Deferred::ReentryCooldown,
+    Deferred::Halt,
+    Deferred::OtherOrders,
+    Deferred::QuoteAsk,
+    Deferred::ConductHistory,
+    Deferred::RelatedAccounts,
+    Deferred::FeeReservation,
+    Deferred::AccountExposure,
+];
+
+/// Changes `s` so that the unseen part `part` refuses it, and the reason the binding gate gives.
+fn refuse_on(s: &mut Scenario, part: Deferred) -> ReasonCode {
+    let instrument = s.proposed.instrument.clone();
+    match part {
+        Deferred::AgentMode => {
+            s.agent.mode = mandate_risk::AgentMode::ExitsOnly;
+            ReasonCode::AgentExitsOnly
+        }
+        Deferred::AgentEquity => {
+            s.risk.agent_equity = usd("50");
+            ReasonCode::ConcentrationLimit
+        }
+        Deferred::OtherOrders => {
+            s.account.unknown_orders.insert(instrument);
+            ReasonCode::UnknownOrderInFlight
+        }
+        Deferred::QuoteAsk => {
+            if let Some(quote) = s.market.quote.as_mut() {
+                quote.ask = common::price("200");
+            }
+            ReasonCode::PriceOutsideCollar
+        }
+        Deferred::AccountExposure => {
+            let equity = s.account.equity;
+            s.account
+                .market_values
+                .insert(common::asset(common::INSTRUMENT_1), equity);
+            ReasonCode::GrossExposureLimit
+        }
+        Deferred::ReentryCooldown => {
+            s.agent
+                .last_exit_fill_at
+                .insert(instrument, common::at("2026-09-21T14:59:00Z"));
+            ReasonCode::ReentryCooldown
+        }
+        Deferred::Halt => {
+            s.instrument.halted = true;
+            ReasonCode::InstrumentHalted
+        }
+        Deferred::ConductHistory => {
+            s.agent.orders_today = common::two_stock_swing_limits().max_orders_per_day;
+            ReasonCode::MaxOrdersPerDay
+        }
+        Deferred::RelatedAccounts => {
+            s.account.related_account_resting.insert(
+                instrument,
+                BTreeSet::from([mandate_risk::RestingSide::Sell]),
+            );
+            ReasonCode::ConductLimitBreached
+        }
+        Deferred::FeeReservation => {
+            s.proposed.fee_reservation = usd("1000000000");
+            ReasonCode::InsufficientBuyingPower
+        }
+        skipped => panic!("{skipped:?} is a check the pass skips, not an unseen part"),
+    }
+}
+
+/// An unseen part is never skipped: deferred, it still refuses with the binding gate's reason, so
+/// naming it can only stop a pass from being claimed, never lift a refusal.
+#[test]
+fn an_unseen_part_deferred_still_refuses_with_the_binding_reason() {
+    for part in UNSEEN {
+        let mut s = Scenario::allowing();
+        let reason = refuse_on(&mut s, part);
+        let binding = evaluate(&s.input()).unwrap();
+        assert_eq!(binding.reason, Some(reason), "{part:?}");
+        let mut every = ALL.to_vec();
+        every.extend(UNSEEN);
+        let advisory = evaluate_deferring(&s.input(), &deferring(&every)).unwrap();
+        assert_eq!(
+            (advisory.decision.verdict, advisory.decision.reason),
+            (binding.verdict, binding.reason),
+            "{part:?}"
+        );
+        assert!(
+            advisory
+                .decision
+                .checks
+                .contains(&CheckOutcome::Failed(part.check(), reason)),
+            "{part:?}: a refusing part reads Failed on its check, never Deferred: {advisory:?}"
+        );
+    }
+}
+
+/// An unseen part that passes is reported deferred on its check, never passed, and named.
+#[test]
+fn an_unseen_part_that_passes_reads_as_deferred_on_its_check() {
+    let s = Scenario::allowing();
+    for part in UNSEEN {
+        let advisory = evaluate_deferring(&s.input(), &deferring(&[part])).unwrap();
+        assert_eq!(advisory.decision.verdict, Verdict::Allow, "{part:?}");
+        assert_eq!(advisory.deferred, deferring(&[part]), "{part:?}");
+        assert!(
+            advisory
+                .decision
+                .checks
+                .contains(&CheckOutcome::Deferred(part.check())),
+            "{part:?}: {advisory:?}"
+        );
+        assert!(
+            !advisory
+                .decision
+                .checks
+                .contains(&CheckOutcome::Passed(part.check())),
+            "{part:?}"
+        );
+    }
+}
+
+#[test]
+fn each_unseen_part_belongs_to_the_check_that_reads_it() {
+    assert_eq!(Deferred::AgentMode.check(), Check::AccountAndMode);
+    assert_eq!(Deferred::AgentEquity.check(), Check::UniverseAndLimits);
+    assert_eq!(Deferred::OtherOrders.check(), Check::OrderConstraints);
+    assert_eq!(Deferred::QuoteAsk.check(), Check::MarkAndCollar);
+    assert_eq!(
+        Deferred::AccountExposure.check(),
+        Check::BuyingPowerAndExposure
+    );
+    assert_eq!(Deferred::ReentryCooldown.check(), Check::UniverseAndLimits);
+    assert_eq!(Deferred::Halt.check(), Check::SessionAndHalt);
+    assert_eq!(Deferred::ConductHistory.check(), Check::ConductControls);
+    assert_eq!(Deferred::RelatedAccounts.check(), Check::ConductControls);
+    assert_eq!(
+        Deferred::FeeReservation.check(),
+        Check::BuyingPowerAndExposure
+    );
+}
+
+/// Over every set of the ten unseen parts and the four skipped checks together, an allowed
+/// opening reports each touched check deferred and every other passed.
+#[test]
+fn no_check_an_unseen_part_touches_reads_as_passed() {
+    let s = Scenario::allowing();
+    let mut every = ALL.to_vec();
+    every.extend(UNSEEN);
+    for mask in 0..(1_u32 << every.len()) {
+        let set: Vec<Deferred> = every
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask & (1 << i) != 0)
+            .map(|(_, d)| *d)
+            .collect();
+        let touched: BTreeSet<Check> = set.iter().map(|d| d.check()).collect();
+        let advisory = evaluate_deferring(&s.input(), &deferring(&set)).unwrap();
+        assert_eq!(advisory.decision.verdict, Verdict::Allow, "{set:?}");
+        for outcome in &advisory.decision.checks {
+            match outcome {
+                CheckOutcome::Deferred(check) => assert!(touched.contains(check), "{set:?}"),
+                CheckOutcome::Passed(check) => assert!(!touched.contains(check), "{set:?}"),
+                other => panic!("{set:?}: {other:?}"),
+            }
         }
     }
 }

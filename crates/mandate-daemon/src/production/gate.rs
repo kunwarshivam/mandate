@@ -1,8 +1,8 @@
 //! The deployment's gate dry run over the journaled fold (DEC-2388): `mandate-ports`'s advisory
-//! pass over a context built from [`Facts`], with DEC-2378 item 11's four checks deferred to the
-//! executor's binding gate. It can only narrow: every opening it allows is still judged by the
-//! binding gate on the account stream (`AGENTS.md` rules 1 and 12), and while any check is
-//! deferred it allows none.
+//! pass over a context built from [`Facts`], with DEC-2378 item 11's four checks and DEC-2388
+//! item 8's unseen parts deferred to the executor's binding gate. It can only narrow: every
+//! opening it allows is still judged by the binding gate on the account stream (`AGENTS.md`
+//! rules 1 and 12), and while any check is deferred it allows none.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -28,6 +28,22 @@ pub const UNJOURNALED: [Deferred; 4] = [
     Deferred::LiquidityFloor,
     Deferred::Participation,
     Deferred::DayTradeBudget,
+];
+
+/// The parts of the gate's checks whose facts the fold does not carry (DEC-2388 items 7 and 8):
+/// evaluated on what the context holds, so a refusal still refuses, and named, so none is ever
+/// reported passed. Each leaves this set only once its fact is folded from the journal.
+pub const UNSEEN: [Deferred; 10] = [
+    Deferred::AgentMode,
+    Deferred::AgentEquity,
+    Deferred::ReentryCooldown,
+    Deferred::Halt,
+    Deferred::OtherOrders,
+    Deferred::QuoteAsk,
+    Deferred::ConductHistory,
+    Deferred::RelatedAccounts,
+    Deferred::FeeReservation,
+    Deferred::AccountExposure,
 ];
 
 const DEFERRED_TO_BINDING: &str = "deferred_to_binding";
@@ -66,7 +82,8 @@ impl Gate {
         }
     }
 
-    /// The advisory pass of the opening `proposal` over the fold, with [`UNJOURNALED`] deferred,
+    /// The advisory pass of the opening `proposal` over the fold, with [`UNJOURNALED`] and [`UNSEEN`]
+    /// deferred,
     /// or the reason it could not be evaluated: `rule_set_unavailable`, `facts_held` for a fact
     /// the fold holds, `working_orders_unseen` while any order of the agent's works, whose cost
     /// the fold cannot see, and `gate_refused` when the gate refuses to evaluate it or types it as
@@ -88,8 +105,9 @@ impl Gate {
             .facts
             .read(|journaled| self.context(journaled, proposal, config, mandate))
             .ok_or(FACTS_HELD)??;
-        let advisory = evaluate_deferring(proposal, &context, &BTreeSet::from(UNJOURNALED))
-            .map_err(|_| GATE_REFUSED)?;
+        let deferred = UNJOURNALED.into_iter().chain(UNSEEN).collect();
+        let advisory =
+            evaluate_deferring(proposal, &context, &deferred).map_err(|_| GATE_REFUSED)?;
         match advisory.decision.purpose {
             GatePurpose::Open | GatePurpose::Increase => Ok(advisory),
             _ => Err(GATE_REFUSED),
