@@ -17,6 +17,7 @@
 use mandate_domain::Environment;
 use mandate_journal::{StoredEvent, StreamId};
 use mandate_journal_pg::PgJournal;
+use mandate_num::SignedQty;
 use mandate_robinhood::AccountSnapshot;
 use mandate_shell::control::ControlRecord;
 use mandate_shell::{Cause, ShellError, Stage};
@@ -125,11 +126,17 @@ pub fn lapse_read(
     unspent(connection, &rows, &held(snapshot))
 }
 
-/// What the snapshot lists, counted (DEC-470 item 1): every position record and every working
-/// order, re-derived by nothing else (DEC-918 item 1).
+/// What the snapshot lists, counted (DEC-470 item 1): every position record of a non-zero
+/// quantity, long or short, and every working order, re-derived by nothing else (DEC-918 item 1).
+/// A row of quantity exactly zero is a sold-out position the broker still lists, and is flat
+/// ([DEC-2390](../../../docs/project/decisions/DEC-2390.md) item 1, the founder's).
 fn held(snapshot: &AccountSnapshot) -> Held {
     Held {
-        positions: snapshot.positions.len(),
+        positions: snapshot
+            .positions
+            .iter()
+            .filter(|position| position.qty != SignedQty::ZERO)
+            .count(),
         open_orders: snapshot.open_orders.len(),
     }
 }

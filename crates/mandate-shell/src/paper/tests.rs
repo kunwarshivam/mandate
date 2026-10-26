@@ -1175,6 +1175,37 @@ fn a_quote_and_record_exactly_at_the_bound_and_a_locked_quote_pass() -> Result<(
     Ok(())
 }
 
+/// DEC-2390 item 1 (the founder's): a position row of quantity exactly zero is a sold-out
+/// position the broker still lists, and the account is empty; a short row is a holding and
+/// refuses, as a long one does.
+#[test]
+fn a_sold_out_row_of_zero_is_an_empty_account_and_a_short_row_is_not() -> Result<(), String> {
+    let loaded = artifacts()?;
+    let row = |quantity: &str| -> Result<BrokerPosition, String> {
+        Ok(BrokerPosition {
+            instrument: symbol(INSTRUMENT_ID)?,
+            qty: SignedQty::parse(quantity).map_err(text)?,
+            avg_entry_price: price("255.2")?,
+        })
+    };
+    let mut sold_out = facts_at(NOW, NOW)?;
+    sold_out.broker.positions.push(row("0")?);
+    load_contexts(&loaded, &sold_out, at(NOW)?, &agent(), Environment::Paper).map_err(text)?;
+    let mut short = facts_at(NOW, NOW)?;
+    short.broker.positions.push(row("-1")?);
+    assert_eq!(
+        refusal(load_contexts(
+            &loaded,
+            &short,
+            at(NOW)?,
+            &agent(),
+            Environment::Paper
+        ))?,
+        "a paper account with no position and no open order"
+    );
+    Ok(())
+}
+
 #[test]
 fn the_clock_must_be_inside_the_regular_session_and_before_its_close_window() -> Result<(), String>
 {
