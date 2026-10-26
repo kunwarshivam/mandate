@@ -1,7 +1,9 @@
 //! What the service is started with, read from its environment (E21-62, DEC-2272 item 7, DEC-2207):
 //! every value is required and none has a default, so a value the chart does not render, the
 //! spending caps above all, stops the start with its code rather than running on a number no one
-//! named (DEC-79). Each is read once, at start.
+//! named (DEC-79). Each is read once, at start. The one exception is the research store the
+//! service writes (DEC-2279 item 5): without it every put is refused `store_unavailable`, which
+//! halts research (item 3), and adds no risk.
 
 use mandate_gateway::money::Usd6;
 use secrecy::{ExposeSecret, SecretString};
@@ -18,6 +20,10 @@ pub struct Config {
     journal_dsn: SecretString,
     /// The artifact store, mounted read-only (DEC-2272 item 7), `MANDATE_ARTIFACTS`.
     pub artifacts: String,
+    /// The research store, a store of its own and the service's one writable mount (DEC-2279
+    /// item 5), `MANDATE_RESEARCH_ARTIFACTS`; `None` when unset or empty, and then the service
+    /// stores nothing.
+    pub research_artifacts: Option<String>,
     /// The workspace's monthly model budget, `MANDATE_GATEWAY_WORKSPACE_MONTHLY_USD`.
     pub workspace_monthly: Usd6,
     /// The deployment's monthly model budget, `MANDATE_GATEWAY_DEPLOYMENT_MONTHLY_USD`.
@@ -80,6 +86,7 @@ impl Config {
                 ConfigError::JournalMissing,
             )?),
             artifacts: named("MANDATE_ARTIFACTS", ConfigError::ArtifactsMissing)?,
+            research_artifacts: var("MANDATE_RESEARCH_ARTIFACTS").filter(|value| !value.is_empty()),
             workspace_monthly: amount(
                 "MANDATE_GATEWAY_WORKSPACE_MONTHLY_USD",
                 ConfigError::WorkspaceBudget,
