@@ -85565,7 +85565,7 @@ account_restrictions:
     expect:
       outcome: Valid
 account_activity:
-  spec: docs/specs/journal.md §9.5 rules 297 to 299 (DEC-2803)
+  spec: docs/specs/journal.md §9.5 rules 297 and 298 (DEC-2803)
   drafts:
     external_order:
       envelope_version: 1
@@ -85787,6 +85787,60 @@ account_activity:
       outcome: Invalid
       reason: schema
       path: payload.fill_id
+  - name: order_reports_instrument_before_side
+    clause: 'rule 298: the members in the table''s order'
+    base_draft: external_order
+    changes:
+    - path: payload.side
+      value: null
+    - path: payload.instrument
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument
+  - name: fill_reports_client_order_id_before_instrument
+    clause: 'rule 297: the members in the table''s order'
+    base_draft: external_fill
+    changes:
+    - path: payload.instrument
+      value: SPY
+    - path: payload.client_order_id
+      value: theirs-1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: client_order_id_empty
+    clause: '§9.5: an empty broker field is written `null`'
+    base_draft: external_order
+    changes:
+    - path: payload.client_order_id
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.client_order_id
+  - name: instrument_empty
+    clause: '§9.5: an empty broker field is written `null`'
+    base_draft: external_order
+    changes:
+    - path: payload.instrument
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument
+  - name: fill_id_empty
+    clause: '§9.5: an empty broker field is written `null`'
+    base_draft: external_fill
+    changes:
+    - path: payload.fill_id
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.fill_id
   - name: order_reports_side_before_qty
     clause: 'rule 298: the members in the table''s order'
     base_draft: external_order
@@ -85949,32 +86003,22 @@ account_activity:
       outcome: Invalid
       reason: schema
       path: payload.account_number
-  - name: abandoned_another_order
-    clause: 'rule 299: the intent''s own order'
-    base_draft: abandoned
-    changes:
-    - path: payload.client_order_id
-      value: md-01JAE3A0A000000000000000N2
-    expect:
-      outcome: Invalid
-      reason: schema
-      path: payload.client_order_id
-  - name: abandoned_without_prefix
-    clause: 'rule 299: `md-` then the intent'
-    base_draft: abandoned
-    changes:
-    - path: payload.client_order_id
-      value: 01JAE3A0A000000000000000N1
-    expect:
-      outcome: Invalid
-      reason: schema
-      path: payload.client_order_id
   - name: abandoned_reason_unknown
     clause: '§9.5: `reason` is one of the four'
     base_draft: abandoned
     changes:
     - path: payload.reason
       value: max_intent_age
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reason
+  - name: abandoned_reason_empty
+    clause: '§9.5: `reason` is one of the four'
+    base_draft: abandoned
+    changes:
+    - path: payload.reason
+      value: ''
     expect:
       outcome: Invalid
       reason: non_canonical
@@ -86044,6 +86088,22 @@ account_activity:
     changes:
     - path: payload.client_order_id
       value: theirs-1
+    expect:
+      outcome: Valid
+  - name: order_with_an_md_id_we_do_not_hold
+    clause: 'rule 298: an id of our form the executor does not know'
+    base_draft: external_order
+    changes:
+    - path: payload.client_order_id
+      value: md-01JAE3A0A000000000000000N9
+    expect:
+      outcome: Valid
+  - name: abandoned_any_client_order_id
+    clause: '§9.5: no rule binds the id to the intent'
+    base_draft: abandoned
+    changes:
+    - path: payload.client_order_id
+      value: md-01JAE3A0A000000000000000N2
     expect:
       outcome: Valid
   - name: order_sell_fractional
@@ -86133,7 +86193,7 @@ account_activity:
     expect:
       outcome: Valid
   - name: abandoned_w_intent
-    clause: 'rule 299: the executor''s own exit''s intent'
+    clause: '§9.5: the executor''s own exit''s intent is an `id`'
     base_draft: abandoned
     changes:
     - path: payload.intent_id
@@ -86143,7 +86203,7 @@ account_activity:
     expect:
       outcome: Valid
   - name: abandoned_k_intent
-    clause: 'rule 299: the executor''s own exit''s intent'
+    clause: '§9.5: the executor''s own exit''s intent is an `id`'
     base_draft: abandoned
     changes:
     - path: payload.intent_id

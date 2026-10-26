@@ -1962,12 +1962,16 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         fill = p["source"] == "fill"
         if fill:
             members = ("client_order_id", "instrument", "side", "qty")
+            if "rule.297.order" in skip:
+                members = ("instrument", "client_order_id", "side", "qty")
             if "rule.297.broker_order_id" not in skip:
                 members = ("broker_order_id",) + members
             wrong = next((m for m in members if p[m] is not None), None)
             rule("297", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
         else:
             required = ("instrument", "side", "qty")
+            if "rule.298.order" in skip:
+                required = ("side", "instrument", "qty")
             if "rule.298.side" in skip:
                 required = ("instrument", "qty")
             fill_null = p["fill_id"] is None or "rule.298.fill_id" in skip
@@ -1976,11 +1980,6 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
                 rule("298", False, "schema", "payload.fill_id")
             else:
                 rule("298", missing is None, "schema", f"payload.{missing}" if missing else "")
-    if event_type == "OrderAbandoned":
-        derived = p["client_order_id"] == f"md-{p['intent_id']}"
-        if "rule.299.suffix" in skip:
-            derived = p["client_order_id"].endswith(p["intent_id"])
-        rule("299", derived, "schema", "payload.client_order_id")
     if event_type == "AccountCloseRequested":
         qty = normalize_decimal(p["qty"])
         if qty is None:

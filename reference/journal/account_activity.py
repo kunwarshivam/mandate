@@ -2,7 +2,7 @@
 `OrderAbandoned` (DEC-2803): the broker's activity the executor did not originate, a reject it
 answered with, and an intent the executor gave up on.
 
-The schemas and rules 297 to 299 live in `control.py`, beside §9.5's other account-stream records,
+The schemas and rules 297 and 298 live in `control.py`, beside §9.5's other account-stream records,
 so one validator judges every closed schema. This module builds the `account_activity` section: a
 base draft of each record and each source, an invalid draft for every member type and each clause
 of the rules, and valid drafts for what the rules might be misread to refuse. Its own oracle reads
@@ -31,7 +31,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md §9.5 rules 297 to 299 (DEC-2803)"
+SPEC = "docs/specs/journal.md §9.5 rules 297 and 298 (DEC-2803)"
 ACCOUNT = f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}"
 AT = "2026-10-26T15:00:00.250000000Z"
 RISK_CLOCK = "2026-10-26T15:00:01.000000000Z"
@@ -42,7 +42,6 @@ REJECT = "reject"
 ABANDONED = "abandoned"
 RULE_297 = "rule 297"
 RULE_298 = "rule 298"
-RULE_299 = "rule 299"
 REASONS = ("intent_too_old", "gate_recheck", "released_to_owner", "unprotected_interval_limit")
 # The members whose presence each source decides, in the table's order.
 SOURCED = ("broker_order_id", "fill_id", "client_order_id", "instrument", "side", "qty")
@@ -120,6 +119,15 @@ def invalid_drafts() -> list[dict]:
                        [change(at(member), None)], at(member)))
     out.append(bad("order_reports_fill_id_first", f"{RULE_298}: `fill_id` before the open order's members",
                    EXTERNAL_ORDER, [change(at("qty"), None), change(at("fill_id"), "f-1")], at("fill_id")))
+    out.append(bad("order_reports_instrument_before_side", f"{RULE_298}: the members in the table's order",
+                   EXTERNAL_ORDER, [change(at("side"), None), change(at("instrument"), None)], at("instrument")))
+    out.append(bad("fill_reports_client_order_id_before_instrument", f"{RULE_297}: the members in the table's order",
+                   EXTERNAL_FILL, [change(at("instrument"), "SPY"), change(at("client_order_id"), "theirs-1")],
+                   at("client_order_id")))
+    for member in ("client_order_id", "instrument", "fill_id"):
+        base = EXTERNAL_FILL if member == "fill_id" else EXTERNAL_ORDER
+        out.append(bad(f"{member}_empty", "§9.5: an empty broker field is written `null`", base,
+                       [change(at(member), "")], at(member), "non_canonical"))
     out.append(bad("order_reports_side_before_qty", f"{RULE_298}: the members in the table's order",
                    EXTERNAL_ORDER, [change(at("qty"), None), change(at("side"), None)], at("side")))
     out += [
@@ -150,12 +158,10 @@ def invalid_drafts() -> list[dict]:
             [delete(at("client_order_id"))], at("client_order_id")),
         bad("reject_extra_account_number", "§9.5: the schema is closed", REJECT,
             [change(at("account_number"), "x")], at("account_number")),
-        bad("abandoned_another_order", f"{RULE_299}: the intent's own order", ABANDONED,
-            [change(at("client_order_id"), "md-01JAE3A0A000000000000000N2")], at("client_order_id")),
-        bad("abandoned_without_prefix", f"{RULE_299}: `md-` then the intent", ABANDONED,
-            [change(at("client_order_id"), INTENT)], at("client_order_id")),
         bad("abandoned_reason_unknown", "§9.5: `reason` is one of the four", ABANDONED,
             [change(at("reason"), "max_intent_age")], at("reason"), "non_canonical"),
+        bad("abandoned_reason_empty", "§9.5: `reason` is one of the four", ABANDONED, [change(at("reason"), "")],
+            at("reason"), "non_canonical"),
         bad("abandoned_reason_null", "§9.5: `reason` is never null", ABANDONED, [change(at("reason"), None)],
             at("reason")),
         bad("abandoned_intent_not_an_id", "§9.1: an id", ABANDONED, [change(at("intent_id"), "an intent")],
@@ -185,6 +191,10 @@ def valid_drafts() -> list[dict]:
            [change(at("broker_order_id"), None)]),
         ok("order_with_their_client_order_id", f"{RULE_298}: another system's client order id", EXTERNAL_ORDER,
            [change(at("client_order_id"), "theirs-1")]),
+        ok("order_with_an_md_id_we_do_not_hold", f"{RULE_298}: an id of our form the executor does not know",
+           EXTERNAL_ORDER, [change(at("client_order_id"), "md-01JAE3A0A000000000000000N9")]),
+        ok("abandoned_any_client_order_id", "§9.5: no rule binds the id to the intent", ABANDONED,
+           [change(at("client_order_id"), "md-01JAE3A0A000000000000000N2")]),
         ok("order_sell_fractional", "§9.5: either side, a decimal quantity", EXTERNAL_ORDER,
            [change(at("side"), "sell"), change(at("qty"), "0.5")]),
         ok("fill_without_fill_id", f"{RULE_297}: a broker may send an empty fill id", EXTERNAL_FILL,
@@ -199,14 +209,14 @@ def valid_drafts() -> list[dict]:
     for reason in REASONS:
         out.append(ok(f"abandoned_{reason}", "§9.5: each reason", ABANDONED, [change(at("reason"), reason)]))
     for intent in ("w-01JAE3A0A000000000000000W1", "k-01JAE3A0A000000000000000K1-2"):
-        out.append(ok(f"abandoned_{intent[0]}_intent", f"{RULE_299}: the executor's own exit's intent", ABANDONED,
+        out.append(ok(f"abandoned_{intent[0]}_intent", "§9.5: the executor's own exit's intent is an `id`", ABANDONED,
                       [change(at("intent_id"), intent), change(at("client_order_id"), f"md-{intent}")]))
     return out
 
 
 # --------------------------------------------------------------------------- independent oracle
 
-ORACLE_CHECKS = ("drafts.valid", "invalid_drafts", "valid_drafts", "sources.oracle", "derivation.oracle")
+ORACLE_CHECKS = ("drafts.valid", "invalid_drafts", "valid_drafts", "sources.oracle")
 
 
 def found(check: str, message: str) -> str:
@@ -247,11 +257,6 @@ def check_section(section: dict) -> list[str]:
             draft = external("01JAE3A0A000000000000000X9", source, members)
             if (not violations(draft)) != source_admits(source, present):
                 problems.append(found("sources.oracle", f"{source} {present}: the rules and §9.5 disagree"))
-    for intent, client in ((INTENT, f"md-{INTENT}"), (INTENT, INTENT), (INTENT, f"xx-{INTENT}"),
-                           (INTENT, f"md-{INTENT}x"), ("w-01JAE3A0A000000000000000W1", "md-w-01JAE3A0A000000000000000W1")):
-        draft = abandoned("01JAE3A0A000000000000000X8", intent, "gate_recheck", client)
-        if (not violations(draft)) != (client == "md-" + intent):
-            problems.append(found("derivation.oracle", f"{client} for {intent}: rule 299 and §2.3 disagree"))
     return problems
 
 
@@ -260,11 +265,11 @@ def check_section(section: dict) -> list[str]:
 VALIDATOR_MUTANTS = (
     "rule.297",
     "rule.298",
-    "rule.299",
     "rule.297.broker_order_id",
+    "rule.297.order",
     "rule.298.side",
     "rule.298.fill_id",
-    "rule.299.suffix",
+    "rule.298.order",
 )
 
 
@@ -284,9 +289,9 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
          mutated(lambda s: s["drafts"][EXTERNAL_FILL]["payload"].update(instrument="SPY"))),
         ("an invalid draft's expectation differs", "invalid_drafts",
          mutated(lambda s: case(s, "invalid_drafts", "order_with_fill_id")["expect"].update(path="payload.qty"))),
-        ("a valid draft abandons another order", "valid_drafts",
+        ("a valid draft abandons for an unknown reason", "valid_drafts",
          mutated(lambda s: case(s, "valid_drafts", "abandoned_gate_recheck")["changes"].append(
-             change("payload.client_order_id", "md-other")))),
+             change("payload.reason", "max_intent_age")))),
     ]
 
 
