@@ -308,6 +308,15 @@ pub struct Event {
 /// The canonical draft of `event`, written by the user `writer` names on the workspace's control
 /// stream; `None` only for a value the canonical form cannot hold.
 pub fn envelope(writer: &Writer<'_>, event: &Event) -> Option<Vec<u8>> {
+    caused_envelope(writer, event, None)
+}
+
+/// [`envelope`] with `causation_id` the event `causation` names, or `null` for `None`.
+pub fn caused_envelope(
+    writer: &Writer<'_>,
+    event: &Event,
+    causation: Option<&str>,
+) -> Option<Vec<u8>> {
     let actor = object(vec![
         ("build", text(BUILD)),
         ("id", text(writer.principal)),
@@ -319,7 +328,7 @@ pub fn envelope(writer: &Writer<'_>, event: &Event) -> Option<Vec<u8>> {
     let envelope = object(vec![
         ("actor", actor),
         ("artifact_refs", Value::Array(event.artifact_refs.clone())),
-        ("causation_id", Value::Null),
+        ("causation_id", causation.map_or(Value::Null, text)),
         ("clock_source", text("local")),
         ("config_refs", object(event.config_refs.clone())?),
         ("correlation_id", Value::Null),
@@ -425,9 +434,22 @@ pub async fn settle_at(
     now: UtcNanos,
     pinned: Option<u64>,
 ) -> Settled {
+    settle_batch_at(journal, stream, event_id, &[draft], now, pinned).await
+}
+
+/// [`settle_at`] for `drafts` appended in one batch, all or none, settled by the one whose id is
+/// `event_id`.
+pub async fn settle_batch_at(
+    journal: &dyn Journal,
+    stream: &str,
+    event_id: &str,
+    drafts: &[&[u8]],
+    now: UtcNanos,
+    pinned: Option<u64>,
+) -> Settled {
     let mut ambiguous = false;
     for _ in 0..ATTEMPTS {
-        match attempt(journal, stream, &[draft], now, pinned).await {
+        match attempt(journal, stream, drafts, now, pinned).await {
             Some(AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows)) => {
                 match rows.into_iter().find(|row| row.event_id == event_id) {
                     Some(row) => return Settled::Stored(Box::new(row)),

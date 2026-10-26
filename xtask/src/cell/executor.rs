@@ -72,6 +72,24 @@ pub fn check_args(workspace: &str, account: &str) -> Vec<String> {
     .to_vec()
 }
 
+/// The executor's connect check for `account` in `workspace`, as the one-off Job run `run`: the
+/// passing `ConnectionChecked`'s event id, or the Job's logs when it did not pass.
+pub fn connect_check(run: &str, workspace: &str, account: &str) -> Result<Result<String, String>> {
+    let check = render(
+        &[
+            format!("run.id=\"{run}\""),
+            "run.process=\"connect-check\"".into(),
+            format!("run.args={}", json!(check_args(workspace, account))),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    let (done, logs) = run_job(check)?;
+    Ok(checked_in(&logs)
+        .filter(|_| done)
+        .map(str::to_owned)
+        .ok_or(logs))
+}
+
 /// The event id a connect check's logs name as passing.
 pub fn checked_in(logs: &str) -> Option<&str> {
     logs.lines()
@@ -300,19 +318,13 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
         }
         None
     } else {
-        let check = render(
-            &[
-                format!("run.id=\"{id}c\""),
-                "run.process=\"connect-check\"".into(),
-                format!("run.args={}", json!(check_args(&workspace, &account))),
-            ],
-            Some("templates/run.yaml"),
-        )?;
-        let (done, logs) = run_job(check)?;
-        let Some(checked) = checked_in(&logs).filter(|_| done).map(str::to_owned) else {
-            return Ok(Verdict::Broken(format!(
-                "the connect check did not pass:\n{logs}"
-            )));
+        let checked = match connect_check(&format!("{id}c"), &workspace, &account)? {
+            Ok(checked) => checked,
+            Err(logs) => {
+                return Ok(Verdict::Broken(format!(
+                    "the connect check did not pass:\n{logs}"
+                )));
+            }
         };
         let (done, logs) = gestures(&id, "o", &opening(&workspace, &account, &checked), &files)?;
         let code = lines_of(&logs, "g03-connection-record")
@@ -340,6 +352,21 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
             "the deployment's gestures failed:\n{logs}"
         )));
     }
+    Ok(match executor_live(&account)? {
+        Ok(_) => {
+            eprintln!(
+                "    the manager's executor for account {account} runs and is live; not ready \
+                 until a scheduler tick, and the cell builds no scheduler yet"
+            );
+            Verdict::Held
+        }
+        Err(why) => Verdict::Broken(why),
+    })
+}
+
+/// Polls for the deployment manager's executor pod for `account` until it runs and its process
+/// answers `livez`: its pod's name, or why it never did.
+pub fn executor_live(account: &str) -> Result<Result<String, String>> {
     let selector = format!("{MANAGED_BY},mandate.dev/process=executor");
     let mut found = None;
     for _ in 0..POLLS {
@@ -355,22 +382,18 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
         ])?;
         found = executor_running(
             &serde_json::from_str(&pods).context("the executor pods")?,
-            &account,
+            account,
         );
         if let Some(Some(pod)) = &found {
             let mut exec = vec!["exec", "--namespace", NAMESPACE, pod.as_str(), "--"];
             exec.extend(LIVEZ);
             if kubectl(&exec).is_ok() {
-                eprintln!(
-                    "    the manager's executor for account {account} runs and is live; not ready \
-                     until a scheduler tick, and the cell builds no scheduler yet"
-                );
-                return Ok(Verdict::Held);
+                return Ok(Ok(pod.clone()));
             }
         }
         sleep(Duration::from_secs(2));
     }
-    Ok(Verdict::Broken(match found {
+    Ok(Err(match found {
         None => {
             format!("no executor pod for account {account}: the deployment manager started none")
         }
@@ -379,7 +402,7 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
 }
 
 /// Runs `all` as one gestures Job of the `control` process, run `{id}{suffix}`.
-fn gestures(
+pub(super) fn gestures(
     id: &str,
     suffix: &str,
     all: &[Gesture],
