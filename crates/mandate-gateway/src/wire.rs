@@ -1,6 +1,11 @@
 //! The wire form of one call between the runtime and the model-gateway service (DEC-2265 item 5):
 //! a [`CallRequest`] one way, and its [`CallRecord`] or [`RequestError`] back, each as canonical
 //! JSON. Decoding is the exact inverse of encoding: anything else reads as a [`WireError`].
+//!
+//! The same exchange carries a research artifact's [`PutRequest`] (DEC-2279 item 1): the
+//! workspace and the bytes one way, and the reference the service computed from them, or a
+//! [`PutRefusal`], back. A request frame is a put when it has a `put` member, and a call otherwise
+//! ([`any_request_from`]).
 
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_time::UtcNanos;
@@ -28,6 +33,111 @@ pub enum WireError {
 
 /// What the gateway answers one request with.
 pub type Reply = Result<CallRecord, RequestError>;
+
+/// A research artifact the runtime asks the service to store (DEC-2279 item 1). It carries no
+/// reference: the service computes one from the bytes it receives (item 2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PutRequest {
+    pub workspace_id: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Why the service stored nothing for a put (DEC-2279 items 1, 2 and 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PutRefusal {
+    /// The put names a workspace other than the service's.
+    ForeignWorkspace,
+    /// Storing it would take the research store past the service's cap.
+    StoreFull,
+    /// The store did not take it: a write failed, or the object under its reference no longer
+    /// re-hashes.
+    StoreUnavailable,
+}
+
+impl PutRefusal {
+    pub const ALL: [Self; 3] = [
+        Self::ForeignWorkspace,
+        Self::StoreFull,
+        Self::StoreUnavailable,
+    ];
+
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::ForeignWorkspace => "foreign_workspace",
+            Self::StoreFull => "store_full",
+            Self::StoreUnavailable => "store_unavailable",
+        }
+    }
+}
+
+/// What the service answers a put with: the SHA-256 of the bytes it stored, or why it stored none.
+pub type PutReply = Result<Digest, PutRefusal>;
+
+/// A request frame of either kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Request {
+    Call(Box<CallRequest>),
+    Put(PutRequest),
+}
+
+/// `put`'s frame body.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn put_bytes(put: &PutRequest) -> Vec<u8> {
+    let _ = put;
+    todo!()
+}
+
+/// The put a frame body holds.
+///
+/// # Errors
+/// [`WireError`] for any body [`put_bytes`] would not write.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn put_from(bytes: &[u8]) -> Result<PutRequest, WireError> {
+    let _ = bytes;
+    todo!()
+}
+
+/// The request a frame body holds, a put when it has a `put` member and a call otherwise.
+///
+/// # Errors
+/// [`WireError`] for any body neither [`put_bytes`] nor [`request_bytes`] would write.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn any_request_from(bytes: &[u8]) -> Result<Request, WireError> {
+    let _ = bytes;
+    todo!()
+}
+
+/// `reply`'s frame body.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn put_reply_bytes(reply: &PutReply) -> Vec<u8> {
+    let _ = reply;
+    todo!()
+}
+
+/// The put reply a frame body holds.
+///
+/// # Errors
+/// [`WireError`] for any body [`put_reply_bytes`] would not write.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn put_reply_from(bytes: &[u8]) -> Result<PutReply, WireError> {
+    let _ = bytes;
+    todo!()
+}
 
 /// `request`'s frame body.
 pub fn request_bytes(request: &CallRequest) -> Vec<u8> {

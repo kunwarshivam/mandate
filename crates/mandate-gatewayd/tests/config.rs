@@ -119,3 +119,23 @@ fn the_dsn_s_password_shows_nowhere() {
         }
     }
 }
+
+/// DEC-2279 item 5: the research store the service writes is `MANDATE_RESEARCH_ARTIFACTS`. Unset
+/// or empty, the service starts and stores nothing, every put refused, which halts research and
+/// adds no risk; it is never derived from `MANDATE_ARTIFACTS`.
+#[test]
+fn the_research_store_is_its_own_value_and_absent_stores_nothing() {
+    assert_eq!(read(&full()).unwrap().research_artifacts, None);
+    let mut empty = full();
+    empty.insert("MANDATE_RESEARCH_ARTIFACTS", String::new());
+    assert_eq!(read(&empty).unwrap().research_artifacts, None);
+    let mut named = full();
+    named.insert(
+        "MANDATE_RESEARCH_ARTIFACTS",
+        "/var/lib/mandate/research-artifacts".to_owned(),
+    );
+    assert_eq!(
+        read(&named).unwrap().research_artifacts.as_deref(),
+        Some("/var/lib/mandate/research-artifacts")
+    );
+}

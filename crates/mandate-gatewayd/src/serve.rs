@@ -15,7 +15,7 @@ use mandate_gateway::CallRequest;
 use mandate_gateway::frame::{
     FrameError, MAX_REPLY_FRAME, MAX_REQUEST_FRAME, read_frame, write_frame,
 };
-use mandate_gateway::wire::{Reply, reply_bytes, request_from};
+use mandate_gateway::wire::{PutReply, PutRequest, Reply, reply_bytes, request_from};
 
 /// The serve loop's bounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +96,21 @@ impl Server {
         let acceptor = thread::spawn(move || accept(&listener, limits, &log, &stopping, &jobs));
         answer_all(&queue, &mut answer);
         let _ = acceptor.join();
+    }
+
+    /// As [`Server::run`], and answers each put that decoded whole with `store`, on the same
+    /// thread (DEC-2279 items 1 and 4).
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn run_storing(
+        self,
+        answer: impl FnMut(CallRequest) -> Reply,
+        store: impl FnMut(&PutRequest) -> PutReply,
+    ) {
+        let _ = (self, answer, store);
+        todo!()
     }
 }
 
