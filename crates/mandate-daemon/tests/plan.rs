@@ -1057,3 +1057,70 @@ fn an_opening_whose_thesis_ended_before_it_is_classified_is_denied() {
     facts.feed(&rows.0);
     assert_eq!(plan.classify(&view(), &proposal).autonomy, Autonomy::Deny);
 }
+
+/// DEC-2841 item 5: the class a held research instrument is flattened and classified with is the
+/// one its own latest admitted thesis record states, never a later record on another instrument,
+/// nor a refused one, nor an invalidation.
+#[test]
+fn a_thesis_class_is_the_latest_admitted_record_of_that_instrument() {
+    let mut rows = research_journaled(REGULAR);
+    thesis(
+        &mut rows,
+        "01J8Z3MTHE5000000000000002",
+        QQQ,
+        "crypto",
+        CURRENT,
+    );
+    let hash = Digest::of(b"x").to_hex();
+    rows.push(
+        AGENT_STREAM,
+        "ThesisProposed",
+        &format!(
+            r#"{{"model_id":"llm.research_agent","model_version":"0.1.0","content_hash":"sha256:{RESEARCH_HASH}","thesis_id":"01J8Z3MTHE5000000000000003","lineage_id":"01J8Z3MTHE5000000000000003","revision":0,"predecessor_thesis_id":null,"autopsy_ref":null,"instrument_id":"{SPY}","asset_class":"crypto","direction":"long","as_of":"{}","expires_at":"{}","horizon_s":86400,"conviction":"0.6","confidence":"0.6","evidence_ref":null,"evidence_sources":["src.newswire"],"corroboration":"independent_source","invalidation":"a guidance cut","allowlist_version":3,"prompt_ref":"sha256:{hash}","response_ref":"sha256:{hash}","admitted":false,"reason":"corroboration_missing"}}"#,
+            CURRENT.0, CURRENT.1
+        ),
+    );
+    invalidated(&mut rows, "01J8Z3MTHE5000000000000001", SPY);
+    let facts = Facts::new(CLOCK, AGENT);
+    facts.follow(ACCOUNT);
+    facts.feed(&rows.0);
+    assert_eq!(
+        facts.thesis_class(SPY),
+        Some(mandate_accounting::AssetClass::UsEquity),
+        "SPY's own admitted record, not QQQ's, the refused one, or the invalidation"
+    );
+    assert_eq!(
+        facts.thesis_class(QQQ),
+        Some(mandate_accounting::AssetClass::Crypto)
+    );
+    assert_eq!(
+        facts.ever_admitted(),
+        BTreeMap::from([
+            (SPY.to_owned(), mandate_accounting::AssetClass::UsEquity),
+            (QQQ.to_owned(), mandate_accounting::AssetClass::Crypto),
+        ])
+    );
+}
+
+/// DEC-2841 item 2: a proposal whose class differs from its thesis record's is denied, even when
+/// the proposal's own class is one the envelope allows.
+#[test]
+fn an_opening_whose_class_differs_from_its_thesis_is_denied() {
+    let equity = research_journaled(REGULAR);
+    let proposal = research_plan(&equity)
+        .plan(&view(), &working_inputs(REGULAR))
+        .expect("the opening on SPY as a US equity");
+    let mut crypto = research_registered(REGULAR);
+    thesis(
+        &mut crypto,
+        "01J8Z3MTHE5000000000000001",
+        SPY,
+        "crypto",
+        CURRENT,
+    );
+    assert_eq!(
+        research_plan(&crypto).classify(&view(), &proposal).autonomy,
+        Autonomy::Deny,
+        "its thesis names SPY crypto"
+    );
+}

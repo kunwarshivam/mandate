@@ -237,13 +237,6 @@ impl Facts {
         }
     }
 
-    /// The agent stream the fold keeps thesis records from, when the mandate is unpinned: the one
-    /// the process feeds at every pass.
-    pub fn working_stream(&self) -> Option<String> {
-        let fed = self.0.try_borrow().ok()?;
-        fed.working.then(|| fed.agent_stream.clone()).flatten()
-    }
-
     /// The instrument an unpinned mandate may open in now: the one its single surviving thesis
     /// holds, replayed as the executor replays it (DEC-2819). More than one, none, a record that
     /// does not read, or no clock yet, answers none, so every opening is held.

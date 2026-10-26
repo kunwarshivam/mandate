@@ -146,7 +146,7 @@ impl Plan {
         mandate_ports::size(&validated, &builder, inputs)
             .ok()
             .flatten()
-            .filter(|proposal| proposal.purpose.adds_risk() && proposal.instrument == instrument)
+            .filter(|proposal| proposal.purpose.adds_risk())
     }
 
     /// An unpinned mandate's opening classified as a pinned one's is (DEC-2841), only while its
