@@ -802,10 +802,13 @@ fn decided(
                 .output_events
                 .get(model)
                 .and_then(|by_instrument| by_instrument.get(&proposal.instrument))
-                .map(|event| payload::text(&event.0))
+                .map(|event| event.0.clone())
                 .ok_or_else(|| payload::non_canonical("outputs_used"))
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<BTreeSet<_>, _>>()?
+        .into_iter()
+        .map(|event| payload::text(&event))
+        .collect::<Vec<_>>();
     let model_weights = proposal
         .model_weights
         .iter()
