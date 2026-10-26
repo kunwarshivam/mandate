@@ -849,7 +849,7 @@ per workspace deployment (item 6).
       lists, not an error. Both fold the control stream as the create does (`versions.rs`,
       `facts`): a control-stream row that fold cannot read (a malformed `model_version`
       registration among them) makes either read `journal_unavailable`, as it makes the create
-      refuse, never a list the create would then refuse. **(planned: E10-11)**
+      refuse, never a list the create would then refuse.
       - `GET /instruments` returns `read-models/instruments`: the fold the create's instrument
         check reads (`versions.rs`, `instruments`), every `ConfigSnapshotRegistered` of kind
         `instrument_snapshot` in stream order, the latest per stored `instrument_id`. Each listed
@@ -2455,7 +2455,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Mandate validation and classification (`mandate-spec`) | **Exists**; §4.1 calls it |
 | The web app's screens on recorded fixtures (`web/`) | **Exists**; §4.9 maps fixtures to resources |
 | The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10); the process, its sessions, the first reads of §4.3 and §4.7, pause and the kill switch, and an approval's Skip by E21-31 (§3.11) |
-| Drafts, compile, versions, confirm endpoints | **Partly served** (E10-11): creating a version from a document, the confirmation screen, and a new mandate's confirm (§3.11 item 11, DEC-2101); the catalogue reads (`GET /instruments`, `GET /signal-models`, DEC-2136), drafts, compile, validate, diffs, and an agent's later versions are planned |
+| Drafts, compile, versions, confirm endpoints | **Partly served** (E10-11): creating a version from a document, the confirmation screen, and a new mandate's confirm (§3.11 item 11, DEC-2101), and the catalogue reads (`GET /instruments`, `GET /signal-models`, §3.11 item 11, DEC-2136); drafts, compile, validate, diffs, and an agent's later versions are planned |
 | Deployment manager endpoints and the reserved kill-switch path | **Partly served** (E10-12): pause, the kill switch, and Skip (§3.11 item 10); deploy and go-live (item 11, DEC-2101); resume, Stop, owner exit, acknowledgment, and command status (item 12, DEC-2102); the hold, its lift, and backtests are planned |
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
