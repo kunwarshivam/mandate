@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/alerts.schema.json",
-  "description": "GET /alerts (\u00a74.7, DEC-2140): the owner alerts about the workspace's agents and accounts that its control, agent and account streams record, most recent first, each with its notice and the asking member's own latest delivery per push channel. as_of names every stream read that holds a row.",
+  "description": "GET /alerts (\u00a74.7, DEC-2141): the owner alerts about the workspace's agents and accounts that its control, agent and account streams record, most recent first, each with its notice and the asking member's own latest delivery per push channel. as_of names every stream read that holds a row.",
   "type": "object",
   "allOf": [
     {
