@@ -34,7 +34,7 @@ use mandate_num::{Price, Qty, ShareIncrement, SignedQty, Usd};
 use mandate_robinhood::{Tickers, Tools, ref_id, robinhood_profile};
 use serde_json::{Value, json};
 use support::{
-    ACCOUNT_STREAM, AGENT, Allowing, Error, Ids, Instruments, Journal, Mandate, NOON,
+    ACCOUNT_STREAM, AGENT, Allowing, Error, Fault, Ids, Instruments, Journal, Mandate, NOON,
     TwoPercentStop, at, config, deployed, fees, process_config, propose,
 };
 
@@ -61,6 +61,9 @@ const STOP: &str = "147";
 const STOP_LIMIT: &str = "146.265";
 /// The cash after the stop sold the 10 at [`STOP_LIMIT`]: 98505 + 1462.65.
 const SOLD: &str = "99967.65";
+
+/// The first event the core journals when a listing answer adopts the filled opening.
+const ADOPTION_FIRST_DRAFT: &str = "OrderStateChanged";
 
 /// What each read of the account answers, set by the test between passes.
 struct Book {
@@ -742,6 +745,11 @@ fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Err
         sent(&seam.calls, "cancel_equity_order").is_empty(),
         "nothing is cancelled"
     );
+    assert_eq!(
+        listings(&seam.calls),
+        1,
+        "only the filled opening is listed: the resting stop the read lists as working never is"
+    );
     only_the_contracts_tools(&seam.calls);
     assert!(
         journal
@@ -878,6 +886,47 @@ fn an_unanswered_listing_holds_and_never_adopts() -> Result<(), Error> {
         Some("adopted"),
         "{runs:?}"
     );
+    only_the_contracts_tools(&seam.calls);
+    reconciled_without_activity(&journal);
+    Ok(())
+}
+
+/// DEC-2800 item 3: a listing answered but whose hand-off does not commit holds too. The fill's
+/// first append is in doubt, so the pass ends with nothing booked and no reconciliation run; the
+/// next pass commits the same answer, and the fill is booked exactly once, by an adopting run.
+#[test]
+fn a_listing_answer_that_does_not_commit_holds() -> Result<(), Error> {
+    let (journal, mut process, seam) = opened()?;
+    let runs_before = journal.payloads("ReconciliationRun").len();
+    filled(&seam)?;
+    journal.fail_next_of(ADOPTION_FIRST_DRAFT, &[Fault::Unavailable]);
+    pass(&journal, &mut process, "t1", 10)?;
+    assert!(listings(&seam.calls) >= 1, "the pass asks for the listing");
+    assert!(
+        fills(&journal, "buy").is_empty(),
+        "nothing is booked: {:?}",
+        journal.types(ACCOUNT_STREAM)
+    );
+    assert_eq!(
+        journal.payloads("ReconciliationRun").len(),
+        runs_before,
+        "no reconciliation runs on an uncommitted hand-off"
+    );
+    assert!(
+        stop_places(&seam.calls).is_empty(),
+        "nothing is protected yet"
+    );
+    for (second, id) in [(20, "t2"), (30, "t3")] {
+        pass(&journal, &mut process, id, second)?;
+    }
+    assert_eq!(fills(&journal, "buy").len(), 1, "booked once");
+    let runs = runs_from_the_fill(&journal, "buy")?;
+    assert_eq!(
+        runs.first().and_then(|run| text(run, "result")),
+        Some("adopted"),
+        "{runs:?}"
+    );
+    assert_eq!(stop_places(&seam.calls).len(), 1, "protected once");
     only_the_contracts_tools(&seam.calls);
     reconciled_without_activity(&journal);
     Ok(())

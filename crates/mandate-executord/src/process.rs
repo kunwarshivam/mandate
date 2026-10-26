@@ -957,8 +957,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         true
     }
 
-    /// The reconciliation the core asked for (trading spec §11): the broker's four reads as one
-    /// snapshot, its account reported first, as the shell's start does. The snapshot keeps the
+    /// The reconciliation the core asked for (trading spec §11): the broker's reads as one
+    /// snapshot (its four reads, or a one-read broker's account read after its unlisted orders
+    /// are listed, [`Self::snapshot`]), its account reported first, as the shell's start does. The snapshot keeps the
     /// head it was taken at, before its own report, so the reconciliation reads that report as
     /// the snapshot's own and counts every fill since the base it replaced once (DEC-948 item 5);
     /// a fill the broker already booked in the reported cash is never subtracted twice. A read
@@ -1066,6 +1067,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// books an order that filled between two reads before its position is compared: without it,
     /// every fill would read as an unexplained position and pause the agent (DEC-2800).
     ///
+    /// The orders to list are taken once; one an earlier answer's effects settled (a nested
+    /// reconciliation that booked it) is skipped, so a terminal order is never listed.
+    ///
     /// Returns whether any answer was handed: its effects may have journaled and sent more (a
     /// protective order placed on the fill), so the snapshot then reads the account again, and its
     /// reads are never older than the head it is taken at.
@@ -1094,6 +1098,14 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             .collect();
         let handed = !listings.is_empty();
         for listing in listings {
+            let settled = self
+                .state
+                .orders()
+                .get(&listing.client_order_id)
+                .is_none_or(|order| order.state.is_terminal());
+            if settled {
+                continue;
+            }
             let answer = self.read(&BrokerRequest::ListOrders(listing))?;
             if !self.hand(
                 now,

@@ -19,7 +19,10 @@ use tokio::runtime::Runtime;
 use crate::Broker;
 
 /// The runtime that drives the connector: one current-thread runtime, built once, that holds
-/// nothing a restart would lose, as `AlpacaBroker`'s does.
+/// nothing a restart would lose, as `AlpacaBroker`'s does. The broker's calls block on it, so
+/// they are made from the process's synchronous loop, never from inside another runtime, where
+/// blocking would panic. It enables timers only: the transport a production client needs is
+/// DEC-2382's step, and brings what it drives.
 fn runtime() -> Result<Runtime, ConnectorError> {
     tokio::runtime::Builder::new_current_thread()
         .enable_time()
