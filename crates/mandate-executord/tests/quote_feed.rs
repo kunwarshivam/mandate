@@ -318,7 +318,7 @@ fn the_paper_serve_path_reads_quotes_over_its_broker() -> Result<(), Error> {
     let now = at(NOON)?;
     let broker = AlpacaBroker::new(Quoting(now.to_string()))?;
     let aapl = InstrumentId::new(AAPL)?;
-    let read = paper_wiring(&broker, Fixed(now))?
+    let read = paper_wiring(&broker, Fixed(now), &quoted_scope())?
         .quotes
         .observe(&aapl, now)?;
     assert_eq!(
@@ -329,11 +329,18 @@ fn the_paper_serve_path_reads_quotes_over_its_broker() -> Result<(), Error> {
             true
         )
     );
-    assert!(fixture::wiring()?.quotes.observe(&aapl, now).is_err());
+    assert!(
+        fixture::wiring(&quoted_scope())?
+            .quotes
+            .observe(&aapl, now)
+            .is_err()
+    );
     assert_eq!(
         (
-            paper_wiring(&broker, Fixed(now))?.quotes.feed(),
-            fixture::wiring()?.quotes.feed()
+            paper_wiring(&broker, Fixed(now), &quoted_scope())?
+                .quotes
+                .feed(),
+            fixture::wiring(&quoted_scope())?.quotes.feed()
         ),
         ("iex", "none"),
         "a mark names its feed (DEC-2380 item 3)"
@@ -345,7 +352,11 @@ fn the_paper_serve_path_reads_quotes_over_its_broker() -> Result<(), Error> {
 #[test]
 fn the_paper_run_reads_quotes_over_its_broker() -> Result<(), Error> {
     let now = at(NOON)?;
-    let run = run::paper(AlpacaBroker::new(Quoting(now.to_string()))?, Fixed(now))?;
+    let run = run::paper(
+        AlpacaBroker::new(Quoting(now.to_string()))?,
+        Fixed(now),
+        &quoted_scope(),
+    )?;
     let read = run
         .wiring()
         .quotes
@@ -365,7 +376,7 @@ fn the_paper_run_reads_quotes_over_its_broker() -> Result<(), Error> {
 #[test]
 fn the_fixture_run_reads_no_quote() -> Result<(), Error> {
     let now = at(NOON)?;
-    let run = run::fixture(AlpacaBroker::new(FixturePaper::new(now))?)?;
+    let run = run::fixture(AlpacaBroker::new(FixturePaper::new(now))?, &quoted_scope())?;
     assert_eq!(
         run.wiring().quotes.observe(&InstrumentId::new(AAPL)?, now),
         Err("no_quotes")
@@ -456,4 +467,12 @@ fn an_unpriced_kill_switch_close_goes_once_its_quote_is_read() -> Result<(), Err
         "{quoted:?}"
     );
     Ok(())
+}
+
+/// The account the quote tests' wirings are for; their quotes read no stream.
+fn quoted_scope() -> mandate_executor::AccountScope {
+    mandate_executor::AccountScope {
+        account: mandate_executor::AccountRef("acct-q".to_owned()),
+        workspace: mandate_executor::WorkspaceId("ws1".to_owned()),
+    }
 }

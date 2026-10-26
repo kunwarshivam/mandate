@@ -71,7 +71,7 @@ fn the_check_keeps_the_account_under_a_reference_minted_from_its_source() -> Res
     let random = [0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13];
     let checked = exchanged_check(
         &mut store,
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         held(ENTRY)?,
         &mut Fixed(Some(random)),
@@ -123,7 +123,7 @@ fn a_bad_lease_or_a_failed_source_creates_and_journals_nothing() -> Result<(), E
         let created = RefCell::new(0_u32);
         let refused = exchanged_check(
             &mut store,
-            &Ids,
+            &Ids::of(&scope()),
             &scope(),
             held(leased)?,
             &mut Fixed(random),

@@ -594,7 +594,7 @@ fn the_journal_admits_the_copy() -> Result<(), Error> {
     let checked = connect_check(
         &mut store,
         &mut broker,
-        &Ids,
+        &Ids::of(&scope),
         &scope,
         CONNECTION,
         "pii_01J8Z2PQ000000000000000001",
@@ -631,7 +631,11 @@ fn the_journal_admits_the_copy() -> Result<(), Error> {
     let head = u64::try_from(store.rows(&stream).ok_or("rows")?.len())?;
     let draft = copy_draft(
         &due,
-        Ids.event_id(WriterEpoch(epoch), Seq(head), 0),
+        Ids::of(&AccountScope {
+            account: AccountRef(ULID_ACCOUNT.to_owned()),
+            workspace: WorkspaceId(WORKSPACE.to_owned()),
+        })
+        .event_id(WriterEpoch(epoch), Seq(head), 0),
         at(NOON)?,
     )?;
     let bytes = draft_bytes(

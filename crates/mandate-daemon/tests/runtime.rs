@@ -534,7 +534,7 @@ fn the_fixture_wiring_journals_the_owner_s_kill_switch() {
     let rig = Rig::default();
     let mut process = RuntimeProcess::start(
         rig.clone(),
-        fixture::wiring("user-owner"),
+        fixture::wiring("user-owner", AGENT_STREAM),
         &config(),
         at(NOW),
     );
@@ -554,6 +554,42 @@ fn the_fixture_wiring_journals_the_owner_s_kill_switch() {
         .and_then(Value::as_str)
         .map(str::to_owned);
     assert!(refs.is_some_and(|v| v.starts_with("sha256:")));
+}
+
+/// Lane DR's X9: two agents' runtimes on one journal, each on the binary's fixture wiring, both
+/// open their streams and are ready. The journal refuses an `event_id` another stream already
+/// holds (journal spec §3), so ids derived from the epoch, head and ordinal alone stopped the
+/// second agent's runtime at its first batch.
+#[test]
+fn two_agents_runtimes_on_one_journal_both_open_their_streams() {
+    let rig = Rig::default();
+    let other = "agent-b";
+    let other_stream = format!("agent:{WORKSPACE}:{other}");
+    let mut config_b = config();
+    config_b.deployment.agent = AgentId(other.into());
+    let first = RuntimeProcess::start(
+        rig.clone(),
+        fixture::wiring("user-owner", AGENT_STREAM),
+        &config(),
+        at(NOW),
+    );
+    let second = RuntimeProcess::start(
+        rig.clone(),
+        fixture::wiring("user-owner", &other_stream),
+        &config_b,
+        at(NOW),
+    );
+    assert_eq!(first.lifecycle().state(), State::Ready);
+    assert_eq!(second.lifecycle().state(), State::Ready);
+    let opened = |stream: &str| {
+        rig.journal
+            .rows(&StreamId::parse(stream).unwrap())
+            .unwrap_or_default()
+            .iter()
+            .filter(|row| row.event_type == "StreamOpened")
+            .count()
+    };
+    assert_eq!((opened(AGENT_STREAM), opened(&other_stream)), (1, 1));
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -420,12 +420,16 @@ pub fn paper_quote_bounds() -> Result<QuoteBounds, &'static str> {
 /// # Errors
 /// The fixture wiring's refusal, `quote_bounds_invalid` when the bounds do not read, and
 /// `runtime_unavailable` when the feed's runtime cannot be built.
-pub fn paper_wiring<T, P>(broker: &AlpacaBroker<T>, clock: P) -> Result<Wiring, &'static str>
+pub fn paper_wiring<T, P>(
+    broker: &AlpacaBroker<T>,
+    clock: P,
+    scope: &AccountScope,
+) -> Result<Wiring, &'static str>
 where
     T: TradingTransport + DataTransport + Clone + 'static,
     P: Pause + 'static,
 {
-    let mut wiring = fixture::wiring()?;
+    let mut wiring = fixture::wiring(scope)?;
     wiring.quotes = Box::new(AlpacaQuotes::new(
         DataClient::new(broker.transport(), clock),
         paper_quote_bounds()?,
