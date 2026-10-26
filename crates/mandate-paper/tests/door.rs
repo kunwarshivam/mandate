@@ -68,6 +68,7 @@ fn paper_mandate() -> Mandate {
 fn record(seq: u64, event_type: &str, payload: &str) -> ControlRecord {
     ControlRecord {
         seq,
+        event_time: None,
         event_type: event_type.to_owned(),
         payload: json(payload),
         origin: Origin {

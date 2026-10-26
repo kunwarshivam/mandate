@@ -106,10 +106,12 @@ fn rotated(seq: u64, id: &str) -> StoredEvent {
 }
 
 fn deployed(seq: u64, version: u64, agent: &str, id: &str) -> StoredEvent {
-    let named = if version == 2 {
-        format!(r#","connection_id":"{id}""#)
-    } else {
-        String::new()
+    let named = match version {
+        2 => format!(r#","connection_id":"{id}""#),
+        3 => format!(
+            r#","connection_id":"{id}","step_up":{{"assertion_id":"01JAA3P0A000000000000000H1","authenticated_at":"2026-10-17T15:59:50.000000000Z","method":"passkey"}}"#
+        ),
+        _ => String::new(),
     };
     row(
         seq,
@@ -284,6 +286,28 @@ fn agents_are_those_whose_latest_deployment_names_it_at_version_two_and_is_not_s
         stopped(7, "agt_gone"),
         deployed(8, 2, "agt_moved", C1),
         deployed(9, 2, "agt_moved", C2),
+    ];
+    let agents = connections(&rows)
+        .into_iter()
+        .next()
+        .expect("one connection")
+        .agents;
+    assert_eq!(agents, vec!["agt_b".to_owned(), "agt_a".to_owned()]);
+}
+
+/// A version-3 deployment (journal spec v0.84, DEC-2131 item 4) names its connection as its
+/// version 2 does, and a later one moves the agent as a version 2 would.
+#[test]
+fn a_version_3_deployment_names_its_connection_as_a_version_2() {
+    let rows = [
+        requested(1, C1),
+        established(2, C1, SCOPES),
+        deployed(3, 3, "agt_b", C1),
+        deployed(4, 2, "agt_a", C1),
+        deployed(5, 3, "agt_gone", C1),
+        stopped(6, "agt_gone"),
+        deployed(7, 2, "agt_moved", C1),
+        deployed(8, 3, "agt_moved", C2),
     ];
     let agents = connections(&rows)
         .into_iter()

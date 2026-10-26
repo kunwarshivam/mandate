@@ -115,6 +115,7 @@ pub(crate) fn schema(
         ("ClientRevoked", 1, StreamType::Control) => Some(&CLIENT_REVOKED),
         (COMMAND, 1, StreamType::Control) => Some(&HOLD_COMMAND),
         ("MandateConfirmed", 2, StreamType::Control) => Some(&MANDATE_CONFIRMED_V2),
+        ("MandateConfirmed", 3, StreamType::Control) => Some(&MANDATE_CONFIRMED_V3),
         ("ConnectionRevoked", 2, StreamType::Control) => Some(&CONNECTION_REVOKED_V2),
         ("OwnerCommandRefused", 2, StreamType::Agent) => Some(&OWNER_COMMAND_REFUSED_V2),
         _ => None,
@@ -179,7 +180,7 @@ pub(crate) fn rules(
         ("ModelInvocationRecorded", 1) if stream == StreamType::Control => {
             compiler_rules(p, config_refs, writer)
         }
-        ("MandateConfirmed", 2) => {
+        ("MandateConfirmed", 2 | 3) => {
             ensure(
                 p.is_null("base_version") == p.is_null("agent_id"),
                 "payload.base_version",
@@ -512,6 +513,17 @@ static MANDATE_CONFIRMED_V2: Ty = Ty::Record(&[
     ("record_ref", Ty::DigestRef),
     ("agent_id", Ty::Nullable(&Ty::Ident)),
     ("base_version", Ty::Nullable(&Ty::DigestRef)),
+]);
+
+/// Journal spec v0.84 §9.9 (DEC-2131): version 2's members, then the passkey step-up that
+/// authorized the confirmation, which §9.32's rule 253 reads. Rules 18, 77, 78 and 267 apply.
+static MANDATE_CONFIRMED_V3: Ty = Ty::Record(&[
+    ("mandate_version", Ty::DigestRef),
+    ("confirmed_paths", Ty::List(&Ty::Pointer)),
+    ("record_ref", Ty::DigestRef),
+    ("agent_id", Ty::Nullable(&Ty::Ident)),
+    ("base_version", Ty::Nullable(&Ty::DigestRef)),
+    ("step_up", crate::credentials::STEP_UP_RECORD),
 ]);
 
 static OWNER_REQUEST_SUBMITTED: Ty = Ty::Record(&[

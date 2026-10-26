@@ -23,6 +23,7 @@ use mandate_executor::{
     ExitTier, FillId, IdGen, InstrumentSnapshot, MandateVersion, MandateView, ProtectionPrices,
     Purpose, Seq, WorkspaceId, WriterEpoch, equity_bracket_prices,
 };
+use mandate_executord::marks::NoMarks;
 use mandate_executord::quotes::NoQuotes;
 use mandate_executord::serve::ScriptedBroker;
 use mandate_executord::{Broker, Config, ExecutorProcess, Protections, Unplanned, Wiring};
@@ -88,6 +89,9 @@ struct Rows {
     streams: BTreeMap<String, Vec<StoredEvent>>,
     epochs: BTreeMap<String, u64>,
     faults: VecDeque<Fault>,
+    /// Failures answered, in order, to the next appends whose first draft is of the named event
+    /// type, before any in `faults`.
+    typed: BTreeMap<String, VecDeque<Fault>>,
     unreadable: BTreeSet<String>,
     appends: usize,
     /// After this many appends the journal answers nothing more, as a process that crashed would
@@ -172,6 +176,16 @@ impl Journal {
 
     pub fn fail_next(&self, faults: &[Fault]) {
         self.0.borrow_mut().faults.extend(faults.iter().copied());
+    }
+
+    /// Answers `faults`, in order, to the next appends whose first draft is a `event_type`.
+    pub fn fail_next_of(&self, event_type: &str, faults: &[Fault]) {
+        self.0
+            .borrow_mut()
+            .typed
+            .entry(event_type.to_owned())
+            .or_default()
+            .extend(faults.iter().copied());
     }
 
     pub fn clear_faults(&self) {
@@ -304,7 +318,17 @@ impl Store for Journal {
                 current_epoch: current,
             };
         }
-        let fault = rows.faults.pop_front();
+        let first_type = drafts.first().and_then(|d| {
+            parse(d)
+                .ok()?
+                .get("event_type")?
+                .as_str()
+                .map(str::to_owned)
+        });
+        let typed = first_type
+            .and_then(|kind| rows.typed.get_mut(&kind))
+            .and_then(VecDeque::pop_front);
+        let fault = typed.or_else(|| rows.faults.pop_front());
         if fault == Some(Fault::Unavailable) {
             return AppendOutcome::Unavailable;
         }
@@ -806,6 +830,7 @@ pub fn wired(
         gate,
         protections,
         quotes: Box::new(NoQuotes),
+        marked: Box::new(NoMarks),
     })
 }
 
@@ -899,6 +924,36 @@ pub fn deploy(journal: &Journal, id: &str, agent: &str, connection: &str) -> Res
             ("agent_id", text(agent)),
             ("connection_id", text(connection)),
             ("mandate_version", text(VERSION)),
+        ])?,
+    )
+}
+
+/// A version-3 `AgentDeployed` (journal spec v0.84, DEC-2131): version 2's members, then the
+/// passkey step-up that authorized it.
+pub fn deploy_stepped_up(
+    journal: &Journal,
+    id: &str,
+    agent: &str,
+    connection: &str,
+) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "AgentDeployed",
+        3,
+        None,
+        object(vec![
+            ("agent_id", text(agent)),
+            ("connection_id", text(connection)),
+            ("mandate_version", text(VERSION)),
+            (
+                "step_up",
+                object(vec![
+                    ("assertion_id", text("01JAA3P0A000000000000000H1")),
+                    ("authenticated_at", text("2026-10-17T15:59:50.000000000Z")),
+                    ("method", text("passkey")),
+                ])?,
+            ),
         ])?,
     )
 }

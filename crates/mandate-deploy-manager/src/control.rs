@@ -201,7 +201,8 @@ pub enum Fact {
     Refused {
         connection: String,
     },
-    /// A version-2 `AgentDeployed`, which names its connection (§9.24).
+    /// A version-2 or version-3 `AgentDeployed`, which names its connection (§9.24; version 3 is
+    /// read as version 2, journal spec v0.84, DEC-2131 item 4).
     Deployed {
         agent: String,
         connection: String,
@@ -282,7 +283,7 @@ pub fn fact(row: &StoredEvent) -> Option<Fact> {
         "ConnectionRevoked" => Some(Fact::Revoked {
             connection: text("connection_id")?.to_owned(),
         }),
-        "AgentDeployed" if row.schema_version == 2 => Some(Fact::Deployed {
+        "AgentDeployed" if matches!(row.schema_version, 2 | 3) => Some(Fact::Deployed {
             agent: text("agent_id")?.to_owned(),
             connection: text("connection_id")?.to_owned(),
         }),

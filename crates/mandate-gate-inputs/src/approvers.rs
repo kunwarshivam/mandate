@@ -1,20 +1,28 @@
 //! The mandate's approver references resolved to the user ids admission compares (mandate spec
-//! §6.4 check 3, V-024; [DEC-953](../../../docs/project/decisions/DEC-953.md)).
+//! §6.4 check 3, V-024; [DEC-953](../../../docs/project/decisions/DEC-953.md),
+//! [DEC-2384](../../../docs/project/decisions/DEC-2384.md)).
 //!
 //! A mandate names its approvers as `role:approver`, `role:owner`, `role:workspace_admin` or
 //! `user:<id>`, while an answer names its responder by opaque user id, so the runtime can admit
-//! only a set of user ids. The run reads the workspace's members from the one identity record the
-//! founder's control stream journals, the same one `mandate approvals approve` reads for DEC-923's
-//! check: the `user` who recorded the mandate connection's latest `ConnectionEstablished`, the
-//! workspace owner. In that one-person workspace the owner holds every workspace role (identity
-//! spec §3.2, §4.3), so each role reference and the owner's own `user:` reference resolve to the
-//! owner, and nothing else resolves. A stream the run cannot read that way resolves no one, so
-//! every grant is refused `not_an_approver` and nothing is sent (`AGENTS.md` rule 3).
+//! only a set of user ids. A stream with no §9.12 membership record is DEC-953's one-person
+//! workspace: its member is the `user` who recorded the mandate connection's latest
+//! `ConnectionEstablished`, the record `mandate approvals approve` reads for DEC-923's check, who
+//! holds every workspace role (identity spec §3.2, §4.3). A stream with one, as every workspace
+//! `mandate workspace found` founds, is folded by `mandate_identity::Roster` at its latest
+//! membership record's instant, and each reference resolves only among the members active then
+//! who hold the approver role in effect. A stream the run cannot read either way resolves no one,
+//! so every grant is refused `not_an_approver` and nothing is sent (`AGENTS.md` rule 3).
+//!
+//! The resolution itself is [`mandate_identity::approvers`], over the records' sequence, type,
+//! event time and payload, so the runtime daemon resolves the same way; this module reads the
+//! control stream's records into it and adds DEC-923's live `cli_confirm` scope.
 
 use std::collections::BTreeSet;
 
 use mandate_canon::Value;
 use mandate_domain::Environment;
+pub use mandate_identity::approvers::Members;
+use mandate_identity::approvers::{self as resolution, RecordView, latest_connection_record};
 use mandate_num::Usd;
 use mandate_runtime::{LiveBroker, LiveScope, OpaqueUser};
 use mandate_spec::Mandate;
@@ -22,85 +30,53 @@ use mandate_spec::document::ApproverRef;
 
 use crate::control::ControlRecord;
 
-/// The workspace's members as the run reads them off its control stream.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Members {
-    /// No member the run can name: the connection has no `ConnectionEstablished`, its latest
-    /// record is a revocation, the record names no user, or the stream holds a §9.12 membership
-    /// record the run does not fold, so the workspace may have more than one member.
-    Unread,
-    /// A one-person workspace whose one member, the owner, holds every workspace role.
-    Owner(String),
-}
-
-/// The §9.12 membership records: any of them means a membership the run does not fold.
-const MEMBERSHIP_RECORDS: [&str; 7] = [
-    "MemberInvited",
-    "MemberInvitationRevoked",
-    "MemberActivated",
-    "MemberRoleChanged",
-    "MemberDeactivated",
-    "MemberReactivated",
-    "MemberRemoved",
-];
-
-/// The members `records` show for the workspace whose mandate names `connection`: the owner is
-/// the `user` of the connection's latest `ConnectionEstablished` or `ConnectionRevoked` by `seq`,
-/// a revocation outranking an establishment at the same `seq`, and only while that record is an
-/// establishment naming a user as non-empty text. Any §9.12 membership record leaves them
-/// [`Members::Unread`].
+/// The members `records` show for the workspace whose mandate names `connection`, as
+/// [`mandate_identity::approvers::members`] reads them.
 pub fn members(records: &[ControlRecord], connection: &str) -> Members {
-    if records
-        .iter()
-        .any(|record| MEMBERSHIP_RECORDS.contains(&record.event_type.as_str()))
-    {
-        return Members::Unread;
-    }
-    match latest_record(records, connection) {
-        Some(record) if record.event_type == "ConnectionEstablished" => text_of(record, "user")
-            .filter(|user| !user.is_empty())
-            .map_or(Members::Unread, |user| Members::Owner(user.to_owned())),
-        Some(_) | None => Members::Unread,
+    resolution::members(&views(records), connection)
+}
+
+/// What the run resolves its approvers from again at each read of the control stream (DEC-2384
+/// item 6): the mandate's `autonomy.approval.approvers` and its connection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApproverSource {
+    pub references: Vec<ApproverRef>,
+    pub connection: String,
+}
+
+impl ApproverSource {
+    /// `admitted`, the approvers the run was admitted with, narrowed to those `records`, a fresh
+    /// read of the control stream, still resolve to: a member deactivated, removed, or stripped of
+    /// a role since never approves, and no one is added (DEC-2384 item 6, `AGENTS.md` rule 3).
+    pub fn current(
+        &self,
+        admitted: &BTreeSet<String>,
+        records: &[ControlRecord],
+    ) -> BTreeSet<String> {
+        let fresh = resolve(&self.references, &members(records, &self.connection));
+        admitted.intersection(&fresh).cloned().collect()
     }
 }
 
-/// The latest `ConnectionEstablished` or `ConnectionRevoked` of `connection` by `seq`, a
-/// revocation outranking an establishment at the same `seq`: the one record both [`members`] and
-/// [`live_cli_confirm`] read, so the two never disagree on which record governs.
-fn latest_record<'r>(records: &'r [ControlRecord], connection: &str) -> Option<&'r ControlRecord> {
+/// The user ids `references` resolve to among `members`, as
+/// [`mandate_identity::approvers::resolve`] reads them: the set admission check 3 compares a
+/// responder against. Empty when nothing resolves, so every grant is refused.
+pub fn resolve(references: &[ApproverRef], members: &Members) -> BTreeSet<String> {
+    let texts: Vec<&str> = references.iter().map(ApproverRef::as_str).collect();
+    resolution::resolve(&texts, members)
+}
+
+/// The resolution's view of each of `records`.
+fn views(records: &[ControlRecord]) -> Vec<RecordView<'_>> {
     records
         .iter()
-        .filter(|record| {
-            matches!(
-                record.event_type.as_str(),
-                "ConnectionEstablished" | "ConnectionRevoked"
-            ) && text_of(record, "connection_id") == Some(connection)
+        .map(|record| RecordView {
+            seq: record.seq,
+            event_type: &record.event_type,
+            event_time: record.event_time,
+            payload: &record.payload,
         })
-        .max_by_key(|record| (record.seq, record.event_type == "ConnectionRevoked"))
-}
-
-/// The user ids `references` resolve to among `members`: the set admission check 3 compares a
-/// responder against. A role reference resolves to the owner, who holds every workspace role; a
-/// `user:` reference resolves only when it names the owner, since no one else is a member. Empty
-/// when nothing resolves, so every grant is refused.
-pub fn resolve(references: &[ApproverRef], members: &Members) -> BTreeSet<String> {
-    let Members::Owner(owner) = members else {
-        return BTreeSet::new();
-    };
-    references
-        .iter()
-        .filter(|reference| match reference.as_str().split_once(':') {
-            Some(("role", _)) => true,
-            Some(("user", user)) => user == owner,
-            Some(_) | None => false,
-        })
-        .map(|_| owner.clone())
         .collect()
-}
-
-/// One text member of `record`'s payload.
-fn text_of<'r>(record: &'r ControlRecord, name: &str) -> Option<&'r str> {
-    record.payload.get(name).and_then(Value::as_str)
 }
 
 /// DEC-923's scope for a live `cli_confirm` grant, read as `mandate approvals approve` reads it
@@ -118,14 +94,16 @@ pub fn live_cli_confirm(
         return None;
     }
     let connection = mandate.connection_id.as_str();
-    let Members::Owner(owner) = members(records, connection) else {
+    let views = views(records);
+    let Members::Owner(owner) = resolution::members(&views, connection) else {
         return None;
     };
-    let latest = latest_record(records, connection)?;
-    if text_of(latest, "environment") != Some("live") {
+    let latest = latest_connection_record(&views, connection)?;
+    let text = |name: &str| latest.payload.get(name).and_then(Value::as_str);
+    if text("environment") != Some("live") {
         return None;
     }
-    let broker = match text_of(latest, "broker") {
+    let broker = match text("broker") {
         Some("robinhood") => LiveBroker::Robinhood,
         Some(_) | None => LiveBroker::Other,
     };

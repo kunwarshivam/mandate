@@ -12,6 +12,7 @@ import { FixtureTag } from "@/components/domain/placeholders";
 import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { confirmStepUpDigest } from "@/api/confirm";
+import { CONNECT_START_ROUTE } from "@/api/connect";
 import { CONFIRM_RECORD, DEPLOY_RECORD } from "@/test/set-up";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
@@ -208,6 +209,48 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     expect(new Set(posts().map((p) => p.headers.get("Idempotency-Key"))).size).toBe(1);
     expect(new Set(posts().map((p) => p.body)).size).toBe(1);
     expect(server.recorded()).toHaveLength(1);
+  });
+
+  it("sends a connect's start again under one key and one body while its answer is lost, and the server starts it once (DEC-2623 item 8)", async () => {
+    let lost = 2;
+    const { calls, server } = mount("approvals", (fetch) => async (input, init) => {
+      const answer = await fetch(input, init);
+      if (init.method === "POST" && input.endsWith(CONNECT_START_ROUTE) && lost > 0) {
+        lost -= 1;
+        throw new TypeError("the answer was lost");
+      }
+      return answer;
+    });
+    await ready();
+    const connect = current().connect;
+    if (!connect) throw new Error("no connect port");
+    const asked = await connect.challenge();
+    if (!asked.ok) throw new Error(asked.reason);
+    const started = await connect.start(asked.shown.challenge);
+    expect(started.ok).toBe(true);
+    const starts = calls.filter((c) => c.method === "POST" && c.url.endsWith(CONNECT_START_ROUTE));
+    expect(starts).toHaveLength(3);
+    expect(new Set(starts.map((c) => c.headers.get("Idempotency-Key"))).size).toBe(1);
+    expect(new Set(starts.map((c) => c.body)).size).toBe(1);
+    expect(server.started()).toHaveLength(1);
+  });
+
+  it("stops sending a connect's start once an answer says what happened, even one marked retryable", async () => {
+    let starts = 0;
+    mount("approvals", (fetch) => async (input, init) => {
+      if (init.method === "POST" && input.endsWith(CONNECT_START_ROUTE)) {
+        starts += 1;
+        return new Response(JSON.stringify({ code: "journal_unavailable", effect: "none", retryable: true }), { status: 503, headers: { "Content-Type": "application/problem+json" } });
+      }
+      return fetch(input, init);
+    });
+    await ready();
+    const connect = current().connect;
+    if (!connect) throw new Error("no connect port");
+    const asked = await connect.challenge();
+    if (!asked.ok) throw new Error(asked.reason);
+    expect(await connect.start(asked.shown.challenge)).toEqual({ ok: false, reason: "journal_unavailable", effect: "none" });
+    expect(starts).toBe(1);
   });
 
   it("still pauses every agent last seen, and stops its connection, when the reads stop answering (API-8, rule 13)", async () => {

@@ -124,6 +124,7 @@ pub fn deployed(snapshot: &str) -> Result<(Vec<ControlRecord>, Store), String> {
     for (seq, (event_type, payload)) in (1_u64..).zip(payloads) {
         records.push(ControlRecord {
             seq,
+            event_time: None,
             event_type: event_type.to_owned(),
             payload: json(&payload)?,
             origin: origin(),

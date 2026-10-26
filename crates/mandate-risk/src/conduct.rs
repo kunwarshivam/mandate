@@ -19,9 +19,9 @@ use mandate_time::UtcNanos;
 
 use crate::gate::Stop;
 use crate::{
-    AssetClass, CancelInput, Check, CheckOutcome, Computed, Decision, GateError, GateInput,
-    InstrumentRestriction, Pacing, PacingControl, ProposedKind, Purpose, ReasonCode, RestingSide,
-    SaneQuote, SessionAt, Side, Verdict, limits,
+    AssetClass, CancelInput, Check, CheckOutcome, Computed, Decision, Deferred, GateError,
+    GateInput, InstrumentRestriction, Pacing, PacingControl, ProposedKind, Purpose, ReasonCode,
+    RestingSide, SaneQuote, SessionAt, Side, Verdict, limits,
 };
 
 /// The quote a risk mark and the collar may use at `now` (§8.2). `None` when there is none or when
@@ -103,10 +103,12 @@ fn collar_x(input: &GateInput<'_>) -> Fraction {
 pub(crate) fn conduct_controls(
     input: &GateInput<'_>,
     at: &SessionAt,
+    skipped: &BTreeSet<Deferred>,
     computed: &mut Computed,
 ) -> Result<Option<Stop>, GateError> {
     let breached = Some((Verdict::Deny, ReasonCode::ConductLimitBreached));
-    if !participation_holds(input)? || order_to_fill_breached(input) {
+    let participation = skipped.contains(&Deferred::Participation) || participation_holds(input)?;
+    if !participation || order_to_fill_breached(input) {
         return Ok(breached);
     }
     if inside_opposite_fill_interval(input)? {

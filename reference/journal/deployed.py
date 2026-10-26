@@ -237,7 +237,7 @@ def invalid_drafts() -> list[dict]:
         invalid("connection_id.null", "§9.24: not nullable", v2, [change("payload.connection_id", None)], "schema", "payload.connection_id"),
         invalid("connection_id.missing", "§9.24: every member is present", v2, [delete("payload.connection_id")], "schema", "payload.connection_id"),
         invalid("extra", "§9.24: closed", v2, [change("payload.note", "x")], "schema", "payload.note"),
-        invalid("at_version_3", "§9.24: versions 1 and 2 only", v2, [change("schema_version", 3)], "unknown_schema", "payload"),
+        invalid("at_version_4", "§9.24 v0.84: versions 1 to 3 only", v2, [change("schema_version", 4)], "unknown_schema", "payload"),
         invalid("rule_22", "rule 22 at version 2: the payload's version is the config ref's", v2, [other, other_refs], "schema", "payload.mandate_version"),
         invalid("no_mandate_ref", "§9: `AgentDeployed` requires `man` at version 2 too", v2, [change("config_refs", {})], "missing_config_ref", "config_refs.mandate_version"),
         invalid("by_a_client", "rule 83: a client never deploys (identity ID-11)", v2, [change("actor", dict(clients.CLIENT))], "schema", "actor.kind"),
@@ -259,6 +259,12 @@ def valid_drafts() -> list[dict]:
 # --------------------------------------------------------------------------- rule 200: the mapping
 
 
+def named_versions(skip: frozenset[str]) -> tuple[int, ...]:
+    """The `AgentDeployed` versions that name their connection: version 2, and version 3 (v0.84,
+    DEC-2131), which every reader reads as version 2."""
+    return (2,) if "v3.read_as_v1" in skip else (2, 3)
+
+
 def stored(names: list[str]) -> dict[str, dict]:
     return {artifact_ref(ARTIFACTS[n]): ARTIFACTS[n] for n in names}
 
@@ -266,7 +272,7 @@ def stored(names: list[str]) -> dict[str, dict]:
 def map_deployed(draft: dict, documents: dict[str, dict], skip: frozenset[str] = frozenset()) -> dict:
     """§9.2's mapping of an `AgentDeployed`, either version: the fact, or the path it is refused at."""
     p = draft["payload"]
-    v2 = draft["schema_version"] == 2
+    v2 = draft["schema_version"] in named_versions(skip)
     if v2 and "map.v2_document_skipped" in skip:
         return {"refused": None, "fact": {"kind": "AgentVersionActive", "agent": p["agent_id"], "connection_id": p["connection_id"]}}
     document = documents.get(p["mandate_version"])
@@ -338,7 +344,7 @@ def fold(state: dict, d: dict, skip: frozenset[str] = frozenset()) -> None:
 def breaks_201(state: dict, d: dict, skip: frozenset[str], later: list[dict]) -> bool:
     if d["event_type"] != "AgentDeployed":
         return False
-    if d["schema_version"] != 2:
+    if d["schema_version"] not in named_versions(skip):
         if "stream.201.v1_judged" not in skip:
             return False
         connection = CONNECTION
@@ -439,7 +445,7 @@ def range_failure(drafts: list[dict], start: int, anchored: bool, skip: frozense
     if "range.201.unanchored_open" in skip:
         return stream_failure(records, skip, None, start)
     for i, d in enumerate(records):
-        v2_deployment = d["event_type"] == "AgentDeployed" and d["schema_version"] == 2
+        v2_deployment = d["event_type"] == "AgentDeployed" and d["schema_version"] in named_versions(skip)
         if d["event_type"] in JUDGED or (v2_deployment and "range.201.unanchored_v1_only" not in skip):
             return {"index": start + i, "cause": "unanchored"}
     return None
@@ -459,7 +465,7 @@ def processes(drafts: list[dict], skip: frozenset[str] = frozenset()) -> dict:
             agent = p["agent_id"]
             if agent in agents or (agent in gone and "manager.stop_not_final" not in skip):
                 continue
-            if d["schema_version"] == 2:
+            if d["schema_version"] in named_versions(skip):
                 connection = p["connection_id"]
             elif "manager.v1_document" in skip:
                 connection = DOCUMENT["connection_id"]
@@ -800,7 +806,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         ("the version-2 base names another connection", "drafts.document", mutated(lambda s: s["drafts"]["deployed_v2"]["payload"].update(connection_id=OTHER_CONNECTION))),
         ("an invalid draft's path differs", "invalid_drafts", mutated(lambda s: case(s, "invalid_drafts", "deployed_v2.rule_22")["expect"].update(path="payload.connection_id"))),
         ("a valid draft drops its connection", "valid_drafts", mutated(lambda s: case(s, "valid_drafts", "deployed_v2.live")["changes"].append(change("payload.connection_id", None)))),
-        ("a mapping draft is refused at append", "mappings.drafts", mutated(lambda s: case(s, "mappings", "version_2")["changes"].append(change("schema_version", 3)))),
+        ("a mapping draft is refused at append", "mappings.drafts", mutated(lambda s: case(s, "mappings", "version_2")["changes"].append(change("schema_version", 4)))),
         ("a mismatch is listed as mapped", "mappings.rule", mutated(lambda s: case(s, "mappings", "another_connection").update(expect=case(s, "mappings", "version_2")["expect"]))),
         ("a stream record is written by a client", "streams.records", mutated(lambda s: case(s, "streams", "stopped")["records"][2].update(actor=dict(clients.CLIENT)))),
         ("a stream case expects the wrong record", "streams.rule", mutated(lambda s: case(s, "streams", "revoked_before")["expect"].update(index=1))),

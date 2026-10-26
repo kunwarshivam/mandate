@@ -35,6 +35,14 @@ pub const SCENARIOS: &[&str] = &["demo"];
 /// Both are stored as canonical JSON (journal spec §4), so a version is the SHA-256 of the file.
 pub const MANDATE_FILE: &str = "deploy/cell/demo/mandate.json";
 pub const INSTRUMENT_FILE: &str = "deploy/cell/demo/instrument.json";
+/// The reviewed configuration every agent the demo deploys trades under, registered on the
+/// workspace's control stream before any version: the gate's rule set, which the runtime's gate
+/// and the executor's binding gate both read as the stream's latest `rule_set` (one artifact for
+/// both), and the paper fee schedule over its trading calendar, which the executor reads. Each is
+/// the shell's reviewed tracer configuration, as canonical JSON.
+pub const RULE_SET_FILE: &str = "deploy/cell/demo/rule-set.json";
+pub const FEE_CONFIG_FILE: &str = "deploy/cell/demo/fee-config.json";
+pub const TRADING_CALENDAR_FILE: &str = "deploy/cell/demo/trading-calendar.json";
 /// [`WEB_AGENT`]'s own envelope and its instrument's snapshot, as canonical JSON: the demo's
 /// envelope on QQQ, since V-006 refuses a second agent on the account an instrument the demo agent
 /// already pins (DEC-2036).
@@ -127,6 +135,7 @@ pub enum Part {
     Api(ApiCheck),
     Web(WebCheck),
     WebSignIn(WebCheck),
+    WebTradeLoop(WebCheck),
     Executor(ExecutorCheck),
     Applied(AppliedCheck),
     Gap(Gap),
@@ -546,6 +555,9 @@ pub fn plan(
     };
     let mandate_in = format!("{INPUTS}/mandate.json");
     let instrument_in = format!("{INPUTS}/instrument.json");
+    let rule_set_in = format!("{INPUTS}/rule-set.json");
+    let fee_in = format!("{INPUTS}/fee-config.json");
+    let calendar_in = format!("{INPUTS}/trading-calendar.json");
     let (confirm, deploy) = (confirm_code(&version), deploy_code(AGENT, &version));
     let (web_confirm, web_deploy) = (
         confirm_code(&web_version),
@@ -689,6 +701,28 @@ pub fn plan(
                     })],
                 },
                 vec![
+                    gesture(
+                        "the gate's reviewed rule set, registered: the one both the runtime's \
+                         gate and the executor's read",
+                        owner(&["config", "register", "--kind", "rule_set", &rule_set_in]),
+                        "registered as event".into(),
+                    ),
+                    gesture(
+                        "the paper fee schedule, registered",
+                        owner(&["config", "register", "--kind", "fee_config", &fee_in]),
+                        "registered as event".into(),
+                    ),
+                    gesture(
+                        "its trading calendar, registered",
+                        owner(&[
+                            "config",
+                            "register",
+                            "--kind",
+                            "trading_calendar",
+                            &calendar_in,
+                        ]),
+                        "registered as event".into(),
+                    ),
                     gesture(
                         "SPY's instrument snapshot, registered",
                         owner(&[
@@ -901,6 +935,12 @@ pub fn plan(
                         ),
                     ],
                 }),
+                Part::WebTradeLoop(WebCheck {
+                    shows: "the trade loop from web/ on the second agent: its approval request \
+                            shown, approved with the code the host confirms, the order filled, \
+                            the position and the journal shown, then its kill switch",
+                    agent: WEB_AGENT,
+                }),
                 Part::Gap(Gap {
                     what: "the paper fill and the protective stop on a fixture broker",
                     on_main: "the executor process (#1596, binary #1694) and its interim image \
@@ -915,17 +955,6 @@ pub fn plan(
             number: 5,
             title: "a backtest of the same mandate version is shown",
             parts: vec![
-                gesture(
-                    "the rule set the backtest runs under, registered: the demo run's settings",
-                    owner(&[
-                        "config",
-                        "register",
-                        "--kind",
-                        "rule_set",
-                        &format!("{BACKTEST_IN}/settings.json"),
-                    ]),
-                    "registered as event".into(),
-                ),
                 gesture(
                     "the backtest of the confirmed version, run on the demo inputs",
                     with(
@@ -1114,6 +1143,7 @@ pub fn gestures(steps: &[Step]) -> Vec<&Gesture> {
             Part::Api(_)
             | Part::Web(_)
             | Part::WebSignIn(_)
+            | Part::WebTradeLoop(_)
             | Part::Executor(_)
             | Part::Applied(_)
             | Part::Gap(_) => None,
@@ -1293,6 +1323,15 @@ pub fn demo_inputs() -> Result<DemoInputs> {
         (
             "instrument.json",
             text(read(INSTRUMENT_FILE)?, INSTRUMENT_FILE)?,
+        ),
+        ("rule-set.json", text(read(RULE_SET_FILE)?, RULE_SET_FILE)?),
+        (
+            "fee-config.json",
+            text(read(FEE_CONFIG_FILE)?, FEE_CONFIG_FILE)?,
+        ),
+        (
+            "trading-calendar.json",
+            text(read(TRADING_CALENDAR_FILE)?, TRADING_CALENDAR_FILE)?,
         ),
         (
             "web-mandate.json",
@@ -1519,6 +1558,7 @@ pub fn run(name: &str) -> Result<()> {
     let mut failed = None;
     let mut gaps = 0;
     let mut browsed: Option<WebOutcome> = None;
+    let mut traded: Option<TradeOutcome> = None;
     for step in &steps {
         let mut previous: Option<&Gesture> = None;
         let waiting = lanes(step);
@@ -1603,14 +1643,36 @@ pub fn run(name: &str) -> Result<()> {
                         failed.get_or_insert_with(|| format!("GET {}: {said}", check.path));
                     }
                 }
+                Part::WebTradeLoop(check) => {
+                    let outcome = match (&failed, &traded) {
+                        (Some(_), _) => TradeOutcome::AfterFailure,
+                        (None, Some(seen)) => seen.clone(),
+                        (None, None) => {
+                            let (seen, web) = browse(check.agent, &workspace, &id, &files)?;
+                            browsed = Some(web);
+                            traded = Some(seen.clone());
+                            seen
+                        }
+                    };
+                    let required = Required {
+                        cell: env::var_os(CELL_REQUIRED_ENV).is_some(),
+                        web: env::var_os(WEB_REQUIRED_ENV).is_some(),
+                    };
+                    let (word, said, fails) = trade_verdict(&outcome, required);
+                    eprintln!("    {word:<8} {}: {said}", check.shows);
+                    if fails {
+                        failed.get_or_insert_with(|| format!("web/ trade loop: {said}"));
+                    }
+                }
                 Part::Web(check) | Part::WebSignIn(check) => {
                     let outcome = match (&failed, &browsed) {
                         (Some(_), _) => WebOutcome::AfterFailure,
                         (None, Some(seen)) => seen.clone(),
                         (None, None) => {
-                            let seen = web_outcome(check, &workspace)?;
-                            browsed = Some(seen.clone());
-                            seen
+                            let (seen, web) = browse(check.agent, &workspace, &id, &files)?;
+                            traded = Some(seen);
+                            browsed = Some(web.clone());
+                            web
                         }
                     };
                     let required = Required {
@@ -1848,6 +1910,206 @@ pub enum WebOutcome {
     },
 }
 
+/// How the browser's trade loop read: as [`WebOutcome`] reads a gesture, or what it reached.
+#[derive(Debug, Clone)]
+pub enum TradeOutcome {
+    AfterFailure,
+    /// Lane W's spec is not in this checkout yet (#2462).
+    NoSpec,
+    Unaskable(String),
+    NoTools(String),
+    Failed(String),
+    /// The loop stopped before any approval reached `web/`, and the API, read with the owner's
+    /// session, lists no approval of the agent in any state: the runtime proposed nothing, which
+    /// waits on E15-14's composer, not on `web/`.
+    Unproposed(String),
+    Ran(web::TradeLoop),
+}
+
+/// The scenario's one pass through the browser on `agent`, the second agent, which nothing has
+/// stopped yet: first the trade loop (lane W's spec, its confirmation run on the host as a control
+/// gesture), then, unless the loop pressed the agent's kill switch itself, the kill switch gesture
+/// alone, so step 1's sign-in, step 4's loop and step 7's kill switch read one browser session's
+/// work. A loop that pressed the kill switch hands step 7 that command.
+fn browse(
+    agent: &'static str,
+    workspace: &str,
+    id: &str,
+    files: &[(&str, String)],
+) -> Result<(TradeOutcome, WebOutcome)> {
+    if let Some(why) = api_unaskable()? {
+        return Ok((
+            TradeOutcome::Unaskable(why.clone()),
+            WebOutcome::Unaskable(why),
+        ));
+    }
+    if let Some(why) = web::unavailable()? {
+        return Ok((TradeOutcome::NoTools(why.clone()), WebOutcome::NoTools(why)));
+    }
+    if let Err(why) = api_port_forward(stub_image_tag()?.is_some()) {
+        let why = format!("{why:#}");
+        return Ok((
+            TradeOutcome::Unaskable(why.clone()),
+            WebOutcome::Unaskable(why),
+        ));
+    }
+    let mut confirm = |asked: &web::ConfirmRequest| confirm_on_host(asked, id, files);
+    let traded = if !web::trade_loop_spec_present()? {
+        TradeOutcome::NoSpec
+    } else {
+        match web::trade_loop_from_web(workspace, agent, &mut confirm) {
+            Ok(traded) if traded.first_missing() == Some("approval") => {
+                let listed = api_answer(&requests_read(workspace))?;
+                unproposed(traded, &listed, agent)
+            }
+            Ok(traded) => TradeOutcome::Ran(traded),
+            Err(why) => TradeOutcome::Failed(format!("{why:#}")),
+        }
+    };
+    let pressed = match &traded {
+        TradeOutcome::Ran(t) => t
+            .reached
+            .get("kill_switch")
+            .filter(|c| !c.is_empty())
+            .cloned(),
+        _ => None,
+    };
+    let web = match pressed {
+        Some(command) => WebOutcome::Recorded {
+            agent: agent.to_owned(),
+            workspace: workspace.to_owned(),
+            read: api_answer(&command_read(workspace, &command))?,
+            command,
+        },
+        None => web_outcome(&WebCheck { shows: "", agent }, workspace)?,
+    };
+    Ok((traded, web))
+}
+
+/// The signed-in read of every approval in `workspace`, whatever its state.
+pub fn requests_read(workspace: &str) -> ApiCheck {
+    ApiCheck {
+        shows: "the workspace's approvals, read with the owner's session",
+        path: format!("/v1/workspaces/{workspace}/approvals"),
+        status: 200,
+        ask: Ask::Session,
+        body: Body::Any,
+    }
+}
+
+/// A loop that stopped before its approval, read against the API's list of approvals: pending as
+/// [`TradeOutcome::Unproposed`] only when the API answered 200 and lists none of `agent`'s, in any
+/// state. Otherwise the loop stays [`TradeOutcome::Ran`], which fails: a request the runtime made
+/// that `web/` never showed is `web/`'s failure, and a list that cannot be read proves nothing.
+pub fn unproposed(
+    traded: web::TradeLoop,
+    listed: &Result<(u16, String), String>,
+    agent: &str,
+) -> TradeOutcome {
+    let none_listed = match listed {
+        Ok((200, body)) => serde_json::from_str::<Value>(body).ok().and_then(|v| {
+            v["approvals"]
+                .as_array()
+                .map(|a| !a.iter().any(|x| x["agent_id"] == agent))
+        }),
+        _ => None,
+    };
+    if none_listed == Some(true) {
+        let why = traded.error.unwrap_or_else(|| "no error named".into());
+        TradeOutcome::Unproposed(why)
+    } else {
+        TradeOutcome::Ran(traded)
+    }
+}
+
+/// The host's `mandate step-up confirm` for the browser's request, as a one-gesture Job of the
+/// `control` process against the cell's journal and store; `Err` names why it did not confirm.
+fn confirm_on_host(
+    asked: &web::ConfirmRequest,
+    id: &str,
+    files: &[(&str, String)],
+) -> std::result::Result<(), String> {
+    let gesture = Gesture {
+        container: "g99-step-up-confirm".into(),
+        shows: "the host's confirmation of the browser's step-up code",
+        command: None,
+        args: web::confirm_args(asked, JOURNAL, STORE),
+        expect: "confirmed ".into(),
+    };
+    let run = || -> Result<(bool, String)> {
+        let rendered = render(
+            &[
+                format!("run.id=\"{id}s\""),
+                format!("run.args={}", json!(gesture.args)),
+            ],
+            Some("templates/run.yaml"),
+        )?;
+        run_job(gestures_job(
+            rendered,
+            &[&gesture],
+            &format!("demo-in-{id}s"),
+            files,
+            NAMESPACE,
+        )?)
+    };
+    match run() {
+        Ok((true, logs))
+            if lines_of(&logs, &gesture.container)
+                .iter()
+                .any(|l| l.starts_with("confirmed ")) =>
+        {
+            Ok(())
+        }
+        Ok((_, logs)) => Err(format!(
+            "`mandate step-up confirm` did not confirm:\n{logs}"
+        )),
+        Err(why) => Err(format!("{why:#}")),
+    }
+}
+
+/// How step 4's trade loop reads: `ran` when every step was reached; `pending` when it stopped
+/// before any approval request reached web/, which is the loop's upstream (the runtime's
+/// proposal) not being on `main` yet, never a fault of what is; `failed` when it stopped at any
+/// later step, or the run itself failed; and, as [`web_verdict`] reads them, a machine without
+/// web/'s tools or an API that cannot be asked.
+pub fn trade_verdict(outcome: &TradeOutcome, required: Required) -> (&'static str, String, bool) {
+    match outcome {
+        TradeOutcome::AfterFailure => ("not run", "an earlier part failed".into(), false),
+        TradeOutcome::NoSpec => (
+            "pending",
+            "lane W's web/e2e-cell/trade-loop.spec.ts is not on main yet (#2462)".into(),
+            false,
+        ),
+        TradeOutcome::Unaskable(why) if required.cell => ("failed", why.clone(), true),
+        TradeOutcome::NoTools(why) if required.web => ("failed", why.clone(), true),
+        TradeOutcome::Unaskable(why) | TradeOutcome::NoTools(why) => {
+            ("not run", why.clone(), false)
+        }
+        TradeOutcome::Failed(why) => ("failed", why.clone(), true),
+        TradeOutcome::Ran(t) if t.whole() => (
+            "ran",
+            format!(
+                "approval {}, approved {}, kill switch {}",
+                t.reached["approval"], t.reached["approved"], t.reached["kill_switch"]
+            ),
+            false,
+        ),
+        TradeOutcome::Unproposed(why) => (
+            "pending",
+            format!(
+                "no approval request reached web/ ({why}), and the API lists none of the agent's: \
+                 the runtime proposed nothing, which waits on E15-14's composer"
+            ),
+            false,
+        ),
+        TradeOutcome::Ran(t) => {
+            let stopped = t.first_missing().unwrap_or("the end");
+            let why = t.error.clone().unwrap_or_else(|| "no error named".into());
+            ("failed", format!("stopped before {stopped}: {why}"), true)
+        }
+    }
+}
+
 /// Runs `check`'s gesture against the cell's API for `workspace`, then reads its command back
 /// with the owner's session.
 fn web_outcome(check: &WebCheck, workspace: &str) -> Result<WebOutcome> {
@@ -2068,6 +2330,9 @@ mod tests {
         for path in [
             MANDATE_FILE,
             INSTRUMENT_FILE,
+            RULE_SET_FILE,
+            FEE_CONFIG_FILE,
+            TRADING_CALENDAR_FILE,
             WEB_MANDATE_FILE,
             WEB_INSTRUMENT_FILE,
             RESEARCH_MANDATE_FILE,
@@ -2260,11 +2525,12 @@ mod tests {
         assert_eq!(payload["mandate_version"], reference(&mandate()));
     }
 
-    /// Step 5 registers a rule set, runs the runner on the confirmed version in the pod's store,
-    /// and records the payload it prints, after the confirmation and before the kill switch; the
-    /// API read and web/'s report wait on the membership parser and web/.
+    /// Step 5 runs the runner on the confirmed version in the pod's store and records the payload
+    /// it prints, after the confirmation and before the kill switch, under the rule set step 2
+    /// registered before the version; the API read and web/'s report wait on the membership
+    /// parser and web/.
     #[test]
-    fn step_five_registers_a_rule_set_runs_the_backtest_and_records_it() {
+    fn step_five_runs_the_backtest_under_the_registered_rule_set_and_records_it() {
         let steps = planned("demo5");
         let all = gestures(&steps);
         let at = |name: &str| {
@@ -2286,7 +2552,7 @@ mod tests {
                 .unwrap(),
             at("agent-kill"),
         );
-        assert!(confirm < rule_set && rule_set < runner && runner < record && record < kill);
+        assert!(rule_set < confirm && confirm < runner && runner < record && record < kill);
         assert!(
             all[rule_set]
                 .args
@@ -2331,6 +2597,74 @@ mod tests {
             .flatten()
             .collect();
         assert_eq!(lanes, ["W2"], "only web/'s report screen is left");
+    }
+
+    /// Step 2 registers the reviewed configuration before any version, once each: the gate's
+    /// rule set, which the runtime's gate and the executor's binding gate both read as the
+    /// control stream's latest `rule_set`, so no later registration of that kind may shadow it,
+    /// then the paper fee schedule and its trading calendar. Each file is the shell's reviewed
+    /// tracer configuration, and the rule set has exactly the members the gates accept.
+    #[test]
+    fn step_two_registers_the_reviewed_configuration_both_gates_read_once_before_any_version() {
+        let steps = planned("demo2");
+        let all = gestures(&steps);
+        let first_version = all
+            .iter()
+            .position(|g| g.args[..2] == ["version", "create"])
+            .unwrap();
+        for (kind, file) in [
+            ("rule_set", "rule-set.json"),
+            ("fee_config", "fee-config.json"),
+            ("trading_calendar", "trading-calendar.json"),
+        ] {
+            let registered: Vec<usize> = all
+                .iter()
+                .enumerate()
+                .filter(|(_, g)| g.args.windows(2).any(|w| w == ["--kind", kind]))
+                .map(|(n, _)| n)
+                .collect();
+            assert_eq!(registered.len(), 1, "{kind} is registered once");
+            assert!(registered[0] < first_version, "{kind} before any version");
+            let path = format!("{INPUTS}/{file}");
+            assert!(
+                all[registered[0]].args.contains(&path),
+                "{kind} registers {path}: {:?}",
+                all[registered[0]].args
+            );
+        }
+        for (demo, tracer) in [
+            (RULE_SET_FILE, "rule-set.json"),
+            (FEE_CONFIG_FILE, "fee-config.json"),
+            (TRADING_CALENDAR_FILE, "trading-calendar.json"),
+        ] {
+            assert_eq!(
+                parsed(demo),
+                parsed(&format!(
+                    "crates/mandate-shell/tests/fixtures/tracer/config/{tracer}"
+                )),
+                "{demo} is the shell's reviewed configuration"
+            );
+        }
+        let rule_set = parsed(RULE_SET_FILE);
+        let members: Vec<&str> = rule_set
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            members,
+            [
+                "executor",
+                "gate",
+                "gate_config",
+                "iex_quote_max_age_s",
+                "ruleset_version",
+                "story"
+            ],
+            "mandate-gate-inputs' RULE_MEMBERS"
+        );
+        assert_eq!(rule_set["gate"], "trading-domain-9.1");
     }
 
     /// The runner's five inputs are read from its committed fixtures into their own directory of
@@ -3455,6 +3789,110 @@ mod tests {
         }
     }
 
+    /// Step 4 runs lane W's trade loop on the second agent, the one nothing stops before the parts
+    /// run (the CLI's kill switch is the demo agent's), and reads it: `ran` only when every step
+    /// was reached; `pending`, never failing, only as [`TradeOutcome::Unproposed`], the API's word
+    /// that the runtime asked for nothing; and `failed` for a loop that stopped at any step,
+    /// approval included, or for a run that failed.
+    #[test]
+    fn step_four_reads_the_browser_trade_loop() {
+        let steps = planned("demo1");
+        let loops: Vec<(u8, &WebCheck)> = steps
+            .iter()
+            .flat_map(|s| s.parts.iter().map(move |p| (s.number, p)))
+            .filter_map(|(n, p)| match p {
+                Part::WebTradeLoop(c) => Some((n, c)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(loops.len(), 1);
+        assert_eq!(loops[0].0, 4);
+        assert_eq!(loops[0].1.agent, WEB_AGENT, "never the agent the CLI kills");
+        let reached = |steps: &[&str], error: Option<&str>| {
+            TradeOutcome::Ran(web::TradeLoop {
+                reached: steps
+                    .iter()
+                    .map(|s| ((*s).to_owned(), format!("v-{s}")))
+                    .collect(),
+                error: error.map(str::to_owned),
+            })
+        };
+        for required in [
+            Required {
+                cell: false,
+                web: false,
+            },
+            Required {
+                cell: true,
+                web: true,
+            },
+        ] {
+            let (word, said, fails) =
+                trade_verdict(&reached(&web::TRADE_LOOP_STEPS, None), required);
+            assert_eq!((word, fails), ("ran", false), "{said}");
+            assert!(said.contains("v-kill_switch"), "{said}");
+            let (word, said, fails) =
+                trade_verdict(&reached(&[], Some("no approval within 20000 ms")), required);
+            assert_eq!(
+                (word, fails),
+                ("failed", true),
+                "a loop left at its approval fails unless the API showed no request: {said}"
+            );
+            let (word, _, fails) = trade_verdict(
+                &TradeOutcome::Unproposed("no approval within 20000 ms".into()),
+                required,
+            );
+            assert_eq!(
+                (word, fails),
+                ("pending", false),
+                "no proposal yet is upstream, not a fault"
+            );
+            for stopped_at in 0..web::TRADE_LOOP_STEPS.len() {
+                let (word, said, fails) = trade_verdict(
+                    &reached(&web::TRADE_LOOP_STEPS[..stopped_at], Some("x")),
+                    required,
+                );
+                assert_eq!((word, fails), ("failed", true), "{said}");
+                assert!(said.contains(web::TRADE_LOOP_STEPS[stopped_at]), "{said}");
+            }
+            let (word, _, fails) =
+                trade_verdict(&reached(&web::TRADE_LOOP_STEPS, Some("late")), required);
+            assert_eq!(
+                (word, fails),
+                ("failed", true),
+                "an error fails a loop that reached every step"
+            );
+            let (word, _, fails) = trade_verdict(&TradeOutcome::Failed("x".into()), required);
+            assert_eq!((word, fails), ("failed", true));
+            let (word, _, fails) = trade_verdict(&TradeOutcome::AfterFailure, required);
+            assert_eq!((word, fails), ("not run", false));
+            let (word, _, fails) = trade_verdict(&TradeOutcome::NoSpec, required);
+            assert_eq!(
+                (word, fails),
+                ("pending", false),
+                "the spec not yet on main fails nothing"
+            );
+        }
+        let none = Required {
+            cell: false,
+            web: false,
+        };
+        let web_only = Required {
+            cell: false,
+            web: true,
+        };
+        let cell_only = Required {
+            cell: true,
+            web: false,
+        };
+        let no_npm = TradeOutcome::NoTools("no npm".into());
+        assert!(!trade_verdict(&no_npm, none).2);
+        assert!(trade_verdict(&no_npm, web_only).2);
+        let unaskable = TradeOutcome::Unaskable("no kubectl".into());
+        assert!(!trade_verdict(&unaskable, web_only).2);
+        assert!(trade_verdict(&unaskable, cell_only).2);
+    }
+
     /// The closing summary lists every wait of every gap once, under its own lane, with the step it
     /// holds back.
     #[test]
@@ -3731,6 +4169,47 @@ mod tests {
         );
     }
 
+    /// #2466's review: a loop left at its approval is pending only on the API's word that the
+    /// agent has no approval at all. One the runtime requested and `web/` never showed, any state,
+    /// or a list that cannot be read, a non-200, or a body that is not the list, all fail.
+    #[test]
+    fn a_loop_left_at_its_approval_is_pending_only_when_the_api_lists_none_of_the_agent_s() {
+        let stopped = || web::TradeLoop {
+            reached: BTreeMap::new(),
+            error: Some("no approval within 20000 ms".into()),
+        };
+        let listed = |status: u16, body: &str| Ok((status, body.to_owned()));
+        let pending = |outcome: &TradeOutcome| matches!(outcome, TradeOutcome::Unproposed(_));
+        let other = r#"{"approvals":[{"agent_id":"other","state":"pending"}]}"#;
+        assert!(pending(&unproposed(
+            stopped(),
+            &listed(200, r#"{"approvals":[]}"#),
+            WEB_AGENT
+        )));
+        assert!(pending(&unproposed(
+            stopped(),
+            &listed(200, other),
+            WEB_AGENT
+        )));
+        for state in ["pending", "approved", "expired"] {
+            let body = json!({"approvals": [{"agent_id": WEB_AGENT, "state": state}]}).to_string();
+            assert!(
+                !pending(&unproposed(stopped(), &listed(200, &body), WEB_AGENT)),
+                "a {state} request was made"
+            );
+        }
+        for answer in [
+            listed(503, r#"{"approvals":[]}"#),
+            listed(200, "not json"),
+            listed(200, r#"{"agents":[]}"#),
+            Err("no kubectl".to_owned()),
+        ] {
+            assert!(
+                !pending(&unproposed(stopped(), &answer, WEB_AGENT)),
+                "{answer:?}"
+            );
+        }
+    }
     /// Only a terminated container has a code; init containers count, and a running one does not.
     #[test]
     fn exit_codes_come_from_terminated_containers_only() {

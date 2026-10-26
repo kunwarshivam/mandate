@@ -96,6 +96,7 @@ impl Stream {
         let seq = u64::try_from(self.records.len()).unwrap() + 1;
         self.records.push(ControlRecord {
             seq,
+            event_time: None,
             event_type: event_type.to_owned(),
             payload: json(payload),
             origin: Origin {
