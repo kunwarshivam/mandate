@@ -41,6 +41,7 @@
 /crates/mandate-authn/      @kunwarshivam
 /crates/mandate-backtest-runner/ @kunwarshivam
 /crates/mandate-backtest/   @kunwarshivam
+/crates/mandate-bars/       @kunwarshivam
 /crates/mandate-builder/    @kunwarshivam
 /crates/mandate-canon/      @kunwarshivam
 /crates/mandate-cli/        @kunwarshivam
