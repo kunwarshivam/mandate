@@ -790,7 +790,8 @@ fn open_xyz(journal: &Journal, id: &str) -> Result<(), Error> {
     )
 }
 
-/// A feed quoting XYZ sane at its bid, a cent under the ask, at the instant asked, and marking XYZ.
+/// A feed quoting XYZ sane at its bid at the instant asked, or nothing while its bid is empty, and
+/// marking XYZ.
 #[derive(Clone)]
 struct QuotingXyz(Rc<std::cell::RefCell<&'static str>>);
 
@@ -810,7 +811,7 @@ impl mandate_executord::quotes::QuoteFeed for QuotingXyz {
         instrument: &InstrumentId,
         now: mandate_time::UtcNanos,
     ) -> Result<mandate_executor::MarketObservation, &'static str> {
-        if instrument.as_str() != XYZ {
+        if instrument.as_str() != XYZ || self.0.borrow().is_empty() {
             return Err("no_quote");
         }
         Ok(mandate_executor::MarketObservation {
@@ -920,5 +921,57 @@ fn records_owed_after_a_committed_batch_and_fenced_stop_the_pass() -> Result<(),
         "{types:?}"
     );
     assert!(!process.ready(), "{:?}", process.lifecycle().state());
+    Ok(())
+}
+
+/// DEC-2834: the agent's opening fills before the executor has marked its instrument. The fill is
+/// booked and E is unknown: the view is `unpriced`, the gate is handed no risk for the agent, so
+/// its next opening is held, and nothing trips. The first sane regular mark prices it, and the gate
+/// reads the agent's risk again, E being 10000 − 1500 + 10 × 150.
+#[test]
+fn a_fill_before_any_mark_holds_openings_until_the_first_mark_prices_it() -> Result<(), Error> {
+    let journal = deployed()?;
+    let broker = Paper::new(&journal);
+    let openings = Fixed::new(1);
+    let published = Rc::clone(&openings.published);
+    let quotes = QuotingXyz::at("");
+    let mut process = holding(&journal, &broker, trading(openings)?, &quotes)?;
+    let types = journal.types(ACCOUNT_STREAM);
+    assert!(
+        types.contains(&"FillApplied".to_owned()) && !types.contains(&"MarkUpdated".to_owned()),
+        "{types:?}"
+    );
+    assert!(
+        matches!(
+            process.risk_view(&agent(AGENT)),
+            RiskView::Unreadable {
+                cause: UnreadableCause::Unpriced,
+                mode: AgentMode::ExitsOnly,
+                ..
+            }
+        ),
+        "{:?}",
+        process.risk_view(&agent(AGENT))
+    );
+    assert!(published.borrow().is_empty(), "{:?}", published.borrow());
+    let tripped = [
+        "RiskLimitTriggered",
+        "RiskLimitLifted",
+        "InstrumentRestrictionChanged",
+        "AgentModeApplied",
+    ];
+    assert!(
+        !types.iter().any(|kind| tripped.contains(&kind.as_str())),
+        "nothing trips while unpriced: {types:?}"
+    );
+    quotes.quote("150");
+    tick(&journal, "t5", "2026-09-21T15:06:00Z")?;
+    process.step(at("2026-09-21T15:06:00Z")?);
+    let RiskView::Readable { snapshot, .. } = process.risk_view(&agent(AGENT)) else {
+        return Err(format!("{:?}", process.risk_view(&agent(AGENT))).into());
+    };
+    assert_eq!(snapshot.agent_equity, Usd::parse("10000")?);
+    assert_eq!(snapshot.agent_mode, AgentMode::Normal);
+    assert_eq!(*published.borrow(), vec![AGENT.to_owned()]);
     Ok(())
 }

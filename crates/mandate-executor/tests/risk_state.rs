@@ -2670,7 +2670,8 @@ fn rows_from_before_the_deployment_are_not_the_agents() {
 
 /// The opening's own second is the agent's: a mark of another instrument there fails closed, and
 /// on a bound fold a mark before it, of the bound instrument or another, steps nothing before the
-/// instrument is checked (DEC-2804 item 3, DEC-2308 item 4).
+/// instrument is checked (DEC-2804 item 3, DEC-2308 item 4). A mark in that second prices the
+/// flat fold, and a fill and a fee there are the agent's (DEC-2834).
 #[test]
 fn the_opening_second_is_the_agents_and_a_bound_fold_skips_earlier_marks() {
     let mandate = mandate();
@@ -2713,20 +2714,23 @@ fn the_opening_second_is_the_agents_and_a_bound_fold_skips_earlier_marks() {
     );
 
     let mut at_opening = bound();
-    for row in own_order(2, AGENT, "o-1", XYZ, "buy", "1") {
+    at_opening
+        .fold(&mark(2, XYZ, OPENED, "100", true, "regular"))
+        .unwrap();
+    for row in own_order(3, AGENT, "o-1", XYZ, "buy", "1") {
         at_opening.fold(&row).unwrap();
     }
     at_opening
-        .fold(&fill(4, "o-1", XYZ, ("buy", "1", "100"), OPENED, "[]"))
+        .fold(&fill(5, "o-1", XYZ, ("buy", "1", "100"), OPENED, "[]"))
         .unwrap();
     assert!(
-        matches!(at_opening.view(), RiskView::Readable { head: 4, .. }),
+        matches!(at_opening.view(), RiskView::Readable { head: 5, .. }),
         "a fill at the opening second is the agent's: {:?}",
         at_opening.view()
     );
     let before = equity(at_opening.view());
     at_opening
-        .fold(&fees_charged(5, "o-1", "0.01", OPENED))
+        .fold(&fees_charged(6, "o-1", "0.01", OPENED))
         .unwrap();
     let lowered = Usd::parse(&before)
         .unwrap()
@@ -3293,4 +3297,226 @@ fn the_reconcilers_own_adoption_batch_folds_readable() {
         panic!("the reconciler's batch reads: {types:?} {:?}", fold.view());
     };
     assert_eq!((snapshot, *head), (&before, 4 + drafts.len() as u64));
+}
+
+/// DEC-2834 items 1 to 3: an own fill on a flat fold before any counted sane mark is held, with E
+/// unknown. The view holds openings and nothing else, nothing is returned, and a fee, a mark that is
+/// not sane and an equity's mark outside the regular session are held too. The first counted sane
+/// mark prices them: E = A − cost − fee + Q × bid, and a restart reaches the same view.
+#[test]
+fn an_unpriced_fill_is_held_until_the_first_counted_sane_mark_prices_it() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    let mut rows: Vec<StoredEvent> = own_order(2, AGENT, "o-1", XYZ, "buy", "10").into();
+    rows.extend([
+        fill(4, "o-1", XYZ, ("buy", "10", "100"), AT_1, "[]"),
+        fees_charged(5, "o-1", "0.01", AT_1),
+        mark(6, XYZ, AT_2, "80", false, "regular"),
+        mark(7, XYZ, AT_2, "80", true, "pre_market"),
+    ]);
+    for row in &rows {
+        assert_eq!(fold.fold(row).unwrap(), Vec::new(), "{}", row.event_type);
+        if row.seq >= 4 {
+            assert_eq!(
+                unreadable(fold.view()),
+                (UnreadableCause::Unpriced, row.seq),
+                "held: {}",
+                row.event_type
+            );
+        }
+    }
+    let priced = mark(8, XYZ, AT_2, "90", true, "regular");
+    fold.fold(&priced).unwrap();
+    assert_eq!(readable_head(fold.view()), 8);
+    assert_eq!(
+        equity(fold.view()),
+        "9899.99",
+        "10000 − 1000 − 0.01 + 10 × 90"
+    );
+    rows.push(priced);
+    let mut restarted = open(&mandate, &Wall);
+    for row in &rows {
+        restarted.fold(row).unwrap();
+    }
+    assert_eq!(restarted.view(), fold.view());
+}
+
+/// DEC-2834 item 4: while unpriced, a mark naming another instrument is refused at once, for good.
+#[test]
+fn a_mark_of_another_instrument_while_unpriced_is_refused() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    for row in own_order(2, AGENT, "o-1", XYZ, "buy", "10") {
+        fold.fold(&row).unwrap();
+    }
+    fold.fold(&fill(4, "o-1", XYZ, ("buy", "10", "100"), AT_1, "[]"))
+        .unwrap();
+    fold.fold(&mark(5, ETH, AT_2, "90", true, "regular"))
+        .unwrap();
+    assert_eq!(
+        unreadable(fold.view()),
+        (UnreadableCause::RefusedToDecide, 4)
+    );
+    fold.fold(&mark(6, XYZ, AT_2, "90", true, "regular"))
+        .unwrap();
+    assert_eq!(
+        unreadable(fold.view()),
+        (UnreadableCause::RefusedToDecide, 4),
+        "refused for good"
+    );
+}
+
+/// One input to a flat fold: an own buy or sell at 100, a tick, or an XYZ mark at a bid, sane or
+/// not, in the regular session or the pre-market.
+#[derive(Debug, Clone)]
+enum Flat {
+    Buy(u8),
+    Sell(u8),
+    Tick,
+    Mark(u16, bool, bool),
+}
+
+fn flat_input() -> impl proptest::strategy::Strategy<Value = Flat> {
+    use proptest::prelude::*;
+    prop_oneof![
+        (1_u8..=50).prop_map(Flat::Buy),
+        (1_u8..=50).prop_map(Flat::Sell),
+        Just(Flat::Tick),
+        (20_u16..=180, any::<bool>(), any::<bool>())
+            .prop_map(|(bid, sane, regular)| Flat::Mark(bid, sane, regular)),
+    ]
+}
+
+/// The rows of `inputs` on a flat fold, one minute apart from 14:31, each order's fill right after
+/// its request and submission, and a closing sane regular mark at 95. With `oracle`, a sane
+/// regular mark at the pricing bid is journaled right before the first own fill that comes before
+/// any counted sane mark, at that fill's instant: the fold the held inputs must end as.
+fn flat_rows(inputs: &[Flat], oracle: bool) -> Vec<(String, Flat)> {
+    let mut timed: Vec<(String, Flat)> = (31_u32..)
+        .zip(inputs)
+        .map(|(minute, input)| {
+            (
+                format!(
+                    "2026-09-22T{:02}:{:02}:00.000000000Z",
+                    14 + minute / 60,
+                    minute % 60
+                ),
+                input.clone(),
+            )
+        })
+        .collect();
+    let last = 31 + u32::try_from(inputs.len()).unwrap();
+    timed.push((
+        format!(
+            "2026-09-22T{:02}:{:02}:00.000000000Z",
+            14 + last / 60,
+            last % 60
+        ),
+        Flat::Mark(95, true, true),
+    ));
+    let counted = |input: &Flat| matches!(input, Flat::Mark(_, true, true));
+    let first_fill = timed
+        .iter()
+        .position(|(_, input)| matches!(input, Flat::Buy(_)))
+        .filter(|fill| !timed[..*fill].iter().any(|(_, input)| counted(input)));
+    if let (true, Some(fill)) = (oracle, first_fill) {
+        let bid = timed[fill..]
+            .iter()
+            .find_map(|(_, input)| match input {
+                Flat::Mark(bid, true, true) => Some(*bid),
+                _ => None,
+            })
+            .unwrap();
+        let at = timed[fill].0.clone();
+        timed.insert(fill, (at, Flat::Mark(bid, true, true)));
+    }
+    timed
+}
+
+/// Folds `timed` on a flat fold, journaling each step's records right after it, and returns the
+/// records, the view, and whether any step returned a record while the view was unpriced.
+fn fold_flat(timed: &[(String, Flat)]) -> (Vec<(String, Value)>, RiskView, bool) {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    let (mut seq, mut held, mut orders) = (2_u64, 0_u32, 0_u32);
+    let mut records = Vec::new();
+    let mut while_unpriced = false;
+    for (clock, input) in timed {
+        let mut rows = Vec::new();
+        match input {
+            Flat::Buy(qty) | Flat::Sell(qty) => {
+                let side = if matches!(input, Flat::Buy(_)) {
+                    "buy"
+                } else {
+                    "sell"
+                };
+                if side == "sell" && u32::from(*qty) > held {
+                    continue;
+                }
+                held = if side == "buy" {
+                    held + u32::from(*qty)
+                } else {
+                    held - u32::from(*qty)
+                };
+                orders += 1;
+                let order = format!("o-{orders}");
+                let qty = qty.to_string();
+                rows.extend(own_order(seq, AGENT, &order, XYZ, side, &qty));
+                rows.push(fill(seq + 2, &order, XYZ, (side, &qty, "100"), clock, "[]"));
+            }
+            Flat::Tick => rows.push(tick(seq, clock)),
+            Flat::Mark(bid, sane, regular) => {
+                let session = if *regular { "regular" } else { "pre_market" };
+                rows.push(mark(seq, XYZ, clock, &bid.to_string(), *sane, session));
+            }
+        }
+        for row in rows {
+            let appends = fold.fold(&row).unwrap();
+            seq = row.seq + 1;
+            let unpriced = matches!(
+                fold.view(),
+                RiskView::Unreadable {
+                    cause: UnreadableCause::Unpriced,
+                    ..
+                }
+            );
+            while_unpriced |= unpriced && !appends.is_empty();
+            for append in &appends {
+                let record = appended(seq, append);
+                let body = parse(&record.body).unwrap();
+                records.push((
+                    record.event_type.clone(),
+                    body.get("payload").unwrap().clone(),
+                ));
+                fold.fold(&record).unwrap();
+                seq += 1;
+            }
+        }
+    }
+    (records, fold.view().clone(), while_unpriced)
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+    /// DEC-2834: while a flat fold is unpriced no record is returned, so no limit trips or lifts and
+    /// nothing pauses; once its first counted sane mark prices it, its view and records are the
+    /// oracle's, a fold that read that mark's bid at the first unpriced fill's instant.
+    #[test]
+    fn an_unpriced_fold_trips_nothing_and_prices_as_the_oracle(
+        inputs in proptest::collection::vec(flat_input(), 1..25),
+    ) {
+        let (records, view, while_unpriced) = fold_flat(&flat_rows(&inputs, false));
+        let (expected, oracle, _) = fold_flat(&flat_rows(&inputs, true));
+        proptest::prop_assert!(!while_unpriced, "a record while unpriced");
+        let (RiskView::Readable { snapshot, .. }, RiskView::Readable { snapshot: want, .. }) =
+            (&view, &oracle)
+        else {
+            return Err(proptest::test_runner::TestCaseError::fail(format!(
+                "both read after the closing mark: {view:?} {oracle:?}"
+            )));
+        };
+        proptest::prop_assert_eq!(snapshot, want);
+        proptest::prop_assert_eq!(records, expected);
+    }
 }
