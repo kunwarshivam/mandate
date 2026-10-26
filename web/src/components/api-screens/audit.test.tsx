@@ -59,6 +59,23 @@ describe("the audit timeline over the workspace API (§4.8.1, API-15)", () => {
     expect(screen.getByRole("list", { name: "Journal records" })).toBeInTheDocument();
   });
 
+  it("says a stream with no record yet has none, never that it was not reported", async () => {
+    mount((send) => (input, init) =>
+      decodeURIComponent(new URL(input).pathname).includes(`/journal/streams/ctl:${WS}/`)
+        ? Promise.resolve(new Response(JSON.stringify({ type: "about:blank", status: 404, title: "Not found", code: "not_found", effect: "none", event_id: null, retryable: false }), { status: 404, headers: { "Content-Type": "application/problem+json" } }))
+        : send(input, init),
+    );
+    await waitFor(() => expect(screen.getByRole("main")).toHaveTextContent("No records yet: Workspace."));
+    expect(screen.getByRole("main")).not.toHaveTextContent("Not reported: Workspace");
+  });
+
+  it("names an agent whose account could not be found from its positions read", async () => {
+    const fixture = buildWorkspace("normal");
+    const agent = fixture.agents[0];
+    mount((send) => (input, init) => (new URL(input).pathname.endsWith(`/agents/${agent.agent_id}/positions`) ? Promise.reject(new TypeError("down")) : send(input, init)));
+    await waitFor(() => expect(screen.getByRole("main")).toHaveTextContent(`The account of ${agent.mandate.name} is not reported`));
+  });
+
   it("orders the records newest first by when the journal recorded them", async () => {
     mount();
     const list = await screen.findByRole("list", { name: "Journal records" });
