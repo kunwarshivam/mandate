@@ -126,7 +126,6 @@ fn the_workspaces_agent_control_and_clock_streams_are_followed() {
 fn every_uninterpreted_event_names_the_story_that_owns_it() {
     for (kind, story) in [
         ("RelatedAccountsCoordination", "E7-5"),
-        ("UniverseChanged", "E17-3"),
         ("MandateVersionApplied", "E6-4"),
         ("SomethingNobodyWrote", "E7-2"),
     ] {
@@ -1369,11 +1368,12 @@ fn a_position_mismatch_pauses_only_the_agents_holding_the_instrument() {
     );
 }
 
-/// DEC-2828: an owner's acknowledgment in journal spec §9.28's closed shape names a triggered limit,
-/// never a reconciliation mismatch, so it clears no mismatched instrument and lifts no mismatch
-/// pause: both stay until a spec names how the owner acknowledges them (backlog E7-4b).
+/// DEC-2830: an owner's acknowledgment of a mismatch's hold, naming the executor's own
+/// `AgentModeApplied` under `reconciliation:<instrument>`, lifts that hold alone and ends that
+/// instrument's recorded mismatch; the other instrument's mismatch and hold stand, so the agent is
+/// still paused.
 #[test]
-fn no_acknowledgment_clears_a_mismatch_pause() {
+fn an_acknowledgment_of_one_mismatch_hold_lifts_it_and_no_other() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
     let instruments = FixedInstruments;
@@ -1383,39 +1383,69 @@ fn no_acknowledgment_clears_a_mismatch_pause() {
     let mut bad = snapshot(shell.head().0, ReconcileReason::Startup);
     bad.positions = vec![broker_position(AAPL, "7"), broker_position(CPHC, "3")];
     shell.run(Input::BrokerSnapshot(bad), &ports);
-    let event = copied(
-        ACCOUNT_STREAM,
-        next_seq(&shell),
+    let restriction = format!("reconciliation:{AAPL}");
+    let hold = shell
+        .account_journal
+        .iter()
+        .find(|e| {
+            e.event_type == "AgentModeApplied"
+                && e.payload.get("restriction").and_then(Value::as_str)
+                    == Some(restriction.as_str())
+        })
+        .expect("the mismatch's hold")
+        .clone();
+    let at: u64 = 1_900_000_000;
+    shell.run(Input::Tick(clock(1_900_000_000)), &ports);
+    let original = event(
+        CONTROL_STREAM,
+        1,
         "OwnerAcknowledged",
-        with_clock(
-            &[
-                ("agent", text(common::AGENT)),
-                ("event", text(AAPL)),
-                ("user", text("user-1")),
-                ("requested_by", text("user-1")),
-                ("independent_required", Value::Bool(false)),
-                ("request", Value::Null),
-                ("submitted_at", int(100)),
-                (
-                    "step_up",
-                    object(&[
-                        ("assertion_id", text("assertion-1")),
-                        ("authenticated_at", int(100)),
-                        ("method", text("cli_confirm")),
-                    ]),
-                ),
-            ],
-            100,
-        ),
-        &EventId(format!("{CONTROL_STREAM}-1")),
+        object(&[
+            ("agent", text(common::AGENT)),
+            ("event", text(&hold.event_id.0)),
+            ("subject", text("reconciliation")),
+            ("user", text("user-1")),
+            ("requested_by", text("user-1")),
+            ("independent_required", Value::Bool(false)),
+            ("request", Value::Null),
+            ("submitted_at", int(at)),
+            ("risk_clock", text("2026-10-18T16:00:00.000000000Z")),
+            (
+                "step_up",
+                object(&[
+                    ("assertion_id", text("assertion-1")),
+                    ("authenticated_at", int(at)),
+                    ("method", text("cli_confirm")),
+                ]),
+            ),
+        ]),
     );
-    shell.fold_one(&event).expect("the acknowledgment folds");
-    assert!(shell.state.mismatched().contains(&instrument(AAPL)));
-    assert!(shell.state.mismatched().contains(&instrument(CPHC)));
+    let ran = shell.run(
+        Input::Acknowledgment(mandate_executor::AcknowledgmentHandoff {
+            original,
+            schema_version: 2,
+            processed_at: clock(1_900_000_000),
+            spent: std::collections::BTreeSet::new(),
+            request_spent: None,
+            independent_overlay: false,
+            methods: std::collections::BTreeSet::from(["cli_confirm".to_owned()]),
+        }),
+        &ports,
+    );
+    let kinds: Vec<&str> = ran.drafts.iter().map(|d| d.event_type.as_str()).collect();
+    assert_eq!(kinds, vec!["OwnerAcknowledged", "AgentModeApplied"]);
+    assert!(
+        !shell.state.mismatched().contains(&instrument(AAPL)),
+        "AAPL's mismatch ends"
+    );
+    assert!(
+        shell.state.mismatched().contains(&instrument(CPHC)),
+        "CPHC's stands"
+    );
     assert_eq!(
         shell.state.effective_mode(&agent(common::AGENT)),
         Mode::Paused,
-        "the mismatches still pause"
+        "CPHC's mismatch still pauses"
     );
 }
 

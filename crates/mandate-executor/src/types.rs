@@ -792,6 +792,15 @@ pub enum BrokerUpdate {
     Reject(BrokerReject),
 }
 
+/// One agent-stream thesis record: `ThesisProposed`, `ThesisRevised` or `ThesisInvalidated` (journal
+/// spec §9.4, §9.22), with the id a `UniverseChanged` copying it names as its `causation_id`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThesisRow {
+    pub event_id: EventId,
+    pub event_type: String,
+    pub payload: Value,
+}
+
 /// A quote or mark the shell observed, used for collar and ladder pricing, **never** for time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketObservation {
@@ -1131,6 +1140,14 @@ pub enum Input {
     /// for a refused batch, rather than stopping the process and its exits, protection and kill
     /// switch on a broker answer the restart would read again.
     InputFailed,
+    /// Every thesis record on `agent`'s stream, in stream order, as the process read it this pass
+    /// (mandate spec §8.5, §8.6; DEC-2823). The core replays them at its risk clock and journals
+    /// each difference from the working universe the account stream folds to as `UniverseChanged`,
+    /// once: a record handed again changes nothing the account stream already holds.
+    Theses {
+        agent: AgentId,
+        records: Vec<ThesisRow>,
+    },
 }
 
 /// What one step asks the shell to do, in order. The shell runs the journal appends first and
