@@ -58,6 +58,9 @@ pub struct ExecutorState {
     /// interval ends (DEC-348 item 2).
     pub(crate) awaiting: BTreeMap<InstrumentId, BTreeSet<ClientOrderId>>,
     pub(crate) copied: BTreeMap<EventId, EventId>,
+    /// What journal spec §9.28's judgment of an owner's acknowledgment reads from the account
+    /// stream (DEC-2828).
+    pub(crate) acknowledgments: crate::acknowledge::Acknowledgments,
     /// Each instrument's running exit sequence, `unprotected_start` to `unprotected_end` (§5.4).
     pub(crate) exiting: BTreeMap<InstrumentId, ExitSequence>,
     /// Each instrument whose protection is being re-placed before its GTC expiry: cancelled, and
@@ -421,6 +424,7 @@ impl ExecutorState {
             unprotected: Vec::new(),
             awaiting: BTreeMap::new(),
             copied: BTreeMap::new(),
+            acknowledgments: crate::acknowledge::Acknowledgments::default(),
             exiting: BTreeMap::new(),
             replacing: BTreeMap::new(),
             trading_day: None,
@@ -931,7 +935,8 @@ pub(crate) struct Ladder {
 }
 
 /// The restriction a reconciliation places for one subject — an instrument, or external activity
-/// on the account — and the only one an owner acknowledgment of that subject lifts (§11).
+/// on the account — which an owner's acknowledgment naming the hold lifts (§11, DEC-2830; backlog
+/// E7-4b, until the executor reads it).
 pub(crate) fn restriction_for(subject: &str) -> String {
     format!("reconciliation:{subject}")
 }

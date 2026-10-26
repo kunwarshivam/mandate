@@ -93,6 +93,16 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
     if kind == "OwnerAlertSent" {
         return Ok(());
     }
+    crate::acknowledge::fold(state, event)?;
+    if matches!(kind, "OwnerAcknowledged" | "OwnerAcknowledgmentRequested") {
+        return Ok(());
+    }
+    if kind == "OwnerCommandRefused" {
+        return match optional_text(payload, "command") {
+            Some("acknowledge") => Ok(()),
+            _ => not_interpreted(kind, "E7-2"),
+        };
+    }
     if let Some(story) = owner_elsewhere(kind) {
         return not_interpreted(kind, story);
     }
@@ -135,7 +145,6 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             }
             Ok(())
         }
-        "OwnerAcknowledged" => owner_acknowledged(state, payload),
         "PositionReleased" => position_released(state, payload),
         "ReconciliationRun" => {
             state.reconciled_through = Some(event.seq);
@@ -308,8 +317,8 @@ fn connection_state_changed(
     Ok(())
 }
 
-/// Corporate actions, reconciliation's records and snapshot, recorded broker exchanges, the owner
-/// acknowledgment, the trading and risk days, and the kill switch (trading-domain spec §5.5 to §5.7,
+/// Corporate actions, reconciliation's records and snapshot, recorded broker exchanges, the trading
+/// and risk days, and the kill switch (trading-domain spec §5.5 to §5.7,
 /// §6, §10, §11): the later slices of this stack; the trading day is slice 5's trading-day part,
 /// which owes what a new day starts (GTC re-placement, the copy, the harness's start) together.
 /// An `ExternalActivityIngested` and a `ConductBreachDetected` fold as records only: the
@@ -1921,36 +1930,6 @@ fn posted(
         .checked_add(accrued)?
         .checked_sub(charged)?
         .max(Usd::ZERO);
-    Ok(())
-}
-
-/// Only an owner acknowledgment carrying step-up evidence clears a reconciliation mismatch and the
-/// pause it caused (trading-domain spec §11, interpretation 14).
-///
-/// The owner is who authorizes it: the event reaches the account stream only as a copy from the
-/// control stream, which only the owner-facing surface writes, and it names its `user` (required,
-/// opaque) and carries step-up evidence. Inside this crate nothing else tells an owner from an
-/// agent (journal spec §9, #205 review, round 1, finding 6).
-fn owner_acknowledged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
-    let subject = required_text(payload, "subject")?;
-    required_text(payload, "user")?;
-    if required_text(payload, "step_up")?.is_empty() {
-        return Ok(());
-    }
-    if let Ok(instrument) = InstrumentId::new(subject) {
-        state.mismatched.remove(&instrument);
-    }
-    let lifted = crate::state::restriction_for(subject);
-    let agents: Vec<AgentId> = state
-        .restrictions
-        .keys()
-        .filter(|(_, name)| *name == lifted)
-        .map(|(agent, _)| agent.clone())
-        .collect();
-    for agent in agents {
-        state.restrictions.remove(&(agent.clone(), lifted.clone()));
-        recompute(state, &agent);
-    }
     Ok(())
 }
 
