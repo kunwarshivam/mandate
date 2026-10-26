@@ -1629,9 +1629,9 @@ impl DemoInputs {
 
 /// The demo's instrument snapshot as a run registers it (DEC-2073): `committed`,
 /// [`INSTRUMENT_FILE`]'s text, with its classification instant replaced by `classified_at`, a UTC
-/// instant to the second, and every other byte as committed, so the file stays canonical JSON. The cell has no classifier: the fixture's
-/// classification, a plain fund from the Nasdaq Trader symbol directory, is asserted as of the
-/// run's start.
+/// instant to the second, and every other byte as committed, so the file stays canonical JSON.
+/// The cell has no classifier: the fixture's classification, a plain fund from the Nasdaq Trader
+/// symbol directory, is asserted as of the run's start.
 pub fn registered_instrument(committed: &str, classified_at: &str) -> Result<String> {
     let instant = |t: &str| {
         let b = t.as_bytes();
