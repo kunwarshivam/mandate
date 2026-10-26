@@ -623,7 +623,10 @@ fn liquidity_value(read: &LiquidityRead) -> Result<Value, RuntimeError> {
 /// denies one on a connection that is not usable, and one in an instrument where an opening this
 /// runtime proposed still works is denied `working_order_limit` (trading spec §5.3 rule 6,
 /// DEC-1150 item 5); every other proposal, and every exit whatever either says, is the gate's to
-/// judge (`AGENTS.md` rule 13, DEC-969 item 4).
+/// judge (`AGENTS.md` rule 13, DEC-969 item 4). An opening the gate allows with checks deferred but
+/// for which the builder produced no plan is denied `plan_required`: no approval request can both
+/// bind no plan and name the deferrals, so it is refused, journaled and notified rather than left
+/// unasked (DEC-2810).
 pub(crate) fn dry_run(
     state: &RuntimeState,
     ports: &Ports<'_>,
@@ -640,7 +643,14 @@ pub(crate) fn dry_run(
             reason_code: payload::WORKING_ORDER_LIMIT.to_owned(),
         };
     }
-    settled(ports.gate.check(proposal), proposal.purpose)
+    match settled(ports.gate.check(proposal), proposal.purpose) {
+        DryRunVerdict::AllowDeferring { .. } if proposal.execution.is_none() => {
+            DryRunVerdict::Deny {
+                reason_code: payload::PLAN_REQUIRED.to_owned(),
+            }
+        }
+        verdict => verdict,
+    }
 }
 
 /// What the autonomy classification does with a proposal the dry run allowed (mandate spec §6):

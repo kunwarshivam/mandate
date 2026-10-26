@@ -142,3 +142,98 @@ fn every_type_the_runtime_folds_a_stream_of_has_an_arm() {
         "the runtime's fold refuses exactly the named account types"
     );
 }
+
+/// The executor's account-stream record of a kill switch it applied (journal spec §9.5): `scope`,
+/// `subject`, and the members the executor writes, with `initiator` an owner's.
+fn executor_switch(scope: &str, subject: &str) -> Value {
+    object(&[
+        ("bid", Value::Null),
+        ("bid_size", Value::Null),
+        ("cancels", Value::Array(Vec::new())),
+        ("closes", Value::Array(Vec::new())),
+        ("copied_from", Value::Null),
+        ("deferred", Value::Array(Vec::new())),
+        ("floor", Value::Null),
+        ("initiator", text("owner")),
+        ("purpose", text("owner_exit")),
+        ("scope", text(scope)),
+        ("subject", text(subject)),
+    ])
+}
+
+/// An agent-scope switch the executor applied to another agent on the same account is that agent's,
+/// and folds here as inert: before, it stopped every runtime following the account, so killing one
+/// agent stopped the others (lane DR's cell run on 2026-10-26, once the executor could journal it).
+#[test]
+fn another_agents_switch_on_the_account_stream_folds_as_inert() {
+    let other = folded("KillSwitchActivated", executor_switch("agent", "agent-b"));
+    assert_eq!(other, inert());
+    assert_ne!(other.effective_mode(), mandate_runtime::Mode::Stopped);
+}
+
+/// The executor's record of a switch on this agent, or on the whole account, still stops it, as it
+/// did before: the addressee check only ever spares another agent's.
+#[test]
+fn a_switch_on_this_agent_or_the_account_still_stops_it() {
+    for (scope, subject) in [
+        ("agent", common::AGENT),
+        ("account", "01J8Z3MACCOUNTREF000000001"),
+        ("workspace", "ws-other"),
+        ("connection", "conn-other"),
+    ] {
+        let state = folded("KillSwitchActivated", executor_switch(scope, subject));
+        assert_ne!(state, inert(), "{scope} {subject}");
+        assert_eq!(
+            state.effective_mode(),
+            mandate_runtime::Mode::Stopped,
+            "{scope} {subject}"
+        );
+    }
+}
+
+/// A switch naming no scope or no subject is never spared: the check spares only what it can read
+/// as another agent's.
+#[test]
+fn a_switch_without_a_scope_or_a_subject_still_stops_it() {
+    for missing in ["scope", "subject"] {
+        let Value::Object(mut members) = executor_switch("agent", "agent-b") else {
+            panic!("the switch is an object");
+        };
+        members.retain(|key, _| key.as_str() != missing);
+        let state = folded("KillSwitchActivated", Value::Object(members));
+        assert_eq!(
+            state.effective_mode(),
+            mandate_runtime::Mode::Stopped,
+            "no {missing}"
+        );
+    }
+}
+
+/// Every subject and scope a switch the executor journals can carry, against this agent: it ends
+/// stopped unless the switch is an agent-scope one on a subject that is certainly another agent,
+/// whatever the case of the spelling (D1's review of #2579).
+#[test]
+fn only_another_agents_agent_scope_switch_is_spared_in_any_spelling() {
+    let own = common::AGENT;
+    let subjects = [
+        (own.to_owned(), true),
+        (own.to_ascii_uppercase(), true),
+        ("agent-b".to_owned(), false),
+        ("AGENT-B".to_owned(), false),
+    ];
+    for scope in ["agent", "account"] {
+        for (subject, this_agent) in &subjects {
+            let state = folded("KillSwitchActivated", executor_switch(scope, subject));
+            let spared = scope == "agent" && !this_agent;
+            if spared {
+                assert_eq!(state, inert(), "{scope} {subject}");
+            } else {
+                assert_eq!(
+                    state.effective_mode(),
+                    mandate_runtime::Mode::Stopped,
+                    "{scope} {subject}"
+                );
+            }
+        }
+    }
+}

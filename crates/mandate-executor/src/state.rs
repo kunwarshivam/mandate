@@ -326,6 +326,10 @@ pub struct UnresolvedAppend {
     pub head: Seq,
     pub input: crate::types::Input,
     pub drafts: Vec<crate::types::EventDraft>,
+    /// `now` and `previous_now` as they stood before the input was first handed, so a batch the
+    /// journal refuses leaves no tick of its own behind (DEC-2805): the next tick is judged
+    /// against the last one that committed, and a window it crosses is not lost.
+    pub(crate) clocks: (Option<RiskClock>, Option<RiskClock>),
 }
 
 /// What the fold carries about one intent, and the whole of the executor's deduplication: an
@@ -977,6 +981,7 @@ mod tests {
             head: Seq(3),
             input: Input::Tick(RiskClock::from_secs(42)),
             drafts: Vec::new(),
+            clocks: (None, None),
         });
         state.orders.insert(
             id("md-a"),
