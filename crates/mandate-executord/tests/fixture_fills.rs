@@ -2,8 +2,8 @@
 //! client and then under a whole executor process. A limit order fills whole at its limit when it
 //! is placed; a bracket's two legs rest under its filled entry; OCO protection and stops rest; each
 //! fill is a `FILL` activity naming only the broker's order id, as Alpaca's does (DEC-2353), and
-//! moves the position and the cash by its notional (paper's fees are simulated, so none is
-//! charged). The process then journals the order, books the fill, keeps the bracket's legs as the
+//! moves the position and the cash by its notional (Alpaca paper does not simulate regulatory
+//! fees, trading spec §11, so none is charged). The process then journals the order, books the fill, keeps the bracket's legs as the
 //! position's protection, and reconciles clean.
 
 mod support;
@@ -103,7 +103,7 @@ fn cash(broker: &mut AlpacaBroker<FixturePaper>) -> Result<(String, String), Err
 /// as Alpaca accepts it, `new` and unfilled; a later lookup reads it `filled`, one `FILL` activity
 /// names the broker's order id and no client order id (Alpaca's shape, DEC-2353),
 /// the cursor it returns reads nothing new, the position is the fill, and the cash falls by its
-/// notional with no fee accrued (paper's fees are simulated).
+/// notional with no fee accrued (Alpaca paper does not simulate regulatory fees, trading spec §11).
 #[test]
 #[ignore = "pending E21-30"]
 fn a_limit_opening_fills_whole_at_its_limit() -> Result<(), Error> {
@@ -268,7 +268,8 @@ fn protection_rests_unfilled() -> Result<(), Error> {
     Ok(())
 }
 
-/// A filled order is not cancelable, as Alpaca refuses it.
+/// A filled order is not cancelable, as Alpaca refuses it: the cancel's read-back answers the
+/// order itself, `filled`, never a confirmed cancel, and the position stays the fill.
 #[test]
 #[ignore = "pending E21-30"]
 fn a_filled_order_does_not_cancel() -> Result<(), Error> {
@@ -278,10 +279,74 @@ fn a_filled_order_does_not_cancel() -> Result<(), Error> {
     let cancel = BrokerRequest::Cancel {
         client_order_id: ClientOrderId::parse(id)?,
     };
-    assert!(!matches!(
-        broker.call(&cancel),
-        Ok(BrokerOutcome::CancelAccepted { .. })
-    ));
+    match broker.call(&cancel)? {
+        BrokerOutcome::Order(read) => assert_eq!(read.status, "filled"),
+        other => return Err(format!("the filled order read back, not {other:?}").into()),
+    }
+    assert_eq!(
+        held(&mut broker)?,
+        [("AAPL".to_owned(), "10".to_owned(), "150".to_owned())]
+    );
+    assert_eq!(cash(&mut broker)?.0, "98500");
+    Ok(())
+}
+
+/// A `client_order_id` the fixture already holds is refused as Alpaca refuses it, `422`, which the
+/// client reads as the order already being there: one fill, one position.
+#[test]
+#[ignore = "pending E21-30"]
+fn a_duplicate_client_order_id_is_refused() -> Result<(), Error> {
+    let mut broker = broker()?;
+    let id = "md-01JINTENT0000000000000000A";
+    submit(&mut broker, order(id, Side::Buy, "10", "150")?)?;
+    let again = broker.call(&BrokerRequest::Submit(order(id, Side::Buy, "10", "150")?))?;
+    assert!(
+        matches!(again, BrokerOutcome::DuplicateClientOrderId { .. }),
+        "{again:?}"
+    );
+    assert_eq!(fills(&mut broker, "")?.0.len(), 1);
+    assert_eq!(
+        held(&mut broker)?,
+        [("AAPL".to_owned(), "10".to_owned(), "150".to_owned())]
+    );
+    Ok(())
+}
+
+/// No short sales (`AGENTS.md` rule 12): a sell with no position, or larger than the position, is
+/// refused as Alpaca refuses it, `403` with code 40310000, and fills nothing.
+#[test]
+#[ignore = "pending E21-30"]
+fn a_sell_beyond_the_position_is_refused() -> Result<(), Error> {
+    let mut broker = broker()?;
+    let refused = |outcome: BrokerOutcome| match outcome {
+        BrokerOutcome::Rejected(reject) => {
+            reject.http_status == 403 && reject.code.as_deref() == Some("40310000")
+        }
+        _ => false,
+    };
+    let naked = broker.call(&BrokerRequest::Submit(order(
+        "md-01JINTENT0000000000000000S",
+        Side::Sell,
+        "1",
+        "150",
+    )?))?;
+    assert!(refused(naked.clone()), "{naked:?}");
+    submit(
+        &mut broker,
+        order("md-01JINTENT0000000000000000A", Side::Buy, "10", "150")?,
+    )?;
+    let beyond = broker.call(&BrokerRequest::Submit(order(
+        "md-01JINTENT0000000000000000B",
+        Side::Sell,
+        "11",
+        "150",
+    )?))?;
+    assert!(refused(beyond.clone()), "{beyond:?}");
+    assert_eq!(fills(&mut broker, "")?.0.len(), 1, "only the opening fills");
+    assert_eq!(
+        held(&mut broker)?,
+        [("AAPL".to_owned(), "10".to_owned(), "150".to_owned())]
+    );
     Ok(())
 }
 
@@ -329,6 +394,54 @@ fn action(payload: &Value) -> Option<&str> {
     payload.get("action").and_then(Value::as_str)
 }
 
+type Process = ExecutorProcess<Journal, AlpacaBroker<FixturePaper>>;
+
+/// A process started at noon over `paper`, the agent deployed, and its opening of 10 AAPL at 150
+/// proposed when `opening`.
+fn running(paper: FixturePaper, opening: bool) -> Result<(Journal, Process), Error> {
+    let journal: Journal = deployed()?;
+    if opening {
+        propose(&journal, AGENT, OPEN, "buy", "10", "150", "open")?;
+    }
+    let process = ExecutorProcess::start(
+        journal.clone(),
+        AlpacaBroker::new(paper)?,
+        wiring()?,
+        &process_config(Environment::Paper),
+        at(NOON)?,
+    );
+    Ok((journal, process))
+}
+
+/// One pass at `now`, after the scheduler's tick `id` at that time.
+fn pass(journal: &Journal, process: &mut Process, id: &str, now: &str) -> Result<(), Error> {
+    support::tick(journal, id, now)?;
+    process.step(at(now)?);
+    Ok(())
+}
+
+/// The `ReconciliationRun`s journaled after the first `FillApplied`, in order.
+fn runs_after_the_fill(journal: &Journal) -> Result<Vec<Value>, Error> {
+    let types = journal.types(ACCOUNT_STREAM);
+    let fill = types
+        .iter()
+        .position(|kind| kind == "FillApplied")
+        .ok_or("the fill is booked")?;
+    let before = types[..fill]
+        .iter()
+        .filter(|kind| *kind == "ReconciliationRun")
+        .count();
+    Ok(journal
+        .payloads("ReconciliationRun")
+        .into_iter()
+        .skip(before)
+        .collect())
+}
+
+fn result(run: &Value) -> Option<&str> {
+    run.get("result").and_then(Value::as_str)
+}
+
 /// X1b-3 end to end: an agent's opening of 10 AAPL at 150, handed to a process over the filling
 /// fixture, is journaled and sent as a bracket, fills whole, is booked as the agent's fill, keeps
 /// the bracket's two legs as the position's protection, and the account reconciles clean: the
@@ -338,19 +451,10 @@ fn action(payload: &Value) -> Option<&str> {
 #[test]
 #[ignore = "pending E21-30"]
 fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Error> {
-    let journal: Journal = deployed()?;
-    propose(&journal, AGENT, OPEN, "buy", "10", "150", "open")?;
-    let mut process = ExecutorProcess::start(
-        journal.clone(),
-        AlpacaBroker::new(FixturePaper::filling(at(NOON)?))?,
-        wiring()?,
-        &process_config(Environment::Paper),
-        at(NOON)?,
-    );
+    let (journal, mut process) = running(FixturePaper::filling(at(NOON)?), true)?;
     for minute in 0..10 {
         let now = format!("2026-09-21T15:{minute:02}:00Z");
-        support::tick(&journal, &format!("t{minute}"), &now)?;
-        process.step(at(&now)?);
+        pass(&journal, &mut process, &format!("t{minute}"), &now)?;
     }
     let fill = journal
         .payloads("FillApplied")
@@ -369,12 +473,23 @@ fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Err
         "the bracket's legs are the position's protection: {:?}",
         journal.types(ACCOUNT_STREAM)
     );
-    let runs = journal.payloads("ReconciliationRun");
-    let last = runs.last().ok_or("a reconciliation ran")?;
+    let runs = runs_after_the_fill(&journal)?;
+    let (booking, later) = runs
+        .split_first()
+        .ok_or("a reconciliation booked the fill")?;
     assert_eq!(
-        last.get("result").and_then(Value::as_str),
-        Some("clean"),
-        "{runs:?}"
+        result(booking),
+        Some("adopted"),
+        "the run that books the fill adopts the broker's order state and its fill, and finds no \
+         unexplained difference: {runs:?}"
+    );
+    assert!(
+        !later.is_empty(),
+        "the process reconciles again while its legs work"
+    );
+    assert!(
+        later.iter().all(|run| result(run) == Some("clean")),
+        "every later run is clean, none mismatch or adopted: {runs:?}"
     );
     let snapshots = journal.payloads("AccountSnapshotRecorded");
     assert!(
@@ -390,5 +505,71 @@ fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Err
             .all(|p| p.get("to").and_then(Value::as_str) == Some("normal")),
         "no agent is held"
     );
+    Ok(())
+}
+
+/// The fill's own reconciliation (DEC-948 item 5): one fill, then exactly one reconciliation, ten
+/// seconds on, which books it, adopting the broker's order state and its fill (§11) and finding
+/// no unexplained difference, its snapshot's cash the model's cash. A snapshot that read its own
+/// account report as an older base would count the fill's notional twice and mismatch.
+#[test]
+#[ignore = "pending E21-30"]
+fn the_fills_one_reconciliation_books_it_and_its_cash_is_the_models() -> Result<(), Error> {
+    let (journal, mut process) = running(FixturePaper::filling(at(NOON)?), true)?;
+    pass(&journal, &mut process, "t0", NOON)?;
+    pass(&journal, &mut process, "t1", "2026-09-21T15:00:10Z")?;
+    let runs = runs_after_the_fill(&journal)?;
+    assert_eq!(runs.len(), 1, "{:?}", journal.types(ACCOUNT_STREAM));
+    assert_eq!(result(&runs[0]), Some("adopted"), "{runs:?}");
+    let snapshot = journal
+        .payloads("AccountSnapshotRecorded")
+        .pop()
+        .ok_or("the run records its snapshot")?;
+    assert_eq!(snapshot.get("cash").and_then(Value::as_str), Some("98500"));
+    assert_eq!(
+        snapshot.get("model_cash").and_then(Value::as_str),
+        Some("98500"),
+        "{snapshot:?}"
+    );
+    Ok(())
+}
+
+/// The scheduled reconciliation's cadence (X1b-3): with an order working (the resting fixture),
+/// a pass five seconds after the start's reconciliation reads nothing, and one ten seconds after
+/// reconciles once.
+#[test]
+#[ignore = "pending E21-30"]
+fn a_working_order_is_reconciled_every_ten_seconds() -> Result<(), Error> {
+    let (journal, mut process) = running(FixturePaper::new(at(NOON)?), true)?;
+    pass(&journal, &mut process, "t0", NOON)?;
+    let started = journal.payloads("ReconciliationRun").len();
+    assert!(
+        journal
+            .types(ACCOUNT_STREAM)
+            .iter()
+            .any(|kind| kind == "OrderSubmitted"),
+        "the opening works"
+    );
+    pass(&journal, &mut process, "t1", "2026-09-21T15:00:05Z")?;
+    assert_eq!(journal.payloads("ReconciliationRun").len(), started);
+    pass(&journal, &mut process, "t2", "2026-09-21T15:00:10Z")?;
+    assert_eq!(journal.payloads("ReconciliationRun").len(), started + 1);
+    Ok(())
+}
+
+/// With no order working, no scheduled reconciliation runs: only the start's.
+#[test]
+fn nothing_working_is_never_reconciled_on_schedule() -> Result<(), Error> {
+    let (journal, mut process) = running(FixturePaper::new(at(NOON)?), false)?;
+    pass(&journal, &mut process, "t0", NOON)?;
+    let started = journal.payloads("ReconciliationRun").len();
+    for (id, now) in [
+        ("t1", "2026-09-21T15:00:10Z"),
+        ("t2", "2026-09-21T15:00:20Z"),
+        ("t3", "2026-09-21T15:01:00Z"),
+    ] {
+        pass(&journal, &mut process, id, now)?;
+    }
+    assert_eq!(journal.payloads("ReconciliationRun").len(), started);
     Ok(())
 }

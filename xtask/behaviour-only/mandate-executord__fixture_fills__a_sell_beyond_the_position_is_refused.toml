@@ -1,0 +1,7 @@
+file = "crates/mandate-executord/tests/fixture_fills.rs"
+test = "a_sell_beyond_the_position_is_refused"
+reason = """
+`FixturePaper::filling` is a stub that rests every order as `FixturePaper::new` does, and the
+fixture refuses no sell: the sells beyond the position are accepted. The test fails on that
+behaviour, not at a stub's report. X1b-3's implementation refuses them and deletes this row.
+"""
