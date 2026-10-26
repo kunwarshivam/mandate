@@ -470,6 +470,7 @@ pub struct AccountRiskFold<'c> {
 }
 
 /// An `OrderStateChanged` as a compensation right after it must name it (DEC-2829).
+#[derive(Clone)]
 struct StateChange {
     event_id: String,
     recorded_at: String,
