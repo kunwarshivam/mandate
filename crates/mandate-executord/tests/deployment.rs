@@ -1918,3 +1918,32 @@ fn two_surviving_instruments_hold_the_opening() -> Result<(), Error> {
     assert!(opening(&deployment)?.is_none());
     Ok(())
 }
+
+/// An instrument that no longer resolves once the control stream grows holds its openings: a
+/// later SPY snapshot registered with no object in the store leaves the version read but SPY
+/// unresolved, so the opening is never answered from the resolution of the shorter stream,
+/// while exits keep it as it last resolved.
+#[test]
+fn an_instrument_that_no_longer_resolves_holds_openings_and_keeps_exits() -> Result<(), Error> {
+    let (journal, store) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    let (deployment, _) = self::deployment(&journal, store);
+    assert_eq!(answers(&deployment)?, (true, true, true, true, true, true));
+    journal.write(
+        CONTROL_STREAM,
+        "snap-2",
+        "ConfigSnapshotRegistered",
+        1,
+        None,
+        json(&format!(
+            r#"{{"admits_instruments":null,"content_hash":"sha256:{}","kind":"instrument_snapshot","model_id":null,"model_version":null,"params":[]}}"#,
+            "9".repeat(64)
+        ))?,
+    )?;
+    assert_eq!(
+        answers(&deployment)?,
+        (false, false, false, true, true, true),
+        "openings hold on the longer stream; exits keep SPY as it last resolved"
+    );
+    Ok(())
+}
