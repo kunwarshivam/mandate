@@ -14,11 +14,14 @@
 //! `mandate-gatewayd run --recorded <research.json> --listen <addr> --probe <socket>` serves the
 //! runtime's framed calls over the recorded transport, metering through the journaled meter
 //! streams in Postgres (`MANDATE_JOURNAL_DSN`) under the budgets its environment names
-//! (`mandate_gatewayd::config`). It reaches no provider and reads no key. `mandate-gatewayd probe
+//! (`mandate_gatewayd::config`), and stores the runtime's research artifacts in the research store
+//! `MANDATE_RESEARCH_ARTIFACTS` names, create-only and capped (DEC-2279). It reaches no provider
+//! and reads no key. `mandate-gatewayd probe
 //! livez|readyz --probe <socket>` is its `exec` probe (DEC-994 item 5). A live start is refused
 //! (`mandate_gatewayd::run::command`). Every refusal exits 2 with its code alone on stderr.
 
 use std::net::TcpListener;
+use std::path::Path;
 use std::process::ExitCode;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,6 +29,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mandate_artifacts_fs::FsArtifactStore;
+use mandate_gateway::wire::PutRefusal;
 use mandate_gateway_http::SystemClock;
 use mandate_gatewayd::config::Config;
 use mandate_gatewayd::control::StoreControl;
@@ -35,6 +39,7 @@ use mandate_gatewayd::run::{
     recorded_service,
 };
 use mandate_gatewayd::serve::{Limits, Server};
+use mandate_gatewayd::writer::ArtifactWriter;
 use mandate_process::lifecycle::{Input, Kind, Lifecycle};
 use mandate_process::probe::{self, Status};
 use mandate_store::PgStore;
@@ -101,6 +106,12 @@ fn serve_started(
     let model = run::read_recorded(&args.recorded).map_err(|e| e.code())?;
     let artifacts = FsArtifactStore::open_existing(&config.artifacts)
         .map_err(|_| "artifact_store_unavailable")?;
+    let mut writer = config
+        .research_artifacts
+        .as_deref()
+        .map(|root| ArtifactWriter::open(Path::new(root), &config.workspace))
+        .transpose()
+        .map_err(|_| "research_artifacts_unavailable")?;
     let control = StoreControl::new(PgStore::connect(config.journal_dsn())?, &config.workspace)
         .ok_or("workspace_missing")?;
     let parts = Parts {
@@ -124,6 +135,13 @@ fn serve_started(
         Arc::new(WriteLog::new(std::io::stderr())),
     );
     observe(lifecycle, status, host_now(), Input::StartupPassed);
-    server.run(|request| answer_recorded(&mut service, &replies, &request));
+    server.run_storing(
+        |request| answer_recorded(&mut service, &replies, &request),
+        |put| {
+            writer
+                .as_mut()
+                .map_or(Err(PutRefusal::StoreUnavailable), |writer| writer.put(put))
+        },
+    );
     Err("listener_stopped")
 }

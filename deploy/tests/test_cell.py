@@ -3179,6 +3179,7 @@ def admission_problems(docs: list[dict]) -> Iterator[str]:
     started = managed_pods(docs)
     names = {w["metadata"]["name"] for w in started}
     claimed = any(d["kind"] == "PersistentVolumeClaim" and d["metadata"]["name"] == "artifacts" for d in docs)
+    research = any(d["kind"] == "PersistentVolumeClaim" and d["metadata"]["name"] == "research-artifacts" for d in docs)
     templates = {w["metadata"]["name"]: w["spec"]["template"] for w in started}
     role = lambda n: process(n)["db_role"]  # noqa: E731
     want = {
@@ -3188,7 +3189,11 @@ def admission_problems(docs: list[dict]) -> Iterator[str]:
             n: sorted({"journal-ca", "journal-role-" + role(n).replace("_", "-")}) if role(n) else []
             for n in names
         },
-        "claims": {n: ["artifacts"] if n in ("runtime", "executor") and claimed else [] for n in names},
+        "claims": {
+            n: (["artifacts"] if n in ("runtime", "executor") and claimed else [])
+            + (["research-artifacts"] if n == "runtime" and research else [])
+            for n in names
+        },
         "projected": {
             n: ["mandate-vault|600|token|292|namespace=metadata.namespace"]
             if n == EXCHANGE or (n == "executor" and "alpaca-paper" in json.dumps(launches(templates[n])))
