@@ -211,7 +211,7 @@ pub fn recorded_fills(state: &ExecutorState, positions: &[BrokerPosition]) -> Ve
 
 /// The fills a broker that reports no sell price implies for our own risk-reducing sells
 /// ([DEC-2300](../../../docs/project/decisions/DEC-2300.md) items 1 to 3,
-/// [DEC-2391](../../../docs/project/decisions/DEC-2391.md)): each increment of a `protective`,
+/// [DEC-2395](../../../docs/project/decisions/DEC-2395.md)): each increment of a `protective`,
 /// `risk_exit`, `owner_exit` or `discretionary_exit` sell that its broker record reported filled,
 /// booked at the order's journaled limit price, the worst price the order allowed, under the id
 /// `limit:<client order id>:<cumulative filled quantity>`, when the ledger holds the instrument long
@@ -221,7 +221,7 @@ pub fn recorded_fills(state: &ExecutorState, positions: &[BrokerPosition]) -> Ve
 /// executor's clock, never earlier. Anything else derives nothing (`AGENTS.md` rule 3).
 ///
 /// # Errors
-/// [`ExecutorError::Unimplemented`] until DEC-2391's implementation lands.
+/// [`ExecutorError::Unimplemented`] until DEC-2395's implementation lands.
 pub fn limit_fills(
     state: &ExecutorState,
     positions: &[BrokerPosition],
