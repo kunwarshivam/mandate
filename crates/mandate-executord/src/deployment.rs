@@ -982,6 +982,11 @@ impl BindingGateSource for Deployment {
         {
             return None;
         }
+        let agent = if journaled.untraded() {
+            untraded(resolved.allocation, resolved.loss_carry)
+        } else {
+            self.traded(request.agent, &journaled, facts.now)
+        };
         let sources = &self.0.sources;
         let quote = sane(&self.observe(request.instrument, facts.now).ok()?)?;
         let order = OrderFacts {
@@ -989,7 +994,7 @@ impl BindingGateSource for Deployment {
             asset: sources.broker.asset(&resolved.symbol),
             rules: sources.broker.rules(),
             liquidity: sources.liquidity.liquidity(&resolved.symbol, facts.now),
-            agent: untraded(resolved.allocation, resolved.loss_carry),
+            agent,
             halted: sources.broker.halted(&resolved.symbol),
             flat: true,
             journaled: facts,
@@ -999,6 +1004,32 @@ impl BindingGateSource for Deployment {
 }
 
 impl Deployment {
+    /// `agent`'s risk on a traded account that is flat again (DEC-2833 items 1 to 3), which
+    /// `Journaled::opening_hold` has already found flat: the account risk book's snapshot, mode and
+    /// restrictions, with the counters `journaled` folds from the account stream at `now`. `None`
+    /// while the counters do not read, or the book reads no risk for the agent, which holds the
+    /// opening and never an exit. The day-trade ledger is empty: the gate answers only where day
+    /// trades cannot bind (item 5).
+    fn traded(&self, agent: &AgentId, journaled: &Journaled, now: UtcNanos) -> Option<AgentRisk> {
+        let counted = journaled.counted(now)?;
+        let GateRisk {
+            risk,
+            mode,
+            instrument_restrictions,
+        } = self.risk(agent)?;
+        Some(AgentRisk {
+            risk: RiskSnapshot {
+                agent_mode: mode,
+                ..risk
+            },
+            conduct: counted.conduct,
+            instrument_restrictions,
+            last_exit_fill_at: counted.last_exit_fill_at,
+            orders_today: counted.orders_today,
+            day_trades: DayTradeLedger::default(),
+        })
+    }
+
     /// `agent`'s risk as the process's risk book last read it: `None` while its fold is not open
     /// or its view is unreadable, which holds its openings and never its exits (DEC-2804 items 2
     /// and 7).
