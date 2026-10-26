@@ -39,6 +39,7 @@ pub mod credential;
 pub mod establish;
 pub mod fixture;
 pub mod follow;
+pub mod gate;
 pub mod launch;
 pub mod lease;
 pub mod oauth_check;
