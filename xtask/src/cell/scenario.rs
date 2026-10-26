@@ -22,10 +22,11 @@ use sha2::{Digest, Sha256};
 use super::executor::{CONNECTION, RESEARCH_CONNECTION, connect_check, executor_live};
 use super::{
     API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_OWNER, DEPLOY_MANAGER_PROCESS,
-    ImageSource, MODEL_GATEWAY_PROCESS, NAMESPACE, NODE, RESEARCH_MANAGER_PROCESS, WORKSPACE_CHART,
-    api_diagnosis, api_image_tag, api_port_forward, helm, host_image_source, http, kubectl,
-    open_session, processes, render, render_with, reply_body, run_id, run_job, session_cookie,
-    signed_in, stub_image_tag, stub_token, template_args, tools_missing, up, web,
+    ImageSource, MODEL_GATEWAY_PROCESS, NAMESPACE, NODE, RESEARCH_MANAGER_PROCESS,
+    RESEARCH_SCHEDULER_PROCESS, SCHEDULER_PROCESS, WORKSPACE_CHART, api_diagnosis, api_image_tag,
+    api_port_forward, helm, host_image_source, http, kubectl, open_session, processes, render,
+    render_with, reply_body, run_id, run_job, session_cookie, signed_in, stub_image_tag,
+    stub_token, template_args, tools_missing, up, web,
 };
 use crate::output;
 
@@ -1865,12 +1866,15 @@ fn api_unaskable() -> Result<Option<String>> {
     Ok(None)
 }
 
-/// The Deployments [`point_api`] points at the run and waits on: the API and the first manager on
-/// the run's workspace, the second manager and the model gateway on its research workspace.
-const POINTED: [&str; 4] = [
+/// The Deployments [`point_api`] points at the run and waits on: the API, the first manager and
+/// the first scheduler on the run's workspace, and the second manager, the second scheduler and the
+/// model gateway on its research workspace (DEC-2070, DEC-2071).
+const POINTED: [&str; 6] = [
     API_PROCESS,
     DEPLOY_MANAGER_PROCESS,
+    SCHEDULER_PROCESS,
     RESEARCH_MANAGER_PROCESS,
+    RESEARCH_SCHEDULER_PROCESS,
     MODEL_GATEWAY_PROCESS,
 ];
 
@@ -3759,7 +3763,9 @@ mod tests {
             [
                 "api",
                 "deploy-manager",
+                "scheduler",
                 "deploy-manager-research",
+                "scheduler-research",
                 "model-gateway"
             ]
         );
