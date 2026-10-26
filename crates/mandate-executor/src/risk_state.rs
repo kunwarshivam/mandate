@@ -34,6 +34,16 @@ use crate::ExecutorError;
 use crate::payload::{int, object, text};
 use crate::tripwire::TripwireState;
 
+/// The order states that end an order (trading-domain spec §5.7), as the executor's fold ends one.
+const TERMINAL: [&str; 6] = [
+    "filled",
+    "canceled",
+    "rejected",
+    "expired",
+    "replaced",
+    "abandoned",
+];
+
 /// How the fold reads an account-stream event type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Reading {
@@ -381,6 +391,9 @@ pub struct AccountRiskFold<'c> {
     requests: BTreeMap<String, String>,
     /// The agent's own orders by client order id (DEC-2393 item 1).
     own: BTreeSet<String>,
+    /// The `fill_id`s of the agent's own fills already stepped, each once, as the executor's fold
+    /// applies a fill once (DEC-2393 item 2).
+    fills: BTreeSet<String>,
 }
 
 impl<'c> AccountRiskFold<'c> {
@@ -430,6 +443,7 @@ impl<'c> AccountRiskFold<'c> {
             instrument: instrument.map(str::to_owned),
             requests: BTreeMap::new(),
             own: BTreeSet::new(),
+            fills: BTreeSet::new(),
         })
     }
 
@@ -550,7 +564,11 @@ impl<'c> AccountRiskFold<'c> {
                 if named("replaces").is_some_and(|old| self.own.contains(old)) {
                     self.own.insert(order.to_owned());
                 }
+                let terminal = named("state").is_some_and(|state| TERMINAL.contains(&state));
+                let ignored = payload.get("ignored") == Some(&Value::Bool(true));
                 if let Some(successor) = named("replaced_by")
+                    && terminal
+                    && !ignored
                     && self.own.contains(order)
                 {
                     self.own.insert(successor.to_owned());
@@ -569,11 +587,18 @@ impl<'c> AccountRiskFold<'c> {
         row: &StoredEvent,
         payload: &Object,
     ) -> Result<Vec<RiskAppend>, UnreadableCause> {
-        let order = payload
+        let ours = payload
             .get("client_order_id")
             .and_then(Value::as_str)
+            .is_some_and(|order| self.own.contains(order));
+        if !ours {
+            return Ok(Vec::new());
+        }
+        let fill_id = payload
+            .get("fill_id")
+            .and_then(Value::as_str)
             .ok_or(UnreadableCause::Undecodable)?;
-        if !self.own.contains(order) {
+        if self.fills.contains(fill_id) {
             return Ok(Vec::new());
         }
         let instrument = payload
@@ -599,6 +624,7 @@ impl<'c> AccountRiskFold<'c> {
         let fees = usd_fees(payload)?;
         let clock = whole_second(payload, "risk_clock")?;
         self.bind(instrument)?;
+        self.fills.insert(fill_id.to_owned());
         let session = self.calendar.session(clock).map_err(refused)?;
         let outcome = self.step(clock, session, Input::Fill { side, qty, price })?;
         let mut appends = self.records(row, clock, &outcome)?;
@@ -609,25 +635,33 @@ impl<'c> AccountRiskFold<'c> {
         Ok(appends)
     }
 
-    /// Steps a `FeesCharged` of the agent's own order as `Input::Fee` of its `charged` (DEC-2393
-    /// item 3). One of any other order, or of nothing, steps nothing.
+    /// Steps a `FeesCharged` of the agent's own order (DEC-2393 item 3): the regulatory fee the
+    /// paper executor simulates for its fill (`simulated`, family `equities`) as `Input::Fee` of its
+    /// `accrued`, the fee trading spec §8.2 takes from equity and §10 puts in P&L; the record
+    /// writes `charged` 0, since no broker charges it. Any other shape naming an own order is one
+    /// no slice reads yet, a refusal to decide. One of any other order, or of none, steps nothing.
     fn fee(
         &mut self,
         row: &StoredEvent,
         payload: &Object,
     ) -> Result<Vec<RiskAppend>, UnreadableCause> {
-        let order = payload
+        let ours = payload
             .get("client_order_id")
             .and_then(Value::as_str)
-            .ok_or(UnreadableCause::Undecodable)?;
-        if !self.own.contains(order) {
+            .is_some_and(|order| self.own.contains(order));
+        if !ours {
             return Ok(Vec::new());
         }
+        let simulated = payload.get("simulated") == Some(&Value::Bool(true))
+            && payload.get("family").and_then(Value::as_str) == Some("equities");
+        if !simulated {
+            return Err(UnreadableCause::RefusedToDecide);
+        }
         let charged = payload
-            .get("charged")
+            .get("accrued")
             .and_then(Value::as_str)
-            .and_then(|charged| Usd::parse(charged).ok())
-            .filter(|charged| !charged.is_negative())
+            .and_then(|accrued| Usd::parse(accrued).ok())
+            .filter(|accrued| !accrued.is_negative())
             .ok_or(UnreadableCause::Undecodable)?;
         if charged.is_zero() {
             return Ok(Vec::new());

@@ -911,15 +911,16 @@ fn fill(
     )
 }
 
-/// A `FeesCharged` the paper executor books for `order`, charging `charged`.
-fn fees_charged(seq: u64, order: &str, charged: &str, clock: &str) -> StoredEvent {
+/// A `FeesCharged` as the paper executor's `simulated_fee` books it for `order`: `accrued` the fee,
+/// `charged` 0, `simulated` true (DEC-948 item 3).
+fn fees_charged(seq: u64, order: &str, accrued: &str, clock: &str) -> StoredEvent {
     row(
         seq,
         "FeesCharged",
         1,
         &format!(
-            r#"{{"family":"equities","day":"{OPENED_DAY}","accrued":"{charged}","charged":"{charged}",
-            "simulated":true,"client_order_id":"{order}","sec":null,"taf":null,"cat":"{charged}",
+            r#"{{"family":"equities","day":"{OPENED_DAY}","accrued":"{accrued}","charged":"0",
+            "simulated":true,"client_order_id":"{order}","sec":null,"taf":null,"cat":"{accrued}",
             "risk_clock":"{clock}"}}"#
         ),
     )
@@ -1563,6 +1564,7 @@ fn a_fill_or_a_fee_that_does_not_decode_makes_the_view_unreadable() {
         fill(5, "o-1", XYZ, ("buy", "1", "100"), AT_2, bad_fee),
         fill(5, "o-1", XYZ, ("buy", "1", "100"), AT_2, "null"),
         fees_charged(5, "o-1", "-0.01", AT_2),
+        fees_charged(5, "o-1", "x", AT_2),
     ] {
         let mut fold = marked_with_an_order(&mandate, &Wall);
         fold.fold(&row).unwrap();
@@ -1753,4 +1755,103 @@ fn a_mode_change_after_a_lift_names_the_lifted_limit() {
     }
     let wanted = ["max_daily_loss", "drawdown_ladder[2]"].map(|name| Some(name.to_owned()));
     assert_eq!(named, wanted);
+}
+
+/// The paper executor's own fee record, as `simulated_fee` writes it: `charged` "0" and `accrued`
+/// the fee. The accrual lowers E (trading spec §8.2); a broker-posted or another family's fee for
+/// an own order is a refusal to decide (DEC-2393 item 3).
+#[test]
+fn the_simulated_fee_lowers_equity_by_its_accrual_and_any_other_fee_record_is_refused() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    fold.fold(&fill(5, "o-1", XYZ, ("buy", "10", "100"), AT_2, "[]"))
+        .unwrap();
+    let simulated = row(
+        6,
+        "FeesCharged",
+        1,
+        &format!(
+            r#"{{"family":"equities","day":"{OPENED_DAY}","accrued":"0.0123","charged":"0",
+            "simulated":true,"client_order_id":"o-1","sec":null,"taf":null,"cat":"0.0123",
+            "risk_clock":"{AT_2}"}}"#
+        ),
+    );
+    fold.fold(&simulated).unwrap();
+    assert_eq!(equity(fold.view()), "9999.9877");
+    for (simulated, family) in [("false", "equities"), ("true", "crypto")] {
+        let mut fold = marked_with_an_order(&mandate, &Wall);
+        let posted = row(
+            5,
+            "FeesCharged",
+            1,
+            &format!(
+                r#"{{"family":"{family}","day":"{OPENED_DAY}","accrued":"1","charged":"1",
+                "simulated":{simulated},"client_order_id":"o-1","sec":null,"taf":null,"cat":"1",
+                "risk_clock":"{AT_2}"}}"#
+            ),
+        );
+        fold.fold(&posted).unwrap();
+        assert_eq!(
+            unreadable(fold.view()),
+            (UnreadableCause::RefusedToDecide, 4)
+        );
+    }
+}
+
+/// A fill naming no order is external activity (journal spec §9.16), never the agent's; a fill
+/// journaled twice is stepped once.
+#[test]
+fn a_fill_with_no_order_steps_nothing_and_a_repeated_fill_steps_once() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    let external = row(
+        5,
+        "FillApplied",
+        1,
+        &format!(
+            r#"{{"fill_id":"f-x","client_order_id":null,"instrument_id":"{XYZ}","side":"buy",
+            "qty_gross":"5","price":"1","trade_date":"{OPENED_DAY}","risk_clock":"{AT_2}","fees":[]}}"#
+        ),
+    );
+    fold.fold(&external).unwrap();
+    assert_eq!(equity(fold.view()), "10000");
+    let first = fill(6, "o-1", XYZ, ("buy", "10", "100"), AT_2, "[]");
+    fold.fold(&first).unwrap();
+    let mut again = fill(7, "o-1", XYZ, ("buy", "10", "100"), AT_2, "[]");
+    again.body = String::from_utf8(again.body.clone())
+        .unwrap()
+        .replace("f-7", "f-6")
+        .into_bytes();
+    fold.fold(&again).unwrap();
+    fold.fold(&mark(8, XYZ, AT_3, "90", true, "regular"))
+        .unwrap();
+    assert_eq!(
+        equity(fold.view()),
+        "9900",
+        "10 shares, not 20: 10000 - 1000 + 10 × 90"
+    );
+}
+
+/// A successor named by a change that is not terminal, or is `ignored`, is not the agent's, as the
+/// executor's fold names a successor only on a terminal, applied state (DEC-2393 item 1).
+#[test]
+fn only_a_terminal_applied_change_makes_its_successor_the_agents() {
+    let mandate = mandate();
+    for (state, ignored) in [("accepted", false), ("replaced", true)] {
+        let mut fold = marked_with_an_order(&mandate, &Wall);
+        let changed = row(
+            5,
+            "OrderStateChanged",
+            2,
+            &format!(
+                r#"{{"client_order_id":"o-1","state":"{state}","replaced_by":"o-9","ignored":{ignored}}}"#
+            ),
+        );
+        fold.fold(&changed).unwrap();
+        fold.fold(&fill(6, "o-9", XYZ, ("buy", "10", "100"), AT_2, "[]"))
+            .unwrap();
+        fold.fold(&mark(7, XYZ, AT_3, "90", true, "regular"))
+            .unwrap();
+        assert_eq!(equity(fold.view()), "10000", "{state}, ignored {ignored}");
+    }
 }
