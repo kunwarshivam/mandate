@@ -98,8 +98,8 @@ impl OutputRejection {
     }
 }
 
-/// Parses `bytes` against `bounds`, as the output schema of a `kind` run pins it (agent harness spec
-/// §6.5, §6.9): an `ideate` run's output is exactly `theses` and `invalidations`, and a `monitor`
+/// Parses `bytes` against `bounds`, as the output schema of a `kind` run pins it (agent harness
+/// spec §6.5, §6.9): an `ideate` run's output is exactly `theses` and `invalidations`, and a `monitor`
 /// run's exactly `invalidations`, so a thesis from a monitor run is refused, as the gateway's
 /// `schema_invalid` refuses it, and its invalidations are never lost to a member it cannot have.
 ///

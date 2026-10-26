@@ -97,10 +97,10 @@ pub(super) struct Judged {
 }
 
 /// Judges the `ok` record of `run`'s call, a `kind` run's, under the version in effect (HI-17), its
-/// output read as that kind's schema pins it (§6.9). An output the
-/// harness's strict read refuses, or one whose candidates the platform cannot fill or admission
-/// cannot decide, is judged as nothing: no verdict and no thesis record, so nothing reaches the
-/// order path (HI-6, DEC-1120 item 4).
+/// output read as that kind's schema pins it (§6.9). An output the harness's strict read refuses,
+/// or one whose candidates the platform cannot fill or admission cannot decide, is judged as
+/// nothing: no verdict and no thesis record, so nothing reaches the order path (HI-6, DEC-1120
+/// item 4).
 ///
 /// # Errors
 /// [`RuntimeError`] when a value cannot be written.
