@@ -233,6 +233,14 @@ impl Journaled {
         self.applied.clone().or_else(|| self.deployed.clone())
     }
 
+    /// Whether nothing has traded yet: the account stream holds no fill, of any order, and no
+    /// order of the agent's was submitted. Only then are the agent's allocation and empty
+    /// counters its risk, as the binding gate reads it before the account risk view does
+    /// (DEC-2380 item 2).
+    pub fn untraded(&self) -> bool {
+        self.fills.is_empty() && self.orders.is_empty()
+    }
+
     /// The later of the account stream's latest risk clock and the scheduler's latest tick.
     pub fn now(&self) -> Option<UtcNanos> {
         self.account_now.max(self.scheduler_now)

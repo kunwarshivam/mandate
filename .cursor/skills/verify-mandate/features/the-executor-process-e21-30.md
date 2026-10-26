@@ -74,5 +74,10 @@
   day-trade rules and liquidity, held when any is missing, when the account is not flat or not
   active, or under a regime whose day trades could bind, never answered for an order reducing
   risk, and refused by an inactive or untradable asset, the liquidity and price floors and
-  participation.
+  participation. `tests/deployment.rs` (`src/deployment.rs`, X1b-3 G2b): the production ports read
+  from the control stream's confirmed version and registrations and the artifact store, a
+  deployment the store cannot read answering nothing, an untraded account's opening on every read
+  fact allowed, a traded account or an unread fact holding it, an exit never reading the bars or
+  the broker, an uncovered opening handed no protection, and a run given the deployment reading
+  its ports from it.
 - **Run:** `cargo nextest run -p mandate-executord` (with `MANDATE_PG_URL` for `tests/pg.rs`).
