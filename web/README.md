@@ -204,7 +204,9 @@ agent's stream from `GET /journal/streams/agent:{ws}:{agent}/events`, by sequenc
 never a body (DEC-2377). Positions (`/positions`) reads each agent's `GET /agents/{id}/positions` every five seconds and
 groups the agents by the account their reads name: each agent's own net quantity per instrument, its
 cost basis, risk mark and protection shown as not reported until the API serves them (DEC-2111 item
-5), and the account's holdings at its last reconciliation from the agent read. Stop works over the API too (DEC-2408): the sheet lists the agents the API serves, each with its kill
+5), and the account's holdings at its last reconciliation from the same reads.
+
+Stop works over the API too (DEC-2408): the sheet lists the agents the API serves, each with its kill
 switch, and the record screens build from the API's view, with open orders and per-agent positions
 shown as not reported, never as none. Release is not offered there. `/demo` always reads the fixtures. With sign-in on, the browser first opens an API session with
 `POST /v1/sessions` from its Supabase access token and refreshes it every four minutes, one tab at a

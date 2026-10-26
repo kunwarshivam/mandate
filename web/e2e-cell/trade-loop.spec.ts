@@ -129,6 +129,7 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
   });
 
   await test.step("the browser's kill switch is recorded for this agent alone", async () => {
+    await page.goto(`/agents/${AGENT}`, { timeout: 15_000 });
     await page.getByRole("button", { name: "Stop", exact: true }).first().click();
     const sheet = page.getByRole("dialog", { name: /^Stop/ });
     await expect(sheet).toBeVisible();

@@ -10,7 +10,7 @@ import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
 import type { CommandPhase, PreparedCommand } from "@/api/types";
-import { activityRead, journalPageRead } from "@/api/activity";
+import { activityRead, journalPageRead, holdingsRead } from "@/api/activity";
 import { connectStartBody, connectionRead, connectionsRead } from "@/api/connect";
 import { type PasskeyKind, type StepUpAction, type StepUpChallenge, confirmCode, connectStepUpDigest } from "@/api/step-up";
 import { prepareCreateVersion, readConfirmation, versionCreated } from "@/api/versions";
@@ -28,6 +28,7 @@ import {
   type CommandKind,
   type CommandRecord,
   type MandateChangeRequest,
+  type PositionsAnswer,
   type Runtime,
   RuntimeContext,
   type SetUp,
@@ -352,9 +353,9 @@ export function ApiRuntimeProvider({
 
   /** `GET /agents/{id}/positions` alone (DEC-2111): the positions screen reads every agent's, not their orders or journals. */
   const holdings = useCallback(
-    async (agentId: string): Promise<ActivityAnswer["holdings"]> => {
-      const read = await client.read(`/agents/${encodeURIComponent(agentId)}/positions`, activityRead(agentId).holdings);
-      return read.ok ? { ok: true, account_ref: read.value.account_ref, items: read.value.items } : { ok: false, reason: read.error.code };
+    async (agentId: string): Promise<PositionsAnswer> => {
+      const read = await client.read(`/agents/${encodeURIComponent(agentId)}/positions`, holdingsRead(agentId));
+      return read.ok ? { ok: true, account_ref: read.value.account_ref, items: read.value.items, account_positions: read.value.account_positions } : { ok: false, reason: read.error.code };
     },
     [client],
   );

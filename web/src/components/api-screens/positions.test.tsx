@@ -63,6 +63,18 @@ describe("positions over the workspace API (§4.7 D3, DEC-2111)", () => {
     expect(document.querySelector(`[data-slot=agent-positions][data-agent="${failing.agent_id}"]`)).toBeNull();
   });
 
+  it("takes the account's holdings from the same positions reads, not the agent read refreshed on another cadence", async () => {
+    mount("normal", (send) => async (input, init) => {
+      const answer = await send(input, init);
+      if (!/\/agents\/[^/]+$/.test(new URL(input).pathname)) return answer;
+      const body = (await answer.json()) as { agent: Record<string, unknown> };
+      return new Response(JSON.stringify({ ...body, agent: { ...body.agent, account_positions: null } }), { status: answer.status, headers: answer.headers });
+    });
+    const table = await screen.findByRole("table", { name: "The account's holdings" });
+    expect(within(table).getAllByRole("row").length).toBeGreaterThan(1);
+    expect(within(table).getAllByRole("columnheader").every((h) => h.getAttribute("scope") === "col")).toBe(true);
+  });
+
   it("says the deployment reports no agents, never the fixtures' empty board", async () => {
     mount("empty");
     await waitFor(() => expect(screen.getByRole("main")).toHaveTextContent("Your deployment reports no agents."));
