@@ -1206,9 +1206,12 @@ struct Called<'a> {
 fn refused(
     research: &mut ResearchState,
     run_id: &str,
-    _error: RequestError,
+    error: RequestError,
     step: &mut Step<'_, '_>,
 ) -> Result<(), RuntimeError> {
+    if error == RequestError::GatewayUnreachable {
+        return unreachable_gateway(research, run_id, step);
+    }
     let turning = research
         .run
         .as_ref()
@@ -1232,6 +1235,26 @@ fn refused(
     research.withdrawn.insert(run.pin);
     research.last_attempt = Some(run.cut_off);
     Ok(())
+}
+
+/// The caller's own `gateway_unreachable` (DEC-2397 item 3): the exchange with the model-gateway
+/// service was lost. The run ends with no output as for a refusal, and its call is never sent again,
+/// but its pin is not withdrawn, so research stays on schedule and resumes once the service answers.
+/// Since the call may have cost up to its reservation, the operator is alerted, naming the run's
+/// latest journaled record: an agentic run's `RunEnded`, which ending it journals, or a single
+/// call's last observation. A single call that observed nothing has no record to name, and its loss
+/// is the runtime's log line and the service's meter record alone.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+fn unreachable_gateway(
+    research: &mut ResearchState,
+    run_id: &str,
+    step: &mut Step<'_, '_>,
+) -> Result<(), RuntimeError> {
+    let _ = (research, run_id, step);
+    todo!()
 }
 
 /// The gateway's refusal of an agentic run's turn (DEC-2261): the run ends `error` with no record,

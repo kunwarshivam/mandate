@@ -1734,3 +1734,40 @@ fn the_journal_check_refuses_a_summary_that_names_a_symbol() {
     assert!(parse_as_journal_draft(&summary(AAPL), run).is_ok());
     assert!(parse_as_journal_draft(&summary("AAPL"), run).is_err());
 }
+
+/// DEC-2397 item 3: a turn the model-gateway service never answered whole ends the run `error` as a
+/// refused turn does, alerts the operator once naming its `RunEnded`, and keeps the pin, so the
+/// next due run starts.
+#[test]
+#[ignore = "pending E21-62"]
+fn a_lost_turn_ends_the_run_error_alerts_and_keeps_the_pin() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    let (mut run, seed) = seeded(&ports, &world);
+    turn_of(&seed);
+    let before = run.lp.types().len();
+    let lost = ResearchInput::Refused {
+        run_id: run.run_id.clone(),
+        at: clock(CUT_OFF + 20),
+        error: mandate_gateway::RequestError::GatewayUnreachable,
+    };
+    let step = go(&mut run.lp, lost, &ports, &world);
+    assert_eq!(run.lp.types()[before..], ["RunSummaryRecorded", "RunEnded"]);
+    let ended = run.lp.events("RunEnded")[0].event_id.clone();
+    let alerts: Vec<_> = step
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            mandate_runtime::Effect::Notify(reference) => {
+                Some((reference.kind.key(), reference.subject_event.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(alerts, [("research_gateway_unreachable", ended)]);
+    assert!(step.requests.is_empty(), "no turn follows: {step:?}");
+    let later = clock(CUT_OFF + 2 * i64::from(common::research::INTERVAL_S));
+    let next = go(&mut run.lp, ResearchInput::Poll(later), &ports, &world);
+    assert!(starts_a_run(&next), "the pin is kept: {next:?}");
+}

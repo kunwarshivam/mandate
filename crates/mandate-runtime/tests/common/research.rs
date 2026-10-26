@@ -884,6 +884,65 @@ pub fn worker_run_on<T: Transport, S: MeterStore, C: Clock>(
     seen
 }
 
+/// A run whose call is answered `error` instead of sent: started at `now`, retrieved from `plane`,
+/// and, once the core asks for its call, handed the refusal at `answered_at`, as a worker hands
+/// what its port returned. The step that took the refusal is the loop's last.
+pub fn refused_run(
+    lp: &mut Loop,
+    now: RiskClock,
+    ports: &Ports<'_>,
+    world: &World,
+    plane: &RecordedPlane,
+    error: mandate_gateway::RequestError,
+    answered_at: RiskClock,
+) {
+    let started = lp.run(ResearchInput::Poll(now), ports, world);
+    let Some(ResearchRequest::Start { run_id, cut_off }) = started
+        .requests
+        .iter()
+        .find(|request| matches!(request, ResearchRequest::Start { .. }))
+        .cloned()
+    else {
+        panic!("no run started: {started:?}");
+    };
+    let scope = world.scope(cut_off);
+    let retrieval = retrieve(&config().plan, &scope, plane.readers())
+        .unwrap_or_else(|e| panic!("the recorded plane retrieves: {e}"));
+    let items = retrieval
+        .items
+        .iter()
+        .map(|item| {
+            RetrievedObservation::capture(item, cut_off)
+                .unwrap_or_else(|e| panic!("every recorded item is captured: {e}"))
+                .0
+        })
+        .collect();
+    let retrieved = lp.run(
+        ResearchInput::Retrieved {
+            run_id: run_id.clone(),
+            items,
+        },
+        ports,
+        world,
+    );
+    assert!(
+        retrieved
+            .requests
+            .iter()
+            .any(|request| matches!(request, ResearchRequest::Call(_))),
+        "the core asks for its call: {retrieved:?}"
+    );
+    lp.run(
+        ResearchInput::Refused {
+            run_id,
+            at: answered_at,
+            error,
+        },
+        ports,
+        world,
+    );
+}
+
 /// A whole run: the worker's run, answered 30 seconds after the start, then a poll.
 pub fn full_run(
     lp: &mut Loop,
