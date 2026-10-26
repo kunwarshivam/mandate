@@ -754,6 +754,36 @@ fn an_account_reconciled_before_the_start_is_folded_before_the_hold_is_taken() {
     assert_eq!(mode(&process), Mode::Normal);
 }
 
+/// The account stream as the cell's connect and record leave it (journal spec §9.8): the copy of
+/// `ConnectionEstablished` the CLI's `connection record` appends after the executor's check and
+/// reconciliation. The runtime folds it and starts ready; before, its fold refused the copy as not
+/// interpreted, and every runtime in the cell exited `cycle_failed` at its start.
+#[test]
+fn the_account_streams_copy_of_the_establishment_folds_and_the_runtime_starts() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "ConnectionEstablished",
+        &format!(
+            r#"{{"connection_id":"{CONNECTION}","broker":"alpaca","environment":"paper","scopes":[],"account_ref":"{ACCOUNT_REF}","risk_clock":"2026-09-21T15:00:00.000000000Z"}}"#
+        ),
+    );
+    let mut process = start(&rig, NOW);
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+    assert_eq!(mode(&process), Mode::Normal);
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
 /// The latest establishment names the account: a reconnect to a new account is followed from the
 /// restart, and the old account's reconciliation is not this connection's.
 #[test]
