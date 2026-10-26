@@ -281,14 +281,16 @@ const SILENT_AFTER_S: i64 = 2 * DAY_S;
 /// §9.34, DEC-2352 item 4): its sequence's last `RetirementHeld` in `records`, the agent's records in
 /// commit order as [`retirement_failure`] reads them, is more than 48 hours old, with no end and no
 /// version that cancels it since. `cause` is the record that began the retirement and `terms` reads
-/// a mandate version's terms by its hash.
+/// a mandate version's terms by its hash; for a stream that held more than one sequence it is the
+/// open one's, the cause of its records.
 ///
 /// An end is the agent's own, as rule 266 reads it. A version cancels only once applied to this
 /// agent, and only by its cause: a `profit_stop` by a `profit_level` above the return at the trigger,
 /// (`agent_equity` − `capital_base`) / `capital_base` from its `RiskLimitTriggered`; a passed
 /// `end_date` by a later one; a goal's `release` by a changed `on_complete`, each against the version
-/// the sequence's first record names. Any other cause, or terms that cannot be read, cancels nothing,
-/// so the finding is reported rather than missed (`AGENTS.md` rule 3, DEC-2835).
+/// the sequence's first record names, each sequence's own. Any other cause, or terms or figures
+/// that cannot be read, cancels nothing, and a record whose risk clock cannot be read is as old as
+/// can be, so the finding is reported rather than missed (`AGENTS.md` rule 3, DEC-2835).
 #[must_use]
 pub fn retirement_held_silent(
     agent: &str,
@@ -303,7 +305,7 @@ pub fn retirement_held_silent(
         let p = payload(record);
         match text(record, "event_type") {
             HELD => {
-                last = clock(p, "risk_clock");
+                last = Some(clock(p, "risk_clock").unwrap_or(i64::MIN));
                 if held_under.is_none() {
                     let version = record
                         .get("config_refs")
@@ -311,7 +313,10 @@ pub fn retirement_held_silent(
                     held_under = Some(terms(version));
                 }
             }
-            "AgentStopped" | "OwnerCommandIssued" if ends(agent, record) => last = None,
+            "AgentStopped" | "OwnerCommandIssued" if ends(agent, record) => {
+                last = None;
+                held_under = None;
+            }
             "MandateVersionApplied"
                 if last.is_some()
                     && text(p, "agent_id") == agent
@@ -321,6 +326,7 @@ pub fn retirement_held_silent(
                 let under = held_under.as_ref().and_then(Option::as_ref);
                 if new.is_some_and(|new| cancels(cause, under, &new)) {
                     last = None;
+                    held_under = None;
                 }
             }
             _ => {}
