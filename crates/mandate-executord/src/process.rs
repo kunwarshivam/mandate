@@ -7,12 +7,12 @@ use mandate_accounting::InstrumentId;
 use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    AccountDeclaration, AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOrder,
-    BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect,
-    EventDraft, EventId, ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input,
-    InstrumentSnapshot, IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion,
-    MandateView, OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch,
-    fold, handle, limit_fills, recorded_fills,
+    AccountDeclaration, AccountScope, AcknowledgmentHandoff, ActivityCursor, AgentId,
+    BindingGateSource, BrokerOrder, BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate,
+    Command, ConnectorError, Effect, EventDraft, EventId, ExecutorConfig, ExecutorError,
+    ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot, IntentBody, IntentHandoff,
+    IntentId, KillScope, MandateVersion, MandateView, OrderState, Ports, ProtectionPrices,
+    ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle, limit_fills, recorded_fills,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
@@ -239,6 +239,9 @@ struct Followed {
     /// Whether every followed agent's stream parsed and read: one that did not may hold a switch,
     /// so it holds the exit (DEC-2347 item 3.3).
     all_read: bool,
+    /// The owner's acknowledgments and requests the account stream holds no copy of yet, in the
+    /// control stream's order (journal spec §9.28, DEC-2828, DEC-2830).
+    acknowledgments: Vec<AcknowledgmentHandoff>,
 }
 
 impl<S: Store, B: Broker> ExecutorProcess<S, B> {
@@ -390,6 +393,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             unreadable,
             released,
             all_read,
+            acknowledgments,
         }) = self.switches(now, &mut alerts)
         else {
             return alerts;
@@ -411,6 +415,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             && !self.hand(now, now, Input::Tick(tick), &mut alerts, 0)
         {
             return alerts;
+        }
+        for handoff in acknowledgments {
+            if !self.hand(now, now, Input::Acknowledgment(handoff), &mut alerts, 0) {
+                return alerts;
+            }
         }
         for (agent, proposal) in proposed {
             let action = if proposal.purpose.adds_risk() {
@@ -779,12 +788,31 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     .map(|switch| (agent.clone(), switch)),
             );
         }
+        let agents: BTreeSet<AgentId> = following.agents.keys().cloned().collect();
+        let processed_at = RiskClock::from_secs(now.secs());
+        let acknowledgments = match crate::acknowledgments::acknowledgments(
+            &rows,
+            &agents,
+            self.environment,
+            processed_at,
+        ) {
+            Ok(all) => all
+                .into_iter()
+                .filter(|handoff| !self.state.copied_acknowledgment(&handoff.original.event_id))
+                .collect(),
+            Err(crate::acknowledgments::Unread::Policy) => Vec::new(),
+            Err(crate::acknowledgments::Unread::Record) => {
+                unreadable = true;
+                Vec::new()
+            }
+        };
         Some(Followed {
             switches: pending,
             proposals: proposed,
             unreadable,
             released: following.released(),
             all_read,
+            acknowledgments,
         })
     }
 
