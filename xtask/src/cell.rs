@@ -1263,7 +1263,7 @@ pub(super) fn api_diagnosis() {
         "--selector",
         selector.as_str(),
         "-o",
-        "jsonpath={range .items[*]}{.metadata.name}{range .status.containerStatuses[*]} {.name} {.restartCount}{end}{\"\\n\"}{end}",
+        "jsonpath={range .items[*]}{.metadata.name}{range .status.initContainerStatuses[*]} {.name} {.restartCount}{end}{range .status.containerStatuses[*]} {.name} {.restartCount}{end}{\"\\n\"}{end}",
     ];
     let events = [
         "get",
@@ -1277,7 +1277,10 @@ pub(super) fn api_diagnosis() {
     for args in shown {
         diagnose(args);
     }
-    let listing = kubectl(&restarted).unwrap_or_default();
+    let listing = kubectl(&restarted).unwrap_or_else(|e| {
+        eprintln!("    api diagnosis `kubectl {}`: {e:#}", restarted.join(" "));
+        String::new()
+    });
     for (pod, container) in restarted_containers(&listing) {
         diagnose(&[
             "logs",
@@ -1303,7 +1306,7 @@ fn diagnose(args: &[&str]) {
 }
 
 /// Each `(pod, container)` that has restarted, from a listing of one pod a line, its name then
-/// `<container> <restarts>` pairs. Only those have logs from a run before: `kubectl logs
+/// `<container> <restarts>` pairs, init containers first. Only those have logs from a run before: `kubectl logs
 /// --previous` over every container of a selector fails outright on the first one that has none,
 /// an init container among them, which hid the API's own last run (main's run 40254976469).
 fn restarted_containers(listing: &str) -> Vec<(String, String)> {
@@ -5726,8 +5729,7 @@ mod tests {
     /// The API's diagnosis asks for the logs of a run before only of the containers that restarted.
     #[test]
     fn only_restarted_containers_are_asked_for_their_previous_logs() {
-        let listing =
-            "api-1 api 5\nconnect-finish-1 finish 0 credentials 0\napi-2 api 0 sidecar 2\n";
+        let listing = "api-1 api 5\nconnect-finish-1 credentials 0 finish 0\npending-1\napi-2 api 0 sidecar 2\n";
         assert_eq!(
             restarted_containers(listing),
             vec![
