@@ -511,6 +511,7 @@ fn decide(
     }
     let verdict = dry_run(state, ports, &proposal, now);
     let classified = overlaid(ports.plan.classify(ports.view, &proposal), &verdict);
+    let (verdict, next) = next(state, &proposal, verdict, &classified, now, ports.view);
     let decision = batch.journal(
         "DecisionMade",
         None,
@@ -524,15 +525,9 @@ fn decide(
             });
             Ok(())
         }
-        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. } => allowed(
-            state,
-            &proposal,
-            (&classified, &deferred_names(&verdict)),
-            now,
-            ports,
-            decision,
-            batch,
-        ),
+        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. } => {
+            allowed(&proposal, next, ports, decision, batch)
+        }
     }
 }
 
@@ -653,32 +648,71 @@ pub(crate) fn dry_run(
     }
 }
 
-/// What the autonomy classification does with a proposal the dry run allowed (mandate spec §6):
-/// AUTO proposes and hands off, ASK requests an approval and arms its deadline, DENY records the
-/// refusal the `DecisionMade` already carries and stops there. An ASK of a purpose that adds no risk
-/// is proposed as AUTO is, because reducing risk never needs approval and an exit is never asked
-/// (`AGENTS.md` rules 2 and 13, DEC-278 item 1).
-fn allowed(
+/// What an allowed decision does next (mandate spec §6): ask with the request built in full,
+/// propose and hand off, or nothing, the refusal its `DecisionMade` already records.
+pub(crate) enum Next {
+    Ask(escalation::Prepared),
+    Propose,
+    Nothing,
+}
+
+/// The dry run's `verdict` and what follows it under `classified` (mandate spec §6):
+/// - an allowed opening or increase classified `ask` is asked with its request built in full
+///   before its decision is journaled, or, when the request cannot be built, the verdict becomes
+///   the dry run's denial with the reason, which the decision records and notifies (DEC-2814);
+/// - an `auto`, or an `ask` of a purpose that adds no risk, is proposed, because reducing risk never
+///   needs approval and an exit is never asked (`AGENTS.md` rules 2 and 13, DEC-278 item 1);
+/// - a `deny`, or any denied verdict, does nothing more.
+fn next(
     state: &RuntimeState,
     proposal: &Proposal,
-    (classified, deferred): (&Classified, &[&'static str]),
+    verdict: DryRunVerdict,
+    classified: &Classified,
     now: RiskClock,
+    view: &crate::types::MandateView,
+) -> (DryRunVerdict, Next) {
+    if !matches!(
+        verdict,
+        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. }
+    ) {
+        return (verdict, Next::Nothing);
+    }
+    match classified.autonomy {
+        Autonomy::Ask if proposal.purpose.adds_risk() => match escalation::prepared(
+            state,
+            proposal,
+            classified.decided_by.as_deref(),
+            &deferred_names(&verdict),
+            now,
+            view,
+        ) {
+            Ok(prepared) => (verdict, Next::Ask(prepared)),
+            Err(reason_code) => (
+                DryRunVerdict::Deny {
+                    reason_code: reason_code.to_owned(),
+                },
+                Next::Nothing,
+            ),
+        },
+        Autonomy::Auto | Autonomy::Ask => (verdict, Next::Propose),
+        Autonomy::Deny => (verdict, Next::Nothing),
+    }
+}
+
+/// Carries out an allowed decision's [`Next`]: the ASK's request, its delivery, deadline and
+/// notification; or the proposal's `IntentProposed` and hand-off; or nothing.
+fn allowed(
+    proposal: &Proposal,
+    next: Next,
     ports: &Ports<'_>,
     decision: EventId,
     batch: &mut Batch<'_>,
 ) -> Result<(), RuntimeError> {
-    match classified.autonomy {
-        Autonomy::Ask if proposal.purpose.adds_risk() => escalation::ask(
-            state,
-            proposal,
-            classified.decided_by.as_deref(),
-            deferred,
-            now,
-            ports,
-            decision,
-            batch,
-        ),
-        Autonomy::Auto | Autonomy::Ask => {
+    match next {
+        Next::Ask(prepared) => {
+            escalation::ask(prepared, ports.view.approval.timeout_s, decision, batch)
+        }
+        Next::Propose => {
             let intent = batch.journal("IntentProposed", Some(decision), proposed(proposal)?)?;
             batch.hand(IntentHandoff {
                 intent_id: intent,
@@ -693,7 +727,7 @@ fn allowed(
             });
             Ok(())
         }
-        Autonomy::Deny => Ok(()),
+        Next::Nothing => Ok(()),
     }
 }
 
