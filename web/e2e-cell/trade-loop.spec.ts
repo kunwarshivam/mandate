@@ -9,7 +9,8 @@ import { type Page, expect, test } from "@playwright/test";
  * records from the served reads (DEC-2377), and the browser's kill switch is recorded.
  *
  * The driver sets it up and plays the host. It runs this file with `OWLHEAD_CELL_SPEC=trade-loop.spec.ts`
- * and the agent in `OWLHEAD_CELL_AGENT`. When the page shows a code, the spec writes
+ * and the agent in `OWLHEAD_CELL_AGENT`. The spec triggers nothing itself: it waits for a pending
+ * request from that agent, and only that agent, which the runtime raises on its own. When the page shows a code, the spec writes
  * `{workspace, principal, agent, approval, challenge, code}` to `OWLHEAD_CELL_CONFIRM_REQUEST`. The
  * driver runs `mandate step-up confirm` with those flags and then writes `OWLHEAD_CELL_CONFIRM_DONE`,
  * either `{"ok": true}` or `{"ok": false, "error": …}`. The spec writes each step it reached, and the
@@ -59,12 +60,17 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
   for (const [name, value] of Object.entries({ RESULT, WORKSPACE, AGENT, CONFIRM_REQUEST, CONFIRM_DONE })) expect(value, `the driver names ${name}`).not.toBe("");
 
   await test.step("the agent's request shows in the web app", async () => {
-    const shown = await until(page, "/approvals", PROPOSAL_MS, async () => (await page.getByRole("region", { name: "Waiting" }).getByRole("link").count()) > 0);
-    if (!shown) refuse(`no request waited in the web app within ${PROPOSAL_MS} ms`);
-    const link = page.getByRole("region", { name: "Waiting" }).getByRole("link").first();
-    const href = (await link.getAttribute("href")) ?? "";
-    step("approval", href.split("/").at(-1) ?? "");
-    await link.click();
+    let approval = "";
+    page.on("response", async (r) => {
+      const url = new URL(r.url());
+      if (r.request().method() !== "GET" || url.pathname !== `/v1/workspaces/${WORKSPACE}/approvals` || url.searchParams.get("state") !== "pending" || !r.ok()) return;
+      const listed = ((await r.json().catch(() => ({}))) as { approvals?: Array<{ approval_id: string; agent_id: string }> }).approvals ?? [];
+      approval ||= listed.find((a) => a.agent_id === AGENT)?.approval_id ?? "";
+    });
+    const shown = await until(page, "/approvals", PROPOSAL_MS, async () => approval !== "");
+    if (!shown) refuse(`no request from agent ${AGENT} waited in the web app within ${PROPOSAL_MS} ms`);
+    step("approval", approval);
+    await page.goto(`/approvals/${approval}`);
   });
 
   await test.step("the owner approves with the code the host confirms", async () => {
