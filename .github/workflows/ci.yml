@@ -110,6 +110,11 @@ jobs:
       cell: ${{ steps.select.outputs.cell }}
       cell_web: ${{ steps.select.outputs.cell_web }}
       reasons: ${{ steps.select.outputs.reasons }}
+      # DEC-2065. Where the cell jobs run: the founder's self-hosted runners, named by the repository
+      # variable CI_RUNNER, but only for main's own runs and pull requests from this repository's
+      # branches. A fork's pull request, and any run while CI_RUNNER is unset, stays on GitHub's
+      # runners, so the self-hosted ones never run code from outside the repository.
+      runner: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -534,10 +539,12 @@ jobs:
   # switch's in `cell-kill-switch` and the executor's, the vault's and the token exchange's in `cell-executor`, `cell-vault` and `cell-exchange`, below); `cell demo --no-web`, an upgrade of every release in place, is `cell-upgrade`'s (DEC-464). Not yet in `full` (DEC-993 item 10); the chart's invariants are in
   # `fast-python`. It and the nine cell jobs below start only when `select` says the diff reaches
   # the cell (DEC-2609); main's nightly run has no diff base and runs all ten.
+  # All eleven run on `select`'s `runner`: the self-hosted runners once the founder sets CI_RUNNER,
+  # never for a fork's pull request, and GitHub's ubuntu-24.04 otherwise (DEC-2065).
   cell:
     needs: select
     if: needs.select.outputs.cell == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -579,7 +586,7 @@ jobs:
   cell-demo:
     needs: select
     if: needs.select.outputs.cell == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -625,7 +632,7 @@ jobs:
   cell-demo-web:
     needs: select
     if: needs.select.outputs.cell_web == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -709,7 +716,7 @@ jobs:
   cell-journal:
     needs: select
     if: needs.select.outputs.cell == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -751,7 +758,7 @@ jobs:
   cell-failover:
     needs: select
     if: needs.select.outputs.cell == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -793,7 +800,7 @@ jobs:
   cell-kill-switch:
     needs: select
     if: needs.select.outputs.cell == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -835,7 +842,7 @@ jobs:
   cell-executor:
     needs: select
     if: needs.select.outputs.cell == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -877,7 +884,7 @@ jobs:
   cell-vault:
     needs: select
     if: needs.select.outputs.cell == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -919,7 +926,7 @@ jobs:
   cell-exchange:
     needs: select
     if: needs.select.outputs.cell == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -961,7 +968,7 @@ jobs:
   cell-seeded:
     needs: select
     if: needs.select.outputs.cell == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -1003,7 +1010,7 @@ jobs:
   cell-upgrade:
     needs: select
     if: needs.select.outputs.cell == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
