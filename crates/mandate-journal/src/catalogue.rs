@@ -35,7 +35,7 @@ const NONE: &[&str] = &[];
 
 /// Every event type [`lookup`] admits, in its order. The test below reads `lookup`'s source, so
 /// a type added there and not here fails the build's tests.
-pub(crate) const EVENT_TYPES: [&str; 135] = [
+pub(crate) const EVENT_TYPES: [&str; 137] = [
     "StreamOpened",
     "MeterReserved",
     "MeterSettled",
@@ -46,6 +46,8 @@ pub(crate) const EVENT_TYPES: [&str; 135] = [
     "OwnerAcknowledgmentRequested",
     "OwnerCommandRefused",
     "StepUpConfirmed",
+    "RealMoneyGateChanged",
+    "RealMoneyRefused",
     "IntentReceived",
     "GateDecided",
     "FillApplied",
@@ -199,6 +201,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         "OwnerAcknowledged" | "OwnerAcknowledgmentRequested" => entry(&[Account, Control], NONE),
         "OwnerCommandRefused" => entry(&[Account, Agent], NONE),
         "StepUpConfirmed" => entry(CONTROL, NONE),
+        "RealMoneyGateChanged" | "RealMoneyRefused" => entry(CONTROL, NONE),
 
         "IntentReceived" => entry(ACCOUNT, &[MAN]),
         "GateDecided" => entry(ACCOUNT, &[FEE, CAL, INS, RULE, MAN]),
