@@ -22,32 +22,7 @@
       "admits_instruments": false,
       "content": {
         "authorship": "platform",
-        "code": [
-          {
-            "path": "crates/mandate-modelhost/src/ma_crossover.rs",
-            "sha256": "3434343434343434343434343434343434343434343434343434343434343434"
-          }
-        ],
-        "content_version": 1,
-        "inputs": {
-          "bars": "daily_close",
-          "instrument": "pinned",
-          "minimum_count": "slow_periods",
-          "trading_day": "us_equity_regular_session"
-        },
-        "kind": "quant_model_content",
         "methodology": "Long when the mean of the last fast_periods daily closes is strictly above the mean of the last slow_periods daily closes; otherwise no output.",
-        "model_id": "quant.ma_crossover",
-        "model_version": "1.0.0",
-        "output": {
-          "flat": "none",
-          "long": {
-            "confidence": "1",
-            "conviction": "1",
-            "direction": "long"
-          },
-          "undecided": "none"
-        },
         "params_schema": {
           "constraints": [
             "fast_periods < slow_periods"
@@ -66,6 +41,21 @@
               "type": "integer"
             }
           ]
+        },
+        "inputs": {
+          "bars": "daily_close",
+          "instrument": "pinned",
+          "minimum_count": "slow_periods",
+          "trading_day": "us_equity_regular_session"
+        },
+        "output": {
+          "flat": "none",
+          "long": {
+            "confidence": "1",
+            "conviction": "1",
+            "direction": "long"
+          },
+          "undecided": "none"
         }
       },
       "registered_at": "2026-10-26T14:00:00.000000000Z"

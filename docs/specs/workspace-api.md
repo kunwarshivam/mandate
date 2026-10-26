@@ -819,24 +819,41 @@ per workspace deployment (item 6).
       of an agent already deployed with the version, are `commands/command-accepted`.
     - **The catalogue reads** ([DEC-2136](../project/decisions/DEC-2136.md)), so a client builds a
       document the create accepts without inventing an id: `GET /instruments` and `GET
-      /signal-models`, each taking the "Draft a mandate version" row, users only, writing nothing,
-      and answering `journal_unavailable` when a registration's stored object cannot be read,
-      never a shorter list. **(planned: E10-11)**
-      - `GET /instruments` returns `read-models/instruments`: for each instrument id a
-        `ConfigSnapshotRegistered` of kind `instrument_snapshot` names, the latest registration's
-        stored snapshot's `instrument_id`, `symbol` and `asset_class`, the registration's
-        `content_hash` as `snapshot`, and its row's `recorded_at` as `registered_at`, sorted by
-        symbol then id. These are exactly the pairs the create's instrument check admits: a pinned
-        instrument is accepted when the list holds its asset id with its symbol.
-      - `GET /signal-models` returns `read-models/signal-models`: for each `(model_id,
-        model_version)` a `ConfigSnapshotRegistered` of kind `model_version` names, the latest
+      /signal-models`. Each is authorized like the other reads (§3.7's "Draft a mandate version"
+      row, users only: a client's "propose only" cell is not served, a role without the row gets
+      that row's refusal, and a non-member the one 404), writes nothing, and is served in a `live`
+      workspace too, since a read adds no risk. An empty or absent control stream answers empty
+      lists, not an error. **(planned: E10-11)**
+      - `GET /instruments` returns `read-models/instruments`: the fold the create's instrument
+        check reads (`versions.rs`, `instruments`), every `ConfigSnapshotRegistered` of kind
+        `instrument_snapshot` in stream order, the latest per stored `instrument_id`. Each listed
+        instrument has its stored snapshot's `instrument_id`, `symbol` and `asset_class`, the
+        registration's `content_hash` as `snapshot`, and its row's `recorded_at` as
+        `registered_at`, sorted by symbol then id. Any registration whose stored snapshot the store
+        cannot give, superseded or not, makes the read `journal_unavailable`, as it makes the check
+        refuse. Only the pinnable are listed: a snapshot whose `instrument_id` is not an asset id
+        (`common.schema.json`'s `AssetId`), whose `symbol` is not 1 to 32 characters, or whose
+        `asset_class` is not `us_equity` or `crypto` is omitted, since no mandate document can name
+        it (the mandate schema's `instrument_ref`); one with no string id or symbol is skipped, as
+        the check skips it. So every listed pair is one the check admits, and every pair a valid
+        document can pin and the check admits is listed.
+      - `GET /signal-models` returns `read-models/signal-models`: the registry V-007 reads, the
+        control stream's `ModelRegistered` and `ModelWithdrawn` facts folded in stream order
+        (`mandate-spec`'s validation context): the latest `ConfigSnapshotRegistered` of kind
+        `model_version` per `model_id`, whatever its version, less every id a later
+        `PlatformOperatorAction` `model_withdrawn` withdrew. Each listed model has that
         registration's `model_id`, `model_version`, `content_hash`, `params` and
-        `admits_instruments`, its row's `recorded_at` as `registered_at`, and `content`, the object
-        stored under `content_hash` (for a quant model its methodology and `params_schema`, each
-        parameter's name, type and bounds, and its constraints; DEC-518 item 3), sorted by id then
-        version. It serves what V-007 reads and nothing about how a model performed: no scorecard,
-        backtest figure or ranking (DEC-99, DEC-126), so the list never reads as a recommendation.
-      - Both read the control stream only, and `as_of` names it.
+        `admits_instruments`, its row's `recorded_at` as `registered_at`, and `content`, sorted by
+        id. V-007 reads only the row, so the listing never depends on the store; `content` does:
+        it is a fixed projection of the object stored under `content_hash`, its `authorship`,
+        `methodology`, `params_schema` (each parameter's name, type and bounds, and its
+        constraints; DEC-518 item 3), `inputs` and `output`, each only when the object has it,
+        and `null` when the store cannot give or parse the object. Nothing else of the object is
+        served: no prompt template, model identity, retrieval plan, tool declaration or source
+        path. It serves nothing about how a model performed (no scorecard, backtest figure or
+        ranking; DEC-99, DEC-126), so the list never reads as a recommendation.
+      - Both read the control stream, and `as_of` names it; the instrument snapshots and the
+        model content come from the content-addressed store (item 2).
     - **Go live** answers `409` `live_unavailable` to every principal the deploy row authorizes,
       after item 10's checks and before the body is read (B5, rule 8).
     - The content-addressed store (item 2) is written only by these routes, and only by adding an
@@ -901,8 +918,8 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Validate | `POST /mandate-drafts/{id}/validate` | — | Schema, V-rules, the policy hierarchy; returns violations and warnings with each warning's code (A4). Writes nothing |
 | Create a version | `POST /mandate-drafts/{id}/versions` | `MandateVersionCreated` | Requires a passing validation. Canonicalizes and hashes (mandate spec §9.1); records provenance, validation results, the classification against the base version, and the diff (§10) |
 | Read a version | `GET /mandate-versions/{hash}` | — | The stored canonical document and its records |
-| Instruments a version may pin | `GET /instruments` | — | `read-models/instruments` ([DEC-2136](../project/decisions/DEC-2136.md)): the registered instrument snapshots, as the create and deploy checks read them (§3.11 item 11) |
-| Signal models a version may name | `GET /signal-models` | — | `read-models/signal-models` ([DEC-2136](../project/decisions/DEC-2136.md)): each registered `model_version` (V-007) with its stored content object (§3.11 item 11) |
+| Instruments a version may pin | `GET /instruments` | — | `read-models/instruments` ([DEC-2136](../project/decisions/DEC-2136.md)): the pinnable registered instruments, as the create's check reads them (§3.11 item 11) |
+| Signal models a version may name | `GET /signal-models` | — | `read-models/signal-models` ([DEC-2136](../project/decisions/DEC-2136.md)): the models V-007 admits, each with a fixed projection of its content object (§3.11 item 11) |
 | Diff | `GET /mandate-versions/{hash}/diff?against={hash}` | — | Every changed path with its §9.2 classification and when it applies (A6) |
 | Confirmation screen | `GET /mandate-versions/{hash}/confirmation` | — | The deterministic data A5 renders: provenance badges, platform defaults, worst-case figures, the unasked dollars (DEC-189), the crypto gap disclosure when it applies, and its `screen_digest` |
 | What would change | `POST /mandate-versions/{hash}/replay` | `RecordsAccessed` | DEC-186: counts only, over 30 days of `DecisionMade`; stored with its result hash |
