@@ -2197,8 +2197,9 @@ proptest::proptest! {
     #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
 
     /// Any journal the executor writes replays from seq 1 to the live view, owing nothing; and cut
-    /// at any row, as a crash would cut it, the restarted fold owes exactly the journaled records
-    /// the cut dropped whose cause it kept, in their order (DEC-2399).
+    /// at any row, the restarted fold owes exactly the journaled records the cut dropped whose
+    /// cause it kept, in their order (DEC-2399). A crash cuts only between batches, since an append
+    /// is atomic; cutting inside a batch too is the stricter check.
     #[test]
     fn a_replay_ends_where_the_live_fold_did_and_a_crash_owes_what_it_dropped(
         inputs in proptest::collection::vec(generated(), 1..40),
@@ -2287,6 +2288,7 @@ fn the_rest_of_a_causes_batch_comes_before_its_records() {
         tick(8, "2026-09-23T04:00:00.000000000Z"),
         trading_day(9, "2026-09-23T04:00:00.000000000Z"),
     ];
+    let checked = row(10, "ConnectionChecked", 1, r#"{"result":"ok"}"#);
     let mut returned = Vec::new();
     for row in &batch {
         returned.extend(fold.fold(row).unwrap());
@@ -2297,15 +2299,22 @@ fn the_rest_of_a_causes_batch_comes_before_its_records() {
         "the midnight tick's records, owed after the batch"
     );
     assert_eq!(fold.owed().count(), returned.len());
-    let next = journal(&mut fold, &returned, 10);
+    fold.fold(&checked).unwrap();
+    assert_eq!(
+        fold.owed().count(),
+        returned.len(),
+        "a connection check passes too"
+    );
+    let next = journal(&mut fold, &returned, 11);
     assert_eq!(readable_head(fold.view()), next - 1);
 }
 
-/// An `AgentModeApplied` naming no cause is the executor's own for another reason (a kill
-/// switch, an unmapped broker status), whether or not records are owed; one naming a cause is the
-/// fold's, and must be the record owed (DEC-2399 items 1 and 4).
+/// An `AgentModeApplied` is the fold's only when it names the cause of the record owed next, and
+/// then it must be that record. One naming no cause (a kill switch, an unmapped broker status) or
+/// another cause (the copy of an agent stream's `AgentModeChanged`, journal spec §9.6) is another
+/// writer's, whether or not records are owed (DEC-2399 items 1 and 4).
 #[test]
-fn a_mode_record_with_no_cause_is_another_writers_even_while_records_are_owed() {
+fn a_mode_record_not_naming_the_owed_cause_is_another_writers_even_while_records_are_owed() {
     let case = case("MC-R01");
     let (mandate, calendar) = (case_mandate(&case), nyse());
     let (_, rows) = mc_r01_journaled(&mandate, &calendar);
@@ -2339,6 +2348,19 @@ fn a_mode_record_with_no_cause_is_another_writers_even_while_records_are_owed() 
         }
         fold
     };
+    let copied = caused(
+        rows[first].seq,
+        "AgentModeApplied",
+        1,
+        Some("01J8Z4C0000000000000000000"),
+        &format!(r#"{{"agent":"{AGENT}","to":"paused","restriction":"owner","originated":false}}"#),
+    );
+    let passed = replay(copied);
+    assert!(
+        matches!(passed.view(), RiskView::Readable { .. }),
+        "a copy naming another cause: {:?}",
+        passed.view()
+    );
     let passed = replay(others(rows[first].seq, None));
     assert!(
         matches!(passed.view(), RiskView::Readable { .. }),

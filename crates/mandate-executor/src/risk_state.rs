@@ -522,8 +522,13 @@ impl<'c> AccountRiskFold<'c> {
             .get("payload")
             .and_then(Value::as_object)
             .ok_or(UnreadableCause::Undecodable)?;
-        let caused = !matches!(body.get("causation_id"), None | Some(Value::Null));
-        let others_mode = row.event_type == "AgentModeApplied" && !caused;
+        let cause = body.get("causation_id").and_then(Value::as_str);
+        let owed_cause = self
+            .owed
+            .front()
+            .and_then(|owed| owed.causation_id.as_deref());
+        let others_mode =
+            row.event_type == "AgentModeApplied" && (cause.is_none() || cause != owed_cause);
         if FOLD_RECORDS.contains(&row.event_type.as_str()) && !others_mode {
             return match self.owed.front() {
                 Some(owed) if reproduces(owed, row, &body) => {
