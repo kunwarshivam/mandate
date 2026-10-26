@@ -3002,6 +3002,9 @@ pub fn ci() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::Readiness::{Partial, Ready, Skipped};
+    use super::*;
+
     /// The scenario needs `kubectl` beside the cell's own tools, and names whichever is missing
     /// first, the cell's before `kubectl`'s.
     #[test]
@@ -3017,9 +3020,6 @@ mod tests {
             Some("`helm version` did not succeed")
         );
     }
-
-    use super::Readiness::{Partial, Ready, Skipped};
-    use super::*;
 
     fn mandate() -> Vec<u8> {
         fs::read(format!("../{MANDATE_FILE}")).unwrap()
