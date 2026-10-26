@@ -1236,9 +1236,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// core and never stops the process: a probe places and alters nothing, and a failed one is
     /// counted, never read as healthy. While the journal is down nothing reaches the broker, the
     /// probe included (E21-26), and it stays due: a restriction it led to could not be journaled.
+    /// A process that has exited, or is exiting this pass, probes nothing. A one-read broker is
+    /// probed through its account reads, since it offers no single account read.
     fn probe(&mut self, now: UtcNanos) {
         let due = now.secs().saturating_sub(self.probed.secs()) >= PROBE_EVERY_S;
-        if !due || self.journal_down {
+        if !due || self.journal_down || self.exited() {
             return;
         }
         self.probed = now;

@@ -93,9 +93,9 @@ fn an_idle_executor_probes_once_per_period_with_reads_only() -> Result<(), Error
     passes(&mut process, periods * PROBE_EVERY_S / every, every)?;
     let (probes, only_reads) = reads(&broker, before);
     assert!(only_reads, "a probe never places or alters an order");
-    assert!(
-        (periods as usize..=periods as usize + 1).contains(&probes),
-        "one probe a period over {periods} periods, not {probes}"
+    assert_eq!(
+        probes, periods as usize,
+        "one probe a period over {periods} periods"
     );
     assert!(restriction_causes(&journal).is_empty());
     assert_eq!(process.state().account_state(), AccountState::Active);
@@ -122,16 +122,34 @@ fn an_idle_executor_on_a_refused_credential_is_restricted() -> Result<(), Error>
     Ok(())
 }
 
+/// Two lost probes then a good one, four times over, restrict nothing (DEC-687: a good result
+/// resets its class), while the same probes with three lost in a row do: the control shows the
+/// probes ran and were counted.
 #[test]
 fn a_good_probe_between_lost_ones_restricts_nothing() -> Result<(), Error> {
-    let (journal, broker, mut process) = idle()?;
-    for round in 0..4 {
-        broker.lose_next_answers(2);
-        for probe in 1..=3 {
-            let pass = round * 3 + probe;
-            process.step(after(pass * PROBE_EVERY_S)?);
+    for (lost, restricted) in [(2, false), (3, true)] {
+        let (journal, broker, mut process) = idle()?;
+        let before = broker.seen().len();
+        let mut pass = 0;
+        for _round in 0..4 {
+            broker.lose_next_answers(lost);
+            for _probe in 0..=lost {
+                pass += 1;
+                process.step(after(pass * PROBE_EVERY_S)?);
+            }
         }
+        let (probes, only_reads) = reads(&broker, before);
+        assert!(only_reads);
+        assert_eq!(
+            probes, pass as usize,
+            "one probe a pass, {lost} lost a round"
+        );
+        assert_eq!(
+            !restriction_causes(&journal).is_empty(),
+            restricted,
+            "{lost} lost probes in a row: {:?}",
+            restriction_causes(&journal)
+        );
     }
-    assert!(restriction_causes(&journal).is_empty());
     Ok(())
 }
