@@ -185,6 +185,8 @@ export interface Runtime {
   stepUp: ((action: StepUpAction) => Promise<ChallengeAnswer>) | null;
   /** The Alpaca paper connect over the API (§4.5, DEC-2623); `null` over the fixtures, which connect nothing. */
   connect: ConnectPort | null;
+  /** The owner's request to move an agent to real money (DEC-2134); `null` over the fixtures, which have no deployment to ask. */
+  realMoney: RealMoneyPort | null;
   /** An agent's orders and own positions over the API (§4.7 D3, DEC-2111); `null` over the fixtures, whose screens show their own. */
   activity: ((agentId: string) => Promise<ActivityAnswer>) | null;
   setUps: SetUp[];
@@ -208,6 +210,14 @@ export type ChallengeAnswer = { ok: true; shown: ShownChallenge; workspaceId: st
 export type StartAnswer = { ok: true; authorizationUrl: string; connectionId: string } | { ok: false; reason: string; effect: "none" | "recorded" | "unknown" };
 
 export type ConnectionAnswer = { ok: true; connection: ConnectionDetail } | { ok: false; reason: string };
+
+/** What a request for real money came to: refused with the deployment's code, or not known. */
+export type RealMoneyAnswer = { outcome: "refused"; code: string } | { outcome: "unknown" };
+
+/** The real-money request (`POST /agents/{id}/go-live`, DEC-2134). It is always refused until counsel signs off. */
+export interface RealMoneyPort {
+  request: (agentId: string) => Promise<RealMoneyAnswer>;
+}
 
 export interface ConnectPort {
   /** A `cli_confirm` challenge of kind `connection`, bound to this workspace and the disclosure shown (DEC-2621 item 4, DEC-2125). */
@@ -620,7 +630,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, activity: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, activity: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

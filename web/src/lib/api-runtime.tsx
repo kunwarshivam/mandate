@@ -23,6 +23,7 @@ import {
   type ChallengeAnswer,
   type Command,
   type ConnectPort,
+  type RealMoneyPort,
   type CommandKind,
   type CommandRecord,
   type MandateChangeRequest,
@@ -284,6 +285,22 @@ export function ApiRuntimeProvider({
    * the way is sent again with the same key and body, which answers the same start (DEC-2623 item 8);
    * it is never sent under a new key, which would be a second connect.
    */
+  /**
+   * The real-money request (DEC-2134): sent once, under a key of its own. The deployment always
+   * refuses it until counsel signs off; an answer that is not a refusal it names is shown as not
+   * known, never as live.
+   */
+  const realMoney = useMemo<RealMoneyPort>(
+    () => ({
+      request: async (agentId) => {
+        const answer = await client.askRealMoney(agentId);
+        const { code, effect } = answer.error;
+        return effect === "none" || code === "live_unavailable" ? { outcome: "refused", code } : { outcome: "unknown" };
+      },
+    }),
+    [client],
+  );
+
   const connect = useMemo<ConnectPort>(
     () => ({
       challenge: () => stepUp({ kind: "connection", digest: connectStepUpDigest(client.workspaceId) }),
@@ -449,8 +466,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

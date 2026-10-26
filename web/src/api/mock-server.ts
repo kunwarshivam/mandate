@@ -56,6 +56,8 @@ export interface MockServer {
   challenges(): IssuedChallenge[];
   /** The connects the mock has started, by key, in order. */
   started(): Array<{ idempotency_key: string; connection_id: string }>;
+  /** Every agent a real-money request named, in order; the mock refuses each `live_unavailable` (DEC-2134). */
+  goLives(): string[];
 }
 
 /** Where the mock's start sends the browser: no real authorization server is ever named. */
@@ -123,6 +125,8 @@ export function createMockServer(options: MockServerOptions): MockServer {
   const issued: IssuedChallenge[] = [];
   /** Connects started, each read `connecting` once and `established` after, as a completed paper connect would be. */
   const connects: Array<{ idempotency_key: string; body: string; connection_id: string; reads: number }> = [];
+  /** Every agent a real-money request named, each refused (DEC-2134). */
+  const goLives: string[] = [];
   const workspace = structuredClone(buildWorkspace(scenario));
   const prefix = `/v1/workspaces/${workspaceId}`;
   const commands: RecordedCommand[] = [];
@@ -415,6 +419,10 @@ export function createMockServer(options: MockServerOptions): MockServer {
     if (headers.get(CSRF_HEADER) !== "1") return problem(403, "forbidden", "none");
     if (route === STEP_UP_CHALLENGE_ROUTE) return challenge(headers, body);
     if (route === CONNECT_START_ROUTE) return startConnect(headers, body);
+    if (/^\/agents\/[^/]+\/go-live$/.test(route)) {
+      goLives.push(decodeURIComponent(route.split("/")[2] ?? ""));
+      return problem(409, "live_unavailable", "none");
+    }
     const match = ROUTES.find((r) => r.pattern.test(route));
     if (!match) return problem(404, "not_found", "none");
     const key = headers.get("Idempotency-Key") ?? "";
@@ -473,5 +481,5 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return problem(404, "not_found", "none");
   };
 
-  return { fetch, recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], challenges: () => issued.map((c) => ({ ...c })), started: () => connects.map(({ idempotency_key, connection_id }) => ({ idempotency_key, connection_id })) };
+  return { fetch, recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], challenges: () => issued.map((c) => ({ ...c })), goLives: () => [...goLives], started: () => connects.map(({ idempotency_key, connection_id }) => ({ idempotency_key, connection_id })) };
 }

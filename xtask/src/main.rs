@@ -127,6 +127,11 @@ commands:
   cell demo --scenario demo --dry-run --image <ref@sha256:...> --workspace <ULID> [--namespace <ns>]
                         render the demo's gestures' Job and inputs for staging (ws-ws1 by default)
                         with helm template and print them; reads no kubeconfig, applies nothing
+  cell journey [<workspace> <agent>]
+                        the customer's journey on Alpaca paper: the demo scenario (sign-in,
+                        connect, confirm, deploy, the trade loop), then from web/ the go-live
+                        screen pending counsel and a real-money request refused and journaled
+                        (DEC-2134); with a workspace, only the web/ part against it
   cell web-kill-switch <workspace> [agent]
                         step 7 from web/ against a running cell with sign-in ready: next dev, then
                         Playwright presses one listed agent's kill switch (DEC-2406)
@@ -420,6 +425,11 @@ fn run() -> Result<()> {
         ["cell", "demo", "--scenario", name, "--dry-run", target @ ..] => {
             cell::scenario::dry_run(name, target)
         }
+        ["cell", "journey"] => {
+            let workspace = cell::scenario::run_in("demo")?;
+            cell::journey(&workspace, cell::scenario::WEB_AGENT)
+        }
+        ["cell", "journey", workspace, agent] => cell::journey(workspace, agent),
         ["cell", "web-kill-switch", workspace] => {
             cell::web::report(cell::web::kill_switch_from_web(workspace, None))
         }

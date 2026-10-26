@@ -1492,6 +1492,15 @@ pub fn dry_run(name: &str, args: &[&str]) -> Result<()> {
 
 /// `cargo xtask cell demo --scenario <name>`.
 pub fn run(name: &str) -> Result<()> {
+    run_in(name).map(|_| ())
+}
+
+/// [`run`], answering the workspace the scenario ran in, for a step that follows it there
+/// (`cargo xtask cell journey`).
+///
+/// # Errors
+/// As [`run`].
+pub fn run_in(name: &str) -> Result<String> {
     if !SCENARIOS.contains(&name) {
         bail!(
             "no scenario `{name}`; the scenarios are {}",
@@ -1723,7 +1732,7 @@ pub fn run(name: &str) -> Result<()> {
         all.len(),
         NODE
     );
-    Ok(())
+    Ok(workspace)
 }
 
 /// Reads `check` with the owner's session every two seconds until it passes, up to

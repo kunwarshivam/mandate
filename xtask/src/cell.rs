@@ -2820,6 +2820,19 @@ fn run_id() -> Result<String> {
     Ok(nanos.trim().chars().rev().take(10).collect::<String>())
 }
 
+/// The customer journey's web/ part ([`web::journey_from_web`]) against a running cell, printing
+/// each step it reached.
+///
+/// # Errors
+/// As [`web::journey_from_web`].
+pub fn journey(workspace: &str, agent: &str) -> Result<()> {
+    eprintln!("==> the customer's journey from web/ (paper only; real money stays off, DEC-2134)");
+    for (name, value) in web::journey_from_web(workspace, agent)? {
+        eprintln!("    {name}: {value}");
+    }
+    Ok(())
+}
+
 /// Opens a fresh control stream with the CLI in the cell, then exports and verifies it.
 fn journal(seeded: bool) -> Result<Verdict> {
     let id = run_id()?;

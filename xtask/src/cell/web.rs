@@ -515,6 +515,62 @@ fn trade_loop_env(agent: &str, request: &Path, done: &Path) -> [(&'static str, S
     ]
 }
 
+/// The customer journey spec under `web/e2e-cell/` (lane GL, DEC-2134).
+const JOURNEY_SPEC: &str = "customer-journey.spec.ts";
+/// The customer journey's steps, in the order the spec reaches them; its result names each one.
+pub const JOURNEY_STEPS: [&str; 4] = [
+    "connections",
+    "disclosures",
+    "real_money_refused",
+    "refusal_journaled",
+];
+
+/// The customer's journey from `web/` (`customer-journey.spec.ts`, DEC-2134) on `agent` in
+/// `workspace`, after the demo scenario: the owner, signed in, sees Alpaca paper connected and
+/// Robinhood's real money off, reads the go-live screen's disclosures and limits pending counsel,
+/// asks to trade real money and is refused, and finds the refusal journaled. Answers the steps
+/// reached; an `Err` names the first that was not, or a run that wrote no result.
+///
+/// # Errors
+/// A missing tool, a run past [`GESTURE_POLLS`], a run that wrote no result, or a step not reached.
+pub fn journey_from_web(workspace: &str, agent: &str) -> Result<BTreeMap<String, String>> {
+    let run = spec_run(
+        workspace,
+        &[
+            ("OWLHEAD_CELL_SPEC", JOURNEY_SPEC.to_owned()),
+            ("OWLHEAD_CELL_AGENT", agent.to_owned()),
+        ],
+        "web-journey",
+        GESTURE_POLLS,
+        &mut || Ok(()),
+    )?;
+    let Some(text) = run.result else {
+        bail!(
+            "web/'s customer journey wrote no result ({}); its log is {}",
+            run.status,
+            run.log.display()
+        );
+    };
+    journey_result(&text)
+}
+
+/// The journey spec's result file as the steps it reached; an `error`, or a step of
+/// [`JOURNEY_STEPS`] missing, is an `Err` naming it.
+///
+/// # Errors
+/// A result that is not a JSON object of strings, names an error, or lacks a step.
+pub fn journey_result(text: &str) -> Result<BTreeMap<String, String>> {
+    let steps: BTreeMap<String, String> = serde_json::from_str(text)
+        .context("the journey's result is not a JSON object of strings")?;
+    if let Some(error) = steps.get("error") {
+        bail!("the customer journey stopped: {error}");
+    }
+    if let Some(missing) = JOURNEY_STEPS.iter().find(|s| !steps.contains_key(**s)) {
+        bail!("the customer journey did not reach `{missing}`");
+    }
+    Ok(steps)
+}
+
 /// Whether lane W's trade loop spec is in this checkout (#2462).
 ///
 /// # Errors
@@ -651,6 +707,32 @@ mod tests {
     const TRADE_LOOP_SPEC_WAITS_MS: u64 = 60_000 + 120_000 + 120_000;
     /// The longest `next dev` takes to start, as `playwright.cell.config.ts`'s `webServer` bounds it.
     const NEXT_DEV_START_MS: u64 = 60_000;
+    /// The journey's result passes only when it names every step and no error, and the spec it
+    /// runs is in this checkout and writes each step the driver reads.
+    #[test]
+    fn the_journey_reads_every_step_and_names_the_first_one_missing() -> Result<()> {
+        let all = r#"{"connections":"ok","disclosures":"4","real_money_refused":"ok","refusal_journaled":"01JB"}"#;
+        assert_eq!(journey_result(all)?.len(), 4);
+        let stopped = r#"{"connections":"ok","error":"no Alpaca connection is listed"}"#;
+        let why = format!("{:#}", journey_result(stopped).err().context("an error")?);
+        assert!(why.contains("no Alpaca connection is listed"), "{why}");
+        let short = r#"{"connections":"ok","disclosures":"4","real_money_refused":"ok"}"#;
+        let why = format!(
+            "{:#}",
+            journey_result(short).err().context("a missing step")?
+        );
+        assert!(why.contains("`refusal_journaled`"), "{why}");
+        assert!(journey_result("[]").is_err());
+        let spec = fs::read_to_string(crate::repo_root()?.join("web/e2e-cell").join(JOURNEY_SPEC))?;
+        for step in JOURNEY_STEPS {
+            assert!(
+                spec.contains(&format!("step(\"{step}\"")),
+                "the spec writes {step}"
+            );
+        }
+        Ok(())
+    }
+
     /// Playwright's bound on the trade loop holds the spec's own test timeout and `next dev`'s
     /// start, and ends before the driver's polls do, so a slow loop is the spec's failure with a
     /// result rather than a run the driver kills (#2466's review).
