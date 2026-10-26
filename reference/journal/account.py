@@ -1549,3 +1549,119 @@ def run_fraction_mutants(section: dict) -> list[str]:
         if check not in caught_by:
             escaped.append(f"protection_fraction vector mutant: {name} (not caught by {check}; caught by {sorted(caught_by)})")
     return escaped
+
+
+GAP_SPEC = "docs/specs/journal.md v0.83 §9.5 rule 42 (DEC-2368)"
+# A placement turned into the gap record that follows it: the action, no orders, prices, day or
+# bracket, and `qty` the gap.
+GAP = (change("payload.action", "protection_gap"), change("payload.orders", []), *NO_PRICES,
+       change("payload.created_on", None), change("payload.bracket", None), change("payload.qty", "2"))
+GAP_VALIDATOR_MUTANTS = ("rule.42", "rule.41", "rule.43", "rule.44.fraction")
+# A seeded bug that puts back v0.82's rule 42, which nulled `qty` on every action but `placed` and
+# `cancelled`: it must refuse a valid gap.
+GAP_TIGHTEN_MUTANTS = ("tighten.42.gap",)
+GAP_CHECKS = ("drafts.valid", "invalid_drafts", "valid_drafts")
+
+
+def gap_drafts() -> dict[str, dict]:
+    bodies = {body["event_id"]: body for body in chain_bodies()}
+    return {
+        "placed_v1": draft_of_body(bodies[ID["placed"]]),
+        "placed": version_2(draft_of_body(bodies[ID["placed"]])),
+    }
+
+
+def gap_valid_drafts() -> list[dict]:
+    """The gap record at both schema versions, and at the smallest gap a whole share leaves."""
+    return [
+        shape("gap_at_version_1", "rule 42: a gap names its quantity", "placed_v1", [*GAP]),
+        shape("gap_at_version_2", "rule 42: a gap names its quantity", "placed", [*GAP]),
+        shape("gap_of_one_share", "rule 42: the smallest gap", "placed", [*GAP, change("payload.qty", "1")]),
+    ]
+
+
+def gap_invalid_drafts() -> list[dict]:
+    """A gap with no quantity, naming orders, carrying prices, or disclosing a fraction."""
+    return [
+        shape_invalid("gap_without_qty", "rule 42: qty is non-null on protection_gap",
+                      "placed", [*GAP, change("payload.qty", None)], "payload.qty"),
+        shape_invalid("gap_without_qty_at_version_1", "rule 42: qty is non-null on protection_gap",
+                      "placed_v1", [*GAP, change("payload.qty", None)], "payload.qty"),
+        shape_invalid("gap_naming_orders", "rule 41: orders is empty on protection_gap",
+                      "placed", [*GAP, change("payload.orders", ["md-01J8ZT90A000000000000000P1-p1"])],
+                      "payload.orders"),
+        shape_invalid("gap_with_a_stop", "rule 43: no prices on protection_gap",
+                      "placed", [*GAP, change("payload.stop", "139")], "payload.stop"),
+        shape_invalid("gap_with_a_fraction", "rule 44: protection_gap discloses no fraction",
+                      "placed", [*GAP, change(FRACTION, "0.4")], FRACTION),
+    ]
+
+
+def build_gap_section() -> dict:
+    return {
+        "spec": GAP_SPEC,
+        "drafts": gap_drafts(),
+        "invalid_drafts": gap_invalid_drafts(),
+        "valid_drafts": gap_valid_drafts(),
+    }
+
+
+def gap_found(check: str, message: str) -> str:
+    if check not in GAP_CHECKS:
+        raise ValueError(f"unregistered check {check}")
+    return f"{check}: {message}"
+
+
+def check_gap_section(section: dict) -> list[str]:
+    """Every failure: the bases append, each invalid draft is refused only as listed, and each
+    valid draft appends."""
+    problems: list[str] = []
+    for name, draft in section["drafts"].items():
+        got = violations(copy.deepcopy(draft))
+        if got:
+            problems.append(gap_found("drafts.valid", f"{name}: {got}"))
+    for case in section["invalid_drafts"]:
+        got = violations(draft_for(section, case))
+        if not reported(got, case["expect"]):
+            problems.append(gap_found("invalid_drafts", f"{case['name']}: expected {case['expect']}, got {got}"))
+    for case in section["valid_drafts"]:
+        got = violations(draft_for(section, case))
+        if got:
+            problems.append(gap_found("valid_drafts", f"{case['name']}: expected Valid, got {got}"))
+    return problems
+
+
+GAP_VECTOR_MUTANTS = (
+    ("a base draft drops its covered quantity", "drafts.valid",
+     lambda s: s["drafts"]["placed"]["payload"].update(qty=None)),
+    ("an invalid draft's expectation names another member", "invalid_drafts",
+     lambda s: s["invalid_drafts"][0]["expect"].update(path="payload.orders")),
+    ("a valid gap names no quantity", "valid_drafts",
+     lambda s: s["valid_drafts"][0]["changes"].append(change("payload.qty", None))),
+)
+
+
+def run_gap_mutants(section: dict) -> list[str]:
+    """Every seeded bug caught: each dropped clause by an invalid draft, the narrowed clause by a
+    valid draft, and each vector mutant by the check it is registered against."""
+    escaped: list[str] = []
+    invalid_cases = [(draft_for(section, c), c["expect"]) for c in section["invalid_drafts"]]
+    valid_cases = [draft_for(section, c) for c in section["valid_drafts"]]
+    for mutant in GAP_VALIDATOR_MUTANTS:
+        skip = frozenset([mutant])
+        if not any(not reported(violations(d, skip), want) for d, want in invalid_cases):
+            escaped.append(f"protection_gaps validator mutant {mutant}")
+    for mutant in GAP_TIGHTEN_MUTANTS:
+        skip = frozenset([mutant])
+        if not any(violations(d, skip) for d in valid_cases):
+            escaped.append(f"protection_gaps tightening mutant {mutant}: no valid draft is refused")
+    for check in GAP_CHECKS:
+        if not any(c == check for _, c, _ in GAP_VECTOR_MUTANTS):
+            escaped.append(f"protection_gaps check {check} has no vector mutant registered against it")
+    for name, check, fn in GAP_VECTOR_MUTANTS:
+        mutated = copy.deepcopy(section)
+        fn(mutated)
+        caught_by = {found_of(p) for p in check_gap_section(mutated)}
+        if check not in caught_by:
+            escaped.append(f"protection_gaps vector mutant: {name} (not caught by {check}; caught by {sorted(caught_by)})")
+    return escaped

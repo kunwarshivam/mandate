@@ -9589,6 +9589,271 @@ protection_fraction:
       value: '0.4'
     expect:
       outcome: Valid
+protection_gaps:
+  spec: docs/specs/journal.md v0.83 §9.5 rule 42 (DEC-2368)
+  drafts:
+    placed_v1:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZQA6A000000000000000E7
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+      event_type: ProtectionChanged
+      schema_version: 1
+      event_time: '2026-09-21T14:00:30.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        action: placed
+        orders:
+        - md-01J8ZT90A000000000000000P1-p1
+        awaiting: []
+        qty: '10'
+        stop: '139'
+        take_profit: '159'
+        intent_id: null
+        bracket: null
+        entry: null
+        agent_id: null
+        replacing: null
+        created_on: '2026-09-21'
+        sent: null
+        uncovered: null
+        acknowledged: null
+        risk_clock: '2026-09-21T14:00:30.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    placed:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZQA6A000000000000000E7
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+      event_type: ProtectionChanged
+      schema_version: 2
+      event_time: '2026-09-21T14:00:30.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        action: placed
+        orders:
+        - md-01J8ZT90A000000000000000P1-p1
+        awaiting: []
+        qty: '10'
+        stop: '139'
+        take_profit: '159'
+        intent_id: null
+        bracket: null
+        entry: null
+        agent_id: null
+        replacing: null
+        created_on: '2026-09-21'
+        sent: null
+        uncovered: null
+        acknowledged: null
+        unprotected_fraction: null
+        risk_clock: '2026-09-21T14:00:30.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: gap_without_qty
+    clause: 'rule 42: qty is non-null on protection_gap'
+    base_draft: placed
+    changes:
+    - path: payload.action
+      value: protection_gap
+    - path: payload.orders
+      value: []
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.created_on
+      value: null
+    - path: payload.bracket
+      value: null
+    - path: payload.qty
+      value: '2'
+    - path: payload.qty
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: gap_without_qty_at_version_1
+    clause: 'rule 42: qty is non-null on protection_gap'
+    base_draft: placed_v1
+    changes:
+    - path: payload.action
+      value: protection_gap
+    - path: payload.orders
+      value: []
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.created_on
+      value: null
+    - path: payload.bracket
+      value: null
+    - path: payload.qty
+      value: '2'
+    - path: payload.qty
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: gap_naming_orders
+    clause: 'rule 41: orders is empty on protection_gap'
+    base_draft: placed
+    changes:
+    - path: payload.action
+      value: protection_gap
+    - path: payload.orders
+      value: []
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.created_on
+      value: null
+    - path: payload.bracket
+      value: null
+    - path: payload.qty
+      value: '2'
+    - path: payload.orders
+      value:
+      - md-01J8ZT90A000000000000000P1-p1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.orders
+  - name: gap_with_a_stop
+    clause: 'rule 43: no prices on protection_gap'
+    base_draft: placed
+    changes:
+    - path: payload.action
+      value: protection_gap
+    - path: payload.orders
+      value: []
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.created_on
+      value: null
+    - path: payload.bracket
+      value: null
+    - path: payload.qty
+      value: '2'
+    - path: payload.stop
+      value: '139'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.stop
+  - name: gap_with_a_fraction
+    clause: 'rule 44: protection_gap discloses no fraction'
+    base_draft: placed
+    changes:
+    - path: payload.action
+      value: protection_gap
+    - path: payload.orders
+      value: []
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.created_on
+      value: null
+    - path: payload.bracket
+      value: null
+    - path: payload.qty
+      value: '2'
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  valid_drafts:
+  - name: gap_at_version_1
+    clause: 'rule 42: a gap names its quantity'
+    base_draft: placed_v1
+    changes:
+    - path: payload.action
+      value: protection_gap
+    - path: payload.orders
+      value: []
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.created_on
+      value: null
+    - path: payload.bracket
+      value: null
+    - path: payload.qty
+      value: '2'
+    expect:
+      outcome: Valid
+  - name: gap_at_version_2
+    clause: 'rule 42: a gap names its quantity'
+    base_draft: placed
+    changes:
+    - path: payload.action
+      value: protection_gap
+    - path: payload.orders
+      value: []
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.created_on
+      value: null
+    - path: payload.bracket
+      value: null
+    - path: payload.qty
+      value: '2'
+    expect:
+      outcome: Valid
+  - name: gap_of_one_share
+    clause: 'rule 42: the smallest gap'
+    base_draft: placed
+    changes:
+    - path: payload.action
+      value: protection_gap
+    - path: payload.orders
+      value: []
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.created_on
+      value: null
+    - path: payload.bracket
+      value: null
+    - path: payload.qty
+      value: '2'
+    - path: payload.qty
+      value: '1'
+    expect:
+      outcome: Valid
 approval_answers:
   spec: docs/specs/journal.md v0.17 §9.7 (DEC-533)
   drafts:

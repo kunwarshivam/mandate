@@ -1250,7 +1250,7 @@ COMPANION = rec(
 )
 PROTECTION_CHANGED = rec(
     ("instrument_id", STR),
-    ("action", one_of("intended", "placed", "cancelled", "passive_start", "unprotected_start", "watchdog", "exit_unpriced", "ladder_floor", "expiry_unreplaceable", "rung_short", "interval_limit", "unprotected_end")),
+    ("action", one_of("intended", "placed", "cancelled", "passive_start", "unprotected_start", "watchdog", "exit_unpriced", "ladder_floor", "expiry_unreplaceable", "rung_short", "interval_limit", "unprotected_end", "protection_gap")),
     ("orders", list_of(STR)),
     ("awaiting", list_of(STR)),
     ("qty", opt(DEC)),
@@ -2058,7 +2058,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         if "tighten.41.awaiting" in skip:
             awaiting_fit = (len(p["awaiting"]) == 0) != may_await
         rule("41.awaiting", awaiting_fit or "rule.41" in skip, "schema", "payload.awaiting")
-        if action == "placed":
+        gap = action == "protection_gap" and "tighten.42.gap" not in skip
+        if action == "placed" or gap:
             rule("42", p["qty"] is not None or "rule.42" in skip, "schema", "payload.qty")
         elif action != "cancelled":
             rule("42", p["qty"] is None or "rule.42" in skip, "schema", "payload.qty")
