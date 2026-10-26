@@ -2937,7 +2937,7 @@ member named), judged in this order and reported at the first that fails:
 302. `causation_id` is non-null (`causation_id`): the scheduler stream's `ClockAdvanced` the row
      copies (§2's copy rule). `append` checks that one is named, not that it names a scheduler
      tick or that its `clock` is this one's: there is no global order across streams (§2), and the
-     executor holds both, as it does for the other copies.
+     executor holds the link, as it does for the other copies.
 
 **Checked by no rule at append**, as for §9.5's other executor records: the writer. The executor
 writes the copy as a `system` actor, `executor`, with `config_refs` `{}`; `TradingDayStarted`'s
