@@ -1611,7 +1611,8 @@ fn a_second_running_agent_on_the_account_is_refused_at_deploy() {
 
 /// DEC-2809 item 2's edges, each judged before any V-rule: an agent running on another account
 /// does not hold this one; a connection established only at version 1 names no account; and a
-/// version-1 deployment, which names no connection the executor follows, holds no account.
+/// version-1 deployment, which names no connection the executor follows, holds no account. None of
+/// them is refused `second_agent_on_account`, whatever the later checks answer.
 #[test]
 fn another_account_or_a_version_1_record_holds_no_account() {
     let other = |establish_v2: bool, deployed_v2: bool, named: &str| {
@@ -1634,22 +1635,29 @@ fn another_account_or_a_version_1_record_holds_no_account() {
         if establish_v2 {
             seed_control_v2(&f, "ConnectionEstablished", &sibling);
         } else {
-            seed_control(&f, "ConnectionEstablished", &sibling);
+            seed_control(
+                &f,
+                "ConnectionEstablished",
+                r#"{"broker":"alpaca","connection_id":"conn_other","environment":"paper","scopes":["data","trading"]}"#,
+            );
         }
-        let deployed = format!(
-            r#"{{"agent_id":"agt_a","connection_id":"conn_other","mandate_version":"{}","record_ref":"{}"}}"#,
-            version("v1"),
-            reference("{}")
-        );
         if deployed_v2 {
+            let deployed = format!(
+                r#"{{"agent_id":"agt_a","connection_id":"conn_other","mandate_version":"{}","record_ref":"{}"}}"#,
+                version("v1"),
+                reference("{}")
+            );
             seed_control_v2(&f, "AgentDeployed", &deployed);
         } else {
+            let deployed = format!(
+                r#"{{"agent_id":"agt_a","mandate_version":"{}","record_ref":"{}"}}"#,
+                version("v1"),
+                reference("{}")
+            );
             seed_control(&f, "AgentDeployed", &deployed);
         }
         let reply = deploy(&f, &cookie, KEY, &deploy_body("agt_b", "v1", EVIDENCE));
-        violations(&reply)
-            .into_iter()
-            .any(|(_, code)| code == "second_agent_on_account")
+        String::from_utf8_lossy(&reply.body).contains("second_agent_on_account")
     };
     assert!(
         other(true, true, ACCOUNT),
