@@ -797,8 +797,12 @@ fn an_agentic_run_takes_every_turn_its_loop_allows_and_ends_done() {
 
 /// A news item about AAPL, arrived at `arrived`.
 fn aapl_news(arrived: i64) -> RetrievedItem {
+    aapl_item("nw-feed-aapl", arrived)
+}
+
+fn aapl_item(id: &str, arrived: i64) -> RetrievedItem {
     RetrievedItem::News(NewsItem {
-        item_id: ItemId::new("nw-feed-aapl").unwrap(),
+        item_id: ItemId::new(id).unwrap(),
         source: SourceId::new("src.newswire").unwrap(),
         symbols: BTreeSet::from([Symbol::new("AAPL").unwrap()]),
         knowledge_at: at(arrived),
@@ -922,5 +926,91 @@ fn without_event_triggers_an_arrived_item_is_neither_stored_nor_journaled() {
             .and_then(|t| t.get("kind"))
             .and_then(Value::as_str),
         Some("schedule")
+    );
+}
+
+/// Two items arrived by one pass are offered in arrival order, whatever order the source gives
+/// them in: the earlier one takes the one run, and the later one, held by the run in flight,
+/// journals nothing.
+#[test]
+fn the_earlier_of_two_arrived_items_takes_the_run() {
+    let rig = Rig::default();
+    let wired = Wired::agentic(&rig);
+    evented(&wired);
+    if let Some(evented) = wired.source.evented.borrow_mut().as_mut() {
+        evented.events = vec![
+            aapl_item("nw-feed-later", NOW - 30),
+            aapl_item("nw-feed-earlier", NOW - 90),
+        ];
+    }
+    let mut process = running(&rig, &wired);
+    tick(&rig, NOW + 60);
+    assert!(process.step(at(NOW + 60)).is_empty());
+    let observed = stored(&rig, "ObservationRecorded");
+    assert_eq!(observed.len(), 1, "{:?}", kinds(&rig));
+    let as_of = observed[0]
+        .get("payload")
+        .and_then(|p| p.get("as_of"))
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_owned();
+    assert_eq!(as_of, at(NOW - 90).to_string());
+    assert_eq!(
+        wired.shelf.put.borrow().len(),
+        3,
+        "both records and the run's universe"
+    );
+}
+
+/// An event batch in doubt is retried first on the next pass and written once, and the item,
+/// offered again, starts no second run (rule 271).
+#[test]
+fn an_event_batch_in_doubt_is_written_once() {
+    let rig = Rig::default();
+    let wired = Wired::agentic(&rig);
+    evented(&wired);
+    let mut process = running(&rig, &wired);
+    rig.fault.set(Some(Fault::LoseAnswer));
+    tick(&rig, NOW + 60);
+    process.step(at(NOW + 60));
+    assert_eq!(stored(&rig, "ObservationRecorded").len(), 1, "committed");
+    tick(&rig, NOW + 61);
+    process.step(at(NOW + 61));
+    assert_eq!(stored(&rig, "ObservationRecorded").len(), 1, "written once");
+    assert_eq!(run_started(&rig).len(), 1, "{:?}", kinds(&rig));
+    assert_eq!(starts(&wired).len(), 1);
+}
+
+/// A restarted process offers the journaled item again, with the same bytes, and the core, folded
+/// from the journal, starts nothing for it.
+#[test]
+fn a_restarted_process_starts_no_second_run_on_the_item() {
+    let rig = Rig::default();
+    let wired = Wired::agentic(&rig);
+    evented(&wired);
+    let mut process = running(&rig, &wired);
+    tick(&rig, NOW + 60);
+    assert!(process.step(at(NOW + 60)).is_empty());
+    assert_eq!(stored(&rig, "ObservationRecorded").len(), 1);
+    drop(process);
+    let mut restarted = RuntimeProcess::start(
+        rig.clone(),
+        wiring_with(Some(wired.wiring()), Box::new(RunRefs)),
+        &config(),
+        at(NOW + 120),
+    );
+    tick(&rig, NOW + 3_600);
+    restarted.step(at(NOW + 3_600));
+    assert_eq!(
+        stored(&rig, "ObservationRecorded").len(),
+        1,
+        "{:?}",
+        kinds(&rig)
+    );
+    let puts = wired.shelf.put.borrow().clone();
+    assert_eq!(
+        puts.iter().filter(|bytes| *bytes == &puts[0]).count(),
+        2,
+        "the same record, stored again by the new process"
     );
 }

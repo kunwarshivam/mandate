@@ -13,7 +13,7 @@ use mandate_research::{
 use mandate_research_driver::{
     AppendFailure, Driver, DriverError, JournalWriter, RuntimeCore, StepBatch, Stepped, Worker,
 };
-use mandate_research_run::{ItemId, RetrievedItem, Symbol};
+use mandate_research_run::{RetrievedItem, Symbol};
 use mandate_runtime::{
     ActiveThesis, Effect, EventDraft, EventTriggers, FoldedEvent, Preconditions, ResearchConfig,
     ResearchContext, ResearchInput, ResearchRequest, ResearchState, RetrievedObservation,
@@ -94,8 +94,8 @@ pub(super) struct Research {
     inbox: VecDeque<ResearchInput>,
     doubted_at: Option<UtcNanos>,
     doubted_parts: Option<ResearchParts>,
-    /// The items this process has offered as event triggers, each once (agent harness spec §5.3).
-    offered: BTreeSet<ItemId>,
+    /// The records of arrived items this process has stored, so each is put once (DEC-2275).
+    stored: BTreeSet<Digest>,
 }
 
 impl Research {
@@ -107,7 +107,7 @@ impl Research {
             inbox: VecDeque::new(),
             doubted_at: None,
             doubted_parts: None,
-            offered: BTreeSet::new(),
+            stored: BTreeSet::new(),
         }
     }
 }
@@ -236,6 +236,16 @@ fn bytes(
     )
 }
 
+impl Research {
+    /// Folds one replayed agent-stream event into the core's research state, as the start replays
+    /// the stream into the runtime's: a restarted process keeps the runs in flight, the last
+    /// research call, the debounce, the day's event runs, and the items that started runs (agent
+    /// harness spec §5.3's restart row, journal spec rule 271). `None` when the fold refuses it.
+    pub(super) fn replay(&mut self, event: &FoldedEvent) -> Option<()> {
+        self.state.fold(event).ok()
+    }
+}
+
 impl<S: Store> RuntimeProcess<S> {
     /// The research input in doubt, handed again before anything else (DEC-2208 item 4). Whether
     /// nothing research wrote is in doubt any more.
@@ -298,13 +308,14 @@ impl<S: Store> RuntimeProcess<S> {
         }
     }
 
-    /// The pass's event triggers (agent harness spec §5.3, DEC-2392): each arrived item the source
-    /// gives that this process has not offered yet, captured as of its arrival, its record stored
-    /// first so the `ObservationRecorded` an event run starts with names stored bytes, then handed
-    /// to the core, which alone decides whether it brings a `monitor` run forward. An item is
-    /// offered once a process: one that starts nothing is read, if at all, by a later run, as §5.3
-    /// says. A restart offers it again with the same bytes, which the core refuses when its run is
-    /// journaled. Whether the pass may go on.
+    /// The pass's event triggers (agent harness spec §5.3, DEC-2392, DEC-2275): every arrived item
+    /// the source gives, in arrival order, captured as of its arrival, its record stored first so
+    /// the `ObservationRecorded` an event run starts with names stored bytes, then handed to the
+    /// core, which alone decides whether it brings a `monitor` run forward. Each pass offers them
+    /// all again: an item's bytes hang on the deployment, so the core refuses one whose run is
+    /// journaled (rule 271) and one older than the last research call, and an item the debounce or
+    /// a run in flight held is judged again on a later pass. An item whose record cannot be stored
+    /// is not offered on this pass. Whether the pass may go on.
     fn research_offer(&mut self, now: UtcNanos, at: RiskClock, alerts: &mut Vec<Alert>) -> bool {
         let Some(research) = self.research.as_mut() else {
             return true;
@@ -315,20 +326,21 @@ impl<S: Store> RuntimeProcess<S> {
         if parts.event_triggers.is_none() {
             return true;
         }
+        let mut arrived: Vec<&RetrievedItem> = parts.events.iter().collect();
+        arrived.sort_by_key(|item| (item.knowledge_at(), item.item_id().ok()));
         let mut offers = Vec::new();
-        for item in &parts.events {
-            let Ok(id) = item.item_id() else { continue };
-            if research.offered.contains(&id) {
-                continue;
-            }
+        for item in arrived {
             let arrival = RiskClock::from_secs(item.knowledge_at().secs());
             let Ok((observation, record)) = RetrievedObservation::capture(item, arrival) else {
                 continue;
             };
-            if !research.wiring.artifacts.put(&record) {
-                continue;
+            let digest = Digest::of(&record);
+            if !research.stored.contains(&digest) {
+                if !research.wiring.artifacts.put(&record) {
+                    continue;
+                }
+                research.stored.insert(digest);
             }
-            research.offered.insert(id);
             offers.push(observation);
         }
         for item in offers {

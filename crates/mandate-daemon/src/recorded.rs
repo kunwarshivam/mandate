@@ -76,7 +76,7 @@ pub struct RecordedFiling {
     pub licensed: bool,
 }
 
-/// One recorded feed item (agent harness spec §5.3, DEC-2392): a news item that arrives
+/// One recorded feed item (agent harness spec §5.3, DEC-2392, DEC-2275): a news item that arrives
 /// `arrives_s` seconds after its agent's `AgentDeployed`, known and published at its arrival. Its
 /// times hang on the deployment, not on a read, so a restart offers the same item with the same
 /// bytes and the core's one-item-one-run fold holds across it.
@@ -93,11 +93,11 @@ pub struct FeedItem {
 }
 
 impl FeedItem {
-    /// The item as it arrives for an agent deployed at `deployed_at`, or `None` past the
-    /// representable range.
+    /// The item as it arrives for an agent deployed at `deployed_at`, on the whole second, which is
+    /// the observation's `as_of` exactly, or `None` past the representable range.
     pub fn arrived(&self, deployed_at: UtcNanos) -> Option<NewsItem> {
         let secs = deployed_at.secs().checked_add(i64::from(self.arrives_s))?;
-        let at = UtcNanos::from_parts(secs, deployed_at.nanos()).ok()?;
+        let at = UtcNanos::from_parts(secs, 0).ok()?;
         Some(NewsItem {
             item_id: self.item_id.clone(),
             source: self.source.clone(),
@@ -144,7 +144,7 @@ pub struct Bundle {
     /// for a bundle with no `turns` (DEC-2266).
     pub turns: Vec<ScriptedTurn>,
     pub plane: RecordedPlane,
-    /// The recorded feed, empty when the bundle holds no `feed.json` (DEC-2392).
+    /// The recorded feed, empty when the bundle holds no `feed.json` (DEC-2275).
     pub feed: Vec<FeedItem>,
     /// The recorded instruments halted at the bundle's as-of time (DEC-2214 item 1).
     pub halted: BTreeSet<AssetId>,
@@ -199,7 +199,11 @@ impl Bundle {
             allowlist_version: allowlist.version.0,
         };
         let halted = halts(&research, &plane.instruments)?;
-        let feed = if dir.join(FEED).exists() {
+        let present = dir
+            .join(FEED)
+            .try_exists()
+            .map_err(|_| BundleError::Unreadable { file: FEED })?;
+        let feed = if present {
             Doc::read(dir, FEED)?
                 .rows()?
                 .iter()
