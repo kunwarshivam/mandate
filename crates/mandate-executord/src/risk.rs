@@ -86,10 +86,9 @@ impl RiskOpenings for Unopened {
 fn calendar(class: AssetClass) -> Option<&'static ExchangeRiskCalendar> {
     static EQUITY: OnceLock<Option<ExchangeRiskCalendar>> = OnceLock::new();
     static CRYPTO: OnceLock<Option<ExchangeRiskCalendar>> = OnceLock::new();
-    let loaded = if class == AssetClass::Crypto {
-        &CRYPTO
-    } else {
-        &EQUITY
+    let loaded = match class {
+        AssetClass::Crypto => &CRYPTO,
+        AssetClass::UsEquity => &EQUITY,
     };
     loaded
         .get_or_init(|| ExchangeRiskCalendar::new(class).ok())

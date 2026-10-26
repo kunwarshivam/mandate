@@ -3624,3 +3624,20 @@ fn a_held_midnight_starts_the_day_on_the_priced_equity() {
         Some("9900")
     );
 }
+
+/// DEC-2834 item 1: a mark in the opening's own second is at the opening instant, so it prices a
+/// fill held from that second.
+#[test]
+fn a_mark_in_the_opening_second_prices_a_fill_held_there() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    for row in own_order(2, AGENT, "o-1", XYZ, "buy", "10") {
+        fold.fold(&row).unwrap();
+    }
+    fold.fold(&fill(4, "o-1", XYZ, ("buy", "10", "100"), OPENED, "[]"))
+        .unwrap();
+    assert_eq!(unreadable(fold.view()), (UnreadableCause::Unpriced, 4));
+    fold.fold(&mark(5, XYZ, OPENED, "90", true, "regular"))
+        .unwrap();
+    assert_eq!(equity(fold.view()), "9900");
+}

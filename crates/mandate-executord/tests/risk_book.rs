@@ -516,7 +516,15 @@ fn a_refused_copy_is_not_offered_again_that_day() -> Result<(), Error> {
     process.step(at(NOON)?);
     tick(&journal, "t3", TUESDAY)?;
     journal.fail_next_of("ClockAdvanced", &[support::Fault::Invalid]);
-    process.step(at(TUESDAY)?);
+    let alerts = process.step(at(TUESDAY)?);
+    assert_eq!(
+        alerts
+            .iter()
+            .filter(|alert| alert.key == "journal_refused")
+            .count(),
+        1,
+        "the refusal is alerted"
+    );
     assert!(process.ready(), "{:?}", process.lifecycle().state());
     assert!(matches!(
         process.risk_view(&agent(AGENT)),
@@ -973,5 +981,66 @@ fn a_fill_before_any_mark_holds_openings_until_the_first_mark_prices_it() -> Res
     assert_eq!(snapshot.agent_equity, Usd::parse("10000")?);
     assert_eq!(snapshot.agent_mode, AgentMode::Normal);
     assert_eq!(*published.borrow(), vec![AGENT.to_owned()]);
+    Ok(())
+}
+
+/// DEC-2804 item 5: with no fold open, the tick copy still goes out once a day, at the first tick
+/// and at the first tick across New York midnight, and not at a later tick of the same day.
+#[test]
+fn with_no_fold_a_tick_is_copied_once_a_day() -> Result<(), Error> {
+    let journal = deployed()?;
+    let mut process = process(&journal, Fixed::new(2))?;
+    let copies = |journal: &Journal| {
+        journal
+            .types(ACCOUNT_STREAM)
+            .iter()
+            .filter(|kind| *kind == "ClockAdvanced")
+            .count()
+    };
+    process.step(at(NOON)?);
+    assert!(!readable(&process.risk_view(&agent(AGENT))), "no fold");
+    assert_eq!(copies(&journal), 1, "the first tick");
+    tick(&journal, "t3", TUESDAY)?;
+    process.step(at(TUESDAY)?);
+    assert_eq!(copies(&journal), 2, "across midnight");
+    tick(&journal, "t4", "2026-09-22T04:00:06Z")?;
+    process.step(at("2026-09-22T04:00:06Z")?);
+    assert_eq!(copies(&journal), 2, "not again that day");
+    Ok(())
+}
+
+/// DEC-2804 item 2: the opening's equity is the account snapshot's, never another record's that
+/// carries an `equity`, such as the broker's account state observed beside it.
+#[test]
+fn the_opening_equity_is_the_snapshots() -> Result<(), Error> {
+    let journal = deployed()?;
+    let opened: String = support::OPENED
+        .lines()
+        .take(3)
+        .map(|line| {
+            if line.contains("\"AccountStateObserved\"") {
+                line.replace("\"equity\":\"20000\"", "\"equity\":\"30000\"")
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(opened.contains("\"equity\":\"30000\""));
+    journal.seed(ACCOUNT_STREAM, &opened)?;
+    let openings = Fixed::new(1);
+    let asked = Rc::clone(&openings.asked);
+    let mut process = process(&journal, openings)?;
+    process.step(at(NOON)?);
+    let equities: Vec<String> = asked
+        .borrow()
+        .iter()
+        .map(|(_, _, equity, _)| equity.clone())
+        .collect();
+    assert_eq!(
+        equities.first().map(String::as_str),
+        Some("20000"),
+        "{equities:?}"
+    );
     Ok(())
 }
