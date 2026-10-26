@@ -2106,6 +2106,10 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
                 rule("298", False, "schema", "payload.fill_id")
             else:
                 rule("298", missing is None, "schema", f"payload.{missing}" if missing else "")
+    if event_type == "OrderAbandoned":
+        derived = "md-" + p["intent_id"] if isinstance(p["intent_id"], str) else None
+        rule("303", p["client_order_id"] is None or p["client_order_id"] == derived, "schema",
+             "payload.client_order_id")
     if event_type == "FillApplied" and draft["schema_version"] == 2:
         named = p["client_order_id"]
         limit = OUR_CLIENT_ORDER_ID_MAX + (1 if "boundary.rule_299_length" in skip else 0)

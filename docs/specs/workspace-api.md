@@ -998,14 +998,21 @@ workspace that ran it, and no route aggregates backtests across workspaces.
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
 | Inbox | `GET /approvals?state=pending\|resolved` | — | Pending by deadline, then resolved with outcome (D5) |
-| Read one | `GET /approvals/{id}` | — | The content object exactly as `ApprovalRequested` holds it, its `content_hash`, the deadline, the grants so far, and the status folded from the agent stream. Never a scorecard, profit estimate, or price target (DEC-126) |
+| Read one | `GET /approvals/{id}` | — | The content object exactly as `ApprovalRequested` holds it, the `ApprovalRequested` version it comes from (`schema_version`, [DEC-2518](../project/decisions/DEC-2518.md)), its `content_hash`, the deadline, the grants so far, and the status folded from the agent stream. Never a scorecard, profit estimate, or price target (DEC-126) |
 | Delegation preview | `POST /approvals/{id}/delegation-previews` | — | §5.3. Offered only where mandate spec §6.4 allows a scope |
 | Respond | `POST /approvals/{id}/responses` | `ApprovalResponseSubmitted` | §5.2. Users only |
 | Resolve a notice | `GET /notices/{notice_id}` | `RecordsAccessed` | §3.9 |
 
 The inbox and the single read return `read-models/approvals` and `read-models/approval`
 ([DEC-979](../project/decisions/DEC-979.md)): each approval's id, agent, state, `requested_at`,
-`deadline` (the journaled risk-clock seconds), and `content_hash`; the single read adds `content`.
+`deadline` (the journaled risk-clock seconds), and `content_hash`; the single read adds `content`
+and `schema_version`, the `ApprovalRequested` version `content` comes from (1, 2 or 3;
+[DEC-2518](../project/decisions/DEC-2518.md)). Version 3's content names the checks its dry run
+deferred (journal spec §9.6, rule 291) and versions 1 and 2 name none, so a client tells a
+version 3 request without its list from an older one and shows it as unreadable, never as
+nothing deferred (mandate spec §6.4). A version 1 or 2 request whose decision, written in another
+batch, deferred checks is not caught here: that is rule 292's cross-batch debt
+(`E21-30-approval-deferral-range-check`).
 The state is folded from the agent stream, and the first terminal event wins: `pending` until
 re-validation acts (`acted`) or the approval ends `skipped` (by the owner's Skip or by
 re-validation), `timed_out`, or `canceled`. An admitted grant still awaiting re-validation, and a
@@ -1431,7 +1438,7 @@ index on those members in the Postgres adapter; the in-memory reader scans.
 | `ApprovalRequested` | `payload.content.evidence.outputs[].event_id` | Each `ModelOutputRecorded` the approval's content cites, on the same agent stream (§9.6) |
 | `DecisionMade` | `payload.outputs_used[]` | Each `ModelOutputRecorded` on the same agent stream |
 | `ModelOutputRecorded` | `payload.evidence[]`; `payload.thesis_id` | Each event named in `evidence`, on any stream of the workspace (observations, model invocations); and the `ThesisProposed` or `ThesisRevised` with that `thesis_id` on the same agent stream |
-| Any other event, `OrderAbandoned` included | none | Only its `causation_id` (`OrderAbandoned` has no closed schema yet, so no payload member is a link; §12 question 7) |
+| Any other event, `OrderAbandoned` included | none | Only its `causation_id`. `OrderAbandoned` is closed ([journal spec](journal.md) §9.5, [DEC-2803](../project/decisions/DEC-2803.md)), and its `intent_id` names its intent and its `client_order_id` the order that intent derives (rule 303, [DEC-2820](../project/decisions/DEC-2820.md)), but the trace does not follow them yet (§12 question 7) |
 
 The chain of a fill an agent proposed with no approval runs `FillApplied` → `OrderSubmitted` →
 `OrderRequestRecorded` (`causation_id`) → `IntentReceived`, every `GateDecided`, and the agent
@@ -2453,7 +2460,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
-| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); the alerts read is specified (§4.7, [DEC-2141](../project/decisions/DEC-2141.md)) and served once lane EX's route lands; the ledger, risk-mark, and protection folds are planned |
+| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); and the alerts read (§4.7, [DEC-2141](../project/decisions/DEC-2141.md)); the ledger, risk-mark, and protection folds are planned |
 | Journal queries, trace, exports over the API | **Partly served** (E12-6): a stream's events page and one event (§4.8.1); trace, exports, and verification over the API are planned, their contracts in §4.8.1, served by the pure crate `mandate-audit` |
 | The backtest report (`read-models/backtest`) and `BacktestRunRecorded` | **Specified** (DEC-1000, DEC-1001; journal spec v0.45 §9.18); the run is **planned** (E4-4), the record's registration and the route **planned** (E4-5) |
 | The forward-paper evaluation (`read-models/evaluation`) and `EvaluationRunRecorded` | **Specified** (DEC-1002; journal spec v0.45 §9.18); the pure scorer **exists** (`mandate_research::score`); the harness, the record's registration, and the route **planned** (E17-8) |
@@ -2539,8 +2546,8 @@ follow-ups" there (freeze rule). **SC** marks a safety-critical story.
 7. **Trace links the journal does not record yet.** `ModelInvocationRecorded` names no event it
    served, so a trace reaches it only when an output's `evidence` names it. A flatten's or a
    protective order's `OrderRequestRecorded` carries no link to the `KillSwitchActivated` or the
-   opening it serves. A version-1 `OrderSubmitted` names no intent. `OrderAbandoned` has no closed
-   schema, so no payload member of it is a link. No member the journal spec requires links an
+   opening it serves. A version-1 `OrderSubmitted` names no intent. `OrderAbandoned` names its
+   intent and order (journal spec §9.5, rule 303), but the trace does not follow it yet. No member the journal spec requires links an
    `ApprovalRequested` to its `DecisionMade`: the runtime writes the decision as its `causation_id`,
    which the spec does not require. Each needs a journal spec
    member; until then the trace reports the hop as `not_recorded` or ends (§4.8.1).

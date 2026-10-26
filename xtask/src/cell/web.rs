@@ -94,7 +94,7 @@ const TRADE_LOOP_TIMEOUT_MS: &str = "400000";
 /// The trade loop spec under `web/e2e-cell/` (lane W, #2462).
 const TRADE_LOOP_SPEC: &str = "trade-loop.spec.ts";
 /// The trade loop's steps, in the order the spec reaches them; its result names each one reached.
-pub const TRADE_LOOP_STEPS: [&str; 9] = [
+pub const TRADE_LOOP_STEPS: [&str; 10] = [
     "approval",
     "challenge",
     "approved",
@@ -104,6 +104,7 @@ pub const TRADE_LOOP_STEPS: [&str; 9] = [
     "positions_screen",
     "audit_timeline",
     "kill_switch",
+    "kill_switch_alert",
 ];
 
 /// What the trade loop spec asks the host to confirm: the owner's step-up for one approval, the
