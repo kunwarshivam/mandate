@@ -1345,14 +1345,17 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
                    trading day, so outside it this link waits for the next";
     vec![
         link(
-            "the research agent's runtime starts a research run on its own clock",
+            "the research agent's runtime makes its research call through the model gateway",
             &agent,
-            "RunStarted",
-            None,
+            "ModelInvocationRecorded",
+            Some(r#""purpose":"research""#),
             "a research run in the research agent's runtime, over the recorded bundle its image \
-             carries, through the model gateway's recorded fake",
+             carries, through the model gateway's recorded fake: its one call's record, since a \
+             single-call run journals no RunStarted (journal spec §9.19); its runtime holds paused \
+             until the research account's executor reconciles (awaiting_reconciliation)",
             "the runtime calls the model gateway (#2636) and ticks on its own workspace's clock \
-             (DEC-2071)",
+             (DEC-2071); a local run of the cell's processes reaches an admitted thesis once the \
+             account's executor reconciles",
             vec![GW_RESEARCH],
         ),
         link(
@@ -3632,7 +3635,11 @@ mod tests {
         assert_eq!(
             links,
             [
-                (agent.clone(), "RunStarted", None),
+                (
+                    agent.clone(),
+                    "ModelInvocationRecorded",
+                    Some(r#""purpose":"research""#)
+                ),
                 (agent.clone(), "ThesisProposed", Some(r#""admitted":true"#)),
                 (
                     agent.clone(),
@@ -4636,10 +4643,14 @@ mod tests {
                 continue;
             };
             let member = fragment.split('"').nth(1).unwrap();
+            let value = fragment.rsplit(':').next().unwrap().trim_matches('"');
             let written =
                 check.event_type == "FillApplied" && writer.contains(&format!("(\"{member}\", "));
+            let closed = spec.lines().any(|l| {
+                l.starts_with(&format!("| `{member}` |")) && l.contains(&format!("`{value}`"))
+            });
             assert!(
-                row.contains(member) || written,
+                row.contains(member) || written || closed,
                 "{}: {member}",
                 check.event_type
             );
