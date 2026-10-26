@@ -129,7 +129,7 @@ pub struct Journaled {
     account: Option<AccountFacts>,
     marks: BTreeMap<String, Latest>,
     requested_by: Option<String>,
-    orders: BTreeSet<String>,
+    orders: BTreeMap<String, String>,
     ended: BTreeSet<String>,
     fills: BTreeSet<String>,
     positions: BTreeMap<String, SignedQty>,
@@ -150,7 +150,7 @@ impl Journaled {
             account: None,
             marks: BTreeMap::new(),
             requested_by: None,
-            orders: BTreeSet::new(),
+            orders: BTreeMap::new(),
             ended: BTreeSet::new(),
             fills: BTreeSet::new(),
             positions: BTreeMap::new(),
@@ -179,10 +179,14 @@ impl Journaled {
             .collect()
     }
 
-    /// The agent's own orders that no terminal state has ended, by `client_order_id`, which a
-    /// flatten cancels (DEC-2378 item 7).
-    pub fn working(&self) -> BTreeSet<String> {
-        self.orders.difference(&self.ended).cloned().collect()
+    /// The agent's own orders that no terminal state has ended: each `client_order_id` with its
+    /// instrument, which a flatten cancels (DEC-2378 item 7).
+    pub fn working(&self) -> BTreeMap<String, String> {
+        self.orders
+            .iter()
+            .filter(|(order, _)| !self.ended.contains(*order))
+            .map(|(order, instrument)| (order.clone(), instrument.clone()))
+            .collect()
     }
 
     /// The later of the account stream's latest risk clock and the scheduler's latest tick.
@@ -275,8 +279,9 @@ impl Journaled {
             }
             ("OrderSubmitted", _) if on_account => {
                 let order = payload.text("client_order_id")?.to_owned();
+                let instrument = payload.text("instrument_id")?.to_owned();
                 if self.requested_by.take().as_deref() == Some(self.agent.as_str()) {
-                    self.orders.insert(order);
+                    self.orders.insert(order, instrument);
                 }
             }
             ("FillApplied" | "LateFillApplied", _) if on_account => self.fill(&payload)?,
@@ -319,7 +324,7 @@ impl Journaled {
     /// the `OrderRequestRecorded` journaled immediately before its `OrderSubmitted` names the agent
     /// (journal spec rule 45).
     fn fill(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
-        if !self.orders.contains(payload.text("client_order_id")?) {
+        if !self.orders.contains_key(payload.text("client_order_id")?) {
             return Ok(());
         }
         let id = payload.text("fill_id")?.to_owned();
@@ -353,14 +358,14 @@ impl Journaled {
             Some(Value::Str(successor)) => Some(successor.clone()),
             Some(_) => return Err((payload.refused)("replaced_by")),
         };
-        if ignored || !self.orders.contains(&order) {
+        let Some(instrument) = self.orders.get(&order).cloned().filter(|_| !ignored) else {
             return Ok(());
-        }
+        };
         if TERMINAL.contains(&state) {
             self.ended.insert(order);
         }
         if let Some(successor) = successor {
-            self.orders.insert(successor);
+            self.orders.insert(successor, instrument);
         }
         Ok(())
     }

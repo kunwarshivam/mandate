@@ -37,6 +37,10 @@ fn clock() -> String {
 }
 
 fn submitted(state: &mut Journaled, agent: &str, order: &str) {
+    submitted_in(state, agent, order, ASSET);
+}
+
+fn submitted_in(state: &mut Journaled, agent: &str, order: &str, instrument: &str) {
     let clock = clock();
     let request = object(&[
         ("agent_id", agent),
@@ -46,7 +50,7 @@ fn submitted(state: &mut Journaled, agent: &str, order: &str) {
     assert!(on(state, "OrderRequestRecorded", &request));
     let order = object(&[
         ("client_order_id", order),
-        ("instrument_id", ASSET),
+        ("instrument_id", instrument),
         ("side", "buy"),
     ]);
     assert!(on(state, "OrderSubmitted", &order));
@@ -63,6 +67,13 @@ fn fill(id: &str, order: &str, side: &str, qty: &str) -> Value {
         ("price", "190"),
         ("risk_clock", &clock),
     ])
+}
+
+fn working(orders: &[(&str, &str)]) -> BTreeMap<String, String> {
+    orders
+        .iter()
+        .map(|(order, instrument)| ((*order).to_owned(), (*instrument).to_owned()))
+        .collect()
 }
 
 fn held(state: &Journaled) -> BTreeMap<String, Qty> {
@@ -183,7 +194,10 @@ fn orders_and_fills_on_another_stream_are_not_the_agents() {
                 "OrderRequestRecorded",
                 object(&[("agent_id", AGENT), ("risk_clock", &clock)]),
             ),
-            ("OrderSubmitted", object(&[("client_order_id", "o1")])),
+            (
+                "OrderSubmitted",
+                object(&[("client_order_id", "o1"), ("instrument_id", ASSET)]),
+            ),
             ("FillApplied", fill("f1", "o1", "buy", "3")),
         ]
     };
@@ -228,17 +242,13 @@ fn the_agents_orders_work_until_a_terminal_state_ends_them() {
             "OrderStateChanged",
             &changed("o1", "accepted", None, false)
         ));
-        assert_eq!(state.working(), ["o1", "o2"].map(str::to_owned).into());
+        assert_eq!(state.working(), working(&[("o1", ASSET), ("o2", ASSET)]));
         assert!(on(
             &mut state,
             "OrderStateChanged",
             &changed("o1", terminal, None, false)
         ));
-        assert_eq!(
-            state.working(),
-            ["o2"].map(str::to_owned).into(),
-            "{terminal}"
-        );
+        assert_eq!(state.working(), working(&[("o2", ASSET)]), "{terminal}");
     }
 }
 
@@ -252,13 +262,13 @@ fn an_abandoned_or_ignored_change_is_read_as_the_journal_says() {
         "OrderStateChanged",
         &changed("o1", "canceled", None, true)
     ));
-    assert_eq!(state.working(), ["o1", "o2"].map(str::to_owned).into());
+    assert_eq!(state.working(), working(&[("o1", ASSET), ("o2", ASSET)]));
     assert!(on(
         &mut state,
         "OrderAbandoned",
         &object(&[("client_order_id", "o2")])
     ));
-    assert_eq!(state.working(), ["o1"].map(str::to_owned).into());
+    assert_eq!(state.working(), working(&[("o1", ASSET)]));
 }
 
 #[test]
@@ -270,7 +280,7 @@ fn a_replacement_of_the_agents_order_is_the_agents_and_its_fills_are_held() {
         "OrderStateChanged",
         &changed("o1", "replaced", Some("o1b"), false)
     ));
-    assert_eq!(state.working(), ["o1b"].map(str::to_owned).into());
+    assert_eq!(state.working(), working(&[("o1b", ASSET)]));
     assert!(on(
         &mut state,
         "FillApplied",
@@ -283,7 +293,7 @@ fn a_replacement_of_the_agents_order_is_the_agents_and_its_fills_are_held() {
         "OrderStateChanged",
         &changed("o9", "replaced", Some("o9b"), false)
     ));
-    assert_eq!(state.working(), ["o1b"].map(str::to_owned).into());
+    assert_eq!(state.working(), working(&[("o1b", ASSET)]));
 }
 
 #[test]
@@ -333,5 +343,21 @@ fn an_order_change_on_another_stream_ends_nothing() {
     assert!(state.fold(elsewhere("OrderStateChanged", &filled)).is_ok());
     let abandoned = object(&[("client_order_id", "o1")]);
     assert!(state.fold(elsewhere("OrderAbandoned", &abandoned)).is_ok());
-    assert_eq!(state.working(), ["o1"].map(str::to_owned).into());
+    assert_eq!(state.working(), working(&[("o1", ASSET)]));
+}
+
+#[test]
+fn each_working_order_names_its_own_instrument() {
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+    submitted_in(&mut state, AGENT, "o1", "us_equity:MSFT");
+    submitted(&mut state, AGENT, "o2");
+    let expected = working(&[("o1", "us_equity:MSFT"), ("o2", ASSET)]);
+    assert_eq!(state.working(), expected);
+}
+
+#[test]
+fn an_order_submitted_without_its_instrument_is_refused() {
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+    let order = object(&[("client_order_id", "o1")]);
+    assert!(!on(&mut state, "OrderSubmitted", &order));
 }
