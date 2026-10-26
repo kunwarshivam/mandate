@@ -11,9 +11,11 @@ use std::rc::Rc;
 use mandate_canon::{Digest, parse};
 use mandate_daemon::ResearchSource;
 use mandate_daemon::meter::CellMeter;
-use mandate_daemon::recorded::Bundle;
+use mandate_daemon::recorded::{Bundle, BundleError};
 use mandate_daemon::source::FoldError;
-use mandate_daemon::source::{CellSource, Rows, SourceFor, envelope, last_research_reservation};
+use mandate_daemon::source::{
+    CellSource, Rows, SourceFor, envelope, event_triggers, last_research_reservation,
+};
 use mandate_gateway::Outcome as CallOutcome;
 use mandate_gateway::kinds::{KeyOwner, Purpose};
 use mandate_gateway::meter::{MeterRecord, MeterStore, Reservation, Settlement, SharedMeter};
@@ -1069,4 +1071,124 @@ fn the_pass_carries_the_last_research_reservation_from_the_meter_stream() {
         .borrow_mut()
         .insert("meter:ws1".to_owned());
     assert!(source.parts(&state()).is_none());
+}
+
+/// A copy of the fixture bundle with `feed` written as its `feed.json`.
+fn bundle_fed(name: &str, feed: &Json) -> Result<Bundle, BundleError> {
+    let dir: PathBuf =
+        std::env::temp_dir().join(format!("daemon-{}-feed-{name}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    for entry in fs::read_dir(FIXTURE).unwrap() {
+        let path = entry.unwrap().path();
+        fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
+    }
+    fs::write(dir.join("feed.json"), feed.to_string()).unwrap();
+    Bundle::load(&dir)
+}
+
+fn feed_item(id: &str, symbol: &str, arrives_s: u64) -> Json {
+    json!({
+        "item_id": id,
+        "source": "src.newswire",
+        "symbols": [symbol],
+        "arrives_s": arrives_s,
+        "headline": format!("{symbol} guidance withdrawn"),
+        "summary": "The company withdrew its full-year guidance.",
+        "link": format!("https://news.example/{id}"),
+        "licensed": false
+    })
+}
+
+/// The fixture research mandate with `behavior.research.event_triggers` set to news.
+fn triggered() -> Json {
+    let mut document = researching();
+    document["behavior"]["research"]["event_triggers"] = json!({
+        "sources": ["news"],
+        "debounce_s": 900,
+        "max_runs_per_day": 4
+    });
+    document
+}
+
+/// The feed's items reach the pass once arrived, each known and published at the agent's
+/// `AgentDeployed` (13:00) plus its `arrives_s`, and only when the version sets event triggers
+/// (DEC-2392); the pass at 15:00 holds the item due at 14:00 and not the one due at 16:00.
+#[test]
+fn an_arrived_feed_item_reaches_the_pass_only_under_event_triggers() {
+    let feed = json!([
+        feed_item("nw-feed-early", "AAPL", 3_600),
+        feed_item("nw-feed-late", "MSFT", 10_800)
+    ]);
+    let bundle = bundle_fed("arrived", &feed).unwrap();
+    assert_eq!(bundle.feed.len(), 2);
+    let (_, source) = deployed(&bundle, &triggered());
+    let parts = source.parts(&state()).unwrap();
+    let triggers = parts.event_triggers.as_ref().unwrap();
+    assert_eq!(
+        triggers.kinds,
+        BTreeSet::from([mandate_research_run::ItemKind::News])
+    );
+    assert_eq!((triggers.debounce_s, triggers.max_runs_per_day), (900, 4));
+    let arrived: Vec<(String, i64, i64)> = parts
+        .events
+        .iter()
+        .map(|item| match item {
+            mandate_research_run::RetrievedItem::News(news) => (
+                news.item_id.as_str().to_owned(),
+                news.knowledge_at.secs(),
+                news.published_at.secs(),
+            ),
+            other => panic!("a news item, not {other:?}"),
+        })
+        .collect();
+    let due = UtcNanos::parse_rfc3339("2026-10-16T14:00:00Z")
+        .unwrap()
+        .secs();
+    assert_eq!(arrived, vec![("nw-feed-early".to_owned(), due, due)]);
+    let (_, again) = deployed(&bundle, &triggered());
+    assert_eq!(
+        again.parts(&state()).unwrap().events,
+        parts.events,
+        "a restarted source offers the same item with the same bytes"
+    );
+    let (_, untriggered) = deployed(&bundle, &researching());
+    let parts = untriggered.parts(&state()).unwrap();
+    assert_eq!(parts.event_triggers, None);
+    assert!(parts.events.is_empty());
+}
+
+/// The member as the core reads it: absent and `null` are off, and filings map to the filing kind.
+#[test]
+fn event_triggers_read_as_the_document_states_them() {
+    let read = |document: &Json| event_triggers(&parse(document.to_string().as_bytes()).unwrap());
+    assert_eq!(read(&researching()), Ok(None));
+    let mut null = researching();
+    null["behavior"]["research"]["event_triggers"] = Json::Null;
+    assert_eq!(read(&null), Ok(None));
+    let mut both = triggered();
+    both["behavior"]["research"]["event_triggers"]["sources"] = json!(["filings", "news"]);
+    assert_eq!(
+        read(&both).unwrap().unwrap().kinds,
+        BTreeSet::from([
+            mandate_research_run::ItemKind::News,
+            mandate_research_run::ItemKind::Filing
+        ])
+    );
+    assert!(read(&json!({"not": "a mandate"})).is_err());
+}
+
+/// A bundle without `feed.json` has an empty feed; a feed row missing a member refuses the load,
+/// naming it.
+#[test]
+fn the_feed_is_optional_and_read_strictly() {
+    assert!(bundle().feed.is_empty());
+    let mut row = feed_item("nw-feed-bad", "AAPL", 60);
+    row.as_object_mut().unwrap().remove("arrives_s");
+    assert_eq!(
+        bundle_fed("malformed", &json!([row])),
+        Err(BundleError::Malformed {
+            file: "feed.json",
+            member: "arrives_s"
+        })
+    );
 }
