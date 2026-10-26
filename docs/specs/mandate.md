@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.13 (fees charged to the agent's own orders lower E, [DEC-2393](../project/decisions/DEC-2393.md), and a trigger's recorded breach time is the whole breached interval, [DEC-2331](../project/decisions/DEC-2331.md); v0.12 an approval names the checks its dry run deferred, and such an opening is always asked, [DEC-2515](../project/decisions/DEC-2515.md); v0.11 a news item or filing may bring a monitoring run forward, [DEC-2392](../project/decisions/DEC-2392.md); v0.10 a thesis that ends sells its position, [DEC-2391](../project/decisions/DEC-2391.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
+| **Status** | v0.14 (a version-1 order-state `CompensatingEvent` beside the `OrderStateChanged` it corrects moves no figure, [DEC-2829](../project/decisions/DEC-2829.md); v0.13 fees charged to the agent's own orders lower E, [DEC-2393](../project/decisions/DEC-2393.md), and a trigger's recorded breach time is the whole breached interval, [DEC-2331](../project/decisions/DEC-2331.md); v0.12 an approval names the checks its dry run deferred, and such an opening is always asked, [DEC-2515](../project/decisions/DEC-2515.md); v0.11 a news item or filing may bring a monitoring run forward, [DEC-2392](../project/decisions/DEC-2392.md); v0.10 a thesis that ends sells its position, [DEC-2391](../project/decisions/DEC-2391.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
 | **Implements** | PRD 6.3 (FR-3.1 to FR-3.8), 6.5 (FR-5.2 to FR-5.5), 6.6 (FR-6.1 to FR-6.6); backlog E6, E10, E17 |
 | **Schemas** | [mandate.schema.json](../../schemas/mandate.schema.json), [policy.schema.json](../../schemas/policy.schema.json) (structural rules) |
 | **Reference cases** | [reference-cases/mandate.yaml](reference-cases/mandate.yaml) |
@@ -772,6 +772,11 @@ stream** fold (journal spec §2). It belongs to the agent and survives restarts 
   `USD` fees, and the paper executor's simulated `FeesCharged` naming the order, at its `accrued`)
   lowers cash, and so E, when it accrues. Another agent's fills and fees on the same account never
   move E.
+- **An adopted order state moves no figure** ([DEC-2829](../project/decisions/DEC-2829.md)): a
+  `CompensatingEvent` at version 1, whose difference is `order_state`, right after the
+  `OrderStateChanged` it corrects in the same batch, steps nothing; the order's state is that record's
+  and its fill is its own `FillApplied`. Any other compensation is an input not yet read, and the
+  view fails closed.
 - **Corporate actions** ([DEC-2303](../project/decisions/DEC-2303.md)) are folded at application,
   trading spec §8.5's instant (20:00 New York time on the last trading day before the ex-date). A
   **split** replaces Q, B and realized by §8.5's rule: Q' and the removed residual basis R, and cash
