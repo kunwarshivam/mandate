@@ -42,6 +42,7 @@ fn pinned(model: &str) -> Result<String, String> {
         .and_then(|signal| signal.get("content_hash"))
         .and_then(Value::as_str)
         .and_then(|hash| hash.strip_prefix("sha256:"))
+        .filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
         .map(str::to_owned)
         .ok_or_else(|| format!("research-mandate.json pins no content hash for {model}"))
 }
