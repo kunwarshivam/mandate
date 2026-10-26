@@ -394,10 +394,12 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// is due, every order the account stream holds is terminal, `Unknown` included, and no agent
     /// followed holds lots its kill switch or exits would still sell. A pass that reads a switch
     /// or a proposal, or reaches here with anything in doubt or unsent, never asks: it returned
-    /// earlier, or reads again on the next pass.
+    /// earlier, or reads again on the next pass. An account switch still closing an instrument the
+    /// account holds owes its close (DEC-2364).
     fn owes_nothing(&mut self) -> bool {
         self.ready()
             && !self.reconcile
+            && !self.state.account_closing()
             && self
                 .state
                 .orders()
