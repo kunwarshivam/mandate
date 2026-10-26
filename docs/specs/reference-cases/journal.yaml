@@ -87438,6 +87438,60 @@ account_restrictions:
       index: 1
       reason: schema
       path: payload.cause
+  - name: a_block_twice
+    clause: 'rule 309: a cause blocking the account is journaled once'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.cause
   - name: a_cause_restricts_less
     clause: 'rule 309: the same cause at a looser restriction is already in force'
     records:

@@ -147,7 +147,7 @@ def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> d
             stricter = level >= held if held is not None else True
         if not stricter and "stream.309.once" not in skip:
             return {"index": i, "reason": "schema", "path": "payload.cause"}
-        in_force[cause] = max(level, held or 0)
+        in_force[cause] = level
     return None
 
 
@@ -185,6 +185,8 @@ def stream_cases() -> list[dict]:
              [on(1, CLOSING, REJECT), mark, on(2, CLOSING, REJECT)], 2),
         case("the_same_cause_twice", f"{RULE_309}: a cause in force is journaled once",
              [on(1, CLOSING, REJECT), on(2, CLOSING, REJECT)], 1),
+        case("a_block_twice", f"{RULE_309}: a cause blocking the account is journaled once",
+             [on(1, BLOCKED, NOTICE), on(2, BLOCKED, NOTICE)], 1),
         case("a_cause_restricts_less",
              f"{RULE_309}: the same cause at a looser restriction is already in force",
              [on(1, BLOCKED, NOTICE), on(2, CLOSING, NOTICE)], 1),

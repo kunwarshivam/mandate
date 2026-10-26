@@ -8,6 +8,7 @@
   also has no cause-keyed alert for `connection_unavailable`, which §7.3 and connections spec CN-6
   promise. *Accepted when:* each new cause in force is journaled under journal spec rule 309
   ([DEC-2814](../decisions/DEC-2814.md)), the fold holds the causes in force, the account state is
-  the strictest of them, and a record that leaves it unchanged moves no agent. The lift is E7-2y;
+  the strictest of them (never the last record's, so the fold change lands with the first record
+  that can follow a stricter one), and a record that leaves it unchanged moves no agent. The lift is E7-2y;
   the connection's restriction and its distinct alert are E7-2z.
 <!-- section: E7 Alpaca connector and recovery -->

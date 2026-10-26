@@ -15,8 +15,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 - **v0.95 ([DEC-2814](../project/decisions/DEC-2814.md), 2026-10-26; E7-2v slice A, lane L1):**
   §9.5 journals every account-restriction cause in force, not only one that makes the account state
   stricter. New stream rule 309: an `AccountRestrictionChanged` names a cause not already in force at
-  that restriction or a stricter one, so each cause is on the stream once for its lift to name. A
-  record that leaves the account state unchanged moves no agent. The lift (E7-2y) and the
+  that restriction or a stricter one, so each cause is on the stream once per restriction for its
+  lift to name. The account state is the strictest restriction in force, never the last record's,
+  and a record that leaves it unchanged moves no agent. The lift (E7-2y) and the
   connection's restriction and alert (E7-2z) stay unjournaled, and no restriction is lifted until
   then. Rules 310 to 312 are held for the lift. The `account_restrictions` section gains its
   streams; no other section changes, so the vectors stay version 3.
@@ -2859,17 +2860,19 @@ A cause is **in force** from the `AccountRestrictionChanged` that raised it, at 
 record set; nothing lifts one yet (backlog E7-2y). The executor journals a restriction whenever its
 cause is not already in force at that restriction or a stricter one (`blocked` is stricter than
 `closing_only`), whether or not the account state changes, so each cause §7.3 lifts on its own
-evidence is on the stream for its lift to name. The account state is the strictest restriction any
-cause in force set. A record that leaves the account state unchanged moves no agent: its
-`AgentModeApplied` would repeat the mode every agent already holds.
+evidence is on the stream for its lift to name. **The account state is the strictest restriction
+any cause in force set**, never the last record's: every reader of the stream (the executor's fold,
+the audit timeline, a read model) takes the strictest, so a `closing_only` record after a `blocked`
+one leaves the account blocked. A record that leaves the account state unchanged moves no agent:
+its `AgentModeApplied` would repeat the mode every agent already holds.
 
 **Stream rule** on the account stream, judged by `append` over the stream before the batch and
 the batch, after each draft's own rules (reason `schema`):
 
 309. An `AccountRestrictionChanged` names a `cause` that no earlier `AccountRestrictionChanged` of
      its stream raised at the same `restriction` or a stricter one (`payload.cause`): a cause in
-     force is journaled once, and again only when it restricts the account further, so the
-     stream's causes in force are its records, each once.
+     force is journaled once at each restriction, and again only when it restricts the account
+     further, so the stream's causes in force are its records, each once per restriction.
 
 **Not yet journaled** (the backlog holds the rows): a cause's lift, §7.3's "Lifts when" (E7-2y),
 and a restriction for an unavailable connection, `connection_unavailable`, with its distinct owner
