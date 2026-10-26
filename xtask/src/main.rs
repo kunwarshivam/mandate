@@ -458,7 +458,7 @@ fn run() -> Result<()> {
 fn ci(job: &str) -> Result<()> {
     eprintln!("==> ci {job}");
     match job {
-        "lint" => lint(Path::new("."), base_ref()?.as_deref(), workspace_lint),
+        "lint" => ci_lint(Path::new("."), |name| env::var(name).ok(), workspace_lint),
         "test" => {
             for part in TEST_PARTS {
                 eprintln!("==> ci {part}");
@@ -3390,6 +3390,22 @@ fn output_in(dir: &Path, program: &str, args: &[&str]) -> Result<String> {
         );
     }
     String::from_utf8(out.stdout).context("non-UTF-8 output")
+}
+
+/// `ci lint`: the lint job over the repository at `root`, its backlog check against the diff base
+/// that `var` reads from `MANDATE_BASE_REF` and `GITHUB_EVENT_NAME`, as every diff-based job
+/// resolves it (DEC-2373). `ci` passes the process environment, which a test pins.
+fn ci_lint(
+    root: &Path,
+    var: impl Fn(&str) -> Option<String>,
+    workspace_checks: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let base = base_ref_in(
+        root,
+        var("MANDATE_BASE_REF").as_deref(),
+        var("GITHUB_EVENT_NAME").as_deref(),
+    )?;
+    lint(root, base.as_deref(), workspace_checks)
 }
 
 /// The lint job over the repository at `root` (ADR-0001 ES-12): ShellCheck over its
@@ -12041,7 +12057,9 @@ mod tests {
         TOFU_DIR, committed_working_dirs, guarded_word_problems, tofu_committed_working_dirs,
         tofu_forbidden_blocks, tofu_sources, tofu_symlinks,
     };
-    use super::{backlog_row_problem, backlog_rows, backlog_rows_in, is_backlog_row, story_id};
+    use super::{
+        backlog_row_problem, backlog_rows, backlog_rows_in, ci_lint, is_backlog_row, story_id,
+    };
     use super::{unoptimised_config, unoptimised_packages};
 
     /// DEC-2373: each row shape counts, keyed so an edit keeps its key; a row new to the backlog
@@ -12253,8 +12271,9 @@ mod tests {
         Ok(())
     }
 
-    /// The lint job runs the backlog check against the base it is given (DEC-2373): a row added
-    /// to 06 fails the job naming the check, before the workspace checks run.
+    /// `ci lint` runs the backlog check against the diff base it resolves (DEC-2373): a row added
+    /// to 06 fails the job naming the check, before the workspace checks run, whether the base is
+    /// given explicitly or, on a `pull_request` event, is the CI merge commit's first parent.
     #[test]
     fn the_lint_job_runs_the_backlog_check_on_its_repository() -> Result<()> {
         let root =
@@ -12267,18 +12286,34 @@ mod tests {
             fs::create_dir_all(root.join(dir))?;
         }
         let base = backlog_repository(&root)?;
-        let clean = lint(&root, Some(&base), || Ok(())).map_err(|err| format!("{err:#}"));
+        let explicit = |name: &str| (name == "MANDATE_BASE_REF").then(|| base.clone());
+        let clean = ci_lint(&root, explicit, || Ok(())).map_err(|err| format!("{err:#}"));
         fs::write(
             root.join("docs/project/06-backlog-v1.md"),
             "# Backlog\n\n- **E1-1** a\n- **E1-3** added\n",
         )?;
         let reached = Cell::new(false);
-        let planted = lint(&root, Some(&base), || {
+        let planted = ci_lint(&root, explicit, || {
             reached.set(true);
             Ok(())
         })
         .map_err(|err| format!("{err:#}"))
         .err();
+        let commit = |args: &[&str]| {
+            let mut all = vec!["-c", "user.name=t", "-c", "user.email=t@t"];
+            all.extend_from_slice(args);
+            git_in(&root, &all)
+        };
+        git_in(&root, &["checkout", "-q", "-b", "pr"])?;
+        git_in(&root, &["add", "-A"])?;
+        commit(&["commit", "-qm", "the change"])?;
+        git_in(&root, &["checkout", "-q", "--detach", "main"])?;
+        commit(&["merge", "-q", "--no-ff", "--no-edit", "pr"])?;
+        let pull_request =
+            |name: &str| (name == "GITHUB_EVENT_NAME").then(|| "pull_request".to_owned());
+        let on_pull_request = ci_lint(&root, pull_request, || Ok(()))
+            .map_err(|err| format!("{err:#}"))
+            .err();
         fs::remove_dir_all(&root).ok();
         assert_eq!(clean, Ok(()), "a clean fixture repository passes");
         assert!(
@@ -12288,8 +12323,34 @@ mod tests {
             "a row added to 06 fails the lint job naming the check, got {planted:?}"
         );
         assert!(
+            on_pull_request
+                .as_deref()
+                .is_some_and(|err| err.contains("backlog:")),
+            "on a pull_request event the job compares against the merge's first parent, got \
+             {on_pull_request:?}"
+        );
+        assert!(
             !reached.get(),
             "the workspace checks run only after it passes"
+        );
+        Ok(())
+    }
+
+    /// `ci lint` hands [`ci_lint`] the process environment, so the backlog check reads the diff
+    /// base every diff-based job reads; a dispatch that handed it none would skip the check
+    /// everywhere (DEC-2373).
+    #[test]
+    fn ci_lint_reads_the_process_environment() -> Result<()> {
+        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"))?;
+        let arms: Vec<&str> = source
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("\"lint\" =>"))
+            .collect();
+        assert_eq!(
+            arms,
+            ["\"lint\" => ci_lint(Path::new(\".\"), |name| env::var(name).ok(), workspace_lint),"],
+            "ci's one lint arm passes the process environment"
         );
         Ok(())
     }
