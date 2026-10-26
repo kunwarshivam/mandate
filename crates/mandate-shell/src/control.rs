@@ -53,10 +53,8 @@ impl ControlRecord {
     pub fn event_time_of(body: &Value) -> Option<UtcNanos> {
         body.get("event_time")
             .and_then(Value::as_str)
-            .and_then(|text| match UtcNanos::parse(text) {
-                Ok(at) => Some(at),
-                Err(_) => None,
-            })
+            .map(UtcNanos::parse)
+            .and_then(Result::ok)
     }
 }
 

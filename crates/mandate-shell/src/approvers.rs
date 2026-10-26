@@ -77,10 +77,10 @@ fn roster(records: &[ControlRecord]) -> Option<Roster> {
     else {
         return None;
     };
-    match Roster::read(memberships, at) {
-        Ok(roster) => Some(roster),
-        Err(_) => None,
-    }
+    let Ok(roster) = Roster::read(memberships, at) else {
+        return None;
+    };
+    Some(roster)
 }
 
 /// The latest `ConnectionEstablished` or `ConnectionRevoked` of `connection` by `seq`, a
