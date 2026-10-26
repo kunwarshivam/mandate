@@ -10,6 +10,7 @@ use mandate_executor::AccountScope;
 use crate::Wiring;
 use crate::alpaca::AlpacaBroker;
 use crate::credential::paper_wiring;
+use crate::deployment::{Deployment, Production, Unread};
 use crate::fixture;
 use crate::paper::FixturePaper;
 
@@ -23,6 +24,27 @@ impl<B> Run<B> {
     /// The wiring the run serves with.
     pub fn wiring(&self) -> &Wiring {
         &self.wiring
+    }
+
+    /// The run with its wiring's mandate, instrument, protection, binding-gate and marking ports
+    /// read from `scope`'s deployments in `production` ([`Deployment::wired`]), in place of the
+    /// fixture's, which know nothing; its quote feed stays the broker's.
+    pub fn deployed(self, scope: &AccountScope, production: Production) -> Self {
+        let Production {
+            rows,
+            artifacts,
+            liquidity,
+        } = production;
+        Self {
+            broker: self.broker,
+            wiring: Deployment::wired(
+                self.wiring,
+                scope,
+                rows,
+                artifacts,
+                (liquidity, Box::new(Unread)),
+            ),
+        }
     }
 
     /// The broker and its wiring, for the serve path.
