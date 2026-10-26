@@ -869,8 +869,8 @@ jobs:
           cache-on-failure: true
       - run: cargo xtask ci cell-kill-switch
 
-  # E21-30 (DEC-2615): the executor drill, plain and seeded, on its own cell, so `cell-kill-switch`
-  # stays within its ten minutes (DEC-464). Not required, as `cell` is not. It restores `cell`'s
+  # E21-30 (DEC-2615): the ticks and executor drills, plain and seeded, on cells of their own (a
+  # shard each, DEC-2641), so `cell-kill-switch` stays within its ten minutes (DEC-464). Not required, as `cell` is not. It restores `cell`'s
   # cache and saves none of its own.
   cell-executor:
     needs: select

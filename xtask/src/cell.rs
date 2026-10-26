@@ -421,7 +421,8 @@ pub fn ci_upgrade() -> Result<()> {
 
 /// `cargo xtask ci cell-journal`, `ci cell-failover`, `ci cell-kill-switch`, `ci cell-executor` and
 /// `ci cell-vault`: the cell, then `drills`, plain and seeded, or only the variant
-/// [`VARIANT_ENV`] names (E21-41, DEC-2602, DEC-2615, DEC-2616). The chart checks are `ci cell`'s.
+/// [`VARIANT_ENV`] names, and only the drill [`DRILL_ENV`] names (E21-41, DEC-2602, DEC-2615,
+/// DEC-2616, DEC-2641). The chart checks are `ci cell`'s.
 /// Skipped as `ci cell` is.
 pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
     if let Some(reason) = tools_missing() {
@@ -1511,10 +1512,14 @@ fn import_images(images: &[&String]) -> Result<()> {
     }
     let mut args = vec!["image", "import", "--cluster", CLUSTER];
     args.extend(images.iter().map(|image| image.as_str()));
-    let imported = sh("k3d", &args);
+    if sh("k3d", &args).is_err() {
+        eprintln!(
+            "xtask: the batched image import failed; importing what the node lacks one by one"
+        );
+    }
     api_server_ready()?;
     for image in images {
-        if imported.is_err() || !node_holds(image) {
+        if !node_holds(image) {
             import_image(image)?;
         }
     }
