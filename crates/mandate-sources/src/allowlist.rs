@@ -3,8 +3,9 @@
 //! [`PermittedUrl`] (DP-9, DEC-433 item 11).
 //!
 //! A source is in effect only while its entry says `counsel_confirmed = true` (DEC-433 item 20,
-//! DEC-1130 item 2): an unconfirmed entry is listed for review, permits no fetch, and contributes
-//! nothing to [`Allowlist::research_allowlist`].
+//! DEC-1130 item 2), or names the founder's approval and the decision that records it
+//! (`approved_by`, `approved_in`; DEC-79, DEC-2276): an entry with neither is listed for review,
+//! permits no fetch, and contributes nothing to [`Allowlist::research_allowlist`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -84,6 +85,22 @@ impl Endpoint {
     }
 }
 
+/// Who approved a source that counsel has not confirmed (DEC-2276).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Approver {
+    /// The founder, whose call it is under DEC-79 (legal).
+    Founder,
+}
+
+/// A source's approval other than counsel's: who gave it, and the decision that records it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Approval {
+    pub by: Approver,
+    /// The decision file's id, `DEC-<n>`.
+    pub decision: String,
+}
+
 /// One source on the allowlist.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceEntry {
@@ -91,6 +108,7 @@ pub struct SourceEntry {
     kind: SourceKind,
     licensed: bool,
     counsel_confirmed: bool,
+    approval: Option<Approval>,
     min_interval_ms: u64,
     max_response_bytes: u64,
     endpoints: Vec<Endpoint>,
@@ -113,6 +131,17 @@ impl SourceEntry {
     /// Whether counsel confirmed the source's terms allow what DEC-433 item 20 keeps.
     pub fn counsel_confirmed(&self) -> bool {
         self.counsel_confirmed
+    }
+
+    /// The approval the entry records besides counsel's, if any (DEC-2276).
+    pub fn approval(&self) -> Option<&Approval> {
+        self.approval.as_ref()
+    }
+
+    /// Whether the source is in effect: counsel confirmed it, or the entry records the founder's
+    /// approval and its decision.
+    pub fn in_effect(&self) -> bool {
+        self.counsel_confirmed || self.approval.is_some()
     }
 
     /// The least time between two requests to the source (the SEC's fair-access rules).
@@ -175,14 +204,26 @@ struct EntryShape {
     kind: SourceKind,
     licensed: bool,
     counsel_confirmed: bool,
+    #[serde(default)]
+    approved_by: Option<Approver>,
+    #[serde(default)]
+    approved_in: Option<String>,
     min_interval_ms: u64,
     max_response_bytes: u64,
     endpoints: Vec<String>,
 }
 
+/// `DEC-` followed by one or more digits, with no leading zero.
+fn decision_id(text: &str) -> bool {
+    text.strip_prefix("DEC-").is_some_and(|n| {
+        !n.is_empty() && !n.starts_with('0') && n.bytes().all(|b| b.is_ascii_digit())
+    })
+}
+
 impl Allowlist {
     /// Parses one allowlist file. Unknown keys, a version of 0, a repeated source, a source with
-    /// no endpoint, a zero response cap, and an endpoint that is not `https://` are refused.
+    /// no endpoint, a zero response cap, an endpoint that is not `https://`, and an approver
+    /// without the decision that records it, or a decision without an approver, are refused.
     pub fn parse(text: &str) -> Result<Self, SourceError> {
         let file: FileShape = toml::from_str(text).map_err(|_| SourceError::AllowlistMalformed)?;
         if file.version == 0 {
@@ -202,11 +243,19 @@ impl Allowlist {
                 .iter()
                 .map(|e| Endpoint::parse(e))
                 .collect::<Result<Vec<_>, _>>()?;
+            let approval = match (shape.approved_by, shape.approved_in) {
+                (None, None) => None,
+                (Some(by), Some(decision)) if decision_id(&decision) => {
+                    Some(Approval { by, decision })
+                }
+                _ => return Err(SourceError::AllowlistMalformed),
+            };
             let entry = SourceEntry {
                 id: id.clone(),
                 kind: shape.kind,
                 licensed: shape.licensed,
                 counsel_confirmed: shape.counsel_confirmed,
+                approval,
                 min_interval_ms: shape.min_interval_ms,
                 max_response_bytes: shape.max_response_bytes,
                 endpoints,
@@ -230,9 +279,10 @@ impl Allowlist {
         self.entries.values()
     }
 
-    /// The entry for `id` if it is in effect: listed and confirmed by counsel.
+    /// The entry for `id` if it is in effect: listed, and confirmed by counsel or approved by the
+    /// founder in a recorded decision.
     pub fn active(&self, id: &SourceId) -> Option<&SourceEntry> {
-        self.entries.get(id).filter(|e| e.counsel_confirmed)
+        self.entries.get(id).filter(|e| e.in_effect())
     }
 
     /// The sources in effect, as admission check 14 reads them (`mandate-research`).
@@ -242,7 +292,7 @@ impl Allowlist {
             sources: self
                 .entries
                 .values()
-                .filter(|e| e.counsel_confirmed)
+                .filter(|e| e.in_effect())
                 .map(|e| e.id.clone())
                 .collect::<BTreeSet<_>>(),
         }
