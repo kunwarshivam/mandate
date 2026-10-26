@@ -413,8 +413,9 @@ recorded bundle and refuses any live start (`live_not_built`), so a key in the v
 nothing.
 
 1. In OpenRouter, create an API key for this purpose alone. In its settings, set the key's own
-   credit limit to the monthly cap you accepted ($50, DEC-997), so the provider refuses past it
-   even if the platform's meter were wrong. In your account's privacy settings, turn on **Zero
+   credit limit to the monthly cap you accepted ($50, DEC-997), with a **monthly** reset (a limit
+   with no reset is a lifetime limit), so the provider refuses past it even if the platform's meter
+   were wrong. In your account's privacy settings, turn on **Zero
    Data Retention** only, and turn off training on your prompts.
 2. **The key** goes in one place: GitHub, repository **Settings → Environments → `infra-staging`
    → Environment secrets → Add secret**, name `OPENROUTER_API_KEY`. Paste it there only, never
@@ -426,6 +427,9 @@ nothing.
    - The run prints `model provider key: written`. Until you add it, it prints `not set` and
      changes nothing.
 3. Dispatch `infra` with `apply` on `staging`.
-4. **To rotate it**, replace the environment secret and run `apply` again. **To stop all model
-   spend at once**, revoke the key in OpenRouter: every call then ends `credential_invalid`, the
-   safe default, with no output, so no proposal and no order.
+4. **To rotate it**, replace the environment secret and run `apply` again, then restart the
+   model gateway so it reads the new key (it reads the key once, at start, DEC-2257 item 3):
+   `kubectl rollout restart deployment/model-gateway -n ws-ws1`. Revoke the old key in OpenRouter
+   only after the restart. **To stop all model spend at once**, revoke the key in OpenRouter: every
+   call then ends `credential_invalid`, the safe default, with no output, so no proposal and no
+   order.
