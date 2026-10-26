@@ -105,8 +105,19 @@ pub(crate) fn kill_switch(
             ),
         ],
     )?;
-    batch.notify(switch, OwnerAlertKind::KillSwitch);
+    alert(batch, switch, initiator);
     cancel_each(batch, cancels)
+}
+
+/// The switch's owner alert, for every switch but a user's: the API commits a user's
+/// `OwnerAlertSent` with the command's `OwnerCommandIssued`, so one user kill switch is one notice
+/// however many stream owners apply it (notifications spec §3.4, E8-9k). A risk limit's and the
+/// platform operator's switch keep the executor's alert until their own causes are written
+/// (DEC-2514 item 2).
+fn alert(batch: &mut Batch<'_, '_>, switch: EventId, initiator: Initiator) {
+    if initiator != Initiator::Owner {
+        batch.notify(switch, OwnerAlertKind::KillSwitch);
+    }
 }
 
 /// §5.5's account scope where every held instrument may close at the market now (regular session,
@@ -181,7 +192,7 @@ fn account(
             ),
         ],
     )?;
-    batch.notify(switch, OwnerAlertKind::KillSwitch);
+    alert(batch, switch, initiator);
     batch.broker(BrokerRequest::CancelAll(AccountWideScope::new(
         AccountWide::Account(reference),
     )));
