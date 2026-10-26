@@ -26,13 +26,13 @@ use mandate_research::{
     PolicyOverlay, ResearchEnvelope, SourceAllowlist, SourceId, ValidatedMandate, WorkingUniverse,
 };
 use mandate_research_run::agentic::{LoopBounds, OutputMode, Tool};
-use mandate_research_run::{ModelPin, OutputBounds, RetrievalPlan, Symbol};
+use mandate_research_run::{ModelPin, OutputBounds, RetrievalPlan, RetrievedItem, Symbol};
 use mandate_runtime::{
-    AgentId, AgenticConfig, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment,
-    DryRunVerdict, EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest, GateDryRun,
-    IdGen, JournalCatalog, MandateView, OrderPlan, Preconditions, Proposal, ResearchConfig,
-    ResearchInput, ResearchRequest, RiskClock, RuntimeState, Seq, SignalInputs, TurnRequest,
-    WorkspaceId, WriterEpoch,
+    ActiveThesis, AgentId, AgenticConfig, ApprovalSettings, Autonomy, Classified, ConnectionId,
+    Deployment, DryRunVerdict, EventDraft, EventId, EventTriggers, FlattenPlan, FlattenPlanner,
+    FlattenRequest, GateDryRun, IdGen, JournalCatalog, MandateView, OrderPlan, Preconditions,
+    Proposal, ResearchConfig, ResearchInput, ResearchRequest, RiskClock, RuntimeState, Seq,
+    SignalInputs, TurnRequest, WorkspaceId, WriterEpoch,
 };
 use mandate_spec::document::Mandate;
 use mandate_store::{MemoryStore, Store};
@@ -218,6 +218,16 @@ pub fn facts() -> AdmissionFacts {
 pub struct Open {
     pub asked: Rc<Cell<u32>>,
     pub off: Rc<Cell<bool>>,
+    /// Event triggers, the items arrived, and the active theses each pass gives, when set.
+    pub evented: Rc<RefCell<Option<Evented>>>,
+}
+
+/// What an evented pass adds to the open context (DEC-2392).
+#[derive(Clone)]
+pub struct Evented {
+    pub triggers: Option<EventTriggers>,
+    pub events: Vec<RetrievedItem>,
+    pub active: Vec<ActiveThesis>,
 }
 
 impl ResearchSource for Open {
@@ -226,6 +236,7 @@ impl ResearchSource for Open {
         if self.off.get() {
             return None;
         }
+        let evented = self.evented.borrow().clone();
         Some(ResearchParts {
             preconditions: Preconditions::read(&JournalCatalog::JOURNAL),
             mandate: ValidatedMandate::from_validated_envelope(envelope()),
@@ -236,12 +247,17 @@ impl ResearchSource for Open {
             },
             facts: facts(),
             lineages: LineageState::default(),
-            active: Vec::new(),
+            active: evented
+                .as_ref()
+                .map(|e| e.active.clone())
+                .unwrap_or_default(),
             last_reservation: None,
             data_symbols: BTreeSet::from([
                 Symbol::new("AAPL").unwrap(),
                 Symbol::new("MSFT").unwrap(),
             ]),
+            event_triggers: evented.as_ref().and_then(|e| e.triggers.clone()),
+            events: evented.map(|e| e.events).unwrap_or_default(),
         })
     }
 }
