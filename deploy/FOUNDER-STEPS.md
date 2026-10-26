@@ -401,3 +401,27 @@ The log names the confirmation it appended, or the one it had already appended i
 again. A Job that fails leaves the challenge unconfirmed and adds nothing; the challenge expires on
 its own. The code is short-lived, but it is still not for chat or an
 issue.
+
+## K. Does Alpaca's free data plan carry halts? (trading spec §4.4, lane XF)
+
+The executor's binding gate holds every Alpaca paper opening until it can read the instrument's
+trading status, since no halt is ever assumed absent (`AGENTS.md` rule 3; the fixture broker is
+unaffected). Alpaca's stock stream has `statuses` and `lulds` channels, but its documentation does
+not say whether the free `iex` feed carries them. One run of a probe settles it, and an agent builds
+the status reader only if it does.
+
+1. On your own machine, with your Alpaca **paper** key (never a live one) in the environment, run
+   once from the repository root:
+
+   ```bash
+   APCA_API_KEY_ID=... APCA_API_SECRET_KEY=... \
+     uv run --no-project --with 'websockets==15.0.1' python scripts/alpaca-status-probe.py
+   ```
+
+   It connects only to Alpaca's market-data stream, places no order, and prints only what the stream
+   answered to the sign-in and the subscription: message types, codes and channel names, never the
+   key, the secret or any price. Its last line is `result: iex carries statuses and lulds` or
+   `result: iex does not confirm statuses and lulds`.
+2. Paste the printed lines (they hold no secret) to the coordinator. If the result is "does not
+   confirm", the choice of a paid feed or of reading §4.4's presumed halt as allowing limit
+   openings is yours.
