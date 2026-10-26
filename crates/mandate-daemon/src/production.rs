@@ -65,7 +65,7 @@ pub fn wired(
             .collect();
         base.view.approval.timeout_s = i64::from(mandate.autonomy.approval.timeout_s);
         base.plan = Box::new(Plan::new(facts.clone(), mandate.clone(), FRESH));
-        base.gate = Box::new(Gate::new(facts.clone(), mandate, rules, FRESH));
+        base.gate = Box::new(Gate::new(facts.clone(), (version, mandate), rules, FRESH));
     }
     base.refs = Box::new(MandateRefs(version.to_owned()));
     base.facts = Some(facts);

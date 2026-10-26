@@ -112,7 +112,8 @@ pub fn document(
 /// The gate configuration of the latest rule set registered in `environment` (DEC-2388 item 3):
 /// the newest `ConfigSnapshotRegistered` of kind `rule_set` names its artifact in `store`, whose
 /// canonical bytes must read as the reviewed gate rule set. A newest one that is unreadable, not
-/// stored, or not a gate's rule set is never skipped for an older one.
+/// stored, or not a gate's rule set is never skipped for an older one, nor is any registration
+/// newer than it whose row does not parse, since that row may be a rule set.
 ///
 /// # Errors
 /// `rule_set_unavailable`.
@@ -127,8 +128,12 @@ pub fn rule_set(
         .filter(|row| {
             row.environment == environment.as_str() && row.event_type == "ConfigSnapshotRegistered"
         })
-        .filter_map(body)
-        .find(|body| text(body, &["payload", "kind"]) == Some("rule_set"))
+        .map(body)
+        .find(|body| {
+            body.as_ref()
+                .is_none_or(|body| text(body, &["payload", "kind"]) == Some("rule_set"))
+        })
+        .flatten()
         .and_then(|body| text(&body, &["payload", "content_hash"]).and_then(ArtifactRef::parse))
         .and_then(|reference| get_artifact(store, &reference).ok())
         .and_then(|bytes| parse(&bytes).ok())

@@ -13,7 +13,8 @@ use mandate_risk::{
     AccountSnapshot, AccountState, AccountType, Advisory, AgentId as GateAgentId, AgentMode,
     AgentSnapshot, AssetId, ClientOrderId, ConductState, DayTradeLedger, DayTradeRegime, Deferred,
     EtpClass, GateConfig, GatePass, InstrumentSnapshot, MarketSnapshot, Origin, ProposedKind,
-    RiskSnapshot, SaneQuote, TimeInForce, ValidatedMandate, Verdict, WorkingUniverse,
+    Purpose as GatePurpose, RiskSnapshot, SaneQuote, TimeInForce, ValidatedMandate, Verdict,
+    WorkingUniverse,
 };
 use mandate_runtime::{DryRunVerdict, GateDryRun, Proposal};
 use mandate_spec::document::Mandate;
@@ -35,11 +36,12 @@ const GATE_REFUSED: &str = "gate_refused";
 const RULE_SET_UNAVAILABLE: &str = "rule_set_unavailable";
 const WORKING_ORDERS_UNSEEN: &str = "working_orders_unseen";
 
-/// The dry run for one deployment: the shared fold, the stored mandate, the registered rule set's
-/// gate configuration (`None` when none could be read, DEC-2388 item 3) and how fresh a mark and a
-/// snapshot must be.
+/// The dry run for one deployment: the shared fold, the deployed mandate `version` and its stored
+/// document, the registered rule set's gate configuration (`None` when none could be read,
+/// DEC-2388 item 3) and how fresh a mark and a snapshot must be.
 pub struct Gate {
     facts: Facts,
+    version: String,
     mandate: Mandate,
     gate_mandate: Option<ValidatedMandate>,
     config: Option<GateConfig>,
@@ -49,13 +51,14 @@ pub struct Gate {
 impl Gate {
     pub fn new(
         facts: Facts,
-        mandate: Mandate,
+        (version, mandate): (&str, Mandate),
         config: Option<GateConfig>,
         fresh: Freshness,
     ) -> Self {
         let gate_mandate = gate_mandate(&mandate).ok();
         Self {
             facts,
+            version: version.to_owned(),
             mandate,
             gate_mandate,
             config,
@@ -66,7 +69,11 @@ impl Gate {
     /// The advisory pass of the opening `proposal` over the fold, with [`UNJOURNALED`] deferred,
     /// or the reason it could not be evaluated: `rule_set_unavailable`, `facts_held` for a fact
     /// the fold holds, `working_orders_unseen` while any order of the agent's works, whose cost
-    /// the fold cannot see, and `gate_refused` when the gate refuses to evaluate it.
+    /// the fold cannot see, and `gate_refused` when the gate refuses to evaluate it or types it as
+    /// anything but an opening or an increase, so a proposal labelled as adding risk is never
+    /// judged as an exit, which defers nothing (DEC-2388 item 6). The mandate version in force in
+    /// the fold must be the one this gate was built on: after an applied change the opening is
+    /// `facts_held` until the process restarts on the new version.
     ///
     /// # Errors
     /// The reason code the dry run journals.
@@ -77,8 +84,12 @@ impl Gate {
             .facts
             .read(|journaled| self.context(journaled, proposal, config, mandate))
             .ok_or(FACTS_HELD)??;
-        evaluate_deferring(proposal, &context, &BTreeSet::from(UNJOURNALED))
-            .map_err(|_| GATE_REFUSED)
+        let advisory = evaluate_deferring(proposal, &context, &BTreeSet::from(UNJOURNALED))
+            .map_err(|_| GATE_REFUSED)?;
+        match advisory.decision.purpose {
+            GatePurpose::Open | GatePurpose::Increase => Ok(advisory),
+            _ => Err(GATE_REFUSED),
+        }
     }
 
     fn context(
@@ -92,6 +103,9 @@ impl Gate {
         let facts = journaled
             .facts(instrument, self.fresh)
             .map_err(|_| FACTS_HELD)?;
+        if facts.mandate_version != self.version {
+            return Err(FACTS_HELD);
+        }
         if !journaled.working().is_empty() {
             return Err(WORKING_ORDERS_UNSEEN);
         }

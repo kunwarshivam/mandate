@@ -30,6 +30,10 @@ const FRESH: Freshness = Freshness {
 };
 /// Monday 2026-10-26 15:00 UTC, 11:00 in New York: the regular session.
 const REGULAR: &str = "2026-10-26T15:00:00.000000000Z";
+const DEPLOYED: &str = concat!(
+    "sha256:",
+    "cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d"
+);
 const RULES: &str = include_str!("../../mandate-shell/tests/fixtures/tracer/config/rule-set.json");
 
 struct Rows(Vec<StoredEvent>);
@@ -123,6 +127,11 @@ fn document() -> Value {
     mandate_canon::parse(&bytes).unwrap()
 }
 
+/// The deployed version the demo rows name, and its stored document.
+fn version() -> (&'static str, Mandate) {
+    (DEPLOYED, Mandate::parse(&document()).unwrap())
+}
+
 fn config() -> GateConfig {
     gate_rule_set(&mandate_canon::parse(RULES.trim().as_bytes()).unwrap()).unwrap()
 }
@@ -131,7 +140,7 @@ fn gate_over(rows: &Rows, config: Option<GateConfig>) -> Gate {
     let facts = Facts::new(CLOCK, AGENT);
     facts.follow(ACCOUNT);
     facts.feed(&rows.0);
-    Gate::new(facts, Mandate::parse(&document()).unwrap(), config, FRESH)
+    Gate::new(facts, version(), config, FRESH)
 }
 
 /// An opening buy of `qty` SPY at `limit`, as the plan proposes one.
@@ -309,12 +318,7 @@ fn a_missing_fact_denies_the_opening() {
     }
     let unfollowed = Facts::new(CLOCK, AGENT);
     unfollowed.feed(&full.0);
-    let gate = Gate::new(
-        unfollowed,
-        Mandate::parse(&document()).unwrap(),
-        Some(config()),
-        FRESH,
-    );
+    let gate = Gate::new(unfollowed, version(), Some(config()), FRESH);
     assert_eq!(gate.check(&opening("3", "99.95")), denied("facts_held"));
 }
 
@@ -352,7 +356,7 @@ fn an_order_of_the_agents_still_working_denies_the_opening() {
 #[test]
 fn an_exit_is_never_denied() {
     let empty = Facts::new(CLOCK, AGENT);
-    let gate = Gate::new(empty, Mandate::parse(&document()).unwrap(), None, FRESH);
+    let gate = Gate::new(empty, version(), None, FRESH);
     for purpose in [
         Purpose::DiscretionaryExit,
         Purpose::RiskExit,
@@ -415,4 +419,188 @@ proptest! {
         prop_assert_ne!(&answer, &DryRunVerdict::Allow);
         prop_assert_eq!(answer, oracle(blocked, cash, units, limit_cents));
     }
+}
+
+/// One order of the agent's in SPY, journaled as the executor journals it: requested for
+/// `purpose`, submitted on `side`, and either filled for `fill`'s quantity at its risk clock or
+/// canceled.
+fn order(rows: &mut Rows, id: &str, purpose: &str, side: &str, fill: Option<(&str, &str)>) {
+    rows.push(
+        ACCOUNT,
+        "OrderRequestRecorded",
+        &format!(r#"{{"agent_id":"{AGENT}","purpose":"{purpose}","risk_clock":"{REGULAR}"}}"#),
+    );
+    rows.push(
+        ACCOUNT,
+        "OrderSubmitted",
+        &format!(r#"{{"client_order_id":"{id}","instrument_id":"{SPY}","side":"{side}"}}"#),
+    );
+    let state = match fill {
+        Some((qty, filled_at)) => {
+            rows.push(
+                ACCOUNT,
+                "FillApplied",
+                &format!(
+                    r#"{{"fill_id":"f-{id}","client_order_id":"{id}","instrument_id":"{SPY}","side":"{side}","qty_gross":"{qty}","price":"99.95","risk_clock":"{filled_at}"}}"#
+                ),
+            );
+            "filled"
+        }
+        None => "canceled",
+    };
+    rows.push(
+        ACCOUNT,
+        "OrderStateChanged",
+        &format!(
+            r#"{{"client_order_id":"{id}","state":"{state}","replaced_by":null,"ignored":false}}"#
+        ),
+    );
+}
+
+/// DEC-2388 item 7: for each fact the fold does not carry, a journal holding a value that should
+/// refuse the plan's own opening is never answered an allow with nothing deferred.
+#[test]
+fn no_unseen_fact_that_should_refuse_is_answered_an_allow_with_nothing_deferred() {
+    let thirty_seconds_ago = "2026-10-26T14:59:30.000000000Z";
+    let mut exited = journaled_with(&RICH);
+    order(
+        &mut exited,
+        "o1",
+        "open",
+        "buy",
+        Some(("1", thirty_seconds_ago)),
+    );
+    order(
+        &mut exited,
+        "o2",
+        "discretionary_exit",
+        "sell",
+        Some(("1", thirty_seconds_ago)),
+    );
+    let mut busy = journaled_with(&RICH);
+    for n in 0..50 {
+        order(&mut busy, &format!("c{n}"), "open", "buy", None);
+    }
+    let mut related = journaled_with(&RICH);
+    related.push(
+        "acct:ws1:01J8Z3MACCOUNTREF000000002",
+        "OrderSubmitted",
+        &format!(r#"{{"client_order_id":"r1","instrument_id":"{SPY}","side":"sell"}}"#),
+    );
+    let mut cash_without_fees = journaled_with(&RICH);
+    cash_without_fees.push(
+        ACCOUNT,
+        "AccountSnapshotRecorded",
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":1,"equity":"299.85","cash":"299.85","buying_power":"299.85","non_marginable_buying_power":"299.85","risk_clock":"{REGULAR}"}}"#
+        ),
+    );
+    for (fact, rows) in [
+        (
+            "the last exit fill, inside the re-entry cooldown and the opposite-fill interval",
+            exited,
+        ),
+        (
+            "50 orders today, at the cap and with no fill against them",
+            busy,
+        ),
+        (
+            "a related account's sell resting in the instrument",
+            related,
+        ),
+        (
+            "cash for the order's notional and nothing for its fees",
+            cash_without_fees,
+        ),
+    ] {
+        let gate = gate_over(&rows, Some(config()));
+        let proposal = opening("3", "99.95");
+        let advisory = gate.advisory(&proposal);
+        assert!(
+            !matches!(&advisory, Ok(a) if a.decision.verdict == Verdict::Allow && a.deferred.is_empty()),
+            "{fact}: {advisory:?}"
+        );
+        assert_ne!(gate.check(&proposal), DryRunVerdict::Allow, "{fact}");
+    }
+}
+
+/// R2's finding on the first review: a proposal labelled as adding risk that the gate types as an
+/// exit would defer nothing, so the dry run refuses to judge it rather than allow it.
+#[test]
+fn a_proposal_labelled_an_opening_that_the_gate_types_as_an_exit_is_denied() {
+    let mut rows = journaled_with(&RICH);
+    order(&mut rows, "o1", "open", "buy", Some(("3", REGULAR)));
+    let gate = gate_over(&rows, Some(config()));
+    for purpose in [Purpose::Open, Purpose::Increase] {
+        let mut sell = opening("3", "99.95");
+        sell.side = Side::Sell;
+        sell.purpose = purpose;
+        assert_eq!(gate.advisory(&sell), Err("gate_refused"), "{purpose:?}");
+        assert_eq!(gate.check(&sell), denied("gate_refused"), "{purpose:?}");
+    }
+    let mut increase = opening("1", "99.95");
+    increase.purpose = Purpose::Increase;
+    assert_eq!(
+        gate.check(&increase),
+        denied("deferred_to_binding"),
+        "a buy while holding is the gate's increase, still deferred"
+    );
+}
+
+#[test]
+fn a_mandate_version_applied_after_the_start_holds_every_opening() {
+    let applied = |version: &str| {
+        let mut rows = journaled_with(&RICH);
+        rows.push(
+            ACCOUNT,
+            "MandateVersionApplied",
+            &format!(
+                r#"{{"agent_id":"{AGENT}","new_version":"{version}","result":"applied","risk_clock":"{REGULAR}"}}"#
+            ),
+        );
+        gate_over(&rows, Some(config())).check(&opening("3", "99.95"))
+    };
+    assert_eq!(
+        applied(DEPLOYED),
+        denied("deferred_to_binding"),
+        "the version the gate was built on"
+    );
+    assert_eq!(
+        applied(&format!("sha256:{}", "0".repeat(64))),
+        denied("facts_held"),
+        "a version the gate was not built on"
+    );
+}
+
+#[test]
+fn a_held_instrument_with_no_mark_holds_the_opening() {
+    let other = "11111111-2222-4333-8444-555555555555";
+    let mut rows = journaled_with(&RICH);
+    rows.push(
+        ACCOUNT,
+        "OrderRequestRecorded",
+        &format!(r#"{{"agent_id":"{AGENT}","purpose":"open","risk_clock":"{REGULAR}"}}"#),
+    );
+    rows.push(
+        ACCOUNT,
+        "OrderSubmitted",
+        &format!(r#"{{"client_order_id":"q1","instrument_id":"{other}","side":"buy"}}"#),
+    );
+    rows.push(
+        ACCOUNT,
+        "FillApplied",
+        &format!(
+            r#"{{"fill_id":"fq1","client_order_id":"q1","instrument_id":"{other}","side":"buy","qty_gross":"1","price":"50","risk_clock":"{REGULAR}"}}"#
+        ),
+    );
+    rows.push(
+        ACCOUNT,
+        "OrderStateChanged",
+        r#"{"client_order_id":"q1","state":"filled","replaced_by":null,"ignored":false}"#,
+    );
+    assert_eq!(
+        gate_over(&rows, Some(config())).check(&opening("3", "99.95")),
+        denied("facts_held"),
+        "its market value cannot be counted against the caps"
+    );
 }
