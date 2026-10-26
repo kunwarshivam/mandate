@@ -75,6 +75,22 @@ pub trait InstrumentSnapshot {
     fn fill_refs(&self, _instrument: &InstrumentId) -> Option<FillConfigRefs> {
         None
     }
+    /// The account's own fill configuration, which an unattributed fill in an instrument with no
+    /// snapshot is accounted under: the fee configuration and both calendars, which do not depend
+    /// on the instrument (journal spec §9.5 rule 300, DEC-2817). `None`, the default, names none,
+    /// and the journal then refuses such a fill, as it does a fill with no [`Self::fill_refs`].
+    fn account_fill_refs(&self) -> Option<AccountFillRefs> {
+        None
+    }
+}
+
+/// The fill configuration that does not depend on the instrument (journal spec §9: `fee`, `cal`,
+/// `set`), each `sha256:` and 64 lowercase hexadecimal digits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountFillRefs {
+    pub fee_config: String,
+    pub trading_calendar: String,
+    pub settlement_calendar: String,
 }
 
 /// The content references of the configuration a fill is accounted under (journal spec §9:

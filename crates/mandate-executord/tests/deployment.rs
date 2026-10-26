@@ -429,6 +429,18 @@ fn a_deployed_agent_is_answered_from_its_reviewed_artifacts() -> Result<(), Erro
     assert_eq!(deployment.asset_class(&spy), Some(AssetClass::UsEquity));
     assert!(deployment.increment(&spy).is_some());
     assert!(deployment.fill_refs(&spy).is_some());
+    assert_eq!(deployment.fill_refs(&InstrumentId::new(AAPL_ID)?), None);
+    let account = deployment
+        .account_fill_refs()
+        .ok_or("the one deployment names the account's fill configuration")?;
+    let of_spy = deployment
+        .fill_refs(&spy)
+        .ok_or("SPY's fill configuration")?;
+    assert_eq!(
+        (account.fee_config, account.trading_calendar),
+        (of_spy.fee_config, of_spy.trading_calendar),
+        "an instrument no deployment holds is accounted under the deployment's fee and calendar"
+    );
     assert_eq!(deployment.asset_class(&InstrumentId::new(AAPL_ID)?), None);
     let entry = Price::parse("100")?;
     assert!(matches!(

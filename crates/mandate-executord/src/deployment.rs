@@ -27,9 +27,9 @@ use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Value, parse};
 use mandate_executor::{
-    AccountScope, AgentId, BindingGateInput, BindingGateRequest, BindingGateSource, ExitTier,
-    FillConfigRefs, InstrumentSnapshot, MandateVersion, MandateView, MarketObservation,
-    ProtectionPrices,
+    AccountFillRefs, AccountScope, AgentId, BindingGateInput, BindingGateRequest,
+    BindingGateSource, ExitTier, FillConfigRefs, InstrumentSnapshot, MandateVersion, MandateView,
+    MarketObservation, ProtectionPrices,
 };
 use mandate_gate_context::{Freshness, Journaled, Row};
 use mandate_gate_inputs::control::{
@@ -509,6 +509,27 @@ impl InstrumentSnapshot for Deployment {
     fn fill_refs(&self, instrument: &InstrumentId) -> Option<FillConfigRefs> {
         self.of_instrument(instrument, |view| view.fill_refs(instrument))
     }
+
+    /// The fill configuration every followed deployment of the account names alike, which an
+    /// unattributed fill in an instrument no deployment holds is accounted under (DEC-2817). None
+    /// when no deployment reads, or when two name different ones: the executor cannot say which the
+    /// account's is, so it journals none, and the journal refuses the fill as before (DEC-2805).
+    fn account_fill_refs(&self) -> Option<AccountFillRefs> {
+        agreed(
+            self.lasting_all()
+                .into_iter()
+                .map(|resolved| resolved.view.account_fill_refs()),
+        )
+    }
+}
+
+/// The one value every answer names alike: `None` when there is no answer, when any answer is
+/// `None`, or when two differ (DEC-2817).
+fn agreed<T: PartialEq>(mut answers: impl Iterator<Item = Option<T>>) -> Option<T> {
+    let first = answers.next()??;
+    answers
+        .all(|answer| answer.as_ref() == Some(&first))
+        .then_some(first)
 }
 
 impl Protections for Deployment {
@@ -611,5 +632,23 @@ impl BindingGateSource for Deployment {
             journaled: facts,
         };
         resolved.gate.input(&order, request)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::agreed;
+
+    /// DEC-2817: the account's fill configuration is the one every deployment names alike; no
+    /// deployment, one that names none, or two that differ name none.
+    #[test]
+    fn the_accounts_fill_configuration_is_the_one_every_deployment_names() {
+        assert_eq!(agreed(std::iter::empty::<Option<u8>>()), None);
+        assert_eq!(agreed([Some(1)].into_iter()), Some(1));
+        assert_eq!(agreed([Some(1), Some(1), Some(1)].into_iter()), Some(1));
+        assert_eq!(agreed([Some(1), Some(2)].into_iter()), None);
+        assert_eq!(agreed([Some(1), Some(1), Some(2)].into_iter()), None);
+        assert_eq!(agreed([None, Some(1)].into_iter()), None);
+        assert_eq!(agreed([Some(1), None].into_iter()), None);
     }
 }
