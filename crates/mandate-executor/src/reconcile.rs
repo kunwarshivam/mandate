@@ -1448,7 +1448,7 @@ pub(crate) mod tests {
             )?,
             &ports,
         )?;
-        assert_eq!(submitted(&opening), 0, "openings stay held");
+        assert_eq!(submitted(&opening), 1, "an opening is submitted again");
         Ok(())
     }
 
@@ -2671,7 +2671,8 @@ pub(crate) mod tests {
     /// holds its openings under `reconciliation:external_activity` until the owner acknowledges the
     /// hold (DEC-2830); and the same fill read again is applied once.
     #[test]
-    fn an_external_fill_is_booked_to_the_account_and_held() -> Result<(), ExecutorError> {
+    fn an_external_fill_is_booked_to_the_account_and_held_until_the_owner_acknowledges()
+    -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
             ids: &SchemaIds,
