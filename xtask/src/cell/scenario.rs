@@ -46,7 +46,9 @@ pub const TRADING_CALENDAR_FILE: &str = "deploy/cell/demo/trading-calendar.json"
 /// [`WEB_AGENT`]'s own envelope and its instrument's snapshot, as canonical JSON: the demo's
 /// envelope on QQQ, since V-006 refuses a second agent on the account an instrument the demo agent
 /// already pins (DEC-2036).
+#[cfg(test)]
 pub const WEB_MANDATE_FILE: &str = "deploy/cell/demo/web-mandate.json";
+#[cfg(test)]
 pub const WEB_INSTRUMENT_FILE: &str = "deploy/cell/demo/web-instrument.json";
 /// The demo's research agent's envelope, as canonical JSON, and the recording its model registers
 /// from: an unpinned universe of one instrument, a research envelope, and `llm.research_agent`
@@ -67,7 +69,7 @@ const SEGMENT: &str = "/work/segment.jsonl";
 /// An opaque ULID (identity spec §3.1), never a name; the CLI's owner gestures take the lower-case
 /// form, which is all `--user` accepts (DEC-527 item 3).
 pub const FOUNDER: &str = DEMO_OWNER;
-/// The demo's agent.
+/// The `executor` drill's agent, in its own workspace.
 pub const AGENT: &str = "demo-spy";
 /// The instrument the demo's envelope pins (SPY, [`INSTRUMENT_FILE`]'s `instrument_id`), which the
 /// owner's exit names.
@@ -75,10 +77,12 @@ pub const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
 /// The bid, bid size and floor the owner's exit confirms, as the CLI's canonical text (DEC-2507
 /// item 1): fixed values the scenario types, since the cell shows no live quote.
 const EXIT_BID: (&str, &str, &str) = ("501.25", "100", "500");
-/// A second agent, on its own envelope ([`WEB_MANDATE_FILE`]), deployed for `web/`'s kill switch:
-/// the CLI stops [`AGENT`] inside the Job, and `web/` offers nothing to stop on a stopped agent, so
-/// the browser presses this one's (lane W2's D10). Its id is `agt_` and a ULID, the only agent id
-/// web/'s routes open (`web/src/lib/ids.ts`'s `AGENT_ID`); any other id is a 404 there.
+/// The run's workspace's one agent, on the demo's envelope ([`MANDATE_FILE`]): one agent to an
+/// account (V-048), and one Alpaca paper connection to a workspace until the account fingerprint
+/// tells two apart (DEC-802 item 3). Every step acts on it, the CLI's in the gestures' Job and the
+/// browser's after it, so nothing in the Job stops it: its kill switch is the browser's, last. Its
+/// id is `agt_` and a ULID, the only agent id web/'s routes open (`web/src/lib/ids.ts`'s
+/// `AGENT_ID`); any other id is a 404 there.
 pub const WEB_AGENT: &str = "agt_01KDEM00000000000000000WEB";
 /// [`WEB_AGENT`]'s envelope's `name`: a mandate name is lowercase letters, digits and hyphens
 /// (`mandate.schema.json`), so it cannot be the agent's id, and nothing requires that it is.
@@ -580,15 +584,14 @@ pub(super) fn deploy_code(agent: &str, version: &str) -> String {
 }
 
 /// The demo's steps for `workspace`, given the bytes of the demo's mandate, of
-/// [`WEB_AGENT`]'s, and of [`RESEARCH_AGENT`]'s, and the paper connection the executor's connect
+/// [`RESEARCH_AGENT`]'s, and the paper connection the executor's connect
 /// check left `connected`.
 pub fn plan(
     workspace: &str,
-    (mandate, web_mandate, research_mandate): (&[u8], &[u8], &[u8]),
+    (mandate, research_mandate): (&[u8], &[u8]),
     connected: Option<&Connected>,
 ) -> Vec<Step> {
     let version = reference(mandate);
-    let web_version = reference(web_mandate);
     let research_version = reference(research_mandate);
     let research_workspace = research_workspace_of(workspace);
     let user = FOUNDER.to_ascii_lowercase();
@@ -637,11 +640,7 @@ pub fn plan(
     let rule_set_in = format!("{INPUTS}/rule-set.json");
     let fee_in = format!("{INPUTS}/fee-config.json");
     let calendar_in = format!("{INPUTS}/trading-calendar.json");
-    let (confirm, deploy) = (confirm_code(&version), deploy_code(AGENT, &version));
-    let (web_confirm, web_deploy) = (
-        confirm_code(&web_version),
-        deploy_code(WEB_AGENT, &web_version),
-    );
+    let (confirm, deploy) = (confirm_code(&version), deploy_code(WEB_AGENT, &version));
     let (research_confirm, research_deploy) = (
         confirm_code(&research_version),
         deploy_code(RESEARCH_AGENT, &research_version),
@@ -674,7 +673,7 @@ pub fn plan(
     let exit_args = owner(&[
         "agent",
         "exit",
-        AGENT,
+        WEB_AGENT,
         SPY,
         "--confirm-bid",
         bid,
@@ -740,7 +739,7 @@ pub fn plan(
                     path: format!("/v1/workspaces/{workspace}/agents"),
                     status: 200,
                     ask: Ask::Session,
-                    body: Body::Lists(AGENT),
+                    body: Body::Lists(WEB_AGENT),
                 }),
                 Part::WebSignIn(WebCheck {
                     shows: "the demo owner, signed in to web/ through the stub issuer, reading \
@@ -835,12 +834,12 @@ pub fn plan(
                     ),
                     gesture(
                         "the deployment's code, shown (nothing committed)",
-                        owner(&["agent", "deploy", AGENT, &version]),
+                        owner(&["agent", "deploy", WEB_AGENT, &version]),
                         format!("code {deploy}"),
                     ),
                     gesture(
                         "the agent, deployed with the code shown",
-                        owner(&["agent", "deploy", AGENT, &version, "--code", &deploy]),
+                        owner(&["agent", "deploy", WEB_AGENT, &version, "--code", &deploy]),
                         "deployed as event".into(),
                     ),
                     Part::Gap(Gap {
@@ -988,7 +987,7 @@ pub fn plan(
                 }),
                 gesture(
                     "the owner's inbox, read (empty until the runtime asks)",
-                    owner(&["approvals", "list", "--agent", AGENT]),
+                    owner(&["approvals", "list", "--agent", WEB_AGENT]),
                     "no approvals".into(),
                 ),
                 Part::Gap(Gap {
@@ -1096,7 +1095,7 @@ pub fn plan(
                     "the owner's exit at the confirmed bid, size and floor, committed: a risk \
                      reduction, which needs no code (AGENTS.md rules 2 and 13)",
                     exit_args,
-                    format!("owner_exit {AGENT} {SPY} committed as event"),
+                    format!("owner_exit {WEB_AGENT} {SPY} committed as event"),
                 ),
                 Part::Gap(Gap {
                     what: "the exit handed to the executor's core, priced at the confirmed floor",
@@ -1119,65 +1118,18 @@ pub fn plan(
             number: 7,
             title: "the kill switch from the web app stops the agent",
             parts: vec![
-                gesture(
-                    "QQQ's instrument snapshot, registered, for a second agent's envelope",
-                    owner(&[
-                        "config",
-                        "register",
-                        "--kind",
-                        "instrument_snapshot",
-                        &format!("{INPUTS}/web-instrument.json"),
-                    ]),
-                    "registered as event".into(),
-                ),
-                gesture(
-                    "the second agent's envelope, created: the demo's on QQQ",
-                    owner(&["version", "create", &format!("{INPUTS}/web-mandate.json")]),
-                    format!("created {web_version}"),
-                ),
-                gesture(
-                    "its confirmation code, shown (nothing committed)",
-                    owner(&["version", "confirm", &web_version]),
-                    format!("code {web_confirm}"),
-                ),
-                gesture(
-                    "the second envelope, confirmed with the code shown",
-                    owner(&["version", "confirm", &web_version, "--code", &web_confirm]),
-                    "confirmed as event".into(),
-                ),
-                gesture(
-                    "the second agent's code, shown, for web/'s kill switch",
-                    owner(&["agent", "deploy", WEB_AGENT, &web_version]),
-                    format!("code {web_deploy}"),
-                ),
-                gesture(
-                    "the second agent, deployed with the code shown",
-                    owner(&[
-                        "agent",
-                        "deploy",
-                        WEB_AGENT,
-                        &web_version,
-                        "--code",
-                        &web_deploy,
-                    ]),
-                    "deployed as event".into(),
-                ),
                 Part::Web(WebCheck {
-                    shows: "the owner's kill switch for the second agent, pressed in web/ and \
-                            recorded through the API on the run's control stream",
+                    shows: "the owner's kill switch for the agent, pressed in web/ and recorded \
+                            through the API on the run's control stream: the trade loop's own, \
+                            or, when the loop stopped before it, the kill switch gesture alone",
                     agent: WEB_AGENT,
                 }),
-                gesture(
-                    "the owner's kill switch for the agent, through the CLI (agent scope)",
-                    owner(&["agent", "kill", "--agent", AGENT]),
-                    format!("kill_switch agent {AGENT} committed as event"),
-                ),
                 match connected {
                     Some(_) => Part::Applied(AppliedCheck {
                         shows: "the agent's runtime, started from step 2's version-2 \
-                                deployment, applying the CLI's kill switch: its command read \
-                                back applied with the owner's session",
-                        agent: AGENT,
+                                deployment, applying web/'s kill switch: its command read back \
+                                applied with the owner's session",
+                        agent: WEB_AGENT,
                     }),
                     None => Part::Gap(Gap {
                         what: "the agent's runtime applies it",
@@ -1361,20 +1313,19 @@ fn backtest_inputs(root: &Path) -> Result<Vec<(String, String)>> {
     .collect()
 }
 
-/// The demo's inputs: its three envelopes, and every file the gestures' pod mounts at [`INPUTS`]
-/// under its path there (the envelopes, the instruments, the research recording and the backtest
-/// runner's demo inputs).
+/// The demo's inputs: its two envelopes, the run's workspace's and the research agent's, and every
+/// file the gestures' pod mounts at [`INPUTS`] under its path there (the envelopes, the instrument,
+/// the research recording and the backtest runner's demo inputs).
 pub struct DemoInputs {
     mandate: Vec<u8>,
-    web_mandate: Vec<u8>,
     research_mandate: Vec<u8>,
     files: Vec<(String, String)>,
 }
 
 impl DemoInputs {
-    /// The three envelopes [`plan`] takes.
-    pub fn envelopes(&self) -> (&[u8], &[u8], &[u8]) {
-        (&self.mandate, &self.web_mandate, &self.research_mandate)
+    /// The two envelopes [`plan`] takes.
+    pub fn envelopes(&self) -> (&[u8], &[u8]) {
+        (&self.mandate, &self.research_mandate)
     }
 
     /// The mounted files, as [`gestures_job`] takes them.
@@ -1392,11 +1343,7 @@ pub fn demo_inputs() -> Result<DemoInputs> {
     let text = |bytes: Vec<u8>, path: &str| {
         String::from_utf8(bytes).with_context(|| format!("{path} is not UTF-8"))
     };
-    let (mandate, web_mandate, research_mandate) = (
-        read(MANDATE_FILE)?,
-        read(WEB_MANDATE_FILE)?,
-        read(RESEARCH_MANDATE_FILE)?,
-    );
+    let (mandate, research_mandate) = (read(MANDATE_FILE)?, read(RESEARCH_MANDATE_FILE)?);
     let files = [
         ("mandate.json", text(mandate.clone(), MANDATE_FILE)?),
         (
@@ -1413,14 +1360,6 @@ pub fn demo_inputs() -> Result<DemoInputs> {
             text(read(TRADING_CALENDAR_FILE)?, TRADING_CALENDAR_FILE)?,
         ),
         (
-            "web-mandate.json",
-            text(web_mandate.clone(), WEB_MANDATE_FILE)?,
-        ),
-        (
-            "web-instrument.json",
-            text(read(WEB_INSTRUMENT_FILE)?, WEB_INSTRUMENT_FILE)?,
-        ),
-        (
             "research-mandate.json",
             text(research_mandate.clone(), RESEARCH_MANDATE_FILE)?,
         ),
@@ -1435,7 +1374,6 @@ pub fn demo_inputs() -> Result<DemoInputs> {
     .collect();
     Ok(DemoInputs {
         mandate,
-        web_mandate,
         research_mandate,
         files,
     })
@@ -1648,7 +1586,6 @@ pub fn run_in(name: &str) -> Result<String> {
     let mut browsed: Option<WebOutcome> = None;
     let mut traded: Option<TradeOutcome> = None;
     for step in &steps {
-        let mut previous: Option<&Gesture> = None;
         let waiting = lanes(step);
         let on = if waiting.is_empty() {
             String::new()
@@ -1685,7 +1622,6 @@ pub fn run_in(name: &str) -> Result<String> {
                         );
                         failed = Some(g.container.clone());
                     }
-                    previous = Some(g);
                 }
                 Part::Executor(check) => {
                     let (word, said) = if failed.is_some() {
@@ -1702,12 +1638,14 @@ pub fn run_in(name: &str) -> Result<String> {
                     eprintln!("    {word:<8} {}: {said}", check.shows);
                 }
                 Part::Applied(check) => {
-                    let command =
-                        previous.and_then(|g| committed_event(&lines_of(&logs, &g.container)));
+                    let command = match &browsed {
+                        Some(WebOutcome::Recorded { command, .. }) => Some(command.clone()),
+                        _ => None,
+                    };
                     let (word, said) = match (&failed, command) {
                         (Some(_), _) => ("not run", "an earlier part failed".to_owned()),
                         (None, None) => {
-                            let why = "the gesture before it named no committed event".to_owned();
+                            let why = "web/'s kill switch recorded no command".to_owned();
                             failed = Some(why.clone());
                             ("failed", why)
                         }
@@ -2267,14 +2205,6 @@ pub fn applied_read(workspace: &str, agent: &str, command: &str) -> ApiCheck {
     }
 }
 
-/// The event id a gesture's `committed as event <id>` line names.
-pub fn committed_event(lines: &[&str]) -> Option<String> {
-    lines.iter().find_map(|l| {
-        let (_, rest) = l.split_once("committed as event ")?;
-        rest.split_whitespace().next().map(str::to_owned)
-    })
-}
-
 /// What a run requires: the cell ([`CELL_REQUIRED_ENV`]) and the web gesture
 /// ([`WEB_REQUIRED_ENV`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2377,10 +2307,6 @@ mod tests {
         fs::read(format!("../{MANDATE_FILE}")).unwrap()
     }
 
-    fn web_mandate() -> Vec<u8> {
-        fs::read(format!("../{WEB_MANDATE_FILE}")).unwrap()
-    }
-
     fn research_mandate() -> Vec<u8> {
         fs::read(format!("../{RESEARCH_MANDATE_FILE}")).unwrap()
     }
@@ -2397,18 +2323,14 @@ mod tests {
     fn planned(workspace: &str) -> Vec<Step> {
         plan(
             workspace,
-            (&mandate(), &web_mandate(), &research_mandate()),
+            (&mandate(), &research_mandate()),
             Some(&connected()),
         )
     }
 
     /// The plan the staging dry run renders, which names no connect check.
     fn unconnected(workspace: &str) -> Vec<Step> {
-        plan(
-            workspace,
-            (&mandate(), &web_mandate(), &research_mandate()),
-            None,
-        )
+        plan(workspace, (&mandate(), &research_mandate()), None)
     }
 
     fn parsed(path: &str) -> Value {
@@ -2656,13 +2578,13 @@ mod tests {
             at("runner-run"),
             at("backtest-record"),
         );
-        let (confirm, kill) = (
+        let (confirm, export) = (
             all.iter()
                 .rposition(|g| g.args[..3] == ["version", "confirm", version.as_str()])
                 .unwrap(),
-            at("agent-kill"),
+            at("journal-export"),
         );
-        assert!(rule_set < confirm && confirm < runner && runner < record && record < kill);
+        assert!(rule_set < confirm && confirm < runner && runner < record && record < export);
         assert!(
             all[rule_set]
                 .args
@@ -2966,8 +2888,9 @@ mod tests {
 
     /// Step 6 commits the owner's exit of the instrument the demo's envelope pins, on the demo's
     /// agent, at a confirmed bid whose floor is at or below it, its code shown first and then
-    /// typed; after the agent is deployed and before the kill switch (a stopped agent's exits are
-    /// held, rule 13) and the export, so the closing verify covers it.
+    /// typed; after the agent is deployed and before the export, so the closing verify covers it,
+    /// and, as every gesture of the Job, before web/'s kill switch (a stopped agent's exits are
+    /// held, rule 13).
     #[test]
     fn step_six_exits_the_pinned_instrument_at_a_confirmed_floor_before_the_kill_switch() {
         let pinned = parsed(INSTRUMENT_FILE);
@@ -3008,7 +2931,7 @@ mod tests {
             .collect();
         assert_eq!(exits.len(), 1, "one exit gesture: committed, never shown");
         let typed = exits[0];
-        assert_eq!(all[typed].args[2..4], [AGENT, SPY]);
+        assert_eq!(all[typed].args[2..4], [WEB_AGENT, SPY]);
         for pair in [
             ["--confirm-bid", EXIT_BID.0],
             ["--bid-size", EXIT_BID.1],
@@ -3025,14 +2948,10 @@ mod tests {
         );
         assert_eq!(
             all[typed].expect,
-            format!("owner_exit {AGENT} {SPY} committed as event")
+            format!("owner_exit {WEB_AGENT} {SPY} committed as event")
         );
-        let deployed = at(&["agent", "deploy", AGENT], "--code");
+        let deployed = at(&["agent", "deploy", WEB_AGENT], "--code");
         assert!(deployed < typed);
-        assert!(
-            typed < at(&["agent", "kill"], AGENT),
-            "before the kill switch"
-        );
         assert!(
             typed < at(&["journal", "export"], SEGMENT),
             "before the export"
@@ -3048,43 +2967,38 @@ mod tests {
         );
     }
 
-    /// Step 7 commits the owner's kill switch for the demo's agent, at agent scope only (an
-    /// agent-scoped switch never reaches the connection or the workspace, rule 13), after the
-    /// agent is deployed and before the record is exported, so the closing verify covers it.
+    /// The run's workspace holds one agent, [`WEB_AGENT`], on the demo's envelope (V-048, DEC-802
+    /// item 3): its one version is created, confirmed and deployed in step 2, its code shown and
+    /// then typed, and no gesture of the Job stops it, so the browser finds it running.
     #[test]
-    fn step_seven_kills_the_demo_agent_at_agent_scope_before_the_record() {
-        let steps = planned("demo1");
+    fn the_run_s_workspace_holds_one_agent_the_job_never_stops() {
+        let version = reference(&mandate());
+        let steps = planned("demo6");
         let all = gestures(&steps);
-        let at = |head: &[&str]| all.iter().position(|g| g.args[..head.len()] == *head);
-        let kill = at(&["agent", "kill"]).expect("step 7 runs `agent kill`");
-        let g = all[kill];
-        assert_eq!(g.args[2..4], ["--agent", AGENT]);
-        assert!(
-            !g.args
-                .iter()
-                .any(|a| a == "--connection" || a == "--workspace-wide"),
-            "{:?}",
-            g.args
-        );
-        assert_eq!(
-            g.expect,
-            format!("kill_switch agent {AGENT} committed as event")
-        );
-        let deployed = all
+        let in_run = |g: &&&Gesture| g.args.iter().any(|a| a == "demo6");
+        let deployed: Vec<[&str; 2]> = all
             .iter()
-            .rposition(|g| g.args[..2] == ["agent", "deploy"])
-            .unwrap();
-        assert!(deployed < kill, "the agent is deployed before it is killed");
+            .filter(in_run)
+            .filter(|g| g.args[..2] == ["agent", "deploy"])
+            .map(|g| [g.args[2].as_str(), g.args[3].as_str()])
+            .collect();
+        let v = version.as_str();
+        assert_eq!(deployed, [[WEB_AGENT, v], [WEB_AGENT, v]]);
+        let created: Vec<&&Gesture> = all
+            .iter()
+            .filter(in_run)
+            .filter(|g| g.args[..2] == ["version", "create"])
+            .collect();
+        assert_eq!(created.len(), 1, "one envelope in the run's workspace");
         assert!(
-            kill < at(&["journal", "export"]).unwrap(),
-            "exported after it"
+            all.iter().all(|g| g.args[..2] != ["agent", "kill"]),
+            "no gesture of the Job stops the agent"
         );
-        let step7 = &steps[6].parts;
         assert!(
-            step7
-                .iter()
-                .any(|p| matches!(p, Part::Gesture(x) if x.container == g.container)),
-            "the kill switch is step 7's"
+            all.iter()
+                .filter(in_run)
+                .all(|g| !g.args.iter().any(|a| a.contains("web-mandate"))),
+            "no second envelope"
         );
     }
 
@@ -3116,7 +3030,7 @@ mod tests {
             [
                 (1, read.as_str(), 401, Ask::NoSession, &Body::Any),
                 (1, "/v1/sessions", 204, Ask::SignIn, &Body::Any),
-                (1, read.as_str(), 200, Ask::Session, &Body::Lists(AGENT)),
+                (1, read.as_str(), 200, Ask::Session, &Body::Lists(WEB_AGENT)),
                 (5, backtest.as_str(), 200, Ask::Session, &completed),
             ]
         );
@@ -3186,89 +3100,6 @@ mod tests {
                 "a sign-in with no cookie is a wrong answer, never not run: {said}"
             );
         }
-    }
-
-    /// The second agent in the run's workspace has an envelope of its own, deployed only after
-    /// step 5's backtest is recorded (the research agent deploys in its own workspace, in step 3).
-    /// `agent deploy` and `backtest record` each take only the workspace's latest confirmed
-    /// version, so its confirmation comes after the record and its deployment after its
-    /// confirmation. Its snapshot is registered before its version is created, and web/ presses
-    /// that agent's kill switch, never the one the CLI stops (DEC-2036).
-    #[test]
-    fn web_kills_a_second_agent_the_cli_does_not() {
-        let (version, web) = (reference(&mandate()), reference(&web_mandate()));
-        assert_ne!(version, web, "two envelopes, two versions");
-        let steps = planned("demo6");
-        let all = gestures(&steps);
-        let deployed: Vec<[&str; 2]> = all
-            .iter()
-            .filter(|g| g.args[..2] == ["agent", "deploy"] && g.args.iter().any(|a| a == "demo6"))
-            .map(|g| [g.args[2].as_str(), g.args[3].as_str()])
-            .collect();
-        let (v, w) = (version.as_str(), web.as_str());
-        assert_eq!(
-            deployed,
-            [[AGENT, v], [AGENT, v], [WEB_AGENT, w], [WEB_AGENT, w]]
-        );
-        let code = deploy_code(WEB_AGENT, &web);
-        assert_ne!(code, deploy_code(AGENT, &version));
-        assert!(
-            all.iter().any(|g| g.args[2] == WEB_AGENT
-                && g.args.windows(2).any(|w| w == ["--code", code.as_str()]))
-        );
-        let at = |args: &[&str]| {
-            all.iter()
-                .position(|g| g.args.len() >= args.len() && g.args[..args.len()] == *args)
-                .unwrap_or_else(|| panic!("no gesture {args:?}"))
-        };
-        let snapshot = format!("{INPUTS}/web-instrument.json");
-        let register = at(&[
-            "config",
-            "register",
-            "--kind",
-            "instrument_snapshot",
-            &snapshot,
-        ]);
-        let created = at(&["version", "create", &format!("{INPUTS}/web-mandate.json")]);
-        let confirmed = at(&["version", "confirm", w, "--code"]);
-        let deploy = at(&["agent", "deploy", WEB_AGENT, w, "--code"]);
-        let record = at(&["backtest", "record"]);
-        assert!(at(&["agent", "deploy", AGENT, v, "--code"]) < record);
-        assert!(record < register && register < created && created < confirmed);
-        assert!(confirmed < deploy);
-        assert_eq!(all[created].expect, format!("created {web}"));
-        let step_of = |container: &str| {
-            steps
-                .iter()
-                .find(|s| {
-                    s.parts
-                        .iter()
-                        .any(|p| matches!(p, Part::Gesture(g) if g.container == container))
-                })
-                .map(|s| s.number)
-        };
-        assert_eq!(step_of(&all[register].container), Some(7));
-        assert_eq!(step_of(&all[deploy].container), Some(7));
-        let kill = all
-            .iter()
-            .find(|g| g.args[..2] == ["agent", "kill"])
-            .unwrap();
-        assert!(
-            kill.args.windows(2).any(|w| w == ["--agent", AGENT]),
-            "the CLI stops demo-spy"
-        );
-        let web: Vec<(u8, &WebCheck)> = steps
-            .iter()
-            .flat_map(|s| s.parts.iter().map(move |p| (s.number, p)))
-            .filter_map(|(n, p)| match p {
-                Part::Web(w) => Some((n, w)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(web.len(), 1);
-        assert_eq!(web[0].0, 7, "web/'s kill switch is step 7's");
-        assert_eq!(web[0].1.agent, WEB_AGENT);
-        assert_ne!(WEB_AGENT, AGENT);
     }
 
     /// A web check runs only when the gesture acted on its own agent in the run's workspace and
@@ -3402,17 +3233,17 @@ mod tests {
             "the workspace is founded for the owner who signs in: {:?}",
             found.args
         );
-        let kill = all
+        let exit = all
             .iter()
-            .find(|g| g.args[..2] == ["agent", "kill"])
+            .find(|g| g.args[..2] == ["agent", "exit"])
             .unwrap();
         let user = owner.to_ascii_lowercase();
         assert!(
-            kill.args
+            exit.args
                 .windows(2)
                 .any(|w| w[0] == "--user" && w[1] == user),
             "the owner's gestures act as that member: {:?}",
-            kill.args
+            exit.args
         );
     }
 
@@ -3741,7 +3572,7 @@ mod tests {
                 all[typed].args
             );
         }
-        let deployed = at(&["agent", "deploy", AGENT], "--code");
+        let deployed = at(&["agent", "deploy", WEB_AGENT], "--code");
         assert!(
             shown < typed && typed < deployed,
             "recorded before the deployment"
@@ -3770,41 +3601,33 @@ mod tests {
         );
     }
 
-    /// DEC-2379: step 7's CLI kill switch is followed by the check that the runtime applied it,
-    /// which reads the command the gesture before it committed, and passes on `applied` alone.
+    /// DEC-2379: step 7 is web/'s kill switch on the one agent, followed by the check that its
+    /// runtime applied it, which reads the command the browser recorded and passes on `applied`
+    /// alone. Nothing in the gestures' Job stops the agent first: no `agent kill` is a gesture.
     #[test]
-    fn step_seven_reads_the_cli_kill_switch_back_applied() {
+    fn step_seven_reads_web_s_kill_switch_back_applied() {
         let steps = planned("demo1");
         let step7 = &steps[6].parts;
-        let at = step7
-            .iter()
-            .position(|p| matches!(p, Part::Applied(_)))
-            .expect("step 7 checks the kill switch applied");
+        assert!(matches!(&step7[0], Part::Web(c) if c.agent == WEB_AGENT));
         assert!(
-            matches!(&step7[at - 1], Part::Gesture(g) if g.args[..2] == ["agent", "kill"]),
-            "the gesture before it is the kill switch"
+            matches!(&step7[1], Part::Applied(c) if c.agent == WEB_AGENT),
+            "the runtime of the agent web/ killed"
         );
-        assert_eq!(
-            committed_event(&[
-                "x",
-                "kill_switch agent demo-spy committed as event 1TSG2CY1PW at seq 15"
-            ]),
-            Some("1TSG2CY1PW".into())
-        );
-        assert_eq!(committed_event(&["code 1234abcd"]), None);
         assert!(
-            matches!(&step7[at], Part::Applied(c) if c.agent == AGENT),
-            "the runtime of the agent the CLI killed"
+            gestures(&steps)
+                .iter()
+                .all(|g| g.args[..2] != ["agent", "kill"]),
+            "no CLI kill switch stops the agent before the browser"
         );
-        let read = applied_read("demo1", AGENT, "1TSG");
+        let read = applied_read("demo1", WEB_AGENT, "1TSG");
         assert_eq!(read.path, "/v1/workspaces/demo1/commands/1TSG");
         let with_steps = |phase: &str, steps: Value| {
             json!({"command_id": "1TSG", "phase": phase, "steps": steps,
                 "as_of": [{"stream_id": "ctl:demo1"}]})
             .to_string()
         };
-        let runtime =
-            json!([{"stream_id": "agent:demo1:demo-spy", "event_type": "KillSwitchActivated"}]);
+        let runtime = json!([{"stream_id": "agent:demo1:agt_01KDEM00000000000000000WEB",
+            "event_type": "KillSwitchActivated"}]);
         let body = |phase: &str| with_steps(phase, runtime.clone());
         assert_eq!(read.body.missing(&body("applied")), None);
         for phase in ["recorded", "taken", "ended", "refused"] {
@@ -3816,8 +3639,8 @@ mod tests {
         for other in [
             json!([]),
             json!([{"stream_id": "acct:demo1:01KDEA0000000001000000000A", "event_type": "KillSwitchActivated"}]),
-            json!([{"stream_id": "agent:demo1:agt_01KDEM00000000000000000WEB", "event_type": "KillSwitchActivated"}]),
-            json!([{"stream_id": "agent:demo1:demo-spy", "event_type": "AgentModeApplied"}]),
+            json!([{"stream_id": "agent:demo1:demo-spy", "event_type": "KillSwitchActivated"}]),
+            json!([{"stream_id": "agent:demo1:agt_01KDEM00000000000000000WEB", "event_type": "AgentModeApplied"}]),
         ] {
             assert!(
                 read.body
