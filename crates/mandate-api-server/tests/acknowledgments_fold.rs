@@ -3,7 +3,7 @@
 //! ends only by the record journal spec §9.28 names for it, and a record it cannot read fails the
 //! fold. The step-up digest's worked vectors are checked against the object the HTTP tests bind.
 
-use mandate_api_server::acknowledgments::{Holder, Reason, requests, standing};
+use mandate_api_server::acknowledgments::{Hold, Holder, Raised, Reason, requests, standing};
 use mandate_canon::{Digest, parse, to_canonical};
 use mandate_journal::StoredEvent;
 
@@ -285,4 +285,31 @@ fn a_request_is_spent_by_any_acknowledgment_naming_it_and_a_version_1_one_is_a_l
         r#"{"agent":7,"event":"e","requested_by":"bob","subject":"limit"}"#,
     );
     assert_eq!(requests(&[unreadable]), None);
+}
+
+/// A hold blocks an agent only on that agent's own account stream: an account-wide hold of
+/// another account blocks no agent here, and an agent's own hold blocks no other agent.
+#[test]
+fn a_hold_blocks_only_its_own_agent_or_the_agents_of_its_own_account() {
+    let raised = |holder| Raised {
+        event: "e".to_owned(),
+        holder,
+        reason: Reason::Cause("broker_notice".to_owned()),
+        mode: Some("paused"),
+        raised_at: "2026-10-17T11:00:00.000000000Z".to_owned(),
+    };
+    let hold = |holder| Hold {
+        raised: raised(holder),
+        agent_id: "a".to_owned(),
+        account: "acct:w:x".to_owned(),
+        request: None,
+    };
+    let account_wide = hold(Holder::Account);
+    assert!(account_wide.blocks("a", "acct:w:x"));
+    assert!(account_wide.blocks("b", "acct:w:x"));
+    assert!(!account_wide.blocks("b", "acct:w:y"));
+    let own = hold(Holder::Agent("a".to_owned()));
+    assert!(own.blocks("a", "acct:w:x"));
+    assert!(!own.blocks("b", "acct:w:x"));
+    assert!(!own.blocks("a", "acct:w:y"));
 }

@@ -3440,3 +3440,143 @@ fn an_acknowledgments_status_follows_its_copy_to_the_lift() {
     );
     assert_eq!(phase(), "applied");
 }
+
+/// A limit of another agent on the account blocks only that agent: the list for `agt_a` leaves it
+/// out, and an acknowledgment of it posted to `agt_a` is `acknowledgment_unavailable` with nothing
+/// recorded, rather than journaled for the executor to refuse.
+#[test]
+fn another_agents_limit_is_not_acknowledged_through_this_agent() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let theirs = seed_account(
+        &w.f,
+        "RiskLimitTriggered",
+        r#"{"agent_id":"agt_z","limit":"max_daily_loss"}"#,
+        None,
+    );
+    assert_eq!(
+        listed(&list(&w, "?state=open")),
+        std::slice::from_ref(&theirs.event_id)
+    );
+    assert_eq!(
+        listed(&list(&w, "?state=open&agent=agt_a")),
+        Vec::<String>::new()
+    );
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &theirs.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        &theirs.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let before = control(&w.f).len();
+    refused(
+        &w.post_ack("acknowledgments", KEY_3, &body),
+        409,
+        ProblemCode::AcknowledgmentUnavailable,
+    );
+    assert_eq!(control(&w.f).len(), before);
+    assert!(w.held(&issued));
+}
+
+/// A request is refused as an acknowledgment is, with nothing recorded and the challenge kept: a
+/// hold that does not stand, no step-up, a method other than passkey, and no assertion.
+#[test]
+fn a_refused_request_commits_nothing() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let lifted = seed_account(&w.f, "RiskLimitTriggered", &limit("profit_stop"), None);
+    seed_account(&w.f, "RiskLimitLifted", &limit("profit_stop"), None);
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "request_ack",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let passkey = Passkeyed::evidence(&issued, "passkey");
+    let cli = Passkeyed::evidence(&issued, "cli_confirm");
+    let before = control(&w.f).len();
+    for (body, status, code) in [
+        (
+            request_body(
+                &lifted.event_id,
+                "limit",
+                &passkey,
+                Some(signed.json(CREDENTIAL)),
+            ),
+            409,
+            ProblemCode::AcknowledgmentUnavailable,
+        ),
+        (
+            request_body(&hold.event_id, "limit", "null", None),
+            401,
+            ProblemCode::StepUpRequired,
+        ),
+        (
+            request_body(&hold.event_id, "limit", &cli, None),
+            401,
+            ProblemCode::StepUpMethod,
+        ),
+        (
+            request_body(&hold.event_id, "limit", &passkey, None),
+            401,
+            ProblemCode::StepUpMissing,
+        ),
+    ] {
+        refused(
+            &w.post_ack("acknowledgment-requests", KEY_3, &body),
+            status,
+            code,
+        );
+    }
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+    assert!(w.held(&issued), "nothing is taken");
+}
+
+/// A control stream that moves between the challenge and the call changes the digest's
+/// `control_head`, so the port answers `step_up_mismatch` and nothing is recorded (§3.11 item 12).
+#[test]
+fn an_acknowledgment_after_the_control_stream_moved_is_a_step_up_mismatch() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    seed_hosted(
+        &w.f,
+        "AgentModeChanged",
+        1,
+        r#"{"agent_id":"agt_a","to":"paused"}"#,
+    );
+    let before = control(&w.f).len();
+    let body = ack_body(
+        &hold.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    refused(
+        &w.post_ack("acknowledgments", KEY_3, &body),
+        401,
+        ProblemCode::StepUpMismatch,
+    );
+    assert_eq!(control(&w.f).len(), before);
+}

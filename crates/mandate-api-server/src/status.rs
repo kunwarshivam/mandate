@@ -196,6 +196,15 @@ async fn reported(
             steps.extend(caused(rows, copy).ok_or(Refused::JournalUnavailable)?);
         }
     }
+    let streams: Vec<&str> = read
+        .iter()
+        .filter_map(|rows| rows.first().map(|row| row.stream_id.as_str()))
+        .collect();
+    let position = |row: &StoredEvent| {
+        let stream = streams.iter().position(|s| *s == row.stream_id);
+        (stream, row.seq)
+    };
+    steps.sort_by_key(|(row, _)| position(row));
     let phase = phase(
         steps
             .iter()

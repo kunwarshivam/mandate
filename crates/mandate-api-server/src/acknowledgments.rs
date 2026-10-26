@@ -267,12 +267,16 @@ pub struct Hold {
 }
 
 impl Hold {
-    /// Whether it blocks `agent`: its own limit or hold, or any hold of its account.
-    pub fn blocks(&self, agent: &str) -> bool {
-        match &self.raised.holder {
-            Holder::Agent(holder) => holder == agent,
-            Holder::Account => true,
-        }
+    /// Whether it blocks `agent`, whose account stream is `account`: its own limit or hold, or a
+    /// hold of every agent of that account. A hold of another account never blocks it, so an
+    /// acknowledgment posted to an agent of another account is refused here, not copied to a stream
+    /// where the executor would find no trigger.
+    pub fn blocks(&self, agent: &str, account: &str) -> bool {
+        self.account == account
+            && match &self.raised.holder {
+                Holder::Agent(holder) => holder == agent,
+                Holder::Account => true,
+            }
     }
 }
 
@@ -325,12 +329,27 @@ fn agent_accounts(app: &App, reader: &Reader) -> Option<Vec<(Deployment, String)
         .collect()
 }
 
+/// What [`read_holds`] read: every standing hold, the account streams' rows, and each deployed
+/// agent's account stream.
+struct Read {
+    holds: Vec<Hold>,
+    rows: Vec<Vec<StoredEvent>>,
+    accounts: BTreeMap<String, String>,
+}
+
+impl Read {
+    /// The holds that block `agent`, none when it has no account here.
+    fn blocking<'a>(&'a self, agent: &'a str) -> impl Iterator<Item = &'a Hold> {
+        let account = self.accounts.get(agent);
+        self.holds
+            .iter()
+            .filter(move |hold| account.is_some_and(|account| hold.blocks(agent, account)))
+    }
+}
+
 /// Every hold standing on the workspace's account streams, with the streams read, or
 /// `journal_unavailable` when an account, a stream, or a record cannot be read.
-async fn read_holds(
-    app: &App,
-    reader: &Reader,
-) -> Result<(Vec<Hold>, Vec<Vec<StoredEvent>>), Refused> {
+async fn read_holds(app: &App, reader: &Reader) -> Result<Read, Refused> {
     let mapped = agent_accounts(app, reader).ok_or(Refused::JournalUnavailable)?;
     let mut by_account: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (deployment, account) in &mapped {
@@ -351,10 +370,14 @@ async fn read_holds(
     }
     let requested = requests(&reader.control).ok_or(Refused::JournalUnavailable)?;
     let listed = holds(&accounts, &requested).ok_or(Refused::JournalUnavailable)?;
-    Ok((
-        listed,
-        accounts.into_iter().map(|(_, rows, _)| rows).collect(),
-    ))
+    Ok(Read {
+        holds: listed,
+        rows: accounts.into_iter().map(|(_, rows, _)| rows).collect(),
+        accounts: mapped
+            .into_iter()
+            .map(|(deployment, account)| (deployment.0, account))
+            .collect(),
+    })
 }
 
 /// The list's query: `state=open`, and an optional `agent`, in either order; `None` for anything
@@ -410,16 +433,15 @@ pub async fn list(
     {
         return Refused::Invalid.response();
     }
-    let (listed, rows) = match read_holds(&app, &reader).await {
+    let read = match read_holds(&app, &reader).await {
         Ok(read) => read,
         Err(refusal) => return refusal.response(),
     };
-    let items = listed
-        .iter()
-        .filter(|hold| agent.as_deref().is_none_or(|agent| hold.blocks(agent)))
-        .map(hold_value)
-        .collect();
-    let streams: Vec<&[StoredEvent]> = rows.iter().map(Vec::as_slice).collect();
+    let items = match &agent {
+        Some(agent) => read.blocking(agent).map(hold_value).collect(),
+        None => read.holds.iter().map(hold_value).collect(),
+    };
+    let streams: Vec<&[StoredEvent]> = read.rows.iter().map(Vec::as_slice).collect();
     served(
         &reader,
         &streams,
@@ -595,7 +617,9 @@ async fn judged(
             .iter()
             .find(|(request, _)| &request.event_id == id)
     });
-    let principal = crate::writes::principal_text(gate).unwrap_or_default();
+    let Some(principal) = crate::writes::principal_text(gate) else {
+        return Refused::Unauthenticated.response();
+    };
     let make = |step_up: Value| match answers {
         true => Command::Acknowledge {
             agent: asked.agent.clone(),
@@ -622,14 +646,12 @@ async fn judged(
             return accepted(as_presented.id_member(), &row, gate.now, &[], None);
         }
     }
-    let (listed, _) = match read_holds(app, &reader).await {
+    let read = match read_holds(app, &reader).await {
         Ok(read) => read,
         Err(refusal) => return refusal.response(),
     };
-    let stands = listed.iter().any(|hold| {
-        hold.raised.event == asked.event
-            && hold.raised.reason.subject() == asked.subject
-            && hold.blocks(&asked.agent)
+    let stands = read.blocking(&asked.agent).any(|hold| {
+        hold.raised.event == asked.event && hold.raised.reason.subject() == asked.subject
     });
     if !stands {
         return refused(ProblemCode::AcknowledgmentUnavailable, StatusCode::CONFLICT);
@@ -703,5 +725,39 @@ async fn judged(
             Refused::JournalUnavailable.response()
         }
         Err(Unverified::Code(code)) => refused(code, StatusCode::UNAUTHORIZED),
+    }
+}
+
+#[cfg(test)]
+mod digest {
+    //! [`Bound::held`] against §3.11 item 12's worked vectors, which lane WB and the spec's review
+    //! recomputed apart from this code.
+
+    use crate::writes::Bound;
+
+    const AGENT: &str = "agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z";
+    const EVENT: &str = "01JBH3BTZ8K2M4N6P8R0S2T4V6";
+
+    fn hex(confirms: &'static str, request: Option<&str>) -> Option<String> {
+        let bound = Bound::held(confirms, AGENT, EVENT, "reconciliation", request);
+        bound
+            .digest(42)
+            .map(|digest| format!("sha256:{}", digest.to_hex()))
+    }
+
+    #[test]
+    fn the_held_object_reproduces_the_spec_s_three_vectors() {
+        assert_eq!(
+            hex("acknowledge", None).as_deref(),
+            Some("sha256:5f5506a3ac32cae637a2cc222393f852035c699430656870ba024702431260a7")
+        );
+        assert_eq!(
+            hex("acknowledge", Some("01JBH3BTZ8K2M4N6P8R0S2T4V7")).as_deref(),
+            Some("sha256:b9367c62d1201059c5a9f2cf0bf35e637d27a5934e174b779276a2fcbc7af765")
+        );
+        assert_eq!(
+            hex("request_ack", None).as_deref(),
+            Some("sha256:b15c59e4e09394ddf0f5430c04569276c27c7a957ac68c683e53b15e6b393ebc")
+        );
     }
 }
