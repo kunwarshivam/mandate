@@ -1389,6 +1389,18 @@ def fill_applied(client_order_id: T) -> T:
 
 FILL_APPLIED_V1 = fill_applied(STR)
 FILL_APPLIED_V2 = fill_applied(opt(STR))
+# v0.96 §9.5 (DEC-2817): `FillApplied` version 2 requires the instrument snapshot only of a fill
+# that names an order of ours, which rule 300 checks; an unattributed fill may be in an instrument
+# the platform holds no snapshot of.
+FILL_V2_REQUIRED_REFS = ("fee_config", "trading_calendar", "settlement_calendar")
+
+
+def required_refs(event_type: str, version: int) -> tuple[str, ...]:
+    if event_type == "FillApplied" and version == 2:
+        return FILL_V2_REQUIRED_REFS
+    return REQUIRED_REFS.get(event_type, ())
+
+
 # Trading spec §2.3 (v0.21): every client order id of ours is `md-` and one or more ASCII letters,
 # digits or hyphens, at most 128 characters in all.
 OUR_CLIENT_ORDER_ID = re.compile(r"md-[A-Za-z0-9-]+")
@@ -2082,6 +2094,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         limit = OUR_CLIENT_ORDER_ID_MAX + (1 if "boundary.rule_299_length" in skip else 0)
         ours = named is None or (OUR_CLIENT_ORDER_ID.fullmatch(named) is not None and len(named) <= limit)
         rule("299", ours, "schema", "payload.client_order_id")
+        snapshot = "instrument_snapshot" in draft["config_refs"]
+        rule("300", named is None or snapshot, "missing_config_ref", "config_refs.instrument_snapshot")
     if event_type == "AccountCloseRequested":
         qty = normalize_decimal(p["qty"])
         if qty is None:
@@ -3701,7 +3715,7 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
         elif not (isinstance(refs[kind], str) and DIGEST_REF.match(refs[kind])):
             out.append(Violation("config_refs", "non_canonical", f"config_refs.{kind}"))
     if "config_refs.required" not in skip:
-        missing = [k for k in REQUIRED_REFS.get(event_type, ()) if k not in refs]
+        missing = [k for k in required_refs(event_type, draft["schema_version"]) if k not in refs]
         out += [
             Violation("config_refs.required", "missing_config_ref", f"config_refs.{k}") for k in missing[:1]
         ]
