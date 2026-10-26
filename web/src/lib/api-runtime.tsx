@@ -44,10 +44,13 @@ const DISCLOSURE_PAGES = 50;
 /** What an acceptance names: the document, its version, the user who accepted, and the step-up method; `null` for a body that names any of them wrongly. */
 type Accepted = { document: string; version: string; user: string; method: string };
 
-/** One served event's acceptance, decoded from its base64 body (journal spec §9.2 `DisclosureAccepted`). */
+/** A member of a JSON object, or `undefined`. */
+const member = (value: unknown, name: string): unknown => (typeof value === "object" && value !== null ? (value as Record<string, unknown>)[name] : undefined);
+
+/** `GET /journal/events/{id}`'s `event`, its acceptance decoded from its base64 body (journal spec §9.2 `DisclosureAccepted`). */
 const acceptedRead: Decoder<Accepted | null> = (value, path) => {
-  const body = typeof value === "object" && value !== null ? (value as Record<string, unknown>).body : undefined;
-  if (typeof body !== "string") return { ok: false, issue: { path: `${path}/body`, problem: "wrong_type", value: null, allowed: null } };
+  const body = member(member(value, "event"), "body");
+  if (typeof body !== "string") return { ok: false, issue: { path: `${path}/event/body`, problem: "wrong_type", value: null, allowed: null } };
   try {
     const bytes = Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
     const payload = (JSON.parse(new TextDecoder().decode(bytes)) as { payload?: Record<string, unknown> }).payload;
@@ -56,11 +59,11 @@ const acceptedRead: Decoder<Accepted | null> = (value, path) => {
     const named = typeof document === "string" && typeof version === "string" && typeof user === "string" && typeof method === "string";
     return { ok: true, value: named ? { document, version, user, method } : null };
   } catch {
-    return { ok: false, issue: { path: `${path}/body`, problem: "not_canonical", value: null, allowed: null } };
+    return { ok: false, issue: { path: `${path}/event/body`, problem: "not_canonical", value: null, allowed: null } };
   }
 };
 
-/** The step-up methods an acceptance counts with (V-005: never one without step-up). */
+/** The step-up methods an acceptance counts with (users are ULIDs, which compare without case: the host writes `--user` as typed) (V-005: never one without step-up). */
 const STEP_UP_METHODS: ReadonlySet<string> = new Set(["passkey", "cli_confirm"]);
 
 /** How many times an unanswered command is sent again, with the same key and body (API-4), before it is called unknown. */
@@ -348,7 +351,7 @@ export function ApiRuntimeProvider({
           const one = await client.read(`/journal/events/${encodeURIComponent(eventId)}`, acceptedRead);
           if (!one.ok) return "unknown";
           const a = one.value;
-          if (a && a.document === document && a.version === version && a.user === principal && STEP_UP_METHODS.has(a.method)) return "accepted";
+          if (a && a.document === document && a.version === version && a.user.toUpperCase() === principal.toUpperCase() && STEP_UP_METHODS.has(a.method)) return "accepted";
         }
         return "not_accepted";
       },
