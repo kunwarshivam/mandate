@@ -726,7 +726,7 @@ const CASES: [Case; 11] = [
                 bytes: issued.bytes.clone(),
                 issued_at: issued.issued_at.clone(),
             };
-            grant(&w, &unissued)
+            grant(w, &unissued)
         },
     },
     Case {
@@ -735,7 +735,7 @@ const CASES: [Case; 11] = [
         arrange: |w, _| {
             let bobs = w.challenge_by(BOB, &w.hash);
             w.confirm_with(&bobs, |p| p["principal"] = json!(BOB));
-            grant(&w, &bobs)
+            grant(w, &bobs)
         },
     },
     Case {
