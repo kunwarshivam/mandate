@@ -28,14 +28,16 @@ neither the invalidation verdict (E19-5) nor the agent-stream `ModelInvocationRe
   schema), `crates/mandate-research-run/src/backend.rs` (the OpenRouter-or-recorded-fake selection),
   `crates/mandate-research-run/src/output.rs` (`parse_output`). In `mandate-runtime`:
   `crates/mandate-runtime/src/research.rs` (`handle_research`, `ResearchState`, the schedule, the
-  cancellations, the call record) and `crates/mandate-runtime/src/research/judge.rs` (the harness
+  cancellations, the call record, and a lost exchange with the model-gateway service, DEC-2397 item
+  3: the run ends, the operator is alerted naming its latest record, and the pin is kept) and `crates/mandate-runtime/src/research/judge.rs` (the harness
   checks, the platform fill, admission, and the judging batch).
   In `mandate-research-driver`, the shell's research driver ([DEC-2204](../../../../docs/project/decisions/DEC-2204.md), not yet
   wired into the run path, which waits for R0): `crates/mandate-research-driver/src/trigger.rs`
   (the per-agent trigger queue) and `crates/mandate-research-driver/src/driver.rs` (the step
   machine: commit, check, fold back, then hand on; hold on an unknown append; abandon and halt on a
   refused one; halt as diverged otherwise), with `mandate_runtime::abandon_refused_research`.
-- **Tests:** `crates/mandate-research-run/tests/retrieve.rs`, `crates/mandate-research-run/tests/dispatch.rs`, `crates/mandate-research-run/tests/dispatch_news.rs`, `crates/mandate-research-run/tests/dispatch_news_get.rs`, `crates/mandate-research-run/tests/dispatch_filings.rs`, `crates/mandate-research-run/tests/dispatch_filings_get.rs`, `crates/mandate-research-run/tests/dispatch_quote.rs`, `crates/mandate-research-run/tests/turn.rs`, `crates/mandate-research-run/tests/call_turn.rs`, `crates/mandate-research-run/tests/agentic_entry.rs`
+- **Tests:** `crates/mandate-runtime/tests/research.rs` and `tests/agentic.rs` (among them a lost
+  call or turn, DEC-2397), `crates/mandate-research-run/tests/retrieve.rs`, `crates/mandate-research-run/tests/dispatch.rs`, `crates/mandate-research-run/tests/dispatch_news.rs`, `crates/mandate-research-run/tests/dispatch_news_get.rs`, `crates/mandate-research-run/tests/dispatch_filings.rs`, `crates/mandate-research-run/tests/dispatch_filings_get.rs`, `crates/mandate-research-run/tests/dispatch_quote.rs`, `crates/mandate-research-run/tests/turn.rs`, `crates/mandate-research-run/tests/call_turn.rs`, `crates/mandate-research-run/tests/agentic_entry.rs`
   (with a property over random answers and byte budgets), `crates/mandate-research-run/tests/output.rs`
   (with a property over arbitrary bytes and an integer-thousandths oracle),
   `crates/mandate-research-run/tests/call.rs`, `crates/mandate-research-run/tests/item.rs`,

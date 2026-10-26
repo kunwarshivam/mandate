@@ -383,6 +383,54 @@ fn a_kill_switch_names_its_scope() {
     }
 }
 
+/// E8-9k (notifications spec §3.2 and §3.4; journal spec §9.15 rules 119, 120 and 130): a user's
+/// kill switch commits, in the `OwnerCommandIssued`'s own batch and right after it, one
+/// `OwnerAlertSent` of kind `kill_switch` whose `subject`, `causation_id` and `owner_command` are
+/// the command, so the dispatcher gives the command exactly one notice. A repeat under the key
+/// replays and adds no second alert.
+#[test]
+fn a_kill_switch_commits_one_owner_alert_naming_its_command_in_its_batch() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    let key = "kill-key-0000000099";
+    let body = br#"{"scope":{"kind":"workspace","id":null}}"#;
+    accepted(&post(&f, &ws("/kill-switch"), &cookie, Some(key), body));
+    let command = derived("kill_switch", ALICE, key);
+    let rows = f.journal.rows_of(&ctl());
+    let at = rows
+        .iter()
+        .position(|row| row.event_id == command)
+        .expect("the command");
+    let alerts: Vec<&StoredEvent> = rows
+        .iter()
+        .filter(|row| row.event_type == "OwnerAlertSent")
+        .collect();
+    assert_eq!(alerts.len(), 1, "one alert for the command");
+    let alert = alerts[0];
+    assert_eq!(
+        rows.get(at + 1).map(|row| row.event_id.as_str()),
+        Some(alert.event_id.as_str()),
+        "right after its command, in its batch"
+    );
+    assert_eq!(alert.event_id, derived("kill_switch_alert", ALICE, key));
+    let event = parse(&alert.body).expect("JSON");
+    assert_eq!(text(&event, &["causation_id"]), command);
+    assert_eq!(text(&event, &["payload", "subject"]), command);
+    assert_eq!(text(&event, &["payload", "kind"]), "kill_switch");
+    assert_eq!(text(&event, &["payload", "owner_command"]), command);
+
+    accepted(&post(&f, &ws("/kill-switch"), &cookie, Some(key), body));
+    let again = f.journal.rows_of(&ctl());
+    assert_eq!(
+        again
+            .iter()
+            .filter(|row| row.event_type == "OwnerAlertSent")
+            .count(),
+        1,
+        "a repeat replays and alerts nothing more"
+    );
+}
+
 #[test]
 fn a_kill_switch_forwards_no_step_up_and_says_it_is_unbound() {
     let f = fixture();

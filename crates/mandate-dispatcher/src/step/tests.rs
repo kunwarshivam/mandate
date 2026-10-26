@@ -18,6 +18,7 @@ use std::rc::Rc;
 
 mod approval;
 mod crash;
+mod process;
 mod retry;
 mod switch;
 mod unread;

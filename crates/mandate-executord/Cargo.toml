@@ -12,6 +12,8 @@ workspace = true
 [dependencies]
 mandate-accounting.workspace = true
 mandate-alpaca.workspace = true
+mandate-artifacts-fs.workspace = true
+mandate-bars.workspace = true
 mandate-canon.workspace = true
 mandate-connections.workspace = true
 mandate-domain.workspace = true
@@ -25,6 +27,7 @@ mandate-process.workspace = true
 mandate-risk.workspace = true
 mandate-spec.workspace = true
 mandate-robinhood.workspace = true
+mandate-spec.workspace = true
 mandate-store.workspace = true
 mandate-time.workspace = true
 mandate-vault.workspace = true
@@ -32,6 +35,7 @@ secrecy.workspace = true
 tokio = { workspace = true, features = ["rt", "signal", "time"] }
 
 [dev-dependencies]
+mandate-marketdata.workspace = true
 mandate-mcp.workspace = true
 mandate-journal-pg.workspace = true
 proptest.workspace = true

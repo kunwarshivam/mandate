@@ -37,6 +37,13 @@ data:
     - symbol: QQQ
       assetId: eb82ffb0-efd6-4f4e-9307-8fead28e04f6
       anchor: 2026-10-23=140
+# The notification dispatcher, when `cargo xtask cell up` names its image, which also sets its
+# binary's digest as `dispatcher.build`: the demo owner as its one email recipient, mailed only
+# through the recorded transport, which sends nothing (DEC-2516).
+dispatcher:
+  recipient: demo_owner
+  build: ""
+  subjects: []
 # The workspace API server, when `cargo xtask cell up` names its image. It hosts the demo workspace
 # (`cargo xtask cell demo` opens it under this id). The issuer is the local stub of DEC-2100 on the
 # pod's loopback, which lane SI adds: until then no key set is fetched and every sign-in is refused,

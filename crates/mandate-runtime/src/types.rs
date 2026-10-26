@@ -461,7 +461,7 @@ pub struct NotificationRef {
 
 /// The runtime's alerts. None is an owner notice kind of notifications spec §3.2, so the runtime
 /// journals no `OwnerAlertSent` for them (DEC-2514): a dry run's deny waits on the founder's
-/// DEC-723 and is raised as it was until then, and the two research alerts are the operator's.
+/// DEC-723 and is raised as it was until then, and the three research alerts are the operator's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeAlert {
     /// The gate's dry run denied a decision (DEC-723, Proposed).
@@ -470,6 +470,9 @@ pub enum RuntimeAlert {
     ResearchCallRefused,
     /// Three research deadlines in a row passed.
     ResearchDeadlineStreak,
+    /// The exchange with the model-gateway service was lost, so the call may have cost up to its
+    /// reservation (DEC-2397 item 3).
+    ResearchGatewayUnreachable,
 }
 
 impl RuntimeAlert {
@@ -480,6 +483,7 @@ impl RuntimeAlert {
             Self::DecisionSkipped => "decision_skipped",
             Self::ResearchCallRefused => "research_call_refused",
             Self::ResearchDeadlineStreak => "research_deadline_streak",
+            Self::ResearchGatewayUnreachable => "research_gateway_unreachable",
         }
     }
 }
