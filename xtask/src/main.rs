@@ -3478,9 +3478,9 @@ fn ci_select() -> Result<()> {
 const LAND_CHECK_BASE: &str = "origin/main";
 
 /// The `ci` jobs [`land_check`] runs on the merged tree, in order: the spec guard (ES-22), gitleaks
-/// over the diff (`secrets`, DEC-2645), lint, and each part of `ci test`, which run over the crates the diff from the base selects (DEC-1190). The
-/// parts run as jobs of their own, so a failing nextest run never keeps the doctests, the rehearsal
-/// or the Python tests from running. No cell and no mutants, so the check stays fast enough to run
+/// over the diff (`secrets`, DEC-2645), lint, and each part of `ci test`, which run over the crates
+/// the diff from the base selects (DEC-1190). The parts run as jobs of their own, so a failing
+/// nextest run never keeps the doctests, the rehearsal or the Python tests from running. No cell and no mutants, so the check stays fast enough to run
 /// before every landing (DEC-2642).
 const LAND_CHECK_JOBS: [&str; 7] = [
     "spec-guard",
