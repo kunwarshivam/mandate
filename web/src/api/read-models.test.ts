@@ -122,7 +122,7 @@ describe("the workspace from the API's read models (DEC-1096)", () => {
         expect(read.mode, scenario).toBe(agent.mode);
         expect(read.mandate?.allocation_usd).toBe(agent.mandate.capital.allocation_usd);
         expect(read.mandate?.max_order_usd).toBe(agent.mandate.risk.max_order_usd);
-        expect(read.account_positions?.map((p) => p.instrument)).toEqual(agent.positions.map((p) => p.instrument.symbol));
+        expect(read.account_positions?.map((p) => p.instrument), "the account's holdings, every agent's").toEqual(fixture.agents.flatMap((a) => a.positions).map((p) => p.instrument.symbol));
         expect(read.pending_approvals).toBe(fixture.approvals.filter((a) => a.agent_id === agent.agent_id && a.status === "delivered").length);
       }
       expect(view.approvals.map((a) => a.approval_id).sort(), scenario).toEqual(fixture.approvals.map((a) => servedId(a.approval_id)).sort());

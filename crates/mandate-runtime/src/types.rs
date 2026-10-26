@@ -309,8 +309,11 @@ pub struct EventDraft {
 impl EventDraft {
     /// The schema version this draft is written at under version 1's references, read from the
     /// members only a later version has, so a host never chooses it apart from the payload:
+    /// - an `ApprovalRequested` whose content names the checks its dry run deferred is version 3
+    ///   (journal spec v0.92, rules 291 and 292; DEC-2515), tested first because version 3's
+    ///   content also binds the plan;
     /// - an `ApprovalRequested` whose content binds the order builder's `execution` plan is
-    ///   version 2 (journal spec v0.42, rule 136);
+    ///   otherwise version 2 (journal spec v0.42, rule 136);
     /// - a `DecisionMade` that names what its dry run deferred to the binding gate is version 3
     ///   (journal spec v0.85, DEC-2388 item 13);
     /// - every other draft is version 1.
@@ -320,6 +323,14 @@ impl EventDraft {
     #[must_use]
     pub fn schema_version(&self) -> u64 {
         match self.event_type.as_str() {
+            "ApprovalRequested"
+                if self
+                    .payload
+                    .get("content")
+                    .is_some_and(|content| content.get("deferred_to_binding").is_some()) =>
+            {
+                3
+            }
             "ApprovalRequested"
                 if self
                     .payload
@@ -658,6 +669,9 @@ pub struct SignalInputs {
     /// Per instrument, the sells this runtime proposed that are still working, which a plan takes
     /// off the position before it proposes an exit (§8.3 step 2, "minus working exits").
     pub working_exits: BTreeMap<InstrumentId, Qty>,
+    /// The asset class of each instrument an admitted thesis named (journal spec §9.4), which a
+    /// plan reads to price and route an exit of an instrument the mandate does not pin.
+    pub thesis_classes: BTreeMap<InstrumentId, mandate_accounting::AssetClass>,
 }
 
 /// Whether the executor is known to hold an intent yet.

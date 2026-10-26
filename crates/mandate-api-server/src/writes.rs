@@ -33,8 +33,8 @@ use mandate_time::UtcNanos;
 
 use crate::backtests::paper;
 use crate::commands::{
-    Command, Issued, KillScope, Settled, draft, in_workspace, release_warning, same,
-    settle_batch_at,
+    Command, Event, Issued, KillScope, Settled, Writer, caused_envelope, draft, in_workspace,
+    release_warning, same, settle_batch_at,
 };
 use crate::http::{App, browser, invalid, problem, problem_body};
 use crate::reads::deployed;
@@ -234,7 +234,17 @@ async fn committed(
     let Some(bytes) = draft(&issued) else {
         return Refused::JournalUnavailable.response();
     };
-    match appended(app, reader, &text, &bytes, gate.now).await {
+    let alert = match command {
+        Command::KillSwitch(_) => match kill_switch_alert(gate, &issued) {
+            Some(alert) => Some(alert),
+            None => return Refused::JournalUnavailable.response(),
+        },
+        _ => None,
+    };
+    let batch: Vec<&[u8]> = std::iter::once(bytes.as_slice())
+        .chain(alert.as_deref())
+        .collect();
+    match appended_batch_at(app, reader, (&text, &batch), gate.now, None).await {
         Settled::Stored(row) => accepted(command.id_member(), &row, gate.now, dropped, status),
         Settled::Conflict => problem(
             StatusCode::CONFLICT,
@@ -245,31 +255,47 @@ async fn committed(
     }
 }
 
-/// `draft`, whose id is `id`, on the control stream `reader` read: the event already stored under
-/// the id, replayed or a conflict (§3.4 step 1), or the append's outcome (DEC-1007 item 6).
-pub(crate) async fn appended(
-    app: &App,
-    reader: &Reader,
-    id: &str,
-    draft: &[u8],
-    now: UtcNanos,
-) -> Settled {
-    appended_at(app, reader, (id, draft), now, None).await
+/// The operation §3.4 derives a user kill switch's `OwnerAlertSent` id under, distinct from the
+/// command's own `kill_switch` (E8-9k).
+const KILL_SWITCH_ALERT: &str = "kill_switch_alert";
+
+/// The `OwnerAlertSent` a user's kill switch commits in its own batch, right after its
+/// `OwnerCommandIssued` (E8-9k; notifications spec §3.2 and §3.4, journal spec §9.15 rules 119,
+/// 120 and 130): kind `kill_switch`, its `subject`, `causation_id` and `owner_command` the command,
+/// on which the dispatcher gives the command exactly one notice. `None` when no id derives or the
+/// canonical form cannot hold it.
+fn kill_switch_alert(gate: &Gate, issued: &Issued<'_>) -> Option<Vec<u8>> {
+    let (_, id) = derived_for(gate, issued.workspace, KILL_SWITCH_ALERT)?;
+    let writer = Writer {
+        workspace: issued.workspace,
+        principal: issued.principal,
+        event_id: &id,
+        environment: issued.environment,
+        now: issued.now,
+    };
+    let command = string(issued.event_id);
+    let mut payload = mandate_canon::Object::new();
+    for (name, value) in [
+        ("kind", string("kill_switch")),
+        ("owner_command", command.clone()),
+        ("subject", command),
+    ] {
+        payload.insert(mandate_canon::Key::new(name).ok()?, value);
+    }
+    let event = Event {
+        event_type: "OwnerAlertSent",
+        schema_version: 1,
+        payload: Value::Object(payload),
+        artifact_refs: Vec::new(),
+        config_refs: Vec::new(),
+    };
+    caused_envelope(&writer, &event, Some(issued.event_id))
 }
 
-/// [`appended`], appended at `pinned` when it names a head (`settle_at`).
-pub(crate) async fn appended_at(
-    app: &App,
-    reader: &Reader,
-    (id, draft): (&str, &[u8]),
-    now: UtcNanos,
-    pinned: Option<u64>,
-) -> Settled {
-    appended_batch_at(app, reader, (id, &[draft]), now, pinned).await
-}
-
-/// [`appended_at`] for `drafts` appended in one batch, all or none, the first of which has the id
-/// `id` and settles it: a retry finds that one stored.
+/// `drafts`, the first of which has the id `id`, on the control stream `reader` read, appended in
+/// one batch, all or none, at `pinned` when it names a head: the event already stored under the id,
+/// replayed or a conflict (§3.4 step 1), or the append's outcome (DEC-1007 item 6). A retry finds
+/// the first stored.
 pub(crate) async fn appended_batch_at(
     app: &App,
     reader: &Reader,

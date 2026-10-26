@@ -43,8 +43,16 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
   v0.85: a deferring allow names its deferrals in byte order with its figures or the two liquidity
   checks, an `auto` opening with a deferral is asked under `policy_overlay` and never proposed, an
   exit defers nothing at version 1, a denial on figures records them, a granted ask still deferring
-  acts, and a property whose oracle is `mandate-journal`'s own parse at the version computed from
-  the verdict; [DEC-2388](../../../../docs/project/decisions/DEC-2388.md) item 12),
+  acts, a deferring opening without a plan asking no one, and a property whose oracles are
+  `mandate-journal`'s own parse at the version computed from the verdict and its `check_batch` over
+  every batch the runtime writes, the request naming exactly the decision's deferrals at version 3;
+  [DEC-2388](../../../../docs/project/decisions/DEC-2388.md) item 12,
+  [DEC-2515](../../../../docs/project/decisions/DEC-2515.md)),
+  `crates/mandate-runtime/tests/account_wide_mode.rs` (the executor's `AgentModeApplied` naming
+  every agent, `*`, and this agent's own, each keyed by restriction as the executor keys them: it
+  holds this agent, is copied and cancels approvals, survives a restart and re-hands no opening,
+  each cause lifts only itself, and a property whose oracle is the executor's keyed map over the
+  generated records; [DEC-2806](../../../../docs/project/decisions/DEC-2806.md)),
   `crates/mandate-runtime/tests/common/mod.rs` (the in-memory shell, which can put an append in doubt,
   fence a writer, and crash and restart), and `crates/mandate-runtime/tests/golden-journal.json` (the
   committed fold output that pins `FOLD_VERSION`). Planted bugs per test: the task brief.

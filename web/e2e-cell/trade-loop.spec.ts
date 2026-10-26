@@ -6,7 +6,8 @@ import { type Page, expect, test } from "@playwright/test";
  * deployed paper agent's request appears in the web app, the owner approves it in the browser with
  * the code the host confirms (`cli_confirm`, DEC-2104), the executor places and fills the order on
  * the fixture broker, the agent's screen shows the order filled, the position and the journal
- * records from the served reads (DEC-2377), and the browser's kill switch is recorded.
+ * records from the served reads (DEC-2377), the positions screen shows the agent's own position, the
+ * audit timeline shows the agent's and its account's records, and the browser's kill switch is recorded.
  *
  * The driver sets it up and plays the host. It runs this file with `OWLHEAD_CELL_SPEC=trade-loop.spec.ts`
  * and the agent in `OWLHEAD_CELL_AGENT`. The spec triggers nothing itself: it waits for a pending
@@ -119,7 +120,25 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     step("journal", String(await journal.getByRole("listitem").count()));
   });
 
+  await test.step("the positions screen shows the agent's own position from the API, its unserved members as not reported", async () => {
+    const own = page.locator(`[data-slot=agent-positions][data-agent="${AGENT}"]`);
+    const shown = await until(page, "/positions", 30_000, async () => (await own.getByRole("row").count()) > 1);
+    if (!shown) refuse("the positions screen showed no row of the agent's own position within 30 s");
+    await expect(own.getByRole("cell", { name: "Not reported" }).first()).toBeVisible();
+    step("positions_screen");
+  });
+
+  await test.step("the audit timeline shows the agent's records and its account's, as the journal holds them", async () => {
+    const records = page.getByRole("list", { name: "Journal records" });
+    const agent = records.locator(`[data-stream="agent:${WORKSPACE}:${AGENT}"]`);
+    const account = records.locator('[data-stream^="acct:"]');
+    const shown = await until(page, "/audit/timeline", 30_000, async () => (await agent.count()) > 0 && (await account.count()) > 0);
+    if (!shown) refuse("the audit timeline showed no record of the agent's stream and of an account stream within 30 s");
+    step("audit_timeline");
+  });
+
   await test.step("the browser's kill switch is recorded for this agent alone", async () => {
+    await page.goto(`/agents/${AGENT}`, { timeout: 15_000 });
     await page.getByRole("button", { name: "Stop", exact: true }).first().click();
     const sheet = page.getByRole("dialog", { name: /^Stop/ });
     await expect(sheet).toBeVisible();

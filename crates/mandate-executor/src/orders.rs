@@ -16,7 +16,7 @@ use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::intent::resubmit;
 use crate::listing::{lookup_target, query_unknown, queryable};
-use crate::payload::{int, object, text};
+use crate::payload::{broker_text, int, object, text};
 use crate::protection::{overdue, protection_cancelled};
 use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
@@ -642,7 +642,15 @@ pub(crate) fn fill(
         let ingested = batch.journal(
             "ExternalActivityIngested",
             None,
-            vec![("fill_id", text(fill.fill_id.0.clone()))],
+            vec![
+                ("source", text("fill")),
+                ("broker_order_id", Value::Null),
+                ("fill_id", broker_text(Some(fill.fill_id.0.as_str()))),
+                ("client_order_id", Value::Null),
+                ("instrument", Value::Null),
+                ("side", Value::Null),
+                ("qty", Value::Null),
+            ],
         )?;
         batch.journal_with_refs("FillApplied", None, refs, pairs)?;
         every_agent_alerted(
@@ -979,16 +987,15 @@ pub(crate) fn reject(
     batch: &mut Batch<'_, '_>,
     reject: &BrokerReject,
 ) -> Result<(), ExecutorError> {
-    let mut pairs = vec![
+    let pairs = vec![
         ("http_status", int(u64::from(reject.http_status))?),
-        ("message", text(reject.message.clone())),
+        ("code", broker_text(reject.code.as_deref())),
+        ("message", broker_text(Some(reject.message.as_str()))),
+        (
+            "client_order_id",
+            broker_text(reject.client_order_id.as_deref()),
+        ),
     ];
-    if let Some(raw) = &reject.client_order_id {
-        pairs.push(("client_order_id", text(raw.clone())));
-    }
-    if let Some(code) = &reject.code {
-        pairs.push(("code", text(code.clone())));
-    }
     batch.journal("RejectObserved", None, pairs)?;
     let cancelling = known(batch, reject.client_order_id.as_deref()).filter(|id| {
         batch

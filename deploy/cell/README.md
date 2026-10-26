@@ -265,6 +265,27 @@ another already pins ([DEC-2036](../../docs/project/decisions/DEC-2036.md)). CI'
 the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecting proxy, set
 `MANDATE_CELL_CA_BUNDLE` to the proxy's CA bundle first.
 
+### The customer journey
+
+`cargo xtask cell journey` (lane GL, [DEC-2134](../../docs/project/decisions/DEC-2134.md)) runs
+the demo's scenario above, and then two more steps in the same workspace:
+
+1. On the host, the owner accepts the go-live disclosure with `mandate disclosure accept
+   go_live_risk`, typing the code it shows. The disclosure is `fixtures/disclosures/go_live_risk.json`,
+   a placeholder pending counsel. This journals `DisclosureAccepted` with `cli_confirm` step-up.
+2. In `web/`, `web/e2e-cell/customer-journey.spec.ts` drives the owner through four things:
+   - **Connections:** the Alpaca paper connection is listed, and Robinhood is shown as real money,
+     off.
+   - **The go-live screen:** every disclosure and platform limit is marked "Pending counsel — not
+     for real-money use". The disclosure's acceptance is read back from the journal.
+   - **Real money:** the owner asks to trade real money for the web agent. The API refuses with
+     `409 live_unavailable`.
+   - **The refusal:** it is read back from the control stream as `RealMoneyRefused`.
+
+`cargo xtask cell journey <workspace> <agent>` runs only those two steps, against a cell that has
+already run the scenario. Every order is still paper on the fixture broker. The customer real-money
+gate stays off, and no step reaches a live venue.
+
 For staging, `cargo xtask cell demo --scenario demo --dry-run --image <ref@sha256:...> --workspace
 <ULID> [--namespace <ns>]` renders the gestures' Job and its inputs' ConfigMap with `helm template`
 alone, from staging's values (`deploy/cell/values/managed.yaml`, then

@@ -6,14 +6,11 @@
 //! reads a clock or a store.
 
 use mandate_gateway::CallRequest;
-use mandate_gateway::Gateway;
-use mandate_gateway::meter::MeterStore;
-use mandate_gateway::provider::{Clock, Transport};
 use mandate_gateway::tools::Turn;
 use mandate_time::UtcNanos;
 
 use crate::agentic::{RunKind, TurnPlan};
-use crate::call::{Answer, CallContext, CallPlan, ResearchCall, after_ms};
+use crate::call::{Answer, CallContext, CallPlan, ModelCalls, ResearchCall, after_ms};
 use crate::error::ResearchRunError;
 use crate::retrieve::Retrieval;
 
@@ -149,11 +146,11 @@ pub struct TurnParts<'a> {
 ///
 /// # Errors
 /// [`ResearchRunError`] when the turn's call cannot be built; nothing is then sent.
-pub fn call_turn<T: Transport, S: MeterStore, C: Clock>(
-    gateway: &mut Gateway<T, S, C>,
+pub fn call_turn<M: ModelCalls + ?Sized>(
+    gateway: &mut M,
     parts: TurnParts<'_>,
 ) -> Result<(TurnCall, Answer), ResearchRunError> {
-    let dispatched_at = gateway.clock_mut().now();
+    let dispatched_at = gateway.now();
     let built = TurnCall::build(
         parts.call,
         parts.plan,

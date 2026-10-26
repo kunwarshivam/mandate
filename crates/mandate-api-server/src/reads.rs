@@ -9,9 +9,11 @@
 //!
 //! Every function here is pure: rows in, values out.
 
+use mandate_accounting::Position;
 use mandate_canon::Value;
+use mandate_gate_context::{Positions, Protection, RiskMark, Row};
 use mandate_journal::StoredEvent;
-use mandate_num::{Qty, SignedQty};
+use mandate_num::Usd;
 
 /// How many resolved approvals the inbox lists, most recently requested first (DEC-979 item 5).
 pub const RESOLVED_LISTED: usize = 100;
@@ -418,48 +420,95 @@ fn set(members: &mut [(&'static str, Value)], name: &str, value: Value) {
 }
 
 /// The agent's net filled quantity per instrument (`read-models/positions`, DEC-2111 item 4): the
-/// `FillApplied` and `LateFillApplied` records of its own orders, as `agent_orders` attributes
-/// them, buys adding and sells subtracting, in instrument order, leaving out an instrument that
-/// nets to zero. `cost_basis`, `risk_mark` and `protection` are `null` (DEC-2111 item 5). `None`
-/// when a fill of its own cannot be read, so no position is served from part of its fills.
+/// `FillApplied` and `LateFillApplied` records of its own orders, buys adding and sells
+/// subtracting, in instrument order, leaving out an instrument that nets to zero. Its orders are
+/// those `mandate_gate_context::Positions` attributes to it (DEC-2138 item 1): its requests, their
+/// replacements, and the protective legs the broker created for its entries. Beside it, DEC-2138's
+/// figures from the same reading: the sub-ledger's §8.1 `cost_basis`, the latest counted
+/// `risk_mark`, §8.2's `market_value` and `unrealized_pnl` at that mark when it is sane and the
+/// position long, and the account's `protection`. `None` when a row the reading reads cannot be
+/// read, so no position is served from part of the journal.
 pub fn agent_positions(account: &[StoredEvent], agent_id: &str) -> Option<Vec<Value>> {
-    let owned: std::collections::BTreeSet<String> = agent_orders(account, agent_id)
-        .iter()
-        .filter_map(|order| order.get("client_order_id").and_then(Value::as_str))
-        .map(str::to_owned)
-        .collect();
-    let mut net: std::collections::BTreeMap<String, SignedQty> = std::collections::BTreeMap::new();
+    let Some(first) = account.first() else {
+        return Some(Vec::new());
+    };
+    let mut read = Positions::new(&first.stream_id, agent_id);
     for row in account {
-        if !matches!(row.event_type.as_str(), "FillApplied" | "LateFillApplied") {
-            continue;
-        }
         let event = envelope(row)?;
-        let owner = text(&event, "payload.client_order_id");
-        if !owner.is_some_and(|id| owned.contains(id)) {
-            continue;
-        }
-        let instrument = text(&event, "payload.instrument_id")?;
-        let qty = SignedQty::from(Qty::parse(text(&event, "payload.qty_gross")?).ok()?);
-        let signed = match text(&event, "payload.side")? {
-            "buy" => qty,
-            "sell" => qty.negated(),
-            _ => return None,
-        };
-        let held = net.entry(instrument.to_owned()).or_insert(SignedQty::ZERO);
-        *held = held.checked_add(signed).ok()?;
+        read.fold(Row {
+            stream: &row.stream_id,
+            event_type: &row.event_type,
+            payload: event.get("payload")?,
+        })
+        .ok()?;
     }
-    Some(
-        net.into_iter()
-            .filter(|(_, qty)| *qty != SignedQty::ZERO)
-            .filter_map(|(instrument, qty)| {
-                object(vec![
-                    ("instrument_id", Value::Str(instrument)),
-                    ("filled_qty", Value::Str(qty.to_string())),
-                    ("cost_basis", Value::Null),
-                    ("risk_mark", Value::Null),
-                    ("protection", Value::Null),
-                ])
-            })
-            .collect(),
-    )
+    read.filled()
+        .map(|(instrument, qty)| {
+            let basis = read.cost_basis(instrument);
+            let mark = read.risk_mark(instrument);
+            let valued = valued(basis, mark)?;
+            object(vec![
+                ("instrument_id", Value::Str(instrument.to_owned())),
+                ("filled_qty", Value::Str(qty.to_string())),
+                ("cost_basis", basis.map_or(Some(Value::Null), cost_basis)?),
+                ("risk_mark", mark.map_or(Some(Value::Null), risk_mark)?),
+                ("market_value", decimal(valued.map(|(value, _)| value))),
+                ("unrealized_pnl", decimal(valued.map(|(_, pnl)| pnl))),
+                (
+                    "protection",
+                    protection_value(&read.protection(instrument))?,
+                ),
+            ])
+        })
+        .collect()
+}
+
+/// A decimal figure, or `null` when it is not served.
+fn decimal(figure: Option<impl std::fmt::Display>) -> Value {
+    figure.map_or(Value::Null, |figure| Value::Str(figure.to_string()))
+}
+
+/// §8.2's market value Q × bid and unrealized P&L Q × bid − B, exactly: `Some(None)` unless the
+/// basis is served, long or flat, and the mark is sane (DEC-2138 item 3; a short is marked at the
+/// ask, which a risk mark does not carry), `None` when the arithmetic overflows.
+fn valued(basis: Option<Position>, mark: Option<RiskMark>) -> Option<Option<(Usd, Usd)>> {
+    let long = basis.filter(|basis| !basis.qty().is_negative());
+    let (Some(basis), Some(bid)) = (long, mark.filter(|mark| mark.sane).and_then(|m| m.bid)) else {
+        return Some(None);
+    };
+    let value = basis.qty().value_at(bid).ok()?;
+    let pnl = value.checked_sub(basis.basis().to_usd()).ok()?;
+    Some(Some((value, pnl)))
+}
+
+fn cost_basis(position: Position) -> Option<Value> {
+    object(vec![
+        ("qty", Value::Str(position.qty().to_string())),
+        ("basis", Value::Str(position.basis().to_string())),
+    ])
+}
+
+fn risk_mark(mark: RiskMark) -> Option<Value> {
+    object(vec![
+        ("bid", decimal(mark.bid)),
+        ("sane", Value::Bool(mark.sane)),
+        ("session", Value::Str(mark.session.as_str().to_owned())),
+        ("marked_at", Value::Str(mark.at.to_string())),
+    ])
+}
+
+fn protection_value(protection: &Protection) -> Option<Value> {
+    object(vec![
+        (
+            "orders",
+            Value::Array(protection.orders.iter().cloned().map(Value::Str).collect()),
+        ),
+        (
+            "covered_qty",
+            Value::Str(protection.covered_qty.to_string()),
+        ),
+        ("stop", decimal(protection.stop)),
+        ("take_profit", decimal(protection.take_profit)),
+        ("unprotected_since", decimal(protection.unprotected_since)),
+    ])
 }

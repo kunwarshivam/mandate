@@ -494,6 +494,85 @@ pub fn record_code(account: &str, checked: &str, user: &str) -> String {
     ))
 }
 
+/// The go-live disclosure the customer journey accepts on the host (DEC-2134), a placeholder
+/// pending counsel, as its file holds it.
+const GO_LIVE_DISCLOSURE: &str = include_str!("../../../fixtures/disclosures/go_live_risk.json");
+
+/// The go-live disclosure's version: `sha256:` over its canonical JSON (sorted keys, no
+/// whitespace), as `mandate disclosure accept` stores it.
+///
+/// # Errors
+/// A file that is not JSON.
+pub fn disclosure_version() -> Result<String> {
+    let parsed: Value =
+        serde_json::from_str(GO_LIVE_DISCLOSURE).context("the go-live disclosure is not JSON")?;
+    Ok(reference(serde_json::to_string(&parsed)?.as_bytes()))
+}
+
+/// The code `mandate disclosure accept go_live_risk` shows for `version` (DEC-530 item 4).
+pub fn disclosure_code(version: &str) -> String {
+    code(&format!(
+        r#"{{"document":"go_live_risk","gesture":"disclosure_accept","version":"{version}"}}"#
+    ))
+}
+
+/// The owner accepts the go-live disclosure on the host in `workspace`, as the go-live screen
+/// asks, by running `mandate disclosure accept` with the code it shows, in a Job of the demo's
+/// image.
+///
+/// # Errors
+/// A Job that did not run, or a CLI that did not print `accepted`.
+pub fn accept_disclosure(workspace: &str) -> Result<()> {
+    let id = run_id()?;
+    let user = FOUNDER.to_ascii_lowercase();
+    let code = disclosure_code(&disclosure_version()?);
+    let args = [
+        "disclosure",
+        "accept",
+        "go_live_risk",
+        "--code",
+        &code,
+        "--workspace",
+        workspace,
+        "--user",
+        &user,
+        "--journal",
+        JOURNAL,
+        "--store",
+        STORE,
+    ];
+    let gesture = Gesture {
+        container: "g98-disclosure-accept".into(),
+        shows: "the owner's acceptance of the go-live disclosure, on the host",
+        command: None,
+        args: args.map(str::to_owned).to_vec(),
+        expect: "accepted ".into(),
+    };
+    let rendered = render(
+        &[
+            format!("run.id=\"{id}d\""),
+            format!("run.args={}", json!(gesture.args)),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    let inputs = demo_inputs()?;
+    let (succeeded, logs) = run_job(gestures_job(
+        rendered,
+        &[&gesture],
+        &format!("demo-in-{id}d"),
+        &inputs.files(),
+        NAMESPACE,
+    )?)?;
+    let accepted = lines_of(&logs, &gesture.container)
+        .iter()
+        .any(|l| l.starts_with("accepted "));
+    if !(succeeded && accepted) {
+        bail!("`mandate disclosure accept` did not accept the go-live disclosure:\n{logs}");
+    }
+    eprintln!("    disclosure: the owner accepted go_live_risk on the host");
+    Ok(())
+}
+
 pub(super) fn deploy_code(agent: &str, version: &str) -> String {
     code(&format!(
         r#"{{"agent_id":"{agent}","gesture":"agent_deploy","mandate_version":"{version}"}}"#
@@ -1492,6 +1571,15 @@ pub fn dry_run(name: &str, args: &[&str]) -> Result<()> {
 
 /// `cargo xtask cell demo --scenario <name>`.
 pub fn run(name: &str) -> Result<()> {
+    run_in(name).map(|_| ())
+}
+
+/// [`run`], answering the workspace the scenario ran in, for a step that follows it there
+/// (`cargo xtask cell journey`).
+///
+/// # Errors
+/// As [`run`].
+pub fn run_in(name: &str) -> Result<String> {
     if !SCENARIOS.contains(&name) {
         bail!(
             "no scenario `{name}`; the scenarios are {}",
@@ -1723,7 +1811,7 @@ pub fn run(name: &str) -> Result<()> {
         all.len(),
         NODE
     );
-    Ok(())
+    Ok(workspace)
 }
 
 /// Reads `check` with the owner's session every two seconds until it passes or [`APPLIED_WITHIN`]
@@ -2528,6 +2616,23 @@ mod tests {
         assert_eq!(payload["result"], "completed");
         assert_eq!(payload["backtest_id"], BACKTEST_ID);
         assert_eq!(payload["mandate_version"], reference(&mandate()));
+    }
+
+    /// The journey accepts the version `mandate disclosure accept` stores, which its own test pins,
+    /// with the code the CLI shows for it.
+    #[test]
+    fn the_journey_accepts_the_go_live_disclosures_pinned_version_with_its_code() -> Result<()> {
+        let version = disclosure_version()?;
+        assert_eq!(
+            version,
+            "sha256:35ab1cb9c3861954a3d846866198e8b4c801532de56e8b00ee86e51404d541f2"
+        );
+        let gesture = format!(
+            r#"{{"document":"go_live_risk","gesture":"disclosure_accept","version":"{version}"}}"#
+        );
+        assert_eq!(disclosure_code(&version), code(&gesture));
+        assert_eq!(disclosure_code(&version).len(), 8);
+        Ok(())
     }
 
     /// Step 5 runs the runner on the confirmed version in the pod's store and records the payload

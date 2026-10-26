@@ -123,7 +123,9 @@ pub(super) fn runs_in(mode: Mode) -> bool {
 }
 
 /// A run's start (§6.9 step 1): its loop state, and `RunStarted` journaled with what it froze. The
-/// data universe's canonical bytes are returned for the shell to store (DEC-2206 item 4).
+/// data universe's canonical bytes are returned for the shell to store (DEC-2206 item 4). `event`
+/// is the `ObservationRecorded` of the item that brought a `monitor` run forward, journaled just
+/// before in the same batch, or `None` for a scheduled run (journal spec rule 271, DEC-2392).
 pub(super) fn start(
     kind: RunKind,
     menu: &BTreeSet<Tool>,
@@ -131,6 +133,7 @@ pub(super) fn start(
     cut_off: RiskClock,
     context: &ResearchContext<'_>,
     batch: &mut Batch<'_>,
+    event: Option<&EventId>,
 ) -> Result<(Agentic, Vec<u8>), RuntimeError> {
     let deadline = RiskClock::from_secs(
         cut_off
@@ -155,8 +158,14 @@ pub(super) fn start(
         (
             "trigger",
             payload::object(vec![
-                ("kind", payload::text("schedule")),
-                ("cause", Value::Null),
+                (
+                    "kind",
+                    payload::text(if event.is_some() { "event" } else { "schedule" }),
+                ),
+                (
+                    "cause",
+                    event.map_or(Value::Null, |cause| payload::text(&cause.0)),
+                ),
             ])?,
         ),
         ("output", payload::text(output_name(agentic.output))),

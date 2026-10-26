@@ -15,7 +15,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::Value;
 use mandate_research::{
     AdmissionChange, AdmissionDecision, AssetId, LineageId, LineageState, RefusalReason, ThesisId,
@@ -37,6 +37,9 @@ const THESIS_REASONS: [&str; 3] = ["thesis_expired", "thesis_invalidated", "line
 pub(crate) struct Theses {
     entries: BTreeMap<AssetId, UniverseEntry>,
     lineages: LineageState,
+    /// Each admitted thesis's instrument's asset class, as its record states it from reference data
+    /// (journal spec §9.4), which the plan needs to price and route the instrument's exit.
+    classes: BTreeMap<AssetId, AssetClass>,
 }
 
 impl Theses {
@@ -54,6 +57,11 @@ impl Theses {
         let expires_at = payload::str_of(body, "expires_at")
             .and_then(|at| UtcNanos::parse_rfc3339(at).ok())
             .ok_or_else(|| payload::non_canonical("expires_at"))?;
+        let class = match payload::str_of(body, "asset_class") {
+            Some("us_equity") => AssetClass::UsEquity,
+            Some("crypto") => AssetClass::Crypto,
+            _ => return Err(payload::non_canonical("asset_class")),
+        };
         let admitted = match body.get("admitted") {
             Some(Value::Bool(admitted)) => *admitted,
             _ => return Err(payload::non_canonical("admitted")),
@@ -70,6 +78,7 @@ impl Theses {
         self.lineages
             .replay(&lineage, revision, &instrument, decision);
         if admitted {
+            self.classes.insert(instrument.clone(), class);
             self.entries.insert(
                 instrument.clone(),
                 UniverseEntry {
@@ -131,6 +140,14 @@ impl Theses {
         ended
             .iter()
             .filter_map(|asset| InstrumentId::new(asset.as_str()).ok())
+            .collect()
+    }
+
+    /// The asset class of every instrument an admitted thesis named, as the order plan names it.
+    pub(crate) fn classes(&self) -> BTreeMap<InstrumentId, AssetClass> {
+        self.classes
+            .iter()
+            .filter_map(|(asset, class)| Some((InstrumentId::new(asset.as_str()).ok()?, *class)))
             .collect()
     }
 
