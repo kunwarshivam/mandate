@@ -48,6 +48,9 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
   every batch the runtime writes, the request naming exactly the decision's deferrals at version 3;
   [DEC-2388](../../../../docs/project/decisions/DEC-2388.md) item 12,
   [DEC-2515](../../../../docs/project/decisions/DEC-2515.md)),
+  `crates/mandate-runtime/tests/unaskable.rs` (an ask the runtime cannot build is the dry run's
+  deny with its reason, `ask_unbound`, `plan_mismatch` or `content_unhashable`, notified once, and
+  a well-built one is asked; [DEC-2814](../../../../docs/project/decisions/DEC-2814.md)),
   `crates/mandate-runtime/tests/account_wide_mode.rs` (the executor's `AgentModeApplied` naming
   every agent, `*`, and this agent's own, each keyed by restriction as the executor keys them: it
   holds this agent, is copied and cancels approvals, survives a restart and re-hands no opening,

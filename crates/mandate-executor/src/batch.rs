@@ -299,7 +299,8 @@ pub(crate) fn schema_version(event_type: &str) -> u64 {
         | "OrderSubmitted"
         | "OrderStateChanged"
         | "ProtectionChanged"
-        | "AccountSnapshotRecorded" => 2,
+        | "AccountSnapshotRecorded"
+        | "FillApplied" => 2,
         _ => 1,
     }
 }
@@ -325,10 +326,12 @@ mod tests {
             "GateDecided",
             "OrderSubmitted",
             "AccountSnapshotRecorded",
+            "FillApplied",
         ] {
             assert_eq!(schema_version(event_type), 2, "{event_type}");
         }
         for event_type in [
+            "LateFillApplied",
             "OrderRequestRecorded",
             "ReconciliationRun",
             "OwnerCommandRefused",
