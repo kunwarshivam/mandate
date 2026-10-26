@@ -90,6 +90,13 @@ fn a_single_call_takes_the_recorded_reply() {
         reply.delivery,
         "a single call has no turns to script"
     );
+    let agentic = model(AGENTIC);
+    assert!(!agentic.turns.is_empty(), "the fixture scripts turns");
+    assert_eq!(
+        body(&Replies::new(&agentic).reply_for(&request(None, 0)).delivery),
+        final_body(&agentic).as_slice(),
+        "a call with no run kind takes the final reply even where a turn is scripted"
+    );
 }
 
 /// DEC-2266: an agentic call takes the scripted turn after the turns its transcript holds, and the
