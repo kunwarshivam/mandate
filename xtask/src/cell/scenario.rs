@@ -2068,7 +2068,7 @@ const APPLIED_WITHIN: Duration = Duration::from_secs(90);
 /// How long the research loop waits for each of its links to appear in the journal: one research
 /// pass at the runtime's tick, or the executor's next reconciliation, with the Job's ten minutes in
 /// mind, since a link not seen stops the loop's later reads.
-const LINK_WITHIN: Duration = Duration::from_secs(90);
+const LINK_WITHIN: Duration = Duration::from_secs(60);
 
 /// Whether the research loop's later links are read: `Open` until a link is not seen, then
 /// `Stopped` with that link, so every later link reads as not reached rather than spending its own
