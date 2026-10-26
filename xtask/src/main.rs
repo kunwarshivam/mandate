@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 mod admission_drill;
 mod cell;
+mod deferring;
 mod founding;
 mod gitops;
 mod image;
@@ -369,6 +370,7 @@ fn run() -> Result<()> {
         ["leak-guard"] => leak::guard_in(&root),
         ["live-feature"] => live_feature_in(Path::new(".")),
         ["mail-guard"] => mail::guard_in(Path::new(".")),
+        ["deferring-guard"] => deferring::guard_in(Path::new(".")),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
         ["release", "tools"] => {
@@ -3447,6 +3449,7 @@ fn lint(
     infra_workflow_in(root)?;
     mail::guard_in(root)?;
     leak::guard_in(root)?;
+    deferring::guard_in(root)?;
     backlog_rows_in(root, base)?;
     workspace_checks()
 }
@@ -26261,6 +26264,49 @@ jq -r "$filter" "$src"
                 .as_deref()
                 .is_some_and(|err| err.contains("live-feature")),
             "a workflow that runs `live` fails the lint job naming the check, got {planted:?}"
+        );
+        assert!(
+            !reached.get(),
+            "the workspace checks run only after it passes"
+        );
+        Ok(())
+    }
+
+    /// The lint job runs the deferring guard over its own repository (DEC-2378 item 11 condition
+    /// 3): a fixture crate that names `evaluate_deferring` fails the job naming the check, before
+    /// the workspace checks run.
+    #[test]
+    fn the_lint_job_runs_the_deferring_guard_on_its_repository() -> Result<()> {
+        let root = env::temp_dir().join(format!(
+            "mandate-xtask-lint-deferring-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        fixture_workspace(&root)?;
+        for dir in [".github/workflows", ".github/scripts", "deploy", "scripts"] {
+            fs::create_dir_all(root.join(dir))?;
+        }
+        let clean = lint(&root, None, || Ok(())).map_err(|err| format!("{err:#}"));
+        fs::write(
+            root.join("a/src/lib.rs"),
+            "//! A fixture crate.\npub fn f() { mandate_ports::evaluate_deferring(); }\n",
+        )?;
+        let reached = Cell::new(false);
+        let planted = lint(&root, None, || {
+            reached.set(true);
+            Ok(())
+        })
+        .map_err(|err| format!("{err:#}"))
+        .err();
+        fs::remove_dir_all(&root).ok();
+        assert_eq!(clean, Ok(()), "a clean fixture workspace passes");
+        assert!(
+            planted
+                .as_deref()
+                .is_some_and(|err| err.contains("deferring-guard")),
+            "a crate naming it fails the lint job naming the check, got {planted:?}"
         );
         assert!(
             !reached.get(),

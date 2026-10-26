@@ -158,9 +158,11 @@ impl DeployedGate {
     /// An order that reduces risk is answered `None` too: the core then keeps its own decision,
     /// which a missing snapshot never turns into a denial (`AGENTS.md` rule 13, DEC-2034 item 2).
     /// The account's positions and working orders are not yet read, so an opening is answered
-    /// only from a flat account, and only where the account's day trades could not bind: under the
+    /// only from a flat account, and only where the account's day trades could not bind (trading
+    /// spec §9.2): under `intraday_margin`, which counts none, while the broker reports no
+    /// maintenance deficit (a deficit puts the account's agents in exits only), and under the
     /// legacy pattern-day-trader regime with a prior close's equity at or above the rule set's
-    /// threshold (trading spec §9.2). Any other regime holds it.
+    /// threshold.
     pub fn input(
         &self,
         facts: &OrderFacts,
@@ -178,9 +180,15 @@ impl DeployedGate {
         let liquidity = facts.liquidity?;
         let agent = facts.agent.clone()?;
         let halted = facts.halted?;
-        if rules.regime != DayTradeRegime::LegacyPdt
-            || rules.prior_close_equity < self.config.legacy_pdt_equity_threshold
-        {
+        let day_trades_cannot_bind = match rules.regime {
+            DayTradeRegime::IntradayMargin { maintenance_excess } => {
+                maintenance_excess >= Usd::ZERO
+            }
+            DayTradeRegime::LegacyPdt => {
+                rules.prior_close_equity >= self.config.legacy_pdt_equity_threshold
+            }
+        };
+        if !day_trades_cannot_bind {
             return None;
         }
         let journaled = &facts.journaled;
