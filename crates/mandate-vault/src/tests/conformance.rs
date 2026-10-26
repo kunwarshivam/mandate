@@ -359,13 +359,14 @@ pub async fn after_revoke_the_session_takes_no_lease<H: Harness>(h: &H) {
     );
 }
 
-/// The oracle for the platform's own secrets (DEC-2020 item 2), written out by hand: the model
-/// gateway reads the model provider's key, the email sender the email credential, and only the
-/// secret import writes either.
+/// The oracle for the platform's own secrets (DEC-2020 item 2, DEC-2277), written out by hand: the
+/// model gateway reads the model provider's key, the email sender the email credential, the news
+/// reader the news data key, and only the secret import writes any.
 pub fn platform_holders(secret: PlatformSecret) -> Holders {
     let reads = match secret {
         PlatformSecret::ModelProviderKey => Identity::ModelGateway,
         PlatformSecret::EmailCredential => Identity::EmailSender,
+        PlatformSecret::NewsDataKey => Identity::NewsReader,
     };
     Holders {
         reads,
