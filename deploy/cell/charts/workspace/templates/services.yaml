@@ -47,7 +47,7 @@ spec:
 {{- end -}}
 {{- $root := . }}
 {{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) }}
-{{- if and (not (has .name (list "api" "deploy-manager" "role-provisioner" "connect-finish"))) (not (include "mandate.startedElsewhere" (dict "root" $root "p" .))) }}
+{{- if and (not (has .name (list "api" "deploy-manager" "deploy-manager-research" "role-provisioner" "connect-finish"))) (not (include "mandate.startedElsewhere" (dict "root" $root "p" .))) }}
 ---
 {{ include "mandate.emit" (include "mandate.service" (dict "root" $root "p" .)) }}
 {{- end }}
