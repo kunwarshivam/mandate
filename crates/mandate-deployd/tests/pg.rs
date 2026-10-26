@@ -86,7 +86,7 @@ fn a_deployment_on_postgres_is_journaled_once_before_its_processes_start() {
             harness::established(&harness::connection_of(account), account),
             harness::deployed("agent_1", account),
         ] {
-            let outcome = services.append(&draft, harness::at(0)).await.unwrap();
+            let outcome = services.append(&[&draft], harness::at(0)).await.unwrap();
             assert!(committed(&outcome), "{outcome:?}");
         }
         let mut deployer = Deployer::new(
@@ -131,7 +131,7 @@ fn a_restarted_manager_on_postgres_journals_no_second_start() {
             harness::established(&harness::connection_of(account), account),
             harness::deployed("agent_1", account),
         ] {
-            services.append(&draft, harness::at(0)).await.unwrap();
+            services.append(&[&draft], harness::at(0)).await.unwrap();
         }
         let mut first = Deployer::new(
             harness::identity(),

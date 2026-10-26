@@ -84,7 +84,7 @@ impl Journal {
 
     /// Appends one control services' draft, which must commit.
     pub fn services(&self, draft: &[u8], now: UtcNanos) {
-        let outcome = append(&self.inner, draft, now);
+        let outcome = append(&self.inner, &[draft], now);
         assert!(
             matches!(outcome, AppendOutcome::Committed(_)),
             "{outcome:?}"
@@ -118,12 +118,12 @@ impl Journal {
     }
 }
 
-fn append(journal: &Shared, draft: &[u8], now: UtcNanos) -> AppendOutcome {
+fn append(journal: &Shared, drafts: &[&[u8]], now: UtcNanos) -> AppendOutcome {
     let mut journal = journal.borrow_mut();
     let stream = StreamId::parse(STREAM).unwrap();
     let epoch = journal.take_ownership(&stream);
     let head = journal.head(&stream).seq;
-    journal.append(&stream, head, epoch, now, &[draft])
+    journal.append(&stream, head, epoch, now, drafts)
 }
 
 impl ControlJournal for Journal {
@@ -136,7 +136,7 @@ impl ControlJournal for Journal {
 
     async fn append(
         &mut self,
-        draft: &[u8],
+        drafts: &[&[u8]],
         recorded_at: UtcNanos,
     ) -> Result<AppendOutcome, Unavailable> {
         if *self.unavailable.borrow() {
@@ -148,7 +148,7 @@ impl ControlJournal for Journal {
             return Err(Unavailable);
         }
         drop(failing);
-        let outcome = append(&self.inner, draft, recorded_at);
+        let outcome = append(&self.inner, drafts, recorded_at);
         let racing: Vec<Vec<u8>> = self.after_append.borrow_mut().drain(..).collect();
         for other in racing {
             self.services(&other, recorded_at);
@@ -338,7 +338,7 @@ pub fn restart(old: Manager) -> Manager {
 pub fn manager(journal: &Journal, accounts: Accounts) -> Manager {
     journal.agents.borrow_mut().extend(accounts.agents);
     for (connection, account) in &accounts.connections {
-        let outcome = append(&journal.inner, &established(connection, account), at(0));
+        let outcome = append(&journal.inner, &[&established(connection, account)], at(0));
         assert!(
             matches!(
                 outcome,

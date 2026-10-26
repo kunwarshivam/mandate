@@ -232,6 +232,17 @@ fn a_kill_switch_start_that_crash_loops_before_it_ends_raises_kill_switch_unappl
         vec![UNAPPLIED],
         "an unapplied switch raises its own opaque alert, once, in place of crash_loop"
     );
+    let looped: Vec<String> = journal
+        .rows()
+        .iter()
+        .filter(|row| row.event_type == "ProcessCrashLooped")
+        .map(|row| row.event_id.clone())
+        .collect();
+    assert_eq!(
+        owner_alerts(&journal),
+        looped,
+        "and its owner is told once, in the loop's own batch (E8-17)"
+    );
     clean(&mut m);
 }
 
@@ -289,6 +300,43 @@ const AGENTS: [(&str, &str); 3] = [
 ];
 const ACCOUNTS: [&str; 2] = [ACCOUNT, OTHER];
 const UNAPPLIED: &str = "kill_switch_unapplied";
+
+/// Every owner alert on the control stream, each checked against the record it answers (E8-17,
+/// DEC-2351 items 2 and 3): an `OwnerAlertSent` of kind `kill_switch_unapplied` that names, as its
+/// subject and its cause, the `ProcessCrashLooped` journaled just before it, with opaque ids and
+/// nothing else (`AGENTS.md` rule 6). Its batch is the loop's: the journal refuses any other (rule
+/// 130). Returns the loops they name.
+fn owner_alerts(journal: &Journal) -> Vec<String> {
+    let rows = journal.rows();
+    let mut named = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        if row.event_type != "OwnerAlertSent" {
+            continue;
+        }
+        let body = mandate_canon::parse(&row.body).unwrap();
+        let payload = body.get("payload").and_then(Value::as_object).unwrap();
+        let members: Vec<&str> = payload.keys().map(|key| key.as_str()).collect();
+        assert_eq!(
+            members,
+            ["kind", "owner_command", "subject"],
+            "opaque ids and the kind only"
+        );
+        assert_eq!(payload.get("kind").and_then(Value::as_str), Some(UNAPPLIED));
+        assert_eq!(payload.get("owner_command"), Some(&Value::Null));
+        let subject = payload.get("subject").and_then(Value::as_str).unwrap();
+        let cause = index.checked_sub(1).map(|before| &rows[before]);
+        assert!(
+            cause.is_some_and(|c| c.event_type == "ProcessCrashLooped" && c.event_id == subject),
+            "the alert follows the loop it names"
+        );
+        assert_eq!(
+            body.get("causation_id").and_then(Value::as_str),
+            Some(subject)
+        );
+        named.push(subject.to_owned());
+    }
+    named
+}
 
 #[derive(Debug, Clone)]
 enum Op {
@@ -496,6 +544,7 @@ fn check_seeded(ops: &[Op], bug: Bug) -> Result<(), TestCaseError> {
     let mut now = 1_i64;
     let mut seen = journal.rows().len();
     let mut alerted = 0;
+    let mut owners = 0;
     let mut nth = 0_u32;
     for op in ops {
         let mut switches: Vec<(String, Vec<&'static str>)> = Vec::new();
@@ -674,6 +723,12 @@ fn check_seeded(ops: &[Op], bug: Bug) -> Result<(), TestCaseError> {
             vec![UNAPPLIED; unapplied + rearmed],
             "each crash loop that leaves a switch unapplied raises kill_switch_unapplied once, again once by a restarted manager, and nothing else alerts"
         );
+        owners += unapplied;
+        prop_assert_eq!(
+            owner_alerts(&journal).len(),
+            owners,
+            "each crash loop that leaves a switch unapplied tells its owner once, in its batch, and a restarted manager never again"
+        );
     }
     Ok(())
 }
@@ -801,6 +856,11 @@ fn a_restarted_manager_raises_kill_switch_unapplied_again_once() {
     }
     let codes: Vec<&str> = m.alerts().0.iter().map(|alert| alert.code).collect();
     assert_eq!(codes, vec![UNAPPLIED, UNAPPLIED]);
+    assert_eq!(
+        owner_alerts(&journal).len(),
+        1,
+        "the operator is told again; the owner was told once, by the loop's batch (DEC-2351 item 3)"
+    );
 }
 
 /// An executor an agent still wants is restarted after any exit, a successful one included: only one
@@ -895,6 +955,10 @@ fn a_redeploy_after_a_kill_switch_run_makes_a_later_crash_loop_an_ordinary_one()
         vec![CRASH_LOOP.code, CRASH_LOOP.code],
         "and a restarted manager raises crash_loop again, never kill_switch_unapplied"
     );
+    assert!(
+        owner_alerts(&journal).is_empty(),
+        "an ordinary loop tells no owner of an unapplied switch"
+    );
 }
 
 /// DEC-2344 item 1 and rule 13: a switch that covers the executor after an unapplied loop starts a
@@ -936,6 +1000,11 @@ fn a_covering_switch_after_an_unapplied_loop_starts_a_new_run_that_can_loop_agai
         codes,
         vec![UNAPPLIED, UNAPPLIED],
         "each unapplied switch is reported"
+    );
+    assert_eq!(
+        owner_alerts(&journal).len(),
+        2,
+        "and each loop tells its owner once"
     );
     clean(&mut m);
 }

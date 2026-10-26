@@ -135,13 +135,16 @@ fn the_fixtures_control_stream_appends_at_its_head_and_reads_after_a_position() 
     harness::block_on(async {
         assert!(control.rows_after(0).await.unwrap().is_empty());
         let opened = harness::opened();
-        let first = control.append(&opened, harness::at(0)).await.unwrap();
+        let first = control.append(&[&opened], harness::at(0)).await.unwrap();
         assert!(matches!(first, AppendOutcome::Committed(_)), "{first:?}");
         let account = "01J8Z2ACCT00000000000000A1";
         let established = harness::established(&harness::connection_of(account), account);
-        let second = control.append(&established, harness::at(1)).await.unwrap();
+        let second = control
+            .append(&[&established], harness::at(1))
+            .await
+            .unwrap();
         assert!(matches!(second, AppendOutcome::Committed(_)), "{second:?}");
-        let again = control.append(&opened, harness::at(2)).await.unwrap();
+        let again = control.append(&[&opened], harness::at(2)).await.unwrap();
         assert!(
             matches!(again, AppendOutcome::AlreadyCommitted(_)),
             "{again:?}"
