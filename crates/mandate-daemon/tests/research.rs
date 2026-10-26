@@ -982,7 +982,8 @@ fn an_event_batch_in_doubt_is_written_once() {
 }
 
 /// A restarted process offers the journaled item again, with the same bytes, and the core, folded
-/// from the journal, starts nothing for it.
+/// from the journal, starts nothing for it. The pass comes after the debounce, with no research
+/// call recorded and no run carried over, so only rule 271's fold of the item refuses it.
 #[test]
 fn a_restarted_process_starts_no_second_run_on_the_item() {
     let rig = Rig::default();
@@ -999,8 +1000,9 @@ fn a_restarted_process_starts_no_second_run_on_the_item() {
         &config(),
         at(NOW + 120),
     );
-    tick(&rig, NOW + 3_600);
-    restarted.step(at(NOW + 3_600));
+    assert_eq!(count(&rig, "ModelInvocationRecorded"), 0);
+    tick(&rig, NOW + 1_000);
+    restarted.step(at(NOW + 1_000));
     assert_eq!(
         stored(&rig, "ObservationRecorded").len(),
         1,
