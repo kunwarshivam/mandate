@@ -1,4 +1,4 @@
-"""Journal spec v0.88 §9.6's reference vectors for `ApprovalRequested` version 3 (DEC-2514): the
+"""Journal spec v0.90 §9.6's reference vectors for `ApprovalRequested` version 3 (DEC-2515): the
 runtime's approval request names, inside its hashed content, the checks its dry run deferred to
 the executor's binding gate, with rule 291 on the request and rule 292 on the batch that holds it
 and the `DecisionMade` that asks.
@@ -22,7 +22,7 @@ from common import DEFERRED_PARTS, Violation, apply_change, change, delete, dige
 from control import check_of, draft_for, reported, violations
 from requests import PLAN, V2, base_drafts, oracle_hash, restated
 
-SPEC = "docs/specs/journal.md v0.88 §9.6 rules 291 and 292 (DEC-2514)"
+SPEC = "docs/specs/journal.md v0.90 §9.6 rules 291 and 292 (DEC-2515)"
 V3 = "requested_v3"
 DEFERRED = "payload.content.deferred_to_binding"
 NAMED = ["halt", "liquidity_floor", "participation"]

@@ -34,7 +34,7 @@ It stopped in **step 4**: the trade loop "stopped before approval", because no a
 | X5 | **The executor knows nothing** | The fixture broker fills (`FixturePaper::filling`, executord/src/main.rs:218; paper.rs:201-206; #2468), and executord reads `IntentProposed` (follow.rs:463-499, process.rs:582). But its wiring is still NoMandate, NoInstruments, NoFacts, NoProtection, NoQuotes and NoMarks (executord/src/fixture.rs:29-102), and NoFacts holds every opening at the binding gate (:63-70) | 3, 4, 6 | X (G1b to G2b: #2458, #2463, #2470, #2478) + LV | L |
 | X6 | **The approve is refused** | Passkey enrolment and assertion are implemented (api-server/src/passkeys.rs:187; methods.rs:117), and confirm, deploy and connect judge step-up (version_routes.rs:302-314; connect.rs:352). The responses route still answers 401 to every `Approved` grant, `StepUpMissing` with evidence and `StepUpRequired` without (api-server/src/writes.rs:414-419). Web's cli_confirm approve (#2435) is real, but only the mock API accepts it | 1, 4, 7 | L1 (#2469/#2474, DEC-2129) | M |
 | X7 | ~~Exits never reach the executor~~ **Closed by DEC-2387** | Only the owner's exit of one instrument was unwired (see "X7 by path" below). The runtime now journals one `IntentProposed` per sell leg, caused by the `OwnerExitRequested` copy, which executord reads (follow.rs `proposals`, `confirmed`); `fixtures/contracts/owner-exit-agent-stream.json` pins the rows both processes read. Kill switches, discretionary and builder risk exits already reached it | — | EX | — |
-| X8 | **Alerts are dropped** | The daemon prints each alert to stderr (runtime-models/src/main.rs); executord discards them (serve.rs:205). `mandate-dispatcher` has no binary and no process | 4, 7 | EX | S/M |
+| X8 | **Alerts are dropped** | Mapped by lane EX (see "X8 by path"): the cores raise owner alerts only as effects (`Effect::Notify`, `Effect::NotifyApproval`), which the processes print or discard (runtime-models/src/main.rs, executord/src/serve.rs). Nothing writes `OwnerAlertSent`, the dispatcher's only cause besides `ApprovalRequested`, except the executor's risk-limit and tripwire records. `mandate-dispatcher` is a library with no binary, image or chart entry | 4, 7 | EX | M–L |
 | X9 | **NEW: deployed event ids are not unique across streams** | executord's `fixture::Ids` is `1`, epoch, head, ordinal (executord/src/fixture.rs:18-26); the daemon's is `0`, epoch, head, ordinal (daemon/src/fixture.rs:20-24). The journal requires a globally unique `event_id` (journal spec, envelope table: "ULID; globally unique"). Every account stream's first batch therefore has the same ids, and so does every agent stream's. In one cell journal only the first agent's runtime can open its stream, and only the first account's connect check commits. Reproduced: a second demo run on one cell, connect check `append_refused`. The trade loop's agent is the second | 4, 7 | unowned (X and D1 crates) | S |
 
 ## X7 by path (lane EX, main at 4e98608)
@@ -50,6 +50,20 @@ The journal is the only channel from the runtime to the executor in the cell (de
 | Executor-originated risk exits (watchdog, unprotected bound, drawdown flatten) | none: the executor originates them | its own state | in the executor already; the drawdown ladder is not yet called (risk_state.rs:7-9, lane TW) |
 
 Once handed, the core runs trading spec §5.4's marketable exit sequence (cancel protection, confirm, re-gate, submit, priced by §5.6), and cancels the agent's resting opening buys first (§5.3 rule 5). The in-process path (mandate-paper) had the same hole: the core refuses every `Flatten` handoff, so DEC-2387 hands the legs as orders there too.
+
+## X8 by path (lane EX)
+
+The notifications spec's design (§5.1, §5.5, §5.9): each stream's owner writes `OwnerAlertSent` in the subject's own batch (journal spec §9.15, rules 119, 120 and 130), and a dispatcher process tails the journal and journals `NoticeIssued` and `NoticeAttempted` on `ntf:{workspace}`. The `ApprovalRequested` cause is already journaled.
+
+| Piece | State | Gap |
+|---|---|---|
+| Executor owner alerts (`batch.notify`: protection, exit_stalled, reconciliation, agent_held, kill_switch keys) | effect only | executord's `hand` turns `Effect::Notify` into an `Alert` that `serve.rs` discards; no `OwnerAlertSent` (E8-9) |
+| Runtime owner alerts (step.rs:521, research.rs:1268-1280) | effect only | the daemon prints `alert {key}` to stderr (main.rs) |
+| `OwnerAlertSent` writers | executor risk-limit and tripwire records only (risk_state.rs, tripwire.rs) | every other alert kind |
+| Operator alerts (`journal_unavailable`, `opening_held`, `exit_held`, `flatten_unplanned`) | process-only | infrastructure alerts (`mandate-alerts`, E21-39), not owner notices |
+| Dispatcher | pure step (DEC-704), retry read (DEC-707), Postgres journal edge, recorded email transport, web push off | no binary, no image, no `processes.json` entry, no chart values (E8-10 slice D10, DEC-2500) |
+
+Plan: (1) the processes write `OwnerAlertSent` for each core alert in its own batch, mapped by spec §3.2's closed key-to-kind table; (2) the dispatcher binary in the cell over the journal, sending only through the recorded transports and the pull channels.
 
 ## Step 1: the owner creates an agent in web (envelope, confirm, deploy)
 

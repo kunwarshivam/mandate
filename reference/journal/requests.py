@@ -346,7 +346,7 @@ def invalid_drafts() -> list[dict]:
         ),
         invalid(
             "at_version_4",
-            "§9.6: versions 1 to 3 only (v0.88)",
+            "§9.6: versions 1 to 3 only (v0.90)",
             V2,
             [change("schema_version", 4)],
             "unknown_schema",

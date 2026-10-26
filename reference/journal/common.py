@@ -269,7 +269,7 @@ def digest_strings(value) -> set[str]:
     return set()
 
 
-# Journal spec v0.85 (DEC-2388 item 10) and v0.88 (DEC-2514): the checks, or parts of checks, the
+# Journal spec v0.85 (DEC-2388 item 10) and v0.90 (DEC-2515): the checks, or parts of checks, the
 # cell's runtime's advisory dry run deferred to the executor's binding gate, in strictly ascending
 # byte order: `DecisionMade` version 3's and `ApprovalRequested` version 3's names.
 DEFERRED_PARTS = (

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.12 (an approval names the checks its dry run deferred, and such an opening is always asked, [DEC-2514](../project/decisions/DEC-2514.md); v0.11 a news item or filing may bring a monitoring run forward, [DEC-2392](../project/decisions/DEC-2392.md); v0.10 a thesis that ends sells its position, [DEC-2391](../project/decisions/DEC-2391.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
+| **Status** | v0.12 (an approval names the checks its dry run deferred, and such an opening is always asked, [DEC-2515](../project/decisions/DEC-2515.md); v0.11 a news item or filing may bring a monitoring run forward, [DEC-2392](../project/decisions/DEC-2392.md); v0.10 a thesis that ends sells its position, [DEC-2391](../project/decisions/DEC-2391.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
 | **Implements** | PRD 6.3 (FR-3.1 to FR-3.8), 6.5 (FR-5.2 to FR-5.5), 6.6 (FR-6.1 to FR-6.6); backlog E6, E10, E17 |
 | **Schemas** | [mandate.schema.json](../../schemas/mandate.schema.json), [policy.schema.json](../../schemas/policy.schema.json) (structural rules) |
 | **Reference cases** | [reference-cases/mandate.yaml](reference-cases/mandate.yaml) |
@@ -20,7 +20,7 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
-- **v0.12 ([DEC-2514](../project/decisions/DEC-2514.md), an agent reading under
+- **v0.12 ([DEC-2515](../project/decisions/DEC-2515.md), an agent reading under
   [DEC-176](../project/04-decision-log.md#decisions); E21-30):** the approval content of §6.4 gains
   `deferred_to_binding`, the checks the cell's runtime's dry run left to the executor's binding
   gate. The approver is shown a fixed sentence saying they have not been run and may still refuse
@@ -1111,7 +1111,7 @@ Silence, lateness, a failed check, a restart, a version change, and a tightening
 (journal spec §4), written `sha256:` and 64 lowercase hex digits, is the **content hash**. The object
 has exactly these keys, `execution` when the order builder produced a plan
 ([DEC-942](../project/decisions/DEC-942.md)), and `deferred_to_binding` when the dry run deferred a
-check ([DEC-2514](../project/decisions/DEC-2514.md)); everything an approver is shown comes from it:
+check ([DEC-2515](../project/decisions/DEC-2515.md)); everything an approver is shown comes from it:
 
 | Key | Content |
 |---|---|
