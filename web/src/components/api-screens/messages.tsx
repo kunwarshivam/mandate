@@ -7,7 +7,7 @@ import { ALERT_KINDS, type Alert } from "@/api/alerts";
 import type { AgentDetail, ApprovalDetail } from "@/api/read-models";
 import { ModeBadge } from "@/components/domain/mode";
 import { PageHeader } from "@/components/kumo/page-header/page-header";
-import { ApiNotYetNotice, Section, WorkspaceGate } from "@/components/screens/common";
+import { Section, WorkspaceGate } from "@/components/screens/common";
 import { datedClock } from "@/lib/format";
 import { type ActivityAnswer, type AlertsAnswer, useRuntime } from "@/lib/mock-runtime";
 import { cn } from "@/lib/utils";
@@ -28,15 +28,24 @@ const POLL_MS = 10_000;
 const NOT_REPORTED = "text-muted-foreground";
 
 interface ThreadRead {
+  /** The agent whose thread this read is: a read for another agent is never shown under this one's name. */
+  agentId: string;
   journal: ActivityAnswer["journal"] | null;
   alerts: AlertsAnswer | null;
 }
 
-/** Reads the open thread's records and the workspace's alerts on open and every few seconds; a slower earlier read never replaces a later one. */
-function useThread(agentId: string): ThreadRead {
+/** What a thread shows while its reads cannot even be asked: not reported, never loading forever. */
+const UNASKED: Pick<ThreadRead, "journal" | "alerts"> = { journal: { ok: false, reason: "not_served" }, alerts: { ok: false, reason: "not_served" } };
+
+/**
+ * Reads the open thread's records and the workspace's alerts on open and every few seconds; a slower
+ * earlier read never replaces a later one, and a read for another agent is treated as not yet read.
+ */
+function useThread(agentId: string): Pick<ThreadRead, "journal" | "alerts"> {
   const { streamTail, alerts, workspaceId } = useRuntime();
-  const [read, setRead] = useState<ThreadRead>({ journal: null, alerts: null });
+  const [read, setRead] = useState<ThreadRead>({ agentId, journal: null, alerts: null });
   const generation = useRef(0);
+  const askable = Boolean(streamTail && alerts && workspaceId);
   useEffect(() => {
     if (!streamTail || !alerts || !workspaceId) return;
     let live = true;
@@ -44,7 +53,7 @@ function useThread(agentId: string): ThreadRead {
       generation.current += 1;
       const mine = generation.current;
       const [journal, alerted] = await Promise.all([streamTail(`agent:${workspaceId}:${agentId}`, THREAD_TAIL), alerts()]);
-      if (live && mine === generation.current) setRead({ journal, alerts: alerted });
+      if (live && mine === generation.current) setRead({ agentId, journal, alerts: alerted });
     };
     void load();
     const poll = window.setInterval(() => void load(), POLL_MS);
@@ -53,7 +62,8 @@ function useThread(agentId: string): ThreadRead {
       window.clearInterval(poll);
     };
   }, [streamTail, alerts, workspaceId, agentId]);
-  return read;
+  if (!askable) return UNASKED;
+  return read.agentId === agentId ? read : { journal: null, alerts: null };
 }
 
 function nameOf(agent: AgentDetail): string {
@@ -74,7 +84,7 @@ function Threads({ agents, current }: { agents: AgentDetail[]; current: string |
           <Link
             href={`/messages/${encodeURIComponent(agent.agent_id)}`}
             aria-current={agent.agent_id === current ? "page" : undefined}
-            className={cn("press -mx-3 grid gap-1 rounded-xl px-3 py-3 hover:bg-background", agent.agent_id === current && "bg-background")}
+            className={cn("press -mx-3 grid gap-1 rounded-xl px-3 py-3 outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-ring", agent.agent_id === current && "bg-background")}
           >
             <span className="flex flex-wrap items-center gap-2">
               <span className="font-semibold">{nameOf(agent)}</span>
@@ -104,10 +114,13 @@ function Record({ line, alert, request, now }: { line: JournalLine; alert: Alert
   }
   if (request) {
     return (
-      <li data-slot="thread-record" data-type={line.event_type} className="flex flex-wrap justify-between gap-x-3 gap-y-0.5 py-2.5 text-sm">
-        <Link href={`/approvals/${encodeURIComponent(request.approval_id)}`} className="font-medium text-lapis underline-offset-4 hover:underline">
-          A request waits for you
-        </Link>
+      <li data-slot="thread-record" data-type={line.event_type} data-request={request.approval_id} className="flex flex-wrap justify-between gap-x-3 gap-y-0.5 py-2.5 text-sm">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">{line.event_type}</span>
+          <Link href={`/approvals/${encodeURIComponent(request.approval_id)}`} className="font-medium text-lapis underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring">
+            A request waits for you
+          </Link>
+        </span>
         {at}
       </li>
     );
@@ -131,7 +144,7 @@ function Thread({ agent, approvals }: { agent: AgentDetail; approvals: ApprovalD
       {journal === null ? (
         <p className={NOT_REPORTED}>Reading the thread.</p>
       ) : !journal.ok ? (
-        <p className={NOT_REPORTED}>{journal.reason === "not_found" ? "Nothing recorded yet." : journal.reason === "forbidden" ? "Not available to your role." : `The thread is not reported: your deployment answered ${journal.reason}.`}</p>
+        <p className={NOT_REPORTED}>{journal.reason === "not_found" ? "Nothing recorded yet." : journal.reason === "forbidden" ? "Not available to your role." : journal.reason === "not_served" ? "The thread is not reported: your deployment does not serve its records." : `The thread is not reported: your deployment answered ${journal.reason}.`}</p>
       ) : journal.items.length === 0 ? (
         <p className="text-muted-foreground">Nothing recorded yet.</p>
       ) : (
@@ -142,7 +155,20 @@ function Thread({ agent, approvals }: { agent: AgentDetail; approvals: ApprovalD
         </ol>
       )}
       {alerts !== null && !alerts.ok ? <p className={cn("text-sm", NOT_REPORTED)}>Alerts not reported, so an alert shows by its record&apos;s type.</p> : null}
+      {alerts?.ok && alerts.read.truncated ? <p className={cn("text-sm", NOT_REPORTED)}>Older alerts are not listed, so an older alert shows by its record&apos;s type.</p> : null}
     </Section>
+  );
+}
+
+/** The desk's questions and answers are not served by the API yet: said beside the threads, which are. */
+function DeskNotServed() {
+  return (
+    <section role="status" data-slot="api-not-yet" aria-labelledby="desk-not-served" className="grid content-start gap-2">
+      <h2 id="desk-not-served" className="text-h2">
+        The desk is not available from your deployment yet
+      </h2>
+      <p className="max-w-measure text-pretty text-muted-foreground">Your deployment does not serve the desk&apos;s questions and answers, so it shows nothing rather than an example. The thread beside it is served.</p>
+    </section>
   );
 }
 
@@ -160,9 +186,9 @@ function Messages({ agentId, view }: { agentId: string | null; view: "chat" | "d
       ) : !agent ? (
         <p className={NOT_REPORTED}>Your deployment reports no such agent.</p>
       ) : view === "desk" ? (
-        <ApiNotYetNotice />
+        <DeskNotServed />
       ) : (
-        <Thread agent={agent} approvals={read.approvals} />
+        <Thread key={agent.agent_id} agent={agent} approvals={read.approvals} />
       )}
     </div>
   );
