@@ -92,6 +92,18 @@ fn output(conviction: &str) -> Box<ModelOutput> {
     })
 }
 
+/// The content hash `quant.ma_crossover` 1.1.0 is pinned to from its release (DEC-2801 item 3,
+/// DEC-504 item 2): an edit to any of its three listed files fails this test, so its code cannot
+/// change under its version.
+const PINNED_1_1_0: &str = "ee5806e63d39e21778d6131bf995e11b49739cb3fd2803ba8627c66ea834e5a4";
+
+#[test]
+fn quant_ma_crossover_1_1_0_keeps_its_pinned_content_hash() {
+    let hash = content(ID, EXIT_VERSION).map(|c| c.hash.to_hex());
+    let why = "a listed file changed: give the model a new version and pin its new hash";
+    assert_eq!(hash, Ok(PINNED_1_1_0.to_owned()), "{why}");
+}
+
 #[test]
 fn the_host_computes_1_1_0_s_content_object_from_its_three_listed_files() {
     let text = oracle_content();

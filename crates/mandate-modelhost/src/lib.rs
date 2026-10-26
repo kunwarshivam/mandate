@@ -203,8 +203,9 @@ pub fn evaluate(
         .signal(&prices)
         .map_err(|_: BacktestError| Refusal::SignalArithmetic)?;
     let opinion = match model.version.as_str() {
+        ma_crossover::MODEL_VERSION => ma_crossover::opinion(signal)?,
         ma_crossover_exit::MODEL_VERSION => ma_crossover_exit::opinion(signal)?,
-        _ => ma_crossover::opinion(signal)?,
+        _ => return Err(Refusal::UnknownModel),
     };
     let Some((direction, conviction, confidence)) = opinion else {
         return Ok(Evaluation::NoOutput(signal));
@@ -240,7 +241,8 @@ pub fn evaluate(
     });
     Ok(match signal {
         Signal::Long => Evaluation::Long(output),
-        Signal::Flat | Signal::Undecided => Evaluation::Exit(output),
+        Signal::Flat => Evaluation::Exit(output),
+        Signal::Undecided => Evaluation::NoOutput(signal),
     })
 }
 
