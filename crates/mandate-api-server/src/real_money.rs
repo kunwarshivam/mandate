@@ -18,7 +18,7 @@ use crate::commands::{Event, Settled, Writer, envelope};
 use crate::http::App;
 use crate::routes::{Reader, Refused};
 use crate::versions::{object, text};
-use crate::writes::{Gate, appended_at, derived_for, principal_text};
+use crate::writes::{Gate, appended_batch_at, derived_for, principal_text};
 
 /// The setting's record, which this module reads and never writes.
 const CHANGED: &str = "RealMoneyGateChanged";
@@ -151,7 +151,7 @@ pub(crate) async fn gated(
         now: gate.now,
     };
     let draft = envelope(&writer, &event).ok_or(unavailable)?;
-    match appended_at(app, reader, (&id, &draft), gate.now, None).await {
+    match appended_batch_at(app, reader, (&id, &[draft.as_slice()]), gate.now, None).await {
         Settled::Stored(_) => Ok(decision),
         Settled::Conflict | Settled::Unknown | Settled::Unavailable => Err(unavailable),
     }

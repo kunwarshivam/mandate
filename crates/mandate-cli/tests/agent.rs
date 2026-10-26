@@ -36,8 +36,14 @@ fn answer<T>(what: &str, result: Result<T, ControlError>) -> T {
     result.unwrap_or_else(|e| panic!("{what} answers, not: {e}"))
 }
 
+/// The control stream's events but the owner alerts a kill switch commits beside its command
+/// (E8-9k), which `a_kill_switch_commits_its_owner_alert_in_its_batch` checks.
 fn control(fx: &Fixture) -> Vec<Value> {
-    fx.rows(CONTROL).iter().map(body).collect()
+    fx.rows(CONTROL)
+        .iter()
+        .filter(|row| row.event_type != "OwnerAlertSent")
+        .map(body)
+        .collect()
 }
 
 /// The one event a command committed, checked as the owner's on the control stream; and since
@@ -1070,7 +1076,7 @@ fn a_kill_switch_is_always_committed_never_reported_as_an_earlier_one() {
         let first = answer("kill", switch(&mut fx, ASKED_AT));
         let second = answer("kill", switch(&mut fx, ASKED_AT + 1));
         assert_ne!(second.event_id, first.event_id, "{scope:?}");
-        assert_eq!(second.seq, 2, "{scope:?}");
+        assert_eq!(second.seq, 3, "{scope:?}: after the first and its alert");
         assert_eq!(control(&fx).len(), 2, "{scope:?}: committed twice");
 
         let mut fx = Fixture::new();
@@ -1082,7 +1088,10 @@ fn a_kill_switch_is_always_committed_never_reported_as_an_earlier_one() {
         );
         fx.journal.recover();
         let again = answer("kill", switch(&mut fx, ASKED_AT + 5));
-        assert_eq!(again.seq, 2, "{scope:?}: the re-run is committed");
+        assert_eq!(
+            again.seq, 3,
+            "{scope:?}: the re-run is committed after the lost pair"
+        );
         assert_eq!(control(&fx).len(), 2, "{scope:?}");
     }
 }

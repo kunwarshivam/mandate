@@ -84,6 +84,8 @@ fn parts(bundle: &Bundle) -> ResearchParts {
         active: Vec::new(),
         last_reservation: None,
         data_symbols: BTreeSet::from([Symbol::new("SPY").unwrap()]),
+        event_triggers: None,
+        events: Vec::new(),
     }
 }
 
