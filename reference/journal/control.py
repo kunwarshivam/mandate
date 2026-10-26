@@ -262,6 +262,8 @@ REQUIRED_REFS = {
     "ThesisProposed": ("mandate_version", "model_version"),
     "ThesisRevised": ("mandate_version", "model_version"),
     "ThesisInvalidated": ("mandate_version",),
+    **{event_type: ("fee_config", "trading_calendar", "settlement_calendar", "instrument_snapshot")
+       for event_type in ("FillApplied", "LateFillApplied")},
 }
 
 # §9.3 (DEC-403): the account stream's risk-state records.
@@ -1337,6 +1339,8 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "ExternalActivityIngested"): (1,),
     ("acct", "RejectObserved"): (1,),
     ("acct", "OrderAbandoned"): (1,),
+    ("acct", "FillApplied"): (1, 2),
+    ("acct", "LateFillApplied"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2, 3),
@@ -1365,6 +1369,29 @@ MARK_UPDATED_V2 = rec(
     ("session", one_of(*MARK_SESSIONS)),
     ("risk_clock", RISK_CLOCK),
 )
+FILL_FEE = rec(("kind", STR), ("amount", DEC), ("asset", STR), ("status", STR))
+
+
+def fill_applied(client_order_id: T) -> T:
+    return rec(
+        ("fill_id", STR),
+        ("client_order_id", client_order_id),
+        ("instrument_id", STR),
+        ("side", STR),
+        ("qty_gross", DEC),
+        ("price", DEC),
+        ("trade_date", DATE),
+        ("risk_clock", RISK_CLOCK),
+        ("fees", list_of(FILL_FEE)),
+    )
+
+
+FILL_APPLIED_V1 = fill_applied(STR)
+FILL_APPLIED_V2 = fill_applied(opt(STR))
+# Trading spec §2.3 (v0.21): every client order id of ours is `md-` and one or more ASCII letters,
+# digits or hyphens, at most 128 characters in all.
+OUR_CLIENT_ORDER_ID = re.compile(r"md-[A-Za-z0-9-]+")
+OUR_CLIENT_ORDER_ID_MAX = 128
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "AccountSnapshotRecorded", 2): rec(
         *SNAPSHOT_ACCOUNT_MEMBERS,
@@ -1449,6 +1476,12 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("reason", one_of("intent_too_old", "gate_recheck", "released_to_owner", "unprotected_interval_limit")),
         ("risk_clock", RISK_CLOCK),
     ),
+    # v0.94 §9.5 (DEC-2809): one broker fill. Version 2 is version 1's members with
+    # `client_order_id` nullable, `null` for a fill that names no order of ours; `LateFillApplied`
+    # stays at version 1, since a late fill is always of an order of ours.
+    ("acct", "FillApplied", 1): FILL_APPLIED_V1,
+    ("acct", "FillApplied", 2): FILL_APPLIED_V2,
+    ("acct", "LateFillApplied", 1): FILL_APPLIED_V1,
     # v0.75 §9.5 (DEC-2337): one instrument's close-position under an account kill switch,
     # journaled before it is sent.
     ("acct", "AccountCloseRequested", 1): rec(
@@ -2034,6 +2067,11 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
                 rule("298", False, "schema", "payload.fill_id")
             else:
                 rule("298", missing is None, "schema", f"payload.{missing}" if missing else "")
+    if event_type == "FillApplied" and draft["schema_version"] == 2:
+        named = p["client_order_id"]
+        limit = OUR_CLIENT_ORDER_ID_MAX + (1 if "boundary.rule_299_length" in skip else 0)
+        ours = named is None or (OUR_CLIENT_ORDER_ID.fullmatch(named) is not None and len(named) <= limit)
+        rule("299", ours, "schema", "payload.client_order_id")
     if event_type == "AccountCloseRequested":
         qty = normalize_decimal(p["qty"])
         if qty is None:
