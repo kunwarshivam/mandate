@@ -15,8 +15,8 @@ use mandate_gate_context::Freshness;
 use mandate_num::{CostBasis, FeeRate, Fraction, MarkPrice, Qty, Signed, SizeFraction, Unit, Usd};
 use mandate_ports::BuilderContext;
 use mandate_runtime::{
-    Autonomy, Classified, MandateView, OrderExecution, OrderPlan, Proposal, ProtectionPrices,
-    SignalInputs, TimeInForce,
+    Autonomy, Classified, MandateView, ModelDirection, OrderExecution, OrderPlan, Proposal,
+    ProtectionPrices, SignalInputs, TimeInForce,
 };
 use mandate_spec::ValidationContext;
 use mandate_spec::condition::{Condition, ConditionField};
@@ -96,6 +96,43 @@ impl OrderPlan for Plan {
     }
 }
 
+/// Whether any model's output in `inputs` is a `Long`: an unpinned mandate's opening is sized only
+/// from one (DEC-2827 keeps a `Long` only on the instrument the executor would open in).
+fn any_long(inputs: &SignalInputs) -> bool {
+    inputs.outputs.values().any(|outputs| {
+        outputs
+            .values()
+            .any(|output| output.direction == ModelDirection::Long)
+    })
+}
+
+impl Plan {
+    /// An unpinned mandate's opening, on its working universe: the instrument a current `Long`
+    /// names, whose admitted thesis gives its asset class, within the envelope's asset classes,
+    /// sized from journaled facts as a pinned one is (DEC-2378 item 10, DEC-2827). `None` when any
+    /// of it is missing (`AGENTS.md` rule 3). D1 implements (E21-2).
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    fn working_opening(&self, inputs: &SignalInputs) -> Option<Proposal> {
+        let _ = inputs;
+        todo!()
+    }
+
+    /// An unpinned mandate's opening classified as a pinned one's is, on the instrument the
+    /// working universe names; a proposal on any other instrument, or outside the envelope's asset
+    /// classes, is denied (`AGENTS.md` rule 3). D1 implements (E21-2).
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    fn classify_working(&self, view: &MandateView, proposal: &Proposal) -> Classified {
+        let _ = (view, proposal);
+        todo!()
+    }
+}
+
 /// The `decided_by` label of an exit's built-in AUTO (journal spec §9.1, mandate spec §6.2 step 3).
 const BUILTIN_RISK_REDUCING: &str = "builtin_risk_reducing";
 
@@ -168,6 +205,9 @@ impl Plan {
     }
 
     fn opening(&self, inputs: &SignalInputs) -> Option<Proposal> {
+        if !self.mandate.universe.pinned && any_long(inputs) {
+            return self.working_opening(inputs);
+        }
         self.mandate
             .universe
             .pinned_instruments
@@ -181,7 +221,10 @@ impl Plan {
             .filter(|proposal| proposal.purpose.adds_risk())
     }
 
-    fn classify_opening(&self, _view: &MandateView, proposal: &Proposal) -> Classified {
+    fn classify_opening(&self, view: &MandateView, proposal: &Proposal) -> Classified {
+        if !self.mandate.universe.pinned {
+            return self.classify_working(view, proposal);
+        }
         let denied = Classified {
             autonomy: Autonomy::Deny,
             decided_by: None,
