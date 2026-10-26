@@ -993,6 +993,40 @@ pub fn plan(
                 },
                 vec![
                 gesture(
+                    "the same reviewed rule set, registered there: the one its runtime's gate and \
+                     its executor's read (DEC-2819 item 3)",
+                    researcher(&["config", "register", "--kind", "rule_set", &rule_set_in]),
+                    "registered as event".into(),
+                ),
+                gesture(
+                    "the paper fee schedule, registered there",
+                    researcher(&["config", "register", "--kind", "fee_config", &fee_in]),
+                    "registered as event".into(),
+                ),
+                gesture(
+                    "its trading calendar, registered there",
+                    researcher(&[
+                        "config",
+                        "register",
+                        "--kind",
+                        "trading_calendar",
+                        &calendar_in,
+                    ]),
+                    "registered as event".into(),
+                ),
+                gesture(
+                    "SPY's instrument snapshot, registered there: the one instrument its research \
+                     admits, whose own snapshot its executor reads",
+                    researcher(&[
+                        "config",
+                        "register",
+                        "--kind",
+                        "instrument_snapshot",
+                        &instrument_in,
+                    ]),
+                    "registered as event".into(),
+                ),
+                gesture(
                     "the moving-average crossover model, registered there",
                     researcher(&["model", "register", "quant.ma_crossover", "1.0.0"]),
                     "registered as event".into(),
@@ -3306,38 +3340,53 @@ mod tests {
         assert_eq!(lanes, ["W2"], "only web/'s report screen is left");
     }
 
-    /// Step 2 registers the reviewed configuration before any version, once each: the gate's
-    /// rule set, which the runtime's gate and the executor's binding gate both read as the
-    /// control stream's latest `rule_set`, so no later registration of that kind may shadow it,
-    /// then the paper fee schedule and its trading calendar. Each file is the shell's reviewed
-    /// tracer configuration, and the rule set has exactly the members the gates accept.
+    /// Step 2 registers the reviewed configuration before any version, once each in each
+    /// workspace, the run's and its research workspace's (DEC-2819 item 3): the gate's rule set,
+    /// which the runtime's gate and the executor's binding gate both read as the control stream's
+    /// latest `rule_set`, so no later registration of that kind may shadow it, then the paper fee
+    /// schedule, its trading calendar and SPY's instrument snapshot. Each file is the shell's
+    /// reviewed tracer configuration, and the rule set has exactly the members the gates accept.
     #[test]
     fn step_two_registers_the_reviewed_configuration_both_gates_read_once_before_any_version() {
         let steps = planned("demo2");
-        let all = gestures(&steps);
-        let first_version = all
-            .iter()
-            .position(|g| g.args[..2] == ["version", "create"])
-            .unwrap();
-        for (kind, file) in [
-            ("rule_set", "rule-set.json"),
-            ("fee_config", "fee-config.json"),
-            ("trading_calendar", "trading-calendar.json"),
-        ] {
-            let registered: Vec<usize> = all
+        let every = gestures(&steps);
+        for workspace in ["demo2", "demo2r"] {
+            let all: Vec<&&Gesture> = every
                 .iter()
-                .enumerate()
-                .filter(|(_, g)| g.args.windows(2).any(|w| w == ["--kind", kind]))
-                .map(|(n, _)| n)
+                .filter(|g| g.args.windows(2).any(|w| w == ["--workspace", workspace]))
                 .collect();
-            assert_eq!(registered.len(), 1, "{kind} is registered once");
-            assert!(registered[0] < first_version, "{kind} before any version");
-            let path = format!("{INPUTS}/{file}");
-            assert!(
-                all[registered[0]].args.contains(&path),
-                "{kind} registers {path}: {:?}",
-                all[registered[0]].args
-            );
+            let first_version = all
+                .iter()
+                .position(|g| g.args[..2] == ["version", "create"])
+                .unwrap();
+            for (kind, file) in [
+                ("rule_set", "rule-set.json"),
+                ("fee_config", "fee-config.json"),
+                ("trading_calendar", "trading-calendar.json"),
+                ("instrument_snapshot", "instrument.json"),
+            ] {
+                let registered: Vec<usize> = all
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, g)| g.args.windows(2).any(|w| w == ["--kind", kind]))
+                    .map(|(n, _)| n)
+                    .collect();
+                assert_eq!(
+                    registered.len(),
+                    1,
+                    "{workspace}: {kind} is registered once"
+                );
+                assert!(
+                    registered[0] < first_version,
+                    "{workspace}: {kind} before any version"
+                );
+                let path = format!("{INPUTS}/{file}");
+                assert!(
+                    all[registered[0]].args.contains(&path),
+                    "{workspace}: {kind} registers {path}: {:?}",
+                    all[registered[0]].args
+                );
+            }
         }
         for (demo, tracer) in [
             (RULE_SET_FILE, "rule-set.json"),
@@ -3513,6 +3562,10 @@ mod tests {
                 ["workspace", "found"],
                 ["connection", "record"],
                 ["connection", "record"],
+                ["config", "register"],
+                ["config", "register"],
+                ["config", "register"],
+                ["config", "register"],
                 ["model", "register"],
                 ["model", "register"],
                 ["version", "create"],
@@ -3623,7 +3676,7 @@ mod tests {
             assert_eq!(g.args[at + 1], "demo3r", "{:?}", g.args);
         }
         assert_eq!(
-            gestures[5].args[2..6],
+            gestures[9].args[2..6],
             [
                 "llm.research_agent",
                 "0.1.0",
@@ -3632,8 +3685,8 @@ mod tests {
             ]
         );
         let version = reference(&research_mandate());
-        assert_eq!(gestures[6].expect, format!("created {version}"));
-        let deployed = &gestures[10].args;
+        assert_eq!(gestures[10].expect, format!("created {version}"));
+        let deployed = &gestures[14].args;
         assert_eq!(deployed[2..4], [RESEARCH_AGENT, version.as_str()]);
         assert_eq!(
             lanes(step),
