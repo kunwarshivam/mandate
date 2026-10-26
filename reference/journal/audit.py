@@ -635,7 +635,7 @@ def invalid_drafts() -> list[dict]:
 
 # The §11 codes §9.13 first omitted (DEC-774 item 1) and the code DEC-774 item 2 adds, each with the
 # range of `verification_fail` it is reported in and the `seq` it is reported at: the agent stream's
-# held hold (a range of its own), and the control stream's own checks.
+# held hold and approval deferrals (a range of their own), and the control stream's own checks.
 LATE_EVENT_CHECKS = {
     "held_mismatch": R0,
     "approval_deferral_mismatch": R0,
