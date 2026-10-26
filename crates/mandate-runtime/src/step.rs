@@ -651,7 +651,7 @@ pub(crate) fn dry_run(
 /// What an allowed decision does next (mandate spec §6): ask with the request built in full,
 /// propose and hand off, or nothing, the refusal its `DecisionMade` already records.
 pub(crate) enum Next {
-    Ask(escalation::Prepared),
+    Ask(Box<escalation::Prepared>),
     Propose,
     Nothing,
 }
@@ -686,7 +686,7 @@ fn next(
             now,
             view,
         ) {
-            Ok(prepared) => (verdict, Next::Ask(prepared)),
+            Ok(prepared) => (verdict, Next::Ask(Box::new(prepared))),
             Err(reason_code) => (
                 DryRunVerdict::Deny {
                     reason_code: reason_code.to_owned(),
@@ -710,7 +710,7 @@ fn allowed(
 ) -> Result<(), RuntimeError> {
     match next {
         Next::Ask(prepared) => {
-            escalation::ask(prepared, ports.view.approval.timeout_s, decision, batch)
+            escalation::ask(*prepared, ports.view.approval.timeout_s, decision, batch)
         }
         Next::Propose => {
             let intent = batch.journal("IntentProposed", Some(decision), proposed(proposal)?)?;
