@@ -48,8 +48,16 @@ fn connecting() -> Result<Journal, Error> {
     Ok(journal)
 }
 
+/// The opaque reference the connect check names the account by (journal spec rule 62).
+const PII: &str = "pii_01J0000000000000000000000A";
+
 /// The account stream's `connect` check of the connection, every result passed.
 fn checked(journal: &Journal) -> Result<(), Error> {
+    checked_naming(journal, Some(PII))
+}
+
+/// That check, naming the account by `reference`.
+fn checked_naming(journal: &Journal, reference: Option<&str>) -> Result<(), Error> {
     let row = |check: &str| {
         object(vec![
             ("check", text(check)),
@@ -64,7 +72,7 @@ fn checked(journal: &Journal) -> Result<(), Error> {
         1,
         None,
         object(vec![
-            ("account_pii_ref", Value::Null),
+            ("account_pii_ref", reference.map_or(Value::Null, text)),
             ("connection_id", text(CONNECTION)),
             ("occasion", text("connect")),
             (
@@ -472,6 +480,144 @@ fn a_lost_credential_restricts_the_account_before_the_drain() -> Result<(), Erro
             );
         }
     }
+    Ok(())
+}
+
+/// Runs `journal`'s connection over `broker` for one pass at each of `offsets` (seconds after
+/// noon 2026-09-21), `before` run ahead of each pass with its index, then SIGTERM.
+fn run_at(
+    journal: &Journal,
+    broker: &Paper,
+    offsets: &[i64],
+    before: &dyn Fn(usize),
+) -> Result<Result<u8, &'static str>, Error> {
+    let noon = at(NOON)?.secs();
+    let pass = Cell::new(0usize);
+    let instants: Vec<UtcNanos> = offsets
+        .iter()
+        .map(|offset| UtcNanos::from_parts(noon + offset, 0))
+        .collect::<Result<_, _>>()?;
+    let last = instants.last().copied().ok_or("no pass")?;
+    let now = || instants.get(pass.get()).copied().unwrap_or(last);
+    let mut tick = |_: UtcNanos| {
+        before(pass.get());
+        None
+    };
+    let terminated = || {
+        let next = pass.get().saturating_add(1);
+        pass.set(next);
+        next > offsets.len()
+    };
+    let mut say = |_: &str| {};
+    let wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    Ok(serve(
+        journal.clone(),
+        broker.clone(),
+        wiring,
+        &process_config(Environment::Paper),
+        &starting_status(),
+        Edge {
+            now: &now,
+            tick: &mut tick,
+            terminated: &terminated,
+            say: &mut say,
+            interval: Duration::ZERO,
+        },
+    ))
+}
+
+/// The occasions of the account stream's `ConnectionChecked` records, in order.
+fn check_occasions(journal: &Journal) -> Vec<String> {
+    journal
+        .payloads("ConnectionChecked")
+        .iter()
+        .map(|payload| member(payload, "occasion"))
+        .collect()
+}
+
+/// DEC-2840: an established run checks the connection's permissions once at its start and once
+/// each later New York day (connections spec §8.1), naming the account by the connect check's
+/// reference; a passed check restricts nothing.
+#[test]
+fn an_established_run_checks_its_permissions_at_start_and_daily() -> Result<(), Error> {
+    let journal = connecting()?;
+    establish(&journal)?;
+    let broker = Paper::new(&journal);
+    let day = 86_400;
+    let exit = run_at(
+        &journal,
+        &broker,
+        &[0, 60, 120, day, day + 60, 2 * day],
+        &|_| {},
+    )?;
+    assert_eq!(exit, Ok(0));
+    assert_eq!(
+        check_occasions(&journal),
+        ["connect", "executor_start", "daily", "daily"]
+    );
+    let later = journal.payloads("ConnectionChecked");
+    assert!(
+        later
+            .iter()
+            .skip(1)
+            .all(|payload| member(payload, "account_pii_ref") == PII),
+        "{later:?}"
+    );
+    assert!(restriction_causes(&journal).is_empty());
+    Ok(())
+}
+
+/// DEC-2840: a later check that fails suspends the connection (journal spec §9.8: a failed
+/// `account` check suspends with `check_failed`): the restriction first, then the state change.
+/// Here no connect-time check named the account, so the later one cannot name it and fails.
+#[test]
+fn a_failed_later_check_suspends_the_connection() -> Result<(), Error> {
+    let journal = deployed()?;
+    opened(&journal)?;
+    checked_naming(&journal, None)?;
+    establish(&journal)?;
+    let broker = Paper::new(&journal);
+    let exit = run_at(&journal, &broker, &[0, 60, 120, 180], &|_| {})?;
+    assert_eq!(exit, Ok(0));
+    assert_eq!(check_occasions(&journal), ["connect", "executor_start"]);
+    let failed = journal.payloads("ConnectionChecked");
+    assert_eq!(
+        failed
+            .get(1)
+            .map(|payload| member(payload, "account_pii_ref")),
+        Some(String::new()),
+        "an unread account names no reference (rule 62)"
+    );
+    assert_eq!(restriction_causes(&journal), ["connection_unavailable"]);
+    let changes: Vec<(String, String)> = journal
+        .payloads("ConnectionStateChanged")
+        .iter()
+        .map(|payload| (member(payload, "to"), member(payload, "reason")))
+        .collect();
+    assert_eq!(
+        changes,
+        [("suspended".to_owned(), "check_failed".to_owned())]
+    );
+    Ok(())
+}
+
+/// DEC-2840: a check whose account read is lost cannot run, so nothing is journaled for it and it
+/// stays due; it counts toward the connection's network failures, never as passed.
+#[test]
+fn a_check_whose_read_is_lost_runs_on_a_later_pass() -> Result<(), Error> {
+    let journal = connecting()?;
+    establish(&journal)?;
+    let broker = Paper::new(&journal);
+    let exit = run_at(&journal, &broker, &[0, 60, 120, 180, 240], &|pass| {
+        if pass == 1 {
+            broker.lose_next_answers(1_000);
+        }
+        if pass == 3 {
+            broker.lose_next_answers(0);
+        }
+    })?;
+    assert_eq!(exit, Ok(0));
+    assert_eq!(check_occasions(&journal), ["connect", "executor_start"]);
     Ok(())
 }
 

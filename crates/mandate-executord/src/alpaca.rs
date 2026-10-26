@@ -10,6 +10,8 @@ use mandate_alpaca::{
     DeclaredRegime as AlpacaRegime, RetryPolicy, TokioPause, TradingClient, TradingTransport,
     alpaca_account_rules,
 };
+use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
+use mandate_connections::record::ConnectionId;
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountDeclaration, BrokerConnector, BrokerOutcome, BrokerRequest, ConnectorError,
@@ -57,6 +59,16 @@ impl<T: TradingTransport + Clone> Broker for AlpacaBroker<T> {
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         let mut client = self.client();
         self.runtime.block_on(client.call(request))
+    }
+
+    /// The connect check's own §8.1 checks, at every start and daily (DEC-2840).
+    fn later_check(
+        &self,
+        connection: ConnectionId,
+        occasion: Occasion,
+        account: AccountRead,
+    ) -> Option<Result<CheckReport, &'static str>> {
+        Some(crate::connect::alpaca_report(connection, occasion, account))
     }
 
     /// Alpaca's declaration (trading spec §7.2, DEC-840): always margin, under `intraday_margin`.

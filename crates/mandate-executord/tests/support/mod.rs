@@ -15,6 +15,8 @@ use std::time::Duration;
 
 use mandate_accounting::{AccountType, AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Object, Value, parse};
+use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
+use mandate_connections::record::ConnectionId;
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountRef, AccountScope, ActivityCursor, AgentId, BindingGateConfigRefs, BindingGateInput,
@@ -579,6 +581,19 @@ impl ScriptedBroker for Paper {}
 impl Broker for Paper {
     fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
         mandate_alpaca::alpaca_profile()
+    }
+
+    /// The paper Alpaca connection's own later checks (DEC-2840), as the process's Alpaca broker
+    /// runs them.
+    fn later_check(
+        &self,
+        connection: ConnectionId,
+        occasion: Occasion,
+        account: AccountRead,
+    ) -> Option<Result<CheckReport, &'static str>> {
+        Some(mandate_executord::connect::alpaca_report(
+            connection, occasion, account,
+        ))
     }
 
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {

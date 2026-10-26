@@ -861,6 +861,12 @@ impl ExecutorState {
         state
     }
 
+    /// The connection the stream's copy of `ConnectionEstablished` names, once it holds one
+    /// (journal spec rule 68).
+    pub fn connection_id(&self) -> Option<&str> {
+        self.connection.as_ref().map(|view| view.id.as_str())
+    }
+
     pub fn started(&self) -> bool {
         self.started
     }
