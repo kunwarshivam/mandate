@@ -2015,6 +2015,7 @@ dependencies = [
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-notify",
+ "mandate-process",
  "mandate-push-relay",
  "mandate-time",
  "mandate-webpush",
