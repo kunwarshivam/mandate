@@ -271,3 +271,172 @@ fn a_lift_leaves_every_other_hold_in_force() {
         );
     }
 }
+
+const CHECKER: &str = "user_checker_01";
+const OWNER: &str = "user_owner_01";
+const REQUEST_ID: &str = "01JBRQ00001000000000000000";
+const ACK_ID: &str = "01JBAK00009000000000000000";
+
+/// A §9.28 record on the control stream at `seq`: version 2 with `subject`, or version 1 without.
+fn control_record(
+    id: &str,
+    event_type: &str,
+    seq: u64,
+    subject: Option<&str>,
+    members: Vec<(&str, Value)>,
+) -> (FoldedEvent, u64) {
+    let mut payload = mandate_canon::Object::new();
+    for (name, value) in members {
+        if let Ok(key) = mandate_canon::Key::new(name) {
+            payload.insert(key, value);
+        }
+    }
+    if let Some(subject) = subject
+        && let Ok(key) = mandate_canon::Key::new("subject")
+    {
+        payload.insert(key, Value::Str(subject.to_owned()));
+    }
+    let event = FoldedEvent {
+        stream: CONTROL_STREAM.to_owned(),
+        seq: Seq(seq),
+        event_id: EventId(id.to_owned()),
+        event_type: event_type.to_owned(),
+        causation_id: None,
+        payload: Value::Object(payload),
+    };
+    (event, if subject.is_some() { 2 } else { 1 })
+}
+
+fn evidence(assertion: &str, at: u64) -> Value {
+    let mut out = mandate_canon::Object::new();
+    for (name, value) in [
+        ("assertion_id", Value::Str(assertion.to_owned())),
+        (
+            "authenticated_at",
+            Value::Int(mandate_canon::Int::new(at).expect("a second")),
+        ),
+        ("method", Value::Str("cli_confirm".to_owned())),
+    ] {
+        out.insert(mandate_canon::Key::new(name).expect("a key"), value);
+    }
+    Value::Object(out)
+}
+
+/// The outcome of an independent acknowledgment of the incomplete hold whose request named
+/// `asked` and which names `answered` (`None` for version 1): `lift`, or the refusal's reason.
+fn answered(asked: Option<&str>, answered: Option<&str>, ports: &Ports<'_>) -> String {
+    let vector = vectors()
+        .into_iter()
+        .find(|v| text(v, "name") == "the_incomplete_hold_lifts")
+        .expect("the vector");
+    let hold = &list(&vector, "account")[0];
+    let copy = &list(&vector, "account")[1];
+    let at = second_of(copy);
+    let secs = u64::try_from(at.secs()).expect("a second");
+    let hold_id = text(hold, "event_id").to_owned();
+    let mut shell = Shell::new(1);
+    shell
+        .fold_one(&common::stream_opened())
+        .expect("the stream opens");
+    let mut shell = shell.restart_ready(ports);
+    let seq = shell.head().0.saturating_add(1);
+    shell
+        .fold_one(&folded(hold, ACCOUNT_STREAM, seq))
+        .expect("the hold folds");
+    shell.run(Input::Tick(at), ports);
+    let clock = Value::Str(text(copy, "event_time").to_owned());
+    let int = |n: u64| Value::Int(mandate_canon::Int::new(n).expect("a second"));
+    let agent = Value::Str("agent_a".to_owned());
+    let (request, request_version) = control_record(
+        REQUEST_ID,
+        "OwnerAcknowledgmentRequested",
+        1,
+        asked,
+        vec![
+            ("agent", agent.clone()),
+            ("event", Value::Str(hold_id.clone())),
+            ("requested_by", Value::Str(CHECKER.to_owned())),
+            ("independent_required", Value::Bool(true)),
+            ("submitted_at", int(secs - 20)),
+            ("risk_clock", clock.clone()),
+            ("step_up", evidence("assert_rq", secs - 25)),
+        ],
+    );
+    let (ack, ack_version) = control_record(
+        ACK_ID,
+        "OwnerAcknowledged",
+        2,
+        answered,
+        vec![
+            ("agent", agent),
+            ("event", Value::Str(hold_id)),
+            ("user", Value::Str(OWNER.to_owned())),
+            ("requested_by", Value::Str(CHECKER.to_owned())),
+            ("independent_required", Value::Bool(true)),
+            ("request", Value::Str(REQUEST_ID.to_owned())),
+            ("submitted_at", int(secs)),
+            ("risk_clock", clock),
+            ("step_up", evidence("assert_ak", secs - 5)),
+        ],
+    );
+    let methods = BTreeSet::from(["cli_confirm".to_owned()]);
+    shell.run(
+        Input::Acknowledgment(AcknowledgmentHandoff {
+            original: request,
+            schema_version: request_version,
+            processed_at: at,
+            spent: BTreeSet::new(),
+            request_spent: None,
+            independent_overlay: false,
+            methods: methods.clone(),
+        }),
+        ports,
+    );
+    let ran = shell.run(
+        Input::Acknowledgment(AcknowledgmentHandoff {
+            original: ack,
+            schema_version: ack_version,
+            processed_at: at,
+            spent: BTreeSet::from(["assert_rq".to_owned()]),
+            request_spent: Some(BTreeSet::new()),
+            independent_overlay: false,
+            methods,
+        }),
+        ports,
+    );
+    match ran.drafts.get(1) {
+        Some(d) if d.event_type == "AgentModeApplied" => "lift".to_owned(),
+        Some(d) => member(d, "reason")
+            .and_then(Value::as_str)
+            .unwrap_or("no reason")
+            .to_owned(),
+        None => format!("{:?}", ran.drafts),
+    }
+}
+
+/// Rule 240 at the executor, read as DEC-2838 reads it: an independent acknowledgment answers its
+/// request only when both name the same subject, a version-1 record naming `limit`; a request of
+/// another subject is `request_invalid`, so no lift.
+#[test]
+fn an_acknowledgment_lifts_a_hold_only_through_a_request_of_its_subject() {
+    with_ports!(ports);
+    assert_eq!(
+        answered(Some("reconciliation"), Some("reconciliation"), &ports),
+        "lift",
+        "the same subject lifts: the control for every refusal below"
+    );
+    for asked in [None, Some("limit"), Some("restriction")] {
+        assert_eq!(
+            answered(asked, Some("reconciliation"), &ports),
+            "request_invalid",
+            "a request of {asked:?}"
+        );
+    }
+    for wrong in [None, Some("limit"), Some("restriction")] {
+        assert_ne!(
+            answered(Some("reconciliation"), wrong, &ports),
+            "lift",
+            "an acknowledgment of {wrong:?}"
+        );
+    }
+}
