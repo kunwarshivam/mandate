@@ -49,6 +49,58 @@ impl NewsAuth {
     }
 }
 
+/// Why a stored news data key is refused before any request (DEC-2277 item 4). Neither carries any
+/// part of the key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NewsKeyRefusal {
+    /// Not one line `<key id>:<secret>`: not UTF-8, no `:` or more than one, an empty part, or a
+    /// part holding whitespace or a control character.
+    Malformed,
+    /// The key id does not begin `PK`, Alpaca's paper key prefix: a live key, or not Alpaca's
+    /// (AGENTS.md rule 8). A guard on Alpaca's convention, not a proof.
+    NotPaper,
+}
+
+impl NewsKeyRefusal {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Malformed => "news_key_malformed",
+            Self::NotPaper => "not_paper",
+        }
+    }
+}
+
+/// The prefix of an Alpaca paper key's id (DEC-2277 item 4).
+const PAPER_KEY_PREFIX: &str = "PK";
+
+impl NewsAuth {
+    /// The news reader's key as `mandate vault put news-data-key` stores it at
+    /// `platform/news-data-key`: one line `<key id>:<secret>`, a final line break allowed. A key
+    /// that is not that line is refused [`NewsKeyRefusal::Malformed`], and one whose id is not a
+    /// paper key's [`NewsKeyRefusal::NotPaper`], keeping nothing of it (DEC-2277 items 2 and 4).
+    pub fn from_stored(stored: &[u8]) -> Result<Self, NewsKeyRefusal> {
+        let text = core::str::from_utf8(stored).map_err(|_| NewsKeyRefusal::Malformed)?;
+        let line = text.strip_suffix('\n').unwrap_or(text);
+        let (key_id, secret) = line.split_once(':').ok_or(NewsKeyRefusal::Malformed)?;
+        let clean = |part: &str| {
+            !part.is_empty()
+                && part
+                    .chars()
+                    .all(|c| c != ':' && !c.is_whitespace() && !c.is_control())
+        };
+        if !clean(key_id) || !clean(secret) {
+            return Err(NewsKeyRefusal::Malformed);
+        }
+        if !key_id.starts_with(PAPER_KEY_PREFIX) {
+            return Err(NewsKeyRefusal::NotPaper);
+        }
+        Ok(Self::new(
+            SecretString::from(key_id.to_owned()),
+            SecretString::from(secret.to_owned()),
+        ))
+    }
+}
+
 impl core::fmt::Debug for NewsAuth {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("NewsAuth(redacted)")
