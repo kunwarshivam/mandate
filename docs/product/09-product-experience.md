@@ -291,7 +291,8 @@ accepted (§9).
   ways to stop, each with its scope in words: **Pause** (no new orders; protection stays; reversible;
   no step-up), **Stop** (agent scope only: ends the agent, terminal, sells nothing, and is offered
   only when the agent is flat, DEC-136; step-up, the brief's addition because it cannot be undone),
-  and **Kill switch** (cancel and flatten, terminal; step-up, as the spec requires for an owner exit).
+  and **Kill switch** (cancel and flatten, terminal; a plain confirm and no step-up, since the spec
+  never holds a kill switch back for one, PX-4 and DEC-2410).
 - *Primary action:* Pause, the least drastic, is first; Stop and Kill switch follow as distinct
   choices.
 - *States:* Paused agent: offers Resume, Stop, and Kill switch. Stopped by a kill switch: shown as
@@ -600,7 +601,9 @@ activity, account restriction, surveillance), because each acknowledgment restor
   per workspace. Outside the regular session, the owner-exit confirmation of D9 for equities is
   optional: declining it, or having no fresh quote, still activates the cancel and `stopped`, and
   equity sells then wait for the session (trading §5.5; rule 13).
-- *Primary action:* Activate (step-up).
+- *Primary action:* Activate, confirmed with one press and no step-up (PX-4, DEC-2410): the kill
+  switch is never refused, so no check stands in front of it. In progress announces "Recorded" once
+  the deployment records it, and what was canceled and sold only once the runtime applies it.
 - *States:* In progress: each step as journaled (mode applied, orders canceled and confirmed, sells
   submitted or deferred). Degraded (deployment unreachable): says the switch could not be delivered
   and how to reach the broker directly.
@@ -888,7 +891,8 @@ kill switch. Needs a line in the runtime brief or the mandate spec.
 *Spec line:* mandate spec §6.1, "Owner controls and step-up" (DEC-173). The kill switch is as
 DEC-158 option (c) leaves it: without valid step-up it still stops the agent and flattens as an
 automated flatten does, and only its privileges beyond the stop (selling equities outside the regular
-session at a confirmed bid) need step-up. The web kill switch inherits the same rule.
+session at a confirmed bid) need step-up. The web kill switch inherits the same rule. Its D10 confirm
+is one press with no step-up (DEC-2410); "the same check as the kill switch" above predates that.
 
 **PX-5. What the owner sees while reconciliation holds an agent.**
 (a) "Paused: reconciliation mismatch" and a resume button. (b) The difference (ledger against broker,

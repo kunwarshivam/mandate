@@ -14,6 +14,7 @@ import { CommandEntry, UnreachableAlert } from "./command-log";
 import type { RecordKind } from "./commands";
 import { KillSwitchButton } from "./kill-switch-button";
 import { type AgentModeLine, MODES_HEADING, RECORD_TITLE, type RecordList, type StopRecord, buildRecord, commandRecord } from "./record";
+import { ConfirmDialog } from "./confirm-dialog";
 import { StepUpDialog } from "./step-up-dialog";
 import { KEY } from "@/components/kumo/key";
 import { cn } from "@/lib/utils";
@@ -41,24 +42,30 @@ function List({ list }: { list: RecordList }) {
   );
 }
 
+/** A kill switch at any scope needs no step-up for its stop and flatten, and is never refused (DEC-2410). */
+const NO_PASSKEY = "No passkey needed. It cannot be undone.";
+
+/** The commands D10 confirms with a plain press: every kill switch, never the release, which is a Stop and steps up. */
+const PLAIN_CONFIRM: ReadonlySet<RecordKind> = new Set(["kill", "stop_all", "close_all"]);
+
 function Activate({ record, onClick }: { record: StopRecord; onClick: () => void }) {
   switch (record.kind) {
     case "kill":
       return (
         <KillSwitchButton title="Activate the kill switch" onClick={onClick}>
-          Needs your passkey.
+          {NO_PASSKEY}
         </KillSwitchButton>
       );
     case "stop_all":
       return (
         <KillSwitchButton title="Stop all agents on this account" onClick={onClick}>
-          Needs your passkey.
+          {NO_PASSKEY}
         </KillSwitchButton>
       );
     case "close_all":
       return (
         <KillSwitchButton appearance="outline" title="Close everything on this account" onClick={onClick}>
-          Needs your passkey.
+          {NO_PASSKEY}
         </KillSwitchButton>
       );
     case "release":
@@ -109,7 +116,8 @@ function Modes({ modes }: { modes: AgentModeLine[] }) {
  * D10 and D11. A record screen, so a page and never a modal (brief §4.1): everything the owner
  * confirms, mode badges included, is shown expanded, fixed at first render, and sent with the
  * command. A change before they confirm asks for a fresh render; live progress after they confirm
- * sits outside the record. The passkey check (G3) opens from this page; the Stop sheet only links here.
+ * sits outside the record. A kill switch is confirmed with one press and no passkey (DEC-2410); the
+ * release, a Stop, opens the passkey check (G3) from this page. The Stop sheet only links here.
  */
 export function StopRecordScreen({ kind, targetId }: { kind: RecordKind; targetId: string }) {
   const { ws, view, source, send, commands } = useRuntime();
@@ -228,8 +236,20 @@ export function StopRecordScreen({ kind, targetId }: { kind: RecordKind; targetI
             ) : null}
           </div>
 
+          <ConfirmDialog
+            open={asking && PLAIN_CONFIRM.has(kind)}
+            action={shown.stepUp}
+            onConfirm={() => {
+              setAsking(false);
+              confirm();
+            }}
+            onCancel={() => {
+              setAsking(false);
+              setNotice("Canceled. Nothing was sent.");
+            }}
+          />
           <StepUpDialog
-            open={asking}
+            open={asking && !PLAIN_CONFIRM.has(kind)}
             action={shown.stepUp}
             onVerified={() => {
               setAsking(false);
