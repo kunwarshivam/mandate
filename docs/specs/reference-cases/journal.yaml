@@ -98135,7 +98135,7 @@ news_stream:
       artifact_refs:
       - sha256:4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e
       pii_refs: []
-    expect: &id188
+    expect: &id190
       outcome: Valid
   - name: one_response
     clause: 'rule 285: equal is allowed, one response holds many items'
@@ -98221,7 +98221,7 @@ news_stream:
       artifact_refs:
       - sha256:4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e
       pii_refs: []
-    expect: *id188
+    expect: *id190
   - name: a_later_version
     clause: 'rule 284: a vendor''s later version is a new item id'
     records:
@@ -98306,7 +98306,7 @@ news_stream:
       artifact_refs:
       - sha256:4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e
       pii_refs: []
-    expect: *id188
+    expect: *id190
   - name: stored_twice
     clause: 'rule 284: one record per item id'
     records:
