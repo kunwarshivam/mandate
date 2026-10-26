@@ -1,6 +1,6 @@
-//! DEC-2833: an opening on an account that has traded is answered only while the account is flat,
-//! the workspace relates no other account, and every counter the gate reads beside the agent's risk
-//! is folded from the account stream. Each counter is checked against an oracle that reads the
+//! DEC-2833: an opening on an account that has traded may be answered only while the account is
+//! flat, the workspace relates no other account, and every counter the gate reads beside the
+//! agent's risk is folded from the account stream. `counted` answers exactly then. Each counter is checked against an oracle that reads the
 //! generated round trips its own way, from mandate spec §5.3 and trading spec §9.6.
 
 use std::collections::BTreeMap;
@@ -192,6 +192,12 @@ impl Rig {
     }
 }
 
+/// Whether an opening on the traded account may be answered from the fold: the account is flat
+/// and its counters read, at a tick later the same day.
+fn answers(rig: &Rig) -> bool {
+    rig.0.flat() && rig.0.counted(instant(START + 600)).is_some()
+}
+
 /// After one round trip the account is flat, and an opening is held for nothing the fold reads:
 /// the counters are each the round trip's, every instant the later of the fill's risk clock and the
 /// instant the store recorded it.
@@ -200,7 +206,7 @@ fn a_flat_account_after_a_round_trip_reads_every_counter() {
     let mut rig = Rig::new();
     rig.round_trip(0, SPY, START);
     assert!(rig.0.flat());
-    assert_eq!(rig.0.opening_hold(true), None);
+    assert!(answers(&rig));
     assert_eq!(
         rig.0.opening_hold(false),
         Some(OpeningHold::ResearchAgentTraded),
@@ -251,16 +257,16 @@ fn a_position_or_a_working_order_holds_the_opening() {
     );
     rig.state("o0", "filled", START + 10);
     assert!(!rig.0.flat(), "a position");
-    assert_eq!(rig.0.opening_hold(true), Some(OpeningHold::AccountTraded));
+    assert!(!answers(&rig));
 
     let mut rig = Rig::new();
     rig.round_trip(0, SPY, START);
     rig.order("o1", QQQ, "open", START + 200, START + 201);
     assert!(!rig.0.flat(), "an order working");
-    assert_eq!(rig.0.opening_hold(true), Some(OpeningHold::AccountTraded));
+    assert!(!answers(&rig));
     rig.state("o1", "rejected", START + 202);
     assert!(rig.0.flat(), "a rejected order ends");
-    assert_eq!(rig.0.opening_hold(true), None);
+    assert!(answers(&rig));
 
     rig.state("leg-1", "accepted", START + 300);
     assert!(
@@ -304,7 +310,7 @@ fn a_position_or_a_working_order_holds_the_opening() {
         !rig.0.flat(),
         "a request whose submission is not journaled may be working"
     );
-    assert_eq!(rig.0.opening_hold(true), Some(OpeningHold::AccountTraded));
+    assert!(!answers(&rig));
 }
 
 /// A second live connection relates another account the counters do not read, so the opening is
@@ -314,10 +320,10 @@ fn a_second_live_connection_holds_until_it_is_revoked() {
     let mut rig = Rig::new();
     rig.round_trip(0, SPY, START);
     rig.connection("ConnectionEstablished", "conn-2");
-    assert_eq!(rig.0.opening_hold(true), Some(OpeningHold::AccountTraded));
+    assert!(!answers(&rig));
     assert_eq!(rig.0.counted(instant(START + 600)), None);
     rig.connection("ConnectionRevoked", "conn-2");
-    assert_eq!(rig.0.opening_hold(true), None);
+    assert!(answers(&rig));
     assert!(rig.0.counted(instant(START + 600)).is_some());
 }
 
@@ -339,7 +345,7 @@ fn a_fill_without_its_recorded_instant_or_an_unknown_purpose_leaves_the_counters
     );
     assert!(rig.0.flat());
     assert_eq!(rig.0.counted(instant(START + 600)), None);
-    assert_eq!(rig.0.opening_hold(true), Some(OpeningHold::AccountTraded));
+    assert!(!answers(&rig));
 
     let mut rig = Rig::new();
     rig.round_trip(0, SPY, START);
@@ -347,7 +353,7 @@ fn a_fill_without_its_recorded_instant_or_an_unknown_purpose_leaves_the_counters
     rig.state("o1", "canceled", START + 202);
     assert!(rig.0.flat());
     assert_eq!(rig.0.counted(instant(START + 600)), None);
-    assert_eq!(rig.0.opening_hold(true), Some(OpeningHold::AccountTraded));
+    assert!(!answers(&rig));
 }
 
 /// Orders and fills of an earlier risk day count toward no daily counter; their instants still
@@ -660,7 +666,7 @@ proptest! {
     fn every_counter_is_the_specs_reading_of_the_rows(events in events()) {
         let (rig, expected) = laid(&events);
         prop_assert!(rig.0.flat());
-        prop_assert_eq!(rig.0.opening_hold(true), None);
+        prop_assert!(answers(&rig));
         let now = instant(MIDNIGHT + 86_399);
         let Counted { conduct, orders_today, last_exit_fill_at } = rig.0.counted(now).unwrap();
         prop_assert_eq!(orders_today, expected.orders_today);

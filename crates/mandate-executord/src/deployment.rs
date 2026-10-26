@@ -956,7 +956,6 @@ impl BindingGateSource for Deployment {
         if facts.mandate_version != resolved.version
             || !resolved.view.covers(request.agent, request.instrument)
             || journaled.opening_hold(resolved.pinned).is_some()
-            || !journaled.untraded()
             || !self.openable_at(request.agent, request.instrument, facts.now)
         {
             return None;

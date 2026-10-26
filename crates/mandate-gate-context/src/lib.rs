@@ -356,21 +356,19 @@ impl Journaled {
 
     /// Why every opening of the agent's is held whatever the order, as the binding gate's source
     /// binds on it and the workspace API's agent read serves it (DEC-2143): `None` while nothing
-    /// has traded on the account, or while a pinned agent's account is [`Self::flat`] and its
-    /// counters read (DEC-2833 item 1), when the account risk view's snapshot is what the gate
-    /// reads next; otherwise the account risk view does not yet read the opening (DEC-2380 item
-    /// 2), and an unpinned mandate's agent binds no instrument for it (DEC-2819 item 4). No exit,
-    /// protective order or kill switch reads it (`AGENTS.md` rule 13).
+    /// has traded on the account; once anything has, the account risk view must read an opening
+    /// (DEC-2380 item 2), and an unpinned mandate's agent binds no instrument for it (DEC-2819
+    /// item 4). No exit, protective order or kill switch reads it (`AGENTS.md` rule 13).
+    /// [`Self::flat`] and [`Self::counted`] are what a traded, flat account's opening will read
+    /// once the account risk view's snapshot reaches the gate (DEC-2833 item 1).
     #[must_use]
     pub fn opening_hold(&self, pinned: bool) -> Option<OpeningHold> {
         if self.untraded() {
             None
-        } else if !pinned {
-            Some(OpeningHold::ResearchAgentTraded)
-        } else if self.flat() && !self.unreadable && self.ledger.readable() {
-            None
-        } else {
+        } else if pinned {
             Some(OpeningHold::AccountTraded)
+        } else {
+            Some(OpeningHold::ResearchAgentTraded)
         }
     }
 
