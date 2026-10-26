@@ -9,7 +9,8 @@ import { deferredCheckLabel } from "../src/lib/deferred-checks";
  * the code the host confirms (`cli_confirm`, DEC-2104), the executor places and fills the order on
  * the fixture broker, the agent's screen shows the order filled, the position and the journal
  * records from the served reads (DEC-2377), the positions screen shows the agent's own position, the
- * audit timeline shows the agent's and its account's records, and the browser's kill switch is recorded.
+ * audit timeline shows the agent's and its account's records, the browser's kill switch is recorded,
+ * and the alerts screen shows that kill switch as exactly one alert (`GET /alerts`, DEC-2141).
  *
  * The driver sets it up and plays the host. It runs this file with `OWLHEAD_CELL_SPEC=trade-loop.spec.ts`
  * and the agent in `OWLHEAD_CELL_AGENT`. The spec triggers nothing itself: it waits for a pending
@@ -211,5 +212,15 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     if (answer === null) return refuse(`the kill switch was sent for ${JSON.stringify(scope)}, not agent ${AGENT} alone, and was stopped`);
     if (!answer.ok()) refuse(`the API answered ${answer.status()} for the kill switch`);
     step("kill_switch", ((await answer.json()) as { command_id?: string }).command_id ?? "");
+  });
+
+  await test.step("the alerts screen shows the kill switch as exactly one alert", async () => {
+    const killed = page.locator('[data-slot="api-alert"][data-kind="kill_switch"]');
+    const shown = await until(page, "/alerts", 30_000, async () => (await killed.count()) > 0);
+    if (!shown) refuse("the alerts screen showed no kill switch alert within 30 s of the kill switch");
+    const count = await killed.count();
+    if (count !== 1) refuse(`the alerts screen showed ${count} kill switch alerts for one kill switch, not one`);
+    await expect(killed.getByText("Kill switch activated")).toBeVisible();
+    step("kill_switch_alert");
   });
 });

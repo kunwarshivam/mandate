@@ -12,6 +12,7 @@ import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
 import type { CommandPhase, Decoder, PreparedCommand } from "@/api/types";
 import { activityRead, journalPageRead, holdingsRead } from "@/api/activity";
+import { alertsRead } from "@/api/alerts";
 import { connectStartBody, connectionRead, connectionsRead } from "@/api/connect";
 import { type PasskeyKind, type StepUpAction, type StepUpChallenge, confirmCode, connectStepUpDigest } from "@/api/step-up";
 import { prepareCreateVersion, readConfirmation, versionCreated } from "@/api/versions";
@@ -32,6 +33,7 @@ import {
   type CommandRecord,
   type MandateChangeRequest,
   type PasskeyPort,
+  type AlertsAnswer,
   type PositionsAnswer,
   type Runtime,
   RuntimeContext,
@@ -477,6 +479,12 @@ export function ApiRuntimeProvider({
     [client],
   );
 
+  /** `GET /alerts` (§4.7, DEC-2141): the workspace's owner alerts, with only this member's own deliveries. */
+  const alerts = useCallback(async (): Promise<AlertsAnswer> => {
+    const read = await client.read("/alerts", alertsRead);
+    return read.ok ? { ok: true, read: read.value } : { ok: false, reason: read.error.code };
+  }, [client]);
+
   /** Mandate changes go through drafts, versions and confirmation (spec §4.1), which this slice does not send. */
   const changeMandate = useCallback<Runtime["changeMandate"]>((proposal, origin, record) => {
     counter.current += 1;
@@ -663,8 +671,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, streamTail: journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, streamTail: journalTail, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, journalTail, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

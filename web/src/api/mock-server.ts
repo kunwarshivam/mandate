@@ -266,7 +266,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
 
   function get(route: string, query: URLSearchParams): Response {
     const journal = route.match(/^\/journal\/streams\/([^/]+)\/events$/);
-    const allowed = (name: string) => (route === "/approvals" && name === "state") || (journal !== null && (name === "after_seq" || name === "limit"));
+    const allowed = (name: string) => (route === "/approvals" && name === "state") || (route === "/alerts" && name === "limit") || (journal !== null && (name === "after_seq" || name === "limit"));
     if ([...query.keys()].some((name) => !allowed(name))) return problem(404, "not_found", "none");
     if (journal) {
       const lines = agentStream(decodeURIComponent(journal[1])) ?? controlStream(decodeURIComponent(journal[1]));
@@ -284,6 +284,8 @@ export function createMockServer(options: MockServerOptions): MockServer {
       return event ? read({ event: { ...event, stream_id: `ctl:${workspaceId}`, artifact_refs: [], config_refs: {} } }) : problem(404, "not_found", "none");
     }
     if (route === "/health") return read(healthBody(workspace.health, servedAt));
+    /** `read-models/alerts` (DEC-2141): the fixtures journal no owner alert, so none is invented. */
+    if (route === "/alerts") return read({ alerts: [], truncated: false });
     if (route === "/passkeys") return read({ passkeys: passkeys.map((p) => ({ passkey_id: p.passkey_id, alg: "es256", enrolled_at: servedAt, cool_off_ends: p.cool_off_ends })) });
     if (route === "/agents") return read({ agents: workspace.agents.map(agentRow) });
     if (route === "/connections") return read({ connections: connectionRows() });
