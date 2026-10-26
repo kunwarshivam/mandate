@@ -153,6 +153,7 @@ pub enum Part {
     Api(ApiCheck),
     Web(WebCheck),
     WebSignIn(WebCheck),
+    WebSetUp(SetUpCheck),
     WebTradeLoop(WebCheck),
     Executor(ExecutorCheck),
     Applied(AppliedCheck),
@@ -224,6 +225,15 @@ pub struct AppliedCheck {
 pub struct WebCheck {
     pub shows: &'static str,
     pub agent: &'static str,
+}
+
+/// The owner's set-up from `web/` in the run's workspace (`web/e2e-cell/setup.spec.ts`), run after
+/// the gestures' Job: a passkey added in Settings by Chromium's virtual authenticator, version 1
+/// created in `/agents/new`, and its confirm held in words for the passkey's first 24 hours, with
+/// no deployment offered ([`web::setup_from_web`]).
+#[derive(Debug)]
+pub struct SetUpCheck {
+    pub shows: &'static str,
 }
 
 /// A link of the story not on `main` yet (DEC-2004): what it would show, what of it is already on
@@ -347,6 +357,14 @@ const W2_WEB: Wait = Wait {
     pr: None,
     lands: "web/ sends the demo's gestures through the API, and `cell demo` drives web/ against \
             the cell (claim #1443)",
+};
+const WB_SETUP: Wait = Wait {
+    lane: "WB",
+    story: "E11-9",
+    pr: None,
+    lands: "web/'s confirm and deploy with a passkey in the cell, once the founder decides whether \
+            a dev or ci cell may waive a first passkey's 24-hour cool-off (workspace API spec \
+            §3.6, DEC-79); until then the cell's confirm and deploy stay the CLI's",
 };
 const E2E_FILL: Wait = Wait {
     lane: "E2E",
@@ -890,12 +908,18 @@ pub fn plan(
                         owner(&["agent", "deploy", WEB_AGENT, &version, "--code", &deploy]),
                         "deployed as event".into(),
                     ),
+                    Part::WebSetUp(SetUpCheck {
+                        shows: "the owner's set-up from web/: a passkey added in Settings, \
+                                version 1 created in /agents/new, and its confirm held in words \
+                                for the passkey's first 24 hours, with nothing sent",
+                    }),
                     Part::Gap(Gap {
-                        what: "the same gestures from web/",
-                        on_main: "the API's version, confirm and deploy routes (#1552) in the \
-                                  cell (#1554), web/'s set-up (#1557), its sign-in to a dev cell \
-                                  (#1588) and the stub issuer (#1591)",
-                        waits: vec![W2_WEB],
+                        what: "the confirm and deploy from web/",
+                        on_main: "the API's version, confirm and deploy routes (#1552) with \
+                                  passkey step-up (DEC-2128), web/'s set-up (#1557), and the \
+                                  set-up above, which a passkey still in its first 24 hours \
+                                  stops at the confirm",
+                        waits: vec![WB_SETUP],
                     }),
                 ],
                 connected
@@ -1296,6 +1320,7 @@ pub fn gestures(steps: &[Step]) -> Vec<&Gesture> {
             Part::Api(_)
             | Part::Web(_)
             | Part::WebSignIn(_)
+            | Part::WebSetUp(_)
             | Part::WebTradeLoop(_)
             | Part::Executor(_)
             | Part::Applied(_)
@@ -1968,6 +1993,21 @@ pub fn run_in(name: &str) -> Result<String> {
                     eprintln!("    {word:<8} {}: {said}", check.shows);
                     if fails {
                         failed.get_or_insert_with(|| format!("GET {}: {said}", check.path));
+                    }
+                }
+                Part::WebSetUp(check) => {
+                    let outcome = match &failed {
+                        Some(_) => SetUpOutcome::AfterFailure,
+                        None => set_up(&workspace)?,
+                    };
+                    let required = Required {
+                        cell: env::var_os(CELL_REQUIRED_ENV).is_some(),
+                        web: env::var_os(WEB_REQUIRED_ENV).is_some(),
+                    };
+                    let (word, said, fails) = setup_verdict(&outcome, required);
+                    eprintln!("    {word:<8} {}: {said}", check.shows);
+                    if fails {
+                        failed.get_or_insert_with(|| format!("web/ set-up: {said}"));
                     }
                 }
                 Part::WebTradeLoop(check) => {
@@ -2683,6 +2723,63 @@ fn browse(
         None => web_outcome(&WebCheck { shows: "", agent }, workspace)?,
     };
     Ok((traded, web))
+}
+
+/// What became of the owner's set-up from `web/`: an earlier part failed, so it was not tried; the
+/// API could not be asked; this machine lacks `web/`'s tools; the run failed or stopped at a step;
+/// or it reached every step, with what each recorded.
+#[derive(Debug, Clone)]
+pub enum SetUpOutcome {
+    AfterFailure,
+    Unaskable(String),
+    NoTools(String),
+    Failed(String),
+    Ran(BTreeMap<String, String>),
+}
+
+/// The owner's set-up from `web/` in `workspace`, as [`browse`] reaches the browser: the API
+/// asked first, then `web/`'s tools, then the API's port-forward.
+fn set_up(workspace: &str) -> Result<SetUpOutcome> {
+    if let Some(why) = api_unaskable()? {
+        return Ok(SetUpOutcome::Unaskable(why));
+    }
+    if let Some(why) = web::unavailable()? {
+        return Ok(SetUpOutcome::NoTools(why));
+    }
+    if let Err(why) = api_port_forward(stub_image_tag()?.is_some()) {
+        return Ok(SetUpOutcome::Unaskable(format!("{why:#}")));
+    }
+    Ok(match web::setup_from_web(workspace) {
+        Ok(reached) => SetUpOutcome::Ran(reached),
+        Err(why) => SetUpOutcome::Failed(format!("{why:#}")),
+    })
+}
+
+/// How the set-up from `web/` reads: `ran` only when it reached every step of
+/// [`web::SETUP_STEPS`]; `failed` for a run that stopped or failed, for an API that cannot be
+/// asked where the cell is required, and for a machine without `web/`'s tools where the web
+/// gesture is; otherwise `not run`, as [`web_verdict`] reads a gesture. Returns the word, what to
+/// print after it, and whether the run fails.
+pub fn setup_verdict(outcome: &SetUpOutcome, required: Required) -> (&'static str, String, bool) {
+    match outcome {
+        SetUpOutcome::AfterFailure => ("not run", "an earlier part failed".into(), false),
+        SetUpOutcome::Unaskable(why) if required.cell => ("failed", why.clone(), true),
+        SetUpOutcome::NoTools(why) if required.web => ("failed", why.clone(), true),
+        SetUpOutcome::Unaskable(why) | SetUpOutcome::NoTools(why) => {
+            ("not run", why.clone(), false)
+        }
+        SetUpOutcome::Failed(why) => ("failed", why.clone(), true),
+        SetUpOutcome::Ran(reached) => {
+            let version = reached.get("version_created").map_or("", String::as_str);
+            (
+                "ran",
+                format!(
+                    "version {version} created; its confirm held for the passkey's first 24 hours"
+                ),
+                false,
+            )
+        }
+    }
 }
 
 /// The signed-in read of every approval in `workspace`, whatever its state.
@@ -4358,6 +4455,84 @@ mod tests {
                 "slice {slice} landed as {cited}, but no gap's on_main cites it"
             );
         }
+    }
+
+    /// Step 2 ends with the owner's set-up from web/ after the CLI's deployment, then the gap for
+    /// the confirm and deploy from web/, which waits on lane WB once the founder decides the
+    /// cool-off; so step 2 stays partial while that gap stands.
+    #[test]
+    fn step_two_runs_the_web_set_up_after_the_cli_deployment_and_names_its_gap() {
+        for steps in [planned("demo1"), unconnected("demo1")] {
+            let step2 = &steps[1];
+            let set_up = step2
+                .parts
+                .iter()
+                .position(|p| matches!(p, Part::WebSetUp(_)))
+                .unwrap();
+            let deployed = step2
+                .parts
+                .iter()
+                .position(|p| {
+                    matches!(p, Part::Gesture(g) if g.args[..2] == ["agent", "deploy"] && g.args.iter().any(|a| a == "--code"))
+                })
+                .unwrap();
+            assert!(deployed < set_up, "after the CLI's deployment");
+            let Some(Part::Gap(gap)) = step2.parts.get(set_up + 1) else {
+                panic!("the gap for the confirm and deploy follows the set-up");
+            };
+            assert_eq!(gap.what, "the confirm and deploy from web/");
+            assert_eq!(gap.waits.iter().map(|w| w.lane).collect::<Vec<_>>(), ["WB"]);
+            assert!(
+                gap.waits[0].lands.contains("founder"),
+                "the founder's cool-off decision is what it waits on"
+            );
+            assert_eq!(readiness(step2), Partial);
+        }
+    }
+
+    /// The set-up from web/ reads `ran` only once it reached every step; a run that stopped is
+    /// `failed`; a machine without web/'s tools or an API that cannot be asked is `not run`,
+    /// unless the run requires the web gesture or the cell, as a web gesture reads.
+    #[test]
+    fn the_web_set_up_reads_ran_failed_or_not_run() {
+        let free = Required {
+            cell: false,
+            web: false,
+        };
+        let strict = Required {
+            cell: true,
+            web: true,
+        };
+        let reached: BTreeMap<String, String> = web::SETUP_STEPS
+            .iter()
+            .map(|s| ((*s).to_owned(), "v".to_owned()))
+            .collect();
+        let (word, _, fails) = setup_verdict(&SetUpOutcome::Ran(reached), free);
+        assert_eq!((word, fails), ("ran", false));
+        let stopped =
+            SetUpOutcome::Failed("the set-up from web/ did not reach `version_created`".into());
+        assert_eq!(setup_verdict(&stopped, free).0, "failed");
+        assert!(setup_verdict(&stopped, free).2);
+        for outcome in [
+            SetUpOutcome::NoTools("no Chromium".into()),
+            SetUpOutcome::Unaskable("no API".into()),
+            SetUpOutcome::AfterFailure,
+        ] {
+            let (word, _, fails) = setup_verdict(&outcome, free);
+            assert_eq!((word, fails), ("not run", false), "{outcome:?}");
+        }
+        for outcome in [
+            SetUpOutcome::NoTools("no Chromium".into()),
+            SetUpOutcome::Unaskable("no API".into()),
+        ] {
+            let (word, _, fails) = setup_verdict(&outcome, strict);
+            assert_eq!((word, fails), ("failed", true), "{outcome:?}");
+        }
+        assert_eq!(
+            setup_verdict(&SetUpOutcome::AfterFailure, strict).0,
+            "not run",
+            "an earlier failure already fails the run"
+        );
     }
 
     /// DEC-2379: step 2 records the paper connection the connect check left before anything else,
