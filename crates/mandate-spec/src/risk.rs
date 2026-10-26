@@ -218,6 +218,11 @@ pub enum Input {
     },
     /// A copied `ClockAdvanced`: confirmation continues when no marks arrive (§5.6).
     Clock,
+    /// A fee charged to one of the agent's own orders: E is net of fees (§5.1), so it lowers the
+    /// sub-ledger's cash by `usd`, never below what it was, and so never raises E (DEC-2393 item 3).
+    Fee {
+        usd: Usd,
+    },
     UniverseChanged {
         instrument: AssetId,
         change: UniverseChange,
