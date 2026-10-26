@@ -29,6 +29,8 @@ export type Capability =
   | "agents.view"
   | "audit.view"
   | "workspace.view"
+  /** Exit one of an agent's positions (workspace API spec §3.7, "Owner exit (close a position)": the operator's column; the owner holds every capability here). */
+  | "positions.exit"
   /** Connect a broker account (workspace API spec §3.7, "Connect, change, or revoke a broker connection"): the owner only here, the most conservative reading. */
   | "connections.manage";
 
@@ -39,7 +41,7 @@ export function can(role: Role, capability: Capability): boolean {
     case "operator":
       return capability !== "agents.deploy" && capability !== "connections.manage";
     case "approver":
-      return capability !== "stop.full" && capability !== "agents.deploy" && capability !== "connections.manage";
+      return capability !== "stop.full" && capability !== "positions.exit" && capability !== "agents.deploy" && capability !== "connections.manage";
     case "viewer":
       return capability === "agents.view" || capability === "workspace.view";
     case "auditor":

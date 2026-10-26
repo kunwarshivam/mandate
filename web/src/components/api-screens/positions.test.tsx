@@ -113,7 +113,7 @@ describe("the owner's exit from the positions screen (spec §5.4, rule 13)", () 
     const confirm = await openExit();
     const shown = within(confirm).getAllByRole("listitem").map((li) => li.textContent);
     fireEvent.click(within(confirm).getByRole("button", { name: "Sell it" }));
-    await waitFor(() => expect(screen.getByRole("status", { name: `Your exit from ${held.instrument.asset_id}` })).toHaveTextContent("Applied: the agent's runtime took your exit. Its sell shows in the agent's orders."));
+    await waitFor(() => expect(screen.getByRole("status", { name: `Your exit from ${held.instrument.asset_id}` })).toHaveTextContent("Taken by the agent's runtime. Look at the agent's orders for its sell."));
     const sent = posts.filter((p) => p.path === exitsRoute);
     expect(sent).toHaveLength(1);
     expect(Object.keys(sent[0].body).sort()).toEqual(["bid", "bid_size", "floor", "instrument", "quoted_at", "record", "step_up"]);
@@ -126,9 +126,11 @@ describe("the owner's exit from the positions screen (spec §5.4, rule 13)", () 
     const { posts } = mount();
     const confirm = await openExit();
     const sell = within(confirm).getByRole("button", { name: "Sell it" });
-    fireEvent.click(sell);
-    fireEvent.click(sell);
-    await waitFor(() => expect(screen.getByRole("status", { name: `Your exit from ${held.instrument.asset_id}` })).toHaveTextContent("Applied"));
+    act(() => {
+      sell.click();
+      sell.click();
+    });
+    await waitFor(() => expect(screen.getByRole("status", { name: `Your exit from ${held.instrument.asset_id}` })).toHaveTextContent("Taken by the agent's runtime"));
     expect(posts.filter((p) => p.path === exitsRoute)).toHaveLength(1);
   });
 
@@ -164,9 +166,67 @@ describe("the owner's exit from the positions screen (spec §5.4, rule 13)", () 
     expect(table).toHaveTextContent("No exit here: this position names no asset id. The agent's kill switch still sells it.");
   });
 
-  it("offers no exit to a role that cannot stop an agent", async () => {
-    mount("normal", (send) => send, "viewer");
+  it("offers no exit to a role the spec does not give it, and offers it to the operator", async () => {
+    for (const role of ["viewer", "approver"] as const) {
+      mount("normal", (send) => send, role);
+      const table = await screen.findByRole("table", { name: `${holder.mandate.name}'s positions` });
+      expect(within(table).queryByRole("button", { name: /^Exit / })).toBeNull();
+      cleanup();
+    }
+    mount("normal", (send) => send, "operator");
     const table = await screen.findByRole("table", { name: `${holder.mandate.name}'s positions` });
-    expect(within(table).queryByRole("button", { name: /^Exit / })).toBeNull();
+    expect(within(table).getByRole("button", { name: `Exit ${held.instrument.asset_id}` })).toBeInTheDocument();
+  });
+
+  it("keeps the exit's outcome once the position sells to nothing and its row is gone", async () => {
+    let sold = false;
+    mount("normal", (send) => async (input, init) => {
+      const path = new URL(input).pathname;
+      if (init.method === "POST" && path === exitsRoute) sold = true;
+      const answer = await send(input, init);
+      if (!sold || !path.endsWith(`/agents/${holder.agent_id}/positions`)) return answer;
+      const body = (await answer.json()) as Record<string, unknown>;
+      return new Response(JSON.stringify({ ...body, positions: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    fireEvent.click(within(await openExit()).getByRole("button", { name: "Sell it" }));
+    await waitFor(() => expect(screen.getByRole("status", { name: `Your exit from ${held.instrument.asset_id}` })).toHaveTextContent("Taken by the agent's runtime"));
+    await waitFor(() => expect(document.querySelector(`[data-slot=agent-positions][data-agent="${holder.agent_id}"]`)).toHaveTextContent("Its own fills net to nothing."), { timeout: 8000 });
+    expect(screen.getByRole("status", { name: `Your exit from ${held.instrument.asset_id}` })).toHaveTextContent("Taken by the agent's runtime");
+  }, 15_000);
+
+  it("never says nothing was sold when an earlier attempt's answer was lost, even if a later one is refused", async () => {
+    let attempts = 0;
+    mount("normal", (send) => (input, init) => {
+      if (init.method !== "POST" || new URL(input).pathname !== exitsRoute) return send(input, init);
+      attempts += 1;
+      return attempts === 1
+        ? Promise.reject(new TypeError("lost"))
+        : Promise.resolve(new Response(JSON.stringify({ type: "about:blank", status: 403, title: "Forbidden", code: "forbidden", effect: "none", event_id: null, retryable: false }), { status: 403, headers: { "Content-Type": "application/problem+json" } }));
+    });
+    fireEvent.click(within(await openExit()).getByRole("button", { name: "Sell it" }));
+    const status = await screen.findByRole("status", { name: `Your exit from ${held.instrument.asset_id}` });
+    await waitFor(() => expect(status).toHaveTextContent("The result is unknown; we are checking."), { timeout: 3000 });
+    expect(status).not.toHaveTextContent("Nothing was sold");
+    expect(attempts).toBe(2);
+    expect(screen.queryByRole("button", { name: `Exit ${held.instrument.asset_id}` })).toBeNull();
+  });
+
+  it("lets the owner ask again, as a new exit, only once nothing was recorded", async () => {
+    let refused = true;
+    const keys: string[] = [];
+    const { posts } = mount("normal", (send) => (input, init) =>
+      init.method === "POST" && new URL(input).pathname === exitsRoute && (keys.push(new Headers(init.headers).get("Idempotency-Key") ?? ""), refused)
+        ? ((refused = false), Promise.resolve(new Response(JSON.stringify({ type: "about:blank", status: 403, title: "Forbidden", code: "forbidden", effect: "none", event_id: null, retryable: false }), { status: 403, headers: { "Content-Type": "application/problem+json" } })))
+        : send(input, init),
+    );
+    fireEvent.click(within(await openExit()).getByRole("button", { name: "Sell it" }));
+    await waitFor(() => expect(screen.getByRole("status", { name: `Your exit from ${held.instrument.asset_id}` })).toHaveTextContent("Nothing was sold."));
+    const table = screen.getByRole("table", { name: `${holder.mandate.name}'s positions` });
+    fireEvent.click(within(table).getByRole("button", { name: `Exit ${held.instrument.asset_id}` }));
+    fireEvent.click(within(screen.getByRole("group", { name: `Exit ${held.instrument.asset_id}` })).getByRole("button", { name: "Sell it" }));
+    await waitFor(() => expect(screen.getByRole("status", { name: `Your exit from ${held.instrument.asset_id}` })).toHaveTextContent("Taken by the agent's runtime"));
+    expect(posts.filter((p) => p.path === exitsRoute)).toHaveLength(1);
+    expect(keys).toHaveLength(2);
+    expect(new Set(keys).size).toBe(2);
   });
 });

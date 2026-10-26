@@ -128,10 +128,15 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     step("positions_screen");
   });
 
-  await test.step("the owner's exit from the positions screen is recorded, and its sell fills the agent's position to nothing", async () => {
+  await test.step("the owner's exit from the positions screen is recorded, and its sell fills on the agent's orders", async () => {
+    const sells = page.getByRole("list", { name: "Orders" }).locator("[data-state=filled]").filter({ hasText: /^Sell / });
+    await page.goto(`/agents/${AGENT}`, { timeout: 15_000 });
+    await page.getByRole("list", { name: "Orders" }).waitFor({ timeout: 30_000 });
+    const before = await sells.count();
+    await page.goto("/positions", { timeout: 15_000 });
     const own = page.locator(`[data-slot=agent-positions][data-agent="${AGENT}"]`);
     const exit = own.getByRole("button", { name: /^Exit / }).first();
-    await expect(exit).toBeVisible();
+    await expect(exit).toBeVisible({ timeout: 30_000 });
     await exit.click();
     const confirm = own.getByRole("group", { name: /^Exit / });
     await expect(confirm).toContainText("only participation caps pace it");
@@ -139,9 +144,9 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     await confirm.getByRole("button", { name: "Sell it" }).click();
     const answer = await sent;
     if (!answer.ok()) refuse(`the API answered ${answer.status()} for the owner exit: ${(await answer.text()).slice(0, 400)}`);
-    await expect(own.getByRole("status", { name: /^Your exit from / })).toContainText(/Recorded in the journal: your exit|Applied: the agent's runtime took your exit/);
-    const sold = await until(page, "/positions", FILL_MS, async () => (await own.getByText("Its own fills net to nothing.").count()) > 0);
-    if (!sold) refuse(`the owner exit was recorded but the agent's position did not fill to nothing within ${FILL_MS} ms`);
+    await expect(page.getByRole("status", { name: /^Your exit from / })).toContainText(/Recorded in the journal: your exit|Taken by the agent's runtime/);
+    const filled = await until(page, `/agents/${AGENT}`, FILL_MS, async () => (await sells.count()) > before);
+    if (!filled) refuse(`the owner exit was recorded but no new sell filled on the agent's orders within ${FILL_MS} ms`);
     step("owner_exit", ((await answer.json()) as { command_id?: string }).command_id ?? "");
   });
 

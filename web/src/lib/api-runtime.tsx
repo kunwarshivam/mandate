@@ -212,15 +212,22 @@ export function ApiRuntimeProvider({
     };
   }, [refresh, refreshMs, session, keepAliveMs]);
 
-  /** Sends one prepared gesture until the API answers, with the same key and body each time (API-4, API-13). */
+  /**
+   * Sends one prepared gesture until the API answers, with the same key and body each time (API-4,
+   * API-13). A refusal that records nothing after an attempt whose effect was not known is `unknown`,
+   * never `undelivered`: the earlier attempt may have been recorded.
+   */
   const deliver = useCallback(
     async (command: PreparedCommand): Promise<Delivery> => {
       let eventId: string | null = null;
+      let ambiguous = false;
       for (let attempt = 0; attempt < SENDS; attempt += 1) {
         const outcome = await client.send(command);
         if (outcome.ok) return { phase: "recorded", eventId: outcome.accepted.event_id, body: outcome.body };
         const { error } = outcome;
+        if (error.effect === "none" && ambiguous) return { phase: "unknown", eventId };
         if (error.effect === "none") return { phase: "undelivered", reason: error.code };
+        ambiguous = true;
         eventId = error.event_id ?? eventId;
         if (error.effect === "recorded" && eventId) return { phase: "recorded", eventId };
         if (!error.retryable) break;

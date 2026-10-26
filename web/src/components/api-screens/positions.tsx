@@ -80,20 +80,29 @@ function AgentLink({ agent }: { agent: AgentDetail }) {
 }
 
 /** Where the owner's exit from one instrument stands on this screen. */
-type ExitState = { step: "idle" } | { step: "confirming" } | { step: "sending" } | { step: "recorded" } | { step: "done"; outcome: ExitOutcome };
+type ExitStep = { step: "confirming" } | { step: "sending" } | { step: "recorded" } | { step: "done"; outcome: ExitOutcome };
 
-/** An exit's outcome in words, never by a code: what happened, and what was not sold. */
-function exitWords(state: ExitState): string {
+/** One exit the owner started here: the agent, its name, the asset, and where it stands. */
+interface Exit {
+  agentId: string;
+  name: string;
+  instrument: string;
+  state: ExitStep;
+}
+
+const exitKey = (agentId: string, instrument: string) => `${agentId}\n${instrument}`;
+
+/** An exit's outcome in words, never by a code: what the journal says, and that nothing was sold where nothing was recorded. */
+function exitWords(state: ExitStep): string {
   if (state.step === "sending") return "Sending your exit…";
-  if (state.step === "recorded") return "Recorded in the journal: your exit. Waiting for the agent's runtime to take it.";
-  if (state.step !== "done") return "";
+  if (state.step === "recorded" || state.step === "confirming") return "Recorded in the journal: your exit. Waiting for the agent's runtime to take it.";
   switch (state.outcome.phase) {
     case "applied":
-      return "Applied: the agent's runtime took your exit. Its sell shows in the agent's orders.";
+      return "Taken by the agent's runtime. Look at the agent's orders for its sell.";
     case "refused":
-      return "Refused by the agent's runtime: nothing was sold. Its records say why.";
+      return "Refused by the agent's runtime: nothing was sold for it. Its records say why.";
     case "ended":
-      return "Ended without a sell: nothing was sold. The agent's records say why.";
+      return "Ended without a sell for it. The agent's records say why.";
     case "recorded":
       return "Recorded in the journal: your exit. Its outcome is not reported yet; look at the agent's orders.";
     case "undelivered":
@@ -103,16 +112,22 @@ function exitWords(state: ExitState): string {
   }
 }
 
-/**
- * The owner's exit from one instrument (§5.4, rule 13): asked first on the screen, then sent once.
- * The bid confirmation is never sent, since this screen shows no quote with its size and time, so
- * the confirmation says an equity sell outside the regular session waits for it.
- */
-function ExitCell({ agent, holding, name }: { agent: AgentDetail; holding: AgentHolding; name: string }) {
+/** Whether the owner may ask again here: only where nothing was recorded, or the runtime refused it. */
+const retryable = (state: ExitStep) => state.step === "done" && (state.outcome.phase === "undelivered" || state.outcome.phase === "refused");
+
+/** The exits the owner started on this screen, kept here so a row that sold to nothing, or a read that failed, never hides one. */
+interface Exits {
+  of: (agentId: string, instrument: string) => Exit | undefined;
+  ask: (agentId: string, name: string, instrument: string) => void;
+  cancel: (agentId: string, instrument: string) => void;
+  sell: (agent: AgentDetail, name: string, instrument: string, lines: string[]) => void;
+  all: Exit[];
+}
+
+function useExits(): Exits {
   const { ownerExit, ws } = useRuntime();
-  const allowed = useCan("stop.full");
-  const [state, setState] = useState<ExitState>({ step: "idle" });
-  const sent = useRef(false);
+  const [exits, setExits] = useState<Readonly<Record<string, Exit>>>({});
+  const sending = useRef(new Set<string>());
   const live = useRef(true);
   useEffect(() => {
     live.current = true;
@@ -120,54 +135,95 @@ function ExitCell({ agent, holding, name }: { agent: AgentDetail; holding: Agent
       live.current = false;
     };
   }, []);
+  const put = (key: string, exit: Exit) => setExits((all) => ({ ...all, [key]: exit }));
+  return {
+    of: (agentId, instrument) => exits[exitKey(agentId, instrument)],
+    ask: (agentId, name, instrument) => put(exitKey(agentId, instrument), { agentId, name, instrument, state: { step: "confirming" } }),
+    cancel: (agentId, instrument) =>
+      setExits((all) => {
+        const rest = { ...all };
+        delete rest[exitKey(agentId, instrument)];
+        return rest;
+      }),
+    sell: (agent, name, instrument, lines) => {
+      const key = exitKey(agent.agent_id, instrument);
+      if (!ownerExit || sending.current.has(key)) return;
+      sending.current.add(key);
+      const at = (state: ExitStep) => {
+        if (live.current) put(key, { agentId: agent.agent_id, name, instrument, state });
+      };
+      const record: CommandRecord = { screen: "D10", environment: ws.environment, title: `Exit ${instrument}`, shown: lines, modes: [{ agent: agent.agent_id, badge: agent.mode ?? "not reported" }] };
+      at({ step: "sending" });
+      void ownerExit(agent.agent_id, instrument, record, () => at({ step: "recorded" })).then((outcome) => {
+        at({ step: "done", outcome });
+        if (outcome.phase === "undelivered" || outcome.phase === "refused") sending.current.delete(key);
+      });
+    },
+    all: Object.values(exits),
+  };
+}
+
+/**
+ * The owner's exit from one instrument (§5.4, rule 13): asked first on the screen, then sent once.
+ * The bid confirmation is never sent, since this screen shows no quote with its size and time, so
+ * the confirmation says an equity sell outside the regular session waits for it.
+ */
+function ExitControl({ agent, holding, name, exits }: { agent: AgentDetail; holding: AgentHolding; name: string; exits: Exits }) {
+  const { ownerExit } = useRuntime();
+  const allowed = useCan("positions.exit");
   const instrument = holding.instrument_id;
   if (!ownerExit || !allowed || holding.filled_qty.startsWith("-") || /^0(\.0*)?$/.test(holding.filled_qty)) return null;
   if (!isAssetId(instrument)) return <span className={NOT_REPORTED}>{"No exit here: this position names no asset id. The agent's kill switch still sells it."}</span>;
+  const exit = exits.of(agent.agent_id, instrument);
+  if (exit && exit.state.step !== "confirming" && !retryable(exit.state)) return <span className="text-muted-foreground">Asked below.</span>;
+  if (!exit || exit.state.step !== "confirming")
+    return (
+      <Button type="button" variant="secondary" aria-label={`Exit ${instrument}`} onClick={() => exits.ask(agent.agent_id, name, instrument)}>
+        {exit ? "Exit again" : "Exit"}
+      </Button>
+    );
   const lines = [
     `Sell ${name}'s whole position in ${instrument}: ${quantity(holding.filled_qty)} held by its fills.`,
     "Your exit is never denied for the agent's limits or conduct controls; only participation caps pace it.",
     "In the regular session it is sent at once. Outside the regular session, an equity sell waits for it: this screen has no bid you could confirm.",
     "The journal records it with what this screen showed.",
   ];
-  const sell = () => {
-    if (sent.current) return;
-    sent.current = true;
-    const record: CommandRecord = { screen: "D10", environment: ws.environment, title: `Exit ${instrument}`, shown: lines, modes: [{ agent: agent.agent_id, badge: agent.mode ?? "not reported" }] };
-    setState({ step: "sending" });
-    void ownerExit(agent.agent_id, instrument, record, () => {
-      if (live.current) setState({ step: "recorded" });
-    }).then((outcome) => {
-      if (live.current) setState({ step: "done", outcome });
-    });
-  };
-  if (state.step === "idle")
-    return (
-      <Button type="button" variant="secondary" aria-label={`Exit ${instrument}`} onClick={() => setState({ step: "confirming" })}>
-        Exit
-      </Button>
-    );
-  if (state.step === "confirming")
-    return (
-      <div role="group" aria-label={`Exit ${instrument}`} className="grid gap-2">
-        <ul className="grid gap-1">
-          {lines.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-        <div className="flex gap-2">
-          <Button type="button" variant="primary" onClick={sell}>
-            Sell it
-          </Button>
-          <Button type="button" variant="secondary" onClick={() => setState({ step: "idle" })}>
-            Cancel
-          </Button>
-        </div>
-      </div>
-    );
   return (
-    <p role="status" aria-label={`Your exit from ${instrument}`}>
-      {exitWords(state)}
-    </p>
+    <div role="group" aria-label={`Exit ${instrument}`} className="grid gap-2">
+      <ul className="grid gap-1">
+        {lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      <div className="flex gap-2">
+        <Button type="button" variant="primary" onClick={() => exits.sell(agent, name, instrument, lines)}>
+          Sell it
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => exits.cancel(agent.agent_id, instrument)}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Every exit sent from this screen, with where it stands, whatever the latest positions read shows. */
+function ExitStatuses({ exits }: { exits: Exits }) {
+  const shown = exits.all.filter((e) => e.state.step !== "confirming");
+  if (shown.length === 0) return null;
+  return (
+    <Section id="positions-exits" title="Your exits">
+      <div className="grid gap-2">
+        {shown.map((e) => (
+          <p key={exitKey(e.agentId, e.instrument)} role="status" aria-label={`Your exit from ${e.instrument}`}>
+            <span className="font-medium">
+              {e.name}, {e.instrument}:
+            </span>{" "}
+            {exitWords(e.state)}
+          </p>
+        ))}
+      </div>
+    </Section>
   );
 }
 
@@ -176,10 +232,12 @@ function OwnPositions({
   agent,
   answer,
   name,
+  exits,
 }: {
   agent: AgentDetail;
   answer: Holdings;
   name: string;
+  exits: Exits;
 }) {
   if (!answer.ok || answer.account_ref === null) return null;
   return (
@@ -231,7 +289,7 @@ function OwnPositions({
                 <td className={`py-2.5 ${NOT_REPORTED}`}>Not reported</td>
                 <td className={`py-2.5 ${NOT_REPORTED}`}>Not reported</td>
                 <td className="py-2.5">
-                  <ExitCell agent={agent} holding={h} name={name} />
+                  <ExitControl agent={agent} holding={h} name={name} exits={exits} />
                 </td>
               </tr>
             ))}
@@ -312,6 +370,7 @@ function Positions() {
   const view = useRuntime().view;
   const agents = view?.agents ?? [];
   const answers = useHoldings(agents);
+  const exits = useExits();
   if (!view) return null;
   const header = (
     <PageHeader
@@ -358,6 +417,7 @@ function Positions() {
   return (
     <div className="grid grid-cols-1 gap-(--section-gap)">
       {header}
+      <ExitStatuses exits={exits} />
       {[...accounts.entries()].map(([ref, members], i) => (
         <Section
           key={ref}
@@ -371,6 +431,7 @@ function Positions() {
                 agent={agent}
                 answer={answers[agent.agent_id]}
                 name={nameOf(agent)}
+                exits={exits}
               />
             ))}
             <div className="grid gap-2">
