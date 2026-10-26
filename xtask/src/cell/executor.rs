@@ -597,8 +597,9 @@ fn ticks(id: &str, workspace: &str) -> Result<Option<String>> {
     Ok(None)
 }
 
-/// The data process's daily bars (E21-29 lane SC): one `mandate inspect` of [`BARS_DIR`] in a
-/// one-off `control` Job; `None` when it lists at least [`BAR_SESSIONS`] days and no problem.
+/// The data process's daily and minute bars (E21-29 lane SC): one `mandate inspect` of every
+/// [`bar_datasets`] dataset in a one-off `control` Job, which reports them in the order given;
+/// `None` when it counts no problem and each dataset lists at least its fewest days.
 fn bars(id: &str) -> Result<Option<String>> {
     let datasets = bar_datasets();
     let args: Vec<&str> = std::iter::once("inspect")
@@ -714,7 +715,7 @@ mod tests {
                      [pod/x/run] coverage: 2026-09-14 to 2026-10-23, 30 days listed\n\
                      [pod/x/run] problems: 0\n\
                      [pod/x/run] alpaca iex bars-1Min SPY\n\
-                     [pod/x/run] coverage: 2026-10-23, 1 days listed\n\
+                     [pod/x/run] coverage: 2026-10-23 to 2026-10-23, 1 days listed\n\
                      [pod/x/run] problems: 0\n\
                      [pod/x/run] total: 2 datasets, 0 problems";
         assert_eq!(inspected_days(clean, 2), Some(vec![30, 1]));
@@ -724,7 +725,10 @@ mod tests {
             "total: 2 datasets, 2 problems",
         );
         assert_eq!(inspected_days(&flawed, 2), None);
-        let uncovered = clean.replace("coverage: 2026-10-23, 1 days listed", "rows: 0");
+        let uncovered = clean.replace(
+            "coverage: 2026-10-23 to 2026-10-23, 1 days listed",
+            "rows: 0",
+        );
         assert_eq!(inspected_days(&uncovered, 2), None);
         assert_eq!(
             inspected_days("Error: inspecting /var/lib/mandate: missing", 2),

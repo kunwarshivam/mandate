@@ -113,14 +113,18 @@ fn without_its_arguments_the_process_refuses() {
             "instruments_malformed\n",
         ),
     ] {
-        let output = Command::new(BIN)
+        let child = Command::new(BIN)
             .args(&args)
             .arg("--probe")
             .arg(&socket)
-            .output()
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
             .unwrap();
-        assert_eq!(output.status.code(), Some(2), "{args:?}");
-        assert_eq!(String::from_utf8_lossy(&output.stderr), said, "{args:?}");
+        let (status, stderr) = Guard(child).exited();
+        assert_eq!(status.code(), Some(2), "{args:?}");
+        assert_eq!(stderr, said, "{args:?}");
     }
 }
 
