@@ -2082,12 +2082,19 @@ fn a_refusal_the_journal_cannot_take_is_journal_unavailable_and_admits_nothing()
     let cookie = signed_in(&f, alice());
     seed_version(&f, "live");
     for action in LIVE_ACTIONS {
-        f.journal.script(&[Scripted::Unavailable; 5]);
-        refused(
-            &live_attempt(&f, &cookie, KEY, action),
-            503,
-            ProblemCode::JournalUnavailable,
-        );
+        for script in [
+            Scripted::Unavailable,
+            Scripted::Ambiguous,
+            Scripted::Conflict,
+        ] {
+            f.journal.script(&[script; 5]);
+            refused(
+                &live_attempt(&f, &cookie, KEY, action),
+                503,
+                ProblemCode::JournalUnavailable,
+            );
+            f.journal.script.lock().expect("unpoisoned").clear();
+        }
     }
     assert!(real_money_refusals(&f).is_empty());
     nothing_but_refusals(&f, 0);

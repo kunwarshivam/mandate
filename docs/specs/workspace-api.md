@@ -754,7 +754,12 @@ per workspace deployment (item 6).
       document itself, as `mandate version create` reads it from a file. It must parse as a
       mandate (mandate spec §3) in the control stream's environment: `paper`. A `live` document is
       refused `live_unavailable`, and any other environment, or one unlike the stream's,
-      `invalid`. The customer real-money gate ([DEC-2134](../project/decisions/DEC-2134.md), journal spec §9.35) judges a `live` document first: while the workspace's setting is off, the API appends `RealMoneyRefused` (action `create_version`), under the id §3.4 derives for operation `real_money_refused_create_version`, before it answers; if that append fails the answer is `journal_unavailable`. While the setting is on, nothing is appended and the answer is the same. It must pass every V-rule but V-002 as if every envelope path were confirmed
+      `invalid`. The customer real-money gate ([DEC-2134](../project/decisions/DEC-2134.md), journal
+      spec §9.35) judges a `live` document first: while the workspace's setting is off, the API
+      appends `RealMoneyRefused` (action `create_version`), under the id §3.4 derives for operation
+      `real_money_refused_create_version`, before it answers; if that append fails the answer is
+      `journal_unavailable`. While the setting is on, nothing is appended and the answer is the
+      same. It must pass every V-rule but V-002 as if every envelope path were confirmed
       (the confirmation's own check), and every pinned instrument must be registered, as the CLI
       checks at confirmation; a failure is `invalid` with each V-code in `violations`. The server
       stores the canonical document under its version (mandate spec §9.1) and the CLI's record,
@@ -816,7 +821,12 @@ per workspace deployment (item 6).
       written until the deployment manager journals its own refusals. Its `202`, and the `200`
       of an agent already deployed with the version, are `commands/command-accepted`.
     - **Go live** answers `409` `live_unavailable` to every principal the deploy row authorizes,
-      after item 10's checks and before the body is read (B5, rule 8). The customer real-money gate ([DEC-2134](../project/decisions/DEC-2134.md), journal spec §9.35) judges it first: while the workspace's setting is off, the API appends `RealMoneyRefused` (action `go_live`), under the id §3.4 derives for operation `real_money_refused_go_live`, before it answers; if that append fails the answer is `journal_unavailable`. While the setting is on, nothing is appended and the answer is the same.
+      after item 10's checks and before the body is read (B5, rule 8). The customer real-money gate
+      ([DEC-2134](../project/decisions/DEC-2134.md), journal spec §9.35) judges it first: while the
+      workspace's setting is off, the API appends `RealMoneyRefused` (action `go_live`), under the
+      id §3.4 derives for operation `real_money_refused_go_live`, before it answers; if that append
+      fails the answer is `journal_unavailable`. While the setting is on, nothing is appended and
+      the answer is the same.
     - The content-addressed store (item 2) is written only by these routes, and only by adding an
       object under its own digest. Without `MANDATE_API_ARTIFACTS`, they answer
       `journal_unavailable`.

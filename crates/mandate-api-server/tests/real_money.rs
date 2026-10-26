@@ -241,3 +241,55 @@ fn no_source_of_the_api_but_the_operator_command_writes_the_gates_setting() {
         "the gate reads its setting and never writes it"
     );
 }
+
+/// The journal spec's own setting streams (§9.35's `real_money` vectors), each folded by the gate
+/// at `seq` 1 to n, give the setting the vectors expect, so the reference's fold and this one read
+/// every shared stream alike.
+#[test]
+fn the_gate_reads_each_vector_stream_as_the_spec_expects() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/refcases/journal.json");
+    let fixture = parse(&std::fs::read(path).expect("the fixture")).expect("JSON");
+    let streams = fixture
+        .get("real_money")
+        .and_then(|s| s.get("streams"))
+        .and_then(Value::as_array)
+        .expect("the setting streams");
+    assert!(streams.len() >= 6, "{} streams", streams.len());
+    for case in streams {
+        let name = case.get("name").and_then(Value::as_str).expect("a name");
+        let records = case
+            .get("records")
+            .and_then(Value::as_array)
+            .expect("records");
+        let rows: Vec<StoredEvent> = records
+            .iter()
+            .zip(1_u64..)
+            .map(|(record, seq)| {
+                let body = to_canonical(record);
+                StoredEvent {
+                    stream_id: format!("ctl:{WORKSPACE}"),
+                    seq,
+                    event_id: format!("01JBH3BTZ8K2M4N6P8R0S2T{seq:03}"),
+                    event_type: record
+                        .get("event_type")
+                        .and_then(Value::as_str)
+                        .expect("a type")
+                        .to_owned(),
+                    schema_version: 1,
+                    environment: "paper".to_owned(),
+                    recorded_at: "2026-10-26T09:00:00.000000000Z".to_owned(),
+                    prev_hash: Digest::ZERO,
+                    hash: Digest::of(&body),
+                    body,
+                }
+            })
+            .collect();
+        let want = case.get("expect").and_then(|e| e.get("enabled")) == Some(&Value::Bool(true));
+        let want = if want { Setting::On } else { Setting::Off };
+        assert_eq!(setting(&rows), want, "{name}");
+        let mut reversed = rows;
+        reversed.reverse();
+        assert_eq!(setting(&reversed), want, "{name}, rows handed in reverse");
+    }
+}
