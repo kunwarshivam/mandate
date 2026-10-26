@@ -81,6 +81,14 @@ fn users(ids: &[&str]) -> BTreeSet<String> {
     ids.iter().map(|id| (*id).to_owned()).collect()
 }
 
+/// The user ids check 3 compares a responder with for `ids`, ULIDs: each in its canonical upper
+/// case and in the lower case the CLI's `--user` takes (DEC-2384 item 3).
+fn principals(ids: &[&str]) -> BTreeSet<String> {
+    ids.iter()
+        .flat_map(|id| [(*id).to_owned(), id.to_ascii_lowercase()])
+        .collect()
+}
+
 /// The owner is the user on the mandate connection's latest record, read in `seq` order, and only
 /// while that record is an establishment naming a user.
 #[test]
@@ -256,12 +264,12 @@ fn a_founded_workspace_resolves_each_reference_to_the_founder() {
     for role in ["role:approver", "role:owner", "role:workspace_admin"] {
         assert_eq!(
             resolved(&founded, &[role]),
-            users(&[ULID_FOUNDER]),
+            principals(&[ULID_FOUNDER]),
             "{role}"
         );
     }
     let mine = format!("user:{ULID_FOUNDER}");
-    assert_eq!(resolved(&founded, &[&mine]), users(&[ULID_FOUNDER]));
+    assert_eq!(resolved(&founded, &[&mine]), principals(&[ULID_FOUNDER]));
     let theirs = format!("user:{ULID_OUTSIDER}");
     assert_eq!(resolved(&founded, &[&theirs]), users(&[]), "not a member");
     assert_eq!(
@@ -272,13 +280,13 @@ fn a_founded_workspace_resolves_each_reference_to_the_founder() {
     let alone = [founding(1, 0, ULID_FOUNDER)];
     assert_eq!(
         resolved(&alone, &["role:approver"]),
-        users(&[ULID_FOUNDER]),
+        principals(&[ULID_FOUNDER]),
         "no connection"
     );
 }
 
 /// E7-31: an invitee is an approver only once its cool-off has ended by the stream's latest
-/// record, only while it holds the approver role, and never once deactivated; `role:owner` names
+/// membership record (DEC-2384 item 2), only while it holds the approver role, and never once deactivated; `role:owner` names
 /// the founder alone, and `role:workspace_admin` only an approver who is also workspace admin.
 #[test]
 fn an_invitee_resolves_only_while_an_active_approver() {
@@ -295,25 +303,33 @@ fn an_invitee_resolves_only_while_an_active_approver() {
             1_000,
         ),
     ];
-    let cooling = [joined.clone(), vec![established_at(4, 500, "u")]].concat();
-    let both = users(&[ULID_FOUNDER]);
+    let later = |seq, secs| invited(seq, secs, "01K6C0000000000000000009V0", &["viewer"]);
+    let beside = [joined.clone(), vec![established_at(4, 1_020, "u")]].concat();
+    let both = principals(&[ULID_FOUNDER]);
+    assert_eq!(
+        resolved(&beside, &["role:approver"]),
+        both,
+        "a later record of another type does not end the cool-off"
+    );
+    let cooling = [joined.clone(), vec![later(4, 500)]].concat();
+    let both = principals(&[ULID_FOUNDER]);
     assert_eq!(resolved(&cooling, &["role:approver"]), both, "B cools off");
-    let cooled = [joined.clone(), vec![established_at(4, 1_020, "u")]].concat();
-    let both = users(&[ULID_FOUNDER, ULID_B]);
+    let cooled = [joined.clone(), vec![later(4, 1_020)]].concat();
+    let both = principals(&[ULID_FOUNDER, ULID_B]);
     assert_eq!(resolved(&cooled, &["role:approver"]), both, "B cooled off");
     assert_eq!(
         resolved(&cooled, &["role:workspace_admin"]),
         both,
         "B is admin"
     );
-    let owner = users(&[ULID_FOUNDER]);
+    let owner = principals(&[ULID_FOUNDER]);
     assert_eq!(
         resolved(&cooled, &["role:owner"]),
         owner,
         "the founder alone"
     );
     let b = format!("user:{ULID_B}");
-    assert_eq!(resolved(&cooled, &[&b]), users(&[ULID_B]));
+    assert_eq!(resolved(&cooled, &[&b]), principals(&[ULID_B]));
     let gone = [cooled.clone(), vec![deactivated(5, 1_030, ULID_B)]].concat();
     assert_eq!(resolved(&gone, &[&b]), users(&[]), "deactivated");
     let founder_gone = [cooled, vec![deactivated(5, 1_030, ULID_FOUNDER)]].concat();
@@ -321,6 +337,23 @@ fn an_invitee_resolves_only_while_an_active_approver() {
         resolved(&founder_gone, &["role:owner"]),
         users(&[]),
         "the founder left"
+    );
+    let plain = vec![
+        founding(1, 0, ULID_FOUNDER),
+        invited(2, 10, inv_b, &["approver"]),
+        accepted(3, 20, ULID_B, inv_b, &["approver"], 0),
+    ];
+    let approvers = principals(&[ULID_FOUNDER, ULID_B]);
+    assert_eq!(
+        resolved(&plain, &["role:approver"]),
+        approvers,
+        "B approves"
+    );
+    let admins = resolved(&plain, &["role:workspace_admin"]);
+    assert_eq!(
+        admins,
+        principals(&[ULID_FOUNDER]),
+        "an approver who is not workspace admin"
     );
     let viewer = vec![
         founding(1, 0, ULID_FOUNDER),
@@ -331,7 +364,7 @@ fn an_invitee_resolves_only_while_an_active_approver() {
     let admins = resolved(&viewer, &["role:workspace_admin"]);
     assert_eq!(
         admins,
-        users(&[ULID_FOUNDER]),
+        principals(&[ULID_FOUNDER]),
         "an admin who cannot approve"
     );
 }
@@ -472,7 +505,9 @@ fn a_responder_is_an_approver_exactly_when_an_active_approver_answers_a_referenc
             eligible.insert(ULID_FOUNDER);
         }
         seq += 1;
-        records.push(established_at(seq, tail, "user_founder"));
+        records.push(invited(seq, tail, "01K6C0000000000000000009V0", &["viewer"]));
+        seq += 1;
+        records.push(established_at(seq, tail + 50_000, "user_founder"));
         let texts: Vec<String> = roles
             .iter()
             .map(|r| (*r).to_owned())
@@ -489,7 +524,9 @@ fn a_responder_is_an_approver_exactly_when_an_active_approver_answers_a_referenc
         });
         let expected = eligible.contains(responder) && names;
         prop_assert_eq!(resolved.contains(responder), expected, "{:?} {:?}", texts, eligible);
-        prop_assert!(resolved.iter().all(|u| eligible.contains(u.as_str())), "{:?}", resolved);
+        prop_assert!(resolved
+            .iter()
+            .all(|u| eligible.contains(u.to_ascii_uppercase().as_str())), "{:?}", resolved);
         Ok(())
     };
     if let Err(failure) = TestRunner::new(config).run(&strategy, body) {
@@ -660,7 +697,7 @@ fn the_production_view_hands_the_runtime_the_founder_of_a_founded_workspace() {
         r#"{{"account_ref":"acct_spy","broker":"alpaca","connection_id":"{CONNECTION}","environment":"paper","scopes":["trading"],"user":"{FOUNDER}"}}"#
     );
     founded.record("ConnectionEstablished", &payload);
-    assert_eq!(admitted_approvers(&founded), users(&[ULID_FOUNDER]));
+    assert_eq!(admitted_approvers(&founded), principals(&[ULID_FOUNDER]));
 }
 
 /// The run reads a stored envelope's `event_time` only in the journal's canonical form; an
@@ -677,4 +714,44 @@ fn a_record_carries_its_envelopes_canonical_event_time_only() {
     ] {
         assert_eq!(ControlRecord::event_time_of(&json(body)), None, "{body}");
     }
+}
+
+/// E7-31 (DEC-2384 item 3): the CLI's lower-case `--user` names the founder its upper-case
+/// founding grant activated, as a responder and as a `user:` reference; a near miss of the
+/// founder's id, as either, names no one.
+#[test]
+fn a_lower_case_cli_responder_is_the_founder_and_no_near_miss_is() {
+    let founded = [founding(1, 0, ULID_FOUNDER)];
+    let resolved = resolved(&founded, &["role:approver"]);
+    assert!(
+        resolved.contains(&ULID_FOUNDER.to_ascii_lowercase()),
+        "{resolved:?}"
+    );
+    assert!(resolved.contains(ULID_FOUNDER), "{resolved:?}");
+    let lower = format!("user:{}", ULID_FOUNDER.to_ascii_lowercase());
+    assert_eq!(resolved_by(&founded, &lower), principals(&[ULID_FOUNDER]));
+    let (head, _) = ULID_FOUNDER.split_at(25);
+    for miss in [
+        format!("user:{head}"),
+        format!("user:{ULID_FOUNDER}0"),
+        format!("user: {ULID_FOUNDER}"),
+        format!("user:{ULID_FOUNDER} "),
+        format!("user:{head}E"),
+        format!("user:{head}I"),
+        format!("user:{head}L"),
+        format!("user:{head}O"),
+        format!("user:{head}U"),
+    ] {
+        assert_eq!(resolved_by(&founded, &miss), users(&[]), "{miss:?}");
+        assert!(!resolved.contains(&miss[5..]), "{miss:?} as a responder");
+    }
+}
+
+/// What the one reference `text` resolves to over `records`, or nothing when the mandate schema's
+/// own grammar refuses it.
+fn resolved_by(records: &[ControlRecord], text: &str) -> BTreeSet<String> {
+    ApproverRef::parse(text).map_or_else(
+        |_| BTreeSet::new(),
+        |reference| resolve(&[reference], &members(records, CONNECTION)),
+    )
 }

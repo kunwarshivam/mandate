@@ -10,7 +10,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_canon::encode_ulid;
+use mandate_canon::decode_ulid;
 use mandate_identity_seal::Seal;
 use mandate_time::UtcNanos;
 
@@ -74,8 +74,10 @@ impl Roster {
     /// The members `references` name among the active members holding the approver role in
     /// effect, the set admission check 3 and the API's grant check compare a responder with
     /// (DEC-2384 item 3, DEC-2130): `role:approver` names each, `role:workspace_admin` each also
-    /// holding workspace admin, `role:owner` the founder, and `user:<id>` the one whose canonical
-    /// ULID text is `<id>`. Any other reference names no one.
+    /// holding workspace admin, `role:owner` the founder, and `user:<id>` the one whose ULID `<id>`
+    /// parses to, in either case (Crockford base32 is case-insensitive; the CLI writes lower case,
+    /// DEC-527 item 3). Text that does not parse as a ULID, an alias letter or a space included,
+    /// names no one.
     pub fn approvers(&self, references: &[&str]) -> BTreeSet<PrincipalId> {
         self.active
             .iter()
@@ -87,11 +89,16 @@ impl Roster {
                         Some(("role", "approver")) => true,
                         Some(("role", "workspace_admin")) => roles.contains(&Role::WorkspaceAdmin),
                         Some(("role", "owner")) => self.founder == Some(**member),
-                        Some(("user", user)) => user == encode_ulid(member.0),
+                        Some(("user", user)) => same_principal(user, **member),
                         Some(_) | None => false,
                     })
             })
             .map(|(member, _)| *member)
             .collect()
     }
+}
+
+/// Whether `text`, upper-cased, is the canonical ULID text of `member` (DEC-2384 item 3).
+fn same_principal(text: &str, member: PrincipalId) -> bool {
+    decode_ulid(&text.to_ascii_uppercase()).is_ok_and(|id| id == member.0)
 }

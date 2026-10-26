@@ -68,7 +68,7 @@ use mandate_spec::policy::PolicyLevel;
 use mandate_spec::{ValidatedMandate, ValidationContext};
 use mandate_time::{Date, ExchangeCalendar, TradingCalendar, UtcNanos};
 
-use crate::approvers::{Members, resolve};
+use crate::approvers::{ApproverSource, Members, resolve};
 use crate::control::Governance;
 use crate::envelope::account_stream;
 use crate::error::Cause;
@@ -882,6 +882,10 @@ impl MandateSource for SpecMandate {
         Ok(Admitted {
             environment: view.approval.environment,
             view,
+            approvers: ApproverSource {
+                references: document.autonomy.approval.approvers.clone(),
+                connection: document.connection_id.as_str().to_owned(),
+            },
             governed: context.governance.as_ref().map(|governance| GovernedRefs {
                 policy_set: governance.policy_set.content_hash,
                 model_registry: governance.model_registry.content_hash,
@@ -1015,6 +1019,17 @@ pub(crate) fn untrusted(what: &'static str) -> Cause {
     Cause::Untrusted { what }
 }
 
+/// Whether `view` is the run's own admitted view `own`, but for approvers narrowed to a subset of
+/// its own by a later control-stream read (DEC-2384 item 6): narrowing removes approvers and
+/// changes nothing sizing or classification reads, while any other difference, a wider approver
+/// set included, is not the admitted view.
+pub(crate) fn admitted_view(own: MandateView, view: &MandateView) -> bool {
+    let narrowed = view.approval.approvers.is_subset(&own.approval.approvers);
+    let mut own = own;
+    own.approval.approvers.clone_from(&view.approval.approvers);
+    narrowed && own == *view
+}
+
 /// `mandate-builder`'s `conviction_linear` sizing and §6 classification.
 pub struct BuilderPlan {
     pub mandate: PathBuf,
@@ -1025,7 +1040,7 @@ impl Sizing for BuilderPlan {
     fn size(&self, view: &MandateView, inputs: &SignalInputs) -> Result<Option<Proposal>, Cause> {
         let context = required_context(&self.context)?;
         let validated = validated_mandate(&self.mandate, context)?;
-        if runtime_view(&validated, context)? != *view {
+        if !admitted_view(runtime_view(&validated, context)?, view) {
             return Err(Cause::Absent {
                 what: "the admitted mandate view used for sizing",
             });
@@ -1047,7 +1062,7 @@ impl Classifier for BuilderPlan {
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause> {
         let context = required_context(&self.context)?;
         let validated = validated_mandate(&self.mandate, context)?;
-        if runtime_view(&validated, context)? != *view {
+        if !admitted_view(runtime_view(&validated, context)?, view) {
             return Err(Cause::Absent {
                 what: "the admitted mandate view used for classification",
             });

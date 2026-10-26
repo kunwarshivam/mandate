@@ -8,10 +8,10 @@
 //! workspace: its member is the `user` who recorded the mandate connection's latest
 //! `ConnectionEstablished`, the record `mandate approvals approve` reads for DEC-923's check, who
 //! holds every workspace role (identity spec §3.2, §4.3). A stream with one, as every workspace
-//! `mandate workspace found` founds, is folded by `mandate_identity::Roster` at its latest record's
-//! instant, and each reference resolves only among the members active then who hold the approver
-//! role in effect. A stream the run cannot read either way resolves no one, so every grant is
-//! refused `not_an_approver` and nothing is sent (`AGENTS.md` rule 3).
+//! `mandate workspace found` founds, is folded by `mandate_identity::Roster` at its latest
+//! membership record's instant, and each reference resolves only among the members active then
+//! who hold the approver role in effect. A stream the run cannot read either way resolves no one,
+//! so every grant is refused `not_an_approver` and nothing is sent (`AGENTS.md` rule 3).
 
 use std::collections::BTreeSet;
 
@@ -35,7 +35,7 @@ pub enum Members {
     Unread,
     /// A one-person workspace whose one member, the owner, holds every workspace role.
     Owner(String),
-    /// The members the §9.12 fold reads active at the stream's latest record (DEC-2384).
+    /// The members the §9.12 fold reads active at the stream's latest membership record (DEC-2384).
     Folded(Roster),
 }
 
@@ -43,7 +43,7 @@ pub enum Members {
 /// membership record, the owner is the `user` of the connection's latest `ConnectionEstablished`
 /// or `ConnectionRevoked` by `seq`, a revocation outranking an establishment at the same `seq`,
 /// and only while that record is an establishment naming a user as non-empty text. With one, the
-/// stream's [`Roster`] at its latest record, or [`Members::Unread`] when it does not fold.
+/// stream's [`Roster`] at its latest membership record, or [`Members::Unread`] when it does not fold.
 pub fn members(records: &[ControlRecord], connection: &str) -> Members {
     if records
         .iter()
@@ -59,15 +59,41 @@ pub fn members(records: &[ControlRecord], connection: &str) -> Members {
     }
 }
 
-/// The roster `records`, in stream order, fold to at the latest record's `event_time`
-/// (DEC-2384 items 2 and 4): `None` when any record carries no `event_time`, a membership record
+/// What the run resolves its approvers from again at each read of the control stream (DEC-2384
+/// item 6): the mandate's `autonomy.approval.approvers` and its connection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApproverSource {
+    pub references: Vec<ApproverRef>,
+    pub connection: String,
+}
+
+impl ApproverSource {
+    /// `admitted`, the approvers the run was admitted with, narrowed to those `records`, a fresh
+    /// read of the control stream, still resolve to: a member deactivated, removed, or stripped of
+    /// a role since never approves, and no one is added (DEC-2384 item 6, `AGENTS.md` rule 3).
+    pub fn current(
+        &self,
+        admitted: &BTreeSet<String>,
+        records: &[ControlRecord],
+    ) -> BTreeSet<String> {
+        let fresh = resolve(&self.references, &members(records, &self.connection));
+        admitted.intersection(&fresh).cloned().collect()
+    }
+}
+
+/// The roster `records`, in stream order, fold to at the latest membership record's
+/// `event_time` (DEC-2384 items 2 and 4): `None` when any record carries no `event_time`, a membership record
 /// does not map, or the fold is unreadable then.
 fn roster(records: &[ControlRecord]) -> Option<Roster> {
     let timed: Vec<(&ControlRecord, UtcNanos)> = records
         .iter()
         .map(|record| record.event_time.map(|at| (record, at)))
         .collect::<Option<_>>()?;
-    let at = timed.iter().map(|(_, at)| *at).max()?;
+    let at = timed
+        .iter()
+        .filter(|(record, _)| MEMBERSHIP_TYPES.contains(&record.event_type.as_str()))
+        .map(|(_, at)| *at)
+        .max()?;
     let Ok(memberships) = timed
         .into_iter()
         .filter_map(|(record, at)| {
@@ -120,13 +146,19 @@ pub fn resolve(references: &[ApproverRef], members: &Members) -> BTreeSet<String
 }
 
 /// The user ids `references` resolve to among `roster`, by [`Roster::approvers`], the one
-/// resolution the API's grant check shares (DEC-2384 item 3, DEC-2130), each as its ULID text.
+/// resolution the API's grant check shares (DEC-2384 item 3, DEC-2130): each member's ULID in both
+/// of its spellings, the canonical upper case the API's session names and the lower case the
+/// CLI's `--user` takes (DEC-527 item 3), so check 3's comparison of a responder's text admits the
+/// same principal either way and no one else.
 fn folded(references: &[ApproverRef], roster: &Roster) -> BTreeSet<String> {
     let texts: Vec<&str> = references.iter().map(ApproverRef::as_str).collect();
     roster
         .approvers(&texts)
         .into_iter()
-        .map(|member| encode_ulid(member.0))
+        .flat_map(|member| {
+            let canonical = encode_ulid(member.0);
+            [canonical.to_ascii_lowercase(), canonical]
+        })
         .collect()
 }
 

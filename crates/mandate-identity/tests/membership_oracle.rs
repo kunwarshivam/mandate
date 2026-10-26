@@ -838,9 +838,34 @@ fn references_asked() -> Vec<String> {
         .map(str::to_owned)
         .into();
     asked.extend(ASKERS.map(|m| format!("user:{}", encode_ulid(m))));
+    asked.extend(ASKERS.map(|m| format!("user:{}", encode_ulid(m).to_lowercase())));
     asked.push("role:operator".to_owned());
-    asked.push(format!("user:{}", encode_ulid(FOUNDER).to_lowercase()));
+    asked.extend(near_misses(&encode_ulid(FOUNDER)));
+    asked.extend(near_misses(&encode_ulid(B)));
     asked
+}
+
+/// `user:` references that are not `id`, however close: a prefix, one character dropped or
+/// appended, padding, a changed last character, the alias letters `I`, `L`, `O` and `U` for the
+/// digits Crockford spells them as, a mixed case that is still `id`'s, and no text at all.
+fn near_misses(id: &str) -> Vec<String> {
+    let (head, last) = id.split_at(id.len() - 1);
+    let mut misses = vec![
+        format!("user:{}", &id[..id.len() - 2]),
+        format!("user:{head}"),
+        format!("user:{id}0"),
+        format!("user: {id}"),
+        format!("user:{id} "),
+        format!("user:{head}{}", if last == "Z" { "Y" } else { "Z" }),
+        "user:".to_owned(),
+        format!("role:{id}"),
+        id.to_owned(),
+    ];
+    for alias in ["I", "L", "O", "U"] {
+        misses.push(format!("user:{head}{alias}"));
+        misses.push(format!("user:{alias}{}", &id[1..]));
+    }
+    misses
 }
 
 /// What the oracle says `reference` names at `at`: the members it reads `active` holding approver
@@ -857,7 +882,10 @@ fn oracle_approvers(o: &Oracle, at: i64, reference: &str) -> BTreeSet<u128> {
                     "role:approver" => true,
                     "role:workspace_admin" => effective.contains(&Role::WorkspaceAdmin),
                     "role:owner" => *m == FOUNDER,
-                    user => user == format!("user:{}", encode_ulid(*m)),
+                    other => other.strip_prefix("user:").is_some_and(|text| {
+                        text.chars().all(|c| c.is_ascii_alphanumeric())
+                            && text.to_uppercase() == encode_ulid(*m)
+                    }),
                 }
         })
         .collect()
@@ -897,5 +925,61 @@ fn the_rosters_approvers_equal_the_oracles_over_random_histories() {
     };
     if let Err(failure) = TestRunner::new(config).run(&ops(), body) {
         panic!("{failure}");
+    }
+}
+
+/// E7-31: the founder is `None` once the founding member is deactivated, and when the stream's
+/// first membership record is an accepted invitation rather than a founding grant, whatever
+/// activation without an invitation comes later.
+#[test]
+fn the_roster_names_no_founder_once_deactivated_or_not_founded() {
+    let approver = set(0b00001);
+    let left = vec![
+        founding(),
+        (
+            10,
+            Event::Deactivated {
+                member: PrincipalId(FOUNDER),
+            },
+        ),
+    ];
+    let roster = Roster::read(records(&left), t(DAY)).unwrap();
+    assert_eq!(roster.founder, None, "deactivated");
+    assert!(roster.active.is_empty(), "no one is active");
+    let accepted_first = vec![
+        (0, invited(1, approver.clone(), 0)),
+        (10, activated(B, Some(1), approver.clone(), false, 10)),
+        (20, activated(FOUNDER, None, approver, false, 20)),
+    ];
+    let roster = Roster::read(records(&accepted_first), t(DAY)).unwrap();
+    assert_eq!(
+        roster.founder, None,
+        "the first record is an accepted invitation"
+    );
+    assert_eq!(roster.active.len(), 2, "both members are active");
+    assert!(
+        roster.approvers(&["role:owner"]).is_empty(),
+        "role:owner names no one without a founder"
+    );
+}
+
+/// E7-31 (DEC-2384 item 3): a `user:` reference names its member in either case, and none of its
+/// near misses names anyone.
+#[test]
+fn a_user_reference_names_its_member_in_either_case_and_no_near_miss_does() {
+    let roster = Roster::read(records(&[founding()]), t(0)).unwrap();
+    let founder = BTreeSet::from([PrincipalId(FOUNDER)]);
+    let upper = format!("user:{}", encode_ulid(FOUNDER));
+    let lower = upper.to_lowercase();
+    let mixed = format!(
+        "user:{}{}",
+        encode_ulid(FOUNDER)[..13].to_lowercase(),
+        &encode_ulid(FOUNDER)[13..]
+    );
+    for spelling in [&upper, &lower, &mixed] {
+        assert_eq!(roster.approvers(&[spelling]), founder, "{spelling}");
+    }
+    for miss in near_misses(&encode_ulid(FOUNDER)) {
+        assert!(roster.approvers(&[&miss]).is_empty(), "{miss:?}");
     }
 }

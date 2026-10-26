@@ -5,5 +5,5 @@
   ([DEC-2129](decisions/DEC-2129.md) item 8). *Accepted when:* the run folds §9.12 to a roster of
   active members and resolves each reference only to active approvers (`role:owner` to the founder),
   and every stream it cannot fold resolves no one. Design: [DEC-2384](decisions/DEC-2384.md).
-  Follow-up: re-read the roster when the stream's memberships change during a run (item 6).
+  The run resolves again at every control-stream read that admits a grant (item 6).
 <!-- section: E7 Alpaca connector and recovery -->
