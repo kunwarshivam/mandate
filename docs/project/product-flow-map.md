@@ -131,7 +131,7 @@ Unchanged since 517ee19: news tools exist on the recorded plane only, live news 
 | Agent flatten over the journaled fold | deployed yes | production.rs `Flatten` over the agent's own fills (#2447); an owner exit's legs are journaled as `IntentProposed` (DEC-2387); a kill switch's flatten is planned by the executor itself | — | — |
 | Signal and goal exits | library yes | X2, X4 | D1 + DR | — |
 | Thesis exit | no | the runtime fold ignores `ThesisInvalidated` (state.rs:758) | NE | L |
-| Owner exit | journaled as its market sells | DEC-2387; sold once the executor holds the position (X5) | — | — |
+| Owner exit | web yes, journaled as its market sells | DEC-2387; sold once the executor holds the position (X5); `web/`'s positions screen sends it (#2645), and the cell's trade loop proves it as `owner_exit`, scenario step 6 | — | — |
 
 ## Step 7: the owner sees everything in web, and approves, intervenes or kills
 
