@@ -551,7 +551,11 @@ pub fn fold(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtime
 
 /// What one event type means to the runtime's state. The arms that change nothing are named rather
 /// than absent, because DEC-85 makes the difference between "interpreted and inert" and "unknown"
-/// the difference between a fold and a silent loss.
+/// the difference between a fold and a silent loss. Among the inert ones are the account stream's
+/// copy of `ConnectionEstablished` (journal spec §9.8; the runtime reads its connection from the
+/// control stream), `AccountCloseRequested` (an account kill switch's close, which the runtime
+/// reads as `KillSwitchActivated`) and `OwnerConfirmationReceived` (an owner exit's confirmed bid,
+/// whose hand-off it reads as `IntentReceived`).
 fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), RuntimeError> {
     if let Some(at) = payload::clock_of(&event.payload, "risk_clock") {
         state.risk_clock = Some(state.risk_clock.map_or(at, |last| last.max(at)));
@@ -747,6 +751,9 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         | "CompensatingEvent"
         | "AccountSnapshotRecorded"
         | "AccountStateObserved"
+        | "ConnectionEstablished"
+        | "AccountCloseRequested"
+        | "OwnerConfirmationReceived"
         | "RejectObserved"
         | "AccountRestrictionChanged"
         | "ExternalActivityIngested"
