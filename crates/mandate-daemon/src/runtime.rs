@@ -23,7 +23,7 @@ use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::UtcNanos;
 
-use crate::models::{Models, fresh, inputs};
+use crate::models::{Models, Streams, fresh, inputs};
 
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -492,8 +492,13 @@ impl<S: Store> RuntimeProcess<S> {
         let Some(rows) = self.agent.clone().and_then(|agent| self.store.rows(&agent)) else {
             return Vec::new();
         };
+        let control = self.control.as_ref().and_then(|c| self.store.rows(c));
+        let streams = Streams {
+            control: control.as_deref(),
+            agent: &rows,
+        };
         let evaluated = match &self.wiring.models {
-            Some(wired) => wired.models.evaluate(at),
+            Some(wired) => wired.models.evaluate(at, streams),
             None => Vec::new(),
         };
         let Ok(new) = fresh(&rows, evaluated) else {

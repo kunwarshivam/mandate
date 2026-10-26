@@ -94,6 +94,7 @@ pub(crate) const EVENT_TYPES: [&str; 138] = [
     "ThesisProposed",
     "ThesisRevised",
     "ThesisInvalidated",
+    "RetirementHeld",
     "RunStarted",
     "ToolCallRecorded",
     "ToolResultRecorded",
@@ -246,7 +247,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
 
         "ModelInvocationRecorded" => entry(&[Agent, Control], &[MOD]),
         "ThesisProposed" | "ThesisRevised" => entry(AGENT, &[MAN, MOD]),
-        "ThesisInvalidated" => entry(AGENT, &[MAN]),
+        "ThesisInvalidated" | "RetirementHeld" => entry(AGENT, &[MAN]),
         "RunStarted" | "ToolCallRecorded" | "ToolResultRecorded" | "RunSummaryRecorded"
         | "RunEnded" => entry(AGENT, &[MOD]),
         "ModelOutputRecorded"

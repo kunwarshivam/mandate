@@ -43,6 +43,7 @@ mod news;
 mod notices;
 mod real_money;
 mod records;
+mod retirements;
 mod risk_limits;
 mod runs;
 mod scheduler;
@@ -207,6 +208,7 @@ pub use control_verify::{
 };
 pub use draft::Draft;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};
+pub use retirements::retirement_failure;
 pub use start::{
     AnchorRecord, AnchorRecordError, ColdRead, ManifestStart, ResolvedStart, StartRequest,
     TrustedStartError, anchor_record, resolve_start_from_rows,

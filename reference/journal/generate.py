@@ -38,6 +38,7 @@ import account_clock
 import news
 import account_closes
 import account_restrictions
+import reconciliation_acks
 import restriction_lifts
 import account_switches
 import acknowledgments
@@ -4272,6 +4273,7 @@ def render(
     real_money_section: dict,
     account_restrictions_section: dict,
     restriction_lifts_section: dict,
+    reconciliation_acks_section: dict,
     account_switches_section: dict,
     snapshots_section: dict,
     account_activity_section: dict,
@@ -4335,6 +4337,7 @@ def render(
             "real_money": real_money_section,
             "account_restrictions": account_restrictions_section,
             "restriction_lifts": restriction_lifts_section,
+            "reconciliation_acknowledgments": reconciliation_acks_section,
             "account_switches": account_switches_section,
             "account_activity": account_activity_section,
             "fill_applied": fill_applied_section,
@@ -4429,6 +4432,7 @@ def main(argv: list[str] | None = None) -> int:
     real_money_section = real_money.build_section()
     account_restrictions_section = account_restrictions.build_section()
     restriction_lifts_section = restriction_lifts.build_section()
+    reconciliation_acks_section = reconciliation_acks.build_section()
     account_switches_section = account_switches.build_section()
     account_activity_section = account_activity.build_section()
     fill_applied_section = fill_applied.build_section()
@@ -4512,6 +4516,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += account_restrictions.run_mutants(account_restrictions_section)
     problems += restriction_lifts.check_section(restriction_lifts_section)
     problems += restriction_lifts.run_mutants(restriction_lifts_section)
+    problems += reconciliation_acks.check_section(reconciliation_acks_section)
+    problems += reconciliation_acks.run_mutants(reconciliation_acks_section)
     problems += account_switches.check_section(account_switches_section)
     problems += account_switches.run_mutants(account_switches_section)
     problems += account_activity.check_section(account_activity_section)
@@ -4614,6 +4620,7 @@ def main(argv: list[str] | None = None) -> int:
         real_money_section,
         account_restrictions_section,
         restriction_lifts_section,
+        reconciliation_acks_section,
         account_switches_section,
         snapshots_section,
         account_activity_section,
@@ -4677,6 +4684,7 @@ def main(argv: list[str] | None = None) -> int:
         or real_money.check_section(reread["real_money"])
         or account_restrictions.check_section(reread["account_restrictions"])
         or restriction_lifts.check_section(reread["restriction_lifts"])
+        or reconciliation_acks.check_section(reread["reconciliation_acknowledgments"])
         or account_switches.check_section(reread["account_switches"])
         or account_activity.check_section(reread["account_activity"])
         or fill_applied.check_section(reread["fill_applied"])
@@ -4713,8 +4721,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(deferred_section['invalid_drafts'])} invalid and {len(deferred_section['valid_drafts'])} valid "
         f"version-3 DecisionMade drafts, {len(DEFERRED_VALIDATOR_MUTANTS)} validator and 2 vector mutants caught; "
         f"{len(deferrals_section['invalid_drafts'])} invalid and {len(deferrals_section['valid_drafts'])} valid "
-        f"version-3 ApprovalRequested drafts and {len(deferrals_section['batches'])} rule-292 batches, "
-        f"{len(approval_deferrals.VALIDATOR_MUTANTS)} validator and "
+        f"version-3 ApprovalRequested drafts, {len(deferrals_section['batches'])} rule-292 batches and "
+        f"{len(deferrals_section['ranges'])} approval_deferral_mismatch ranges, "
+        f"{len(approval_deferrals.VALIDATOR_MUTANTS)} validator, {len(approval_deferrals.RANGE_MUTANTS)} range and "
         f"{len(approval_deferrals.vector_mutants(deferrals_section))} vector mutants caught; "
         f"{len(control_section['chain'])} control-stream events, {len(control_section['drafts'])} base drafts, "
         f"{len(control_section['journaled_facts'])} journaled facts, {len(control_section['invalid_drafts'])} invalid "
