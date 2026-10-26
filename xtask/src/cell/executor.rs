@@ -17,7 +17,7 @@ use std::fs;
 use std::thread::sleep;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use super::scenario::{
@@ -442,6 +442,73 @@ pub fn executor_live(account: &str) -> Result<Result<String, String>> {
         }
         Some(_) => format!("the executor pod for account {account} never ran and answered livez"),
     }))
+}
+
+/// The scheduler's Deployment, which the chart renders once `cell up` names its image.
+const SCHEDULER_DEPLOYMENT: &str = "deployment/scheduler";
+const SCHEDULER_POD: &str = "mandate.dev/process=scheduler";
+
+/// The ticks drill (E21-29). The chart is pointed at a fresh workspace, which restarts the
+/// scheduler on it, and two exports of its clock stream must show it growing. Seeded, the
+/// scheduler is scaled to zero once a first export shows its stream ticking, so the two that
+/// follow end at the same seq and the drill reports that the scheduler is not ticking; it is
+/// scaled back to one replica and waited on before the verdict is returned, whatever it is.
+pub fn ticks_drill(seeded: bool) -> Result<Verdict> {
+    let id = run_id()?;
+    let workspace = workspace_of(&id);
+    point_api(&workspace)?;
+    if !seeded {
+        return Ok(ticks(&id, &workspace)?.map_or(Verdict::Held, Verdict::Broken));
+    }
+    if let Some(broken) = ticks(&format!("{id}s"), &workspace)? {
+        return Ok(Verdict::Broken(format!(
+            "the scheduler never ticked before it was scaled down: {broken}"
+        )));
+    }
+    let scale = |replicas: &str| {
+        kubectl(&[
+            "scale",
+            SCHEDULER_DEPLOYMENT,
+            "--namespace",
+            NAMESPACE,
+            &format!("--replicas={replicas}"),
+        ])
+    };
+    let stopped = scale("0").map(|_| {
+        let gone = kubectl(&[
+            "wait",
+            "--for=delete",
+            "pod",
+            "--selector",
+            SCHEDULER_POD,
+            "--namespace",
+            NAMESPACE,
+            "--timeout=60s",
+        ]);
+        if gone.is_err() {
+            eprintln!("    the scheduler's pod was not seen gone; the exports judge it");
+        }
+    });
+    let verdict = stopped.and_then(|_| ticks(&id, &workspace));
+    let restored = scale("1").and_then(|_| {
+        kubectl(&[
+            "rollout",
+            "status",
+            SCHEDULER_DEPLOYMENT,
+            "--namespace",
+            NAMESPACE,
+            "--timeout=120s",
+        ])
+    });
+    match (verdict, restored) {
+        (Ok(broken), Ok(_)) => Ok(broken.map_or(Verdict::Held, Verdict::Broken)),
+        (verdict, Err(e)) => {
+            bail!(
+                "the drill's verdict was {verdict:?}, but the scheduler was not scaled back: {e:#}"
+            )
+        }
+        (Err(e), Ok(_)) => Err(e),
+    }
 }
 
 /// The scheduler's ticks on the run's workspace (E21-29): two exports of its clock stream,

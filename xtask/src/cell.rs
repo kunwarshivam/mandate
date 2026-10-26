@@ -187,6 +187,10 @@ pub enum Drill {
     /// archived, and Barman's own tools, reading the store with the archive's key, list the backup
     /// and fetch the segment back (E21-41).
     Archive,
+    /// The scheduler ticking a fresh workspace's clock stream once the chart names it the hosted
+    /// workspace: two exports of its `clock:` stream a few seconds apart, the second longer
+    /// (E21-29); see [`executor::ticks_drill`].
+    Ticks,
     /// The scheduler ticking the run's workspace's clock stream (E21-29), then an agent deployed on
     /// a recorded paper connection, and the deployment manager starting that account's executor
     /// until its pod runs and answers `livez` (E21-30, DEC-2035); see [`executor`].
@@ -221,9 +225,9 @@ pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
 /// DEC-2602).
 pub const KILL_SWITCH_DRILLS: [Drill; 2] = [Drill::KillSwitch, Drill::Admission];
 
-/// The executor drill (E21-30, DEC-2035), which `cargo xtask ci cell-executor` runs on a cell of
-/// its own, so `ci cell-kill-switch` stays within its ten minutes (DEC-464, DEC-2615).
-pub const EXECUTOR_DRILLS: [Drill; 1] = [Drill::Executor];
+/// The scheduler's ticks drill (E21-29) and the executor drill (E21-30, DEC-2035), which `cargo
+/// xtask ci cell-executor` runs on a cell of its own, so `ci cell-kill-switch` stays within its ten minutes (DEC-464, DEC-2615).
+pub const EXECUTOR_DRILLS: [Drill; 2] = [Drill::Ticks, Drill::Executor];
 
 /// The vault's drill (E21-32, DEC-2022), which `cargo xtask ci cell-vault` runs on a cell of its
 /// own, so each cell job stays within its ten minutes (DEC-464, DEC-2616).
@@ -245,6 +249,7 @@ impl Drill {
             Self::Admission => "admission",
             Self::StandbyDown => "standby-down",
             Self::Archive => "archive",
+            Self::Ticks => "ticks",
             Self::Executor => "executor",
             Self::Vault => "vault",
             Self::Exchange => "exchange",
@@ -289,6 +294,10 @@ impl Drill {
                 "the cluster's durability set to `preferred`, so the primary commits alone"
             }
             Self::Archive => "the archive pointed at another bucket of the same store",
+            Self::Ticks => {
+                "the scheduler scaled to zero replicas once it ticks the run's workspace, so its \
+                 clock stream stops"
+            }
             Self::Executor => {
                 "the connect check skipped, so the connection is never recorded and the agent \
                  deploys at version 1"
@@ -317,6 +326,7 @@ impl Drill {
             Self::Admission => "admitted a service account's change to a person's control Job",
             Self::StandbyDown => "committed with the standby fenced",
             Self::Archive => "is not in the archive",
+            Self::Ticks => "the scheduler is not ticking",
             Self::Executor => "no executor pod",
             Self::Vault => "wildcard in mandate-runtime",
             Self::Exchange | Self::ExchangeLate => "step_up_missing",
@@ -2590,6 +2600,7 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Admission => admission_drill::drill(seeded),
             Drill::StandbyDown => standby_down(seeded),
             Drill::Archive => archive(seeded),
+            Drill::Ticks => executor::ticks_drill(seeded),
             Drill::Executor => executor::drill(seeded),
             Drill::Vault => vault_drill(seeded),
             Drill::Exchange => exchange::drill(seeded, false),
