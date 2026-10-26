@@ -136,6 +136,7 @@ pub struct Journaled {
     fills: BTreeSet<String>,
     positions: BTreeMap<String, SignedQty>,
     released: BTreeMap<String, Qty>,
+    models: BTreeMap<(String, String), String>,
     account_positions: BTreeMap<String, SignedQty>,
     unreadable: bool,
 }
@@ -161,6 +162,7 @@ impl Journaled {
             fills: BTreeSet::new(),
             positions: BTreeMap::new(),
             released: BTreeMap::new(),
+            models: BTreeMap::new(),
             account_positions: BTreeMap::new(),
             unreadable: false,
         }
@@ -206,6 +208,14 @@ impl Journaled {
             .filter(|(order, _)| !self.ended.contains(*order))
             .map(|(order, instrument)| (order.clone(), instrument.clone()))
             .collect()
+    }
+
+    /// Each model the workspace registered (`ConfigSnapshotRegistered` of kind `model_version`),
+    /// by its id and version, with the content hash it was registered under, the latest one
+    /// where it was registered again. The builder sizes only outputs of a model listed here
+    /// (DEC-2378 item 10).
+    pub fn models(&self) -> BTreeMap<(String, String), String> {
+        self.models.clone()
     }
 
     /// The mandate version in force: the latest one applied on the account stream, else the one
@@ -324,6 +334,14 @@ impl Journaled {
                     .insert(payload.text("client_order_id")?.to_owned());
             }
             ("PositionReleased", _) if on_account => self.released(&payload)?,
+            ("ConfigSnapshotRegistered", _) if payload.text("kind")? == "model_version" => {
+                let model = (
+                    payload.text("model_id")?.to_owned(),
+                    payload.text("model_version")?.to_owned(),
+                );
+                let hash = payload.text("content_hash")?.to_owned();
+                self.models.insert(model, hash);
+            }
             ("FeesCharged", _) if on_account => self.fees(&payload)?,
             ("CorporateActionApplied", _) if on_account => {
                 return Err(refused("corporate_action"));

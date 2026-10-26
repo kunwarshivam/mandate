@@ -21,6 +21,10 @@ use mandate_spec::document::Mandate;
 
 use crate::runtime::Wiring;
 
+mod plan;
+
+pub use plan::Plan;
+
 /// `base` with the production ports this slice has (DEC-2378 S3a): the shared fold for `agent`,
 /// ticked by the scheduler's `clock` stream, and the flatten planner over it with the asset
 /// classes of `document`'s pinned universe. Every other port stays `base`'s, so a deployment's

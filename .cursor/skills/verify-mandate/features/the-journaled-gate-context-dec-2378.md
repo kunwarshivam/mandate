@@ -9,7 +9,8 @@
   agent's sub-ledger a flatten sells, and `working`, its orders no terminal state has ended).
   The cell's runtime reads it through `mandate-daemon`'s `src/production.rs`: `Facts`, the one
   fold the process feeds every control, account and clock row it reads, and `Flatten`, the
-  flatten planner over it.
+  flatten planner over it, and `src/production/plan.rs`: `Plan`, the order plan over the fold
+  (DEC-2378 item 10), with the bracket from `mandate-num`'s `Price::equity_bracket`.
 - **Tests:** `crates/mandate-gate-context/tests/facts.rs`: one test a fail-closed rule (no clock,
   no mandate, another agent's deployment, a rejected or another stream's version, a stopped agent,
   no or stale snapshot, no, stale or insane mark, scheduler ticks ageing the facts while the
@@ -23,4 +24,8 @@
   working orders, an owner exit only its instrument's, rows fed twice count once, an unreadable
   row holds openings and never the flatten; `crates/mandate-daemon/tests/runtime.rs`'s
   `the_production_fold_is_fed_the_named_account_and_the_clock_once_each`.
+- `crates/mandate-daemon/tests/plan.rs`: on the demo mandate, a flat agent with every fact
+  journaled is proposed an opening never above the bid and asked about it; no opening outside the
+  regular session, in its close window from 15:50, while held or working, or with any fact
+  missing or a mark not sane.
 - **Run:** `cargo nextest run -p mandate-gate-context -p mandate-daemon`.
