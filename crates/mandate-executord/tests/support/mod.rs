@@ -15,6 +15,8 @@ use std::time::Duration;
 
 use mandate_accounting::{AccountType, AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Object, Value, parse};
+use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
+use mandate_connections::record::ConnectionId;
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountRef, AccountScope, ActivityCursor, AgentId, BindingGateConfigRefs, BindingGateInput,
@@ -420,6 +422,10 @@ struct Books {
     /// answers them: a `401` as an unknown outcome, `Unauthorized` (connections spec §5.4), and any
     /// other status as a rejection.
     refuse_with: Option<(u16, usize)>,
+    /// The status every account read is refused with from now on, every other request answered.
+    refuse_account: Option<u16>,
+    /// Whether the broker says it runs no later permission checks, as one not built yet.
+    no_later_checks: bool,
     sequence: u64,
 }
 
@@ -547,6 +553,16 @@ impl Paper {
         self.books.borrow_mut().lose_answers = n;
     }
 
+    /// The broker says it runs no later permission checks from now on (DEC-2840).
+    pub fn without_later_checks(&self) {
+        self.books.borrow_mut().no_later_checks = true;
+    }
+
+    /// Every account read from now on is refused with `status`; every other request is answered.
+    pub fn refuse_account_with(&self, status: u16) {
+        self.books.borrow_mut().refuse_account = Some(status);
+    }
+
     /// The next `n` requests are refused with `status`, and nothing they asked takes effect.
     pub fn refuse_next_with(&self, status: u16, n: usize) {
         self.books.borrow_mut().refuse_with = Some((status, n));
@@ -581,6 +597,23 @@ impl Broker for Paper {
         mandate_alpaca::alpaca_profile()
     }
 
+    fn has_later_checks(&self) -> bool {
+        !self.books.borrow().no_later_checks
+    }
+
+    /// The paper Alpaca connection's own later checks (DEC-2840), as the process's Alpaca broker
+    /// runs them.
+    fn later_check(
+        &self,
+        connection: ConnectionId,
+        occasion: Occasion,
+        account: AccountRead,
+    ) -> Option<Result<CheckReport, &'static str>> {
+        Some(mandate_executord::connect::alpaca_report(
+            connection, occasion, account,
+        ))
+    }
+
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         if self.journal.crashed() {
             return Err(ConnectorError::NotSent { code: "crashed" });
@@ -607,6 +640,14 @@ impl Broker for Paper {
             if status == 401 {
                 return Err(ConnectorError::Unknown(BrokerUnknown::Unauthorized));
             }
+            return Ok(BrokerOutcome::Rejected(BrokerReject {
+                client_order_id: None,
+                http_status: status,
+                code: None,
+                message: "refused".to_owned(),
+            }));
+        }
+        if let (Some(status), BrokerRequest::GetAccount) = (books.refuse_account, request) {
             return Ok(BrokerOutcome::Rejected(BrokerReject {
                 client_order_id: None,
                 http_status: status,
