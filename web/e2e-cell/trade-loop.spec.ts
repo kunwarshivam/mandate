@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { type Page, expect, test } from "@playwright/test";
 
 /**
@@ -27,6 +28,12 @@ const CONFIRM_DONE = process.env.OWLHEAD_CELL_CONFIRM_DONE ?? "";
 const PROPOSAL_MS = Number(process.env.OWLHEAD_CELL_PROPOSAL_MS ?? 120_000);
 const CONFIRM_MS = Number(process.env.OWLHEAD_CELL_CONFIRM_MS ?? 60_000);
 const FILL_MS = Number(process.env.OWLHEAD_CELL_FILL_MS ?? 120_000);
+
+/**
+ * The sentence the approver is shown above the checks the dry run deferred, read from the journal
+ * vectors so the spec cannot drift from it (DEC-2515 item 5). The driver runs this from `web/`.
+ */
+const APPROVER_SENTENCE = (JSON.parse(readFileSync(join(process.cwd(), "../fixtures/refcases/journal.json"), "utf8")) as { approval_deferrals: { approver_sentence: string } }).approval_deferrals.approver_sentence;
 
 const reached: Record<string, string> = {};
 const write = (extra: Record<string, string> = {}) => writeFileSync(RESULT, JSON.stringify({ ...reached, ...extra }));
@@ -60,11 +67,19 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
   test.setTimeout(PROPOSAL_MS + CONFIRM_MS + FILL_MS + 120_000);
   for (const [name, value] of Object.entries({ RESULT, WORKSPACE, AGENT, CONFIRM_REQUEST, CONFIRM_DONE })) expect(value, `the driver names ${name}`).not.toBe("");
 
-  await test.step("the agent's request shows in the web app", async () => {
+  await test.step("the agent's request shows in the web app, with the checks its dry run deferred", async () => {
     let approval = "";
+    const contents = new Map<string, Record<string, unknown>>();
     page.on("response", async (r) => {
       const url = new URL(r.url());
-      if (r.request().method() !== "GET" || url.pathname !== `/v1/workspaces/${WORKSPACE}/approvals` || url.searchParams.get("state") !== "pending" || !r.ok()) return;
+      if (r.request().method() !== "GET" || !r.ok()) return;
+      const detail = url.pathname.match(new RegExp(`^/v1/workspaces/${WORKSPACE}/approvals/([^/]+)$`));
+      if (detail) {
+        const content = ((await r.json().catch(() => ({}))) as { approval?: { content?: Record<string, unknown> } }).approval?.content;
+        if (content) contents.set(decodeURIComponent(detail[1]), content);
+        return;
+      }
+      if (url.pathname !== `/v1/workspaces/${WORKSPACE}/approvals` || url.searchParams.get("state") !== "pending") return;
       const listed = ((await r.json().catch(() => ({}))) as { approvals?: Array<{ approval_id: string; agent_id: string }> }).approvals ?? [];
       approval ||= listed.find((a) => a.agent_id === AGENT)?.approval_id ?? "";
     });
@@ -72,6 +87,22 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     if (!shown) refuse(`no request from agent ${AGENT} waited in the web app within ${PROPOSAL_MS} ms`);
     step("approval", approval);
     await page.goto(`/approvals/${approval}`, { timeout: 15_000 });
+
+    await expect.poll(() => contents.has(approval), { message: "the API's read of the request", timeout: 30_000 }).toBe(true);
+    const deferred = contents.get(approval)?.deferred_to_binding;
+    const region = page.getByRole("region", { name: "Checks not run yet" });
+    if (deferred === undefined) {
+      await expect(region).toHaveCount(0);
+      step("deferred_checks", "none");
+    } else if (Array.isArray(deferred) && deferred.length > 0 && deferred.every((n) => typeof n === "string")) {
+      await expect(region).toBeVisible({ timeout: 15_000 });
+      await expect(region.getByText(APPROVER_SENTENCE, { exact: true })).toBeVisible();
+      await expect(region.getByRole("listitem")).toHaveCount(deferred.length);
+      await expect(region).not.toContainText(/passed|cleared/i);
+      step("deferred_checks", deferred.join(","));
+    } else {
+      refuse(`the API served deferred checks it cannot list: ${JSON.stringify(deferred)}`);
+    }
   });
 
   await test.step("the owner approves with the code the host confirms", async () => {

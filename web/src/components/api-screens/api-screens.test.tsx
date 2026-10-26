@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ApiAgent, ApiAgents, ApiApproval, ApiApprovals, ApiHome, BySource } from "./api-screens";
@@ -8,6 +10,7 @@ import { WorkspaceGate } from "@/components/screens/common";
 import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { ApiRuntimeProvider } from "@/lib/api-runtime";
+import { DEFERRED_CHECK_LABELS } from "@/lib/deferred-checks";
 import { quantity } from "@/lib/format";
 import { RoleProvider } from "@/lib/roles";
 
@@ -54,6 +57,17 @@ const fixture = buildWorkspace("approvals");
 const agentOf = (id: string) => fixture.agents.find((a) => a.agent_id === id)!;
 /** The API names an approval by its event id, a bare ULID; the fixtures prefix theirs with `apr_`. */
 const pending = fixture.approvals.filter((a) => a.status === "delivered").map((a) => ({ ...a, approval_id: a.approval_id.replace(/^apr_/, "") }));
+
+/** The journal vectors' sentence and every name a version 3 request may defer (DEC-2515 item 5). */
+const deferrals = (JSON.parse(readFileSync(join(process.cwd(), "../fixtures/refcases/journal.json"), "utf8")) as { approval_deferrals: { approver_sentence: string } }).approval_deferrals;
+/** Serves the approval's content with `deferred_to_binding` set to `value`, as version 3 carries it. */
+const deferring =
+  (value: unknown): Tamper =>
+  (route, body) => {
+    if (!route.startsWith("/approvals/")) return body;
+    const approval = body.approval as Record<string, unknown>;
+    return { ...body, approval: { ...approval, content: { ...(approval.content as Record<string, unknown>), deferred_to_binding: value } } };
+  };
 
 afterEach(() => {
   cleanup();
@@ -195,6 +209,46 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     await screen.findByRole("button", { name: "Skip" });
     expect(screen.getByText("ENVIRONMENT NOT REPORTED")).toBeTruthy();
     expect(screen.queryByText("PAPER")).toBeNull();
+  });
+
+  it("a request whose dry run deferred checks names each one under the fixed sentence, and never as passed (DEC-2515 item 5)", async () => {
+    const approval = pending[0];
+    const names = ["halt", "liquidity_floor", "participation"];
+    mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", deferring(names));
+    const region = await screen.findByRole("region", { name: "Checks not run yet" });
+    expect(within(region).getByText(deferrals.approver_sentence)).toBeTruthy();
+    expect(within(region).getAllByRole("listitem").map((li) => li.textContent)).toEqual(names.map((n) => DEFERRED_CHECK_LABELS[n]));
+    expect(region.textContent).not.toMatch(/passed|cleared/i);
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+  });
+
+  it("a deferred check the web app has no label for is shown by its name, never dropped", async () => {
+    const approval = pending[0];
+    mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", deferring(["halt", "new_check"]));
+    const region = await screen.findByRole("region", { name: "Checks not run yet" });
+    expect(within(region).getAllByRole("listitem").map((li) => li.textContent)).toEqual([DEFERRED_CHECK_LABELS.halt, "new_check"]);
+  });
+
+  it("a request with no deferred checks shows no such list", async () => {
+    const approval = pending[0];
+    mount(<ApiApproval approvalId={approval.approval_id} />);
+    await screen.findByRole("button", { name: "Approve" });
+    expect(screen.queryByRole("region", { name: "Checks not run yet" })).toBeNull();
+    expect(screen.queryByText(deferrals.approver_sentence)).toBeNull();
+  });
+
+  it("deferred checks it cannot read are never read as none: it says so and offers Skip, not Approve", async () => {
+    const approval = pending[0];
+    for (const value of [null, [], "halt", [7]]) {
+      const { posts } = mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", deferring(value));
+      const region = await screen.findByRole("region", { name: "Checks not run yet" });
+      expect(region.textContent, JSON.stringify(value)).toMatch(/cannot be read/);
+      expect(screen.queryByRole("button", { name: "Approve" }), JSON.stringify(value)).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+      await waitFor(() => expect(posts).toHaveLength(1));
+      expect(posts[0].body).toMatchObject({ verdict: "skipped" });
+      cleanup();
+    }
   });
 
   it("Approve asks for a code first and sends no answer: the owner confirms it on the host (DEC-2104)", async () => {
