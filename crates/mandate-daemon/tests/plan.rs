@@ -417,3 +417,81 @@ fn the_overlay_asks_only_about_an_auto_opening_or_increase() {
         );
     }
 }
+
+/// The demo mandate with one more rule, `rule`, ahead of none: its default stays `ask`.
+fn with_rule(rule: serde_json::Value) -> Value {
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&mandate_canon::to_canonical(&document())).unwrap();
+    document["autonomy"]["rules"] = serde_json::json!([rule]);
+    mandate_canon::parse(&serde_json::to_vec(&document).unwrap()).unwrap()
+}
+
+fn classified_under(rule: serde_json::Value) -> Classified {
+    let rows = journaled(REGULAR);
+    let facts = Facts::new(CLOCK, AGENT);
+    facts.follow(ACCOUNT);
+    facts.feed(&rows.0);
+    let plan = Plan::new(facts, Mandate::parse(&with_rule(rule)).unwrap(), FRESH);
+    let proposal = plan.plan(&view(), &inputs(REGULAR)).expect("an opening");
+    plan.classify(&view(), &proposal)
+}
+
+/// A `deny` rule on a fact the plan cannot see is never offered to an approver: the plan reads
+/// that fact as zero, so the rule cannot fire on it, and every opening is denied under the policy
+/// overlay instead, however deep the field sits in the rule's condition. A `deny` rule on a fact
+/// the plan does see is judged on it as usual (`AGENTS.md` rule 1, DEC-2378 item 10).
+#[test]
+fn a_deny_rule_on_a_fact_the_plan_cannot_see_denies_every_opening() {
+    let overlay = Classified {
+        autonomy: Autonomy::Deny,
+        decided_by: Some("policy_overlay".into()),
+    };
+    for (field, value) in [
+        ("bought_today_usd", serde_json::json!("1000")),
+        ("drawdown", serde_json::json!("0.05")),
+        ("daily_pnl_fraction", serde_json::json!("0.05")),
+        ("gross_usd_after", serde_json::json!("1000")),
+        ("thesis_confidence", serde_json::json!("0.5")),
+    ] {
+        let leaf = serde_json::json!({"field": field, "op": "gt", "value": value});
+        assert_eq!(
+            classified_under(serde_json::json!({"id": "cap", "then": "deny", "when": leaf})),
+            overlay,
+            "{field}"
+        );
+        let nested = serde_json::json!({"all": [
+            {"field": "purpose", "op": "in", "value": ["open", "increase"]},
+            {"not": {"any": [leaf]}},
+        ]});
+        assert_eq!(
+            classified_under(serde_json::json!({"id": "cap", "then": "deny", "when": nested})),
+            overlay,
+            "{field}, nested"
+        );
+    }
+    for field in ["first_trade_in_instrument", "new_instrument"] {
+        assert_eq!(
+            classified_under(serde_json::json!({"id": "flag", "then": "deny", "when":
+                {"field": field, "op": "eq", "value": true}})),
+            overlay,
+            "{field}"
+        );
+    }
+    let seen = classified_under(serde_json::json!({"id": "big", "then": "deny", "when":
+        {"field": "order_usd", "op": "gt", "value": "100000"}}));
+    assert_eq!(
+        seen,
+        Classified {
+            autonomy: Autonomy::Ask,
+            decided_by: Some("default".into()),
+        },
+        "order_usd is the plan's own figure: the rule does not match, and the default asks"
+    );
+    let asked = classified_under(serde_json::json!({"id": "daily", "then": "ask", "when":
+        {"field": "bought_today_usd", "op": "gt", "value": "100000"}}));
+    assert_eq!(
+        asked.autonomy,
+        Autonomy::Ask,
+        "an ask rule on an unseen fact still asks, never denies: {asked:?}"
+    );
+}

@@ -294,7 +294,7 @@ pub fn size(
 
 /// The `decided_by` label of mandate spec §6.2 step 5c, the policy overlay (DEC-536 item 2;
 /// journal spec §9.1).
-const POLICY_OVERLAY: &str = "policy_overlay";
+pub const POLICY_OVERLAY: &str = "policy_overlay";
 
 /// Mandate spec §6 classification of `proposal` against `action`, its trusted facts, with §6.2
 /// step 5c (DEC-534 item 2, DEC-536): an opening or an increase while the confirmed mandate is

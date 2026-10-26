@@ -10,7 +10,7 @@ use mandate_builder::{
     RiskContext as BuilderRiskContext, buy_action,
 };
 use mandate_canon::{Digest, Value};
-use mandate_domain::{AssetClass, Environment, MarketSession};
+use mandate_domain::{AssetClass, AutonomyDecision, Environment, MarketSession};
 use mandate_gate_context::Freshness;
 use mandate_num::{CostBasis, FeeRate, Fraction, MarkPrice, Qty, Signed, SizeFraction, Unit, Usd};
 use mandate_ports::BuilderContext;
@@ -19,6 +19,7 @@ use mandate_runtime::{
     SignalInputs, TimeInForce,
 };
 use mandate_spec::ValidationContext;
+use mandate_spec::condition::{Condition, ConditionField};
 use mandate_spec::document::{InstrumentRef, Mandate, ProvenanceMap};
 use mandate_spec::{ValidatedMandate, context::stop_limit_asset_classes, risk::risk_day};
 use mandate_time::{ExchangeCalendar, Session, UtcNanos};
@@ -124,10 +125,43 @@ impl Plan {
             proposal.qty,
         )
         .ok()?;
-        mandate_ports::classify(&validated, &action, proposal, false)
-            .ok()
-            .map(|classified| mandate_ports::auto_not_allowed(classified, proposal))
+        let classified = mandate_ports::classify(&validated, &action, proposal, false).ok()?;
+        if proposal.purpose.adds_risk() && denies_on_an_unseen_fact(&self.mandate) {
+            return Some(Classified {
+                autonomy: Autonomy::Deny,
+                decided_by: Some(mandate_ports::POLICY_OVERLAY.to_owned()),
+            });
+        }
+        Some(mandate_ports::auto_not_allowed(classified, proposal))
     }
+}
+
+/// The rule fields (mandate spec §6.3) the plan's builder facts do not carry from the fold: it
+/// sees no earlier fill, drawdown, daily P&L, gross exposure, or the day's buys, and no thesis or
+/// research admission, and the input-drift field is reserved. On these a rule reads zero or
+/// false, whatever the account did.
+const UNSEEN: [ConditionField; 8] = [
+    ConditionField::FirstTradeInInstrument,
+    ConditionField::NewInstrument,
+    ConditionField::ThesisConfidence,
+    ConditionField::Drawdown,
+    ConditionField::DailyPnlFraction,
+    ConditionField::GrossUsdAfter,
+    ConditionField::BoughtTodayUsd,
+    ConditionField::UnusualInput,
+];
+
+/// Whether a `deny` rule of `mandate` reads a field the plan cannot see, anywhere in its
+/// condition. Such a rule cannot be judged on the plan's facts, and the owner chose to refuse
+/// what it names, so every opening and increase is denied rather than asked: an approver must
+/// never be offered what a `deny` rule would refuse (`AGENTS.md` rules 1 and 3).
+fn denies_on_an_unseen_fact(mandate: &Mandate) -> bool {
+    mandate.autonomy.rules.iter().any(|rule| {
+        rule.then == AutonomyDecision::Deny
+            && rule.when.comparisons().iter().any(|(comparison, _)| {
+                matches!(comparison, Condition::Compare { field, .. } if UNSEEN.contains(field))
+            })
+    })
 }
 
 /// The session an opening in `asset_class` may be proposed in at `now`: an equity's regular
