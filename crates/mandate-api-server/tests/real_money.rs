@@ -1,5 +1,5 @@
-//! The customer real-money gate's decision ([DEC-2134] items 2, 5 and 7; journal spec v0.89
-//! §9.35), over random control streams: the setting is the `enabled` of the latest
+//! The customer real-money gate's decision ([DEC-2134] items 2, 5 and 7; journal spec v0.90
+//! §9.36), over random control streams: the setting is the `enabled` of the latest
 //! `RealMoneyGateChanged` by `seq`, off with none or with one it cannot read, and a request that
 //! names any environment but `paper` is refused while it is off and admitted only to the checks
 //! after the gate while it is on. The oracle walks the stream from its highest `seq` down, apart
@@ -242,7 +242,7 @@ fn no_source_of_the_api_but_the_operator_command_writes_the_gates_setting() {
     );
 }
 
-/// The journal spec's own setting streams (§9.35's `real_money` vectors), each folded by the gate
+/// The journal spec's own setting streams (§9.36's `real_money` vectors), each folded by the gate
 /// at `seq` 1 to n, give the setting the vectors expect, so the reference's fold and this one read
 /// every shared stream alike.
 #[test]

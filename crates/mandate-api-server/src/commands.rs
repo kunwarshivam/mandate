@@ -346,7 +346,7 @@ pub fn caused_envelope(
 const USER: &str = "user";
 
 /// The actor kind of the real-money gate's setting, which only a platform operator writes
-/// (journal spec §9.35 rule 273).
+/// (journal spec §9.36 rule 273).
 pub(crate) const PLATFORM_OPERATOR: &str = "platform_operator";
 
 /// [`caused_envelope`] written by an actor of `kind`, whose id is `writer`'s principal.

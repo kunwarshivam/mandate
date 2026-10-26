@@ -1,4 +1,4 @@
-//! Journal spec v0.89 §9.35 (DEC-2134): the customer real-money gate's `RealMoneyGateChanged` and
+//! Journal spec v0.90 §9.36 (DEC-2134): the customer real-money gate's `RealMoneyGateChanged` and
 //! `RealMoneyRefused` on the control stream at schema version 1, and rules 273 and 274. Through
 //! [`Draft::parse`] against the vectors' `real_money` section: the base and every valid draft parse
 //! as their record, every invalid draft is refused with its reason at its path, and every record of
@@ -63,13 +63,13 @@ fn draft(section: &Value, case: &Value) -> Vec<u8> {
     to_canonical(&Value::Object(body))
 }
 
-/// The vectors' section is §9.35's, with every part this file reads.
+/// The vectors' section is §9.36's, with every part this file reads.
 #[test]
 fn the_real_money_section_holds_every_part() {
     let section = section();
     assert_eq!(
         text(&section, "spec"),
-        "docs/specs/journal.md v0.89 §9.35 (DEC-2134)"
+        "docs/specs/journal.md v0.90 §9.36 (DEC-2134)"
     );
     let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
     let names: Vec<&str> = drafts.keys().map(|k| k.as_str()).collect();
@@ -123,7 +123,7 @@ fn every_invalid_real_money_draft_is_refused_with_its_reason_at_its_path() {
     assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
 
-/// The gate's setting is a fold its reader computes (§9.35), not a stream rule: every record of
+/// The gate's setting is a fold its reader computes (§9.36), not a stream rule: every record of
 /// every setting stream parses, and [`check_stream`] refuses none of them.
 #[test]
 fn every_setting_stream_record_parses_and_no_stream_rule_refuses_it() {

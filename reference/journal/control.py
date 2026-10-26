@@ -93,7 +93,7 @@ DIGEST_HEX_FORM = re.compile(r"^[0-9a-f]{64}\Z")
 # §9.29 (DEC-2104 item 1): the code the web app shows for a challenge, normalized.
 CONFIRM_CODE = T("confirm_code")
 CONFIRM_CODE_FORM = re.compile(r"^[0-9A-HJKMNP-TV-Z]{8}\Z")
-# §9.35 (DEC-2134): the accepted decision an enabled real-money gate cites.
+# §9.36 (DEC-2134): the accepted decision an enabled real-money gate cites.
 DECISION_ID = T("decision_id")
 DECISION_ID_FORM = re.compile(r"^DEC-[1-9][0-9]{0,4}\Z")
 # §9.31 (DEC-2108 item 2): a WebAuthn credential id as unpadded base64url, 16 to 1023 bytes, and the
@@ -127,6 +127,37 @@ RULE_21_REORDERINGS = {
     "order.rule_21_admits_first": ("model_version", "admits_instruments"),
 }
 RULE_21_PARAMS_FIRST = "order.rule_21_params_first"
+
+
+# §9.2's `AccountSnapshotRecorded`: the broker's account members, then the cash comparison. Version 2
+# (§9.35, DEC-2398) adds the connector's declared account type and day-trading regime, `null` when it
+# declares none, and the broker's prior-close equity and maintenance margin between the two.
+SNAPSHOT_ACCOUNT_MEMBERS = (
+    ("status", STR),
+    ("crypto_status", STR),
+    ("trading_blocked", BOOL),
+    ("account_blocked", BOOL),
+    ("trade_suspended_by_user", BOOL),
+    ("multiplier", INT),
+    ("equity", DEC),
+    ("cash", DEC),
+    ("buying_power", DEC),
+    ("non_marginable_buying_power", DEC),
+    ("accrued_fees", DEC),
+)
+SNAPSHOT_CASH_MEMBERS = (
+    ("model_cash", opt(DEC)),
+    ("cash_band", opt(DEC)),
+    ("cash_in_band", opt(BOOL)),
+)
+SNAPSHOT_ACCOUNT_TYPES = ("cash", "margin")
+SNAPSHOT_REGIMES = ("intraday_margin", "legacy_pdt")
+SNAPSHOT_MARGIN_MEMBERS = (
+    ("account_type", opt(one_of(*SNAPSHOT_ACCOUNT_TYPES))),
+    ("day_trading_regime", opt(one_of(*SNAPSHOT_REGIMES))),
+    ("last_equity", DEC),
+    ("maintenance_margin", DEC),
+)
 
 SCHEMAS: dict[tuple[str, str], T] = {
     ("ctl", "StreamOpened"): rec(("stream_type", one_of("control")), ("workspace_id", IDENT_T)),
@@ -165,21 +196,7 @@ SCHEMAS: dict[tuple[str, str], T] = {
         ("loss_added", DEC),
     ),
     ("acct", "AccountSnapshotRecorded"): rec(
-        ("status", STR),
-        ("crypto_status", STR),
-        ("trading_blocked", BOOL),
-        ("account_blocked", BOOL),
-        ("trade_suspended_by_user", BOOL),
-        ("multiplier", INT),
-        ("equity", DEC),
-        ("cash", DEC),
-        ("buying_power", DEC),
-        ("non_marginable_buying_power", DEC),
-        ("accrued_fees", DEC),
-        ("model_cash", opt(DEC)),
-        ("cash_band", opt(DEC)),
-        ("cash_in_band", opt(BOOL)),
-        ("risk_clock", RISK_CLOCK),
+        *SNAPSHOT_ACCOUNT_MEMBERS, *SNAPSHOT_CASH_MEMBERS, ("risk_clock", RISK_CLOCK)
     ),
 }
 REFUSAL = rec(
@@ -529,7 +546,7 @@ SCHEMAS[("ctl", "StepUpConfirmed")] = rec(
     ("confirmed_at", INT),
 )
 
-# §9.35 v0.89 (DEC-2134): the customer real-money gate's setting, by a platform operator, and the
+# §9.36 v0.90 (DEC-2134): the customer real-money gate's setting, by a platform operator, and the
 # workspace API's refusal of a request that named another environment while it was off.
 SCHEMAS[("ctl", "RealMoneyGateChanged")] = rec(
     ("enabled", BOOL),
@@ -1324,6 +1341,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("ctl", "AgentDeployed"): (1, 2, 3),
     ("acct", "MarkUpdated"): (1, 2),
     ("ctl", "ConnectionRequested"): (1, 2),
+    ("acct", "AccountSnapshotRecorded"): (1, 2),
 }
 # §9.30 (DEC-2305): `MarkUpdated` version 2 adds the risk mark's bid, its sanity verdict, and its
 # session to version 1's members, with `risk_clock` last; version 1 stays registered.
@@ -1342,6 +1360,12 @@ MARK_UPDATED_V2 = rec(
     ("risk_clock", RISK_CLOCK),
 )
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
+    ("acct", "AccountSnapshotRecorded", 2): rec(
+        *SNAPSHOT_ACCOUNT_MEMBERS,
+        *SNAPSHOT_MARGIN_MEMBERS,
+        *SNAPSHOT_CASH_MEMBERS,
+        ("risk_clock", RISK_CLOCK),
+    ),
     ("acct", "MarkUpdated", 1): rec(*MARK_UPDATED_V1_MEMBERS, ("risk_clock", RISK_CLOCK)),
     ("acct", "MarkUpdated", 2): MARK_UPDATED_V2,
     ("acct", "StreamOpened", 1): rec(
@@ -3494,6 +3518,8 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     if event_type in ("MandateConfirmed", "AgentDeployed") and "versions.v3" in skip:
         versions = tuple(v for v in versions if v != 3)
     if event_type == "CredentialEnrolled" and "versions.credential_enrolled_v2" in skip:
+        versions = (1,)
+    if event_type == "AccountSnapshotRecorded" and "versions.snapshot_v2" in skip:
         versions = (1,)
     if event_type == "MarkUpdated" and "versions.mark_updated_v1" in skip:
         versions = (2,)

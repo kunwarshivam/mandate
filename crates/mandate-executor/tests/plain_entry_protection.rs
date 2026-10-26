@@ -355,7 +355,7 @@ fn a_stop_that_never_rests_is_flattened_at_the_bound() {
     shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
     let bound = shell.run(Input::Tick(clock(61)), &ports);
     assert!(
-        bound.notifications.contains(&"unprotected_interval_limit"),
+        bound.notifications.contains(&"protection"),
         "the owner is alerted at the bound: {:?}",
         bound.notifications
     );
@@ -409,7 +409,7 @@ fn an_entry_ending_after_its_bound_is_exited_whole_with_no_stop() {
     );
     shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
     let bound = shell.run(Input::Tick(clock(61)), &ports);
-    assert!(bound.notifications.contains(&"unprotected_interval_limit"));
+    assert!(bound.notifications.contains(&"protection"));
     assert!(
         bound
             .requests
@@ -511,7 +511,7 @@ fn a_second_entry_never_ends_the_interval_of_the_first() {
     shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
     let bound = shell.run(Input::Tick(clock(61)), &ports);
     assert!(
-        bound.notifications.contains(&"unprotected_interval_limit"),
+        bound.notifications.contains(&"protection"),
         "the first entry's interval reaches its bound: {:?}",
         bound.notifications
     );
@@ -730,7 +730,7 @@ fn a_bracket_at_the_bound_is_alerted_and_never_flattened() {
     assert!(ended.submissions().iter().any(|order| order.oco.is_some()));
     shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
     let bound = shell.run(Input::Tick(clock(61)), &ports);
-    assert!(bound.notifications.contains(&"unprotected_interval_limit"));
+    assert!(bound.notifications.contains(&"protection"));
     assert!(
         !flattens(&bound, "4"),
         "a bracket is never flattened at the bound"
@@ -828,7 +828,7 @@ impl Book {
                 _ => {}
             }
         }
-        if ran.notifications.contains(&"unprotected_interval_limit") {
+        if ran.notifications.contains(&"protection") {
             self.alerted = true;
         }
         for draft in &ran.drafts {

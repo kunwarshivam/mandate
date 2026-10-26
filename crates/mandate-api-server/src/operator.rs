@@ -1,5 +1,5 @@
 //! The platform operator's setting of the customer real-money gate ([DEC-2134] items 3 and 6;
-//! journal spec v0.89 §9.35): `mandate-api-server real-money`, run with the deployment's own
+//! journal spec v0.90 §9.36): `mandate-api-server real-money`, run with the deployment's own
 //! settings and credentials, never through an HTTP route. It appends one `RealMoneyGateChanged`,
 //! written by a `platform_operator` actor as itself (rule 273), to the hosted workspace's control
 //! stream.
@@ -30,10 +30,10 @@ pub const FOUNDER_WORKSPACE: &str = "MANDATE_API_FOUNDER_WORKSPACE";
 /// (workspace API spec §3.4), so a retry appends nothing new.
 const OPERATION: &str = "real_money_gate_changed";
 
-/// The setting's record (§9.35).
+/// The setting's record (§9.36).
 const CHANGED: &str = "RealMoneyGateChanged";
 
-/// How many digits a decision number may have (§9.35's `decision_id`).
+/// How many digits a decision number may have (§9.36's `decision_id`).
 const DECISION_DIGITS: usize = 5;
 
 /// What the operator asks.
@@ -79,7 +79,7 @@ impl Refusal {
     }
 }
 
-/// §9.35's `decision_id`: `DEC-` then a decimal number with no leading zero, at most five digits.
+/// §9.36's `decision_id`: `DEC-` then a decimal number with no leading zero, at most five digits.
 fn is_decision_id(value: &str) -> bool {
     value.strip_prefix("DEC-").is_some_and(|number| {
         (1..=DECISION_DIGITS).contains(&number.len())

@@ -1,4 +1,4 @@
-//! The customer real-money gate's records, which journal spec v0.89 §9.35 closes at schema version 1
+//! The customer real-money gate's records, which journal spec v0.90 §9.36 closes at schema version 1
 //! ([DEC-2134](../../../docs/project/decisions/DEC-2134.md)): `RealMoneyGateChanged`, a platform
 //! operator's setting of whether the workspace may reach an environment other than `paper`, and
 //! `RealMoneyRefused`, the workspace API's record of a request it refused while that setting was
@@ -14,13 +14,13 @@ use crate::{Invalid, InvalidReason, StreamType};
 const CHANGED: &str = "RealMoneyGateChanged";
 const REFUSED: &str = "RealMoneyRefused";
 
-/// The control-stream event types §9.35 adds to [`crate::control::governs`].
+/// The control-stream event types §9.36 adds to [`crate::control::governs`].
 pub(crate) const CONTROL: [&str; 2] = [CHANGED, REFUSED];
 
-/// How many digits a `decision_id`'s number may have (§9.35).
+/// How many digits a `decision_id`'s number may have (§9.36).
 const DECISION_DIGITS: usize = 5;
 
-/// §9.35's `decision_id`: `DEC-` then a decimal number with no leading zero, at most five digits.
+/// §9.36's `decision_id`: `DEC-` then a decimal number with no leading zero, at most five digits.
 fn is_decision_id(text: &str) -> bool {
     text.strip_prefix("DEC-").is_some_and(|number| {
         (1..=DECISION_DIGITS).contains(&number.len())
@@ -29,7 +29,7 @@ fn is_decision_id(text: &str) -> bool {
     })
 }
 
-/// The §9.35 schema of `event_type` at `schema_version` on `stream`, or `None` when this module
+/// The §9.36 schema of `event_type` at `schema_version` on `stream`, or `None` when this module
 /// registers none there.
 pub(crate) fn schema(
     event_type: &str,

@@ -1,4 +1,4 @@
-//! The customer real-money gate ([DEC-2134]; journal spec v0.89 §9.35): one decision in front of
+//! The customer real-money gate ([DEC-2134]; journal spec v0.90 §9.36): one decision in front of
 //! every workspace API point that can name an environment other than `paper`, creating a mandate
 //! version, deploying, starting a connect, and going live.
 //!
@@ -22,7 +22,7 @@ use crate::writes::{Gate, appended_at, derived_for, principal_text};
 
 /// The setting's record, which this module reads and never writes.
 const CHANGED: &str = "RealMoneyGateChanged";
-/// The refusal's record (§9.35).
+/// The refusal's record (§9.36).
 const REFUSED: &str = "RealMoneyRefused";
 /// The one environment the gate never judges.
 const PAPER: &str = "paper";

@@ -1,4 +1,4 @@
-"""Journal spec v0.89 §9.35's reference vectors for the customer real-money gate (DEC-2134):
+"""Journal spec v0.90 §9.36's reference vectors for the customer real-money gate (DEC-2134):
 `RealMoneyGateChanged`, a platform operator's setting of whether a workspace may reach an
 environment other than `paper`, and `RealMoneyRefused`, the workspace API's record of a request it
 refused while that setting was off.
@@ -31,7 +31,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.89 §9.35 (DEC-2134)"
+SPEC = "docs/specs/journal.md v0.90 §9.36 (DEC-2134)"
 AT = "2026-10-26T09:00:00.000000000Z"
 GATE_EVENT = "01JAA3G4A000000000000000G1"
 REFUSED_EVENT = "01JAA3G4A000000000000000R1"
@@ -102,34 +102,34 @@ ONE_OF = {
 
 def member_drafts() -> list[dict]:
     out = [
-        invalid(GATE, "gate.enabled.kind", "§9.35 types", [change("payload.enabled", "true")], "schema", "payload.enabled"),
-        invalid(GATE, "gate.enabled.int", "§9.35 types", [change("payload.enabled", 1)], "schema", "payload.enabled"),
-        invalid(GATE, "gate.operator.kind", "§9.35 types", [change("payload.operator", 7)], "schema", "payload.operator"),
-        invalid(GATE, "gate.operator.form", "§9.35 types", [change("payload.operator", "operator_01")], "non_canonical", "payload.operator"),
-        invalid(GATE, "gate.decision.kind", "§9.35 types", [change("payload.decision", 2134)], "schema", "payload.decision"),
-        invalid(GATE, "gate.missing", "§9.35 closed", [delete("payload.decision")], "schema", "payload.decision"),
-        invalid(GATE, "gate.extra", "§9.35 closed", [change("payload.workspace", PRINCIPAL)], "schema", "payload.workspace"),
-        invalid(REFUSED, "refused.principal.kind", "§9.35 types", [change("payload.principal", 7)], "schema", "payload.principal"),
-        invalid(REFUSED, "refused.principal.form", "§9.35 types", [change("payload.principal", "user_owner_01")], "non_canonical", "payload.principal"),
-        invalid(REFUSED, "refused.missing", "§9.35 closed", [delete("payload.reason")], "schema", "payload.reason"),
-        invalid(REFUSED, "refused.extra", "§9.35 closed", [change("payload.mandate_version", None)], "schema", "payload.mandate_version"),
+        invalid(GATE, "gate.enabled.kind", "§9.36 types", [change("payload.enabled", "true")], "schema", "payload.enabled"),
+        invalid(GATE, "gate.enabled.int", "§9.36 types", [change("payload.enabled", 1)], "schema", "payload.enabled"),
+        invalid(GATE, "gate.operator.kind", "§9.36 types", [change("payload.operator", 7)], "schema", "payload.operator"),
+        invalid(GATE, "gate.operator.form", "§9.36 types", [change("payload.operator", "operator_01")], "non_canonical", "payload.operator"),
+        invalid(GATE, "gate.decision.kind", "§9.36 types", [change("payload.decision", 2134)], "schema", "payload.decision"),
+        invalid(GATE, "gate.missing", "§9.36 closed", [delete("payload.decision")], "schema", "payload.decision"),
+        invalid(GATE, "gate.extra", "§9.36 closed", [change("payload.workspace", PRINCIPAL)], "schema", "payload.workspace"),
+        invalid(REFUSED, "refused.principal.kind", "§9.36 types", [change("payload.principal", 7)], "schema", "payload.principal"),
+        invalid(REFUSED, "refused.principal.form", "§9.36 types", [change("payload.principal", "user_owner_01")], "non_canonical", "payload.principal"),
+        invalid(REFUSED, "refused.missing", "§9.36 closed", [delete("payload.reason")], "schema", "payload.reason"),
+        invalid(REFUSED, "refused.extra", "§9.36 closed", [change("payload.mandate_version", None)], "schema", "payload.mandate_version"),
     ]
     for member in GATE_NULLED:
         path = f"payload.{member}"
-        out.append(invalid(GATE, f"gate.{member}.null", "§9.35 types", [change(path, None)], "schema", path))
+        out.append(invalid(GATE, f"gate.{member}.null", "§9.36 types", [change(path, None)], "schema", path))
     for member in REFUSED_NULLED:
         path = f"payload.{member}"
-        out.append(invalid(REFUSED, f"refused.{member}.null", "§9.35 types", [change(path, None)], "schema", path))
+        out.append(invalid(REFUSED, f"refused.{member}.null", "§9.36 types", [change(path, None)], "schema", path))
     for member, values in ONE_OF.items():
         path = f"payload.{member}"
         for value in values:
-            out.append(invalid(REFUSED, f"refused.{member}.{value.strip()}{'_padded' if value != value.strip() else ''}", "§9.35 vocabulary", [change(path, value)], "non_canonical", path))
+            out.append(invalid(REFUSED, f"refused.{member}.{value.strip()}{'_padded' if value != value.strip() else ''}", "§9.36 vocabulary", [change(path, value)], "non_canonical", path))
     for decision in ("DEC-0", "DEC-02134", "dec-2134", "DEC2134", "DEC-123456", "DEC-2134 "):
         out.append(
             invalid(
                 GATE,
                 f"gate.decision.form.{decision.strip()}{'_padded' if decision != decision.strip() else ''}",
-                "§9.35 `decision_id`",
+                "§9.36 `decision_id`",
                 [change("payload.enabled", True), change("payload.decision", decision)],
                 "non_canonical",
                 "payload.decision",
@@ -163,8 +163,8 @@ def invalid_drafts() -> list[dict]:
     return [
         *member_drafts(),
         *rule_drafts(),
-        invalid(GATE, "gate.at_version_2", "§9.35: closed at schema version 1 only", [change("schema_version", 2)], "unknown_schema", "payload"),
-        invalid(REFUSED, "refused.at_version_2", "§9.35: closed at schema version 1 only", [change("schema_version", 2)], "unknown_schema", "payload"),
+        invalid(GATE, "gate.at_version_2", "§9.36: closed at schema version 1 only", [change("schema_version", 2)], "unknown_schema", "payload"),
+        invalid(REFUSED, "refused.at_version_2", "§9.36: closed at schema version 1 only", [change("schema_version", 2)], "unknown_schema", "payload"),
     ]
 
 
@@ -173,7 +173,7 @@ def valid_drafts() -> list[dict]:
     out = [
         valid(GATE, "on_with_a_decision", "rule 273: on with its decision", [change("payload.enabled", True), change("payload.decision", DECISION)]),
         valid(GATE, "off_with_a_decision", "rule 273: off may cite one", [change("payload.decision", "DEC-1")]),
-        valid(GATE, "on_with_the_largest_number", "§9.35 `decision_id`: five digits", [change("payload.enabled", True), change("payload.decision", "DEC-99999")]),
+        valid(GATE, "on_with_the_largest_number", "§9.36 `decision_id`: five digits", [change("payload.enabled", True), change("payload.decision", "DEC-99999")]),
         valid(
             GATE,
             "another_operator_as_itself",
@@ -188,14 +188,14 @@ def valid_drafts() -> list[dict]:
         ),
     ]
     for action in ("create_version", "connect", "go_live"):
-        out.append(valid(REFUSED, f"refused_{action}", "§9.35: every action", [change("payload.action", action)]))
+        out.append(valid(REFUSED, f"refused_{action}", "§9.36: every action", [change("payload.action", action)]))
     return out
 
 
 # --------------------------------------------------------------------------- the gate's fold
 
 def setting(records: list[dict], skip: frozenset[str] = frozenset()) -> bool:
-    """§9.35: the latest `RealMoneyGateChanged`'s `enabled`, by place in the stream; none is off."""
+    """§9.36: the latest `RealMoneyGateChanged`'s `enabled`, by place in the stream; none is off."""
     on = False
     seen = False
     for record in records:
@@ -216,12 +216,12 @@ def stream_cases() -> list[dict]:
 
     on = gate(True, LATER, DECISION)
     return [
-        case("none", "§9.35: a stream with no setting is off", [refused()], False),
-        case("off", "§9.35: an off setting", [gate()], False),
-        case("on", "§9.35: an on setting", [gate(), on], True),
-        case("on_then_off", "§9.35: the latest setting, not the first", [gate(True, GATE_EVENT, DECISION), gate(False, LATER)], False),
-        case("off_on_off_on", "§9.35: the latest of several", [gate(), on, gate(False, THIRD), gate(True, FOURTH, DECISION)], True),
-        case("refused_after_on", "§9.35: a refusal changes no setting", [on, refused()], True),
+        case("none", "§9.36: a stream with no setting is off", [refused()], False),
+        case("off", "§9.36: an off setting", [gate()], False),
+        case("on", "§9.36: an on setting", [gate(), on], True),
+        case("on_then_off", "§9.36: the latest setting, not the first", [gate(True, GATE_EVENT, DECISION), gate(False, LATER)], False),
+        case("off_on_off_on", "§9.36: the latest of several", [gate(), on, gate(False, THIRD), gate(True, FOURTH, DECISION)], True),
+        case("refused_after_on", "§9.36: a refusal changes no setting", [on, refused()], True),
     ]
 
 

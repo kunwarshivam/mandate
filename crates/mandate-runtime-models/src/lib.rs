@@ -19,10 +19,12 @@
 //! from the control stream's model registrations ([`registry`]), `ExchangeCalendar::us_equities()`,
 //! and the daily closes `mandate_bars::trusted_daily_closes` admits at the tick, the one trusted
 //! reader of the stored bars (DEC-2385, DEC-2274). The tick's own risk clock is the host's `now`,
-//! so the same tick over the same write-once partitions gives the same answer. Every refusal, a
-//! closes read the trust check refuses, a `Flat` or `Undecided` signal, and a pin the registry or
-//! the host disagrees with, is no output, which can only shrink a buy (MI-10). No `llm.` model is
-//! ever evaluated here: LLM opinions reach the core through the research pass.
+//! so the same tick over the same write-once partitions gives the same answer. A version's `Long`
+//! output and its exit output (`quant.ma_crossover` 1.1.0's `Flat`, conviction −1, DEC-2390) are
+//! both handed on. Every refusal, a closes read the trust check refuses, a signal the pinned
+//! version answers with no output, and a pin the registry or the host disagrees with, is no
+//! output, which can only shrink a buy (MI-10). No `llm.` model is ever evaluated here: LLM
+//! opinions reach the core through the research pass.
 //!
 //! The runtime mounts the artifact store read-only, so [`Held`] stores nothing: it only confirms
 //! the data process already holds the closes object an observation will name (DEC-2385 item 5).
@@ -143,7 +145,7 @@ impl PinnedModels {
             instrument_id: pinned.pin.instrument_id.clone(),
             closes: trusted_daily_closes(&dir, &pinned.symbol, now).ok()?,
         };
-        let Evaluation::Long(output) =
+        let (Evaluation::Long(output) | Evaluation::Exit(output)) =
             evaluate(&pinned.pin, &self.registry, &self.calendar, &daily, now).ok()?
         else {
             return None;

@@ -760,7 +760,7 @@ per workspace deployment (item 6).
       mandate (mandate spec §3) in the control stream's environment: `paper`. A `live` document is
       refused `live_unavailable`, and any other environment, or one unlike the stream's,
       `invalid`. The customer real-money gate ([DEC-2134](../project/decisions/DEC-2134.md), journal
-      spec §9.35) judges a `live` document first: while the workspace's setting is off, the API
+      spec §9.36) judges a `live` document first: while the workspace's setting is off, the API
       appends `RealMoneyRefused` (action `create_version`), under the id §3.4 derives for operation
       `real_money_refused_create_version`, before it answers; if that append fails the answer is
       `journal_unavailable`. While the setting is on, nothing is appended and the answer is the
@@ -869,7 +869,7 @@ per workspace deployment (item 6).
         model content come from the content-addressed store (item 2).
     - **Go live** answers `409` `live_unavailable` to every principal the deploy row authorizes,
       after item 10's checks and before the body is read (B5, rule 8). The customer real-money gate
-      ([DEC-2134](../project/decisions/DEC-2134.md), journal spec §9.35) judges it first: while the
+      ([DEC-2134](../project/decisions/DEC-2134.md), journal spec §9.36) judges it first: while the
       workspace's setting is off, the API appends `RealMoneyRefused` (action `go_live`), under the
       id §3.4 derives for operation `real_money_refused_go_live`, before it answers; if that append
       fails the answer is `journal_unavailable`. While the setting is on, nothing is appended and

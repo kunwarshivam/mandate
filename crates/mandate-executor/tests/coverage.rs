@@ -674,13 +674,13 @@ fn a_held_exit_past_its_age_is_never_abandoned() {
         ran.draft_types()
     );
     assert!(
-        ran.notifications.contains(&"exit_held_long"),
+        ran.notifications.contains(&"exit_stalled"),
         "a hold past max_intent_age is journaled and alerted: {:?}",
         ran.notifications
     );
     let again = shell.run(Input::Tick(clock(240)), &ports);
     assert!(
-        !again.notifications.contains(&"exit_held_long"),
+        !again.notifications.contains(&"exit_stalled"),
         "once: {:?}",
         again.notifications
     );
@@ -1093,7 +1093,7 @@ fn a_fill_that_cannot_be_the_orders_is_applied_unattributed() {
         .collect();
     assert_eq!(alerts.len(), 1, "the owner is alerted once");
     assert_eq!(
-        (Some(alerts[0].subject_event.clone()), alerts[0].message_key),
+        (Some(alerts[0].subject_event.clone()), alerts[0].kind.key()),
         (ingested, "external_activity"),
         "by the ingested event's opaque id and a message key, nothing more (AGENTS.md rule 6)"
     );
@@ -2068,13 +2068,12 @@ fn a_fill_on_a_pending_cancel_or_replace_keeps_its_state() {
 
 /// Asserts §7.3's consequence on every agent: the `*` restriction to `mode`, a second agent that
 /// placed nothing held to it too, and one alert naming the event that recorded the restriction by
-/// its opaque id under `key` (DEC-133 item 39, AGENTS.md rule 6).
+/// its opaque id as `account_restriction` (DEC-133 item 39, DEC-2514, AGENTS.md rule 6).
 fn every_agent_restricted_and_the_owner_alerted(
     shell: &Shell,
     ran: &common::Ran,
     mode: Mode,
     to: &str,
-    key: &str,
 ) {
     let applied = ran
         .draft("AgentModeApplied")
@@ -2096,14 +2095,14 @@ fn every_agent_restricted_and_the_owner_alerted(
         .iter()
         .filter_map(|effect| match effect {
             mandate_executor::Effect::Notify(reference) => {
-                Some((Some(reference.subject_event.clone()), reference.message_key))
+                Some((Some(reference.subject_event.clone()), reference.kind.key()))
             }
             _ => None,
         })
         .collect();
     assert_eq!(
         alerts,
-        vec![(changed, key)],
+        vec![(changed, "account_restriction")],
         "the owner is alerted once, by the restriction's event id and a message key"
     );
 }
@@ -2124,13 +2123,7 @@ fn a_blocked_account_restricts_every_agent_and_alerts_the_owner() {
         })),
         &ports,
     );
-    every_agent_restricted_and_the_owner_alerted(
-        &shell,
-        &ran,
-        Mode::Paused,
-        "paused",
-        "account_trading_blocked",
-    );
+    every_agent_restricted_and_the_owner_alerted(&shell, &ran, Mode::Paused, "paused");
 }
 
 /// §7.3 row 2, DEC-143: a reject whose message says `closing`, without `restricted`, restricts
@@ -2152,13 +2145,7 @@ fn a_closing_message_alone_restricts_every_agent_and_alerts_the_owner() {
         &ports,
     );
     assert_eq!(shell.state.account_state(), AccountState::ClosingOnly);
-    every_agent_restricted_and_the_owner_alerted(
-        &shell,
-        &ran,
-        Mode::ExitsOnly,
-        "exits_only",
-        "account_restricted",
-    );
+    every_agent_restricted_and_the_owner_alerted(&shell, &ran, Mode::ExitsOnly, "exits_only");
 }
 
 /// Journal spec §6: a reject is journaled with its status, code and message.
@@ -2733,4 +2720,87 @@ fn a_late_fill_a_reconciliation_finds_asks_for_the_next_from_its_checkpoint() {
         })
         .expect("the late fill");
     assert!(at_the_journal(fill).is_ok(), "{:?}", at_the_journal(fill));
+}
+
+/// DEC-2514, journal spec §9.15 rules 119, 120 and 130: the `OwnerAlertSent` a blocked account's
+/// batch writes, its ids made ULIDs as the deployed id source makes them, is accepted by the
+/// journal beside its subject, and refused with its subject off the batch or with a second alert
+/// on one subject, so the check is not vacuous. The subject stands in as the batch's
+/// `AgentModeApplied` at the subject's id: `AccountRestrictionChanged` has no registered schema
+/// yet, which is its own gap, reported, not this record's.
+#[test]
+fn a_restrictions_alert_is_accepted_by_the_journal_in_its_subjects_batch() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Account(mandate_executor::BrokerAccount {
+            trading_blocked: true,
+            ..broker_account()
+        })),
+        &ports,
+    );
+    let alert = ran
+        .draft("OwnerAlertSent")
+        .expect("the restriction is alerted");
+    let restriction = ran.draft("AccountRestrictionChanged").unwrap();
+    assert_eq!(
+        alert.payload.get("subject").and_then(Value::as_str),
+        Some(restriction.event_id.0.as_str())
+    );
+    assert_eq!(
+        alert.payload.get("kind").and_then(Value::as_str),
+        Some("account_restriction")
+    );
+    let stand_in = ran.draft("AgentModeApplied").unwrap();
+    let body = |draft: &mandate_executor::EventDraft, id: &str, payload: &Value, cause: &str| {
+        format!(
+            r#"{{"envelope_version":1,"environment":"paper","event_id":"{id}","stream_id":"acct:ws_1:ACCT1","event_type":"{}","schema_version":{},"event_time":"2026-09-22T14:00:00.000000000Z","clock_source":"local","causation_id":{cause},"correlation_id":null,"actor":{{"kind":"system","id":"executor","version":"0.1.0","build":"sha256:{}"}},"config_refs":{},"payload":{},"artifact_refs":[],"pii_refs":[]}}"#,
+            draft.event_type,
+            draft.schema_version,
+            "3".repeat(64),
+            String::from_utf8_lossy(&mandate_canon::to_canonical(&Value::Object(
+                draft.config_refs.clone()
+            ))),
+            String::from_utf8_lossy(&mandate_canon::to_canonical(payload)),
+        )
+    };
+    let parse = |text: String| {
+        mandate_journal::Draft::parse(text.as_bytes()).unwrap_or_else(|e| panic!("{e:?}: {text}"))
+    };
+    let subject_id = "01J8Z3M4000000000000000001";
+    let alerted = |about: &str, id: &str| {
+        let mut payload = alert.payload.clone();
+        if let Value::Object(members) = &mut payload {
+            members.insert(
+                mandate_canon::Key::new("subject").unwrap(),
+                Value::Str(about.to_owned()),
+            );
+        }
+        parse(body(alert, id, &payload, &format!("\"{about}\"")))
+    };
+    let subject = parse(body(stand_in, subject_id, &stand_in.payload, "null"));
+    let first = alerted(subject_id, "01J8Z3M4000000000000000002");
+    assert_eq!(
+        mandate_journal::check_batch(&[subject.clone(), first.clone()]),
+        Ok(())
+    );
+    let elsewhere = alerted("01J8Z3M4000000000000000077", "01J8Z3M4000000000000000002");
+    let refused_at = |result: Result<(), (usize, mandate_journal::Invalid)>| {
+        result.err().map(|(at, invalid)| (at, invalid.path))
+    };
+    assert_eq!(
+        refused_at(mandate_journal::check_batch(&[subject.clone(), elsewhere])),
+        Some((1, "payload.subject".to_owned())),
+        "a subject off the batch is refused by rule 130, at the alert"
+    );
+    let second = alerted(subject_id, "01J8Z3M4000000000000000003");
+    assert_eq!(
+        refused_at(mandate_journal::check_batch(&[subject, first, second])),
+        Some((2, "payload.subject".to_owned())),
+        "two alerts on one subject are refused by rule 130, at the second"
+    );
 }
