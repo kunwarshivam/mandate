@@ -183,7 +183,7 @@ mod tests {
     const START: i64 = 1_790_000_000;
 
     fn instrument(n: usize) -> String {
-        format!("b0b6dd9d-8b9b-48a9-ba46-b9d54906e41{n}")
+        format!("00000000-0000-4000-8000-00000000001{n}")
     }
 
     fn row(seq: usize, event_type: &str, members: Vec<(&'static str, Value)>) -> ThesisRow {

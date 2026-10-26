@@ -8,7 +8,7 @@ use mandate_canon::{Int, Value};
 use support::{ACCOUNT_STREAM, AGENT, Error, Paper, agent_stream, at, deployed, object, start};
 
 const THESIS: &str = "01JTHES0000000000000000001";
-const INSTRUMENT: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+const INSTRUMENT: &str = "00000000-0000-4000-8000-000000000015";
 
 fn text(value: &str) -> Value {
     Value::Str(value.to_owned())
