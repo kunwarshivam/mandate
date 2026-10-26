@@ -45,9 +45,79 @@ pub struct ResearchParts {
     pub events: Vec<RetrievedItem>,
 }
 
-/// The research context of one pass; `None` runs no research on that pass.
+/// The research context of one pass, or the first input it could not read, which runs no research
+/// on that pass and names why (DEC-2825).
 pub trait ResearchSource {
-    fn parts(&self, state: &RuntimeState) -> Option<ResearchParts>;
+    /// # Errors
+    /// The first input of the context that could not be read.
+    fn parts(&self, state: &RuntimeState) -> Result<ResearchParts, ContextUnread>;
+}
+
+/// The first input a research pass could not read, so it ran no research (DEC-2825). Each names an
+/// input, never its content, so the alert that carries its code holds generic text alone
+/// (`AGENTS.md` rule 6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextUnread {
+    /// A stream id the workspace and agent do not make.
+    StreamName,
+    /// The workspace's control stream.
+    Control,
+    /// The agent's own stream.
+    AgentStream,
+    /// The workspace's meter stream.
+    Meter,
+    /// The agent's last research reservation on the meter stream.
+    Reservation,
+    /// The agent's deployment, or its stored mandate document.
+    Deployment,
+    /// The deployed mandate's envelope.
+    Envelope,
+    /// The deployed mandate's event triggers.
+    EventTriggers,
+    /// Whether another agent is deployed in the workspace.
+    Deployments,
+    /// Another agent is deployed in the workspace, which research does not run beside.
+    AnotherAgent,
+    /// The runtime's risk clock: no tick folded yet.
+    Clock,
+    /// The agent's research spend today.
+    Spend,
+    /// The agent's thesis records.
+    Theses,
+    /// A pinned universe whose agent stream holds theses.
+    PinnedWithTheses,
+    /// The research bundle's instrument facts: an asset id or an instrument group.
+    InstrumentFacts,
+    /// The research bundle's halted instruments.
+    Halted,
+    /// The items that have arrived, which the pass offers as event triggers.
+    Arrivals,
+}
+
+impl ContextUnread {
+    /// The reason's stable code (ADR-0001 ES-09), the alert's subject.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::StreamName => "stream_name",
+            Self::Control => "control",
+            Self::AgentStream => "agent_stream",
+            Self::Meter => "meter",
+            Self::Reservation => "reservation",
+            Self::Deployment => "deployment",
+            Self::Envelope => "envelope",
+            Self::EventTriggers => "event_triggers",
+            Self::Deployments => "deployments",
+            Self::AnotherAgent => "another_agent",
+            Self::Clock => "clock",
+            Self::Spend => "spend",
+            Self::Theses => "theses",
+            Self::PinnedWithTheses => "pinned_with_theses",
+            Self::InstrumentFacts => "instrument_facts",
+            Self::Halted => "halted",
+            Self::Arrivals => "arrivals",
+        }
+    }
 }
 
 /// The research worker: retrieval and the gateway's calls. It stores the artifacts its answers name
@@ -96,6 +166,9 @@ pub(super) struct Research {
     doubted_parts: Option<ResearchParts>,
     /// The records of arrived items this process has stored, so each is put once (DEC-2275).
     stored: BTreeSet<Digest>,
+    /// The input the source last could not read, already alerted: a pass that reads its context
+    /// clears it, so the next one it cannot read alerts again (DEC-2825).
+    unread: Option<ContextUnread>,
 }
 
 impl Research {
@@ -108,6 +181,29 @@ impl Research {
             doubted_at: None,
             doubted_parts: None,
             stored: BTreeSet::new(),
+            unread: None,
+        }
+    }
+
+    /// The pass's research context from the source, or `None` when it could not read one: then the
+    /// operator is alerted once, `research_context_unread` with the unread input's code, each time
+    /// that input changes, never once a pass (DEC-2825).
+    fn context(&mut self, state: &RuntimeState, alerts: &mut Vec<Alert>) -> Option<ResearchParts> {
+        match self.wiring.source.parts(state) {
+            Ok(parts) => {
+                self.unread = None;
+                Some(parts)
+            }
+            Err(reason) => {
+                if self.unread != Some(reason) {
+                    self.unread = Some(reason);
+                    alerts.push(Alert {
+                        key: "research_context_unread",
+                        subject: Some(reason.code().to_owned()),
+                    });
+                }
+                None
+            }
         }
     }
 }
@@ -320,7 +416,7 @@ impl<S: Store> RuntimeProcess<S> {
         let Some(research) = self.research.as_mut() else {
             return true;
         };
-        let Some(parts) = research.wiring.source.parts(&self.state) else {
+        let Some(parts) = research.context(&self.state, alerts) else {
             return true;
         };
         if parts.event_triggers.is_none() {
@@ -370,9 +466,7 @@ impl<S: Store> RuntimeProcess<S> {
         };
         let retry = research.driver.pending().is_some();
         let Some(parts) = research
-            .wiring
-            .source
-            .parts(&self.state)
+            .context(&self.state, alerts)
             .or_else(|| research.doubted_parts.clone().filter(|_| retry))
         else {
             return Outcome::Held;

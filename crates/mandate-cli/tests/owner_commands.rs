@@ -14,7 +14,9 @@ use clap::Parser;
 use common::{ACCOUNT, AGENT, ASKED_AT, CONTROL, FixedIds, Fixture, OWNER, at, body, member};
 use common::{member_text, owner};
 use mandate_canon::{Digest, Value};
-use mandate_cli::agent::{Command as Owned, Confirmed, RELEASE_WARNING, Restriction, Status, code};
+use mandate_cli::agent::{
+    Command as Owned, Confirmed, RELEASE_WARNING, Restriction, Status, Subject, code,
+};
 use mandate_cli::brake::AgentCommand;
 use mandate_cli::control::ControlError;
 use mandate_cli::owner::{
@@ -214,12 +216,14 @@ fn acknowledge(request: Option<&str>) -> Owned {
     Owned::Acknowledge {
         event: EVENT.to_owned(),
         request: request.map(str::to_owned),
+        subject: None,
     }
 }
 
 fn request_ack() -> Owned {
     Owned::RequestAcknowledgment {
         event: EVENT.to_owned(),
+        subject: None,
     }
 }
 
@@ -282,6 +286,42 @@ fn the_binary_offers_acknowledge_and_request_ack() {
         parsed(&["request-ack", AGENT, EVENT, "--request", REQUEST]).is_err(),
         "only an acknowledgment names a request"
     );
+}
+
+/// E7-4b: `--subject` names what the event is, on an acknowledgment and on a request, and takes
+/// only §9.28's three subjects.
+#[test]
+fn acknowledge_and_request_ack_take_a_subject() {
+    for (word, subject) in [
+        ("limit", Subject::Limit),
+        ("restriction", Subject::Restriction),
+        ("reconciliation", Subject::Reconciliation),
+    ] {
+        let args = ["acknowledge", AGENT, EVENT, "--subject", word];
+        let Ok(AgentCommand::Acknowledge(given)) = parsed(&args) else {
+            panic!("{args:?}")
+        };
+        assert_eq!(
+            given.command(),
+            Owned::Acknowledge {
+                event: EVENT.to_owned(),
+                request: None,
+                subject: Some(subject),
+            }
+        );
+        let args = ["request-ack", AGENT, EVENT, "--subject", word];
+        let Ok(AgentCommand::RequestAck(given)) = parsed(&args) else {
+            panic!("{args:?}")
+        };
+        assert_eq!(
+            given.command(),
+            Owned::RequestAcknowledgment {
+                event: EVENT.to_owned(),
+                subject: Some(subject),
+            }
+        );
+    }
+    assert!(parsed(&["acknowledge", AGENT, EVENT, "--subject", "hold"]).is_err());
 }
 
 /// DEC-2512: without a code an acknowledgment and a request print the code `agent::code` gives and

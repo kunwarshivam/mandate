@@ -284,9 +284,12 @@ Errors are RFC 9457 problem documents with these members:
 | `step_up_missing` | 401 | Evidence is presented but does not count: its challenge is unknown, its credential is not the principal's or is in its enrolment cool-off, or its assertion does not verify (identity spec §7.2 steps 4 and 6) |
 | `step_up_stale` | 401 | The challenge has expired, or is presented before its `issued_at`; or a first passkey enrolment's session was opened more than 300 s before (§3.6), which alone carries one violation at `/session` ([DEC-2118](../project/decisions/DEC-2118.md) item 4) |
 | `step_up_reused` | 401 | The challenge was already used |
-| `step_up_method` | 401 | The method is not allowed in this environment: `cli_confirm` in `live` (identity spec §7.3) |
+| `step_up_method` | 401 | The method is not allowed in this environment: `cli_confirm` in `live` (identity spec §7.3); for an acknowledgment or its request, any method but `passkey` (§3.11 item 12) |
 | `step_up_mismatch` | 401 | The challenge names another principal, workspace, action kind, or action digest |
 | `live_unavailable` | 409 | A live environment operation before counsel signs off (rule 8, B5) |
+| `acknowledgment_unavailable` | 409 | **(planned: E10-12)** An acknowledgment, or its request, names a hold §3.11 item 12's list does not serve now for that agent and `subject`: never raised, already lifted, or superseded. `effect: none`, `retryable: false`; title "Nothing to acknowledge" |
+| `acknowledgment_request_invalid` | 409 | **(planned: E10-12)** An acknowledgment names a `request` that is not an unspent `OwnerAcknowledgmentRequested` for the same agent, event, and `subject`, or that the caller recorded (journal spec rules 239 to 241). `effect: none`, `retryable: false`; title "Request cannot be answered" |
+| `deferral_mismatch` | 409 | A grant (§5.2) of an approval whose request's deferred checks are not exactly those of the `DecisionMade` it names, or whose decision is not on the agent stream: the request may hide or invent a check that has not been run (mandate spec §6.4, [DEC-2521](../project/decisions/DEC-2521.md)). `effect: none`, `retryable: false`; title "Request does not match its decision". A Skip of it is never refused for this |
 | `control_stream_frozen` | 503 | Journal spec §11 froze mandate and deployment changes; never sent for a risk-reducing call (API-7) |
 | `journal_unavailable` | 503 | Postgres cannot take the append; `effect: none`, `retryable: true` |
 | `rate_limited` | 429 | Over the principal's limit; never for an API-7 operation |
@@ -847,9 +850,9 @@ per workspace deployment (item 6).
       that row's refusal, and a non-member the one 404), writes nothing, and is served in a `live`
       workspace too, since a read adds no risk. An empty or absent control stream answers empty
       lists, not an error. Both fold the control stream as the create does (`versions.rs`,
-      `facts`): a control-stream row that fold cannot read (a malformed `model_version`
+      `control_facts`, the control-stream half of the create's `facts`): a control-stream row that fold cannot read (a malformed `model_version`
       registration among them) makes either read `journal_unavailable`, as it makes the create
-      refuse, never a list the create would then refuse. **(planned: E10-11)**
+      refuse, never a list the create would then refuse.
       - `GET /instruments` returns `read-models/instruments`: the fold the create's instrument
         check reads (`versions.rs`, `instruments`), every `ConfigSnapshotRegistered` of kind
         `instrument_snapshot` in stream order, the latest per stored `instrument_id`. Each listed
@@ -866,9 +869,12 @@ per workspace deployment (item 6).
       - `GET /signal-models` returns `read-models/signal-models`: the registry the create's V-007
         reads, from the same facts folded in stream order (`mandate-spec`'s validation context):
         the latest `ConfigSnapshotRegistered` of kind `model_version` per `model_id`, whatever its
-        version. A model withdrawn by `PlatformOperatorAction` `model_withdrawn` leaves the
+        version. A model whose registration no mandate document can name (a `model_version` off the
+        mandate schema's version pattern, more than 32 parameters, or a parameter name off its key
+        pattern) is omitted, as an unpinnable instrument is ([DEC-2142](../project/decisions/DEC-2142.md)).
+        A model withdrawn by `PlatformOperatorAction` `model_withdrawn` leaves the
         registry, and so the list, once the fold maps that action (E10-11w); until then the create
-        admits it and the list shows it, the two never differing. Each listed model has that
+        admits a withdrawn model and the list shows it, the two never differing for it. Each listed model has that
         registration's `model_id`, `model_version`, `content_hash`, `params` (in the order V-007
         compares a document's, ascending as registered) and `admits_instruments`, its row's
         `recorded_at` as `registered_at`, and `content`, sorted by id. V-007 reads only the row,
@@ -876,7 +882,7 @@ per workspace deployment (item 6).
         object stored under `content_hash`, its `authorship` and `methodology` when they are
         strings, and of its `params_schema` only `constraints` (strings) and each parameter's
         `name`, `type`, `min` and `max` (DEC-518 item 3), member by member, each only when
-        present; `null` when the store cannot give or parse the object. Nothing else of the object
+        present and within `read-models/signal-models`' bounds, never cut short (DEC-2142 item 2); `null` when the store cannot give or parse the object. Nothing else of the object
         is served: no prompt template, model identity, retrieval plan, tool declaration, input or
         output declaration, or source path. It serves nothing about how a model performed (no scorecard, backtest figure or
         ranking; DEC-99, DEC-126), so the list never reads as a recommendation.
@@ -895,10 +901,10 @@ per workspace deployment (item 6).
 12. **Resume, Stop, owner exit, acknowledgment, and command status**
     ([DEC-2102](../project/decisions/DEC-2102.md), E10-12). `POST /agents/{agent_id}/resume`
     (`resume`), `…/stop` (`stop`), `…/exits` (`owner_exit`), `…/acknowledgments`
-    (`acknowledge`), and `GET /commands/{event_id}`. The acknowledgment route is mounted only once
-    `mandate-journal` registers `OwnerAcknowledged`'s payload on the control stream (journal spec
-    §9.2's members): until then the journal refuses its draft, so the route answers the one 401
-    of a route not landed, and the CLI's acknowledgment stays the path. Each command is checked as item 10 orders, the
+    (`acknowledge`), and `GET /commands/{event_id}`. The acknowledgment, its request, and the
+    list of holds to acknowledge are served as **Acknowledgments** below
+    ([DEC-2144](../project/decisions/DEC-2144.md)), now that `mandate-journal` registers both records
+    (journal spec §9.28). Each command is checked as item 10 orders, the
     agent found as item 10 finds it, and recorded as the CLI records it (`mandate agent resume`,
     `stop`, `exit`, `acknowledge`).
     - **Resume and Stop** commit `OwnerCommandIssued` with §9.11's members. A Stop with `release`
@@ -909,18 +915,119 @@ per workspace deployment (item 6).
       (`owner_exit`) with scope `instrument`, the asset as `subject`, and the confirmed `bid`,
       `bid_size`, and `floor`; `quoted_at`, `record`, and `step_up` are kept but not journaled, as
       item 10's are.
-    - **An acknowledgment** commits `OwnerAcknowledged` with `agent`, the acknowledged `event`,
-      `user`, `risk_clock` and `submitted_at` at receipt, and `step_up`. The executor judges the
-      event, the step-up, and independence (mandate spec §5.8).
-    - **Step-up is forwarded only once verified.** Resume, Stop, and acknowledgment carry the port's
+    - **An acknowledgment** is served as **Acknowledgments** below (DEC-2144).
+    - **Step-up is forwarded only once verified.** Resume and Stop carry the port's
       verified evidence as `step_up`, or `null`. A resume's or Stop's `passkey` evidence is verified
       only with its `step_up_assertion`, and then its `StepUpAsserted` follows the command in its
       batch (§3.6, [DEC-2140](../project/decisions/DEC-2140.md)). Until E9-4 binds the port that is always `null`,
       so the runtime or executor refuses each with `OwnerCommandRefused` `step_up_missing`, the
       refusal journaled where the specs put it (§5.4); the client renders that refusal from
-      §5.5, never "stopped". Under `independent_approval_required` an acknowledgment also fails
-      closed (`not_independent`), since `OwnerAcknowledged` does not yet carry its requester. An owner exit forwards `null` too, so it
+      §5.5, never "stopped". An owner exit forwards `null` too, so it
       loses only the owner-exit privilege (mandate spec §6.1).
+    - **Acknowledgments** ([DEC-2144](../project/decisions/DEC-2144.md); journal spec §9.28, version
+      2's `subject`, and v0.106's methods, [DEC-2523](../project/decisions/DEC-2523.md)). Three routes
+      serve the owner's acknowledgment of a hold: a latched limit (`limit`), an account restriction
+      (`restriction`), or a reconciliation hold (`reconciliation`). An acknowledgment adds risk back,
+      so it is not an API-7 operation, and it is refused, with nothing committed, at the first of these
+      checks that fails:
+      1. §3.3's checks, then the body, decoded strictly: anything else is `invalid`.
+      2. The `Acknowledge` row of §3.7, users only, never a client (API-6): else `forbidden`.
+      3. The agent in the path is deployed in this workspace: else `not_found`.
+      4. The workspace is `paper`: else `live_unavailable`, as a grant's is. The founder's live
+         acknowledgment stays the CLI's (journal spec §9.28 check 3, DEC-529 item 3).
+      5. The hold named is one the list below serves now, for this agent, with this `subject`:
+         else `409` `acknowledgment_unavailable`. The writer offers a hold only while it stands
+         (§9.28), so an acknowledgment of a trigger already lifted, superseded, or never raised is
+         refused here and not journaled for the executor to refuse. An account stream the server
+         cannot read is `journal_unavailable`.
+      6. An acknowledgment naming a `request`: an `OwnerAcknowledgmentRequested` on the control
+         stream has that `event_id`, its `agent`, `event`, and `subject` equal the acknowledgment's
+         (a version 1 request, which carries no `subject`, is read as `limit`, as §9.28 reads version
+         1, and a `subject` that is not text matches nothing, so a request for a limit is never
+         answered by an acknowledgment of anything else), no `OwnerAcknowledged` names it yet, and
+         its `requested_by` is not the caller (journal spec rules 239 to 241): else `409`
+         `acknowledgment_request_invalid`.
+      7. Step-up: `passkey` evidence with its `step_up_assertion`, judged by the port against the
+         action's digest below, as a resume's is (§3.6, DEC-2140). Unlike a resume's, unverified
+         evidence is refused with the port's `401` code and nothing is recorded: a `null` step-up is
+         `step_up_required`, and any other method is `step_up_method`, `cli_confirm` in `paper`
+         included: the API accepts an acknowledgment by passkey only, and `cli_confirm` stays the
+         CLI's (DEC-2523). An acknowledgment only lifts
+         a hold, so refusing it never delays risk reduction, and it spends no challenge.
+
+      **The routes.**
+      - `POST /agents/{agent_id}/acknowledgments` (`commands/acknowledge-request`):
+        `acknowledged`, the `event` of the hold; `subject`; `request`, the
+        `OwnerAcknowledgmentRequested` it answers or `null` (absent is `null`); `record`; `step_up`;
+        and `step_up_assertion`. It commits `OwnerAcknowledged` version 2 with `agent`, `event`,
+        `subject`, `user` the caller, `requested_by` the caller or, naming a request, the request's
+        `requested_by`, `independent_required` `true` exactly when it names a request, `request`,
+        `submitted_at` and `risk_clock` at receipt as the CLI writes them (`submitted_at` the whole
+        second, `risk_clock` that second as a timestamp), and the verified
+        `step_up`, then `StepUpAsserted`, in one batch.
+      - `POST /agents/{agent_id}/acknowledgment-requests` (`commands/acknowledgment-request-request`):
+        `acknowledged`, `subject`, `record`, `step_up`, and `step_up_assertion`, for a workspace
+        where another user must acknowledge (mandate spec §5.8). It commits
+        `OwnerAcknowledgmentRequested` version 2 with `agent`, `event`, `subject`, `requested_by` the
+        caller, `independent_required` `true`, `submitted_at`, `risk_clock`, and the verified
+        `step_up`, then `StepUpAsserted`, in one batch. Checks 1 to 5 and 7 apply.
+      - Each answers `202` with §3.4's accepted body, and a repeat under the same key answers as
+        before. The executor judges every acknowledgment again when it processes the copy, by §9.28's
+        four checks, independence included: these checks only keep a request the executor would
+        refuse from being journaled.
+
+      **The digest.** The step-up binds the SHA-256 of the canonical object (journal spec §4) of
+      DEC-279 item 1, as a resume's does: its eight members, `confirms` (`acknowledge`, or
+      `request_ack` for a request), `agent`, `control_head` (the control stream's head `seq` as a
+      decimal string), `instrument`, `bid`, `bid_size`, and `floor` all `null`, and `event` the
+      hold's `event_id`; then two members DEC-279's object does not have, `subject`, and, only for
+      an acknowledgment naming one, `request`. The CLI confirms by its typed code, not this
+      digest, so the members added here are the API's own. A control stream
+      that moves between the client's read and the call changes `control_head`, so the port answers
+      `step_up_mismatch` and nothing is recorded; the client reads again and asks again. Worked
+      vectors, with `agent` `agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z`, `control_head` `"42"`, `event`
+      `01JBH3BTZ8K2M4N6P8R0S2T4V6`, and `subject` `reconciliation`:
+      - acknowledgment, no request:
+        `sha256:5f5506a3ac32cae637a2cc222393f852035c699430656870ba024702431260a7`;
+      - acknowledgment naming request `01JBH3BTZ8K2M4N6P8R0S2T4V7`:
+        `sha256:b9367c62d1201059c5a9f2cf0bf35e637d27a5934e174b779276a2fcbc7af765`;
+      - request (`confirms` `request_ack`):
+        `sha256:b15c59e4e09394ddf0f5430c04569276c27c7a957ac68c683e53b15e6b393ebc`.
+
+      **The list.** `GET /acknowledgments?state=open` (`read-models/acknowledgments`), with an
+      optional `agent`, takes the "View agents, positions, decisions" row. It lists every hold that
+      stands now on the account streams of the workspace's deployed agents, by journal spec §9.28's
+      checks 1 and 2 read for each subject: a `RiskLimitTriggered` neither superseded nor lifted, an
+      `AccountRestrictionChanged` whose cause is in force, and an executor's reconciliation
+      `AgentModeApplied` neither applied again nor removed. Each item has:
+      - `event` and `subject`;
+      - `agent_id`, the agent to post to: a limit's own agent; for a restriction, or a reconciliation
+        hold of every agent (`*`), the account's deployed agent first by id; for a reconciliation
+        hold of one agent, that agent; and for any hold with an unspent request, the request's
+        `agent`, since rule 240 has the acknowledgment name the agent its request named;
+      - `account`, the account stream's id;
+      - `reason`: `{limit}` for a limit, its `limit` code; `{cause}` for a restriction; or
+        `{restriction, kind, instrument}` for a reconciliation hold: `kind` is what follows
+        `reconciliation:` when that is `cash`, `fees`, `external_activity`, or `incomplete`, and
+        otherwise `instrument`, with `instrument` the held asset that follows it; `instrument` is
+        `null` for the other kinds;
+      - `mode`, the agent mode the hold holds: for a restriction, the one trading spec §7.3 gives the account
+        state its `AccountRestrictionChanged` records (`closing_only` holds `exits_only`, `blocked`
+        holds `paused`), and for a
+        reconciliation hold, its `AgentModeApplied`'s `to`; `null` for a limit;
+      - `raised_at`, the hold record's `recorded_at`;
+      - `independent_required`: the workspace's effective `independent_approval_required` (mandate
+        spec §4.3), or `null` until the server reads the policy, as it does not yet; a client then
+        offers the acknowledgment and shows the executor's `not_independent` if it comes;
+      - `request`: the unspent `OwnerAcknowledgmentRequested` for this hold, `{event_id,
+        requested_by}`, or `null`: the latest on the control stream whose `event` and `subject` are
+        the hold's (a version 1 request's subject read as `limit`) and that no `OwnerAcknowledged`
+        names.
+
+      With `agent`, the list holds only the holds that block that agent: its own limits and holds,
+      and every restriction and `*` hold of its account. A `state` other than `open`, or an `agent`
+      not deployed here, is `invalid`. An account stream that cannot be read fails the read
+      `journal_unavailable`, rather than serve a list that leaves a hold out.
     - **Command status** (§5.5) finds the event by equality with a control-stream event id, else
       `not_found`. Its steps are the events on each deployed agent's stream and each account
       stream the control stream names whose `causation_id` is the command, in stream then `seq`
@@ -974,7 +1081,9 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Lift a hold | `POST /agents/{id}/hold/lift` | `OwnerCommandIssued` with command `lift_hold` (journal spec §9.11) | (planned: E10-12) Users only, never a client; step-up required (`lift_hold`); not an API-7 operation, since it adds risk back (DEC-684 item 1) |
 | Stop | `POST /agents/{id}/stop` | `OwnerCommandIssued` | Step-up; `release` and the warning digest per DEC-290 item 2; the flat-or-release precondition is the runtime's (DEC-136) |
 | Owner exit | `POST /agents/{id}/exits` | `OwnerCommandIssued` (`owner_exit`) | §5.4. Never refused for step-up (mandate spec §6.1) |
-| Acknowledge | `POST /agents/{id}/acknowledgments` | `OwnerAcknowledged` | Names the event acknowledged; step-up; independence judged by the executor |
+| Acknowledge | `POST /agents/{id}/acknowledgments` | `OwnerAcknowledged` version 2, `StepUpAsserted` | §3.11 item 12 (DEC-2144). Names the hold and its `subject`; passkey step-up; independence judged again by the executor |
+| Request an acknowledgment | `POST /agents/{id}/acknowledgment-requests` | `OwnerAcknowledgmentRequested` version 2, `StepUpAsserted` | §3.11 item 12 (DEC-2144). Where another user must acknowledge (mandate spec §5.8) |
+| Holds to acknowledge | `GET /acknowledgments?state=open[&agent={id}]` | — | §3.11 item 12 (DEC-2144): each standing hold, the agent to post to, and its open request |
 | Kill switch | `POST /kill-switch` | `OwnerCommandIssued` (`kill_switch`) | §5.4. Agent, connection, or workspace scope |
 | Re-enable a halted scope | **None in v0.1** | — | The halted state is Proposed (DEC-437 item 21; interim: no halted state), so a kill switch leaves no scope halted and there is nothing to re-enable. If the founder accepts item 21, this spec adds a route, a step-up kind, and the events `ScopeHalted` and `ScopeReenabled` (identity spec §12.1) in its own change |
 | Command status | `GET /commands/{event_id}` | — | §5.5 |
@@ -998,7 +1107,7 @@ workspace that ran it, and no route aggregates backtests across workspaces.
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
 | Inbox | `GET /approvals?state=pending\|resolved` | — | Pending by deadline, then resolved with outcome (D5) |
-| Read one | `GET /approvals/{id}` | — | The content object exactly as `ApprovalRequested` holds it, the `ApprovalRequested` version it comes from (`schema_version`, [DEC-2518](../project/decisions/DEC-2518.md)), its `content_hash`, the deadline, the grants so far, and the status folded from the agent stream. Never a scorecard, profit estimate, or price target (DEC-126) |
+| Read one | `GET /approvals/{id}` | — | The content object exactly as `ApprovalRequested` holds it, the `ApprovalRequested` version it comes from (`schema_version`, [DEC-2518](../project/decisions/DEC-2518.md)), its decision's deferred checks (`decision_deferred_to_binding`, [DEC-2519](../project/decisions/DEC-2519.md)), its `content_hash`, the deadline, the grants so far, and the status folded from the agent stream. Never a scorecard, profit estimate, or price target (DEC-126) |
 | Delegation preview | `POST /approvals/{id}/delegation-previews` | — | §5.3. Offered only where mandate spec §6.4 allows a scope |
 | Respond | `POST /approvals/{id}/responses` | `ApprovalResponseSubmitted` | §5.2. Users only |
 | Resolve a notice | `GET /notices/{notice_id}` | `RecordsAccessed` | §3.9 |
@@ -1010,9 +1119,13 @@ and `schema_version`, the `ApprovalRequested` version `content` comes from (1, 2
 [DEC-2518](../project/decisions/DEC-2518.md)). Version 3's content names the checks its dry run
 deferred (journal spec §9.6, rule 291) and versions 1 and 2 name none, so a client tells a
 version 3 request without its list from an older one and shows it as unreadable, never as
-nothing deferred (mandate spec §6.4). A version 1 or 2 request whose decision, written in another
-batch, deferred checks is not caught here: that is rule 292's cross-batch debt
-(`E21-30-approval-deferral-range-check`).
+nothing deferred (mandate spec §6.4). The single read also adds `decision_deferred_to_binding`:
+the `deferred_to_binding` of the `DecisionMade` the request's `causation_id` names on the agent
+stream, an empty list for a decision that names none, or `null` when no such decision is there
+([DEC-2519](../project/decisions/DEC-2519.md)). A client shows the request's checks only when its
+own list (empty for versions 1 and 2) is exactly that list, and shows any other request as
+unreadable: so a request that hides or invents a deferral is caught at the read wherever the two
+were written, which rule 292 checks only within one batch.
 The state is folded from the agent stream, and the first terminal event wins: `pending` until
 re-validation acts (`acted`) or the approval ends `skipped` (by the owner's Skip or by
 re-validation), `timed_out`, or `canceled`. An admitted grant still awaiting re-validation, and a
@@ -1210,6 +1323,24 @@ adds the account's holdings at its last reconciliation as `account_positions`, t
 names (model and broker quantities, the mismatch flag, and when observed), `null` when that stream
 is not found. They are the account's, not the agent's: no journaled fold attributes holdings per
 agent yet. The account stream's watermark joins `as_of`.
+The single read also serves `openings_held` ([DEC-2143](../project/decisions/DEC-2143.md)): a
+standing reason every opening of the agent's is held whatever the order, as the binding gate's
+source decides it, computed by the one function the executor process binds on
+(`mandate-gate-context`'s `Journaled::opening_hold`), from the fold of the streams the executor
+folds for it, in its order (the control stream, the account stream, and the scheduler's clock
+stream), and whether the deployed mandate pins its universe. `{"reason": "account_traded"}` while the account has traded
+and the account risk view, which must then read every opening, does not yet;
+`{"reason": "research_agent_traded"}` while the account has traded and the mandate is unpinned
+(its working universe is research's, mandate spec §8), since that view binds an instrument at
+deployment and such an agent has none ([DEC-2819](../project/decisions/DEC-2819.md) item 4);
+`{"reason": "unknown"}` when the agent's account stream is not found or holds no row, the clock
+stream cannot be read, the deployed document cannot be read, or any row the fold reads cannot be
+read (the fold then holds every opening), so openings may be held; and `null` when none of these applies. `null` is not "openings run": a hold that lasts
+only until a fact arrives or ages in (no risk clock, account snapshot, or mark yet, or a stale
+one) and a hold for one order (its quote, the session, a limit) are the gate's verdict on each
+order, and the owner's hold and a paused or stopped agent show as `mode`. No exit, protective
+order, or kill switch is held by any of them (`AGENTS.md` rule 13). The executor binds on the
+same function (DEC-2819's executor slice), so the read and the gate never differ.
 
 `GET /agents/{id}/orders` and `GET /agents/{id}/positions` return `read-models/orders` and
 `read-models/positions` ([DEC-2111](../project/decisions/DEC-2111.md)), from the account stream of
@@ -1783,7 +1914,7 @@ here, so replacing fixtures with calls changes no screen contract:
 | `Approval` (bound order, risk impact, evidence, grants) | `GET /approvals/{id}` |
 | `GateDecision`, `TimelineEvent` | `GET /journal/events/{id}/gate`, `GET /agents/{id}/timeline` |
 | `Connection` | `GET /connections/{id}` |
-| `mock-runtime.tsx` command phases (`sent`, `recorded`, `undelivered`, `unknown`) | §5.5's phases; `undelivered` is `effect: none` |
+| `mock-runtime.tsx` command phases (`sent`, `recorded`, `undelivered`, `unknown`); an approval response's also `decided` and `refused` | §5.5's phases; `undelivered` is `effect: none`; an approval response's `decided` is §5.5's `applied` and its `refused` is §5.5's `refused`, with its `ApprovalResponded` step's reason ([DEC-2822](../project/decisions/DEC-2822.md)) |
 
 ### 4.10 Routes outside the workspace prefix
 
@@ -2074,7 +2205,11 @@ The API refuses only: an unauthenticated or non-user principal, a user who is no
 mandate, a Skip is recorded for the approving role alone and the runtime refuses a non-approver's,
 [DEC-1007](../project/decisions/DEC-1007.md) item 10, Proposed), an unknown approval, and, for
 `approved` only, missing or unbound step-up: bound to the content hash, or with a delegation to the
-preview's `step_up_digest` (§5.3), else 401 with the step-up code §3.5 names. It does not judge the deadline, the quorum,
+preview's `step_up_digest` (§5.3), else 401 with the step-up code §3.5 names; and, for `approved`
+only, after the role and before the step-up is read, a request whose deferred checks are not exactly
+those of the `DecisionMade` it names (version 3's list, or none for versions 1 and 2), or whose
+decision is not on the agent stream: `409` `deferral_mismatch`, nothing committed and the challenge
+unspent ([DEC-2521](../project/decisions/DEC-2521.md)). It does not judge the deadline, the quorum,
 independence, or re-validation: the runtime does (checks 1 to 12). A `skipped` is never refused for
 anything else (API-7).
 
@@ -2149,7 +2284,7 @@ refusal is journaled where the specs put it.
 
 | Member | Meaning |
 |---|---|
-| `phase` | `recorded`: the control-stream event is committed. `taken`: the owning stream copied it (`causation_id` points to it). `applied`: its effect is journaled (`AgentModeChanged`, `KillSwitchActivated`, `MandateVersionApplied` applied, `ApprovalRevalidated` `act`). `refused`: the owner refused it (`OwnerCommandRefused`, `ApprovalResponded` refused, `MandateVersionApplied` rejected). `ended`: an approval response whose approval ended otherwise (`skip`, timeout, cancellation) |
+| `phase` | `recorded`: the control-stream event is committed. `taken`: the owning stream copied it (`causation_id` points to it). `applied`: its effect is journaled (`AgentModeChanged`, `KillSwitchActivated`, `MandateVersionApplied` applied, `ApprovalRevalidated` `act`, and for an acknowledgment the `RiskLimitLifted` or `AgentModeApplied` that lifts its hold, DEC-2144). `accepted` **(planned: E10-12)**: an acknowledgment of a restriction whose copy no `OwnerCommandRefused` follows in its batch (journal spec §9.28, v0.102's one row of lookahead); it lifts nothing by itself, and its restriction lifts when §7.3's evidence arrives. `refused`: the owner refused it (`OwnerCommandRefused`, `ApprovalResponded` refused, `MandateVersionApplied` rejected). `ended`: an approval response whose approval ended otherwise (`skip`, timeout, cancellation) |
 | `steps` | Each owning-stream event caused by it, in `seq` order, with `stream_id`, `seq`, `event_type`, `recorded_at`, and a reason code. A kill switch lists mode applied, orders canceled and confirmed, sells submitted or deferred (D10 "In progress") |
 | `as_of` | The watermarks read (§6.1) |
 
@@ -2455,12 +2590,12 @@ risk-reducing call never consults one (API-7, API-8).
 | Mandate validation and classification (`mandate-spec`) | **Exists**; §4.1 calls it |
 | The web app's screens on recorded fixtures (`web/`) | **Exists**; §4.9 maps fixtures to resources |
 | The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10); the process, its sessions, the first reads of §4.3 and §4.7, pause and the kill switch, and an approval's Skip by E21-31 (§3.11) |
-| Drafts, compile, versions, confirm endpoints | **Partly served** (E10-11): creating a version from a document, the confirmation screen, and a new mandate's confirm (§3.11 item 11, DEC-2101); the catalogue reads (`GET /instruments`, `GET /signal-models`, DEC-2136), drafts, compile, validate, diffs, and an agent's later versions are planned |
+| Drafts, compile, versions, confirm endpoints | **Partly served** (E10-11): creating a version from a document, the confirmation screen, and a new mandate's confirm (§3.11 item 11, DEC-2101), and the catalogue reads (`GET /instruments`, `GET /signal-models`, §3.11 item 11, DEC-2136); drafts, compile, validate, diffs, and an agent's later versions are planned |
 | Deployment manager endpoints and the reserved kill-switch path | **Partly served** (E10-12): pause, the kill switch, and Skip (§3.11 item 10); deploy and go-live (item 11, DEC-2101); resume, Stop, owner exit, acknowledgment, and command status (item 12, DEC-2102); the hold, its lift, and backtests are planned |
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
-| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); the alerts read is specified (§4.7, [DEC-2141](../project/decisions/DEC-2141.md)) and served once lane EX's route lands; the ledger, risk-mark, and protection folds are planned |
+| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); and the alerts read (§4.7, [DEC-2141](../project/decisions/DEC-2141.md)); the ledger, risk-mark, and protection folds are planned |
 | Journal queries, trace, exports over the API | **Partly served** (E12-6): a stream's events page and one event (§4.8.1); trace, exports, and verification over the API are planned, their contracts in §4.8.1, served by the pure crate `mandate-audit` |
 | The backtest report (`read-models/backtest`) and `BacktestRunRecorded` | **Specified** (DEC-1000, DEC-1001; journal spec v0.45 §9.18); the run is **planned** (E4-4), the record's registration and the route **planned** (E4-5) |
 | The forward-paper evaluation (`read-models/evaluation`) and `EvaluationRunRecorded` | **Specified** (DEC-1002; journal spec v0.45 §9.18); the pure scorer **exists** (`mandate_research::score`); the harness, the record's registration, and the route **planned** (E17-8) |

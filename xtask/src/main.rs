@@ -3,8 +3,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
+use std::fmt;
 use std::fs;
-use std::io::{Read as _, Write};
+use std::io::{BufRead as _, BufReader, Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -52,6 +53,9 @@ commands:
                         `portable` run over the crates the diff selects (DEC-1190); with no diff
                         base, all of them
   ci select             print which scoped jobs this diff runs, as GITHUB_OUTPUT lines
+  land-check [BASE]     before landing: merge BASE (origin/main, fetched first) into HEAD in a
+                        scratch worktree, run spec-guard, lint and the diff's tests on the merged
+                        tree, and end with one `land-check summary:` line (DEC-2642)
   ci sweep --plan       print tonight's share of the whole-crate mutation sweep (DEC-1190)
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
                         MANDATE_TEST_PARTITION=K/N is set (CI's fast-test matrix)
@@ -320,6 +324,17 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     let root = repo_root()?;
+    let invoked = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()));
+    if let Some(why) = root_mismatch(&root, invoked.as_deref()) {
+        bail!(why);
+    }
     env::set_current_dir(&root).context("entering the repository root")?;
     match args
         .iter()
@@ -360,6 +375,8 @@ fn run() -> Result<()> {
             schema_mutants(Some(shard), &mut pinned_python)
         }
         ["ci", job] => ci(job),
+        ["land-check"] => land_check_cmd(&root, LAND_CHECK_BASE),
+        ["land-check", base] => land_check_cmd(&root, base),
         ["layers"] => layers(),
         ["markers"] => markers(),
         ["feature-map"] => feature_map(),
@@ -649,10 +666,34 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
             if env::var_os(NO_FAIL_FAST_ENV).is_some() {
                 args.push("--no-fail-fast".to_owned());
             }
-            sh(
-                "cargo",
-                &args.iter().map(String::as_str).collect::<Vec<_>>(),
-            )
+            if let Ok(filter) = env::var(NEXTEST_FILTER_ENV) {
+                eprintln!(
+                    "    test-nextest: {NEXTEST_FILTER_ENV} narrows this run to `{filter}` \
+                     (DEC-2644); unset it to run every selected test"
+                );
+                filtered(&mut args, &filter);
+            }
+            let Ok(spec) = env::var(NEXTEST_RUNNER_ENV) else {
+                return sh(
+                    "cargo",
+                    &args.iter().map(String::as_str).collect::<Vec<_>>(),
+                );
+            };
+            let (name, runner) = nextest_runner(&spec)?;
+            eprintln!(
+                "    test-nextest: {NEXTEST_RUNNER_ENV} runs each test process through `{runner}` \
+                 (DEC-2644)"
+            );
+            eprintln!("    $ {name}='{runner}' cargo {}", args.join(" "));
+            let status = Command::new("cargo")
+                .args(&args)
+                .env(name, runner)
+                .status()
+                .context("starting `cargo`")?;
+            if !status.success() {
+                bail!("`cargo {}` failed with {status}", args.join(" "));
+            }
+            Ok(())
         }
         "test-doc" => {
             let selected = selection()?;
@@ -777,6 +818,44 @@ const NEXTEST_CONFIG: &str = "xtask/nextest.toml";
 /// <= K <= N`, plain decimal), nextest's counted `K`th of `N` shards, which together run every
 /// test once (DEC-871). Every run reads [`NEXTEST_CONFIG`], so its longest tests start first
 /// (DEC-2325).
+/// Narrows a nextest run to the tests `filter` selects (DEC-2644): land-check's one more run of a
+/// test that failed as root, over the same packages, build and environment as the run it failed
+/// in. Exactly the filtered tests, or it fails: a filter that selects none is no pass.
+const NEXTEST_FILTER_ENV: &str = "MANDATE_NEXTEST_FILTER";
+
+/// The target runner a nextest run's test processes start through (DEC-2644), as
+/// `CARGO_TARGET_<HOST>_RUNNER=<command>`: `ci test-nextest` sets it on its `cargo nextest` alone.
+/// Set on the `cargo xtask` that runs the job, the runner would start xtask itself too, which as
+/// uid 65534 cannot start the toolchain under `/root` (lane DR's land-check of #2743).
+const NEXTEST_RUNNER_ENV: &str = "MANDATE_NEXTEST_RUNNER";
+
+/// [`NEXTEST_RUNNER_ENV`]'s value read as the target-runner variable's name and its command; any
+/// other variable, or no command, is refused.
+fn nextest_runner(spec: &str) -> Result<(&str, &str)> {
+    match spec.split_once('=') {
+        Some((name, runner))
+            if name.starts_with("CARGO_TARGET_")
+                && name.ends_with("_RUNNER")
+                && !runner.trim().is_empty() =>
+        {
+            Ok((name, runner))
+        }
+        _ => bail!(
+            "{NEXTEST_RUNNER_ENV} must read `CARGO_TARGET_<HOST>_RUNNER=<command>`, not `{spec}`"
+        ),
+    }
+}
+
+/// `args`, a nextest run's, narrowed to `filter`'s tests, refusing a run that selects none.
+fn filtered(args: &mut Vec<String>, filter: &str) {
+    for arg in args.iter_mut() {
+        if arg == "--no-tests=pass" {
+            "--no-tests=fail".clone_into(arg);
+        }
+    }
+    args.extend(["-E".to_owned(), filter.to_owned()]);
+}
+
 fn nextest_args(partition: Option<&str>, packages: Option<&[String]>) -> Result<Vec<String>> {
     let config = repo_root()?.join(NEXTEST_CONFIG);
     let mut args: Vec<String> = ["nextest", "run", "--config-file"]
@@ -3404,6 +3483,501 @@ fn ci_select() -> Result<()> {
     Ok(())
 }
 
+/// The base [`land_check_cmd`] merges when it is given none.
+const LAND_CHECK_BASE: &str = "origin/main";
+
+/// The `ci` jobs [`land_check`] runs on the merged tree, in order: the spec guard (ES-22), lint, and
+/// each part of `ci test`, which run over the crates the diff from the base selects (DEC-1190). The
+/// parts run as jobs of their own, so a failing nextest run never keeps the doctests, the rehearsal
+/// or the Python tests from running. No cell and no mutants, so the check stays fast enough to run
+/// before every landing (DEC-2642).
+const LAND_CHECK_JOBS: [&str; 6] = [
+    "spec-guard",
+    "lint",
+    "test-nextest",
+    "test-doc",
+    "test-rh-sim",
+    "test-python",
+];
+
+/// The user a test that failed as root is run again as (DEC-2644): `nobody`'s uid and gid,
+/// which file permissions apply to, so a test that refuses to run as root can run.
+const UNPRIVILEGED_ID: &str = "65534";
+
+/// Where [`land_check`] keeps its scratch worktree, `work/`, and its builds, `target/`, under the
+/// repository root. Both paths are fixed: cargo names a workspace crate's artifacts by its source
+/// path, so a worktree at a new path each run would add a whole workspace's build every time, and
+/// a target directory of its own never replaces the checkout's own `target/debug/xtask` with one
+/// rooted at the worktree. `rm -rf target/land-check` gives the space back.
+const LAND_CHECK_DIR: &str = "target/land-check";
+
+/// What [`land_check_cmd`]'s builds leave out to fit a lane's disk: incremental artifacts and
+/// debuginfo. A change to `xtask/` or `Cargo.lock` selects every crate (DEC-1190), and with both
+/// on, building the whole workspace's tests filled a 40 GB session disk in lane DR's first run
+/// (2026-10-26). Neither changes what a test checks.
+const LAND_CHECK_BUILD: [(&str, &str); 3] = [
+    ("CARGO_INCREMENTAL", "0"),
+    ("CARGO_PROFILE_DEV_DEBUG", "0"),
+    ("CARGO_PROFILE_TEST_DEBUG", "0"),
+];
+
+/// The `cargo xtask ci <job>` child [`land_check_cmd`] runs in the merged tree `dir`: diffed
+/// against the base it merged (`MANDATE_BASE_REF`), built into `target` as [`LAND_CHECK_BUILD`]
+/// says, and running every test after a failure ([`NO_FAIL_FAST_ENV`]), so the check names them
+/// all. `MANDATE_PR_BODY` and `MANDATE_PR_NUMBER`, which spec-guard reads for a DEC the PR
+/// description cites, pass through from the caller's environment.
+fn land_check_job(dir: &Path, base_sha: &str, target: &Path, job: &str) -> Command {
+    let mut cargo = Command::new("cargo");
+    cargo
+        .current_dir(dir)
+        .args(["xtask", "ci", job])
+        .env("MANDATE_BASE_REF", base_sha)
+        .env(CARGO_TARGET_DIR, target)
+        .env(NO_FAIL_FAST_ENV, "1")
+        .env_remove(TEST_PARTITION_ENV)
+        .env_remove(NEXTEST_FILTER_ENV)
+        .env_remove(NEXTEST_RUNNER_ENV)
+        .envs(LAND_CHECK_BUILD);
+    cargo
+}
+
+/// `cargo xtask land-check [BASE]` (DEC-2642): fetches BASE first when it names a branch of
+/// `origin`, then runs [`land_check`] with each job as [`land_check_job`], and prints the summary
+/// line on stdout. Run as root, a nextest job that failed only by tests that failed runs each of
+/// them once more as an unprivileged user (DEC-2644).
+fn land_check_cmd(root: &Path, base: &str) -> Result<()> {
+    let fetched = base
+        .strip_prefix("origin/")
+        .map(|branch| output_in(root, "git", &["fetch", "-q", "origin", branch]).is_ok());
+    let target = root.join(LAND_CHECK_DIR).join("target");
+    let root_user = output("id", &["-u"]).is_ok_and(|uid| uid.trim() == "0");
+    let host = output("rustc", &["-vV"]).ok().and_then(|said| {
+        said.lines()
+            .find_map(|line| line.strip_prefix("host: ").map(str::to_owned))
+    });
+    let (line, verdict) = land_check(root, base, fetched, |dir, base_sha, job| {
+        eprintln!("==> land-check: ci {job}");
+        let mut command = land_check_job(dir, base_sha, &target, job);
+        if job != "test-nextest" {
+            let status = command.status().context("starting `cargo xtask`")?;
+            if !status.success() {
+                bail!("`cargo xtask ci {job}` failed with {status}");
+            }
+            return Ok(Vec::new());
+        }
+        let (status, said) = streamed(&mut command)?;
+        if status.success() {
+            return Ok(Vec::new());
+        }
+        if !root_user {
+            bail!("`cargo xtask ci {job}` failed with {status}");
+        }
+        let failed = nextest_failures(&said).with_context(|| {
+            format!(
+                "`cargo xtask ci {job}` failed with {status}, and not only by tests that failed, \
+                 so none is run again"
+            )
+        })?;
+        let host = host
+            .as_deref()
+            .context("`rustc -vV` names no host, so no runner can be set")?;
+        let scratch = root.join(LAND_CHECK_DIR).join("tmp-unprivileged");
+        fs::remove_dir_all(&scratch).ok();
+        fs::create_dir_all(&scratch).context("making the unprivileged run's TMPDIR")?;
+        sh(
+            "chown",
+            &[
+                &format!("{UNPRIVILEGED_ID}:{UNPRIVILEGED_ID}"),
+                &scratch.display().to_string(),
+            ],
+        )?;
+        if let Some(reason) = rerun_blocked(&[&target, dir, &scratch], unprivileged_reaches) {
+            fs::remove_dir_all(&scratch).ok();
+            return Err(anyhow::Error::new(RerunUnavailable(reason)).context(format!(
+                "`cargo xtask ci {job}` failed with {status} as root, and no test can run again \
+                 as uid {UNPRIVILEGED_ID} here: give land-check a checkout that user can reach \
+                 (DEC-2644)"
+            )));
+        }
+        let rerun = || -> Result<Vec<String>> {
+            let mut passed = Vec::new();
+            for (binary, test) in &failed {
+                eprintln!(
+                    "==> land-check: {binary} {test} failed as root; once more as uid {UNPRIVILEGED_ID}"
+                );
+                let status = unprivileged_rerun(
+                    land_check_job(dir, base_sha, &target, job),
+                    host,
+                    &scratch,
+                    binary,
+                    test,
+                )
+                .status()
+                .context("starting `cargo xtask`")?;
+                if !status.success() {
+                    bail!("{binary} {test} failed as root and again as uid {UNPRIVILEGED_ID}");
+                }
+                passed.push(format!("{binary}:{test}"));
+            }
+            Ok(passed)
+        };
+        let outcome = rerun();
+        fs::remove_dir_all(&scratch).ok();
+        outcome
+    });
+    println!("{line}");
+    verdict
+}
+
+/// Why no test that failed as root can run again here, as land-check's summary names it
+/// (`rerun_unavailable=`): the paths the run needs are not traversable by uid [`UNPRIVILEGED_ID`],
+/// or `setpriv` cannot run. The test stays red (DEC-2644).
+#[derive(Debug)]
+struct RerunUnavailable(&'static str);
+
+impl fmt::Display for RerunUnavailable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "rerun_unavailable={}", self.0)
+    }
+}
+
+impl std::error::Error for RerunUnavailable {}
+
+/// Why a re-run as uid [`UNPRIVILEGED_ID`] cannot reach `paths` (the build, the merged tree, its
+/// TMPDIR), or `None` when it can: `reaches` answers for one path, `None` when it could not ask.
+/// Checked before any test runs again, so an unreachable path reads as itself and never as the
+/// test failing (lane NE's `identity_link`, 2026-10-26).
+fn rerun_blocked(paths: &[&Path], reaches: impl Fn(&Path) -> Option<bool>) -> Option<&'static str> {
+    for path in paths {
+        match reaches(path) {
+            None => return Some("setpriv_unavailable"),
+            Some(false) => return Some("path_not_traversable"),
+            Some(true) => {}
+        }
+    }
+    None
+}
+
+/// Whether uid and gid [`UNPRIVILEGED_ID`] can search `path`, every directory above it included:
+/// `setpriv` runs `test -x` as that user. `None` when `setpriv` cannot start.
+fn unprivileged_reaches(path: &Path) -> Option<bool> {
+    Command::new("setpriv")
+        .args([
+            &format!("--reuid={UNPRIVILEGED_ID}"),
+            &format!("--regid={UNPRIVILEGED_ID}"),
+            "--clear-groups",
+            "--",
+            "test",
+            "-x",
+        ])
+        .arg(path)
+        .status()
+        .ok()
+        .map(|status| status.success())
+}
+
+/// Runs `command` with its stderr read as it comes, each line echoed, and returns its status beside
+/// everything it said there, read lossily so no byte a test prints can fail the read: nextest's
+/// progress and its status lines. The child is always waited for.
+fn streamed(command: &mut Command) -> Result<(ExitStatus, String)> {
+    let mut child = command
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("starting `cargo xtask`")?;
+    let mut said = String::new();
+    let mut read = Ok(());
+    if let Some(stderr) = child.stderr.take() {
+        let mut reader = BufReader::new(stderr);
+        let mut bytes = Vec::new();
+        loop {
+            bytes.clear();
+            match reader.read_until(b'\n', &mut bytes) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let line = String::from_utf8_lossy(&bytes);
+                    eprint!("{line}");
+                    said.push_str(&line);
+                }
+                Err(err) => {
+                    read = Err(err);
+                    break;
+                }
+            }
+        }
+    }
+    let status = child.wait().context("waiting for `cargo xtask`")?;
+    read.context("reading the job's stderr")?;
+    Ok((status, said))
+}
+
+/// The labels of nextest's status lines a run whose failures are all tests that failed may print:
+/// every other label (`ABORT`, `TIMEOUT`, `FAIL + LEAK`, a signal, a failure to execute) is a
+/// failure that is not a test that failed, and stops any test running again (DEC-2644).
+const NEXTEST_PLAIN_LABELS: [&str; 6] = ["PASS", "FAIL", "SKIP", "SLOW", "START", "RETRY"];
+
+/// The tests a nextest run reports failed, each as its binary id and test name from its `FAIL`
+/// lines, or `None` unless those are the whole of what did not pass (DEC-2644):
+/// - every status line's label is one of [`NEXTEST_PLAIN_LABELS`];
+/// - the last summary reads `N tests run: P passed …, F failed …, S skipped` and nothing else,
+///   with `P + F = N`, so no run was cancelled, timed out, aborted or failed to execute;
+/// - `F` is the number of distinct tests the `FAIL` lines name, and is not zero.
+///
+/// It fails closed: a summary part or a status label it cannot read stops any test running again.
+fn nextest_failures(said: &str) -> Option<BTreeSet<(String, String)>> {
+    let plain = |line: &str| {
+        let mut out = String::with_capacity(line.len());
+        let mut chars = line.chars();
+        while let Some(c) = chars.next() {
+            if c == '\u{1b}' {
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    };
+    let label_of = |line: &str| {
+        let (label, rest) = line.split_once(" [")?;
+        let label = label.trim();
+        let shouted = !label.is_empty()
+            && label
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || " +-".contains(c));
+        (shouted && rest.contains(']')).then(|| label.to_owned())
+    };
+    let mut failed = BTreeSet::new();
+    let mut summary = None;
+    for line in said.lines().map(plain) {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("Summary [") {
+            summary = Some(rest.split_once(']')?.1.trim().to_owned());
+            continue;
+        }
+        let Some(label) = label_of(line) else {
+            continue;
+        };
+        if !NEXTEST_PLAIN_LABELS.contains(&label.as_str()) {
+            return None;
+        }
+        if label == "FAIL" {
+            let rest = line.split_once(']')?.1.trim();
+            let rest = match rest.strip_prefix('(') {
+                Some(numbered) => numbered.split_once(')')?.1.trim(),
+                None => rest,
+            };
+            let mut words = rest.split_whitespace();
+            failed.insert((words.next()?.to_owned(), words.next()?.to_owned()));
+        }
+    }
+    let summary = summary?;
+    let (run, parts) = summary.split_once(" tests run: ")?;
+    let run: usize = run.trim().parse().ok()?;
+    let (mut passed, mut failures) = (0, 0);
+    for part in parts.split(", ") {
+        let part = match part.split_once(" (") {
+            Some((count, aside)) if aside.ends_with(" slow)") => count,
+            Some(_) => return None,
+            None => part,
+        };
+        let (count, word) = part.trim().split_once(' ')?;
+        let count: usize = count.parse().ok()?;
+        match word {
+            "passed" => passed = count,
+            "failed" => failures = count,
+            "skipped" => {}
+            _ => return None,
+        }
+    }
+    (passed + failures == run && failures == failed.len() && failures > 0).then_some(failed)
+}
+
+/// `job`, the job that failed, run once more narrowed to `test` of `binary` ([`NEXTEST_FILTER_ENV`]),
+/// its test process run as uid and gid [`UNPRIVILEGED_ID`] by `host`'s target runner, with `scratch`
+/// as its TMPDIR: the same packages, build and environment the test failed in, as the user file
+/// permissions apply to. The build stays root's (DEC-2644).
+fn unprivileged_rerun(
+    mut job: Command,
+    host: &str,
+    scratch: &Path,
+    binary: &str,
+    test: &str,
+) -> Command {
+    let runner = format!(
+        "CARGO_TARGET_{}_RUNNER",
+        host.to_uppercase().replace(['-', '.'], "_")
+    );
+    job.env(
+        NEXTEST_FILTER_ENV,
+        format!("binary_id(={binary}) & test(={test})"),
+    )
+    .env(
+        NEXTEST_RUNNER_ENV,
+        format!(
+            "{runner}=setpriv --reuid={UNPRIVILEGED_ID} --regid={UNPRIVILEGED_ID} --clear-groups --"
+        ),
+    )
+    .env("TMPDIR", scratch);
+    job
+}
+
+/// `git` in `dir` as a committer with no hooks or signing, so the merge a check makes depends on
+/// nothing in the caller's git configuration.
+fn land_check_git(dir: &Path, args: &[&str]) -> Result<String> {
+    let mut all = vec![
+        "-c",
+        "user.name=land-check",
+        "-c",
+        "user.email=land-check@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+    ];
+    all.extend_from_slice(args);
+    output_in(dir, "git", &all).map(|out| out.trim().to_owned())
+}
+
+/// Removes [`land_check`]'s scratch worktree at `dir`, whatever state an earlier run left it in.
+fn land_check_clear(root: &Path, dir: &Path) {
+    land_check_git(
+        root,
+        &["worktree", "remove", "--force", &dir.display().to_string()],
+    )
+    .ok();
+    fs::remove_dir_all(dir).ok();
+    land_check_git(root, &["worktree", "prune"]).ok();
+}
+
+/// Merges `base` into the committed HEAD of the repository at `root` in a scratch worktree,
+/// [`LAND_CHECK_DIR`]`/work`, runs each of [`LAND_CHECK_JOBS`] there with `run(dir, base_sha, job)`,
+/// every one even after a failure so the summary names them all, removes the worktree, and returns
+/// the one `land-check summary:` line beside the verdict (DEC-2642). It passes only when the base
+/// was fetched or names no branch of `origin` (`fetched`), the merge succeeded, and every job
+/// passed: a base that could not be fetched may be stale, which is what the check exists to
+/// rule out. A merge that conflicts, or a worktree that cannot be made, fails before any job.
+fn land_check(
+    root: &Path,
+    base: &str,
+    fetched: Option<bool>,
+    mut run: impl FnMut(&Path, &str, &str) -> Result<Vec<String>>,
+) -> (String, Result<()>) {
+    let short = |sha: &str| sha.chars().take(12).collect::<String>();
+    let fetched_word = match fetched {
+        Some(true) => "yes",
+        Some(false) => "no",
+        None => "skipped",
+    };
+    let resolved = land_check_git(root, &["rev-parse", "HEAD"]).and_then(|head| {
+        land_check_git(root, &["rev-parse", &format!("{base}^{{commit}}")])
+            .map(|base_sha| (head, base_sha))
+    });
+    let (head, base_sha) = match resolved {
+        Ok(pair) => pair,
+        Err(err) => {
+            let line = format!("land-check summary: base={base} verdict=fail unresolved");
+            return (line, Err(err.context("resolving HEAD and the base")));
+        }
+    };
+    if land_check_git(root, &["rev-parse", "--is-shallow-repository"]).is_ok_and(|s| s == "true") {
+        let line = format!("land-check summary: base={base} verdict=fail shallow");
+        return (
+            line,
+            Err(anyhow::anyhow!(
+                "this clone is shallow, and the checks read main's history (the gitops pins, the \
+                 diff base), so they would fail for the clone rather than the change; run `git \
+                 fetch --unshallow origin` and land-check again (DEC-2644)"
+            )),
+        );
+    }
+    let dir = root.join(LAND_CHECK_DIR).join("work");
+    land_check_clear(root, &dir);
+    let mut results: Vec<(&str, Option<bool>)> =
+        LAND_CHECK_JOBS.iter().map(|job| (*job, None)).collect();
+    let mut rerun = Vec::new();
+    let mut unavailable = None;
+    let made = land_check_git(
+        root,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            &dir.display().to_string(),
+            &head,
+        ],
+    );
+    let (merge_word, merged) = match made {
+        Err(err) => {
+            eprintln!("    land-check: no scratch worktree: {err:#}");
+            ("failed", None)
+        }
+        Ok(_) => match land_check_git(&dir, &["merge", "--no-edit", "--no-ff", &base_sha])
+            .and_then(|_| land_check_git(&dir, &["rev-parse", "HEAD"]))
+        {
+            Err(err) => {
+                eprintln!("    land-check: the merge of {base} did not succeed: {err:#}");
+                land_check_git(&dir, &["merge", "--abort"]).ok();
+                ("conflict", None)
+            }
+            Ok(merged) => {
+                for (job, passed) in &mut results {
+                    match run(&dir, &base_sha, job) {
+                        Ok(again) => {
+                            rerun.extend(again);
+                            *passed = Some(true);
+                        }
+                        Err(err) => {
+                            eprintln!("    land-check: {job}: {err:#}");
+                            unavailable = unavailable.or_else(|| {
+                                err.chain()
+                                    .find_map(|cause| cause.downcast_ref::<RerunUnavailable>())
+                                    .map(|why| why.0)
+                            });
+                            *passed = Some(false);
+                        }
+                    }
+                }
+                ("clean", Some(merged))
+            }
+        },
+    };
+    land_check_clear(root, &dir);
+    let passed = fetched != Some(false)
+        && merged.is_some()
+        && results.iter().all(|(_, passed)| *passed == Some(true));
+    let jobs: Vec<String> = results
+        .iter()
+        .map(|(job, passed)| {
+            let word = match passed {
+                Some(true) => "pass",
+                Some(false) => "fail",
+                None => "not-run",
+            };
+            format!("{job}={word}")
+        })
+        .collect();
+    let line = format!(
+        "land-check summary: head={} base={base}@{} fetched={fetched_word} merged={} \
+         merge={merge_word} {} rerun_unprivileged=[{}]{} verdict={}",
+        short(&head),
+        short(&base_sha),
+        merged.as_deref().map_or_else(|| "none".to_owned(), short),
+        jobs.join(" "),
+        rerun.join(","),
+        unavailable.map_or_else(String::new, |why| format!(" rerun_unavailable={why}")),
+        if passed { "pass" } else { "fail" },
+    );
+    let verdict = if passed {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("land-check failed: {line}"))
+    };
+    (line, verdict)
+}
+
 fn sh(program: &str, args: &[&str]) -> Result<()> {
     eprintln!("    $ {program} {}", args.join(" "));
     let status = Command::new(program)
@@ -4145,6 +4719,29 @@ fn mutation_anchors() -> Result<()> {
     .context(
         "a mutation anchor in reference/mandate/mutants.py no longer matches ref.py; re-anchor it, or the nightly's mutants.py fails before its first run",
     )
+}
+
+/// Why this xtask may not run where it was invoked: the checkout it was built from, `built`, is not
+/// the one it runs in, `invoked` (the invoking directory's git toplevel), which happens when two
+/// checkouts share one `CARGO_TARGET_DIR`, and so one xtask binary rooted at whichever built last
+/// (lane NE, 2026-10-26). Every check would then read the other tree, and pass or fail for it.
+/// `None` when they are the same directory, or when either cannot be resolved (no git here).
+fn root_mismatch(built: &Path, invoked: Option<&Path>) -> Option<String> {
+    let invoked = invoked?;
+    let (Ok(built_real), Ok(invoked_real)) = (fs::canonicalize(built), fs::canonicalize(invoked))
+    else {
+        return None;
+    };
+    (built_real != invoked_real).then(|| {
+        format!(
+            "this xtask was built from the checkout at {} but runs in {}, so it would check the \
+             other tree: two checkouts share one CARGO_TARGET_DIR (give this one its own: unset \
+             CARGO_TARGET_DIR, or point it at a directory only this checkout uses, and run it \
+             again), or this tree sits inside another git repository, which git answered for",
+            built_real.display(),
+            invoked_real.display()
+        )
+    })
 }
 
 fn repo_root() -> Result<PathBuf> {
@@ -9244,7 +9841,9 @@ fn backticked_paths(text: &str) -> impl Iterator<Item = &str> {
 /// disagrees with that plan (DEC-538).
 fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
     let (line, verdict) = summarised(root, base, || {
-        incremental_refused(env::var_os(CARGO_INCREMENTAL).as_deref())?;
+        if let Some(notice) = incremental_overridden(env::var_os(CARGO_INCREMENTAL).as_deref()) {
+            eprintln!("    mutants: {notice}");
+        }
         mutants_from_env(root, base)
     });
     println!("{line}");
@@ -10349,23 +10948,25 @@ const CARGO_BUILD_TARGET_DIR: &str = "CARGO_BUILD_TARGET_DIR";
 
 /// Turns incremental compilation off when it is `0`, which a mutant's rebuild cannot afford: each
 /// one then builds its crate from scratch, every mutant reaches [`MUTANT_BUILD_TIMEOUT`], and the
-/// run reports timeouts rather than a verdict (lane GL, 2026-10-26). [`mutants`] refuses a caller
-/// that exported `0` ([`incremental_refused`]), and the job's building children run with it at
-/// `1`, which cargo ranks above `build.incremental` and the profiles' `incremental`, so no other
-/// setting turns it off either.
+/// run reports timeouts rather than a verdict (lane GL, 2026-10-26). The job's building children
+/// run with it at `1`, which cargo ranks above the caller's value, `build.incremental` and the
+/// profiles' `incremental`, so nothing turns it off; [`mutants`] says so when the caller exported
+/// `0` ([`incremental_overridden`]). It does not refuse that caller: CI's `Swatinem/rust-cache`
+/// exports `CARGO_INCREMENTAL=0` into every later step of its job, the mutants job's included, so
+/// a refusal failed every shard (#2648's own landing).
 const CARGO_INCREMENTAL: &str = "CARGO_INCREMENTAL";
 
-/// Refuses a mutants run whose caller exported [`CARGO_INCREMENTAL`] as `0`, loudly rather than
-/// silently overridden, so a session that turned incremental builds off learns it before a run.
-fn incremental_refused(value: Option<&std::ffi::OsStr>) -> Result<()> {
-    if value.is_some_and(|value| value == "0") {
-        bail!(
-            "{CARGO_INCREMENTAL}=0 is set: every mutant would rebuild its crate from scratch and \
-             reach the {MUTANT_BUILD_TIMEOUT}-second build timeout, so the run would report \
-             timeouts, not a verdict; unset it for `cargo xtask ci mutants`"
-        );
-    }
-    Ok(())
+/// What [`mutants`] says when its caller exported [`CARGO_INCREMENTAL`] as `0`: that the job's
+/// building children override it with `1`, so the run never silently differs from the caller's
+/// setting; `None` for any other value.
+fn incremental_overridden(value: Option<&std::ffi::OsStr>) -> Option<String> {
+    value.is_some_and(|value| value == "0").then(|| {
+        format!(
+            "{CARGO_INCREMENTAL}=0 is set, and the mutants job builds with {CARGO_INCREMENTAL}=1 \
+             instead: with it off every mutant would rebuild its crate from scratch and reach the \
+             {MUTANT_BUILD_TIMEOUT}-second build timeout"
+        )
+    })
 }
 
 /// The one target directory the mutants job's building children use: `root`'s own `target/`,
@@ -12329,8 +12930,10 @@ mod tests {
         references_path, select, selection_in, source_references, tokens, withhold_web_demo,
     };
     use super::{
-        CARGO_INCREMENTAL, TIMED_OUT_MUTANTS, conflict_markers_in, incremental_refused,
-        mutants_job_within, mutants_summary, summarised,
+        CARGO_INCREMENTAL, LAND_CHECK_DIR, LAND_CHECK_JOBS, NEXTEST_RUNNER_ENV, NO_FAIL_FAST_ENV,
+        RerunUnavailable, TIMED_OUT_MUTANTS, conflict_markers_in, filtered, incremental_overridden,
+        land_check, land_check_job, mutants_job_within, mutants_summary, nextest_failures,
+        nextest_runner, rerun_blocked, root_mismatch, summarised, unprivileged_rerun,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
@@ -13615,21 +14218,585 @@ mod tests {
         );
     }
 
-    /// A caller that exported `CARGO_INCREMENTAL=0` is refused before the run, by name; unset or
-    /// any other value runs.
+    /// An xtask built from one checkout refuses to run in another, naming both; the same checkout,
+    /// reached by another path, and an invocation with no git answer run.
     #[test]
-    fn a_mutants_run_with_incremental_builds_off_is_refused() {
-        let refused = incremental_refused(Some(OsStr::new("0")))
-            .expect_err("CARGO_INCREMENTAL=0 makes every mutant's build time out");
+    fn an_xtask_built_from_another_checkout_refuses_to_run() -> Result<()> {
+        let here = Fixture::new("root-here")?;
+        let there = Fixture::new("root-there")?;
+        let refused =
+            root_mismatch(&here.0, Some(&there.0)).context("two checkouts are refused")?;
         assert!(
-            format!("{refused:#}").contains("CARGO_INCREMENTAL=0 is set"),
+            refused.contains(&fs::canonicalize(&here.0)?.display().to_string())
+                && refused.contains(&fs::canonicalize(&there.0)?.display().to_string())
+                && refused.contains("CARGO_TARGET_DIR"),
+            "{refused}"
+        );
+        assert_eq!(root_mismatch(&here.0, Some(&here.0)), None);
+        assert_eq!(
+            root_mismatch(&here.0, Some(&here.0.join("crates/.."))),
+            None,
+            "one checkout by two paths"
+        );
+        assert_eq!(root_mismatch(&here.0, None), None, "no git to ask");
+        Ok(())
+    }
+
+    /// A fixture with a PR commit on `a.txt` checked out detached, and a branch `base` that moved
+    /// on from their common start, changing `base_file` to `base_text`.
+    fn land_check_fixture(
+        name: &str,
+        base_file: &str,
+        base_text: &str,
+    ) -> Result<(Fixture, String)> {
+        let fx = Fixture::new(name)?;
+        fx.write("a.txt", "a\n")?;
+        fx.write("b.txt", "b\n")?;
+        fx.commit()?;
+        let start = fx.git(&["rev-parse", "HEAD"])?;
+        fx.write("a.txt", "a from the pr\n")?;
+        fx.commit()?;
+        let head = fx.git(&["rev-parse", "HEAD"])?;
+        fx.git(&["checkout", "-q", "-b", "base", &start])?;
+        fx.write(base_file, base_text)?;
+        fx.commit()?;
+        fx.git(&["checkout", "-q", &head])?;
+        Ok((fx, head))
+    }
+
+    /// DEC-2642: the check merges the base into HEAD and runs every job, in order, on the merged
+    /// tree, diffed against the base it merged; it passes only when all pass, and leaves no
+    /// worktree behind.
+    #[test]
+    fn land_check_runs_every_job_on_the_merged_tree() -> Result<()> {
+        let (fx, head) = land_check_fixture("land-check-clean", "b.txt", "b from main\n")?;
+        let base = fx.git(&["rev-parse", "base"])?;
+        let mut seen = Vec::new();
+        let (line, verdict) = land_check(&fx.0, "base", None, |dir, base_sha, job| {
+            seen.push((
+                job.to_owned(),
+                fs::read_to_string(dir.join("a.txt"))?,
+                fs::read_to_string(dir.join("b.txt"))?,
+                base_sha.to_owned(),
+            ));
+            Ok(Vec::new())
+        });
+        verdict?;
+        assert_eq!(
+            seen.iter()
+                .map(|(job, ..)| job.as_str())
+                .collect::<Vec<_>>(),
+            LAND_CHECK_JOBS,
+            "every job, in order"
+        );
+        assert!(
+            seen.iter().all(|(_, a, b, sha)| a == "a from the pr\n"
+                && b == "b from main\n"
+                && *sha == base),
+            "each job sees the PR's change and the base's, and is diffed against the base: {seen:?}"
+        );
+        assert!(
+            line.starts_with(&format!(
+                "land-check summary: head={} base=base@{} fetched=skipped merged=",
+                &head[..12],
+                &base[..12]
+            )) && line.ends_with(
+                " merge=clean spec-guard=pass lint=pass test-nextest=pass test-doc=pass \
+                 test-rh-sim=pass test-python=pass rerun_unprivileged=[] verdict=pass"
+            ),
+            "{line}"
+        );
+        assert_eq!(
+            fx.git(&["rev-parse", "HEAD"])?,
+            head,
+            "the caller's checkout is untouched"
+        );
+        land_check_left_nothing(&fx)?;
+        Ok(())
+    }
+
+    /// The scratch worktree is gone and git no longer lists it.
+    fn land_check_left_nothing(fx: &Fixture) -> Result<()> {
+        assert!(
+            !fx.0.join(LAND_CHECK_DIR).join("work").exists(),
+            "the scratch worktree is gone"
+        );
+        assert_eq!(
+            fx.git(&["worktree", "list", "--porcelain"])?
+                .lines()
+                .filter(|line| line.starts_with("worktree "))
+                .count(),
+            1,
+            "and git lists only the caller's checkout"
+        );
+        Ok(())
+    }
+
+    /// A base that could not be fetched may be stale, so the check fails even when the merge and
+    /// every job passed; one that already is an ancestor of HEAD merges as HEAD itself and passes.
+    #[test]
+    fn land_check_fails_an_unfetched_base_and_passes_one_head_holds() -> Result<()> {
+        let (fx, head) = land_check_fixture("land-check-stale", "b.txt", "b from main\n")?;
+        let (line, verdict) = land_check(&fx.0, "base", Some(false), |_, _, _| Ok(Vec::new()));
+        assert!(verdict.is_err(), "an unfetched base is no pass");
+        assert!(
+            line.contains(" fetched=no ")
+                && line.ends_with(
+                    " merge=clean spec-guard=pass lint=pass test-nextest=pass test-doc=pass \
+                 test-rh-sim=pass test-python=pass rerun_unprivileged=[] verdict=fail"
+                ),
+            "{line}"
+        );
+        let start = fx.git(&["rev-parse", &format!("{head}~1")])?;
+        let mut ran = 0;
+        let (line, verdict) = land_check(&fx.0, &start, None, |_, _, _| {
+            ran += 1;
+            Ok(Vec::new())
+        });
+        verdict?;
+        assert_eq!(ran, LAND_CHECK_JOBS.len());
+        assert!(
+            line.contains(&format!(" merged={} merge=clean ", &head[..12])),
+            "a base HEAD already holds leaves HEAD as the merged tree: {line}"
+        );
+        land_check_left_nothing(&fx)?;
+        Ok(())
+    }
+
+    /// Each job runs as `cargo xtask ci <job>` in the merged tree, diffed against the merged base,
+    /// built into land-check's own target directory without incremental artifacts or debuginfo.
+    #[test]
+    fn land_check_jobs_run_in_the_merged_tree_against_the_base() {
+        let job = land_check_job(
+            Path::new("/tmp/work"),
+            "abc123",
+            Path::new("/tmp/target"),
+            "lint",
+        );
+        assert_eq!(job.get_program(), "cargo");
+        assert_eq!(
+            job.get_args().collect::<Vec<_>>(),
+            ["xtask", "ci", "lint"].map(OsStr::new)
+        );
+        assert_eq!(job.get_current_dir(), Some(Path::new("/tmp/work")));
+        let envs: BTreeMap<&OsStr, Option<&OsStr>> = job.get_envs().collect();
+        for (name, value) in [
+            ("MANDATE_BASE_REF", "abc123"),
+            (CARGO_TARGET_DIR, "/tmp/target"),
+            ("CARGO_INCREMENTAL", "0"),
+            ("CARGO_PROFILE_DEV_DEBUG", "0"),
+            ("CARGO_PROFILE_TEST_DEBUG", "0"),
+            (NO_FAIL_FAST_ENV, "1"),
+        ] {
+            assert_eq!(
+                envs.get(OsStr::new(name)),
+                Some(&Some(OsStr::new(value))),
+                "{name}"
+            );
+        }
+    }
+
+    /// A base that conflicts with HEAD fails the check before any job runs.
+    #[test]
+    fn land_check_fails_a_conflicting_merge_before_any_job() -> Result<()> {
+        let (fx, _) = land_check_fixture("land-check-conflict", "a.txt", "a from main\n")?;
+        let mut ran = 0;
+        let (line, verdict) = land_check(&fx.0, "base", Some(true), |_, _, _| {
+            ran += 1;
+            Ok(Vec::new())
+        });
+        assert!(verdict.is_err(), "a conflict is no landing");
+        assert_eq!(ran, 0, "no job runs on a merge that did not happen");
+        assert!(
+            line.contains(" fetched=yes merged=none merge=conflict ")
+                && line.ends_with(
+                    "spec-guard=not-run lint=not-run test-nextest=not-run test-doc=not-run \
+                 test-rh-sim=not-run test-python=not-run rerun_unprivileged=[] verdict=fail"
+                ),
+            "{line}"
+        );
+        land_check_left_nothing(&fx)?;
+        Ok(())
+    }
+
+    /// A job that fails fails the check, and the jobs after it still run, so the summary names
+    /// every result.
+    #[test]
+    fn land_check_runs_every_job_after_a_failure_and_fails() -> Result<()> {
+        let (fx, _) = land_check_fixture("land-check-failing", "b.txt", "b from main\n")?;
+        let mut ran = Vec::new();
+        let (line, verdict) = land_check(&fx.0, "base", Some(true), |_, _, job| {
+            ran.push(job.to_owned());
+            if job == "lint" {
+                bail!("lint failed");
+            }
+            Ok(Vec::new())
+        });
+        assert!(verdict.is_err());
+        assert_eq!(ran, LAND_CHECK_JOBS);
+        assert!(
+            line.contains(" fetched=yes ")
+                && line.ends_with(
+                    " merge=clean spec-guard=pass lint=fail test-nextest=pass test-doc=pass \
+                 test-rh-sim=pass test-python=pass rerun_unprivileged=[] verdict=fail"
+                ),
+            "{line}"
+        );
+        land_check_left_nothing(&fx)?;
+        Ok(())
+    }
+
+    /// A re-run that cannot reach its paths as uid 65534 is named as such, never as the test
+    /// failing again; the first path it cannot reach, or a `setpriv` that cannot run, decides.
+    #[test]
+    fn a_rerun_that_cannot_reach_its_paths_says_so() -> Result<()> {
+        let (a, b) = (Path::new("/a"), Path::new("/b"));
+        assert_eq!(rerun_blocked(&[a, b], |_| Some(true)), None);
+        assert_eq!(
+            rerun_blocked(&[a, b], |p| Some(p == a)),
+            Some("path_not_traversable")
+        );
+        assert_eq!(
+            rerun_blocked(&[a, b], |_| None),
+            Some("setpriv_unavailable")
+        );
+        let (fx, _) = land_check_fixture("land-check-unreachable", "b.txt", "b from main\n")?;
+        let (line, verdict) = land_check(&fx.0, "base", Some(true), |_, _, job| {
+            if job == "test-nextest" {
+                return Err(anyhow::Error::new(RerunUnavailable("path_not_traversable"))
+                    .context("no test can run again here"));
+            }
+            Ok(Vec::new())
+        });
+        assert!(verdict.is_err());
+        assert!(
+            line.contains(" test-nextest=fail ")
+                && line.ends_with(
+                    " rerun_unprivileged=[] rerun_unavailable=path_not_traversable verdict=fail"
+                ),
+            "{line}"
+        );
+        Ok(())
+    }
+
+    /// A shallow clone is refused before anything runs: the checks read main's history, so they
+    /// would fail for the clone and not for the change.
+    #[test]
+    fn land_check_refuses_a_shallow_clone() -> Result<()> {
+        let (fx, _) = land_check_fixture("land-check-full", "b.txt", "b from main\n")?;
+        let shallow = fx.0.with_file_name(format!(
+            "{}-shallow",
+            fx.0.file_name()
+                .and_then(OsStr::to_str)
+                .context("a fixture name")?
+        ));
+        fs::remove_dir_all(&shallow).ok();
+        output_in(
+            &fx.0,
+            "git",
+            &[
+                "clone",
+                "-q",
+                "--depth=1",
+                "--no-local",
+                "--branch=base",
+                &format!("file://{}", fx.0.display()),
+                &shallow.display().to_string(),
+            ],
+        )?;
+        let mut ran = 0;
+        let (line, verdict) = land_check(&shallow, "HEAD", None, |_, _, _| {
+            ran += 1;
+            Ok(Vec::new())
+        });
+        let refused = verdict.expect_err("a shallow clone is refused");
+        assert!(
+            format!("{refused:#}").contains("--unshallow"),
             "{refused:#}"
         );
-        assert!(incremental_refused(None).is_ok(), "unset runs");
+        assert_eq!(line, "land-check summary: base=HEAD verdict=fail shallow");
+        assert_eq!(ran, 0, "no job runs");
+        fs::remove_dir_all(&shallow).ok();
+        Ok(())
+    }
+
+    /// A test that passed only when run again as an unprivileged user is named in the summary,
+    /// never folded silently into a pass (DEC-2644).
+    #[test]
+    fn land_check_names_every_test_that_passed_only_unprivileged() -> Result<()> {
+        let (fx, _) = land_check_fixture("land-check-rerun", "b.txt", "b from main\n")?;
+        let (line, verdict) = land_check(&fx.0, "base", Some(true), |_, _, job| {
+            Ok(if job == "test-nextest" {
+                vec!["fx::files:fx_refuses_root".to_owned()]
+            } else {
+                Vec::new()
+            })
+        });
+        verdict?;
         assert!(
-            incremental_refused(Some(OsStr::new("1"))).is_ok(),
-            "on runs"
+            line.ends_with(" rerun_unprivileged=[fx::files:fx_refuses_root] verdict=pass"),
+            "{line}"
         );
+        Ok(())
+    }
+
+    /// The failures a nextest run reports, read only when they are the whole of what did not
+    /// pass: every status label is a plain one, the summary reads only passed, failed and
+    /// skipped and adds up, and its failed count is the number of tests the `FAIL` lines name.
+    /// Anything else, an abort, a timeout, a leak, a signal, a cancelled run or a build that
+    /// printed no summary, gives no test to run again (DEC-2644).
+    #[test]
+    fn only_the_failed_tests_a_whole_nextest_report_names_are_run_again() {
+        let fail =
+            |binary: &str, test: &str| format!("        FAIL [   0.097s] ( 5/9) {binary} {test}\n");
+        let summary = |tail: &str| format!("     Summary [ 609.585s] {tail}\n");
+        let report = [
+            "        START [ 0.0s] (1/9) a::b passes\n".to_owned(),
+            fail("mandate-marketdata::concurrent_writes", "refuses_root"),
+            "        PASS [   0.010s] ( 6/9) a::b passes\n".to_owned(),
+            "        SLOW [> 60.000s] a::b slow\n".to_owned(),
+            "    test output: a line [that] is not a status\n".to_owned(),
+            fail("mandate-runtime::account_copies", "has_an_arm"),
+            summary("9 tests run: 7 passed (3 slow), 2 failed, 181 skipped"),
+            fail("mandate-marketdata::concurrent_writes", "refuses_root"),
+            fail("mandate-runtime::account_copies", "has_an_arm"),
+        ]
+        .concat();
+        let failed = nextest_failures(&report).expect("two failures, both named");
+        assert_eq!(
+            failed.into_iter().collect::<Vec<_>>(),
+            [
+                (
+                    "mandate-marketdata::concurrent_writes".to_owned(),
+                    "refuses_root".to_owned()
+                ),
+                (
+                    "mandate-runtime::account_copies".to_owned(),
+                    "has_an_arm".to_owned()
+                ),
+            ]
+        );
+        let colored = format!(
+            "\u{1b}[31;1m        FAIL\u{1b}[0m [   0.1s] ( 1/2) \u{1b}[35ma::b\u{1b}[0m t\n{}",
+            summary("2 tests run: 1 passed, 1 failed, 0 skipped")
+        );
+        assert_eq!(
+            nextest_failures(&colored),
+            Some(BTreeSet::from([("a::b".to_owned(), "t".to_owned())])),
+            "colour codes are read through"
+        );
+        let one = fail("a::b", "t");
+        for (why, said) in [
+            (
+                "an abort",
+                format!(
+                    "{one}      ABORT [ 0.1s] a::c t\n{}",
+                    summary("2 tests run: 0 passed, 2 failed")
+                ),
+            ),
+            (
+                "a timeout",
+                format!(
+                    "{one}    TIMEOUT [ 9.0s] a::c t\n{}",
+                    summary("2 tests run: 0 passed, 1 failed, 1 timed out")
+                ),
+            ),
+            (
+                "a leak",
+                format!(
+                    "{one}FAIL + LEAK [ 0.1s] a::c t\n{}",
+                    summary("2 tests run: 0 passed, 2 failed")
+                ),
+            ),
+            (
+                "a signal",
+                format!(
+                    "{one}    SIGSEGV [ 0.1s] a::c t\n{}",
+                    summary("2 tests run: 0 passed, 2 failed")
+                ),
+            ),
+            (
+                "a cancelled run",
+                format!("{one}{}", summary("5/9 tests run: 4 passed, 1 failed")),
+            ),
+            (
+                "a part it cannot read",
+                format!(
+                    "{one}{}",
+                    summary("2 tests run: 1 passed, 1 failed, 1 exec failed")
+                ),
+            ),
+            (
+                "counts that do not add up",
+                format!("{one}{}", summary("9 tests run: 1 passed, 1 failed")),
+            ),
+            (
+                "more failures than lines",
+                format!("{one}{}", summary("3 tests run: 1 passed, 2 failed")),
+            ),
+            ("no summary: the run did not finish", one.clone()),
+            (
+                "nothing failed",
+                summary("2 tests run: 2 passed, 0 skipped"),
+            ),
+        ] {
+            assert_eq!(nextest_failures(&said), None, "{why}");
+        }
+    }
+
+    /// The re-run is the job that failed, the same command and environment, narrowed to the one
+    /// test, its process run as uid and gid 65534 by the host's target runner, with its own TMPDIR.
+    #[test]
+    fn a_test_that_failed_as_root_is_run_once_more_as_an_unprivileged_user() {
+        let job = land_check_job(
+            Path::new("/tmp/work"),
+            "abc123",
+            Path::new("/tmp/target"),
+            "test-nextest",
+        );
+        let rerun = unprivileged_rerun(
+            job,
+            "aarch64-unknown-linux-musl",
+            Path::new("/tmp/scratch"),
+            "mandate-marketdata::concurrent_writes",
+            "refuses_root",
+        );
+        assert_eq!(rerun.get_program(), "cargo");
+        assert_eq!(
+            rerun.get_args().collect::<Vec<_>>(),
+            ["xtask", "ci", "test-nextest"].map(OsStr::new),
+            "the job that failed, as it ran"
+        );
+        assert_eq!(rerun.get_current_dir(), Some(Path::new("/tmp/work")));
+        let envs: BTreeMap<&OsStr, Option<&OsStr>> = rerun.get_envs().collect();
+        for (name, value) in [
+            (
+                "MANDATE_NEXTEST_FILTER",
+                Some("binary_id(=mandate-marketdata::concurrent_writes) & test(=refuses_root)"),
+            ),
+            (
+                "MANDATE_NEXTEST_RUNNER",
+                Some(
+                    "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER=setpriv --reuid=65534 \
+                     --regid=65534 --clear-groups --",
+                ),
+            ),
+            ("TMPDIR", Some("/tmp/scratch")),
+            ("MANDATE_BASE_REF", Some("abc123")),
+            (CARGO_TARGET_DIR, Some("/tmp/target")),
+            ("CARGO_INCREMENTAL", Some("0")),
+            ("MANDATE_TEST_PARTITION", None),
+        ] {
+            assert_eq!(
+                envs.get(OsStr::new(name)),
+                Some(&value.map(OsStr::new)),
+                "{name}"
+            );
+        }
+    }
+
+    /// The runner reaches only the nextest run's test processes: the `cargo xtask` that runs the
+    /// job carries no target runner, which would start xtask itself as uid 65534, and the
+    /// runner's spec names a target runner and a command or is refused.
+    #[test]
+    fn only_the_test_processes_start_through_the_unprivileged_runner() -> Result<()> {
+        let rerun = unprivileged_rerun(
+            land_check_job(Path::new("/w"), "abc", Path::new("/t"), "test-nextest"),
+            "x86_64-unknown-linux-gnu",
+            Path::new("/s"),
+            "b",
+            "t",
+        );
+        assert!(
+            !rerun.get_envs().any(|(name, value)| {
+                let name = name.to_string_lossy();
+                value.is_some() && name.starts_with("CARGO_TARGET_") && name.ends_with("_RUNNER")
+            }),
+            "a target runner on `cargo xtask` would start xtask as uid 65534"
+        );
+        let spec = rerun
+            .get_envs()
+            .find(|(name, _)| *name == OsStr::new(NEXTEST_RUNNER_ENV))
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_string_lossy().into_owned())
+            .context("the re-run names its runner")?;
+        assert_eq!(
+            nextest_runner(&spec)?,
+            (
+                "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER",
+                "setpriv --reuid=65534 --regid=65534 --clear-groups --"
+            )
+        );
+        for bad in [
+            "setpriv",
+            "PATH=/tmp",
+            "CARGO_TARGET_X_RUNNER=",
+            "CARGO_TARGET_X_RUNNER= ",
+        ] {
+            assert!(nextest_runner(bad).is_err(), "{bad}");
+        }
+        let job = land_check_job(Path::new("/w"), "abc", Path::new("/t"), "test-nextest");
+        assert!(
+            job.get_envs()
+                .any(|(name, value)| name == OsStr::new(NEXTEST_RUNNER_ENV) && value.is_none()),
+            "a job never inherits a runner"
+        );
+        Ok(())
+    }
+
+    /// A filtered nextest run runs exactly the filtered tests, and fails when they select none.
+    #[test]
+    fn a_filtered_nextest_run_refuses_to_select_nothing() -> Result<()> {
+        let mut args = super::nextest_args(None, Some(&["fx".to_owned()]))?;
+        filtered(&mut args, "test(=t)");
+        assert!(args.iter().any(|arg| arg == "--no-tests=fail"));
+        assert!(!args.iter().any(|arg| arg == "--no-tests=pass"));
+        assert!(args.ends_with(&["-E".to_owned(), "test(=t)".to_owned()]));
+        Ok(())
+    }
+
+    /// land-check runs every part of `ci test`, each as a job of its own.
+    #[test]
+    fn land_check_runs_every_test_part() {
+        let parts: Vec<&str> = LAND_CHECK_JOBS
+            .iter()
+            .copied()
+            .filter(|job| job.starts_with("test"))
+            .collect();
+        assert_eq!(parts, TEST_PARTS);
+    }
+
+    /// A caller that exported `CARGO_INCREMENTAL=0`, as CI's rust-cache does for every job, is
+    /// told the children override it, and runs; unset or any other value says nothing.
+    #[test]
+    fn a_mutants_run_with_incremental_builds_off_says_they_are_overridden() {
+        let said = incremental_overridden(Some(OsStr::new("0")))
+            .expect("CARGO_INCREMENTAL=0 is named, never silently overridden");
+        assert!(
+            said.contains("CARGO_INCREMENTAL=0 is set") && said.contains("CARGO_INCREMENTAL=1"),
+            "{said}"
+        );
+        assert_eq!(incremental_overridden(None), None, "unset");
+        assert_eq!(incremental_overridden(Some(OsStr::new("1"))), None, "on");
+    }
+
+    /// CI's `Swatinem/rust-cache` exports `CARGO_INCREMENTAL=0` into every later step, the
+    /// mutants job's `cargo xtask ci mutants` included, so the job must run under it.
+    #[test]
+    fn the_mutants_job_runs_after_rust_cache_s_incremental_off() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let job = workflow_job(&workflow, "mutants").context("ci.yml has a `mutants` job")?;
+        let at = |needle: &str| job.iter().position(|line| line.contains(needle));
+        assert!(
+            at("Swatinem/rust-cache") < at("cargo xtask ci mutants")
+                && at("Swatinem/rust-cache").is_some(),
+            "the mutants job restores rust-cache before it runs, so it inherits CARGO_INCREMENTAL=0"
+        );
+        assert!(
+            incremental_overridden(Some(OsStr::new("0"))).is_some(),
+            "which the job names and overrides rather than refuses"
+        );
+        Ok(())
     }
 
     /// The summary line counts this run's mutants by how each ended, leaves the baseline out, and

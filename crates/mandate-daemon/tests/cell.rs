@@ -18,8 +18,8 @@ use std::rc::Rc;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, parse};
 use mandate_daemon::cell::{
-    CellDeployment, CellError, OptIn, agentic_config, meter_opened_ids, opt_in, research,
-    research_daily_cap, research_metered, research_through,
+    CellDeployment, CellError, OptIn, ViaGateway, agentic_config, meter_opened_ids, opt_in,
+    research, research_daily_cap, research_metered, research_through,
 };
 use mandate_daemon::recorded::{Bundle, BundleError};
 use mandate_daemon::remote::GatewayAddress;
@@ -491,33 +491,45 @@ fn host_now() -> UtcNanos {
     .unwrap()
 }
 
-/// A scripted service on a local port that reads the one call it is sent within ten seconds and
-/// closes without a reply, handing back the call, or `None` when nothing called it.
+/// A scripted service on a local port that stores each put it is sent in the store at `root`, as
+/// the model-gateway service does (DEC-2279), and reads the one call it is sent within ten seconds
+/// and closes without a reply, handing back the call, or `None` when nothing called it.
 #[allow(
     clippy::disallowed_methods,
     reason = "the scripted service waits for its one call against the host clock"
 )]
-fn dropping_service() -> (
+fn dropping_service(
+    root: &Path,
+) -> (
     std::net::SocketAddr,
     std::thread::JoinHandle<Option<CallRequest>>,
 ) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let address = listener.local_addr().unwrap();
+    let mut store = FsArtifactStore::open_existing(root).unwrap();
     let handle = std::thread::spawn(move || {
         let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        let mut stream = loop {
-            match listener.accept() {
-                Ok((stream, _)) => break stream,
+        loop {
+            let mut stream = match listener.accept() {
+                Ok((stream, _)) => stream,
                 Err(_) if std::time::Instant::now() < until => {
                     std::thread::sleep(std::time::Duration::from_millis(20));
+                    continue;
                 }
                 Err(_) => return None,
+            };
+            stream.set_nonblocking(false).ok()?;
+            let body = frame::read_frame(&mut stream, frame::MAX_REQUEST_FRAME).ok()?;
+            match wire::any_request_from(&body).ok()? {
+                wire::Request::Call(call) => return Some(*call),
+                wire::Request::Put(put) => {
+                    let stored = store.put_artifact(&put.bytes).ok()?.digest();
+                    let reply = wire::put_reply_bytes(&Ok(stored));
+                    frame::write_frame(&mut stream, &reply, frame::MAX_REPLY_FRAME).ok()?;
+                }
             }
-        };
-        stream.set_nonblocking(false).ok()?;
-        let body = frame::read_frame(&mut stream, frame::MAX_REQUEST_FRAME).ok()?;
-        wire::request_from(&body).ok()
+        }
     });
     (address, handle)
 }
@@ -528,7 +540,7 @@ fn dropping_service() -> (
 #[test]
 fn research_through_the_service_calls_it_and_writes_no_meter_record() {
     let (root, control, _, _) = deployed("remote");
-    let (address, service) = dropping_service();
+    let (address, service) = dropping_service(&root);
     let journal = MemoryStore::default();
     let mut wired = research_through(
         opted(),
@@ -537,7 +549,10 @@ fn research_through_the_service_calls_it_and_writes_no_meter_record() {
         "ws1",
         &root,
         host_now,
-        Some(GatewayAddress::from(address)),
+        Some(ViaGateway {
+            address: GatewayAddress::from(address),
+            research: root.clone(),
+        }),
     )
     .unwrap_or_else(|error| panic!("{error:?}"));
     let worker = &mut wired.wiring.worker;
@@ -584,6 +599,39 @@ fn research_through_the_service_calls_it_and_writes_no_meter_record() {
     );
 }
 
+/// DEC-2279 item 3: research wired through the service stores its artifacts through it, never in
+/// its own mount: with no service there, a put stores nothing and leaves nothing in the store, so
+/// research halts rather than journal what was not stored.
+#[test]
+fn research_through_the_service_stores_its_artifacts_only_through_it() {
+    let (root, control, _, _) = deployed("remote-put");
+    let address = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let mut wired = research_through(
+        opted(),
+        Box::new(control),
+        MemoryStore::default(),
+        "ws1",
+        &root,
+        host_now,
+        Some(ViaGateway {
+            address: GatewayAddress::from(address),
+            research: root.clone(),
+        }),
+    )
+    .unwrap_or_else(|error| panic!("{error:?}"));
+    assert!(!wired.wiring.artifacts.put(b"a draft thesis"));
+    let store = FsArtifactStore::open_existing(&root).unwrap();
+    assert!(
+        !store
+            .object_path(&mandate_journal::ArtifactRef::of(b"a draft thesis"))
+            .exists(),
+        "nothing was put in the runtime's own mount"
+    );
+}
+
 /// A reservation the model-gateway service writes for call `n`.
 fn reservation(n: u128) -> MeterRecord {
     MeterRecord::Reserved(Reservation {
@@ -611,7 +659,10 @@ fn reservation(n: u128) -> MeterRecord {
 fn only_research_without_the_service_takes_the_meter_s_writer_epoch() {
     for (gateway, fenced) in [
         (
-            Some(GatewayAddress::parse("model-gateway:8080").unwrap()),
+            Some(ViaGateway {
+                address: GatewayAddress::parse("model-gateway:8080").unwrap(),
+                research: PathBuf::new(),
+            }),
             false,
         ),
         (None, true),

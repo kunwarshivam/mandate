@@ -7,7 +7,8 @@ import { type SetUp, useRuntime } from "@/lib/mock-runtime";
 import { Chat, type Creation } from "./chat";
 import { type Compiler, type CompilerInput, figuresOnly, fixtureCompiler, validateTurn } from "./compiler";
 import { type Checks, type Conversation, applyTurn, blocker, chooseModel, draftOf, failTurn, inputFor, readWithoutModel, say, startConversation } from "./conversation";
-import { mandateFrom } from "./draft";
+import { MODELS, type ModelChoice, mandateFrom, servedModelChoice } from "./draft";
+import type { InstrumentRef } from "@/fixtures/types";
 import { STEP_HEADING } from "./steps";
 
 const FIXTURE_COMPILER = fixtureCompiler();
@@ -18,12 +19,54 @@ const SERVER_JUDGES: Checks = { room: null, claimedBy: () => null, independentAp
 /** Over the API with no established connection: a version names its connection, so none can be created yet. */
 export const NO_CONNECTION = "Connect your Alpaca paper account first, in Connections. A version names the account it trades on.";
 
+/** The models and instruments a conversation offers: the fixture catalogue, or what the deployment registered. */
+interface Catalogue {
+  models: readonly ModelChoice[];
+  instruments: Readonly<Record<string, InstrumentRef>> | null;
+}
+
 /**
- * Over the API until the deployment serves its registered instruments and signal models: the
- * version must name each instrument's registered asset id and the model's registered content hash,
- * and this page knows neither, so it creates nothing rather than send an id it made up.
+ * Over the API, the catalogue the deployment registered (`GET /instruments`, `GET /signal-models`,
+ * DEC-2136), read once when the set-up opens: the version names only registered asset ids and model
+ * hashes, so nothing is made up in the browser. A model this page cannot ask about is not offered.
+ * Until it is read the set-up waits, and a catalogue that cannot be read says so and offers nothing.
  */
-export const CATALOGUE_NOT_SERVED = "Your deployment does not list its registered instruments and models to this page yet, so the version can't be created from here.";
+export function NewAgentFlow({ compiler }: { compiler?: Compiler }) {
+  const { source, catalogue } = useRuntime();
+  const [served, setServed] = useState<{ ok: true; catalogue: Catalogue } | { ok: false } | null>(null);
+  useEffect(() => {
+    if (source !== "api" || !catalogue) return;
+    let live = true;
+    void catalogue().then((answer) => {
+      if (!live) return;
+      if (!answer.ok) return setServed({ ok: false });
+      const models = answer.models
+        .map(servedModelChoice)
+        .filter((m): m is ModelChoice => m !== null)
+        .sort((a, b) => a.name.localeCompare(b.name, "en"));
+      const instruments: Record<string, InstrumentRef> = {};
+      for (const i of [...answer.instruments].sort((a, b) => (a.instrument_id < b.instrument_id ? -1 : 1))) instruments[i.symbol] ??= { asset_id: i.instrument_id, symbol: i.symbol, asset_class: i.asset_class };
+      setServed({ ok: true, catalogue: { models, instruments } });
+    });
+    return () => {
+      live = false;
+    };
+  }, [source, catalogue]);
+  if (source !== "api") return <Flow compiler={compiler} catalogue={{ models: MODELS, instruments: null }} />;
+  if (served === null)
+    return (
+      <p className="mx-auto w-full max-w-2xl text-muted-foreground" data-slot="catalogue-reading">
+        Reading the instruments and models your deployment has registered.
+      </p>
+    );
+  if (!served.ok)
+    return (
+      <p role="alert" className="mx-auto w-full max-w-2xl text-pretty" data-slot="catalogue-unreported">
+        Your deployment did not report the instruments and models it has registered, so no agent can be set up from here now. This page tries again when you reload it.
+      </p>
+    );
+  return <Flow key={JSON.stringify(Object.keys(served.catalogue.instruments ?? {}))} compiler={compiler} catalogue={served.catalogue} />;
+}
 
 /**
  * Setting up an agent on the fixture workspace (brief A0 to A2, A5 and B3, DEC-476, DEC-477,
@@ -36,7 +79,7 @@ export const CATALOGUE_NOT_SERVED = "Your deployment does not list its registere
  * second user can approve). Words handed over from Messages or the
  * copilot wait in the message field; nothing is read until the owner sends them.
  */
-export function NewAgentFlow({ compiler: given }: { compiler?: Compiler }) {
+function Flow({ compiler: given, catalogue }: { compiler?: Compiler; catalogue: Catalogue }) {
   const { ws, setUps, source } = useRuntime();
   /**
    * Over the API no compiler is served (spec §4.1: drafts and compile are planned), so the owner's
@@ -44,7 +87,7 @@ export function NewAgentFlow({ compiler: given }: { compiler?: Compiler }) {
    */
   const overApi = source === "api";
   const compiler = given ?? (overApi ? figuresOnly : FIXTURE_COMPILER);
-  const start = () => startConversation({ figuresOnly: overApi });
+  const start = () => startConversation({ figuresOnly: overApi, models: catalogue.models, instruments: catalogue.instruments });
   const [conversation, setConversation] = useState<Conversation>(start);
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -94,7 +137,7 @@ export function NewAgentFlow({ compiler: given }: { compiler?: Compiler }) {
   };
 
   const draft = useMemo(() => draftOf(conversation), [conversation]);
-  const request = useMemo(() => (draft ? mandateFrom(draft, ws.connection.connection_id) : null), [draft, ws.connection.connection_id]);
+  const request = useMemo(() => (draft ? mandateFrom(draft, ws.connection.connection_id, conversation.instruments) : null), [draft, ws.connection.connection_id, conversation.instruments]);
   const shown = useMemo(() => {
     const out: Record<number, SetUp> = {};
     for (const [revision, id] of Object.entries(sent)) {
@@ -106,7 +149,7 @@ export function NewAgentFlow({ compiler: given }: { compiler?: Compiler }) {
   const creation: Creation = {
     draft,
     request,
-    blocked: blocker(conversation, checks) ?? (overApi ? (ws.connection.connection_id ? CATALOGUE_NOT_SERVED : NO_CONNECTION) : null),
+    blocked: blocker(conversation, checks) ?? (overApi && !ws.connection.connection_id ? NO_CONNECTION : null),
     setUps: shown,
   };
 

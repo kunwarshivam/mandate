@@ -29,12 +29,16 @@ const CHANGED: &str = "NotificationAddressChanged";
 const ACTION: [&str; 2] = ["approval_requested", "approval_reminder"];
 
 /// Notifications spec §3.2's `safety` kinds, in its order (DEC-795 item 6 adds
-/// `notification_address_changed`).
-const SAFETY: [&str; 25] = [
+/// `notification_address_changed`, DEC-2351 `kill_switch_unapplied`, DEC-2352 `retirement_held`,
+/// DEC-2520 `connection_unavailable`).
+const SAFETY: [&str; 28] = [
     "risk_limit",
     "kill_switch",
+    "kill_switch_unapplied",
     "agent_held",
+    "retirement_held",
     "account_restriction",
+    "connection_unavailable",
     "protection",
     "exit_stalled",
     "reconciliation",
@@ -68,7 +72,7 @@ const INFO: [&str; 6] = [
     "approval_closed",
 ];
 
-/// Each class with its kinds: the `kind` type's 33 values, and rule 122's table.
+/// Each class with its kinds: the `kind` type's 36 values, and rule 122's table.
 const CLASSES: [(&str, &[&str]); 3] = [("action", &ACTION), ("safety", &SAFETY), ("info", &INFO)];
 
 /// The kinds no alert causes (notifications spec §3.4).
@@ -533,7 +537,7 @@ fn class(kind: Option<&str>) -> Option<&'static str> {
         .map(|(class, _)| *class)
 }
 
-/// The `kind` type: notifications spec §3.2's 33 kinds.
+/// The `kind` type: notifications spec §3.2's 36 kinds.
 fn is_kind(s: &str) -> bool {
     class(Some(s)).is_some()
 }

@@ -174,6 +174,33 @@ pub fn stored(store: &dyn ArtifactSource, version: &str) -> Option<(Value, Manda
     Some((document, mandate))
 }
 
+/// The stored object `digest` names, parsed.
+fn stored_value(store: &dyn ArtifactSource, digest: &Digest) -> Option<Value> {
+    let bytes = get_artifact(store, &ArtifactRef::from_digest(*digest)).ok()?;
+    parse(&bytes).ok()
+}
+
+/// Every control-stream record as the fact the create's fold reads (DEC-505 item 1), in stream
+/// order: the facts [`check`] folds before the account stream's, and the ones the catalogue reads
+/// fold (DEC-2136).
+///
+/// # Errors
+/// [`Refusal::Unreadable`] for any record the fold cannot read, a deployment whose document the
+/// store cannot give among them.
+pub fn control_facts(
+    control: &[StoredEvent],
+    store: &dyn ArtifactSource,
+) -> Result<Vec<JournaledFact>, Refusal> {
+    let documents = |d: &Digest| stored_value(store, d);
+    let mut facts = Vec::new();
+    for row in control {
+        let fact = JournaledFact::from_record(&row.event_type, &payload(row), &documents, None)
+            .map_err(|_| Refusal::Unreadable)?;
+        facts.extend(fact);
+    }
+    Ok(facts)
+}
+
 /// Every record as the fact the spec's fold reads (DEC-505 item 1): the control stream's, then
 /// the account stream's of `connection` recorded after its last `ConnectionRevoked`, so a
 /// snapshot from before a revocation never restores the equity the revocation cleared (canonical
@@ -183,16 +210,8 @@ fn facts(
     store: &dyn ArtifactSource,
     connection: &ConnectionId,
 ) -> Option<Vec<JournaledFact>> {
-    let documents = |d: &Digest| {
-        let bytes = get_artifact(store, &ArtifactRef::from_digest(*d)).ok()?;
-        parse(&bytes).ok()
-    };
-    let mut facts = Vec::new();
-    for row in control {
-        let fact =
-            JournaledFact::from_record(&row.event_type, &payload(row), &documents, None).ok()?;
-        facts.extend(fact);
-    }
+    let documents = |d: &Digest| stored_value(store, d);
+    let mut facts = control_facts(control, store).ok()?;
     let revoked = control
         .iter()
         .rev()
@@ -293,8 +312,62 @@ pub fn check(
     Ok(report.warnings.iter().map(|w| w.code()).collect())
 }
 
+/// One instrument snapshot the instrument fold keeps: the latest registration whose stored object
+/// names this `instrument_id` with a `symbol`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Snapshot {
+    pub instrument_id: String,
+    pub symbol: String,
+    /// The object's `asset_class`, `None` when it names none as text.
+    pub asset_class: Option<String>,
+    /// The registration's `content_hash`, `sha256:<hex>`.
+    pub snapshot: String,
+    /// The registration row's `recorded_at`.
+    pub registered_at: String,
+}
+
+/// The instrument fold the create's check and `GET /instruments` both read (DEC-505 item 1,
+/// DEC-523 item 5, DEC-2136): every `ConfigSnapshotRegistered` of kind `instrument_snapshot` in
+/// stream order, the latest per stored `instrument_id`, keyed by it. An object with no text id or
+/// symbol is skipped.
+///
+/// # Errors
+/// [`Refusal::Unreadable`] for any registration, superseded or not, whose snapshot the store cannot
+/// give or that does not parse.
+pub fn snapshots(
+    control: &[StoredEvent],
+    store: &dyn ArtifactSource,
+) -> Result<BTreeMap<String, Snapshot>, Refusal> {
+    let mut snapshots: BTreeMap<String, Snapshot> = BTreeMap::new();
+    let registrations = control.iter().filter(|row| {
+        row.event_type == "ConfigSnapshotRegistered"
+            && member(row, "kind").as_deref() == Some("instrument_snapshot")
+    });
+    for row in registrations {
+        let reference = member(row, "content_hash")
+            .and_then(|hash| ArtifactRef::parse(&hash))
+            .ok_or(Refusal::Unreadable)?;
+        let object = get_artifact(store, &reference)
+            .ok()
+            .and_then(|bytes| parse(&bytes).ok())
+            .ok_or(Refusal::Unreadable)?;
+        let text = |name| object.get(name).and_then(Value::as_str).map(str::to_owned);
+        if let (Some(id), Some(symbol)) = (text("instrument_id"), text("symbol")) {
+            let kept = Snapshot {
+                instrument_id: id.clone(),
+                symbol,
+                asset_class: text("asset_class"),
+                snapshot: reference.to_string(),
+                registered_at: row.recorded_at.clone(),
+            };
+            snapshots.insert(id, kept);
+        }
+    }
+    Ok(snapshots)
+}
+
 /// Each pinned instrument is named by the latest registered instrument snapshot whose object
-/// names its asset id, with its symbol (DEC-505 item 1, DEC-523 item 5).
+/// names its asset id, with its symbol ([`snapshots`]).
 ///
 /// # Errors
 /// [`Refusal::Unregistered`], or [`Refusal::Unreadable`] for a snapshot the store cannot give.
@@ -303,22 +376,7 @@ pub fn instruments(
     store: &dyn ArtifactSource,
     document: &Value,
 ) -> Result<(), Refusal> {
-    let mut snapshots: BTreeMap<String, String> = BTreeMap::new();
-    let registrations = control.iter().filter(|row| {
-        row.event_type == "ConfigSnapshotRegistered"
-            && member(row, "kind").as_deref() == Some("instrument_snapshot")
-    });
-    for row in registrations {
-        let object = member(row, "content_hash")
-            .and_then(|hash| ArtifactRef::parse(&hash))
-            .and_then(|r| get_artifact(store, &r).ok())
-            .and_then(|bytes| parse(&bytes).ok())
-            .ok_or(Refusal::Unreadable)?;
-        let text = |name| object.get(name).and_then(Value::as_str).map(str::to_owned);
-        if let (Some(id), Some(symbol)) = (text("instrument_id"), text("symbol")) {
-            snapshots.insert(id, symbol);
-        }
-    }
+    let snapshots = snapshots(control, store)?;
     let pinned = document
         .get("universe")
         .and_then(|u| u.get("pinned_instruments"))
@@ -327,7 +385,7 @@ pub fn instruments(
     for instrument in pinned {
         let text = |name| instrument.get(name).and_then(Value::as_str);
         let registered = text("asset_id").and_then(|id| snapshots.get(id));
-        if registered.is_none() || registered.map(String::as_str) != text("symbol") {
+        if registered.is_none() || registered.map(|s| s.symbol.as_str()) != text("symbol") {
             return Err(Refusal::Unregistered);
         }
     }

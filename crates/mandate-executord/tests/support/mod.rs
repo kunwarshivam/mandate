@@ -15,16 +15,19 @@ use std::time::Duration;
 
 use mandate_accounting::{AccountType, AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Object, Value, parse};
+use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
+use mandate_connections::record::ConnectionId;
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountRef, AccountScope, ActivityCursor, AgentId, BindingGateConfigRefs, BindingGateInput,
     BindingGateRequest, BindingGateSource, BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome,
-    BrokerPosition, BrokerRequest, BrokerUnknown, ConnectorError, EventId, ExecutorConfig,
-    ExitTier, FillId, IdGen, InstrumentSnapshot, MandateVersion, MandateView, ProtectionPrices,
-    Purpose, Seq, WorkspaceId, WriterEpoch, equity_bracket_prices,
+    BrokerPosition, BrokerReject, BrokerRequest, BrokerUnknown, ConnectorError, EventId,
+    ExecutorConfig, ExitTier, FillId, IdGen, InstrumentSnapshot, MandateVersion, MandateView,
+    ProtectionPrices, Purpose, Seq, WorkspaceId, WriterEpoch, equity_bracket_prices,
 };
 use mandate_executord::marks::NoMarks;
 use mandate_executord::quotes::NoQuotes;
+use mandate_executord::risk::Unopened;
 use mandate_executord::serve::ScriptedBroker;
 use mandate_executord::{Broker, Config, ExecutorProcess, Protections, Unplanned, Wiring};
 use mandate_journal::{AppendOutcome, Environment, Invalid, InvalidReason, StoredEvent, StreamId};
@@ -85,6 +88,8 @@ pub enum Fault {
     /// Nothing written: the journal refuses the batch as invalid, as it refuses a draft its schema
     /// does not admit (DEC-2805).
     Invalid,
+    /// Nothing written: a newer writer holds the stream, and this one is fenced (journal spec §2).
+    Fenced,
 }
 
 #[derive(Default)]
@@ -121,6 +126,13 @@ impl Journal {
                     .map(str::to_owned)
             })
             .collect()
+    }
+
+    /// Keeps the first `len` rows of `stream`, as a crash that lost the rest would have left it.
+    pub fn truncate(&self, stream: &str, len: usize) {
+        if let Some(rows) = self.0.borrow_mut().streams.get_mut(stream) {
+            rows.truncate(len);
+        }
     }
 
     pub fn rows_of(&self, stream: &str) -> Vec<StoredEvent> {
@@ -335,6 +347,11 @@ impl Store for Journal {
         if fault == Some(Fault::Unavailable) {
             return AppendOutcome::Unavailable;
         }
+        if fault == Some(Fault::Fenced) {
+            return AppendOutcome::Fenced {
+                current_epoch: epoch.saturating_add(1),
+            };
+        }
         if fault == Some(Fault::Invalid) {
             return AppendOutcome::Invalid {
                 draft: 0,
@@ -416,6 +433,14 @@ struct Books {
     account_wide: Option<bool>,
     /// Whether every close-position's answer is lost after the close takes effect.
     lose_closes: bool,
+    /// Requests refused with this HTTP status before they reach the books, as the Alpaca connector
+    /// answers them: a `401` as an unknown outcome, `Unauthorized` (connections spec §5.4), and any
+    /// other status as a rejection.
+    refuse_with: Option<(u16, usize)>,
+    /// The status every account read is refused with from now on, every other request answered.
+    refuse_account: Option<u16>,
+    /// Whether the broker says it runs no later permission checks, as one not built yet.
+    no_later_checks: bool,
     sequence: u64,
 }
 
@@ -543,6 +568,21 @@ impl Paper {
         self.books.borrow_mut().lose_answers = n;
     }
 
+    /// The broker says it runs no later permission checks from now on (DEC-2840).
+    pub fn without_later_checks(&self) {
+        self.books.borrow_mut().no_later_checks = true;
+    }
+
+    /// Every account read from now on is refused with `status`; every other request is answered.
+    pub fn refuse_account_with(&self, status: u16) {
+        self.books.borrow_mut().refuse_account = Some(status);
+    }
+
+    /// The next `n` requests are refused with `status`, and nothing they asked takes effect.
+    pub fn refuse_next_with(&self, status: u16, n: usize) {
+        self.books.borrow_mut().refuse_with = Some((status, n));
+    }
+
     /// Every cancel-all and close-position is accepted from now on. Each close is an order of the
     /// broker's own that names no client order id, for the whole position: if `closes_fill`, it
     /// sells it at once, else it works until [`Paper::expire_closes`].
@@ -572,6 +612,23 @@ impl Broker for Paper {
         mandate_alpaca::alpaca_profile()
     }
 
+    fn has_later_checks(&self) -> bool {
+        !self.books.borrow().no_later_checks
+    }
+
+    /// The paper Alpaca connection's own later checks (DEC-2840), as the process's Alpaca broker
+    /// runs them.
+    fn later_check(
+        &self,
+        connection: ConnectionId,
+        occasion: Occasion,
+        account: AccountRead,
+    ) -> Option<Result<CheckReport, &'static str>> {
+        Some(mandate_executord::connect::alpaca_report(
+            connection, occasion, account,
+        ))
+    }
+
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         if self.journal.crashed() {
             return Err(ConnectorError::NotSent { code: "crashed" });
@@ -591,6 +648,28 @@ impl Broker for Paper {
             journaled_first,
             appended: self.journal.appends(),
         });
+        if let Some((status, left)) = books.refuse_with
+            && left > 0
+        {
+            books.refuse_with = Some((status, left.saturating_sub(1)));
+            if status == 401 {
+                return Err(ConnectorError::Unknown(BrokerUnknown::Unauthorized));
+            }
+            return Ok(BrokerOutcome::Rejected(BrokerReject {
+                client_order_id: None,
+                http_status: status,
+                code: None,
+                message: "refused".to_owned(),
+            }));
+        }
+        if let (Some(status), BrokerRequest::GetAccount) = (books.refuse_account, request) {
+            return Ok(BrokerOutcome::Rejected(BrokerReject {
+                client_order_id: None,
+                http_status: status,
+                code: None,
+                message: "refused".to_owned(),
+            }));
+        }
         let outcome = answer(&mut books, request)?;
         if books.lose_closes && matches!(request, BrokerRequest::ClosePosition(..)) {
             return Err(ConnectorError::Unknown(BrokerUnknown::Timeout));
@@ -843,6 +922,7 @@ pub fn wired(
         protections,
         quotes: Box::new(NoQuotes),
         marked: Box::new(NoMarks),
+        risk: Box::new(Unopened),
     })
 }
 

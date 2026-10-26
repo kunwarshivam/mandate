@@ -1,0 +1,2 @@
+- **E2-10 Narrow the news reader's Postgres role to the control stream's instrument snapshots (hardening, DEC-2280 item 1).** The news reader reads only `ConfigSnapshotRegistered` rows of kind `instrument_snapshot` from the workspace's control stream, but its role can read the whole stream. Give it a view or row policy that admits only those rows, and test that it reads no other.
+<!-- section: E2 Market data -->

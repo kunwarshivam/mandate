@@ -2,7 +2,9 @@
 
 mod research;
 
-pub use research::{ArtifactSink, ResearchParts, ResearchSource, ResearchWiring, ResearchWorker};
+pub use research::{
+    ArtifactSink, ContextUnread, ResearchParts, ResearchSource, ResearchWiring, ResearchWorker,
+};
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -21,7 +23,7 @@ use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::UtcNanos;
 
-use crate::models::{Models, fresh, inputs};
+use crate::models::{Models, Streams, fresh, inputs};
 
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -81,8 +83,9 @@ pub struct Config {
     pub liveness: Duration,
 }
 
-/// An owner alert the core asked for, after the draft it names committed: a fixed key and an opaque
-/// event id, nothing else (`AGENTS.md` rule 6).
+/// An alert a pass raises: an owner alert the core asked for, after the draft it names committed,
+/// or an operator alert of the process. A fixed key and, as its subject, at most an opaque event id
+/// or a fixed reason code, nothing else (`AGENTS.md` rule 6).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Alert {
     pub key: &'static str,
@@ -489,8 +492,13 @@ impl<S: Store> RuntimeProcess<S> {
         let Some(rows) = self.agent.clone().and_then(|agent| self.store.rows(&agent)) else {
             return Vec::new();
         };
+        let control = self.control.as_ref().and_then(|c| self.store.rows(c));
+        let streams = Streams {
+            control: control.as_deref(),
+            agent: &rows,
+        };
         let evaluated = match &self.wiring.models {
-            Some(wired) => wired.models.evaluate(at),
+            Some(wired) => wired.models.evaluate(at, streams),
             None => Vec::new(),
         };
         let Ok(new) = fresh(&rows, evaluated) else {

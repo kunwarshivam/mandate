@@ -434,7 +434,10 @@ the spec invariants (DP-n) its tests cover.
     precondition), it writes it only when the account stream's fold shows no position attributed to
     the agent and no working order of its own (every non-terminal trading §5.7 state); a release
     cancels every working order of the agent's first, and a retirement waiting 24 hours raises
-    `retirement_held`, then each 24 hours. The deployment manager stops the
+    `retirement_held`, then each 24 hours: the runtime writes that alert's cause, `RetirementHeld`
+    (journal spec v0.79 §9.34, [DEC-2352](decisions/DEC-2352.md) item 5), with its
+    `OwnerAlertSent` as the next row of its batch, under rules 265 and 266, which `mandate-journal`
+    already enforces (#2697; E8-17). The deployment manager stops the
     runtime, and the account's last executor, on that record alone. Nothing writes it for an agent
     that ran today, so this lands with that writer. *Accepted when:* a property test over random
     sequences of fills, exits, protective cancels, releases, `Unknown` orders and Stops shows no
@@ -1452,6 +1455,10 @@ after U-A1 to U-A5 are recorded.
     its `OwnerAlertSent` as the next row, one sequence per agent, none after the retirement ends
     (`AgentStopped`, a resume, a version applied), the next period after downtime, and none twice
     across a restart.
+  - Status (2026-10-26): done are the kinds (#2676), the manager's `kill_switch_unapplied`
+    (#2690), `RetirementHeld`'s schema with rules 265 and 266 (#2697), and the verifier's
+    `retirement_held_silent` (DEC-2835). Left: the runtime's writer, which waits on E6-5's retirement of an
+    agent that still holds something (DEC-2344 item 2).
 
 ### E9 Identity, tenancy, and policy
 

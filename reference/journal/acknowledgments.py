@@ -59,7 +59,10 @@ THIRD = "user_owner_03"
 CLIENT = {"kind": "client", "id": "client_01", "version": "1", "build": None, "on_behalf_of": REQUESTER}
 T0 = 1792339200
 WINDOW = 300
-METHODS = ("cli_confirm",)
+METHODS = ("cli_confirm", "passkey")
+"""Paper's methods: `cli_confirm` and `passkey` (identity spec §6.1, §7.3; DEC-2523)."""
+LIVE_METHODS = ("passkey",)
+"""Live's methods off the founder's own connection: `passkey` only (identity spec §6.1, §7.3)."""
 LIMIT = "max_daily_loss"
 OTHER_LIMIT = "drawdown_ladder[0]"
 MANDATE_VERSION = "sha256:" + "7" * 64
@@ -373,7 +376,7 @@ def member_drafts() -> list[dict]:
             invalid("step_up.method.empty", "§9.7's step-up: text is non-empty", base, [change(f"{step_up}.method", "")], "non_canonical", f"{step_up}.method"),
             invalid("step_up.extra", "§9.7's step-up is closed", base, [change(f"{step_up}.subject", REQUESTER)], "schema", f"{step_up}.subject"),
             invalid("step_up.missing_member", "§9.7's step-up: every member", base, [delete(f"{step_up}.method")], "schema", f"{step_up}.method"),
-            invalid("at_version_2", "§9.28: schema version 1 only", base, [change("schema_version", 2)], "unknown_schema", "payload"),
+            invalid("at_version_3", "§9.28: schema versions 1 and 2 only (v0.102)", base, [change("schema_version", 3)], "unknown_schema", "payload"),
             invalid("on_an_agent_stream", "§9 rows: control and account streams only", base, [change("stream_id", AGENT_STREAM)], "wrong_stream", "event_type"),
             invalid("by_a_client", "rule 83: a client never acknowledges (identity ID-11)", base, [change("actor", dict(CLIENT))], "schema", "actor.kind"),
         ]
@@ -575,10 +578,15 @@ def spent_before(control: list[dict], skip: frozenset[str]) -> dict[str, set[str
     return out
 
 
-def methods_for(environment: str, founder_connection: bool) -> tuple:
-    """Mandate spec §6.1's methods: `cli_confirm` in `paper`, and in `live` only on the founder's
-    own connection (DEC-529 item 3), which a case states as an input as it states the overlay."""
-    return METHODS if environment == "paper" or founder_connection else ()
+def methods_for(environment: str, founder_connection: bool, skip: frozenset[str] = frozenset()) -> tuple:
+    """The methods §9.28 check 3 allows (v0.106, DEC-2523): `passkey` in every environment, as
+    identity spec §6.1 and §7.3 allow it, and `cli_confirm` in `paper`, and in `live` only on the
+    founder's own connection (DEC-529 item 3, DEC-923), which a case states as an input as it states
+    the overlay."""
+    passkey = () if "executor.3.passkey" in skip else LIVE_METHODS
+    if environment == "paper" or founder_connection:
+        return ("cli_confirm", *passkey)
+    return passkey
 
 
 def judge(
@@ -679,7 +687,7 @@ def judge_streams(case: dict, skip: frozenset[str] = frozenset()) -> list[dict]:
     account = case["account"]
     if "executor.4.order" in skip:
         account = [{**r, "_later": account[i + 1 :]} for i, r in enumerate(account)]
-    methods = methods_for(case["environment"], case["founder_connection"])
+    methods = methods_for(case["environment"], case["founder_connection"], skip)
     return judge(case["control"], account, case["overlay_independent"], skip, methods)
 
 
@@ -715,7 +723,8 @@ def oracle(
             return "step_up_stale"
         if assertion_spent(original_id, step_up["assertion_id"]):
             return "step_up_reused"
-        if step_up["method"] != "cli_confirm" or (environment == "live" and not founder_connection):
+        cli_allowed = environment == "paper" or founder_connection
+        if not (step_up["method"] == "passkey" or (step_up["method"] == "cli_confirm" and cli_allowed)):
             return "step_up_method"
         return None
 
@@ -870,6 +879,12 @@ def executor_cases() -> list[dict]:
              [own], [trig, cp(own)], ["step_up_method"], environment="live"),
         case("live_on_the_founder_connection", "check 3: `cli_confirm` on the founder's own live connection (DEC-529 item 3)",
              [own], [trig, cp(own)], ["lift"], environment="live", founder=True),
+        case("passkey_in_paper", "check 3: `passkey` in paper (v0.106, DEC-2523)",
+             [plain(step_up=evidence("assert_pk_paper", T0 + 50, "passkey"))],
+             [trig, cp(plain(step_up=evidence("assert_pk_paper", T0 + 50, "passkey")))], ["lift"]),
+        case("passkey_in_live", "check 3: `passkey` in live, off the founder's connection (v0.106, DEC-2523)",
+             [plain(step_up=evidence("assert_pk_live", T0 + 50, "passkey"))],
+             [trig, cp(plain(step_up=evidence("assert_pk_live", T0 + 50, "passkey")))], ["lift"], environment="live"),
         case("request_step_up_stale", "check 4: the request's step-up, judged at its own `submitted_at`",
              [requested(step_up=evidence("assert_req_old", T0 - 301)), ack],
              [trig, cp(requested(step_up=evidence("assert_req_old", T0 - 301))), cp(ack)], ["request_invalid"]),
@@ -984,7 +999,7 @@ def fuzz_streams(rng: random.Random, run: int) -> tuple[list[dict], list[dict], 
         kind = opening[n] if n < len(opening) else rng.choice(("trigger", "trigger", "lift", "request", "request", "ack", "ack", "ack", "command", "copy", "copy", "copy"))
         assertion = rng.choice(assertions) if rng.random() < 0.3 else f"assert_r{run}_{clock}"
         offset = rng.choice((0, 10, 10, 10, 300, 301, -1))
-        step_up = evidence(assertion, clock - offset, "password" if rng.random() < 0.1 else "cli_confirm")
+        step_up = evidence(assertion, clock - offset, "password" if rng.random() < 0.1 else rng.choice(METHODS))
         if kind == "trigger":
             tid = fresh("TG")
             trigger_ids.append(tid)
@@ -1212,6 +1227,7 @@ VALIDATOR_MUTANTS = (
     "executor.3.method",
     "executor.3.at_submission",
     "executor.3.live",
+    "executor.3.passkey",
     "executor.reuse",
     "executor.reuse.requests",
     "executor.reuse.commands",

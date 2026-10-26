@@ -14,6 +14,7 @@ use mandate_process::{Input, Kind, Lifecycle, Snapshot, State};
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 
+use crate::credential::CREDENTIAL_LOST;
 use crate::establish::{Establishment, GateReport, OpeningGate, pass, read_establishment};
 use crate::follow::agents_of;
 use crate::run::Run;
@@ -188,6 +189,9 @@ fn serve_with<S: Store, B: Broker>(
     loop {
         let stop = tick(now());
         let stopping = stop.is_some() || terminated();
+        if stop == Some(CREDENTIAL_LOST) {
+            process.credential_lost(now());
+        }
         if stopping {
             process.drain(now());
         }

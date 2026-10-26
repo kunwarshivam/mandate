@@ -23,6 +23,7 @@ use mandate_executord::deployment::{BrokerFacts, Deployment, LiquidityRead, Sour
 use mandate_executord::gate::{AccountRules, AssetRecord, Liquidity};
 use mandate_executord::marks::Marked;
 use mandate_executord::quotes::QuoteFeed;
+use mandate_executord::risk::RiskOpenings;
 use mandate_executord::{Broker, Protections};
 use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, StreamId};
 use mandate_marketdata::dataset::Store as Datasets;
@@ -54,7 +55,9 @@ const DEMO_FEE: &str = include_str!("../../../deploy/cell/demo/fee-config.json")
 const DEMO_CALENDAR: &str = include_str!("../../../deploy/cell/demo/trading-calendar.json");
 const DEMO_RULES: &str = include_str!("../../../deploy/cell/demo/rule-set.json");
 const DEMO_SNAPSHOT: &str = include_str!("../../../deploy/cell/demo/instrument.json");
-const DEMO_MODEL: &str = "cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d";
+const RESEARCH_MANDATE: &str = include_str!("../../../deploy/cell/demo/research-mandate.json");
+const LLM_CONTENT: &str =
+    r#"{"kind":"research_model_content","model_id":"llm.research_agent","model_version":"0.1.0"}"#;
 const ENVELOPE: &str = "autonomy behavior capital connection_id environment goal name notifications protection risk universe";
 /// Monday 12:00 in New York, inside the regular session.
 const MONDAY: &str = "2026-09-21T16:00:00Z";
@@ -63,6 +66,25 @@ type Artifacts = BTreeMap<Digest, Vec<u8>>;
 
 fn json(text: &str) -> Result<Value, Error> {
     Ok(mandate_canon::parse(text.as_bytes())?)
+}
+
+/// The content hash, without its `sha256:` prefix, that `mandate`'s signal model `id` names, read
+/// from the checked-in document so a recomputed hash there (as #2653's) never leaves a pinned copy
+/// here stale.
+fn model_hash(mandate: &str, id: &str) -> Result<String, Error> {
+    let document = json(mandate)?;
+    document
+        .get("behavior")
+        .and_then(|behavior| behavior.get("signal_models"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|model| model.get("id").and_then(Value::as_str) == Some(id))
+        .and_then(|model| model.get("content_hash"))
+        .and_then(Value::as_str)
+        .and_then(|hash| hash.strip_prefix("sha256:"))
+        .map(str::to_owned)
+        .ok_or_else(|| format!("the mandate names no content hash for {id}").into())
 }
 
 fn reference(bytes: &[u8]) -> String {
@@ -82,6 +104,7 @@ struct Variant {
     retired_loss: Option<&'static str>,
     max_order: Option<&'static str>,
     demo: bool,
+    research: bool,
 }
 
 /// The account's journal with the agent's SPY mandate registered, created, confirmed and deployed
@@ -116,10 +139,31 @@ fn deployed_as(variant: Variant) -> Result<(Journal, Artifacts, String), Error> 
         )?;
     }
     let mut store = Artifacts::new();
-    let mandate = if variant.demo {
+    let mandate = if variant.research {
+        RESEARCH_MANDATE
+            .replace("conn_demo_research_paper_01", CONNECTION)
+            .replace(
+                &model_hash(RESEARCH_MANDATE, "quant.ma_crossover")?,
+                &Digest::of(CONTENT.as_bytes()).to_hex(),
+            )
+            .replace(
+                &model_hash(RESEARCH_MANDATE, "llm.research_agent")?,
+                &Digest::of(LLM_CONTENT.as_bytes()).to_hex(),
+            )
+            .replace(
+                r#""max_order_usd":"300""#,
+                &format!(
+                    r#""max_order_usd":"{}""#,
+                    variant.max_order.unwrap_or("300")
+                ),
+            )
+    } else if variant.demo {
         DEMO_MANDATE
             .replace("conn_demo_paper_01", CONNECTION)
-            .replace(DEMO_MODEL, &Digest::of(CONTENT.as_bytes()).to_hex())
+            .replace(
+                &model_hash(DEMO_MANDATE, "quant.ma_crossover")?,
+                &Digest::of(CONTENT.as_bytes()).to_hex(),
+            )
     } else {
         MANDATE.to_owned()
     };
@@ -162,6 +206,15 @@ fn deployed_as(variant: Variant) -> Result<(Journal, Artifacts, String), Error> 
             put(&mut store, CONTENT)
         ),
     )];
+    if variant.research {
+        payloads.push((
+            "ConfigSnapshotRegistered",
+            format!(
+                r#"{{"admits_instruments":true,"content_hash":"{}","kind":"model_version","model_id":"llm.research_agent","model_version":"0.1.0","params":[]}}"#,
+                put(&mut store, LLM_CONTENT)
+            ),
+        ));
+    }
     let configs = if variant.demo {
         [DEMO_FEE, DEMO_CALENDAR, DEMO_RULES, DEMO_SNAPSHOT]
     } else {
@@ -571,6 +624,39 @@ fn a_traded_account_holds_the_opening() -> Result<(), Error> {
             ("side", text("buy")),
         ])?,
     )?;
+    let (deployment, _) = deployment(&journal, store);
+    assert!(opening(&deployment)?.is_none());
+    Ok(())
+}
+
+/// A traded account that is flat again, its counters read, is still held until the account risk
+/// view's snapshot is wired into the gate: the allocation is no longer the agent's equity
+/// (DEC-2833 item 2).
+#[test]
+fn a_traded_flat_account_is_held_until_its_risk_is_read() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    let text = |value: &str| Value::Str(value.to_owned());
+    for (id, fill, side) in [("a4", "f1", "buy"), ("a5", "f2", "sell")] {
+        journal.write(
+            ACCOUNT_STREAM,
+            id,
+            "FillApplied",
+            2,
+            None,
+            object(vec![
+                ("client_order_id", Value::Null),
+                ("fees", Value::Array(Vec::new())),
+                ("fill_id", text(fill)),
+                ("instrument_id", text(SPY)),
+                ("price", text("500")),
+                ("qty_gross", text("1")),
+                ("risk_clock", text("2026-09-21T16:00:00.000000000Z")),
+                ("side", text(side)),
+                ("trade_date", text("2026-09-21")),
+            ])?,
+        )?;
+    }
     let (deployment, _) = deployment(&journal, store);
     assert!(opening(&deployment)?.is_none());
     Ok(())
@@ -1021,8 +1107,8 @@ fn unread_answers_nothing() -> Result<(), Error> {
     Ok(())
 }
 
-/// The wiring the deployment replaces answers the binding gate from it: with every fact read,
-/// the untraded agent's opening reaches the gate.
+/// The wiring the deployment replaces answers the binding gate and the risk book's openings from
+/// it: with every fact read, the untraded agent's opening reaches the gate, and its fold opens.
 #[test]
 fn the_wired_gate_reads_the_deployment() -> Result<(), Error> {
     let (journal, store, _) = deployed()?;
@@ -1046,6 +1132,18 @@ fn the_wired_gate_reads_the_deployment() -> Result<(), Error> {
             .gate
             .input(&request(&agent, &spy, Purpose::Open, Side::Buy)?)
             .is_some()
+    );
+    assert!(
+        wiring
+            .risk
+            .opening(
+                &agent,
+                &journal.rows_of(CONTROL_STREAM),
+                Usd::parse("25000")?,
+                Date::parse("2026-09-21")?,
+            )
+            .is_some(),
+        "the wired risk book opens the agent's fold from the deployment"
     );
     Ok(())
 }
@@ -1341,6 +1439,9 @@ type LoopProcess = mandate_executord::ExecutorProcess<
 fn trade_loop(variant: Variant) -> Result<(Journal, LoopProcess, FixturePaper), Error> {
     let (journal, store, _) = deployed_as(variant)?;
     journaled(&journal)?;
+    if variant.research {
+        thesis(&journal, "th-1", SPY, None, "2026-09-21T20:00:00Z")?;
+    }
     let paper = mandate_executord::paper::FixturePaper::filling(at(MONDAY)?).quoting(wall_clock);
     let broker = mandate_executord::alpaca::AlpacaBroker::new(paper.clone())?;
     let rows = journal.clone();
@@ -1501,5 +1602,595 @@ fn a_store_outage_keeps_the_ticker_map_a_cold_start_maps_nothing() -> Result<(),
         named_position("SPY")?,
         "nothing read, nothing mapped"
     );
+    Ok(())
+}
+
+/// The research agent's deployment, with the account journaled at `MONDAY`.
+fn research() -> Result<(Journal, Artifacts), Error> {
+    let (journal, store, _) = deployed_as(Variant {
+        research: true,
+        ..Variant::default()
+    })?;
+    journaled(&journal)?;
+    Ok((journal, store))
+}
+
+/// A thesis record on the agent's stream (journal spec §9.4), with the members the replay reads:
+/// admitted when `refused` is `None`, expiring at `expires`.
+fn thesis(
+    journal: &Journal,
+    id: &str,
+    instrument: &str,
+    refused: Option<&str>,
+    expires: &str,
+) -> Result<(), Error> {
+    let (admitted, reason) = match refused {
+        None => (Value::Bool(true), Value::Null),
+        Some(code) => (Value::Bool(false), text(code)),
+    };
+    journal.write(
+        &support::agent_stream(AGENT),
+        id,
+        "ThesisProposed",
+        1,
+        None,
+        object(vec![
+            ("admitted", admitted),
+            ("expires_at", text(expires)),
+            ("instrument_id", text(instrument)),
+            ("lineage_id", text(id)),
+            ("reason", reason),
+            (
+                "revision",
+                Value::Int(mandate_canon::Int::new(0).ok_or("an int")?),
+            ),
+            ("thesis_id", text(id)),
+        ])?,
+    )
+}
+
+/// What the deployment answers for SPY, as `(covers, opening answered, protected, fill refs,
+/// marked, named by asset id)`.
+fn answers(deployment: &Deployment) -> Result<(bool, bool, bool, bool, bool, bool), Error> {
+    let (agent, spy) = (agent(), spy()?);
+    let named = mandate_executord::Broker::call(
+        &mut mandate_executord::deployment::Named::new(Positioned, Some(deployment.clone())),
+        &BrokerRequest::ListPositions,
+    )?;
+    Ok((
+        deployment.covers(&agent, &spy),
+        opening(deployment)?.is_some(),
+        matches!(
+            deployment.protection(&agent, &spy, Price::parse("100")?),
+            Ok(Some(_))
+        ),
+        deployment.fill_refs(&spy).is_some(),
+        deployment.instruments().contains(&spy),
+        named
+            == BrokerOutcome::Positions(vec![mandate_executor::BrokerPosition {
+                instrument: spy.clone(),
+                qty: SignedQty::parse("1")?,
+                avg_entry_price: Price::parse("100")?,
+            }]),
+    ))
+}
+
+/// A broker holding one SPY share, named by its ticker.
+struct Positioned;
+
+impl mandate_executord::Broker for Positioned {
+    fn profile(&self) -> Result<mandate_domain::CapabilityProfile, mandate_domain::ProfileError> {
+        mandate_alpaca::alpaca_profile()
+    }
+
+    fn call(
+        &mut self,
+        _request: &BrokerRequest,
+    ) -> Result<BrokerOutcome, mandate_executor::ConnectorError> {
+        Ok(BrokerOutcome::Positions(vec![
+            mandate_executor::BrokerPosition {
+                instrument: InstrumentId::new("SPY")
+                    .map_err(|_| mandate_executor::ConnectorError::NotSent { code: "fixture" })?,
+                qty: SignedQty::parse("1")
+                    .map_err(|_| mandate_executor::ConnectorError::NotSent { code: "fixture" })?,
+                avg_entry_price: Price::parse("100")
+                    .map_err(|_| mandate_executor::ConnectorError::NotSent { code: "fixture" })?,
+            },
+        ]))
+    }
+}
+
+/// DEC-2819 item 2: a research agent's instrument is one its admission admitted. With SPY admitted
+/// and its thesis surviving, the opening is covered, protected and answered, SPY is marked, its
+/// fills priced and the broker's SPY read as its asset id; with no thesis, nothing is the agent's.
+#[test]
+fn a_research_agent_trades_only_what_its_admission_admitted() -> Result<(), Error> {
+    let (journal, store) = research()?;
+    let (deployment, _) = self::deployment(&journal, store.clone());
+    assert_eq!(
+        answers(&deployment)?,
+        (false, false, false, false, false, false),
+        "no thesis, nothing the agent's"
+    );
+    let (journal, store) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    let (deployment, _) = self::deployment(&journal, store);
+    assert_eq!(
+        answers(&deployment)?,
+        (true, true, true, true, true, true),
+        "SPY admitted and its thesis surviving"
+    );
+    assert!(
+        deployment.version(&agent()).is_some(),
+        "the deployed version"
+    );
+    Ok(())
+}
+
+/// A refused thesis admits nothing: its instrument is not the agent's.
+#[test]
+fn a_refused_thesis_admits_nothing() -> Result<(), Error> {
+    let (journal, store) = research()?;
+    thesis(
+        &journal,
+        "th-1",
+        SPY,
+        Some("eligibility_floor"),
+        "2026-09-21T18:00:00Z",
+    )?;
+    let (deployment, _) = self::deployment(&journal, store);
+    assert_eq!(
+        answers(&deployment)?,
+        (false, false, false, false, false, false)
+    );
+    Ok(())
+}
+
+/// A thesis that ended, by expiry or by invalidation, ends openings at once, and never what an
+/// exit, a fill or a mark reads: SPY stays priced, marked and named by its asset id.
+#[test]
+fn an_ended_thesis_holds_openings_and_keeps_exits() -> Result<(), Error> {
+    for end in ["expired", "invalidated"] {
+        let (journal, store) = research()?;
+        thesis(&journal, "th-1", SPY, None, "2026-09-21T16:30:00Z")?;
+        let (deployment, _) = self::deployment(&journal, store);
+        assert!(answers(&deployment)?.0, "{end}: covered while it survives");
+        if end == "expired" {
+            tick(&journal, "t-end", "2026-09-21T16:30:00Z")?;
+            journaled_at(&journal, "e", "2026-09-21T16:30:00.000000000Z")?;
+        } else {
+            journal.write(
+                &support::agent_stream(AGENT),
+                "inv-1",
+                "ThesisInvalidated",
+                1,
+                None,
+                object(vec![("thesis_id", text("th-1"))])?,
+            )?;
+        }
+        assert_eq!(
+            answers(&deployment)?,
+            (false, false, false, true, true, true),
+            "{end}: openings end, exits keep what they read"
+        );
+    }
+    Ok(())
+}
+
+/// An agent stream the replay cannot read holds openings and keeps what exits read from the last
+/// replay that read.
+#[test]
+fn an_unreadable_thesis_record_holds_openings_and_keeps_exits() -> Result<(), Error> {
+    let (journal, store) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    let (deployment, _) = self::deployment(&journal, store);
+    assert!(answers(&deployment)?.0);
+    journal.write(
+        &support::agent_stream(AGENT),
+        "bad-1",
+        "ThesisProposed",
+        1,
+        None,
+        object(vec![("thesis_id", text("th-2"))])?,
+    )?;
+    assert_eq!(
+        answers(&deployment)?,
+        (false, false, false, true, true, true)
+    );
+    Ok(())
+}
+
+/// Passes every five seconds from `from` to before `to` seconds after `MONDAY`, each after its
+/// tick, and every alert they raised.
+fn passes(
+    journal: &Journal,
+    process: &mut LoopProcess,
+    (from, to): (u32, u32),
+) -> Result<Vec<mandate_executord::Alert>, Error> {
+    let mut alerts = Vec::new();
+    for second in (from..to).step_by(5) {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(journal, &format!("tp{second}"), &now)?;
+        alerts.extend(process.step(at(&now)?));
+    }
+    Ok(alerts)
+}
+
+/// An `IntentProposed` of `qty` SPY, `side`, limit `limit`, for `purpose`, on the agent's stream.
+fn proposed(
+    journal: &Journal,
+    id: &str,
+    side: &str,
+    limit: &str,
+    purpose: &str,
+) -> Result<(), Error> {
+    journal.write(
+        &support::agent_stream(AGENT),
+        id,
+        "IntentProposed",
+        1,
+        Some("decision"),
+        object(vec![
+            ("instrument_id", text(SPY)),
+            ("limit_price", text(limit)),
+            ("purpose", text(purpose)),
+            ("qty", text("1")),
+            ("side", text(side)),
+            ("tif", text("day")),
+            ("type", text("limit")),
+        ])?,
+    )
+}
+
+/// DEC-2819 item 4, the research workspace's trade loop: the research agent's first opening, on its
+/// admitted SPY while the account is untraded, is gated, filled and protected; a second opening
+/// once the account has traded is held, named `opening_held`; and once the thesis is invalidated,
+/// the runtime's thesis exit sells the position through the executor.
+#[test]
+fn a_research_agent_opens_once_then_holds_and_its_thesis_exit_sells() -> Result<(), Error> {
+    let (journal, mut process, _paper) = trade_loop(Variant {
+        research: true,
+        max_order: Some("1000"),
+        ..Variant::default()
+    })?;
+    passes(&journal, &mut process, (5, 60))?;
+    let buys: Vec<_> = journal
+        .payloads("FillApplied")
+        .into_iter()
+        .filter(|p| p.get("side").and_then(Value::as_str) == Some("buy"))
+        .collect();
+    assert_eq!(buys.len(), 1, "{:?}", journal.types(ACCOUNT_STREAM));
+    proposed(
+        &journal,
+        "01JINTENT0000000000000000B",
+        "buy",
+        "580.13",
+        "open",
+    )?;
+    let alerts = passes(&journal, &mut process, (60, 120))?;
+    assert!(
+        alerts.iter().any(|alert| alert.key == "opening_held"
+            && alert.subject.as_deref() == Some("01JINTENT0000000000000000B")),
+        "the second opening is held, named: {alerts:?}"
+    );
+    journal.write(
+        &support::agent_stream(AGENT),
+        "inv-1",
+        "ThesisInvalidated",
+        1,
+        None,
+        object(vec![("thesis_id", text("th-1"))])?,
+    )?;
+    proposed(
+        &journal,
+        "01JINTENT0000000000000000C",
+        "sell",
+        "580.11",
+        "discretionary_exit",
+    )?;
+    let before = journal.types(ACCOUNT_STREAM).len();
+    passes(&journal, &mut process, (120, 240))?;
+    let types = journal.types(ACCOUNT_STREAM);
+    let exit: Vec<&String> = types
+        .iter()
+        .skip(before)
+        .filter(|kind| *kind != "MarkUpdated" && *kind != "ReconciliationRun")
+        .collect();
+    let member = |kind: &str, name: &str| -> Vec<String> {
+        journal
+            .payloads(kind)
+            .iter()
+            .filter_map(|p| p.get(name).and_then(Value::as_str).map(str::to_owned))
+            .collect()
+    };
+    assert_eq!(
+        member("IntentReceived", "purpose"),
+        ["open", "discretionary_exit"],
+        "the held second opening was never received"
+    );
+    assert_eq!(
+        member("OrderRequestRecorded", "purpose"),
+        ["open", "discretionary_exit"]
+    );
+    assert_eq!(
+        member("ProtectionChanged", "action"),
+        [
+            "intended",
+            "placed",
+            "unprotected_start",
+            "cancelled",
+            "unprotected_end"
+        ],
+        "the exit cancels the bracket's protection before it sells (§5.4)"
+    );
+    let sells = journal
+        .payloads("FillApplied")
+        .into_iter()
+        .filter(|p| p.get("side").and_then(Value::as_str) == Some("sell"))
+        .count();
+    assert_eq!(sells, 1, "the thesis exit sold the position: {exit:?}");
+    Ok(())
+}
+
+/// A record that cannot be read never takes a held instrument from exits, on a cold start too: the
+/// deployment first read after it still prices, marks and names SPY, while openings hold.
+#[test]
+fn an_unreadable_thesis_record_on_a_cold_start_keeps_exits() -> Result<(), Error> {
+    let (journal, store) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    journal.write(
+        &support::agent_stream(AGENT),
+        "bad-1",
+        "ThesisProposed",
+        1,
+        None,
+        object(vec![("thesis_id", text("th-2"))])?,
+    )?;
+    let (deployment, _) = self::deployment(&journal, store);
+    assert_eq!(
+        answers(&deployment)?,
+        (false, false, false, true, true, true)
+    );
+    Ok(())
+}
+
+/// A thesis that ends between the scheduler's tick and the binding instant holds the opening: the
+/// tick still reads SPY covered, the gate, at the account's later instant, answers none.
+#[test]
+fn a_thesis_ending_before_the_binding_instant_holds_the_opening() -> Result<(), Error> {
+    let (journal, store) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T16:00:30Z")?;
+    journaled_at(&journal, "late", "2026-09-21T16:00:40.000000000Z")?;
+    let (deployment, _) = self::deployment(&journal, store);
+    assert!(
+        deployment.covers(&agent(), &spy()?),
+        "at the tick the thesis survives"
+    );
+    assert!(
+        opening(&deployment)?.is_none(),
+        "at the binding instant it has ended"
+    );
+    Ok(())
+}
+
+/// Two surviving theses on two instruments name no one instrument the agent may open: it holds.
+#[test]
+fn two_surviving_instruments_hold_the_opening() -> Result<(), Error> {
+    let (journal, store) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    thesis(
+        &journal,
+        "th-2",
+        "eb82ffb0-efd6-4f4e-9307-8fead28e04f6",
+        None,
+        "2026-09-21T18:00:00Z",
+    )?;
+    let (deployment, _) = self::deployment(&journal, store);
+    assert!(!deployment.covers(&agent(), &spy()?));
+    assert!(opening(&deployment)?.is_none());
+    Ok(())
+}
+
+/// A research instrument is opened only through its own latest snapshot's DEC-523 checks, which the
+/// model composer does not repeat (DEC-2827 item 2): a later SPY snapshot of a leveraged ETP, its
+/// object in the store, holds every opening, so a snapshot that fails can only hold, never open;
+/// exits keep SPY as it last resolved.
+#[test]
+fn a_research_instrument_whose_latest_snapshot_fails_dec_523_only_holds() -> Result<(), Error> {
+    let (journal, mut store) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    let leveraged = DEMO_SNAPSHOT
+        .trim()
+        .replace(r#""etp":"plain""#, r#""etp":"leveraged""#);
+    assert_ne!(
+        leveraged,
+        DEMO_SNAPSHOT.trim(),
+        "the snapshot names its ETP class"
+    );
+    let hash = put(&mut store, &leveraged);
+    let (deployment, _) = self::deployment(&journal, store);
+    assert_eq!(answers(&deployment)?, (true, true, true, true, true, true));
+    journal.write(
+        CONTROL_STREAM,
+        "snap-2",
+        "ConfigSnapshotRegistered",
+        1,
+        None,
+        json(&format!(
+            r#"{{"admits_instruments":null,"content_hash":"{hash}","kind":"instrument_snapshot","model_id":null,"model_version":null,"params":[]}}"#
+        ))?,
+    )?;
+    assert_eq!(
+        answers(&deployment)?,
+        (false, false, false, true, true, true),
+        "the failing snapshot holds openings; exits keep SPY as it last resolved"
+    );
+    Ok(())
+}
+
+/// An instrument that no longer resolves once the control stream grows holds its openings: a
+/// later SPY snapshot registered with no object in the store leaves the version read but SPY
+/// unresolved, so the opening is never answered from the resolution of the shorter stream,
+/// while exits keep it as it last resolved.
+#[test]
+fn an_instrument_that_no_longer_resolves_holds_openings_and_keeps_exits() -> Result<(), Error> {
+    let (journal, store) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    let (deployment, _) = self::deployment(&journal, store);
+    assert_eq!(answers(&deployment)?, (true, true, true, true, true, true));
+    journal.write(
+        CONTROL_STREAM,
+        "snap-2",
+        "ConfigSnapshotRegistered",
+        1,
+        None,
+        json(&format!(
+            r#"{{"admits_instruments":null,"content_hash":"sha256:{}","kind":"instrument_snapshot","model_id":null,"model_version":null,"params":[]}}"#,
+            "9".repeat(64)
+        ))?,
+    )?;
+    assert_eq!(
+        answers(&deployment)?,
+        (false, false, false, true, true, true),
+        "openings hold on the longer stream; exits keep SPY as it last resolved"
+    );
+    Ok(())
+}
+
+/// DEC-2804 item 2: the deployment opens its agent's risk fold on the reviewed instrument, its
+/// class and its quote staleness, with the connection's loss carry, its version validated on the
+/// equity it is handed over the control rows it is handed: an equity below the allocation fails
+/// V-002 and opens none, and so does an agent the rows do not deploy.
+#[test]
+fn the_deployment_opens_its_agents_risk_fold() -> Result<(), Error> {
+    let (journal, store, _) = deployed_as(Variant {
+        retired_loss: Some("40"),
+        ..Variant::default()
+    })?;
+    let (deployment, _) = deployment(&journal, store);
+    let control = journal.rows_of(CONTROL_STREAM);
+    let day = Date::parse("2026-09-21")?;
+    let opening = deployment
+        .opening(&agent(), &control, Usd::parse("25000")?, day)
+        .ok_or("the deployed agent opens")?;
+    assert_eq!(opening.instrument, SPY);
+    assert_eq!(opening.asset_class, AssetClass::UsEquity);
+    assert_eq!(
+        opening.mark_max_age_s, 10,
+        "the rule set's IEX quote staleness"
+    );
+    assert_eq!(opening.inherited_loss_usd, Usd::parse("40")?);
+    assert_eq!(opening.mandate.mandate().universe.max_instruments, 1);
+    assert!(
+        deployment
+            .opening(&agent(), &control, Usd::parse("1")?, day)
+            .is_none(),
+        "V-002: an equity below the allocation"
+    );
+    let before = control
+        .iter()
+        .take_while(|row| row.event_type != "AgentDeployed")
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        deployment
+            .opening(&agent(), &before, Usd::parse("25000")?, day)
+            .is_none(),
+        "rows that do not deploy the agent"
+    );
+    Ok(())
+}
+
+/// DEC-2804 item 7: the risk the process's book hands the deployment is what it answers for the
+/// agent, and an agent it was not handed has none.
+#[test]
+fn the_deployment_answers_the_risk_its_book_read() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    let (deployment, _) = deployment(&journal, store);
+    assert_eq!(deployment.risk(&agent()), None);
+    let risk = mandate_executord::risk::GateRisk {
+        risk: mandate_risk::RiskSnapshot {
+            agent_equity: Usd::parse("990")?,
+            high_water_mark: Usd::parse("1000")?,
+            day_start_equity: Usd::parse("995")?,
+            capital_base: Usd::parse("1000")?,
+            inherited_loss: Usd::ZERO,
+            latched: BTreeSet::new(),
+            active_rungs: BTreeMap::new(),
+            size_factor: mandate_num::Ratio::parse("1")?,
+            agent_mode: mandate_risk::AgentMode::Normal,
+        },
+        mode: mandate_risk::AgentMode::Normal,
+        instrument_restrictions: BTreeMap::new(),
+    };
+    deployment.read(BTreeMap::from([(agent(), risk.clone())]));
+    assert_eq!(deployment.risk(&agent()), Some(risk));
+    assert_eq!(deployment.risk(&AgentId(OTHER_AGENT.to_owned())), None);
+    deployment.read(BTreeMap::new());
+    assert_eq!(deployment.risk(&agent()), None);
+    Ok(())
+}
+
+/// DEC-2279 Safety: the model gateway writes research artifacts to a store of their own, which the
+/// executor never reads. A cold-started executor resolves a research agent's mandate, snapshots and
+/// admitted instrument, and maps the broker's ticker to it for exits, the same whether the gateway's
+/// objects are all there, all gone, or all corrupted, and its production wiring asks for the shared
+/// store alone, never the research store.
+#[test]
+fn a_cold_start_resolves_the_same_with_every_research_object_gone_or_corrupted() -> Result<(), Error>
+{
+    let research_objects: [&[u8]; 4] = [
+        b"{\"kind\":\"observation\",\"text\":\"SPY closed at 150\"}",
+        b"{\"kind\":\"prompt\",\"turn\":0}",
+        b"{\"kind\":\"response\",\"turn\":0}",
+        b"{\"kind\":\"run_summary\",\"run_id\":\"01RUN\"}",
+    ];
+    let (journal, gone) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    let (without, _) = self::deployment(&journal, gone.clone());
+    let (journal, mut there) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    for bytes in research_objects {
+        assert!(!gone.contains_key(&Digest::of(bytes)));
+        there.insert(Digest::of(bytes), bytes.to_vec());
+    }
+    let (with, _) = self::deployment(&journal, there);
+    let (journal, mut corrupted) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    for bytes in research_objects {
+        corrupted.insert(
+            Digest::of(bytes),
+            b"not the bytes the gateway was sent".to_vec(),
+        );
+    }
+    let (damaged, _) = self::deployment(&journal, corrupted);
+    assert_eq!(answers(&without)?, (true, true, true, true, true, true));
+    assert_eq!(answers(&with)?, answers(&without)?);
+    assert_eq!(answers(&damaged)?, answers(&without)?);
+    assert_eq!(with.version(&agent()), without.version(&agent()));
+    assert_eq!(damaged.version(&agent()), without.version(&agent()));
+
+    let asked = std::cell::RefCell::new(Vec::new());
+    let dir = std::env::temp_dir().join(format!("executord-research-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    mandate_artifacts_fs::FsArtifactStore::open(&dir)?;
+    let root = dir.to_string_lossy().into_owned();
+    let none = || -> Result<mandate_executord::deployment::Rows, &'static str> {
+        Ok(Box::new(|_: &StreamId| None))
+    };
+    let production = mandate_executord::deployment::production(
+        |name| {
+            asked.borrow_mut().push(name.to_owned());
+            (name != "MANDATE_BARS").then(|| root.clone())
+        },
+        none,
+    )?;
+    assert!(production.is_some());
+    assert!(
+        !asked.borrow().iter().any(|name| name.contains("RESEARCH")),
+        "the executor never asks for the research store: {:?}",
+        asked.borrow()
+    );
+    std::fs::remove_dir_all(&dir).ok();
     Ok(())
 }
