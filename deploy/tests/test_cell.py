@@ -74,6 +74,9 @@ KUBE_API = "192.0.2.200/32"
 MANAGER = "deploy-manager"
 TEMPLATES = "deploy-manager-templates"
 HOOK = "pre-install,pre-upgrade"
+# The model gateway's workspace and deployment, which its image requires (E21-62); no budget, so a
+# rendering names none unless a test sets one (DEC-2326 item 2).
+GATEWAY = {"workspace": "01KDEM0000000000000000000W", "deployment": "cell-test"}
 # Where the interim runtime image carries the recorded research bundle (DEC-2246).
 RESEARCH = "/usr/local/share/mandate/research"
 
@@ -114,6 +117,7 @@ def every_image() -> list[str]:
         for i, instrument in enumerate(INSTRUMENTS)
         for key, value in instrument.items()
     ]
+    sets += [f"modelGateway.{key}={value}" for key, value in GATEWAY.items()]
     return [arg for s in sets for arg in ("--set", s)]
 
 

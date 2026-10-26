@@ -231,6 +231,23 @@ start without them (AGENTS.md rule 3).
 - name: MANDATE_ALPACA_ACCOUNT_URL
   value: http://oauth-fixture:8091/alpaca/v2/account
 {{- end }}
+{{- /* The model gateway's workspace and deployment, required with its image, and its two monthly
+budgets, rendered only when named, so an unnamed one stops its start with its code (DEC-2326). */}}
+{{- if eq .p.name "model-gateway" }}
+{{- $g := .root.Values.modelGateway }}
+- name: MANDATE_GATEWAY_WORKSPACE
+  value: {{ required "modelGateway.workspace, the one workspace the model gateway serves, is required with images.model-gateway" $g.workspace | quote }}
+- name: MANDATE_GATEWAY_DEPLOYMENT
+  value: {{ required "modelGateway.deployment, whose meter stream the model gateway writes, is required with images.model-gateway" $g.deployment | quote }}
+{{- with $g.workspaceMonthlyUsd }}
+- name: MANDATE_GATEWAY_WORKSPACE_MONTHLY_USD
+  value: {{ . | quote }}
+{{- end }}
+{{- with $g.deploymentMonthlyUsd }}
+- name: MANDATE_GATEWAY_DEPLOYMENT_MONTHLY_USD
+  value: {{ . | quote }}
+{{- end }}
+{{- end }}
 {{- if include "mandate.artifactsAccess" . }}
 - name: {{ ternary "MANDATE_API_ARTIFACTS" "MANDATE_ARTIFACTS" (eq .p.name "api") }}
   value: {{ include "mandate.artifactsPath" . | quote }}

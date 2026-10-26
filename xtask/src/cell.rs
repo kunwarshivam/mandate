@@ -135,6 +135,12 @@ const SCHEDULER_PACKAGE: &str = "mandate-scheduler";
 const DATA_DOCKERFILE: &str = "deploy/cell/images/data.Dockerfile";
 const DATA_PROCESS: &str = "data";
 const DATA_PACKAGE: &str = "mandate-datad";
+/// The workspace model gateway's image (E21-62): the only caller of a model provider, serving the
+/// demo's recorded research bundle in the cell (DEC-2326 item 3), which it carries as the runtime
+/// image does.
+const MODEL_GATEWAY_DOCKERFILE: &str = "deploy/cell/images/model-gateway.Dockerfile";
+const MODEL_GATEWAY_PROCESS: &str = "model-gateway";
+const MODEL_GATEWAY_PACKAGE: &str = "mandate-gatewayd";
 /// The token-exchange process's image (DEC-1175), which the deployment manager starts once per
 /// OAuth connect.
 const EXCHANGE_DOCKERFILE: &str = "deploy/cell/images/token-exchange.Dockerfile";
@@ -669,7 +675,7 @@ const RUNNER: &str = "mandate-backtest-runner";
 
 /// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
 /// them.
-const BUILT_PACKAGES: [&str; 10] = [
+const BUILT_PACKAGES: [&str; 11] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
@@ -680,6 +686,7 @@ const BUILT_PACKAGES: [&str; 10] = [
     EXCHANGE_PACKAGE,
     SCHEDULER_PACKAGE,
     DATA_PACKAGE,
+    MODEL_GATEWAY_PACKAGE,
 ];
 
 /// The token exchange's package (DEC-1175), a dev-profile build like the rest, so its cell token
@@ -692,7 +699,7 @@ const STUB_PACKAGE: &str = "mandate-stub-issuer";
 /// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
 /// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
 /// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
-pub const IMAGE_PACKAGES: [&str; 11] = [
+pub const IMAGE_PACKAGES: [&str; 12] = [
     BUILT_PACKAGES[0],
     BUILT_PACKAGES[1],
     BUILT_PACKAGES[2],
@@ -703,6 +710,7 @@ pub const IMAGE_PACKAGES: [&str; 11] = [
     BUILT_PACKAGES[7],
     BUILT_PACKAGES[8],
     BUILT_PACKAGES[9],
+    BUILT_PACKAGES[10],
     STUB_PACKAGE,
 ];
 
@@ -899,6 +907,17 @@ fn scheduler_image() -> Result<Option<String>> {
     local_tag(SCHEDULER_PROCESS, &[SCHEDULER_PACKAGE]).map(Some)
 }
 
+/// The cell's `model-gateway` image (E21-62): this checkout's `mandate-gatewayd`, with the demo's
+/// recorded research bundle beside it. `None` where the `mandate` image is pulled, as for the
+/// runtime, whose research calls it serves.
+fn model_gateway_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    let files: Vec<String> = demo_research().into_iter().map(|(from, _)| from).collect();
+    local_tag_with(MODEL_GATEWAY_PROCESS, &[MODEL_GATEWAY_PACKAGE], &files).map(Some)
+}
+
 /// The cell's `data` image (E21-29 lane SC): this checkout's `mandate-datad`. `None` where the
 /// `mandate` image is pulled, as for the runtime, which reads what it stores.
 fn data_image() -> Result<Option<String>> {
@@ -994,6 +1013,9 @@ fn image_sets() -> Result<Vec<String>> {
     if let Some(data) = data_image()? {
         sets.push(format!("images.{DATA_PROCESS}={data}"));
     }
+    if let Some(gateway) = model_gateway_image()? {
+        sets.push(format!("images.{MODEL_GATEWAY_PROCESS}={gateway}"));
+    }
     Ok(sets)
 }
 
@@ -1015,6 +1037,7 @@ pub fn up() -> Result<()> {
     let executor = executor_image()?;
     let scheduler = scheduler_image()?;
     let data = data_image()?;
+    let gateway = model_gateway_image()?;
     let stub = stub_image_tag()?;
     let exchange = exchange_image()?;
     if source == ImageSource::Build {
@@ -1037,6 +1060,19 @@ pub fn up() -> Result<()> {
     }
     if let Some(data) = &data {
         build_image(data, DATA_DOCKERFILE, DATA_PACKAGE, &[])?;
+    }
+    if let Some(gateway) = &gateway {
+        let research = demo_research();
+        let files: Vec<(&str, &str)> = research
+            .iter()
+            .map(|(from, name)| (from.as_str(), name.as_str()))
+            .collect();
+        build_image(
+            gateway,
+            MODEL_GATEWAY_DOCKERFILE,
+            MODEL_GATEWAY_PACKAGE,
+            &files,
+        )?;
     }
     if let Some(stub) = &stub {
         build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
@@ -6331,6 +6367,51 @@ mod tests {
         assert_eq!(process["image"], SCHEDULER_PROCESS);
         assert_eq!(process["built"], true);
         assert_eq!(process["probe"][0], "/mandate-scheduler");
+        Ok(())
+    }
+
+    /// The model gateway's image (E21-62): built with the cell's others and followed by the cell
+    /// jobs, its Dockerfile copies exactly that binary and the recorded bundle on an empty base as
+    /// non-root, and its process serves the bundle's `research.json` with `--recorded` and never
+    /// names a live start (DEC-2326 item 3).
+    #[test]
+    fn the_cell_builds_the_model_gateways_image_over_the_recording() -> Result<()> {
+        assert!(BUILT_PACKAGES.contains(&MODEL_GATEWAY_PACKAGE));
+        assert!(IMAGE_PACKAGES.contains(&MODEL_GATEWAY_PACKAGE));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dockerfile = fs::read_to_string(root.join(MODEL_GATEWAY_DOCKERFILE))?;
+        for line in [
+            "FROM scratch",
+            "COPY mandate-gatewayd /mandate-gatewayd",
+            "COPY research/ /usr/local/share/mandate/research/",
+            "USER 65532:65532",
+        ] {
+            assert!(dockerfile.contains(line), "{line}: {dockerfile}");
+        }
+        let process = processes_in(&root)?
+            .into_iter()
+            .find(|p| p["name"] == MODEL_GATEWAY_PROCESS)
+            .context("processes.json has no model gateway")?;
+        assert_eq!(process["image"], MODEL_GATEWAY_PROCESS);
+        assert_eq!(process["built"], true);
+        assert_eq!(process["probe"][0], "/mandate-gatewayd");
+        let args: Vec<&str> = process["args"]
+            .as_array()
+            .context("the model gateway has no args")?
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        let recorded = args.iter().position(|a| *a == "--recorded");
+        assert_eq!(
+            recorded.and_then(|i| args.get(i + 1)).copied(),
+            Some("/usr/local/share/mandate/research/research.json")
+        );
+        assert!(!args.iter().any(|a| a.starts_with("--registry")), "{args:?}");
+        assert!(
+            demo_research()
+                .iter()
+                .any(|(_, name)| name == "research/research.json")
+        );
         Ok(())
     }
 
