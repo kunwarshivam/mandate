@@ -357,7 +357,9 @@ stateDiagram-v2
   The run's starting batch journals the item first, as an `ObservationRecorded` whose `source` is
   the allowlist source id (its kind is that source's in the allowlist version the run states),
   `instrument_id` the matched instrument, `as_of` the item's knowledge time (data-plane spec §5.2),
-  and `data_ref` the item's raw bytes as stored, and then
+  and `data_ref` the item's typed record as stored (`RetrievedItem::record` of the whole item,
+  which holds no licensed text; for an item off the news stream, its `item_ref`, journal spec
+  §9.37), and then
   `RunStarted` with `trigger` `{kind: event, cause: <that record's event_id>}` (journal spec rule
   271). So the trigger is journaled before the run acts, and one item starts at most one run. The
   item's text is untrusted like every read (§6.12): at most it leads the model to invalidate a
