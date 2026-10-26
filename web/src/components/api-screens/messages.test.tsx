@@ -179,7 +179,27 @@ describe("messages over the workspace API: what a thread says when a read holds 
     const others = pending.filter((p) => p.agent_id !== mine.agent_id).map((p) => ({ event_id: p.approval_id, event_type: "ApprovalRequested" }));
     const done = resolved.slice(0, 1).map((p) => ({ event_id: p.approval_id, event_type: "ApprovalRequested" }));
     expect(others.length, "another agent has a request waiting").toBeGreaterThan(0);
-    await thread(mine.agent_id, [...others, ...done, { event_id: "01JBH3BTZ8K2M4N6P8R0S2T4V9", event_type: "OwnerAlertSent" }]);
+    expect(done.length, "a request was resolved").toBeGreaterThan(0);
+    const elsewhere: Wrap = (send) => (input, init) =>
+      new URL(input).pathname.endsWith("/alerts")
+        ? json({
+            ...envelope,
+            truncated: false,
+            alerts: [
+              {
+                alert_id: "01JBH3BTZ8K2M4N6P8R0S2T4VA",
+                kind: "risk_limit",
+                class: "safety",
+                raised_at: T(9),
+                stream: { type: "agent", agent_id: mine.agent_id, account_ref: null },
+                subject: { event_id: "01JBH3BTZ8K2M4N6P8R0S2T4VB", event_type: "RiskLimitTripped" },
+                owner_command: null,
+                notice: null,
+              },
+            ],
+          })
+        : send(input, init);
+    await thread(mine.agent_id, [...others, ...done, { event_id: "01JBH3BTZ8K2M4N6P8R0S2T4V9", event_type: "OwnerAlertSent" }], elsewhere);
     const records = await screen.findByRole("list", { name: "Thread records" });
     expect(within(records).queryByRole("link")).toBeNull();
     expect(records.querySelector("[data-kind]")).toBeNull();
