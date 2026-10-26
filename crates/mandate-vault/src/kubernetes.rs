@@ -130,6 +130,7 @@ pub fn service_account_name(identity: &Identity) -> Result<String, SourceError> 
         | Identity::Runtime
         | Identity::SecretImport
         | Identity::ModelGateway
+        | Identity::NewsReader
         | Identity::EmailSender
         | Identity::Provisioner => Err(SourceError::Config),
     }
@@ -145,6 +146,7 @@ pub fn kubernetes_policy_name(identity: &Identity, mounts: &Mounts) -> Result<St
         | Identity::Runtime
         | Identity::SecretImport
         | Identity::ModelGateway
+        | Identity::NewsReader
         | Identity::EmailSender
         | Identity::Provisioner => Err(SourceError::Config),
     }
@@ -219,6 +221,7 @@ pub fn kubernetes_policy(
         | Identity::Runtime
         | Identity::SecretImport
         | Identity::ModelGateway
+        | Identity::NewsReader
         | Identity::EmailSender
         | Identity::Provisioner => Err(SourceError::Config),
     }
@@ -287,6 +290,7 @@ pub fn role_request(
         | Identity::Runtime
         | Identity::SecretImport
         | Identity::ModelGateway
+        | Identity::NewsReader
         | Identity::EmailSender
         | Identity::Provisioner => return Err(SourceError::Config),
     };

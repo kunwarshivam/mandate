@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 mod admission_drill;
 mod cell;
+mod deferring;
 mod founding;
 mod gitops;
 mod image;
@@ -369,6 +370,7 @@ fn run() -> Result<()> {
         ["leak-guard"] => leak::guard_in(&root),
         ["live-feature"] => live_feature_in(Path::new(".")),
         ["mail-guard"] => mail::guard_in(Path::new(".")),
+        ["deferring-guard"] => deferring::guard_in(Path::new(".")),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
         ["release", "tools"] => {
@@ -1682,8 +1684,9 @@ const INFRA_CLOSE_SECRETS: [&str; 2] = ["DIGITAL_OCEAN_API_KEY", "KUBE_API_ALLOW
 /// items 2 and 6). The model provider's key, staging's alone, goes to the vault on the CLI's
 /// stdin under a `MANDATE_` name, never `TF_VAR_`, so OpenTofu never reads it (DEC-2630). So does
 /// the founder's identity-provider subject, staging's alone, to the built CLI's stdin (DEC-2114),
-/// and the Alpaca OAuth client secret, staging's alone, to the vault like the model key (DEC-2636).
-const INFRA_SECRETS: [&str; 8] = [
+/// and the Alpaca OAuth client secret, staging's alone, to the vault like the model key (DEC-2636),
+/// and the news reader's Alpaca paper data key id and secret, likewise (DEC-2277).
+const INFRA_SECRETS: [&str; 10] = [
     "DIGITAL_OCEAN_API_KEY",
     "CF_INFRA_API_TOKEN",
     "TOFU_STATE_PASSPHRASE",
@@ -1692,7 +1695,13 @@ const INFRA_SECRETS: [&str; 8] = [
     "OPENROUTER_API_KEY",
     "FOUNDER_OIDC_SUBJECT",
     "ALPACA_OAUTH_CLIENT_SECRET",
+    "ALPACA_NEWS_KEY_ID",
+    "ALPACA_NEWS_SECRET",
 ];
+/// The infra step's environment variables holding the news reader's Alpaca paper data key id and
+/// secret (DEC-2277).
+const NEWS_KEY_ID_VAR: &str = "MANDATE_ALPACA_NEWS_KEY_ID";
+const NEWS_SECRET_VAR: &str = "MANDATE_ALPACA_NEWS_SECRET";
 /// The infra step's environment variable holding the Alpaca OAuth client secret (DEC-2636).
 const ALPACA_CLIENT_SECRET_VAR: &str = "MANDATE_ALPACA_OAUTH_CLIENT_SECRET";
 
@@ -2061,6 +2070,13 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     if !alpaca_client_secret.is_empty() {
         mask::add_mask(&alpaca_client_secret);
     }
+    let news_key = vault_provision::news_data_key(
+        &env::var(NEWS_KEY_ID_VAR).unwrap_or_default(),
+        &env::var(NEWS_SECRET_VAR).unwrap_or_default(),
+    )?;
+    if !news_key.is_empty() {
+        mask::add_mask(&news_key);
+    }
     let founder_subject = env::var(founding::SUBJECT_VAR).unwrap_or_default();
     if !founder_subject.is_empty() {
         mask::add_mask(&founder_subject);
@@ -2148,6 +2164,7 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
         &listed,
         &model_key,
         &alpaca_client_secret,
+        &news_key,
     )?;
     for word in words {
         eprintln!("    vault-provision: {word} (DEC-2630)");
@@ -2494,6 +2511,14 @@ const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
     (
         INFRA_WORKFLOW,
         "MANDATE_ALPACA_OAUTH_CLIENT_SECRET: ${{ secrets.ALPACA_OAUTH_CLIENT_SECRET }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "MANDATE_ALPACA_NEWS_KEY_ID: ${{ secrets.ALPACA_NEWS_KEY_ID }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "MANDATE_ALPACA_NEWS_SECRET: ${{ secrets.ALPACA_NEWS_SECRET }}",
     ),
 ];
 
@@ -3447,6 +3472,7 @@ fn lint(
     infra_workflow_in(root)?;
     mail::guard_in(root)?;
     leak::guard_in(root)?;
+    deferring::guard_in(root)?;
     backlog_rows_in(root, base)?;
     workspace_checks()
 }
@@ -6205,6 +6231,8 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_OPENROUTER_API_KEY",
     "MANDATE_FOUNDER_OIDC_SUBJECT",
     "MANDATE_ALPACA_OAUTH_CLIENT_SECRET",
+    "MANDATE_ALPACA_NEWS_KEY_ID",
+    "MANDATE_ALPACA_NEWS_SECRET",
     "MANDATE_TOFU_REQUIRED",
     "DIGITALOCEAN_TOKEN",
     "TF_VAR_state_passphrase",
@@ -26261,6 +26289,49 @@ jq -r "$filter" "$src"
                 .as_deref()
                 .is_some_and(|err| err.contains("live-feature")),
             "a workflow that runs `live` fails the lint job naming the check, got {planted:?}"
+        );
+        assert!(
+            !reached.get(),
+            "the workspace checks run only after it passes"
+        );
+        Ok(())
+    }
+
+    /// The lint job runs the deferring guard over its own repository (DEC-2378 item 11 condition
+    /// 3): a fixture crate that names `evaluate_deferring` fails the job naming the check, before
+    /// the workspace checks run.
+    #[test]
+    fn the_lint_job_runs_the_deferring_guard_on_its_repository() -> Result<()> {
+        let root = env::temp_dir().join(format!(
+            "mandate-xtask-lint-deferring-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        fixture_workspace(&root)?;
+        for dir in [".github/workflows", ".github/scripts", "deploy", "scripts"] {
+            fs::create_dir_all(root.join(dir))?;
+        }
+        let clean = lint(&root, None, || Ok(())).map_err(|err| format!("{err:#}"));
+        fs::write(
+            root.join("a/src/lib.rs"),
+            "//! A fixture crate.\npub fn f() { mandate_ports::evaluate_deferring(); }\n",
+        )?;
+        let reached = Cell::new(false);
+        let planted = lint(&root, None, || {
+            reached.set(true);
+            Ok(())
+        })
+        .map_err(|err| format!("{err:#}"))
+        .err();
+        fs::remove_dir_all(&root).ok();
+        assert_eq!(clean, Ok(()), "a clean fixture workspace passes");
+        assert!(
+            planted
+                .as_deref()
+                .is_some_and(|err| err.contains("deferring-guard")),
+            "a crate naming it fails the lint job naming the check, got {planted:?}"
         );
         assert!(
             !reached.get(),

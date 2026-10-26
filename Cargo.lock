@@ -2017,6 +2017,7 @@ dependencies = [
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-notify",
+ "mandate-process",
  "mandate-push-relay",
  "mandate-time",
  "mandate-webpush",
@@ -2114,6 +2115,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-accounting",
  "mandate-canon",
+ "mandate-journal",
  "mandate-num",
  "mandate-risk",
  "mandate-time",

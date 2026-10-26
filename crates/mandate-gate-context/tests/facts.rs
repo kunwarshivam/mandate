@@ -184,6 +184,7 @@ fn every_fact_journaled_and_current_is_read_exactly() {
         cash: usd("400.25"),
         buying_power: usd("800.5"),
         non_marginable_buying_power: usd("400.25"),
+        figures: None,
         at: instant(START),
     };
     assert_eq!(facts.account, account);

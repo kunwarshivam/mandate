@@ -46,18 +46,24 @@
 //! Every entry point returns a `Result`, so a stub reports [`DispatchError::Unimplemented`]
 //! (DEC-77).
 
+mod config;
 mod due;
 mod email;
 mod os;
 mod pg;
+mod process;
 mod step;
+mod subjects;
 mod webpush;
 
+pub use config::{ConfigError, Loaded, read as read_config};
 pub use due::{Due, Next, due};
 pub use email::{EmailProvider, MailFailure, MailTransport, RecordedTransport, Submitted};
 pub use os::{Entropy, EntropyUnavailable, OsRandom, System};
 pub use pg::{PgNotices, READ_DEADLINE};
+pub use process::{Dispatcher, LIVENESS, Settings, outcome, serve, watch_terminate};
 pub use step::{Config, Journal, NoticeWriter, step};
+pub use subjects::subjects;
 pub use webpush::{
     AddressBook, AddressRef, Addressed, Clock, KeyId, Ports, PostFailure, PushAnswer, PushPost,
     RingVapidSigner, SEND_DEADLINE, StoredSubscription, VaultUnavailable, WebPushProvider,

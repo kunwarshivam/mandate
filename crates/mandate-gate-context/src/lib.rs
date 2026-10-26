@@ -68,7 +68,47 @@ pub struct AccountFacts {
     pub cash: Usd,
     pub buying_power: Usd,
     pub non_marginable_buying_power: Usd,
+    /// What a version 2 snapshot adds (journal spec v0.89 §9.35, DEC-2398): `None` for a version
+    /// 1 snapshot, which carries none of it, so a reader that needs the figures holds or defers.
+    pub figures: Option<SnapshotFigures>,
     pub at: UtcNanos,
+}
+
+/// The day-trade budget's inputs a version 2 `AccountSnapshotRecorded` carries (trading spec
+/// §9.2): the connector's declared account type and day-trading regime, each `None` when it
+/// declares none, and the broker's prior-close equity and maintenance margin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapshotFigures {
+    pub account_type: Option<DeclaredAccount>,
+    pub day_trading_regime: Option<DeclaredRegime>,
+    pub last_equity: Usd,
+    pub maintenance_margin: Usd,
+}
+
+impl SnapshotFigures {
+    /// The maintenance excess `intraday_margin` checks: `equity` less the maintenance margin,
+    /// signed, and `None` when the margin is negative, which no broker means (§9.35's reading).
+    #[must_use]
+    pub fn maintenance_excess(&self, equity: Usd) -> Option<Usd> {
+        if self.maintenance_margin.is_negative() {
+            return None;
+        }
+        equity.checked_sub(self.maintenance_margin).ok()
+    }
+}
+
+/// The account type a connector declares (trading spec §7.2, DEC-840).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclaredAccount {
+    Cash,
+    Margin,
+}
+
+/// The day-trading regime a connector declares (trading spec §9.2, DEC-840).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclaredRegime {
+    IntradayMargin,
+    LegacyPdt,
 }
 
 /// An instrument's latest sane risk mark from a counted session (journal spec §9.30).
@@ -245,6 +285,13 @@ impl Journaled {
         self.fills.is_empty() && !self.ordered
     }
 
+    /// The account as its latest snapshot states it, current or not; `facts` is what judges it
+    /// current for an opening.
+    #[must_use]
+    pub fn account(&self) -> Option<&AccountFacts> {
+        self.account.as_ref()
+    }
+
     /// The later of the account stream's latest risk clock and the scheduler's latest tick.
     pub fn now(&self) -> Option<UtcNanos> {
         self.account_now.max(self.scheduler_now)
@@ -329,6 +376,7 @@ impl Journaled {
                     cash: payload.usd("cash")?,
                     buying_power: payload.usd("buying_power")?,
                     non_marginable_buying_power: payload.usd("non_marginable_buying_power")?,
+                    figures: figures(&payload)?,
                     at,
                 });
             }
@@ -548,6 +596,37 @@ fn later(
 /// Whether a fact observed at `at` has reached `max_age_s` by `now`.
 fn reached(now: UtcNanos, at: UtcNanos, max_age_s: u32) -> bool {
     now.secs().saturating_sub(at.secs()) >= i64::from(max_age_s)
+}
+
+/// A snapshot's [`SnapshotFigures`]: present exactly when it carries `last_equity`, which only a
+/// version 2 does, its closed schema refusing the member at version 1.
+fn figures(payload: &Payload<'_>) -> Result<Option<SnapshotFigures>, Unreadable> {
+    if payload.value.get("last_equity").is_none() {
+        return Ok(None);
+    }
+    let declared = |member: &'static str| match payload.value.get(member) {
+        Some(Value::Null) => Ok(None),
+        Some(Value::Str(name)) => Ok(Some(name.as_str())),
+        _ => Err((payload.refused)(member)),
+    };
+    let account_type = match declared("account_type")? {
+        None => None,
+        Some("cash") => Some(DeclaredAccount::Cash),
+        Some("margin") => Some(DeclaredAccount::Margin),
+        Some(_) => return Err((payload.refused)("account_type")),
+    };
+    let day_trading_regime = match declared("day_trading_regime")? {
+        None => None,
+        Some("intraday_margin") => Some(DeclaredRegime::IntradayMargin),
+        Some("legacy_pdt") => Some(DeclaredRegime::LegacyPdt),
+        Some(_) => return Err((payload.refused)("day_trading_regime")),
+    };
+    Ok(Some(SnapshotFigures {
+        account_type,
+        day_trading_regime,
+        last_equity: payload.usd("last_equity")?,
+        maintenance_margin: payload.usd("maintenance_margin")?,
+    }))
 }
 
 struct Payload<'a> {

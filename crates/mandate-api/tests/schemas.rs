@@ -186,7 +186,7 @@ fn every_struct_names_exactly_its_schemas_members() {
     members::<HoldRequest>(&[&schema!("hold-request")], None);
     members::<EndDelegationRequest>(&[&schema!("end-delegation-request")], None);
     members::<LiftHoldRequest>(&[&schema!("lift-hold-request")], None);
-    members::<ResumeRequest>(&[&schema!("resume-request")], None);
+    members_ahead::<ResumeRequest>(&[&schema!("resume-request")], &["step_up_assertion"]);
     members::<AcknowledgeRequest>(&[&schema!("acknowledge-request")], None);
     members::<OwnerRequest>(&[&schema!("owner-request")], None);
     members_ahead::<ConfirmRequest>(&[&schema!("confirm-request")], &["step_up_assertion"]);
@@ -194,7 +194,7 @@ fn every_struct_names_exactly_its_schemas_members() {
     members::<ApprovalResponseRequest>(&[&approval], None);
     members::<DelegationChosen>(&[&approval["properties"]["delegation"]["oneOf"][0]], None);
     members::<DelegationPreviewRequest>(&[&schema!("delegation-preview-request")], None);
-    members::<StopRequest>(&[&schema!("stop-request")], None);
+    members_ahead::<StopRequest>(&[&schema!("stop-request")], &["step_up_assertion"]);
     let kill = schema!("kill-switch-request");
     members::<KillSwitchRequest>(&[&kill], None);
     let scope = &kill["properties"]["scope"];

@@ -544,6 +544,7 @@ impl Reconciler for FixedReconciler {
             fills: Vec::new(),
             cursor: ActivityCursor(String::new()),
             reason: ReconcileReason::Startup,
+            declared: None,
             taken_at_head: Seq(0),
         })
     }
