@@ -716,10 +716,13 @@ per workspace deployment (item 6).
       approvers. An `approved` in `paper` is served under `cli_confirm` (DEC-2104,
       [DEC-2129](../project/decisions/DEC-2129.md)): judged through the port's `asserted` with kind
       `approve` and the content hash as digest, it commits one `ApprovalResponseSubmitted` whose
-      payload is what `mandate approvals approve` writes, its evidence's `authenticated_at` the
-      whole second journal spec §9.7 types. An approval already answered or past its deadline is
-      recorded and refused by the runtime, as the CLI's is. A grant with a delegation (§5.3) is
-      `invalid` at `/delegation` until §5.3 is served. A passkey grant waits for its own change.
+      payload is what `mandate approvals approve` writes, its evidence's `authenticated_at`
+      truncated down to the whole second journal spec §9.7 types. An approval already answered or
+      past its deadline is recorded and refused by the runtime, as the CLI's is. As for a Skip, the
+      approvers are the runtime's to judge until the server reads the mandate (DEC-2129 item 7,
+      Proposed). The first failing check answers: an unknown approval, the matrix row, a grant with
+      a delegation (§5.3), `invalid` at `/delegation` until §5.3 is served, `live`, then step-up.
+      A passkey grant waits for its own change.
       **(planned: E9-4)**
 11. **Versions, confirmation, and deployment** ([DEC-2101](../project/decisions/DEC-2101.md),
     E10-11, E10-12). The server serves five routes of §4.1 and §4.2, with these operation names for
