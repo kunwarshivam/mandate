@@ -96,9 +96,10 @@ fn a_decision_cites_its_outputs_in_event_order_not_model_name_order() {
         .iter()
         .filter_map(Value::as_str)
         .collect();
+    let mut expected: Vec<&str> = journaled.iter().map(|(_, id)| id.as_str()).collect();
+    expected.sort_unstable();
     assert_eq!(
-        cited,
-        [journaled[0].1.as_str(), journaled[1].1.as_str()],
+        cited, expected,
         "both outputs, ascending by event id (rule 9)"
     );
 }
