@@ -1689,11 +1689,13 @@ version = "0.0.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "mandate-accounting",
  "mandate-api",
  "mandate-artifacts-fs",
  "mandate-authn",
  "mandate-canon",
  "mandate-connections",
+ "mandate-gate-context",
  "mandate-identity",
  "mandate-identity-seal",
  "mandate-identity-testkit",
@@ -2062,6 +2064,7 @@ dependencies = [
  "mandate-approval",
  "mandate-canon",
  "mandate-domain",
+ "mandate-gate-context",
  "mandate-journal",
  "mandate-num",
  "mandate-risk",
@@ -2101,6 +2104,7 @@ dependencies = [
 name = "mandate-gate-context"
 version = "0.0.0"
 dependencies = [
+ "mandate-accounting",
  "mandate-canon",
  "mandate-num",
  "mandate-risk",

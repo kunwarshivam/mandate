@@ -1170,6 +1170,56 @@ fn holds(steps: Vec<Step>) -> Result<(), TestCaseError> {
         .values()
         .any(|order| order.state == OrderState::Unknown);
     prop_assert!(!unknown, "nothing here leaves an order in doubt");
+    the_owners_read_agrees(&shell)
+}
+
+/// The owner's protection read (`mandate_gate_context::Positions`, DEC-2136 item 4) of the run's
+/// journal, against the executor's live state, the oracle: the resting stops, what they cover,
+/// their prices, and the earliest open interval's start. Plain entries' intervals end only with
+/// their own stops (DEC-966 item 2), which the read must follow too.
+fn the_owners_read_agrees(shell: &Shell) -> Result<(), TestCaseError> {
+    let mut read = mandate_gate_context::Positions::new(common::ACCOUNT_STREAM, "any-agent");
+    for event in &shell.account_journal {
+        read.fold(mandate_gate_context::Row {
+            stream: &event.stream,
+            event_type: &event.event_type,
+            payload: &event.payload,
+        })
+        .map_err(|e| TestCaseError::fail(format!("the read refused {}: {e}", event.event_type)))?;
+    }
+    let id = mandate_accounting::InstrumentId::new(AAPL)
+        .map_err(|e| TestCaseError::fail(e.to_string()))?;
+    let served = read.protection(AAPL);
+    let folded = shell
+        .state
+        .protection(&id)
+        .map_err(|e| TestCaseError::fail(e.to_string()))?;
+    let resting: Vec<String> = folded
+        .map(|p| p.resting.iter().map(|id| id.as_str().to_owned()).collect())
+        .unwrap_or_default();
+    prop_assert_eq!(&served.orders, &resting, "resting stops");
+    prop_assert_eq!(
+        served.covered_qty,
+        folded.map_or(Qty::ZERO, |p| p.covered_qty),
+        "covered quantity"
+    );
+    prop_assert_eq!(
+        served.stop,
+        folded.and_then(|p| p.prices).map(|prices| prices.stop),
+        "stop"
+    );
+    let open = shell
+        .state
+        .unprotected_intervals()
+        .iter()
+        .filter(|interval| interval.instrument == id && interval.ended_at.is_none())
+        .map(|interval| interval.started_at.secs())
+        .min();
+    prop_assert_eq!(
+        served.unprotected_since.map(|at| at.secs()),
+        open,
+        "the earliest open interval"
+    );
     Ok(())
 }
 

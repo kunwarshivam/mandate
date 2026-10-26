@@ -5,6 +5,7 @@
 use mandate_api_server::reads::agent_positions;
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_journal::StoredEvent;
+use mandate_num::{Price, SignedQty};
 use proptest::prelude::*;
 use proptest::test_runner::{TestCaseError, TestError, TestRunner};
 
@@ -71,9 +72,16 @@ impl Account {
     }
 }
 
+/// A position every fill of which was at 10 (`Account::fill`'s price), so trading spec §8.1's
+/// basis is the quantity × 10 however it was reached; with no mark there is no value, and with no
+/// `ProtectionChanged` no protection (DEC-2136).
 fn position(instrument: &str, qty: &str) -> Value {
+    let basis = SignedQty::parse(qty)
+        .expect("a quantity")
+        .value_at(Price::parse("10").expect("a price"))
+        .expect("in range");
     let text = format!(
-        r#"{{"instrument_id":"{instrument}","filled_qty":"{qty}","cost_basis":null,"risk_mark":null,"protection":null}}"#
+        r#"{{"instrument_id":"{instrument}","filled_qty":"{qty}","cost_basis":{{"qty":"{qty}","basis":"{basis}"}},"risk_mark":null,"market_value":null,"unrealized_pnl":null,"protection":{{"orders":[],"covered_qty":"0","stop":null,"take_profit":null,"unprotected_since":null}}}}"#
     );
     parse(text.as_bytes()).expect("JSON")
 }
