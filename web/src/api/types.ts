@@ -89,7 +89,8 @@ export type Operation =
   | "approval_response"
   | "end_delegation"
   | "confirm_version"
-  | "create_version";
+  | "create_version"
+  | "deploy";
 
 /** One user gesture: its key, route and body are fixed when it is prepared, so every retry sends the same call (spec §3.4, API-4). */
 export interface PreparedCommand {
