@@ -60,6 +60,9 @@ pub(crate) fn payload(
         "DecisionMade" => {
             action_rules(view)?;
             decision_rules(view)?;
+            if schema_version == 3 {
+                deferral_rules(view)?;
+            }
         }
         "IntentProposed" => {
             action_rules(view)?;
@@ -634,6 +637,43 @@ fn decision_rules(p: Payload<'_>) -> Result<(), Invalid> {
     ensure(ascending(&clips), non_canonical, "payload.clips_applied")
 }
 
+/// Rules 269 and 270 on a version-3 `DecisionMade` (v0.85, DEC-2388 item 10): the deferred parts
+/// in byte order, named exactly on an allowed opening or increase; figures only for one; and on an
+/// allowed opening the floor and participation deferred together, exactly when no figures were
+/// read.
+fn deferral_rules(p: Payload<'_>) -> Result<(), Invalid> {
+    let path = "payload.deferred_to_binding";
+    let deferred: Vec<&[u8]> = p
+        .list("deferred_to_binding")
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::as_bytes)
+        .collect();
+    ensure(ascending(&deferred), InvalidReason::NonCanonical, path)?;
+    let allowed_opening = p.text("dry_run") == "allow" && p.adds_risk();
+    ensure(
+        deferred.is_empty() != allowed_opening,
+        InvalidReason::Schema,
+        path,
+    )?;
+    ensure(
+        p.is_null("liquidity") || p.adds_risk(),
+        InvalidReason::Schema,
+        "payload.liquidity",
+    )?;
+    if allowed_opening {
+        let floor = deferred.contains(&b"liquidity_floor".as_slice());
+        let participation = deferred.contains(&b"participation".as_slice());
+        ensure(floor == participation, InvalidReason::Schema, path)?;
+        ensure(
+            p.is_null("liquidity") == floor,
+            InvalidReason::Schema,
+            "payload.liquidity",
+        )?;
+    }
+    Ok(())
+}
+
 /// Rule 12: `confirmed` exactly when the bid members are all present, then the step-up evidence
 /// exactly when `step_up_status` is `valid`.
 fn owner_exit_rules(p: Payload<'_>) -> Result<(), Invalid> {
@@ -753,6 +793,9 @@ fn ascending<T: PartialOrd>(items: &[T]) -> bool {
 }
 
 fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
+    if schema_version == 3 {
+        return (event_type == "DecisionMade").then_some(&DECISION_MADE_V3);
+    }
     if schema_version == 2 {
         return match event_type {
             "ModelOutputRecorded" => Some(&MODEL_OUTPUT_RECORDED),
@@ -874,6 +917,81 @@ static DECISION_MADE: Ty = Ty::Record(&[
     ("delegation_id", Ty::Nullable(&Ty::Ident)),
     ("requested_by", Ty::OneOf(&["agent", "owner", "client"])),
     ("client_id", Ty::Nullable(&Ty::Ident)),
+]);
+
+/// The cell's runtime's advisory dry run (v0.85, DEC-2388 item 10): version 1's members, then
+/// the parts it deferred to the binding gate and the stored bars' figures it read.
+static DECISION_MADE_V3: Ty = Ty::Record(&[
+    ("instrument_id", Ty::Str),
+    ("side", SIDE),
+    ("type", ORDER_TYPE),
+    ("tif", TIF),
+    ("qty", Ty::Decimal),
+    ("limit_price", Ty::Nullable(&Ty::Decimal)),
+    (
+        "purpose",
+        Ty::OneOf(&["open", "increase", "discretionary_exit", "risk_exit"]),
+    ),
+    (
+        "exit_origin",
+        Ty::Nullable(&Ty::OneOf(&[
+            "signal",
+            "goal_completion",
+            "removed_instrument",
+        ])),
+    ),
+    ("exit_conviction", Ty::Nullable(&Ty::Decimal)),
+    ("buy_conviction", Ty::Nullable(&Ty::Decimal)),
+    ("combined_score", Ty::Nullable(&Ty::Decimal)),
+    ("outputs_used", Ty::List(&Ty::Ulid)),
+    (
+        "model_weights",
+        Ty::List(&Ty::Record(&[("key", Ty::Str), ("value", Ty::Decimal)])),
+    ),
+    ("clips_applied", Ty::List(&Ty::OneOf(&CLIPS))),
+    ("dry_run", Ty::OneOf(&["allow", "deny", "defer"])),
+    ("reason_code", Ty::Nullable(&Ty::Ident)),
+    (
+        "autonomy",
+        Ty::Nullable(&Ty::OneOf(&["auto", "ask", "deny"])),
+    ),
+    (
+        "ask_suppressed",
+        Ty::Nullable(&Ty::OneOf(&["budget", "skipped_today", "recent_timeout"])),
+    ),
+    ("decided_by", Ty::Nullable(&Ty::Str)),
+    ("delegation_id", Ty::Nullable(&Ty::Ident)),
+    ("requested_by", Ty::OneOf(&["agent", "owner", "client"])),
+    ("client_id", Ty::Nullable(&Ty::Ident)),
+    ("deferred_to_binding", Ty::List(&Ty::OneOf(&DEFERRED_PARTS))),
+    ("liquidity", Ty::Nullable(&LIQUIDITY)),
+]);
+
+/// The checks and parts of checks a version-3 `DecisionMade` may name, in byte order: DEC-2378
+/// item 11's four and DEC-2388 item 8's ten.
+const DEFERRED_PARTS: [&str; 14] = [
+    "account_exposure",
+    "agent_equity",
+    "agent_mode",
+    "conduct_history",
+    "day_trade_budget",
+    "eligibility",
+    "fee_reservation",
+    "halt",
+    "liquidity_floor",
+    "other_orders",
+    "participation",
+    "quote_ask",
+    "reentry_cooldown",
+    "related_accounts",
+];
+
+static LIQUIDITY: Ty = Ty::Record(&[
+    ("prior_close", Ty::Decimal),
+    ("median_dollar_volume_20d", Ty::Decimal),
+    ("adv_20d", Ty::Decimal),
+    ("trailing_5m_volume", Ty::Decimal),
+    ("read_at", Ty::Timestamp),
 ]);
 
 static INTENT_PROPOSED: Ty = Ty::Record(&[
@@ -1281,7 +1399,11 @@ mod tests {
 
     use mandate_canon::{Digest, Key, Object, Value, parse, to_canonical};
 
-    use super::{AgentStreamCheck, AgentStreamFailure, check_batch, verify_agent_stream};
+    use super::{
+        AgentStreamCheck, AgentStreamFailure, DECISION_MADE, DECISION_MADE_V3, DEFERRED_PARTS,
+        check_batch, verify_agent_stream,
+    };
+    use crate::schema::Ty;
     use crate::{Draft, Invalid, StoredEvent, TrustedStart};
 
     fn section() -> Result<Value, String> {
@@ -1874,5 +1996,26 @@ mod tests {
             .map(|(i, e)| (i, e.reason.code(), e.path));
         assert_eq!(refused, Some((1, "schema", "payload.side".to_owned())));
         Ok(())
+    }
+
+    fn member_names(ty: &Ty) -> Vec<&'static str> {
+        match ty {
+            Ty::Record(fields) => fields.iter().map(|(name, _)| *name).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Version 3 is version 1's members, in version 1's order, then exactly the two it adds, and
+    /// its parts are listed in the byte order rule 269 sorts them by.
+    #[test]
+    fn decision_version_3_is_version_1_then_its_two_members() {
+        let v1 = member_names(&DECISION_MADE);
+        let v3 = member_names(&DECISION_MADE_V3);
+        assert!(!v1.is_empty());
+        assert_eq!(&v3[..v1.len()], v1.as_slice());
+        assert_eq!(&v3[v1.len()..], ["deferred_to_binding", "liquidity"]);
+        let mut sorted = DEFERRED_PARTS;
+        sorted.sort_by_key(|part| part.as_bytes());
+        assert_eq!(DEFERRED_PARTS, sorted);
     }
 }
