@@ -28,6 +28,7 @@ import { CONNECT_DISCLOSURE, connectStepUpDigest } from "./step-up";
 import type { Watermark } from "./types";
 import { servedBacktestFixture } from "@/fixtures/backtests";
 import { buildWorkspace } from "@/fixtures/workspace";
+import { INSTRUMENTS } from "@/fixtures/mandates";
 import type { Agent, Approval, ApprovalStatus, Health, Mandate, Scenario } from "@/fixtures/types";
 import { dec, mul, toDecimalString } from "@/lib/decimal";
 import { mandateVersion } from "@/lib/fixture-journey";
@@ -93,6 +94,31 @@ export interface IssuedChallenge {
   expires_at: string;
   used: boolean;
 }
+
+/**
+ * The one signal model the mock registers, as `GET /signal-models` serves the host's
+ * `quant.ma_crossover` (`mandate-modelhost`): its version, a stand-in content hash, and the projection
+ * of its content object, methodology and parameter bounds included.
+ */
+export const MOCK_MODEL = {
+  model_id: "quant.ma_crossover",
+  model_version: "1.0.0",
+  content_hash: `sha256:${"cf".repeat(32)}`,
+  params: ["fast_periods", "slow_periods"],
+  admits_instruments: false,
+  content: {
+    authorship: "platform",
+    methodology: "Long when the mean of the last fast_periods daily closes is strictly above the mean of the last slow_periods daily closes, compared by cross-multiplying the window sums; otherwise no output.",
+    params_schema: {
+      constraints: ["fast_periods < slow_periods"],
+      params: [
+        { max: 1000, min: 1, name: "fast_periods", type: "integer" },
+        { max: 1000, min: 2, name: "slow_periods", type: "integer" },
+      ],
+    },
+  },
+  registered_at: "2026-09-28T13:00:00.000000000Z",
+} as const;
 
 /** The mock's one principal, as `GET /v1/me/session` serves it. */
 export const MOCK_PRINCIPAL = "01JBR2C4D6E8F0G2H4J6K8M0P3";
@@ -208,7 +234,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
   /** `read-models/agent`: the row with the account's holdings at its last reconciliation (`account_positions`), every agent's, as one account's are. */
   function agentDetail(agent: Agent) {
     const positions = workspace.agents.flatMap((a) => a.positions).map((p) => ({ instrument: p.instrument.symbol, qty: canon(p.qty), broker_qty: canon(p.broker_qty), mismatch: dec(p.qty) !== dec(p.broker_qty), observed_at: canonical(p.mark_as_of) }));
-    return { ...agentRow(agent), account_positions: positions };
+    return { ...agentRow(agent), account_positions: positions, openings_held: null };
   }
 
   /** The API names an approval by its `ApprovalRequested` event id, a bare ULID; the fixtures prefix theirs with `apr_`. */
@@ -243,8 +269,9 @@ export function createMockServer(options: MockServerOptions): MockServer {
   }
 
   /**
-   * An agent stream's events as the mock tells them (`agent:{ws}:{agent}`): the deployment, then each
-   * order submitted and each filled, in time order. Types and times only; the body is a stand-in.
+   * An agent stream's events as the mock tells them (`agent:{ws}:{agent}`): the deployment, each gate
+   * decision the fixtures hold with its `DecisionMade` payload (journal spec §9.1), and each order
+   * submitted and filled, in time order. Each body is `{event_type, payload}`, hashed.
    */
   function agentStream(streamId: string) {
     if (streamId === `ctl:${workspaceId}`) return controlStream(streamId);
@@ -253,8 +280,39 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const agent = match && match[1] === workspaceId ? agentOf(match[2]) : undefined;
     if (!agent) return null;
     const orders = [...agent.past_orders, ...agent.orders].sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at));
-    const told = [{ type: "AgentDeployed", at: orders[0]?.submitted_at ?? workspace.now }, ...orders.flatMap((o) => [{ type: "OrderSubmitted", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])])];
-    return told.map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: "0".repeat(64), body: "e30=" }));
+    const decided = workspace.decisions
+      .filter((d) => d.agent_id === agent.agent_id)
+      .map((d) => ({
+        type: "DecisionMade",
+        at: d.at,
+        payload: {
+          instrument_id: d.action.symbol,
+          side: d.action.side,
+          type: "limit",
+          tif: "day",
+          qty: canon(d.action.qty),
+          limit_price: canon(d.action.limit_price),
+          purpose: d.action.purpose,
+          exit_origin: null,
+          dry_run: d.verdict,
+          reason_code: d.reason_code,
+          autonomy: d.verdict === "allow" ? (d.approval_id ? "ask" : "auto") : null,
+          ask_suppressed: null,
+          decided_by: d.verdict === "allow" ? "default" : null,
+          delegation_id: null,
+          requested_by: "agent",
+          client_id: null,
+        } as Record<string, unknown>,
+      }));
+    const told: Array<{ type: string; at: string; payload?: Record<string, unknown> }> = [
+      { type: "AgentDeployed", at: orders[0]?.submitted_at ?? workspace.now },
+      ...decided,
+      ...orders.flatMap((o) => [{ type: "OrderSubmitted", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])]),
+    ].sort((x, y) => Date.parse(x.at) - Date.parse(y.at));
+    return told.map((e, i) => {
+      const body = JSON.stringify({ event_type: e.type, payload: e.payload ?? {} });
+      return { seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: sha256Hex(body), body: Buffer.from(body, "utf8").toString("base64") };
+    });
   }
 
   /** The connection's account stream: every agent's orders requested and filled, in time order. Types and times only. */
@@ -284,6 +342,13 @@ export function createMockServer(options: MockServerOptions): MockServer {
       return event ? read({ event: { ...event, stream_id: `ctl:${workspaceId}`, artifact_refs: [], config_refs: {} } }) : problem(404, "not_found", "none");
     }
     if (route === "/health") return read(healthBody(workspace.health, servedAt));
+    if (route === "/instruments")
+      return read({
+        instruments: Object.values(INSTRUMENTS)
+          .map((i) => ({ instrument_id: i.asset_id, symbol: i.symbol, asset_class: i.asset_class, snapshot: `sha256:${sha256Hex(`instrument:${i.asset_id}`)}`, registered_at: servedAt }))
+          .sort((a, b) => (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0)),
+      });
+    if (route === "/signal-models") return read({ models: [MOCK_MODEL] });
     /** `read-models/alerts` (DEC-2141): the fixtures journal no owner alert, so none is invented. */
     if (route === "/alerts") return read({ alerts: [], truncated: false });
     if (route === "/passkeys") return read({ passkeys: passkeys.map((p) => ({ passkey_id: p.passkey_id, alg: "es256", enrolled_at: servedAt, cool_off_ends: p.cool_off_ends })) });
@@ -336,7 +401,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const approvalRoute = route.match(/^\/approvals\/([^/]+)$/);
     if (approvalRoute) {
       const approval = approvalBy(decodeURIComponent(approvalRoute[1]));
-      return approval ? read({ approval: { ...approvalRow(approval), content: { action: { side: approval.bound.side } }, schema_version: 2 } }) : problem(404, "not_found", "none");
+      return approval ? read({ approval: { ...approvalRow(approval), content: { action: { side: approval.bound.side } }, schema_version: 2, decision_deferred_to_binding: [] } }) : problem(404, "not_found", "none");
     }
     const backtestRoute = route.match(/^\/backtests\/([^/]+)$/);
     if (backtestRoute) {

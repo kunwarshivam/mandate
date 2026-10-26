@@ -1,6 +1,8 @@
-# Product-flow map, main at 57e24bc (2026-10-26 ~10:45 UTC), lane DR
+# Product-flow map, main at 430f5ac (2026-10-26 ~16:00 UTC), lane DR
 
-How this was checked: code reading and grep on main, plus cell runs. Docs alone never count.
+How this was checked: code reading and grep on main, plus cell runs. Docs alone never count. The
+refresh at 430f5ac re-read X3, X5, X6 and X10 and the step rows below against main's code, with no
+new cell run; the next is the rehearsal at 13:35Z on Tuesday 2026-10-27.
 
 - **CI:** main's run 40281337291 at a5f2e0c (`cell-demo-web`).
 - **Local:** the cell on 72e5f7d (#2538's ask and #2545's connection cap included), with a debug
@@ -19,11 +21,12 @@ In order, what stands between the trade loop and a fill:
 1. **No fresh output on a Monday.** The crossover's output from Friday's close expired on Saturday
    (X11), so the runtime decides nothing until Monday's close. The demo's window is Tuesday
    2026-10-27, 13:30 to 20:00 UTC. In that window the runtime asks on a deferring opening (#2538).
-2. **The executor restarts on its kill switch.** The journal has no account-stream schema for
-   `KillSwitchActivated` (X10).
-3. **The approve is refused.** The API answers 401 to every Approved grant (X6).
-4. **The executor holds every opening.** Its binding gate has no deployment ports or broker facts
-   yet (X5).
+2. ~~**The executor restarts on its kill switch.**~~ Closed: the account stream's records have
+   their schemas (X10).
+3. **The approve.** Served on main and verified through the step-up port (X6); not yet seen
+   granted in a cell run, which needs the window in item 1.
+4. ~~**The executor holds every opening.**~~ Closed: its binding gate reads the deployment's ports,
+   and the fixture broker fills and protects a deployed opening (X5).
 
 ## The cross-cutting blockers
 
@@ -31,14 +34,14 @@ In order, what stands between the trade loop and a fill:
 |---|---|---|---|---|---|
 | X1 | ~~No risk clock~~ **Closed.** The scheduler runs in the cell (#2439) | deploy/cell/charts/journal-db/files/processes.json:189-197 `built: true`; deploy/cell/images/scheduler.Dockerfile; xtask/src/cell.rs:884-891, :982-984. Locally the `scheduler` pod runs. The executor takes the first tick, then `Input::Started` (executord/src/process.rs:322-334); the runtime hands it in `clock_pass` (daemon/src/runtime.rs:415) | — | SC | — |
 | X2 | ~~No model outputs in the deployed runtime~~ **Closed by DEC-2383 item 7 (lane MC)** | The daemon's models pass queues `Observation` and `ModelOutput` ahead of each tick (daemon/src/runtime.rs:448-512). `mandate-runtime-models`, the thin layer-9 composer the founder chose, implements `Models` over `mandate_modelhost::evaluate` with the deployed document's pins, the folded `model_version` registrations, the calendar and the closes `mandate_bars::trusted_daily_closes` admits under `MANDATE_BARS`, and the `mandate-daemon` binary, now in that crate, wires it for a resolved deployment (runtime-models/src/main.rs). Only the cell's recording names a source; the closes object must already be in the read-only store (DEC-2385 item 5) | 3, 6 | — | — |
-| X3 | **Bars yes, marks no** | `data` is built and deployed with SPY and QQQ (processes.json:236-243; values/k3d.yaml:22-30; #2467, #2487), but it appends to no stream (processes.json:237). The executor's `MarkUpdated` v2 writer landed (#2449), but executord's fixture wiring marks nothing (`marked: NoMarks`, executord/src/fixture.rs:102), and its quotes are `NoQuotes` (executord/src/quotes.rs:44) | 3, 4, 6, 7 | X | M |
+| X3 | ~~Bars yes, marks no~~ **Closed by #2547 and #2624** | The executor marks each deployed instrument, as its deployment reads now or last read (`Marked for Deployment`, executord/src/deployment.rs:579), from its broker's quote asked by symbol (`QuoteFeed for Deployment`, :590), wired over the fixture's `NoMarks` and `NoQuotes` by `..wiring` (:244-251). `data` still appends to no stream, by design: it serves bars and closes read-only (processes.json `data`) | — | X | — |
 | X4 | ~~The gate's dry run denies every opening~~ **Closed by #2538 (D1's B2)**: the runtime now asks on an opening whose only open checks are the deferred ones | The deployed runtime uses `production::wired` (runtime-models/src/main.rs). It has a real plan (production/plan.rs), flatten, references and view, and a real gate dry run: `Gate` over `evaluate_deferring` with the registered rule set's gate config (production.rs:43-68; production/gate.rs:69-91; #2489, DEC-2388). That gate defers `UNJOURNALED`, which is eligibility, the liquidity floor, participation and the day-trade budget (gate.rs:26-30), on every opening, and denies any opening with a deferred check. `Plan::classify` never answers auto (plan.rs:90-133), so an opening that passed would ask | — | D1 | — |
-| X5 | **The executor knows nothing** | The fixture broker fills (`FixturePaper::filling`, executord/src/main.rs:218; paper.rs:201-206; #2468), and executord reads `IntentProposed` (follow.rs:463-499, process.rs:582). But its wiring is still NoMandate, NoInstruments, NoFacts, NoProtection, NoQuotes and NoMarks (executord/src/fixture.rs:29-102), and NoFacts holds every opening at the binding gate (:63-70) | 3, 4, 6 | X (G2b-1 deployment ports, #2547), XF (G2b-2 broker facts for the fixture and Alpaca paper), then X for the fill and the protective stop | L |
-| X6 | **The approve is refused** | Passkey enrolment and assertion are implemented (api-server/src/passkeys.rs:187; methods.rs:117), and confirm, deploy and connect judge step-up (version_routes.rs:302-314; connect.rs:352). The responses route still answers 401 to every `Approved` grant, `StepUpMissing` with evidence and `StepUpRequired` without (api-server/src/writes.rs:414-419). Web's cli_confirm approve (#2435) is real, but only the mock API accepts it | 1, 4, 7 | L1 (#2469/#2474, DEC-2129) | M |
+| X5 | ~~The executor knows nothing~~ **Closed by #2547, #2581, #2624 and #2641** | executord reads its production ports from the account's deployments, in the cell and in its fixture mode alike (main.rs:192-215, `deployment::production`): mandate, instruments, the binding gate's facts, protections, quotes and marks (deployment.rs:244-251), and the risk fold reads the risk records (#2581). The fixture paper broker fills, books and protects a deployed opening by asset id (#2624), and the cell's trade loop runs on the demo's own deployment (#2641). Not yet seen in a cell run, which waits on a weekday session (X11) | — | X | — |
+| X6 | **The approve: served on main, being confirmed in the cell** | The responses route records a grant only once the step-up port verifies it as an `approve` bound to the request's content hash, and answers `StepUpRequired`, `StepUpStale` or the port's refusal otherwise (`granted`, api-server/src/writes.rs:545; #2474, DEC-2104, DEC-2129). The cell's trade loop confirms the browser's code on the host (`mandate step-up confirm`). Not yet seen granted in a cell run (X11) | 1, 4, 7 | L1 | S |
 | X7 | ~~Exits never reach the executor~~ **Closed by DEC-2387** | Only the owner's exit of one instrument was unwired (see "X7 by path" below). The runtime now journals one `IntentProposed` per sell leg, caused by the `OwnerExitRequested` copy, which executord reads (follow.rs `proposals`, `confirmed`); `fixtures/contracts/owner-exit-agent-stream.json` pins the rows both processes read. Kill switches, discretionary and builder risk exits already reached it | — | EX | — |
 | X8 | ~~Alerts are dropped~~ **Closed by DEC-2514 and DEC-2516** | Every core alert is a closed `OwnerAlertKind` the executor and the runtime journal as `OwnerAlertSent` in the subject's own batch (#2555, DEC-2514; see "X8 by path"). The dispatcher runs in the cell (`mandate-dispatcher`, processes.json `dispatcher`, deploy/cell/images/dispatcher.Dockerfile, templates/dispatcher.yaml): one per workspace, the single writer of `ntf:{workspace}`, following every agent and account stream its control stream names, and mailing only through the recorded transport, which sends nothing; web push is off (DEC-2504) | — | EX | — |
 | X9 | ~~Deployed event ids are not unique across streams~~ **Closed by #2504** (`stream_event_id`, DEC-2389); a second demo run on one cell passes its connect check | executord's `fixture::Ids` is `1`, epoch, head, ordinal (executord/src/fixture.rs:18-26); the daemon's is `0`, epoch, head, ordinal (daemon/src/fixture.rs:20-24). The journal requires a globally unique `event_id` (journal spec, envelope table: "ULID; globally unique"). Every account stream's first batch therefore has the same ids, and so does every agent stream's. In one cell journal only the first agent's runtime can open its stream, and only the first account's connect check commits. Reproduced: a second demo run on one cell, connect check `append_refused`. The trade loop's agent is the second | — | DR | — |
-| X10 | **The executor's account-stream records have no journal schema** | The executor writes `KillSwitchActivated` (kill.rs:69, :151), `ExternalActivityIngested` (orders.rs:645; reconcile.rs:200), `RejectObserved` (orders.rs:989) and `OrderAbandoned` (intent.rs:777) on the account stream. `mandate-journal` registers none of them there (`control::governs`, control.rs:126-135; `schema::payload_schema`, schema.rs:197-208), so the append is refused `UnknownSchema` at `payload` and the executor fails its cycle and restarts. Seen in the cell on the agent kill switch: `drafts ["AgentModeApplied", "KillSwitchActivated"]` | 4, 6, 7 | L1 | M |
+| X10 | ~~The executor's account-stream records have no journal schema~~ **Closed by DEC-2803 (#2569, #2577)** | `mandate-journal` registers the account stream's `KillSwitchActivated` (DEC-2139), `ExternalActivityIngested`, `RejectObserved` and `OrderAbandoned` (control.rs:74-128, :1528-1600). #2642 books an unattributed fill in an instrument with no snapshot (DEC-2817), and #2651 binds an abandonment's client order id to its intent (rule 303, DEC-2820) | — | MC | — |
 | X11 | **No fresh output outside a weekday session** | ma_crossover's horizon is the pinned `max_output_age_s` (modelhost ma_crossover.rs:176), capped at 86400 (mandate.schema.json:657), and freshness needs `now < expires_at` (mandate spec §8.2). With daily closes, a Monday and the day after a holiday have no fresh output, and openings trade only in the regular session. The conservative reading stands; reading freshness in sessions is the founder's call (DEC-79), queued by the coordinator | 3 | founder | — |
 | X12 | ~~The runtimes exhaust the journal's connections~~ **Closed by #2545**: each `PgStore` held up to sqlx's default ten connections under `block_on`, and four runtimes took the cell journal's 100 slots, so the next `cell up`'s migration was refused; it now holds one | — | — | DR | — |
 
@@ -65,7 +68,7 @@ The notifications spec's design (§5.1, §5.5, §5.9): each stream's owner write
 | Executor owner alerts (`batch.notify`: protection, exit_stalled, reconciliation, agent_held, kill_switch keys) | journaled | `OwnerAlertSent` in the subject's batch, under its closed kind (#2555, DEC-2514) |
 | Runtime owner alerts (step.rs:521, research.rs:1268-1280) | journaled | `RuntimeAlert` drafts `OwnerAlertSent` in the agent stream's batch (#2555) |
 | `OwnerAlertSent` writers | every core alert (#2555) | the user kill switch's one notice (E8-9k), an account restriction (E7-2u), and cancel retries exhausted (E7-2x), each a backlog row |
-| Operator alerts (`journal_unavailable`, `opening_held`, `exit_held`, `flatten_unplanned`) | process-only | infrastructure alerts (`mandate-alerts`, E21-39), not owner notices |
+| Operator alerts (`journal_unavailable`, `opening_held`, `exit_held`, `flatten_unplanned`, `research_context_unread` (DEC-2825)) | process-only | infrastructure alerts (`mandate-alerts`, E21-39), not owner notices |
 | Dispatcher | binary, image, `processes.json` entry, journal role, chart values and its configuration file (DEC-2500, DEC-2516) | it mails only through the recorded transport; the founder's SMTP transport and web push join with their adapters (DEC-2511, DEC-2504) |
 
 Plan: (1) the processes write `OwnerAlertSent` for each core alert in its own batch, mapped by spec §3.2's closed key-to-kind table; (2) the dispatcher binary in the cell over the journal, sending only through the recorded transports and the pull channels.
@@ -98,7 +101,7 @@ Today: no real model is called anywhere on main. In the cell, the research agent
 
 ## Step 3: keeps deciding until it buys (signals, builder, gate, autonomy, executor, broker)
 
-Today: in the cell, the runtime evaluates the crossover and, with a fresh output, asks (X2, X4 closed); nothing fills yet (X5), and on a Monday no output is fresh (X11).
+Today: in the cell, the runtime evaluates the crossover and, with a fresh output, asks (X2, X4 closed); in code and in process tests the executor fills and protects a deployed opening on its fixture broker (X5 closed), not yet seen in a cell run; and on a Monday no output is fresh (X11).
 
 | Item | Wired? | Evidence | Lane | Size |
 |---|---|---|---|---|
@@ -107,7 +110,7 @@ Today: in the cell, the runtime evaluates the crossover and, with a fresh output
 | Gate dry run | deployed, asks on deferring openings | #2538 | D1 | — |
 | Autonomy: ask, `ApprovalRequested` | deployed yes, not yet seen in the cell (X11) | `Plan::classify` never auto (plan.rs:90-133); escalation.rs:288 | D1 | — |
 | Runtime to executor handoff | yes | executord reads `IntentProposed` (follow.rs:463-499) | — | — |
-| Executor opening, fill, protective stop | fill yes, opening no | X5 | X / LV | L |
+| Executor opening, fill, protective stop | yes on the fixture paper broker, in process tests; not yet seen in a cell run | X5 (#2624, #2641) | X | — |
 | Broker: Robinhood (rh-sim) | no | #2434 waits on the founder's three DEC-2382 answers | founder | — |
 
 ## Step 4: monitors the position (marks, protection, risk)
@@ -115,10 +118,10 @@ Today: in the cell, the runtime evaluates the crossover and, with a fresh output
 | Item | Wired? | Evidence | Lane | Size |
 |---|---|---|---|---|
 | Executor start, reconciliation, readiness | yes | ticks arrive (X1); CI step 2's executor is live | — | — |
-| Marks in the journal | writer yes, deployed no | X3 (#2449, `NoMarks` in the fixture wiring) | X | S |
-| Protection, OCO, watchdog | library yes | NoProtection (X5) | X / LV | L |
+| Marks in the journal | wired in the cell's executor, not yet seen in a cell run | X3 (#2449, #2547: the deployment's marks over `NoMarks`) | X | — |
+| Protection, OCO, watchdog | the protective stop wired, in process tests; not yet seen in a cell run | the deployment's protections (X5); the fixture broker places the stop as the bracket's legs (#2624, #2641) | X / LV | — |
 | Drawdown ladder, daily loss | library yes | not called deployed | RK | L |
-| Owner sees positions | agent page yes | The agent page reads orders, positions and the journal from the API (web/src/lib/api-runtime.tsx:320-345; api-screens.tsx:279-335; #2459). The `/positions` screen is mock (positions-screen.tsx:6), and the API returns null cost basis, risk mark and protection (reads.rs) | WB | M |
+| Owner sees positions | yes | The agent page reads orders, positions and the journal from the API (#2459), and `/positions` shows each position's DEC-2138 figures from the API (#2660) with the owner's exit on each of the agent's own (#2645) | WB | — |
 
 ## Step 5: acts on news and events
 
@@ -130,18 +133,18 @@ Unchanged since 517ee19: news tools exist on the recorded plane only, live news 
 |---|---|---|---|---|
 | Agent flatten over the journaled fold | deployed yes | production.rs `Flatten` over the agent's own fills (#2447); an owner exit's legs are journaled as `IntentProposed` (DEC-2387); a kill switch's flatten is planned by the executor itself | — | — |
 | Signal and goal exits | library yes | X2, X4 | D1 + DR | — |
-| Thesis exit | no | the runtime fold ignores `ThesisInvalidated` (state.rs:758) | NE | L |
-| Owner exit | journaled as its market sells | DEC-2387; sold once the executor holds the position (X5) | — | — |
+| Thesis exit | yes | the runtime fold reads `ThesisInvalidated` (runtime/src/state.rs:799, DEC-2391), end to end through the journal's own append (#2578); in the cell, step 3's research loop reads it as its own link (#2652, #2661) | NE | — |
+| Owner exit | yes, from web, journaled as its market sells | DEC-2387; the executor holds the position (X5 closed); `web/`'s positions screen sends it (#2645), and the cell's trade loop requires it as `owner_exit`, read by scenario step 6 (#2662) | — | — |
 
 ## Step 7: the owner sees everything in web, and approves, intervenes or kills
 
 | Item | Wired? | Evidence | Lane | Size |
 |---|---|---|---|---|
-| Approve | web yes, server no | X6 | L1 | M |
-| Kill switch | runtime yes, executor no | web's and the CLI's are recorded, and the runtime applies the CLI's; the executor cannot journal its copy (X10) | L1 | M |
+| Approve | web yes, server yes | X6 | L1 | S |
+| Kill switch | yes | web's and the CLI's are recorded and the runtime applies them; the executor journals its account-stream copy (X10 closed), and web/'s alerts screen shows it as one alert (#2638) | — | — |
 | Orders, positions, journal reads | used | the agent page (#2459); `/v1/me/session` by step-up (web/src/lib/api-runtime.tsx:272) | WB | — |
-| Screens still on `ApiNotYetNotice` | — | positions, audit, alerts, messages, settings | WB | M |
-| Resume, release, mandate change | no | unchanged | WB + L1 | M–L |
+| Screens still on `ApiNotYetNotice` | audit decisions; an agent's section and record pages | A `WorkspaceGate` without `api` renders it on the API source (screens/common.tsx:218): the audit page's decisions (account-screens.tsx:176) and `/agents/{id}/...`'s `AgentSectionScreen` and `AgentRecordScreen` (agent-detail.tsx:202, :375; agent-records.tsx:488), which that route renders with no `BySource` swap. The dashboard, agents, an agent's page, connections, approvals, alerts (#2638), positions (#2660) and the audit timeline swap in an API variant; go-live and backtests gate with `api`; messages and settings read without the notice. Not checked: the kill switch and release pages | WB | M |
+| Resume, release, mandate change | resume and stop yes; release and mandate change no | resume and stop from web with the owner's passkey (#2655, DEC-2140) | WB + L1 | M |
 
 ## Running the cell from a cloud session
 

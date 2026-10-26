@@ -276,8 +276,16 @@ describe("one conversation, as in any chat", () => {
     await send("XYZ");
     expect(lastReply()).toEqual(["XYZ is already traded by Agent 2. One agent trades an instrument on an account; choose another."]);
     await send("msft, aapl");
-    expect(lastReply()[0]).toBe("Got it: AAPL, MSFT to trade.");
+    expect(lastReply()).toEqual(["An agent trades one instrument for now. Name one symbol; another instrument needs an agent of its own."]);
+    await send("msft");
+    expect(lastReply()[0]).toBe("Got it: MSFT to trade.");
     expect(screen.getByRole("group", { name: "Models" })).toBeInTheDocument();
+  });
+
+  it("proposes one instrument at most in the version, whatever was asked (DEC-2809)", async () => {
+    renderFlow();
+    await toSummary();
+    expect(row("Most instruments at once").querySelector("dd")?.textContent).toMatch(/^1(?!\d)/);
   });
 });
 

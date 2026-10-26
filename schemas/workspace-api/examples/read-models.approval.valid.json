@@ -83,7 +83,26 @@
           "liquidity_floor",
           "participation"
         ]
-      }
+      },
+      "/approval/decision_deferred_to_binding": [
+        "halt",
+        "liquidity_floor",
+        "participation"
+      ]
+    }
+  },
+  {
+    "label": "a request whose decision is not on the stream",
+    "set": {
+      "/approval/decision_deferred_to_binding": null
+    }
+  },
+  {
+    "label": "a version-2 request across from a decision that deferred checks, which the read serves for the client to refuse",
+    "set": {
+      "/approval/decision_deferred_to_binding": [
+        "halt"
+      ]
     }
   }
 ]

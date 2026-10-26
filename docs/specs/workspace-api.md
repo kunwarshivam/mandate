@@ -287,6 +287,7 @@ Errors are RFC 9457 problem documents with these members:
 | `step_up_method` | 401 | The method is not allowed in this environment: `cli_confirm` in `live` (identity spec §7.3) |
 | `step_up_mismatch` | 401 | The challenge names another principal, workspace, action kind, or action digest |
 | `live_unavailable` | 409 | A live environment operation before counsel signs off (rule 8, B5) |
+| `deferral_mismatch` | 409 | A grant (§5.2) of an approval whose request's deferred checks are not exactly those of the `DecisionMade` it names, or whose decision is not on the agent stream: the request may hide or invent a check that has not been run (mandate spec §6.4, [DEC-2521](../project/decisions/DEC-2521.md)). `effect: none`, `retryable: false`; title "Request does not match its decision". A Skip of it is never refused for this |
 | `control_stream_frozen` | 503 | Journal spec §11 froze mandate and deployment changes; never sent for a risk-reducing call (API-7) |
 | `journal_unavailable` | 503 | Postgres cannot take the append; `effect: none`, `retryable: true` |
 | `rate_limited` | 429 | Over the principal's limit; never for an API-7 operation |
@@ -847,9 +848,9 @@ per workspace deployment (item 6).
       that row's refusal, and a non-member the one 404), writes nothing, and is served in a `live`
       workspace too, since a read adds no risk. An empty or absent control stream answers empty
       lists, not an error. Both fold the control stream as the create does (`versions.rs`,
-      `facts`): a control-stream row that fold cannot read (a malformed `model_version`
+      `control_facts`, the control-stream half of the create's `facts`): a control-stream row that fold cannot read (a malformed `model_version`
       registration among them) makes either read `journal_unavailable`, as it makes the create
-      refuse, never a list the create would then refuse. **(planned: E10-11)**
+      refuse, never a list the create would then refuse.
       - `GET /instruments` returns `read-models/instruments`: the fold the create's instrument
         check reads (`versions.rs`, `instruments`), every `ConfigSnapshotRegistered` of kind
         `instrument_snapshot` in stream order, the latest per stored `instrument_id`. Each listed
@@ -866,9 +867,12 @@ per workspace deployment (item 6).
       - `GET /signal-models` returns `read-models/signal-models`: the registry the create's V-007
         reads, from the same facts folded in stream order (`mandate-spec`'s validation context):
         the latest `ConfigSnapshotRegistered` of kind `model_version` per `model_id`, whatever its
-        version. A model withdrawn by `PlatformOperatorAction` `model_withdrawn` leaves the
+        version. A model whose registration no mandate document can name (a `model_version` off the
+        mandate schema's version pattern, more than 32 parameters, or a parameter name off its key
+        pattern) is omitted, as an unpinnable instrument is ([DEC-2142](../project/decisions/DEC-2142.md)).
+        A model withdrawn by `PlatformOperatorAction` `model_withdrawn` leaves the
         registry, and so the list, once the fold maps that action (E10-11w); until then the create
-        admits it and the list shows it, the two never differing. Each listed model has that
+        admits a withdrawn model and the list shows it, the two never differing for it. Each listed model has that
         registration's `model_id`, `model_version`, `content_hash`, `params` (in the order V-007
         compares a document's, ascending as registered) and `admits_instruments`, its row's
         `recorded_at` as `registered_at`, and `content`, sorted by id. V-007 reads only the row,
@@ -876,7 +880,7 @@ per workspace deployment (item 6).
         object stored under `content_hash`, its `authorship` and `methodology` when they are
         strings, and of its `params_schema` only `constraints` (strings) and each parameter's
         `name`, `type`, `min` and `max` (DEC-518 item 3), member by member, each only when
-        present; `null` when the store cannot give or parse the object. Nothing else of the object
+        present and within `read-models/signal-models`' bounds, never cut short (DEC-2142 item 2); `null` when the store cannot give or parse the object. Nothing else of the object
         is served: no prompt template, model identity, retrieval plan, tool declaration, input or
         output declaration, or source path. It serves nothing about how a model performed (no scorecard, backtest figure or
         ranking; DEC-99, DEC-126), so the list never reads as a recommendation.
@@ -998,7 +1002,7 @@ workspace that ran it, and no route aggregates backtests across workspaces.
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
 | Inbox | `GET /approvals?state=pending\|resolved` | — | Pending by deadline, then resolved with outcome (D5) |
-| Read one | `GET /approvals/{id}` | — | The content object exactly as `ApprovalRequested` holds it, the `ApprovalRequested` version it comes from (`schema_version`, [DEC-2518](../project/decisions/DEC-2518.md)), its `content_hash`, the deadline, the grants so far, and the status folded from the agent stream. Never a scorecard, profit estimate, or price target (DEC-126) |
+| Read one | `GET /approvals/{id}` | — | The content object exactly as `ApprovalRequested` holds it, the `ApprovalRequested` version it comes from (`schema_version`, [DEC-2518](../project/decisions/DEC-2518.md)), its decision's deferred checks (`decision_deferred_to_binding`, [DEC-2519](../project/decisions/DEC-2519.md)), its `content_hash`, the deadline, the grants so far, and the status folded from the agent stream. Never a scorecard, profit estimate, or price target (DEC-126) |
 | Delegation preview | `POST /approvals/{id}/delegation-previews` | — | §5.3. Offered only where mandate spec §6.4 allows a scope |
 | Respond | `POST /approvals/{id}/responses` | `ApprovalResponseSubmitted` | §5.2. Users only |
 | Resolve a notice | `GET /notices/{notice_id}` | `RecordsAccessed` | §3.9 |
@@ -1010,9 +1014,13 @@ and `schema_version`, the `ApprovalRequested` version `content` comes from (1, 2
 [DEC-2518](../project/decisions/DEC-2518.md)). Version 3's content names the checks its dry run
 deferred (journal spec §9.6, rule 291) and versions 1 and 2 name none, so a client tells a
 version 3 request without its list from an older one and shows it as unreadable, never as
-nothing deferred (mandate spec §6.4). A version 1 or 2 request whose decision, written in another
-batch, deferred checks is not caught here: that is rule 292's cross-batch debt
-(`E21-30-approval-deferral-range-check`).
+nothing deferred (mandate spec §6.4). The single read also adds `decision_deferred_to_binding`:
+the `deferred_to_binding` of the `DecisionMade` the request's `causation_id` names on the agent
+stream, an empty list for a decision that names none, or `null` when no such decision is there
+([DEC-2519](../project/decisions/DEC-2519.md)). A client shows the request's checks only when its
+own list (empty for versions 1 and 2) is exactly that list, and shows any other request as
+unreadable: so a request that hides or invents a deferral is caught at the read wherever the two
+were written, which rule 292 checks only within one batch.
 The state is folded from the agent stream, and the first terminal event wins: `pending` until
 re-validation acts (`acted`) or the approval ends `skipped` (by the owner's Skip or by
 re-validation), `timed_out`, or `canceled`. An admitted grant still awaiting re-validation, and a
@@ -1210,6 +1218,24 @@ adds the account's holdings at its last reconciliation as `account_positions`, t
 names (model and broker quantities, the mismatch flag, and when observed), `null` when that stream
 is not found. They are the account's, not the agent's: no journaled fold attributes holdings per
 agent yet. The account stream's watermark joins `as_of`.
+The single read also serves `openings_held` ([DEC-2143](../project/decisions/DEC-2143.md)): a
+standing reason every opening of the agent's is held whatever the order, as the binding gate's
+source decides it, computed by the one function the executor process binds on
+(`mandate-gate-context`'s `Journaled::opening_hold`), from the fold of the streams the executor
+folds for it, in its order (the control stream, the account stream, and the scheduler's clock
+stream), and whether the deployed mandate pins its universe. `{"reason": "account_traded"}` while the account has traded
+and the account risk view, which must then read every opening, does not yet;
+`{"reason": "research_agent_traded"}` while the account has traded and the mandate is unpinned
+(its working universe is research's, mandate spec §8), since that view binds an instrument at
+deployment and such an agent has none ([DEC-2819](../project/decisions/DEC-2819.md) item 4);
+`{"reason": "unknown"}` when the agent's account stream is not found or holds no row, the clock
+stream cannot be read, the deployed document cannot be read, or any row the fold reads cannot be
+read (the fold then holds every opening), so openings may be held; and `null` when none of these applies. `null` is not "openings run": a hold that lasts
+only until a fact arrives or ages in (no risk clock, account snapshot, or mark yet, or a stale
+one) and a hold for one order (its quote, the session, a limit) are the gate's verdict on each
+order, and the owner's hold and a paused or stopped agent show as `mode`. No exit, protective
+order, or kill switch is held by any of them (`AGENTS.md` rule 13). The executor binds on the
+same function (DEC-2819's executor slice), so the read and the gate never differ.
 
 `GET /agents/{id}/orders` and `GET /agents/{id}/positions` return `read-models/orders` and
 `read-models/positions` ([DEC-2111](../project/decisions/DEC-2111.md)), from the account stream of
@@ -1783,7 +1809,7 @@ here, so replacing fixtures with calls changes no screen contract:
 | `Approval` (bound order, risk impact, evidence, grants) | `GET /approvals/{id}` |
 | `GateDecision`, `TimelineEvent` | `GET /journal/events/{id}/gate`, `GET /agents/{id}/timeline` |
 | `Connection` | `GET /connections/{id}` |
-| `mock-runtime.tsx` command phases (`sent`, `recorded`, `undelivered`, `unknown`) | §5.5's phases; `undelivered` is `effect: none` |
+| `mock-runtime.tsx` command phases (`sent`, `recorded`, `undelivered`, `unknown`); an approval response's also `decided` and `refused` | §5.5's phases; `undelivered` is `effect: none`; an approval response's `decided` is §5.5's `applied` and its `refused` is §5.5's `refused`, with its `ApprovalResponded` step's reason ([DEC-2822](../project/decisions/DEC-2822.md)) |
 
 ### 4.10 Routes outside the workspace prefix
 
@@ -2074,7 +2100,11 @@ The API refuses only: an unauthenticated or non-user principal, a user who is no
 mandate, a Skip is recorded for the approving role alone and the runtime refuses a non-approver's,
 [DEC-1007](../project/decisions/DEC-1007.md) item 10, Proposed), an unknown approval, and, for
 `approved` only, missing or unbound step-up: bound to the content hash, or with a delegation to the
-preview's `step_up_digest` (§5.3), else 401 with the step-up code §3.5 names. It does not judge the deadline, the quorum,
+preview's `step_up_digest` (§5.3), else 401 with the step-up code §3.5 names; and, for `approved`
+only, after the role and before the step-up is read, a request whose deferred checks are not exactly
+those of the `DecisionMade` it names (version 3's list, or none for versions 1 and 2), or whose
+decision is not on the agent stream: `409` `deferral_mismatch`, nothing committed and the challenge
+unspent ([DEC-2521](../project/decisions/DEC-2521.md)). It does not judge the deadline, the quorum,
 independence, or re-validation: the runtime does (checks 1 to 12). A `skipped` is never refused for
 anything else (API-7).
 
@@ -2455,7 +2485,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Mandate validation and classification (`mandate-spec`) | **Exists**; §4.1 calls it |
 | The web app's screens on recorded fixtures (`web/`) | **Exists**; §4.9 maps fixtures to resources |
 | The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10); the process, its sessions, the first reads of §4.3 and §4.7, pause and the kill switch, and an approval's Skip by E21-31 (§3.11) |
-| Drafts, compile, versions, confirm endpoints | **Partly served** (E10-11): creating a version from a document, the confirmation screen, and a new mandate's confirm (§3.11 item 11, DEC-2101); the catalogue reads (`GET /instruments`, `GET /signal-models`, DEC-2136), drafts, compile, validate, diffs, and an agent's later versions are planned |
+| Drafts, compile, versions, confirm endpoints | **Partly served** (E10-11): creating a version from a document, the confirmation screen, and a new mandate's confirm (§3.11 item 11, DEC-2101), and the catalogue reads (`GET /instruments`, `GET /signal-models`, §3.11 item 11, DEC-2136); drafts, compile, validate, diffs, and an agent's later versions are planned |
 | Deployment manager endpoints and the reserved kill-switch path | **Partly served** (E10-12): pause, the kill switch, and Skip (§3.11 item 10); deploy and go-live (item 11, DEC-2101); resume, Stop, owner exit, acknowledgment, and command status (item 12, DEC-2102); the hold, its lift, and backtests are planned |
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |

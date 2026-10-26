@@ -83,5 +83,29 @@
     "set": {
       "/agent/label": "a"
     }
+  },
+  {
+    "label": "openings held: account_traded",
+    "set": {
+      "/agent/openings_held": {
+        "reason": "account_traded"
+      }
+    }
+  },
+  {
+    "label": "openings held: research_agent_traded",
+    "set": {
+      "/agent/openings_held": {
+        "reason": "research_agent_traded"
+      }
+    }
+  },
+  {
+    "label": "openings held: unknown",
+    "set": {
+      "/agent/openings_held": {
+        "reason": "unknown"
+      }
+    }
   }
 ]

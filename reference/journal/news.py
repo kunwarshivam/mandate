@@ -25,7 +25,9 @@ import random
 from common import apply_change, change, delete
 from control import WORKSPACE, check_of, reported, violations
 
-SPEC = "docs/specs/journal.md v0.97 §9.37 rules 283 to 286 (DEC-2278)"
+import verification
+
+SPEC = "docs/specs/journal.md v0.97 §9.37 rules 283 to 286 (DEC-2278), and v0.103 §9.13 (DEC-2280)"
 NEWS = f"news:{WORKSPACE}"
 READER = {"kind": "system", "id": "news_reader", "version": "0.1.0", "build": "sha256:" + "7" * 64}
 USER = {"kind": "user", "id": "user_owner_01", "version": "0.1.0", "build": None}
@@ -240,6 +242,7 @@ ORACLE_CHECKS = (
     "streams.rule",
     "items.oracle",
     "streams.oracle",
+    "named.ranges",
 )
 
 
@@ -291,9 +294,22 @@ def draft_for(section: dict, case: dict) -> dict:
     return draft
 
 
+def named_by_ranges() -> list[dict]:
+    """Records of other streams that name the news stream by its id (journal spec v0.103: §9.13's
+    `stream_id` type, which §9.14's anchor leaves reuse, and §9.15's row, DEC-2280): the
+    verification section's passing run, its last range over this workspace's news stream."""
+    draft = copy.deepcopy(verification.BASES["run_passed"])
+    draft["payload"]["ranges"][-1]["stream_id"] = NEWS
+    return [{"name": "verification_range_over_the_news_stream", "draft": draft}]
+
+
 def check_section(section: dict, skip: frozenset[str] = frozenset()) -> list[str]:
     """Every failure, so seeded bugs can be shown caught."""
     problems = []
+    for case in section["named_by_ranges"]:
+        got = violations(case["draft"], skip)
+        if got:
+            problems.append(found("named.ranges", f"{case['name']}: expected Valid, got {got}"))
     for name, draft in section["drafts"].items():
         got = violations(draft, skip)
         if got:
@@ -373,6 +389,9 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
          mutated(lambda s: case(s, "valid_drafts", "thirty_two_tickers")["changes"][0].update(value=TICKERS_33))),
         ("a stream record is written by a user", "streams.records",
          mutated(lambda s: case(s, "streams", "two_items")["records"][1].update(actor=dict(USER)))),
+        ("a range names the news stream by a type no grammar holds", "named.ranges",
+         mutated(lambda s: s["named_by_ranges"][0]["draft"]["payload"]["ranges"][-1].update(
+             stream_id=NEWS.replace("news:", "nws:")))),
         ("a stream case expects the wrong record", "streams.rule",
          mutated(lambda s: case(s, "streams", "stored_again_later")["expect"].update(index=2))),
     ]
@@ -406,6 +425,7 @@ def build_section() -> dict:
         "invalid_drafts": invalid_drafts(),
         "valid_drafts": valid_drafts(),
         "streams": stream_cases(),
+        "named_by_ranges": named_by_ranges(),
         "fuzz_seed": 2278,
     }
 

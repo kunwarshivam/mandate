@@ -13,9 +13,11 @@ import { type ShownChallenge, approvalConfirmCommand } from "@/api/step-up";
 import { HostConfirm } from "./host-confirm";
 import { APPROVER_SENTENCE, type DeferredChecks, deferredCheckLabel, deferredChecks } from "@/lib/deferred-checks";
 import { clock, percent, price, quantity, usd } from "@/lib/format";
+import { FINAL_UNDELIVERED, refusedText, undeliveredText } from "@/lib/grant-refusals";
 import { type ActivityAnswer, type ApprovalRecord, type ApprovalResponse, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { cn } from "@/lib/utils";
+import { AgentTheses } from "./theses";
 
 /**
  * The screens over the workspace API's read models (DEC-1096): Home, the agents, one agent, the
@@ -235,12 +237,14 @@ export function ApiAgent({ agentId }: { agentId: string }) {
               <AgentName agent={agent} />
             </h1>
             <PauseControl agent={agent} />
+            <OpeningsHeldNote held={agent.openings_held} />
           </header>
           <Section title="Mandate">{agent.mandate ? <MandateFacts mandate={agent.mandate} /> : <p className={NOT_REPORTED}>Mandate not reported</p>}</Section>
           <Section title="Account positions">
             <p className="text-sm text-muted-foreground">What the account held at its last reconciliation, whichever agent bought it.</p>
             <Positions agent={agent} />
           </Section>
+          <AgentTheses agentId={agent.agent_id} />
           <AgentActivity agentId={agent.agent_id} />
           <Section title="Limit usage">
             <p className={NOT_REPORTED}>Not reported by your deployment yet.</p>
@@ -248,6 +252,26 @@ export function ApiAgent({ agentId }: { agentId: string }) {
         </article>
       ) : null}
     </WorkspaceGate>
+  );
+}
+
+/**
+ * Why every opening of the agent's is held, in words (DEC-2143), so a held agent never reads as a
+ * stalled one. Nothing is shown when no standing reason applies; exits always still run (`AGENTS.md`
+ * rule 13).
+ */
+export function OpeningsHeldNote({ held }: { held: AgentDetail["openings_held"] }) {
+  if (held === null) return null;
+  const why =
+    held.reason === "research_agent_traded"
+      ? "Openings held: this research agent's account has traded, and a further opening waits for the multi-instrument risk state, which is not built yet."
+      : held.reason === "account_traded"
+        ? "Openings held: this account has traded, and your deployment does not yet read the account's risk for a new opening."
+        : "Openings may be held; status unavailable.";
+  return (
+    <p className="rounded-xl bg-lapis-soft px-4 py-3 text-sm" role="status" data-slot="openings-held" data-reason={held.reason}>
+      {why} Exits still run.
+    </p>
   );
 }
 
@@ -412,8 +436,10 @@ function responseText(response: ApprovalResponse): string {
       return response.response === "approve" ? "Recorded in the journal: you approved. The gate re-runs its checks before anything is sent." : "Recorded in the journal: you skipped. Nothing is sent.";
     case "decided":
       return "Approved: the gate re-ran its checks and allowed it.";
+    case "refused":
+      return refusedText(response.reason ?? null);
     case "undelivered":
-      return UNDELIVERED[response.reason ?? ""] ?? "Not recorded: your deployment answered that nothing was recorded, so nothing was approved.";
+      return undeliveredText(response.reason);
     case "unknown":
       return "The result is unknown; we are checking. Until the journal answers, treat the request as not approved.";
     default: {
@@ -422,16 +448,6 @@ function responseText(response: ApprovalResponse): string {
     }
   }
 }
-
-/** Why an answer was not recorded, for the step-up refusals an approve can meet (§3.5, DEC-2104 item 6). */
-const UNDELIVERED: Readonly<Record<string, string>> = {
-  step_up_required: "Not recorded: approving needs a confirmation your deployment did not receive, so nothing was approved.",
-  step_up_missing: "Not recorded: your deployment found no confirmation of this code on the host, so nothing was approved. Run the command, then approve again.",
-  step_up_mismatch: "Not recorded: the confirmation on the host was for another request, so nothing was approved.",
-  step_up_stale: "Not recorded: the code expired before it was used, so nothing was approved. Ask for a new code.",
-  step_up_reused: "Not recorded: this code was already used, so nothing was approved. Ask for a new code.",
-  step_up_method: "Not recorded: your deployment does not take a host confirmation for this, so nothing was approved.",
-};
 
 /** Why no code could be shown; nothing was asked of the host and nothing was approved. */
 function noCode(reason: string): string {
@@ -496,7 +512,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
     ["Protection", o.protection ? `Stop at ${price(o.protection.stop)}${o.protection.take_profit ? `, take profit at ${price(o.protection.take_profit)}` : ""}` : "Not reported"],
     ["Deadline", clock(deadlineIso(approval.deadline))],
   ];
-  const deferred = deferredChecks(approval.content, approval.schema_version);
+  const deferred = deferredChecks(approval.content, approval.schema_version, approval.decision_deferred_to_binding);
   const shown = [nameOf(agent) ?? "Name not reported", line, ...facts.map(([term, value]) => `${term}: ${value}`), ...deferredLines(deferred)];
   const environment = agent?.environment ?? "unknown";
   const record: ApprovalRecord = { screen: "D6", environment, shown, modelOutputExpanded: false };
@@ -517,7 +533,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
     });
   };
   const submit = (shownChallenge: ShownChallenge) => respond(approval.approval_id, "approve", record, shownChallenge.challenge);
-  const settled = response && response.phase !== "undelivered";
+  const settled = response && (response.phase !== "undelivered" || FINAL_UNDELIVERED.has(response.reason ?? ""));
   const open = approval.state === "pending" && canRespond && !settled;
   const approvable = deferred.kind !== "unreadable";
   return (
@@ -545,7 +561,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
         {deferred.kind !== "none" ? <DeferredChecksPanel deferred={deferred} /> : null}
         {approval.state !== "pending" ? <p className="text-h3">{ENDED[approval.state]}</p> : null}
         {response ? (
-          <p role="status" data-phase={response.phase} className="text-sm">
+          <p role={response.phase === "refused" || (response.phase === "undelivered" && FINAL_UNDELIVERED.has(response.reason ?? "")) ? "alert" : "status"} data-phase={response.phase} className="text-sm">
             {responseText(response)}
           </p>
         ) : null}

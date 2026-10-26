@@ -376,7 +376,10 @@ jobs:
       - run: .github/scripts/no-credentials.sh && cargo nextest run --locked --no-tests=fail --package mandate-paper --features live,rh-sim
 
   fast:
-    runs-on: ubuntu-24.04
+    # DEC-2065, DEC-2072: on `select`'s runner, so `main`'s verdict waits on the self-hosted pool
+    # rather than on GitHub's; `ubuntu-24.04` for a fork or while CI_RUNNER is unset, and when
+    # `select` produced no outputs (skipped, or cancelled before it ran).
+    runs-on: ${{ needs.select.outputs.runner || 'ubuntu-24.04' }}
     timeout-minutes: 1
     permissions: {}
     # On a pull request it runs even when the run is cancelled, so a cancelled head fails rather
@@ -1333,7 +1336,8 @@ jobs:
           MANDATE_SCHEMA_SHARD: ${{ matrix.shard }}
 
   full:
-    runs-on: ubuntu-24.04
+    # As `fast` (DEC-2072).
+    runs-on: ${{ needs.select.outputs.runner || 'ubuntu-24.04' }}
     timeout-minutes: 1
     permissions: {}
     # As `fast`: it runs on a cancelled pull request run, and a cancelled run elsewhere skips it.

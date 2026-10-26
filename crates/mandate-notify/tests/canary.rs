@@ -38,7 +38,7 @@ fn the_canaries_are_fourteen_distinct_lowercase_markers_no_fixed_text_or_hex_hol
     let distinct: BTreeSet<&str> = CANARIES.into_iter().collect();
     assert_eq!(distinct.len(), 14);
     let texts = fixed_texts();
-    assert_eq!(texts.len(), 27 + 8 + 33);
+    assert_eq!(texts.len(), 27 + 8 + 36);
     for canary in CANARIES {
         assert!(!canary.is_empty());
         assert!(canary.bytes().all(|b| b.is_ascii_lowercase()), "{canary}");

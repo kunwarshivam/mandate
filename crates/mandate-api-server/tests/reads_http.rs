@@ -151,9 +151,21 @@ fn ws(path: &str) -> String {
 }
 
 fn row(stream: &str, seq: u64, event_type: &str, payload: &str) -> StoredEvent {
+    caused_row(stream, seq, event_type, payload, None)
+}
+
+/// A row whose envelope names `causation` as its `causation_id`.
+fn caused_row(
+    stream: &str,
+    seq: u64,
+    event_type: &str,
+    payload: &str,
+    causation: Option<&str>,
+) -> StoredEvent {
     let event_id = format!("01JBH3BTZ8K2M4N6P8R0S2T{seq:03}");
+    let caused_by = causation.map_or_else(String::new, |id| format!(r#""causation_id":"{id}","#));
     let text = format!(
-        r#"{{"environment":"paper","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{stream}"}}"#
+        r#"{{{caused_by}"environment":"paper","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{stream}"}}"#
     );
     let body = to_canonical(&parse(text.as_bytes()).expect("JSON"));
     StoredEvent {
@@ -518,6 +530,93 @@ fn the_approvals_inbox_and_one_approval_read_from_the_agent_streams() {
     }
 }
 
+/// The single read names the deferred checks of the `DecisionMade` its request's `causation_id`
+/// names, on the agent stream: its list, empty for a decision without one, and `null` when no such
+/// decision is there, so a reader can tell a request that hides its decision's deferrals across
+/// batches (DEC-2519). The inbox carries no content and none of this.
+#[test]
+fn one_approval_names_its_decisions_deferred_checks_or_null_without_one() {
+    let f = fixture();
+    seed(&f);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Approver])]));
+    let cookie = signed_in(&f, alice());
+    let a = agent_stream("agt_a");
+    let deferring = r#"{"deferred_to_binding":["halt","liquidity_floor","participation"]}"#;
+    let request = |seq, schema_version, causation: Option<&str>| StoredEvent {
+        schema_version,
+        ..caused_row(
+            &a,
+            seq,
+            "ApprovalRequested",
+            &format!(
+                r#"{{"content":{{{ACTION}}},"content_hash":"{}","deadline":900}}"#,
+                version(u8::try_from(seq).expect("small"))
+            ),
+            causation,
+        )
+    };
+    let decision = |seq, schema_version, payload| StoredEvent {
+        schema_version,
+        ..row(&a, seq, "DecisionMade", payload)
+    };
+    let id = |seq: u64| format!("01JBH3BTZ8K2M4N6P8R0S2T{seq:03}");
+    f.journal.streams.lock().expect("unpoisoned").insert(
+        a.clone(),
+        vec![
+            decision(1, 3, deferring),
+            request(2, 2, Some(&id(1))),
+            decision(3, 1, r#"{"dry_run":"allow"}"#),
+            request(4, 2, Some(&id(3))),
+            request(5, 2, Some(&id(99))),
+            request(6, 2, None),
+            request(7, 2, Some(&id(4))),
+            decision(8, 3, r#"{"dry_run":"allow"}"#),
+            request(9, 2, Some(&id(8))),
+        ],
+    );
+    let named = |seq: u64| -> Option<Value> {
+        let reply = get(&f, &ws(&format!("/approvals/{}", id(seq))), Some(&cookie));
+        assert_eq!(reply.status, 200, "{seq}");
+        json(&reply)
+            .get("approval")
+            .and_then(|a| a.get("decision_deferred_to_binding"))
+            .cloned()
+    };
+    assert_eq!(
+        named(2),
+        Some(parse(br#"["halt","liquidity_floor","participation"]"#).expect("JSON")),
+        "a request across from a deferring decision is served that decision's list"
+    );
+    assert_eq!(
+        named(4),
+        Some(parse(b"[]").expect("JSON")),
+        "a decision without a list deferred nothing"
+    );
+    for seq in [5, 6, 7] {
+        assert_eq!(
+            named(seq),
+            Some(Value::Null),
+            "{seq}: no DecisionMade by that id on the stream"
+        );
+    }
+    assert_eq!(
+        named(9),
+        Some(Value::Null),
+        "a version 3 decision without its list is never read as deferring nothing"
+    );
+    let reply = get(&f, &ws("/approvals"), Some(&cookie));
+    let Some(Value::Array(listed)) = json(&reply).get("approvals").cloned() else {
+        panic!("approvals");
+    };
+    assert_eq!(listed.len(), 6);
+    assert!(
+        listed
+            .iter()
+            .all(|a| a.get("decision_deferred_to_binding").is_none()),
+        "the inbox carries none of it"
+    );
+}
+
 #[test]
 fn an_unknown_state_or_query_member_is_invalid() {
     let f = fixture();
@@ -636,7 +735,7 @@ fn seed_documents(f: &Fixture, deployed_version: &str) {
             seq,
             "BrokerPositionObserved",
             &format!(
-                r#"{{"instrument":"{instrument}","broker_qty":"{qty}","model_qty":"{qty}","mismatch":false,"risk_clock":"2026-10-17T10:00:00Z"}}"#
+                r#"{{"instrument":"{instrument}","broker_qty":"{qty}","model_qty":"{qty}","mismatch":false,"risk_clock":"2026-10-17T10:00:00.000000000Z"}}"#
             ),
         )
     };
@@ -777,7 +876,7 @@ fn seed_orders(f: &Fixture) {
             seq,
             "OrderRequestRecorded",
             &format!(
-                r#"{{"agent_id":"{agent}","intent_id":null,"purpose":"open","extended_hours":false,"stop_price":null,"order_class":null,"take_profit":null,"stop":null,"rung":null,"at_floor":null,"risk_clock":"2026-10-17T10:00:00Z"}}"#
+                r#"{{"agent_id":"{agent}","intent_id":null,"purpose":"open","extended_hours":false,"stop_price":null,"order_class":null,"take_profit":null,"stop":null,"rung":null,"at_floor":null,"risk_clock":"2026-10-17T10:00:00.000000000Z"}}"#
             ),
         )
     };
@@ -788,7 +887,7 @@ fn seed_orders(f: &Fixture) {
                 seq,
                 "OrderSubmitted",
                 &format!(
-                    r#"{{"client_order_id":"{id}","attempt":1,"instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"buy","type":"limit","tif":"day","qty":"3","limit_price":"101.5","risk_clock":"2026-10-17T10:00:00Z"}}"#
+                    r#"{{"client_order_id":"{id}","attempt":1,"instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"buy","type":"limit","tif":"day","qty":"3","limit_price":"101.5","risk_clock":"2026-10-17T10:00:00.000000000Z"}}"#
                 ),
             ),
             &cause.event_id,
@@ -884,7 +983,7 @@ fn an_agents_positions_are_its_own_fills_beside_the_accounts_holdings() {
             seq,
             "FillApplied",
             &format!(
-                r#"{{"fill_id":"f-{seq}","client_order_id":"{id}","instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"buy","qty_gross":"{qty}","price":"101.5","trade_date":"2026-10-17","risk_clock":"2026-10-17T10:00:00Z","fees":[]}}"#
+                r#"{{"fill_id":"f-{seq}","client_order_id":"{id}","instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"buy","qty_gross":"{qty}","price":"101.5","trade_date":"2026-10-17","risk_clock":"2026-10-17T10:00:00.000000000Z","fees":[]}}"#
             ),
         )
     };
@@ -968,7 +1067,7 @@ fn an_agents_positions_are_its_own_fills_beside_the_accounts_holdings() {
             &acct,
             9,
             "FillApplied",
-            r#"{"fill_id":"f-9","client_order_id":"o-1","instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"short","qty_gross":"1","price":"1","trade_date":"2026-10-17","risk_clock":"2026-10-17T10:00:00Z","fees":[]}"#,
+            r#"{"fill_id":"f-9","client_order_id":"o-1","instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"short","qty_gross":"1","price":"1","trade_date":"2026-10-17","risk_clock":"2026-10-17T10:00:00.000000000Z","fees":[]}"#,
         ));
     let unreadable = get(&f, &ws("/agents/agt_a/positions"), Some(&cookie));
     assert_eq!(unreadable.status, 503, "no position from part of its fills");
@@ -1271,4 +1370,142 @@ fn a_member_without_the_view_row_reads_no_alerts() {
     members(&f, Ok(vec![activated(1, alice(), &[])]));
     let cookie = signed_in(&f, alice());
     assert_eq!(get(&f, &ws("/alerts"), Some(&cookie)).status, 403);
+}
+
+/// The agent read's `openings_held` for `agent` (DEC-2143).
+fn openings_held(f: &Fixture, cookie: &str, agent: &str) -> Option<Value> {
+    json(&get(f, &ws(&format!("/agents/{agent}")), Some(cookie)))
+        .get("agent")
+        .and_then(|a| a.get("openings_held"))
+        .cloned()
+}
+
+fn reason(code: &str) -> Value {
+    parse(format!(r#"{{"reason":"{code}"}}"#).as_bytes()).expect("JSON")
+}
+
+/// Appends `event_type` with `payload` to the account stream `acct_1`.
+fn on_account(f: &Fixture, event_type: &str, payload: &str) {
+    let acct = format!("acct:{WORKSPACE}:acct_1");
+    let mut streams = f.journal.streams.lock().expect("unpoisoned");
+    let rows = streams.entry(acct.clone()).or_default();
+    let seq = u64::try_from(rows.len()).expect("small") + 1;
+    rows.push(row(&acct, seq, event_type, payload));
+}
+
+#[test]
+fn openings_are_not_held_while_the_account_is_untraded_and_held_once_any_agent_has_traded() {
+    let (bytes, version) = document();
+    let f = fixture_with(stored(bytes));
+    seed_documents(&f, &version);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_a"),
+        Some(Value::Null),
+        "a reconciliation is not a trade"
+    );
+    on_account(
+        &f,
+        "OrderRequestRecorded",
+        r#"{"agent_id":"agt_other","purpose":"open","risk_clock":"2026-10-17T10:00:00.000000000Z"}"#,
+    );
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_a"),
+        Some(reason("account_traded")),
+        "another agent's order on the account holds a pinned agent's openings until the account risk view reads them"
+    );
+}
+
+#[test]
+fn openings_held_is_unknown_never_null_when_it_cannot_be_judged() {
+    let (bytes, version) = document();
+    let f = fixture_with(stored(bytes));
+    seed_documents(&f, &version);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_b"),
+        Some(reason("unknown")),
+        "no stored document, so neither its universe nor its account is known"
+    );
+    on_account(
+        &f,
+        "FillApplied",
+        r#"{"fill_id":"f1","client_order_id":null,"instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"buy","qty_gross":"not a quantity","price":"100","risk_clock":"2026-10-17T10:00:00.000000000Z"}"#,
+    );
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_a"),
+        Some(reason("unknown")),
+        "a row the fold cannot read holds every opening, so it is never null"
+    );
+}
+
+#[test]
+fn openings_held_is_unknown_for_an_empty_account_stream_and_a_body_that_does_not_parse() {
+    let (bytes, version) = document();
+    let f = fixture_with(stored(bytes));
+    seed_documents(&f, &version);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    let acct = format!("acct:{WORKSPACE}:acct_1");
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .insert(acct.clone(), Vec::new());
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_a"),
+        Some(reason("unknown")),
+        "an account stream with no row is not found, as account_positions reads it"
+    );
+    on_account(&f, "StreamOpened", "{}");
+    let mut broken = row(&acct, 2, "StreamOpened", "{}");
+    broken.body = b"not json".to_vec();
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .get_mut(&acct)
+        .expect("seeded")
+        .push(broken);
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_a"),
+        Some(reason("unknown")),
+        "a body that does not parse is a row the fold cannot read"
+    );
+}
+
+#[test]
+fn without_a_store_openings_held_is_unknown() {
+    let (_, version) = document();
+    let f = fixture();
+    seed_documents(&f, &version);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    assert_eq!(openings_held(&f, &cookie, "agt_a"), Some(reason("unknown")));
+}
+
+const RESEARCH_DOCUMENT: &str = include_str!("fixtures/research_mandate.json");
+
+#[test]
+fn a_research_agents_openings_are_held_for_want_of_a_multi_instrument_risk_state_once_the_account_traded()
+ {
+    let bytes = to_canonical(&parse(RESEARCH_DOCUMENT.as_bytes()).expect("JSON"));
+    let version = format!("sha256:{}", Digest::of(&bytes).to_hex());
+    let f = fixture_with(stored(bytes));
+    seed_documents(&f, &version);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    assert_eq!(openings_held(&f, &cookie, "agt_a"), Some(Value::Null));
+    on_account(
+        &f,
+        "OrderRequestRecorded",
+        r#"{"agent_id":"agt_a","purpose":"open","risk_clock":"2026-10-17T10:00:00.000000000Z"}"#,
+    );
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_a"),
+        Some(reason("research_agent_traded")),
+        "an unpinned mandate binds no instrument for the account risk view (DEC-2819 item 4)"
+    );
 }

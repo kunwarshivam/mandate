@@ -65,6 +65,10 @@ pub struct ApprovalView {
     /// The `ApprovalRequested` version `content` comes from, which says which members it must
     /// hold: version 3's `deferred_to_binding` among them (DEC-2518).
     pub schema_version: u64,
+    /// The `deferred_to_binding` of the `DecisionMade` the request's `causation_id` names on the
+    /// agent stream, an empty list for a decision without one, or `null` when no such decision is
+    /// there: what lets a reader catch a request that hides its decision's deferrals (DEC-2519).
+    pub decision_deferred_to_binding: Value,
     /// The order the approval binds (DEC-1021).
     pub order: Value,
 }
@@ -147,6 +151,7 @@ pub fn mode(agent_rows: &[StoredEvent]) -> Option<String> {
 /// Every approval on `agent_id`'s stream, in request order, with its folded state. A request
 /// without a deadline, a content hash, or a content object is not served.
 pub fn approvals(agent_id: &str, agent_rows: &[StoredEvent]) -> Vec<ApprovalView> {
+    let decisions = decision_deferrals(agent_rows);
     let mut views: Vec<ApprovalView> = Vec::new();
     for row in agent_rows {
         let Some(event) = envelope(row) else {
@@ -176,6 +181,7 @@ pub fn approvals(agent_id: &str, agent_rows: &[StoredEvent]) -> Vec<ApprovalView
                     content_hash: hash.to_owned(),
                     content: content.clone(),
                     schema_version: row.schema_version,
+                    decision_deferred_to_binding: decided_for(&event, &decisions),
                     order: bound,
                 });
             }
@@ -246,6 +252,77 @@ pub fn agent(deployment: &Deployment, agent_rows: &[StoredEvent]) -> AgentView {
         },
         pending_approvals: u64::try_from(pending).unwrap_or(u64::MAX),
     }
+}
+
+/// Each `DecisionMade` on the stream by event id, with its `payload.deferred_to_binding` as
+/// journaled; an empty list when a version 1 or 2 decision names none, and `null` when a version 3
+/// one, which always carries the member (rule 269), does not, so it is never read as agreeing
+/// (DEC-2519).
+fn decision_deferrals(agent_rows: &[StoredEvent]) -> std::collections::BTreeMap<String, Value> {
+    agent_rows
+        .iter()
+        .filter(|row| row.event_type == "DecisionMade")
+        .filter_map(|row| {
+            let event = envelope(row)?;
+            let named = event
+                .get("payload")
+                .and_then(|p| p.get("deferred_to_binding"))
+                .cloned();
+            let deferred = match named {
+                Some(list) => list,
+                None if row.schema_version >= 3 => Value::Null,
+                None => Value::Array(Vec::new()),
+            };
+            Some((row.event_id.clone(), deferred))
+        })
+        .collect()
+}
+
+/// The deferred checks of the decision `event`'s `causation_id` names among `decisions`, or `null`
+/// when it names none there (DEC-2519).
+fn decided_for(event: &Value, decisions: &std::collections::BTreeMap<String, Value>) -> Value {
+    text(event, "causation_id")
+        .and_then(|id| decisions.get(id))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+/// Whether `request`, an `ApprovalRequested` row among `agent_rows`, names exactly the deferred
+/// checks of the decision it names as its cause: version 3's non-empty list, or none for versions 1
+/// and 2, against the decision's list. A decision not on the stream, a version 3 decision without its
+/// list, a list that is not distinct check names, and any other request disagree, so a grant of it
+/// is refused (DEC-2521).
+pub fn deferrals_agree(request: &StoredEvent, agent_rows: &[StoredEvent]) -> bool {
+    let Some(event) = envelope(request) else {
+        return false;
+    };
+    let named = event
+        .get("payload")
+        .and_then(|p| p.get("content"))
+        .and_then(|c| c.get("deferred_to_binding"))
+        .cloned();
+    let requested = match (request.schema_version, named) {
+        (3, Some(Value::Array(list))) if !list.is_empty() && check_names(&list) => {
+            Value::Array(list)
+        }
+        (1 | 2, None) => Value::Array(Vec::new()),
+        _ => return false,
+    };
+    decided_for(&event, &decision_deferrals(agent_rows)) == requested
+}
+
+/// Whether `list` holds distinct check names as the journal writes them, a lower-case letter then
+/// lower-case letters, digits, and underscores, as the web app reads them (DEC-2519).
+fn check_names(list: &[Value]) -> bool {
+    let mut seen = std::collections::BTreeSet::new();
+    list.iter().all(|item| {
+        item.as_str().is_some_and(|name| {
+            let mut chars = name.chars();
+            chars.next().is_some_and(|first| first.is_ascii_lowercase())
+                && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                && seen.insert(name)
+        })
+    })
 }
 
 /// The bound order of an `ApprovalRequested` payload (DEC-1021): `content.action`'s members, and

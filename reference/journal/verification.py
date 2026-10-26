@@ -471,12 +471,6 @@ def valid_drafts() -> list[dict]:
             [change(f"{R0}.start", {**MANIFEST_START, "manifest_hash": "b" * 64})],
         ),
         valid(
-            "a_news_stream_range",
-            "§9.13 (v0.102, DEC-2280): the range grammar names the news stream, one of the eight stream types",
-            ok,
-            [change(f"{R2}.stream_id", f"news:{WORKSPACE}")],
-        ),
-        valid(
             "anchor_start_at_seq_2",
             "rule 132: an anchor whose leaf is seq 1",
             unfinished,

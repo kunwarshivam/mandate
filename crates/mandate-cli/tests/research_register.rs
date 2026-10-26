@@ -15,6 +15,7 @@ use mandate_cli::control::{ControlError, ControlJournal, Owner, Submitted};
 use mandate_cli::version::{confirm, create};
 use mandate_gateway::registry::{Identity, Snapshot};
 use mandate_journal::{ArtifactStore, Draft, Environment};
+use mandate_research_run::agentic::LoopBounds;
 use mandate_research_run::{OutputBounds, ResearchEntry, RetrievalPlan};
 use mandate_spec::context::{AgentId, ContextArgs, JournaledFact, Membership};
 use mandate_spec::{Mandate, ValidationContext, Violation, validate::validate};
@@ -27,7 +28,7 @@ const MANDATE: &str = include_str!("../../../deploy/cell/demo/research-mandate.j
 const MODEL: (&str, &str) = ("llm.research_agent", "0.1.0");
 /// The demo entry's content hash, written out: the one `research-mandate.json` pins, so a change to
 /// the pinned template, plan, bounds or schema, or to how the entry is read, shows here first.
-const DEMO_HASH: &str = "sha256:40f446f7858575d2c66a223f747348b3a91ef83e844e13815e527f4d181e5283";
+const DEMO_HASH: &str = "sha256:bff754a2e669add9a7928a4b8c71c764cfe61455e361621ae6f6c262af0824cd";
 
 /// The demo recording's entry, typed out.
 fn entry() -> ResearchEntry {
@@ -45,7 +46,7 @@ fn entry() -> ResearchEntry {
         seed: Some(7),
         plan: RetrievalPlan::v0_1(),
         bounds: OutputBounds::v0_1(),
-        agentic: None,
+        agentic: Some(LoopBounds::v0_2()),
     }
 }
 

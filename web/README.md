@@ -178,8 +178,13 @@ The confirm, when the served screen says it needs step-up, and the deploy each t
 `GET /passkeys`, has the authenticator sign the challenge (`navigator.credentials.get`, user verification
 required, the page's own host as the RP ID), and sends `step_up` with `step_up_assertion` beside it. A
 canceled check, a browser without WebAuthn, no passkey, or one still in its first 24 hours sends nothing
-and says so. Until the deployment serves its registered instruments and signal models, the create step
-over the API sends nothing rather than a made-up asset id or model hash, and says why; changing a mandate is not sent yet,
+and says so. The set-up first reads the instruments and signal models the deployment registered
+(`GET /instruments`, `GET /signal-models`, DEC-2136; `src/api/catalogue.ts`): it offers only those
+models, asking each declared parameter from the bounds its content states and checking a stated
+`a < b` constraint, refuses a symbol the deployment has not registered (naming the ones it lists),
+and names each instrument's registered asset id and the model's registered version and content hash
+in the version, so nothing is made up in the browser; a catalogue that cannot be read offers nothing
+and says so; changing a mandate is not sent yet,
 and the charts and sample headlines are not drawn over the API: DEC-975 has the detail, including the
 provisional read bodies the API server serves until `schemas/workspace-api/read-models/` lands.
 Approving a request is step-up by `cli_confirm` (DEC-2104, DEC-2103 item 7): Approve first asks

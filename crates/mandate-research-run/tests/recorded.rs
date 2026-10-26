@@ -24,6 +24,13 @@ fn agentic() -> Value {
     parse(AGENTIC.as_bytes()).unwrap()
 }
 
+/// The demo recording as a single-call one: its entry names no loop, and it scripts no turn and no
+/// monitor reply.
+fn single_call() -> Value {
+    let demo = edited(demo(), &["entry", "agentic"], None);
+    edited(edited(demo, &["turns"], None), &["monitor_reply"], None)
+}
+
 fn text<'a>(value: &'a Value, path: &[&str]) -> &'a str {
     path.iter()
         .fold(value, |at, member| at.get(member).unwrap())
@@ -90,9 +97,14 @@ fn the_demo_recording_reads_as_the_model_its_text_names() {
             cached: int(&file, &["reply", "cached_tokens"]),
         }
     );
+    assert_eq!(
+        model.turns.len(),
+        file.get("turns").unwrap().as_array().unwrap().len(),
+        "each of the demo recording's turns is read"
+    );
     assert!(
-        model.turns.is_empty(),
-        "the demo recording scripts no turns"
+        model.monitor_reply.is_some(),
+        "the demo recording answers a monitor run"
     );
 }
 
@@ -214,7 +226,7 @@ fn an_agentic_recording_reads_its_turns_in_order() {
 fn turns_the_entry_could_not_serve_refuse_whole() {
     let turns = agentic().get("turns").unwrap().clone();
     assert_eq!(
-        RecordedModel::read(&edited(demo(), &["turns"], Some(turns.clone()))),
+        RecordedModel::read(&edited(single_call(), &["turns"], Some(turns.clone()))),
         Err(RecordedError::Malformed("turns")),
         "a single-call entry"
     );

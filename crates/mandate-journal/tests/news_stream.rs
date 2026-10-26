@@ -108,6 +108,29 @@ fn every_news_base_and_valid_draft_parses() {
     );
 }
 
+/// Journal spec v0.103 (DEC-2280): a record of another stream that names the news stream by its id,
+/// a verification run's range over it, parses: §9.13's `stream_id` type, which §9.14's anchor
+/// leaves reuse, names `news:{workspace_id}`.
+#[test]
+fn a_range_over_the_news_stream_parses() {
+    let section = section();
+    let named = list(&section, "named_by_ranges");
+    assert!(
+        !named.is_empty(),
+        "the section names the news stream from a range"
+    );
+    let failed: Vec<String> = named
+        .iter()
+        .filter_map(|case| {
+            let draft = to_canonical(case.get("draft").unwrap());
+            Draft::parse(&draft)
+                .err()
+                .map(|e| format!("{}: {e:?}", text(case, "name")))
+        })
+        .collect();
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
 /// The closed schema, rule 283's clauses in order, and rule 286's writer and subject: each draft
 /// refused with its reason at the member named, the first the journal reports.
 #[test]

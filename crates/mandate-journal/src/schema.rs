@@ -164,7 +164,7 @@ fn is_asset_id(s: &str) -> bool {
 /// `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`,
 /// `clock:{workspace_id}`, `ntf:{workspace_id}`, `meter:{workspace_id}`,
 /// `dmeter:{deployment_id}`, or `news:{workspace_id}`, each segment an identifier (journal spec §2,
-/// §9.13's range grammar since v0.46, the news stream's since v0.102).
+/// §9.13's range grammar since v0.46, the news stream's since v0.103).
 fn is_stream_name(s: &str) -> bool {
     let parts: Vec<&str> = s.split(':').collect();
     let segments = match parts.first() {
