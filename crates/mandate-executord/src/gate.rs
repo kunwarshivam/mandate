@@ -16,13 +16,13 @@ use mandate_accounting::{AccountType, InstrumentId};
 use mandate_executor::{AgentId, BindingGateConfigRefs, BindingGateInput, BindingGateRequest};
 use mandate_gate_context::Facts;
 use mandate_gate_inputs::{InputError, Reviewed, reservation};
-use mandate_num::{Price, Qty, Ratio, Usd};
+use mandate_num::{Price, Qty, Usd};
 use mandate_ports::{PortError, gate_mandate};
 use mandate_risk::{
-    AccountSnapshot, AccountState, AgentId as GateAgentId, AgentMode, AgentSnapshot, AssetId,
-    ClientOrderId, ConductState, DayTradeLedger, DayTradeRegime, EtpClass, Exchange, GateConfig,
-    InstrumentSnapshot, MarketSnapshot, QuoteCurrency, RiskSnapshot, SaneQuote, ValidatedMandate,
-    WorkingUniverse,
+    AccountSnapshot, AccountState, AgentId as GateAgentId, AgentSnapshot, AssetId, ClientOrderId,
+    ConductState, DayTradeLedger, DayTradeRegime, EtpClass, Exchange, GateConfig,
+    InstrumentRestriction, InstrumentSnapshot, MarketSnapshot, QuoteCurrency, RiskSnapshot,
+    SaneQuote, ValidatedMandate, WorkingUniverse,
 };
 use mandate_time::UtcNanos;
 
@@ -56,10 +56,26 @@ pub struct Liquidity {
     pub trailing_5m_volume: Qty,
 }
 
+/// The agent's own risk as the account risk view folds it from the journal (trading spec §9.6 to
+/// §9.8): its equity against its high-water mark and day start, its latched limits and ladder
+/// rungs, its mode, the instrument restrictions on it, its exits' last fills, its orders today,
+/// its day trades and its conduct counters. The gate reads every limit on these, so none is ever
+/// assumed: an opening without them is held.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentRisk {
+    pub risk: RiskSnapshot,
+    pub conduct: ConductState,
+    pub instrument_restrictions: BTreeMap<AssetId, BTreeSet<InstrumentRestriction>>,
+    pub last_exit_fill_at: BTreeMap<AssetId, UtcNanos>,
+    pub orders_today: u32,
+    pub day_trades: DayTradeLedger,
+}
+
 /// Every fact one opening's binding gate reads that is not the deployment's: the journal's account,
 /// mark and clock, the sane quote the order is judged against, the facts the journal does not
-/// hold, each `None` until it is read, and whether the account is flat: it holds no position and
-/// works no order.
+/// hold, the agent's journaled risk and whether the instrument is halted, each `None` until it is
+/// read, and whether the account is flat: it holds no position and works no order, as the caller
+/// reads the account stream's fold and the broker's open orders.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrderFacts {
     pub journaled: Facts,
@@ -67,6 +83,8 @@ pub struct OrderFacts {
     pub asset: Option<AssetRecord>,
     pub rules: Option<AccountRules>,
     pub liquidity: Option<Liquidity>,
+    pub agent: Option<AgentRisk>,
+    pub halted: Option<bool>,
     pub flat: bool,
 }
 
@@ -79,7 +97,6 @@ pub struct DeployedGate {
     etp: EtpClass,
     etp_classified_at: UtcNanos,
     increment: Qty,
-    allocation: Usd,
     config: GateConfig,
     mandate: ValidatedMandate,
     config_refs: BindingGateConfigRefs,
@@ -104,9 +121,15 @@ impl DeployedGate {
     /// `agent`'s deployment as the gate reads it, quoted from `feed`.
     ///
     /// # Errors
-    /// [`InputError`] when the mandate's limits or allocation cannot be read, or the instrument's
-    /// asset id is not one the gate admits.
+    /// [`InputError`] when the mandate's limits cannot be read, the instrument's
+    /// asset id is not one the gate admits, or the instrument is not a US equity, the only class
+    /// this input judges.
     pub fn new(agent: &str, reviewed: &Reviewed, feed: &str) -> Result<Self, InputError> {
+        if reviewed.instrument.asset_class != mandate_domain::AssetClass::UsEquity {
+            return Err(InputError::Missing {
+                what: "a US-equity instrument",
+            });
+        }
         let asset = AssetId::new(reviewed.instrument.asset_id.as_str()).map_err(|_| {
             InputError::Missing {
                 what: "the reviewed instrument id",
@@ -119,7 +142,6 @@ impl DeployedGate {
             etp: reviewed.instrument.etp,
             etp_classified_at: reviewed.instrument.etp_classified_at,
             increment: reviewed.instrument.increment_qty,
-            allocation: Usd::parse(reviewed.mandate.capital.allocation_usd.as_str())?,
             config: reviewed.gate_config.clone(),
             mandate: gate_mandate(&reviewed.mandate).map_err(limits)?,
             config_refs: reviewed.config_refs.clone(),
@@ -130,16 +152,15 @@ impl DeployedGate {
 
     /// The binding gate's input for the opening `request` on `facts`, or `None` when the request
     /// is not the deployed agent's opening on its instrument, the account is not flat, active and
-    /// unblocked, or any fact the gate reads is missing.
+    /// unblocked, or any fact the gate reads is missing, the agent's journaled risk and the halt
+    /// status among them, so no limit is judged on an assumed figure (`AGENTS.md` rules 1 and 3).
     ///
     /// An order that reduces risk is answered `None` too: the core then keeps its own decision,
     /// which a missing snapshot never turns into a denial (`AGENTS.md` rule 13, DEC-2034 item 2).
-    /// The risk snapshot is the allocation's, as the paper shell's first order reads it (DEC-470
-    /// item 1), until the account risk view supplies it, so an opening is answered only from a
-    /// flat account, where the allocation is the agent's whole equity. The day's day trades are
-    /// not yet folded from the journal, so an opening is answered only where none of them could
-    /// bind: under the legacy pattern-day-trader regime with a prior close's equity at or above
-    /// the rule set's threshold (trading spec §9.2). Any other regime holds it.
+    /// The account's positions and working orders are not yet read, so an opening is answered
+    /// only from a flat account, and only where the account's day trades could not bind: under the
+    /// legacy pattern-day-trader regime with a prior close's equity at or above the rule set's
+    /// threshold (trading spec §9.2). Any other regime holds it.
     pub fn input(
         &self,
         facts: &OrderFacts,
@@ -155,6 +176,8 @@ impl DeployedGate {
         let asset = facts.asset?;
         let rules = facts.rules?;
         let liquidity = facts.liquidity?;
+        let agent = facts.agent.clone()?;
+        let halted = facts.halted?;
         if rules.regime != DayTradeRegime::LegacyPdt
             || rules.prior_close_equity < self.config.legacy_pdt_equity_threshold
         {
@@ -180,23 +203,12 @@ impl DeployedGate {
         )
         .ok()?;
         let gate_agent = GateAgentId(1);
-        let allocation = self.allocation;
         Some(BindingGateInput {
             config_refs: self.config_refs.clone(),
             now,
             config: self.config.clone(),
             mandate: self.mandate.clone(),
-            risk: RiskSnapshot {
-                agent_equity: allocation,
-                high_water_mark: allocation,
-                day_start_equity: allocation,
-                capital_base: allocation,
-                inherited_loss: Usd::ZERO,
-                latched: BTreeSet::new(),
-                active_rungs: BTreeMap::new(),
-                size_factor: Ratio::parse("1").ok()?,
-                agent_mode: AgentMode::Normal,
-            },
+            risk: agent.risk.clone(),
             account: AccountSnapshot {
                 account_type: rules.account_type,
                 state: AccountState::Active,
@@ -215,15 +227,15 @@ impl DeployedGate {
             },
             agent: AgentSnapshot {
                 agent: gate_agent,
-                mode: AgentMode::Normal,
-                instrument_restrictions: BTreeMap::new(),
+                mode: agent.risk.agent_mode,
+                instrument_restrictions: agent.instrument_restrictions,
                 positions: BTreeMap::new(),
                 market_values: BTreeMap::new(),
                 working_orders: BTreeSet::new(),
                 instrument_groups: BTreeMap::new(),
-                last_exit_fill_at: BTreeMap::new(),
-                orders_today: 0,
-                day_trades: DayTradeLedger::default(),
+                last_exit_fill_at: agent.last_exit_fill_at,
+                orders_today: agent.orders_today,
+                day_trades: agent.day_trades,
             },
             instrument: InstrumentSnapshot {
                 instrument: self.asset.clone(),
@@ -242,7 +254,7 @@ impl DeployedGate {
                 median_dollar_volume_30d: None,
                 min_order_size: self.increment,
                 qty_increment: self.increment,
-                halted: false,
+                halted,
                 status_feed_current: false,
             },
             market: MarketSnapshot {
@@ -251,7 +263,7 @@ impl DeployedGate {
                 trailing_5m_volume: Some(liquidity.trailing_5m_volume),
                 adv_20d: Some(liquidity.adv_20d),
             },
-            conduct: ConductState::default(),
+            conduct: agent.conduct,
             universe: WorkingUniverse::Known {
                 instruments: BTreeSet::from([self.asset.clone()]),
                 pinned: true,

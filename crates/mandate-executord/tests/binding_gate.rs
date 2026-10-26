@@ -6,6 +6,7 @@
 //! and an exit keeps the core's own decision; and the eligibility, liquidity and participation
 //! facts the gate reads each refuse the opening when they say so.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use mandate_accounting::{AccountType, InstrumentId, Side};
@@ -15,14 +16,17 @@ use mandate_executor::{
     AgentId, BindingGateConfigRefs, BindingGateInput, BindingGateRequest, ExecutorConfig, Purpose,
     TimeInForce,
 };
-use mandate_executord::gate::{AccountRules, AssetRecord, DeployedGate, Liquidity, OrderFacts};
+use mandate_executord::gate::{
+    AccountRules, AgentRisk, AssetRecord, DeployedGate, Liquidity, OrderFacts,
+};
 use mandate_gate_context::{AccountFacts, Facts, Mark};
 use mandate_gate_inputs::control::SnapshotExchange;
 use mandate_gate_inputs::{Reviewed, ReviewedInstrument};
-use mandate_num::{Fraction, Price, Qty, ShareIncrement, Usd};
+use mandate_num::{Fraction, Price, Qty, Ratio, ShareIncrement, Usd};
 use mandate_risk::{
-    DayTradeRegime, EtpClass, Exchange, GateConfig, GateInput, GatePass, Origin, ProposedKind,
-    ProposedOrder, ReasonCode, SaneQuote, TimeInForce as GateTimeInForce, Verdict, evaluate,
+    AgentMode, ConductState, DayTradeLedger, DayTradeRegime, EtpClass, Exchange, GateConfig,
+    GateInput, GatePass, Origin, ProposedKind, ProposedOrder, ReasonCode, RiskSnapshot, SaneQuote,
+    TimeInForce as GateTimeInForce, Verdict, evaluate,
 };
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
@@ -150,7 +154,7 @@ fn facts() -> Result<OrderFacts, Error> {
                 equity: usd("100000")?,
                 cash: usd("100000")?,
                 buying_power: usd("200000")?,
-                non_marginable_buying_power: usd("100000")?,
+                non_marginable_buying_power: usd("90000")?,
                 at: now,
             },
             mark: Mark {
@@ -181,7 +185,32 @@ fn facts() -> Result<OrderFacts, Error> {
             adv_20d: qty("50000000")?,
             trailing_5m_volume: qty("1000000")?,
         }),
+        agent: Some(agent_risk(usd("10000")?, usd("10000")?, AgentMode::Normal)?),
+        halted: Some(false),
         flat: true,
+    })
+}
+
+/// The agent's journaled risk, as the account risk view folds it: `equity` against a high-water
+/// mark and day start of `high`, in `mode`, with no exit, order or restriction yet today.
+fn agent_risk(equity: Usd, high: Usd, mode: AgentMode) -> Result<AgentRisk, Error> {
+    Ok(AgentRisk {
+        risk: RiskSnapshot {
+            agent_equity: equity,
+            high_water_mark: high,
+            day_start_equity: high,
+            capital_base: high,
+            inherited_loss: Usd::ZERO,
+            latched: BTreeSet::new(),
+            active_rungs: BTreeMap::new(),
+            size_factor: Ratio::parse("1")?,
+            agent_mode: mode,
+        },
+        conduct: ConductState::default(),
+        instrument_restrictions: BTreeMap::new(),
+        last_exit_fill_at: BTreeMap::new(),
+        orders_today: 0,
+        day_trades: DayTradeLedger::default(),
     })
 }
 
@@ -258,7 +287,13 @@ fn an_opening_on_every_fact_is_allowed() -> Result<(), Error> {
     );
     assert_eq!(snapshot.account.equity, usd("100000")?);
     assert_eq!(snapshot.account.prior_close_equity, usd("100000")?);
-    assert_eq!(snapshot.account.model_buying_power, usd("100000")?);
+    assert_eq!(
+        snapshot.account.model_buying_power,
+        usd("90000")?,
+        "the lower of cash and non-marginable buying power"
+    );
+    assert_eq!(snapshot.account.broker_buying_power, usd("200000")?);
+    assert!(!snapshot.instrument.halted);
     assert_eq!(snapshot.feed, "fixture");
     assert!(!snapshot.account.crypto_active);
     let mut crypto = facts()?;
@@ -276,12 +311,18 @@ fn a_missing_fact_holds_the_opening() -> Result<(), Error> {
     no_asset.asset = None;
     let mut no_rules = base.clone();
     no_rules.rules = None;
-    let mut no_liquidity = base;
+    let mut no_liquidity = base.clone();
     no_liquidity.liquidity = None;
+    let mut no_risk = base.clone();
+    no_risk.agent = None;
+    let mut no_halt = base;
+    no_halt.halted = None;
     for (case, facts) in [
         ("asset", no_asset),
         ("rules", no_rules),
         ("liquidity", no_liquidity),
+        ("the agent's journaled risk", no_risk),
+        ("the halt status", no_halt),
     ] {
         assert!(opening(&facts)?.is_none(), "{case}");
     }
@@ -415,5 +456,56 @@ fn the_liquidity_floor_and_participation_refuse_the_opening() -> Result<(), Erro
         verdict(&snapshot)?,
         (Verdict::Deny, Some(ReasonCode::BelowPriceFloor))
     );
+    Ok(())
+}
+
+/// The agent's journaled risk reaches the gate as it was read, never the allocation assumed: a
+/// flat agent down 30% is judged on its drawdown, and its mode, exits, orders and conduct are
+/// the fold's. A paused agent's opening is refused.
+#[test]
+fn the_agents_journaled_risk_reaches_the_gate() -> Result<(), Error> {
+    let mut down = facts()?;
+    let mut read = agent_risk(usd("7000")?, usd("10000")?, AgentMode::Normal)?;
+    let exited = at("2026-09-28T16:59:30Z")?;
+    let asset = mandate_risk::AssetId::new(ASSET)?;
+    read.last_exit_fill_at.insert(asset.clone(), exited);
+    read.orders_today = 3;
+    down.agent = Some(read.clone());
+    let snapshot = opening(&down)?.ok_or("an input")?;
+    assert_eq!(snapshot.risk, read.risk);
+    assert_eq!(snapshot.agent.mode, AgentMode::Normal);
+    assert_eq!(snapshot.agent.last_exit_fill_at.get(&asset), Some(&exited));
+    assert_eq!(snapshot.agent.orders_today, 3);
+    assert_eq!(snapshot.conduct, read.conduct);
+    let mut paused = facts()?;
+    paused.agent = Some(agent_risk(usd("10000")?, usd("10000")?, AgentMode::Paused)?);
+    let snapshot = opening(&paused)?.ok_or("an input")?;
+    assert_eq!(snapshot.risk.agent_mode, AgentMode::Paused);
+    assert_eq!(snapshot.agent.mode, AgentMode::Paused);
+    assert_ne!(
+        verdict(&snapshot)?.0,
+        Verdict::Allow,
+        "a paused agent opens nothing"
+    );
+    Ok(())
+}
+
+/// A halted instrument reaches the gate as halted, which refuses the opening (trading spec §4.4).
+#[test]
+fn a_halted_instrument_refuses_the_opening() -> Result<(), Error> {
+    let mut halted = facts()?;
+    halted.halted = Some(true);
+    let snapshot = opening(&halted)?.ok_or("an input")?;
+    assert!(snapshot.instrument.halted);
+    assert_ne!(verdict(&snapshot)?.0, Verdict::Allow);
+    Ok(())
+}
+
+/// Only a US-equity deployment is judged as one: any other class is refused before any order.
+#[test]
+fn a_deployment_that_is_not_a_us_equity_is_refused() -> Result<(), Error> {
+    let mut crypto = reviewed()?;
+    crypto.instrument.asset_class = DomainAssetClass::Crypto;
+    assert!(DeployedGate::new(AGENT, &crypto, "fixture").is_err());
     Ok(())
 }
