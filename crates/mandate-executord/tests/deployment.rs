@@ -577,3 +577,44 @@ fn a_deployed_run_reads_its_ports_from_the_deployment() -> Result<(), Error> {
     );
     Ok(())
 }
+
+/// G2b-2: a run carries its broker's own facts until it is deployed, and hands them to the
+/// deployment then: the fixture run's facts are the fixture's (its asset, and its own halts), and
+/// the deployed run keeps none of its own. An exit is gated on nothing the broker is asked.
+#[test]
+fn a_run_hands_its_brokers_facts_to_its_deployment() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    let paper = mandate_executord::paper::FixturePaper::new(at(MONDAY)?);
+    let broker = mandate_executord::alpaca::AlpacaBroker::new(paper.clone())?;
+    let run = mandate_executord::run::fixture(broker, &scope())?;
+    let facts = run.facts().ok_or("the fixture run's facts")?;
+    assert!(facts.asset("SPY").is_some_and(|asset| asset.active));
+    assert_eq!(facts.halted("SPY"), Some(false));
+    assert_eq!(paper.served(), ["GET /V2/ASSETS/SPY"]);
+    let rows = journal.clone();
+    let run = run.deployed(
+        &scope(),
+        mandate_executord::deployment::Production {
+            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            artifacts: Box::new(store),
+            liquidity: Box::new(Bars(Rc::new(Cell::new(0)))),
+        },
+    );
+    assert!(
+        run.facts().is_none(),
+        "the run's facts went to its deployment"
+    );
+    let (agent, spy) = (agent(), spy()?);
+    let gate = &run.wiring().gate;
+    assert!(
+        gate.input(&request(&agent, &spy, Purpose::RiskExit, Side::Sell)?)
+            .is_none()
+    );
+    assert_eq!(
+        paper.served(),
+        ["GET /V2/ASSETS/SPY"],
+        "an exit asks the broker nothing"
+    );
+    Ok(())
+}

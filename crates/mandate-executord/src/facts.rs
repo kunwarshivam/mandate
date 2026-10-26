@@ -99,7 +99,7 @@ impl<T: TradingTransport + Clone, H: HaltStatus> BrokerRead<T, H> {
     /// `runtime_unavailable` when the runtime that drives the client cannot be built.
     pub fn new(transport: T, declared: DeclaredRules, halts: H) -> Result<Self, &'static str> {
         let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
+            .enable_all()
             .build()
             .map_err(|_| "runtime_unavailable")?;
         Ok(Self {

@@ -229,7 +229,7 @@ fn alpacas_recorded_asset_record_reads_and_its_absence_is_unread() -> Result<(),
 }
 
 /// Each eligibility fact is the record's own: an `ipo` or `ptp_no_exception` attribute, an
-/// inactive, untradable or unfractionable record each read as such, and a record of another
+/// inactive, untradable or unfractionable record each read as such, active and tradable apart, and a record of another
 /// symbol, one with no `attributes`, a server error, or no answer at all are unread.
 #[test]
 fn each_asset_fact_is_the_records_own_and_a_bad_record_is_unread() -> Result<(), Error> {
@@ -258,6 +258,16 @@ fn each_asset_fact_is_the_records_own_and_a_bad_record_is_unread() -> Result<(),
             "/v2/assets/GONE",
             200,
             &body("GONE", "inactive", false, true, "[]"),
+        )
+        .answer(
+            "/v2/assets/HALT",
+            200,
+            &body("HALT", "active", false, true, "[]"),
+        )
+        .answer(
+            "/v2/assets/IDLE",
+            200,
+            &body("IDLE", "inactive", true, false, "[]"),
         )
         .answer(
             "/v2/assets/ELSE",
@@ -289,6 +299,14 @@ fn each_asset_fact_is_the_records_own_and_a_bad_record_is_unread() -> Result<(),
     assert_eq!(
         facts.asset("GONE"),
         Some(record(false, false, true, false, false))
+    );
+    assert_eq!(
+        facts.asset("HALT"),
+        Some(record(true, false, true, false, false))
+    );
+    assert_eq!(
+        facts.asset("IDLE"),
+        Some(record(false, true, false, false, false))
     );
     for unread in ["ELSE", "BARE", "DOWN", "NONE"] {
         assert_eq!(facts.asset(unread), None, "{unread}");

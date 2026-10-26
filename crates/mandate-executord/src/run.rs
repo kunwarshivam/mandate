@@ -12,7 +12,7 @@ use mandate_executor::AccountScope;
 use crate::Wiring;
 use crate::alpaca::AlpacaBroker;
 use crate::credential::paper_wiring;
-use crate::deployment::{BrokerFacts, Deployment, Production};
+use crate::deployment::{BrokerFacts, Deployment, Production, Unread};
 use crate::facts::{alpaca_facts, fixture_facts};
 use crate::paper::FixturePaper;
 
@@ -20,13 +20,19 @@ use crate::paper::FixturePaper;
 pub struct Run<B> {
     broker: B,
     wiring: Wiring,
-    facts: Box<dyn BrokerFacts>,
+    facts: Option<Box<dyn BrokerFacts>>,
 }
 
 impl<B> Run<B> {
     /// The wiring the run serves with.
     pub fn wiring(&self) -> &Wiring {
         &self.wiring
+    }
+
+    /// The broker's facts the run will hand its deployment, until [`Run::deployed`] hands them;
+    /// `None` after.
+    pub fn facts(&self) -> Option<&dyn BrokerFacts> {
+        self.facts.as_deref()
     }
 
     /// The run with its wiring's mandate, instrument, protection, binding-gate and marking ports
@@ -44,10 +50,11 @@ impl<B> Run<B> {
             wiring,
             facts,
         } = self;
+        let facts = facts.unwrap_or_else(|| Box::new(Unread));
         Self {
             broker,
             wiring: Deployment::wired(wiring, scope, rows, artifacts, (liquidity, facts)),
-            facts: Box::new(crate::deployment::Unread),
+            facts: None,
         }
     }
 
@@ -69,11 +76,11 @@ pub fn fixture(
     scope: &AccountScope,
 ) -> Result<Run<AlpacaBroker<FixturePaper>>, &'static str> {
     let wiring = paper_wiring(&broker, TokioPause, scope)?;
-    let facts = Box::new(fixture_facts(&broker)?);
+    let facts: Box<dyn BrokerFacts> = Box::new(fixture_facts(&broker)?);
     Ok(Run {
         broker,
         wiring,
-        facts,
+        facts: Some(facts),
     })
 }
 
@@ -92,10 +99,10 @@ where
     P: Pause + 'static,
 {
     let wiring = paper_wiring(&broker, clock, scope)?;
-    let facts = Box::new(alpaca_facts(&broker)?);
+    let facts: Box<dyn BrokerFacts> = Box::new(alpaca_facts(&broker)?);
     Ok(Run {
         broker,
         wiring,
-        facts,
+        facts: Some(facts),
     })
 }

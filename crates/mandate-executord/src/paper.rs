@@ -144,6 +144,7 @@ struct Books {
     holdings: BTreeMap<String, Holding>,
     cash: i128,
     sequence: u64,
+    served: Vec<String>,
 }
 
 impl Default for Books {
@@ -154,6 +155,7 @@ impl Default for Books {
             holdings: BTreeMap::new(),
             cash: scaled(CASH).unwrap_or_default(),
             sequence: 0,
+            served: Vec::new(),
         }
     }
 }
@@ -281,8 +283,18 @@ impl FixturePaper {
         }
     }
 
+    /// Every trading-host request it answered, as `METHOD /path?query`, oldest first: what a test
+    /// reads to see a fact asked of the broker.
+    pub fn served(&self) -> Vec<String> {
+        self.books.borrow().served.clone()
+    }
+
     fn answer(&self, request: &HttpRequest) -> Response {
         let path = request.path_and_query();
+        self.books
+            .borrow_mut()
+            .served
+            .push(format!("{:?} {path}", request.method()).to_uppercase());
         let (route, query) = path.split_once('?').unwrap_or((path, ""));
         let param = |name: &str| {
             query
