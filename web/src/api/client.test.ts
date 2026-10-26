@@ -312,6 +312,7 @@ describe("no order ticket (DEC-528)", () => {
    * module or an export edits this list, and only this list, beyond un-skipping its pending tests (DEC-750 item 4).
    */
   const EXPORTS: Record<string, string[]> = {
+    activity: ["activityRead"],
     backtest: ["ABSENT", "DISCLOSURES", "LIMITATIONS", "MODES", "OUTCOMES", "PURPOSES", "backtestNotFound", "backtestRead", "readBacktestFrom", "servedBacktest"],
     client: ["CSRF_HEADER", "OPERATIONS", "SESSION_ROUTE", "STEP_UP_CHALLENGE_ROUTE", "createWorkspaceClient", "isIdempotencyKey", "newIdempotencyKey"],
     commands: ["UI_BUILD", "prepareApprovalResponse", "prepareConfirm", "prepareOwnerCommand", "recordRef"],

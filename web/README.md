@@ -176,7 +176,10 @@ Approving a request is step-up by `cli_confirm` (DEC-2104, DEC-2103 item 7): App
 Its Approve then sends the grant with that challenge's evidence, and the screen says what the server answered
 (`step_up_missing` while the host has not confirmed). A code's five minutes are counted from when it
 was shown, never against this device's clock; paper only, and Skip still carries no step-up. The
-mock API stands in for the host's confirmation. Stop works over the API too (DEC-2408): the sheet lists the agents the API serves, each with its kill
+mock API stands in for the host's confirmation. An agent's screen lists its orders, newest first, and the net quantity its own fills hold per
+instrument, from `GET /agents/{id}/orders` and `/positions` (DEC-2111), read every five seconds; a
+state the journal has not given is "not reported", a list that cannot be read is never shown as
+empty, and an agent with no account found says so. Stop works over the API too (DEC-2408): the sheet lists the agents the API serves, each with its kill
 switch, and the record screens build from the API's view, with open orders and per-agent positions
 shown as not reported, never as none. Release is not offered there. `/demo` always reads the fixtures. With sign-in on, the browser first opens an API session with
 `POST /v1/sessions` from its Supabase access token and refreshes it every four minutes, one tab at a

@@ -8,6 +8,7 @@ import { WorkspaceGate } from "@/components/screens/common";
 import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { ApiRuntimeProvider } from "@/lib/api-runtime";
+import { quantity } from "@/lib/format";
 import { RoleProvider } from "@/lib/roles";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
@@ -86,6 +87,32 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     expect(await screen.findByText("Mandate not reported")).toBeTruthy();
     expect(screen.getByText("Account positions not reported")).toBeTruthy();
     expect(screen.queryByText(/\$10,000/)).toBeNull();
+  });
+
+  it("an agent shows its orders, newest first, and its own positions, from the served reads (DEC-2111)", async () => {
+    const agent = fixture.agents.find((a) => a.orders.length + a.past_orders.length > 0 && a.positions.length > 0)!;
+    mount(<ApiAgent agentId={agent.agent_id} />);
+    const orders = await screen.findByRole("list", { name: "Orders" });
+    const rows = within(orders).getAllByRole("listitem");
+    expect(rows).toHaveLength(agent.orders.length + agent.past_orders.length);
+    const newest = [...agent.past_orders, ...agent.orders].at(-1)!;
+    expect(rows[0].textContent).toContain(`${newest.side === "buy" ? "Buy" : "Sell"} ${quantity(newest.qty)} ${newest.instrument.symbol}`);
+    const held = await screen.findByRole("list", { name: "This agent's positions" });
+    expect(within(held).getAllByRole("listitem")).toHaveLength(agent.positions.length);
+  });
+
+  it("an order list the API cannot answer says not reported, never none", async () => {
+    const agent = fixture.agents[0];
+    mount(<ApiAgent agentId={agent.agent_id} />, "approvals", (route, body) => (/\/(orders|positions)$/.test(route) ? { ...body, agent_id: "agt_someone_else" } : body));
+    expect(await screen.findByText("Orders not reported.")).toBeTruthy();
+    expect(screen.queryByText("No order yet.")).toBeNull();
+    expect(screen.queryByText("This agent holds nothing.")).toBeNull();
+  });
+
+  it("an agent the deployment found no account for says its orders are not reported", async () => {
+    const agent = fixture.agents[0];
+    mount(<ApiAgent agentId={agent.agent_id} />, "approvals", (route, body) => (/\/orders$/.test(route) ? { ...body, account_ref: null, orders: [] } : body));
+    expect(await screen.findByText(/^Orders not reported: the deployment found no account/)).toBeTruthy();
   });
 
   it("an agent shows its mandate's envelope, its account's positions, and limit usage as not reported yet", async () => {

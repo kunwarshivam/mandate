@@ -9,6 +9,7 @@ import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
 import type { CommandPhase, PreparedCommand } from "@/api/types";
+import { activityRead } from "@/api/activity";
 import { type StepUpAction, type StepUpChallenge, confirmCode } from "@/api/step-up";
 import { prepareCreateVersion, readConfirmation, versionCreated } from "@/api/versions";
 import type { Iso, Workspace } from "@/fixtures/types";
@@ -17,6 +18,7 @@ import { mandateVersion } from "./fixture-journey";
 import {
   type ApprovalRecord,
   type ApprovalResponse,
+  type ActivityAnswer,
   type ChallengeAnswer,
   type Command,
   type CommandKind,
@@ -273,6 +275,20 @@ export function ApiRuntimeProvider({
     [client],
   );
 
+  /** `GET /agents/{id}/orders` and `/positions` (DEC-2111), read together when the agent's screen asks. */
+  const activity = useCallback(
+    async (agentId: string): Promise<ActivityAnswer> => {
+      const decoders = activityRead(agentId);
+      const base = `/agents/${encodeURIComponent(agentId)}` as const;
+      const [orders, holdings] = await Promise.all([client.read(`${base}/orders`, decoders.orders), client.read(`${base}/positions`, decoders.holdings)]);
+      return {
+        orders: orders.ok ? { ok: true, account_ref: orders.value.account_ref, items: orders.value.items } : { ok: false, reason: orders.error.code },
+        holdings: holdings.ok ? { ok: true, account_ref: holdings.value.account_ref, items: holdings.value.items } : { ok: false, reason: holdings.error.code },
+      };
+    },
+    [client],
+  );
+
   /** Mandate changes go through drafts, versions and confirmation (spec §4.1), which this slice does not send. */
   const changeMandate = useCallback<Runtime["changeMandate"]>((proposal, origin, record) => {
     counter.current += 1;
@@ -377,8 +393,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }
