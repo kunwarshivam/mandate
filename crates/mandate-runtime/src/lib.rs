@@ -66,7 +66,7 @@ pub use research::{
     ResearchRecord, ResearchRequest, ResearchState, ResearchStep, RetrievedObservation, TurnRef,
     TurnRequest, abandon_refused_research, handle_research,
 };
-pub use state::{FOLD_VERSION, PendingApproval, RuntimeState, UnresolvedAppend, fold};
+pub use state::{FOLD_VERSION, HeldPeriod, PendingApproval, RuntimeState, UnresolvedAppend, fold};
 pub use step::handle;
 pub use tail::{TailError, tailed};
 pub use types::{

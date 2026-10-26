@@ -101,16 +101,16 @@ fn spent_before(control: &[Value], index: usize) -> BTreeSet<String> {
         .collect()
 }
 
-/// Mandate spec §6.1's methods: `cli_confirm` in paper, and in live only on the founder's own
-/// connection (DEC-529 item 3).
+/// §9.28 check 3's methods (journal spec v0.106, DEC-2523): `passkey` in every environment, and
+/// `cli_confirm` in paper and in live only on the founder's own connection (DEC-529 item 3).
 fn methods(vector: &Value) -> BTreeSet<String> {
     let paper = text(vector, "environment") == "paper";
     let founder = vector.get("founder_connection") == Some(&Value::Bool(true));
+    let mut methods = BTreeSet::from(["passkey".to_owned()]);
     if paper || founder {
-        BTreeSet::from(["cli_confirm".to_owned()])
-    } else {
-        BTreeSet::new()
+        methods.insert("cli_confirm".to_owned());
     }
+    methods
 }
 
 /// What the shell hands for control record `at`, copied as account record `copy` (DEC-2828 item 1).
