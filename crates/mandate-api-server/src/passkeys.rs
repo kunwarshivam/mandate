@@ -381,8 +381,8 @@ impl Enrol {
         let text = |name: &str| members.get(name)?.as_str().map(str::to_owned);
         let bytes = |name: &str| unpadded(&text(name)?);
         let passkey_id = text("passkey_id")?;
-        let id_bytes = unpadded(&passkey_id)?;
-        if !(PASSKEY_ID_MIN..=PASSKEY_ID_MAX).contains(&passkey_id.len()) || id_bytes.is_empty() {
+        unpadded(&passkey_id)?;
+        if !(PASSKEY_ID_MIN..=PASSKEY_ID_MAX).contains(&passkey_id.len()) {
             return None;
         }
         let step_up = members.get("step_up")?;
