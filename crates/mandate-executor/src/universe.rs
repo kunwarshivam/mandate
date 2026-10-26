@@ -19,6 +19,10 @@ use crate::types::{AgentId, EventId, ThesisRow};
 /// yet, one `UniverseChanged` each, its `causation_id` naming the record it follows from. Records
 /// handed again add nothing, since the fold already holds what was written.
 ///
+/// A record that does not replay, an instrument that is not an id, or a version that is not a
+/// reference writes nothing this pass rather than fail: the copy's input is the research agent's,
+/// and nothing it writes may stop the executor's exits (`AGENTS.md` rule 13).
+///
 /// Only an instrument a thesis holds is ever removed: one a pinned list admitted
 /// (`version_applied`, no thesis) is the version's, never the research agent's. Nothing is written
 /// while there is no risk clock, no confirmed mandate version for the agent (the record's `man`
@@ -47,18 +51,20 @@ pub(crate) fn copy(
     };
     let held = batch.view.universes.get(agent).cloned().unwrap_or_default();
     let mut size = held.len();
-    let refs = || config_refs(&[("mandate_version", Some(version.0.as_str()))]);
+    let Ok(refs) = config_refs(&[("mandate_version", Some(version.0.as_str()))]) else {
+        return Ok(());
+    };
     let survivors: Vec<(InstrumentId, String, String)> = replayed
         .active
         .iter()
-        .map(|entry| {
-            Ok((
-                InstrumentId::new(entry.instrument.as_str())?,
+        .filter_map(|entry| {
+            Some((
+                InstrumentId::new(entry.instrument.as_str()).ok()?,
                 entry.thesis_id.as_str().to_owned(),
                 entry.lineage_id.as_str().to_owned(),
             ))
         })
-        .collect::<Result<_, ExecutorError>>()?;
+        .collect();
     for (instrument, holding) in &held {
         let (Some(thesis), Some(lineage)) = (&holding.thesis_id, &holding.lineage_id) else {
             continue;
@@ -71,7 +77,7 @@ pub(crate) fn copy(
         };
         size = size.saturating_sub(1);
         let pairs = changed(agent, instrument, "removed", reason, thesis, lineage, size)?;
-        batch.journal_with_refs("UniverseChanged", Some(cause), refs()?, pairs)?;
+        batch.journal_with_refs("UniverseChanged", Some(cause), refs.clone(), pairs)?;
     }
     for (instrument, thesis, lineage) in &survivors {
         let current = held.get(instrument).and_then(|h| h.thesis_id.as_ref());
@@ -93,7 +99,7 @@ pub(crate) fn copy(
             lineage,
             size,
         )?;
-        batch.journal_with_refs("UniverseChanged", Some(cause), refs()?, pairs)?;
+        batch.journal_with_refs("UniverseChanged", Some(cause), refs.clone(), pairs)?;
     }
     Ok(())
 }

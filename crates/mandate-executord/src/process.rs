@@ -416,11 +416,6 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         {
             return alerts;
         }
-        for (agent, records) in researched {
-            if !self.hand(now, now, Input::Theses { agent, records }, &mut alerts, 0) {
-                return alerts;
-            }
-        }
         for (agent, proposal) in proposed {
             let action = if proposal.purpose.adds_risk() {
                 Action::Open
@@ -428,6 +423,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 Action::RiskExit
             };
             if self.lifecycle.permits(action) && !self.take(now, agent, proposal, &mut alerts) {
+                return alerts;
+            }
+        }
+        for (agent, records) in researched {
+            if !self.hand(now, now, Input::Theses { agent, records }, &mut alerts, 0) {
                 return alerts;
             }
         }
@@ -1373,13 +1373,17 @@ fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> 
 }
 
 /// Whether a core error on `input` is held and the process goes on (DEC-2821): the broker's
-/// answers, updates and snapshots, and the quotes its feed sends, which the restart would read
-/// again, so stopping on one would be a crash loop that also stops every exit, protective order and
+/// answers, updates and snapshots, the quotes its feed sends, and an agent's thesis records (DEC-2823),
+/// which the restart would read again, so stopping on one would be a crash loop that also stops every exit, protective order and
 /// kill switch. Any other input's error, the hold's own included, stops the process as before.
 fn failed_on_broker(input: &Input) -> bool {
     matches!(
         input,
-        Input::Broker(_) | Input::BrokerUpdate(_) | Input::BrokerSnapshot(_) | Input::Market(_)
+        Input::Broker(_)
+            | Input::BrokerUpdate(_)
+            | Input::BrokerSnapshot(_)
+            | Input::Market(_)
+            | Input::Theses { .. }
     )
 }
 
@@ -1497,6 +1501,10 @@ mod tests {
         assert!(failed_on_broker(&Input::Broker(Ok(
             mandate_executor::BrokerOutcome::AccountWideAccepted
         ))));
+        assert!(failed_on_broker(&Input::Theses {
+            agent: AgentId("agenta".to_owned()),
+            records: Vec::new(),
+        }));
         for other in [
             Input::Tick(RiskClock::from_secs(0)),
             Input::Started(WriterEpoch(1)),
