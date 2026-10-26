@@ -3458,7 +3458,7 @@ mod tests {
     #[test]
     fn step_one_reads_the_web_sign_in_from_the_shared_browser_gesture() {
         let steps = planned("demo1");
-        let signins: Vec<(u8, &WebCheck)> = steps
+        let sign_in_checks: Vec<(u8, &WebCheck)> = steps
             .iter()
             .flat_map(|s| s.parts.iter().map(move |p| (s.number, p)))
             .filter_map(|(n, p)| match p {
@@ -3466,8 +3466,8 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(signins.len(), 1);
-        assert_eq!(signins[0].0, 1, "the sign-in is step 1's");
+        assert_eq!(sign_in_checks.len(), 1);
+        assert_eq!(sign_in_checks[0].0, 1, "the sign-in is step 1's");
         let web: Vec<&WebCheck> = steps
             .iter()
             .flat_map(|s| &s.parts)
@@ -3476,7 +3476,10 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(signins[0].1.agent, web[0].agent, "one gesture, one agent");
+        assert_eq!(
+            sign_in_checks[0].1.agent, web[0].agent,
+            "one gesture, one agent"
+        );
         let ws = "01KDEM0000000001000000000D";
         let recorded = |acted: &str, read: Result<(u16, String), String>| WebOutcome::Recorded {
             agent: WEB_AGENT.into(),
