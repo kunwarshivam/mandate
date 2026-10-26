@@ -208,7 +208,11 @@ cost basis, risk mark and protection shown as not reported until the API serves 
 stream, each agent's stream and each account stream those reads name (`GET
 /journal/streams/{id}/events`, §4.8.1) every ten seconds, and lists them newest first by type,
 stream, sequence and time, never a body re-told; a stream that cannot be read is named as not
-reported. Gate decisions, alerts and messages are not served yet. Settings › Profile lists the member's
+reported. Gate decisions reads the latest 200 records of each agent's
+stream with their bodies, checks each body against its hash (`src/api/records.ts`), and lists each
+`DecisionMade` newest first: what was proposed, the dry run's verdict and reason, what autonomy chose,
+and the checks a version 3 left to the binding gate; a body that does not match its hash is shown as
+that, never read. Alerts and messages are not served yet. Settings › Profile lists the member's
 passkeys on the deployment (`GET /passkeys`) and adds one (§3.6, DEC-2108, `src/api/enrol.ts`): a
 registration challenge, then, when the member already holds a passkey, a `credential_enrol` step-up
 with it bound to `{"op": "enrol", "registration": <challenge_id>}`, then

@@ -20,6 +20,7 @@ import { PasskeysSection } from "@/components/auth/passkeys-section";
 import { PushSection } from "@/components/notifications/push-section";
 import { BySource } from "@/components/api-screens/api-screens";
 import { ApiTimeline } from "@/components/api-screens/audit";
+import { ApiDecisions } from "@/components/api-screens/decisions";
 import { ApiPasskeys } from "@/components/api-screens/passkeys";
 import { ComingSoon } from "./coming-soon";
 import { AllClear, Panel, Section, WorkspaceGate } from "./common";
@@ -173,9 +174,18 @@ export function RegistryScreen({ screen }: { screen: Screen }) {
         );
       case "audit-decisions":
         return (
-          <WorkspaceGate>
-            <Decisions />
-          </WorkspaceGate>
+          <BySource
+            fixtures={
+              <WorkspaceGate>
+                <Decisions />
+              </WorkspaceGate>
+            }
+            api={
+              <WorkspaceGate api>
+                <ApiDecisions />
+              </WorkspaceGate>
+            }
+          />
         );
       case "audit-timeline":
         return (

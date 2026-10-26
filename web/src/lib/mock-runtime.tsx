@@ -9,6 +9,7 @@ import { RESTRICTIONS } from "./restrictions";
 import { type BacktestRead, backtestNotFound, servedBacktest } from "@/api/backtest";
 import { backtestOfVersion, servedBacktestFixture } from "@/fixtures/backtests";
 import type { ApiView, ReadPosition } from "@/api/read-models";
+import type { JournalRecord } from "@/api/records";
 import type { Enrolled, ListedPasskey } from "@/api/enrol";
 import type { Applies, Classification } from "@/api/confirm";
 import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-up";
@@ -200,6 +201,8 @@ export interface Runtime {
   holdings: ((agentId: string) => Promise<PositionsAnswer>) | null;
   /** A stream's latest `count` records, oldest first (§4.8.1), for the audit screens; `null` over the fixtures. */
   streamTail: ((streamId: string, count: number) => Promise<ActivityAnswer["journal"]>) | null;
+  /** A stream's latest `count` records with their bodies checked against their hashes (§4.8.1); `null` over the fixtures. */
+  streamRecords: ((streamId: string, count: number) => Promise<RecordsAnswer>) | null;
   /** The member's workspace passkeys (§3.6); `null` over the fixtures. */
   passkeys: PasskeyPort | null;
   setUps: SetUp[];
@@ -261,6 +264,9 @@ export interface PasskeyPort {
   /** Registers a new passkey; `unknown` when the enrolment may have been recorded without an answer. */
   enrol: () => Promise<{ ok: true; enrolled: Enrolled } | { ok: false; reason: string; effect: "none" | "unknown" }>;
 }
+
+/** A stream's records with their bodies, or why not. */
+export type RecordsAnswer = { ok: true; items: JournalRecord[] } | { ok: false; reason: string };
 
 /** Each list as served, or not reported: a list that cannot be read is never shown as empty. */
 export interface ActivityAnswer {
@@ -662,7 +668,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, streamTail: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, streamTail: null, streamRecords: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

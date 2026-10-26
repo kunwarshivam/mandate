@@ -7,7 +7,8 @@ import { type Page, expect, test } from "@playwright/test";
  * the code the host confirms (`cli_confirm`, DEC-2104), the executor places and fills the order on
  * the fixture broker, the agent's screen shows the order filled, the position and the journal
  * records from the served reads (DEC-2377), the positions screen shows the agent's own position, the
- * audit timeline shows the agent's and its account's records, and the browser's kill switch is recorded.
+ * audit timeline shows the agent's and its account's records, gate decisions shows its allowed
+ * decision, and the browser's kill switch is recorded.
  *
  * The driver sets it up and plays the host. It runs this file with `OWLHEAD_CELL_SPEC=trade-loop.spec.ts`
  * and the agent in `OWLHEAD_CELL_AGENT`. The spec triggers nothing itself: it waits for a pending
@@ -135,6 +136,13 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     const shown = await until(page, "/audit/timeline", 30_000, async () => (await agent.count()) > 0 && (await account.count()) > 0);
     if (!shown) refuse("the audit timeline showed no record of the agent's stream and of an account stream within 30 s");
     step("audit_timeline");
+  });
+
+  await test.step("gate decisions shows the agent's allowed decision, read from a body that matches its hash", async () => {
+    const allowed = page.getByRole("list", { name: "Gate decisions" }).locator(`[data-agent="${AGENT}"][data-dry-run="allow"]`);
+    const shown = await until(page, "/audit/decisions", 30_000, async () => (await allowed.count()) > 0);
+    if (!shown) refuse("gate decisions showed no allowed decision of the agent within 30 s");
+    step("gate_decisions");
   });
 
   await test.step("the browser's kill switch is recorded for this agent alone", async () => {
