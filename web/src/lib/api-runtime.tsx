@@ -262,26 +262,42 @@ export function ApiRuntimeProvider({
     [client, authenticator],
   );
 
+  /** The resume or Stop in flight for each agent: a second press while one is still being asked or sent is that one (DEC-2140). */
+  const braking = useRef(new Map<string, Command>());
+
   const send = useCallback(
     (kind: CommandKind, agentId: string | null, record?: CommandRecord): Command => {
+      const stepped = (kind === "resume" || kind === "stop") && agentId !== null;
+      const brakeKey = stepped ? `${kind}\n${agentId}` : "";
+      const inFlight = stepped ? braking.current.get(brakeKey) : undefined;
+      if (inFlight) return inFlight;
       counter.current += 1;
-      const command: Command = { id: `cmd-${counter.current}`, kind, agentId, phase: "sent", sentAt: nowRef.current, ...(record ? { record } : {}) };
+      const command: Command = { id: `cmd-${counter.current}`, kind, agentId, phase: "sent", sentAt: nowRef.current, ...(record ? { record } : {}), ...(stepped ? { awaitsRuntime: true } : {}) };
       const update = (patch: Partial<Command>) => setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, ...patch } : c)));
       setCommands((list) => [...list, command]);
+      if (stepped) braking.current.set(brakeKey, command);
       const last = lastRead.current;
       const scope = last
         ? { agents: last.view.agents, connectionId: last.ws.connection.connection_id, environment: last.ws.environment }
         : { agents: [], connectionId: "", environment: wsRef.current.environment };
+      const controlHead = async (id: string): Promise<{ ok: true; head: number } | { ok: false; reason: string }> => {
+        const read = await client.read(`/agents/${encodeURIComponent(id)}`, agentRead);
+        return read.ok ? { ok: true, head: read.as_of.find((w) => w.stream_id === `ctl:${client.workspaceId}`)?.seq ?? 0 } : { ok: false, reason: read.error.code };
+      };
       void (async () => {
         let stepUp: PasskeyStepUp | null = null;
-        if ((kind === "resume" || kind === "stop") && agentId) {
+        if (stepped && (kind === "resume" || kind === "stop") && agentId) {
           update({ awaitingPasskey: true });
-          const head = await client.read(`/agents/${encodeURIComponent(agentId)}`, agentRead);
-          if (!head.ok) return update({ phase: "undelivered", awaitingPasskey: false, reason: head.error.code });
-          const controlHead = head.as_of.find((w) => w.stream_id === `ctl:${client.workspaceId}`)?.seq ?? 0;
-          const asserted = await passkeyStepUp(kind, ownerCommandStepUpDigest(kind, agentId, controlHead));
+          const before = await controlHead(agentId);
+          if (!mounted.current) return;
+          if (!before.ok) return update({ phase: "undelivered", awaitingPasskey: false, reason: before.reason });
+          const asserted = await passkeyStepUp(kind, ownerCommandStepUpDigest(kind, agentId, before.head));
           if (!mounted.current) return;
           if (!asserted.ok) return update({ phase: "undelivered", awaitingPasskey: false, reason: asserted.reason });
+          const after = await controlHead(agentId);
+          if (!mounted.current) return;
+          if (!after.ok) return update({ phase: "undelivered", awaitingPasskey: false, reason: after.reason });
+          if (after.head !== before.head) return update({ phase: "undelivered", awaitingPasskey: false, reason: "control_moved" });
           stepUp = asserted.value;
           update({ awaitingPasskey: false });
         }
@@ -293,15 +309,19 @@ export function ApiRuntimeProvider({
         if (phases.size === 1 && phases.has("recorded")) {
           update({ phase: "recorded", recordedAt: nowRef.current });
           const settled = await Promise.all(delivered.map((d) => (d.phase === "recorded" ? follow(d.eventId) : Promise.resolve(null))));
+          if (!mounted.current) return;
           const refused = settled.find((p) => p === "refused" || p === "ended");
-          if (mounted.current && refused) update({ settled: refused });
-          else if (mounted.current && settled.every((p) => p === "applied")) update({ settled: "applied" });
+          if (refused) update({ settled: refused });
+          else if (settled.every((p) => p === "applied")) update({ settled: "applied" });
+          else update({ settled: "unconfirmed" });
           return;
         }
         if (phases.size === 1 && phases.has("undelivered")) return update({ phase: "undelivered", reason: delivered[0].phase === "undelivered" ? delivered[0].reason : undefined });
         update({ phase: "unknown" });
         for (const d of delivered) if (d.phase !== "undelivered" && d.eventId) void follow(d.eventId);
-      })();
+      })().finally(() => {
+        if (stepped && braking.current.get(brakeKey) === command) braking.current.delete(brakeKey);
+      });
       return command;
     },
     [client, deliver, follow, passkeyStepUp],

@@ -23,6 +23,7 @@ const PASSKEY_REFUSED: Readonly<Record<string, string>> = {
   passkey_cooling_off: "your passkey is new, and confirms only once its first 24 hours have passed",
   passkey_canceled: "the passkey check was canceled or timed out",
   passkey_failed: "your passkey's answer could not be read",
+  control_moved: "something else was recorded while your passkey was asked, so its check no longer matches. Try again",
 };
 
 function PhaseLine({ command, at, recorded }: { command: Command; at: string; recorded: string }) {
@@ -32,9 +33,12 @@ function PhaseLine({ command, at, recorded }: { command: Command; at: string; re
       return command.awaitingPasskey ? "Waiting for your passkey. Nothing is sent until your browser's passkey check is done." : "Sent; waiting for the runtime to record it.";
     case "recorded":
       if (command.settled === "refused" || command.settled === "ended") return `Recorded at ${at}, then refused by the runtime: nothing changed from this request. The journal says why.`;
+      if (command.awaitsRuntime && command.settled === "unconfirmed") return `Recorded at ${at}. The runtime has not confirmed it yet; we are checking. Nothing on screen changes until it does.`;
+      if (command.awaitsRuntime && command.settled !== "applied") return `Recorded at ${at}. Waiting for the runtime to apply it.`;
       return `Recorded at ${at}. ${recorded}`;
     case "undelivered":
-      if (command.reason && Object.hasOwn(PASSKEY_REFUSED, command.reason)) return `Not sent: ${PASSKEY_REFUSED[command.reason]}. Nothing changed. The kill switch needs no passkey.`;
+      if (command.reason && Object.hasOwn(PASSKEY_REFUSED, command.reason)) return `Not sent: ${PASSKEY_REFUSED[command.reason]}. Nothing changed. The kill switch still works.`;
+      if (command.reason && command.reason !== "network") return "Not sent: your deployment refused it, so nothing changed from this request. The kill switch still works.";
       return "Not delivered: your deployment did not answer, so nothing changed from this request. Use the broker directly, as described above.";
     case "unknown":
       return "The result is unknown; we are checking. Nothing on screen changes until the journal answers.";
