@@ -16,6 +16,7 @@ import type { Applies, Classification } from "@/api/confirm";
 import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-up";
 import type { AgentHolding, AgentOrder, JournalLine } from "@/api/activity";
 import type { ConnectionDetail } from "@/api/connect";
+import type { Hold } from "@/api/acknowledgments";
 import type { Alerts } from "@/api/alerts";
 
 /**
@@ -228,6 +229,8 @@ export interface Runtime {
   alerts: (() => Promise<AlertsAnswer>) | null;
   /** The member's workspace passkeys (§3.6); `null` over the fixtures. */
   passkeys: PasskeyPort | null;
+  /** The holds that stand for an agent, and the owner's acknowledgment of one (§3.11 item 12, DEC-2144); `null` over the fixtures. */
+  holds: HoldsPort | null;
   setUps: SetUp[];
   /** Step 1: `POST /mandate-drafts/{id}/versions`. */
   createVersion: (request: NewAgent) => SetUp;
@@ -292,6 +295,20 @@ export type RecordsAnswer = { ok: true; items: JournalRecord[]; fromStart: boole
 
 /** An agent's own positions with its account's holdings from the same read (DEC-2111), or why not. */
 export type PositionsAnswer = { ok: true; account_ref: string | null; items: AgentHolding[]; account_positions: ReadPosition[] | null } | { ok: false; reason: string };
+
+/**
+ * Where an acknowledgment came to: `applied` once the executor journaled the lift; `refused` by the
+ * executor with its reason; `recorded` with no lift read yet, which lifts nothing; not delivered with
+ * the refusal's code, nothing recorded; or not known.
+ */
+export type AcknowledgeOutcome = { phase: "applied" | "recorded" } | { phase: "refused"; reason: string | null } | { phase: "undelivered"; reason: string } | { phase: "unknown" };
+
+/** The holds that stand for an agent (`GET /acknowledgments?state=open&agent=`), and the owner's acknowledgment of one. */
+export interface HoldsPort {
+  list: (agentId: string) => Promise<{ ok: true; holds: Hold[] } | { ok: false; reason: string }>;
+  /** Asks the passkey, sends the acknowledgment, and follows it to the executor's answer; `onRecorded` runs once the journal holds it. */
+  acknowledge: (hold: Hold, onRecorded: () => void) => Promise<AcknowledgeOutcome>;
+}
 
 /** The member's own workspace passkeys over the API (§3.6): the list, and adding one. */
 export interface PasskeyPort {
@@ -700,7 +717,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, catalogue: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, catalogue: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, holds: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

@@ -17,6 +17,7 @@ import { APPROVE_REFUSED, FINAL_UNDELIVERED, refusedText, undeliveredText } from
 import { type ActivityAnswer, type ApprovalRecord, type ApprovalResponse, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { cn } from "@/lib/utils";
+import { AgentHolds } from "./holds";
 import { AgentTheses } from "./theses";
 
 /**
@@ -239,6 +240,7 @@ export function ApiAgent({ agentId }: { agentId: string }) {
             <PauseControl agent={agent} />
             <OpeningsHeldNote held={agent.openings_held} />
           </header>
+          <AgentHolds agentId={agent.agent_id} />
           <Section title="Mandate">{agent.mandate ? <MandateFacts mandate={agent.mandate} /> : <p className={NOT_REPORTED}>Mandate not reported</p>}</Section>
           <Section title="Account positions">
             <p className="text-sm text-muted-foreground">What the account held at its last reconciliation, whichever agent bought it.</p>

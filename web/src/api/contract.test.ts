@@ -1,11 +1,13 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import { HOLD_SUBJECTS, type Hold, prepareAcknowledge } from "./acknowledgments";
 import { type Fetch, OPERATIONS, createWorkspaceClient } from "./client";
 import { type CommandScope, prepareApprovalResponse, prepareConfirm, prepareOwnerCommand, prepareOwnerExit } from "./commands";
 import { createMockServer } from "./mock-server";
 import { NOT_COMMANDS, WEB_OPERATIONS, operationFor } from "./operations";
 import { type ApiView, loadApi } from "./read-models";
+import type { PasskeyStepUp } from "./passkey";
 import type { Operation } from "./types";
 import { prepareCreateVersion, readConfirmation, versionCreated } from "./versions";
 import { buildWorkspace } from "@/fixtures/workspace";
@@ -21,6 +23,12 @@ const WEB = join(__dirname, "..", "..");
 const SPEC = readFileSync(join(WEB, "..", "docs", "specs", "workspace-api.md"), "utf8");
 const SCHEMAS = join(WEB, "..", "schemas", "workspace-api", "commands");
 const WS = "ws_01J9ZQ4M0000000000000000AB";
+/** A standing hold and passkey evidence, for the acknowledgment's body (§3.11 item 12). */
+const ACK_HOLD: Hold = { event: "01JBH3BTZ8K2M4N6P8R0S2T4V6", subject: "reconciliation", agent_id: "", account: "acct:x", reason: {}, mode: "exits_only", raised_at: "2026-10-26T14:30:00.000000000Z", independent_required: null, request: null };
+const ACK_STEP_UP: PasskeyStepUp = {
+  step_up: { assertion_id: "01JC0000000000000000000001", authenticated_at: "2026-10-26T14:31:00.000000000Z", method: "passkey" },
+  step_up_assertion: { passkey_id: "yMnKy8zNzs_Q0dLT1NXW1w", authenticator_data: "AAAA", client_data_json: "e30", signature: "AAAA" },
+};
 
 /** `{agent}`, `{id}` and `{agent_id}` are one path id. */
 const shape = (route: string) => route.replace(/\{[a-z_]+\}/g, "{}");
@@ -206,8 +214,12 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
     const confirmed = prepareApprovalResponse(client, approval, "approve", { screen: "D6", environment: scope.environment, shown: ["line"], modelOutputExpanded: true }, challenge.value);
     if (confirmed.ok) for (const c of confirmed.commands) bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
     const evidence = JSON.parse(readFileSync(join(SCHEMAS, "..", "envelope.schema.json"), "utf8")) as { $defs: { StepUpEvidence: Schema } };
+    for (const subject of HOLD_SUBJECTS) {
+      const c = prepareAcknowledge(client, { ...ACK_HOLD, agent_id: view.agents[0].agent_id, subject }, ACK_STEP_UP);
+      bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
+    }
     const withStepUp = bodies.filter((b) => b.body.step_up !== null && b.body.step_up !== undefined);
-    expect(withStepUp).toHaveLength(1);
+    expect(withStepUp).toHaveLength(1 + HOLD_SUBJECTS.length);
     for (const { body } of withStepUp) {
       const step = body.step_up as Record<string, unknown>;
       expect(Object.keys(step).sort()).toEqual([...(evidence.$defs.StepUpEvidence.required ?? [])].sort());
@@ -219,7 +231,7 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
     }
     const exit = prepareOwnerExit(client, view.agents[0].agent_id, EXIT_ASSET, EXIT_RECORD);
     if (exit.ok) for (const c of exit.commands) bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
-    expect(new Set(bodies.map((b) => b.operation))).toEqual(new Set(["pause", "resume", "stop", "kill_switch", "approval_response", "confirm_version", "owner_exit"]));
+    expect(new Set(bodies.map((b) => b.operation))).toEqual(new Set(["pause", "resume", "stop", "kill_switch", "approval_response", "confirm_version", "owner_exit", "acknowledge"]));
     for (const { operation, body } of bodies) {
       const schema = schemaFor(operation);
       for (const member of schema.required ?? []) expect(Object.hasOwn(body, member), `${operation} needs ${member}`).toBe(true);

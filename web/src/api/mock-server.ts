@@ -23,6 +23,7 @@
  */
 import { CSRF_HEADER, OPERATIONS, SESSION_ROUTE, STEP_UP_CHALLENGE_ROUTE, isIdempotencyKey, type Fetch } from "./client";
 import { CONNECT_START_ROUTE } from "./connect";
+import { type Hold, acknowledgeStepUpDigest } from "./acknowledgments";
 import { deployStepUpDigest } from "./passkey";
 import { CONNECT_DISCLOSURE, connectStepUpDigest } from "./step-up";
 import type { Watermark } from "./types";
@@ -50,6 +51,8 @@ export interface MockServerOptions {
   acceptances?: ReadonlyArray<{ document: string; version: string; user: string; method: string | null }>;
   /** The member's passkeys `GET /passkeys` serves; one past its cool-off by default. */
   passkeys?: ReadonlyArray<{ passkey_id: string; cool_off_ends: string | null }>;
+  /** The holds that stand on the workspace's account streams (`GET /acknowledgments`, §3.11 item 12); none by default. An accepted acknowledgment lifts its own. */
+  holds?: readonly Hold[];
 }
 
 /** The mock deployment's RP ID, as the server derives it from the app's origin. */
@@ -183,6 +186,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
   /** Every agent a real-money request named, each refused (DEC-2134). */
   const goLives: string[] = [];
   const workspace = structuredClone(buildWorkspace(scenario));
+  const holds: Hold[] = structuredClone([...(options.holds ?? [])]);
   const prefix = `/v1/workspaces/${workspaceId}`;
   const commands: RecordedCommand[] = [];
   /** Versions created here, by their hash: a new mandate's, so the confirmation has no agent or base. */
@@ -324,7 +328,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
 
   function get(route: string, query: URLSearchParams): Response {
     const journal = route.match(/^\/journal\/streams\/([^/]+)\/events$/);
-    const allowed = (name: string) => (route === "/approvals" && name === "state") || (route === "/alerts" && name === "limit") || (journal !== null && (name === "after_seq" || name === "limit"));
+    const allowed = (name: string) => (route === "/approvals" && name === "state") || (route === "/alerts" && name === "limit") || (route === "/acknowledgments" && (name === "state" || name === "agent")) || (journal !== null && (name === "after_seq" || name === "limit"));
     if ([...query.keys()].some((name) => !allowed(name))) return problem(404, "not_found", "none");
     if (journal) {
       const lines = agentStream(decodeURIComponent(journal[1])) ?? controlStream(decodeURIComponent(journal[1]));
@@ -351,6 +355,11 @@ export function createMockServer(options: MockServerOptions): MockServer {
     if (route === "/signal-models") return read({ models: [MOCK_MODEL] });
     /** `read-models/alerts` (DEC-2141): the fixtures journal no owner alert, so none is invented. */
     if (route === "/alerts") return read({ alerts: [], truncated: false });
+    if (route === "/acknowledgments") {
+      const agent = query.get("agent");
+      if (query.get("state") !== "open" || (agent !== null && !agentOf(agent))) return problem(422, "invalid", "none");
+      return read({ acknowledgments: holds.filter((h) => agent === null || h.agent_id === agent) });
+    }
     if (route === "/passkeys") return read({ passkeys: passkeys.map((p) => ({ passkey_id: p.passkey_id, alg: "es256", enrolled_at: servedAt, cool_off_ends: p.cool_off_ends })) });
     if (route === "/agents") return read({ agents: workspace.agents.map(agentRow) });
     if (route === "/connections") return read({ connections: connectionRows() });
@@ -641,6 +650,15 @@ export function createMockServer(options: MockServerOptions): MockServer {
       if (refused) return problem(401, refused, "none");
     }
     const repeated = commands.find((c) => c.idempotency_key === key && c.path === prefix + route);
+    if (match.operation === "acknowledge" && !repeated) {
+      const agent = decodeURIComponent(route.split("/")[2] ?? "");
+      if (!agentOf(agent)) return problem(404, "not_found", "none");
+      const standing = holds.find((h) => h.event === members.acknowledged && h.subject === members.subject && h.agent_id === agent);
+      if (!standing) return problem(409, "acknowledgment_unavailable", "none");
+      const refused = judgePasskey(members.step_up, members.step_up_assertion, "acknowledge", acknowledgeStepUpDigest("acknowledge", agent, commands.length, standing.event, standing.subject, null));
+      if (refused) return problem(refused.status, refused.code, "none");
+      holds.splice(holds.indexOf(standing), 1);
+    }
     if (match.operation === "confirm_version" && !repeated) {
       const version = decodeURIComponent(route.split("/")[2] ?? "");
       if (!versions.has(version)) return problem(404, "not_found", "none");

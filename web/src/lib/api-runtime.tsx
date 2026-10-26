@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { acknowledgeStepUpDigest, acknowledgmentsRead, prepareAcknowledge } from "@/api/acknowledgments";
 import { readBacktestFrom } from "@/api/backtest";
 import { type Fetch, createWorkspaceClient } from "@/api/client";
 import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand, prepareOwnerExit } from "@/api/commands";
@@ -35,6 +36,7 @@ import {
   type CommandRecord,
   type MandateChangeRequest,
   type PasskeyPort,
+  type HoldsPort,
   type AlertsAnswer,
   type PositionsAnswer,
   type RecordsAnswer,
@@ -661,6 +663,45 @@ export function ApiRuntimeProvider({
   );
 
   /**
+   * The holds that stand for an agent, and the owner's acknowledgment of one (§3.11 item 12,
+   * DEC-2144). The acknowledgment reads the control stream's head from the agent's read, asks the
+   * passkey for the digest bound to that head, the hold and its subject, and reads the head again: a
+   * head that moved means the evidence would not count, so nothing is sent. It is then sent with one
+   * key until answered and followed to the executor's answer: only `applied`, its `RiskLimitLifted` or
+   * lifting `AgentModeApplied`, means the hold is lifted.
+   */
+  const holds = useMemo<HoldsPort>(
+    () => ({
+      list: async (agentId) => {
+        const read = await client.read(`/acknowledgments?state=open&agent=${encodeURIComponent(agentId)}`, acknowledgmentsRead);
+        return read.ok ? { ok: true, holds: read.value.acknowledgments } : { ok: false, reason: read.error.code };
+      },
+      acknowledge: async (hold, onRecorded) => {
+        const head = async (): Promise<{ ok: true; seq: number } | { ok: false; reason: string }> => {
+          const read = await client.read(`/agents/${encodeURIComponent(hold.agent_id)}`, agentRead);
+          return read.ok ? { ok: true, seq: read.as_of.find((w) => w.stream_id === `ctl:${client.workspaceId}`)?.seq ?? 0 } : { ok: false, reason: read.error.code };
+        };
+        const before = await head();
+        if (!before.ok) return { phase: "undelivered", reason: before.reason };
+        const asserted = await passkeyStepUp("acknowledge", acknowledgeStepUpDigest("acknowledge", hold.agent_id, before.seq, hold.event, hold.subject, null));
+        if (!asserted.ok) return { phase: "undelivered", reason: asserted.reason };
+        const after = await head();
+        if (!after.ok) return { phase: "undelivered", reason: after.reason };
+        if (after.seq !== before.seq) return { phase: "undelivered", reason: "control_moved" };
+        const delivered = await deliver(prepareAcknowledge(client, hold, asserted.value));
+        if (delivered.phase === "undelivered") return { phase: "undelivered", reason: delivered.reason };
+        if (delivered.phase === "unknown") return { phase: "unknown" };
+        onRecorded();
+        const settled = await settle(delivered.eventId);
+        if (settled?.phase === "applied") return { phase: "applied" };
+        if (settled?.phase === "refused") return { phase: "refused", reason: settled.steps.find((s) => s.reason !== null)?.reason ?? null };
+        return { phase: "recorded" };
+      },
+    }),
+    [client, deliver, passkeyStepUp, settle],
+  );
+
+  /**
    * Step 2, `POST /mandate-versions/{hash}/confirm` (§5.1, DEC-2101 item 5), bound to the
    * confirmation the server serves now: it is read again first, since its digest can move. When the
    * server says the confirm needs step-up (a first version is risk-increasing), the owner's passkey
@@ -741,8 +782,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, streamTail: journalTail, streamRecords, alerts, passkeys, holds, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, journalTail, streamRecords, alerts, passkeys, holds, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }
