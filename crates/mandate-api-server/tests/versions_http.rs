@@ -2630,3 +2630,47 @@ fn an_unverified_passkey_resume_is_recorded_with_null_evidence_and_no_assertion(
     );
     assert!(w.held(&issued), "the challenge is kept");
 }
+
+/// A passkey resume sent again under its key answers as the first did, though its challenge is
+/// gone, and appends nothing: no second command and no second `StepUpAsserted` (§3.4 step 1,
+/// DEC-2140 item 3).
+#[test]
+fn a_replayed_passkey_resume_answers_as_the_first_and_appends_nothing() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let issued = w.command_challenge("resume", "resume");
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = resume_body(
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let send = || {
+        post(
+            &w.f,
+            &ws("/agents/agt_a/resume"),
+            &w.cookie,
+            Some(KEY_3),
+            body.as_bytes(),
+        )
+    };
+    let first = send();
+    assert_eq!(
+        first.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&first.body)
+    );
+    let after = control(&w.f).len();
+    let again = send();
+    assert_eq!(
+        again.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(
+        text(&self::body(&again), &["command_id"]),
+        text(&self::body(&first), &["command_id"])
+    );
+    assert_eq!(control(&w.f).len(), after, "nothing more is appended");
+}
