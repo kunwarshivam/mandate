@@ -132,6 +132,7 @@ pub enum Part {
     Api(ApiCheck),
     Web(WebCheck),
     WebSignIn(WebCheck),
+    WebTradeLoop(WebCheck),
     Executor(ExecutorCheck),
     Applied(AppliedCheck),
     Gap(Gap),
@@ -943,6 +944,12 @@ pub fn plan(
                         ),
                     ],
                 }),
+                Part::WebTradeLoop(WebCheck {
+                    shows: "the trade loop from web/ on the second agent: its approval request \
+                            shown, approved with the code the host confirms, the order filled, \
+                            the position and the journal shown, then its kill switch",
+                    agent: WEB_AGENT,
+                }),
                 Part::Gap(Gap {
                     what: "the paper fill and the protective stop on a fixture broker",
                     on_main: "the executor process (#1596, binary #1694) and its interim image \
@@ -1161,6 +1168,7 @@ pub fn gestures(steps: &[Step]) -> Vec<&Gesture> {
             Part::Api(_)
             | Part::Web(_)
             | Part::WebSignIn(_)
+            | Part::WebTradeLoop(_)
             | Part::Executor(_)
             | Part::Applied(_)
             | Part::Gap(_) => None,
@@ -1566,6 +1574,7 @@ pub fn run(name: &str) -> Result<()> {
     let mut failed = None;
     let mut gaps = 0;
     let mut browsed: Option<WebOutcome> = None;
+    let mut traded: Option<TradeOutcome> = None;
     for step in &steps {
         let mut previous: Option<&Gesture> = None;
         let waiting = lanes(step);
@@ -1650,14 +1659,36 @@ pub fn run(name: &str) -> Result<()> {
                         failed.get_or_insert_with(|| format!("GET {}: {said}", check.path));
                     }
                 }
+                Part::WebTradeLoop(check) => {
+                    let outcome = match (&failed, &traded) {
+                        (Some(_), _) => TradeOutcome::AfterFailure,
+                        (None, Some(seen)) => seen.clone(),
+                        (None, None) => {
+                            let (seen, web) = browse(check.agent, &workspace, &id, &files)?;
+                            browsed = Some(web);
+                            traded = Some(seen.clone());
+                            seen
+                        }
+                    };
+                    let required = Required {
+                        cell: env::var_os(CELL_REQUIRED_ENV).is_some(),
+                        web: env::var_os(WEB_REQUIRED_ENV).is_some(),
+                    };
+                    let (word, said, fails) = trade_verdict(&outcome, required);
+                    eprintln!("    {word:<8} {}: {said}", check.shows);
+                    if fails {
+                        failed.get_or_insert_with(|| format!("web/ trade loop: {said}"));
+                    }
+                }
                 Part::Web(check) | Part::WebSignIn(check) => {
                     let outcome = match (&failed, &browsed) {
                         (Some(_), _) => WebOutcome::AfterFailure,
                         (None, Some(seen)) => seen.clone(),
                         (None, None) => {
-                            let seen = web_outcome(check, &workspace)?;
-                            browsed = Some(seen.clone());
-                            seen
+                            let (seen, web) = browse(check.agent, &workspace, &id, &files)?;
+                            traded = Some(seen);
+                            browsed = Some(web.clone());
+                            web
                         }
                     };
                     let required = Required {
@@ -1893,6 +1924,164 @@ pub enum WebOutcome {
         command: String,
         read: Result<(u16, String), String>,
     },
+}
+
+/// How the browser's trade loop read: as [`WebOutcome`] reads a gesture, or what it reached.
+#[derive(Debug, Clone)]
+pub enum TradeOutcome {
+    AfterFailure,
+    /// Lane W's spec is not in this checkout yet (#2462).
+    NoSpec,
+    Unaskable(String),
+    NoTools(String),
+    Failed(String),
+    Ran(web::TradeLoop),
+}
+
+/// The scenario's one pass through the browser on `agent`, the second agent, which nothing has
+/// stopped yet: first the trade loop (lane W's spec, its confirmation run on the host as a control
+/// gesture), then, unless the loop pressed the agent's kill switch itself, the kill switch gesture
+/// alone, so step 1's sign-in, step 4's loop and step 7's kill switch read one browser session's
+/// work. A loop that pressed the kill switch hands step 7 that command.
+fn browse(
+    agent: &'static str,
+    workspace: &str,
+    id: &str,
+    files: &[(&str, String)],
+) -> Result<(TradeOutcome, WebOutcome)> {
+    if let Some(why) = api_unaskable()? {
+        return Ok((
+            TradeOutcome::Unaskable(why.clone()),
+            WebOutcome::Unaskable(why),
+        ));
+    }
+    if let Some(why) = web::unavailable()? {
+        return Ok((TradeOutcome::NoTools(why.clone()), WebOutcome::NoTools(why)));
+    }
+    if let Err(why) = api_port_forward(stub_image_tag()?.is_some()) {
+        let why = format!("{why:#}");
+        return Ok((
+            TradeOutcome::Unaskable(why.clone()),
+            WebOutcome::Unaskable(why),
+        ));
+    }
+    let mut confirm = |asked: &web::ConfirmRequest| confirm_on_host(asked, id, files);
+    let traded = if !web::trade_loop_spec_present()? {
+        TradeOutcome::NoSpec
+    } else {
+        match web::trade_loop_from_web(workspace, agent, &mut confirm) {
+            Ok(traded) => TradeOutcome::Ran(traded),
+            Err(why) => TradeOutcome::Failed(format!("{why:#}")),
+        }
+    };
+    let pressed = match &traded {
+        TradeOutcome::Ran(t) => t
+            .reached
+            .get("kill_switch")
+            .filter(|c| !c.is_empty())
+            .cloned(),
+        _ => None,
+    };
+    let web = match pressed {
+        Some(command) => WebOutcome::Recorded {
+            agent: agent.to_owned(),
+            workspace: workspace.to_owned(),
+            read: api_answer(&command_read(workspace, &command))?,
+            command,
+        },
+        None => web_outcome(&WebCheck { shows: "", agent }, workspace)?,
+    };
+    Ok((traded, web))
+}
+
+/// The host's `mandate step-up confirm` for the browser's request, as a one-gesture Job of the
+/// `control` process against the cell's journal and store; `Err` names why it did not confirm.
+fn confirm_on_host(
+    asked: &web::ConfirmRequest,
+    id: &str,
+    files: &[(&str, String)],
+) -> std::result::Result<(), String> {
+    let gesture = Gesture {
+        container: "g99-step-up-confirm".into(),
+        shows: "the host's confirmation of the browser's step-up code",
+        command: None,
+        args: web::confirm_args(asked, JOURNAL, STORE),
+        expect: "confirmed ".into(),
+    };
+    let run = || -> Result<(bool, String)> {
+        let rendered = render(
+            &[
+                format!("run.id=\"{id}s\""),
+                format!("run.args={}", json!(gesture.args)),
+            ],
+            Some("templates/run.yaml"),
+        )?;
+        run_job(gestures_job(
+            rendered,
+            &[&gesture],
+            &format!("demo-in-{id}s"),
+            files,
+            NAMESPACE,
+        )?)
+    };
+    match run() {
+        Ok((true, logs))
+            if lines_of(&logs, &gesture.container)
+                .iter()
+                .any(|l| l.starts_with("confirmed ")) =>
+        {
+            Ok(())
+        }
+        Ok((_, logs)) => Err(format!(
+            "`mandate step-up confirm` did not confirm:\n{logs}"
+        )),
+        Err(why) => Err(format!("{why:#}")),
+    }
+}
+
+/// How step 4's trade loop reads: `ran` when every step was reached; `pending` when it stopped
+/// before any approval request reached web/, which is the loop's upstream (the runtime's
+/// proposal) not being on `main` yet, never a fault of what is; `failed` when it stopped at any
+/// later step, or the run itself failed; and, as [`web_verdict`] reads them, a machine without
+/// web/'s tools or an API that cannot be asked.
+pub fn trade_verdict(outcome: &TradeOutcome, required: Required) -> (&'static str, String, bool) {
+    match outcome {
+        TradeOutcome::AfterFailure => ("not run", "an earlier part failed".into(), false),
+        TradeOutcome::NoSpec => (
+            "pending",
+            "lane W's web/e2e-cell/trade-loop.spec.ts is not on main yet (#2462)".into(),
+            false,
+        ),
+        TradeOutcome::Unaskable(why) if required.cell => ("failed", why.clone(), true),
+        TradeOutcome::NoTools(why) if required.web => ("failed", why.clone(), true),
+        TradeOutcome::Unaskable(why) | TradeOutcome::NoTools(why) => {
+            ("not run", why.clone(), false)
+        }
+        TradeOutcome::Failed(why) => ("failed", why.clone(), true),
+        TradeOutcome::Ran(t) if t.whole() => (
+            "ran",
+            format!(
+                "approval {}, approved {}, kill switch {}",
+                t.reached["approval"], t.reached["approved"], t.reached["kill_switch"]
+            ),
+            false,
+        ),
+        TradeOutcome::Ran(t) => {
+            let stopped = t.first_missing().unwrap_or("the end");
+            let why = t.error.clone().unwrap_or_else(|| "no error named".into());
+            if stopped == "approval" {
+                (
+                    "pending",
+                    format!(
+                        "no approval request reached web/ ({why}); the loop waits on the runtime's proposal"
+                    ),
+                    false,
+                )
+            } else {
+                ("failed", format!("stopped before {stopped}: {why}"), true)
+            }
+        }
+    }
 }
 
 /// Runs `check`'s gesture against the cell's API for `workspace`, then reads its command back
@@ -3515,6 +3704,100 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Step 4 runs lane W's trade loop on the second agent, the one nothing stops before the parts
+    /// run (the CLI's kill switch is the demo agent's), and reads it: `ran` only when every step
+    /// was reached; `pending`, never failing, while no approval request reaches web/; and
+    /// `failed` for a loop that stopped at any later step, or for a run that failed.
+    #[test]
+    fn step_four_reads_the_browser_trade_loop() {
+        let steps = planned("demo1");
+        let loops: Vec<(u8, &WebCheck)> = steps
+            .iter()
+            .flat_map(|s| s.parts.iter().map(move |p| (s.number, p)))
+            .filter_map(|(n, p)| match p {
+                Part::WebTradeLoop(c) => Some((n, c)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(loops.len(), 1);
+        assert_eq!(loops[0].0, 4);
+        assert_eq!(loops[0].1.agent, WEB_AGENT, "never the agent the CLI kills");
+        let reached = |steps: &[&str], error: Option<&str>| {
+            TradeOutcome::Ran(web::TradeLoop {
+                reached: steps
+                    .iter()
+                    .map(|s| ((*s).to_owned(), format!("v-{s}")))
+                    .collect(),
+                error: error.map(str::to_owned),
+            })
+        };
+        for required in [
+            Required {
+                cell: false,
+                web: false,
+            },
+            Required {
+                cell: true,
+                web: true,
+            },
+        ] {
+            let (word, said, fails) =
+                trade_verdict(&reached(&web::TRADE_LOOP_STEPS, None), required);
+            assert_eq!((word, fails), ("ran", false), "{said}");
+            assert!(said.contains("v-kill_switch"), "{said}");
+            let (word, _, fails) =
+                trade_verdict(&reached(&[], Some("no approval within 20000 ms")), required);
+            assert_eq!(
+                (word, fails),
+                ("pending", false),
+                "no proposal yet is upstream, not a fault"
+            );
+            for stopped_at in 1..web::TRADE_LOOP_STEPS.len() {
+                let (word, said, fails) = trade_verdict(
+                    &reached(&web::TRADE_LOOP_STEPS[..stopped_at], Some("x")),
+                    required,
+                );
+                assert_eq!((word, fails), ("failed", true), "{said}");
+                assert!(said.contains(web::TRADE_LOOP_STEPS[stopped_at]), "{said}");
+            }
+            let (word, _, fails) =
+                trade_verdict(&reached(&web::TRADE_LOOP_STEPS, Some("late")), required);
+            assert_eq!(
+                (word, fails),
+                ("failed", true),
+                "an error fails a loop that reached every step"
+            );
+            let (word, _, fails) = trade_verdict(&TradeOutcome::Failed("x".into()), required);
+            assert_eq!((word, fails), ("failed", true));
+            let (word, _, fails) = trade_verdict(&TradeOutcome::AfterFailure, required);
+            assert_eq!((word, fails), ("not run", false));
+            let (word, _, fails) = trade_verdict(&TradeOutcome::NoSpec, required);
+            assert_eq!(
+                (word, fails),
+                ("pending", false),
+                "the spec not yet on main fails nothing"
+            );
+        }
+        let none = Required {
+            cell: false,
+            web: false,
+        };
+        let web_only = Required {
+            cell: false,
+            web: true,
+        };
+        let cell_only = Required {
+            cell: true,
+            web: false,
+        };
+        let no_npm = TradeOutcome::NoTools("no npm".into());
+        assert!(!trade_verdict(&no_npm, none).2);
+        assert!(trade_verdict(&no_npm, web_only).2);
+        let unaskable = TradeOutcome::Unaskable("no kubectl".into());
+        assert!(!trade_verdict(&unaskable, web_only).2);
+        assert!(trade_verdict(&unaskable, cell_only).2);
     }
 
     /// The closing summary lists every wait of every gap once, under its own lane, with the step it
