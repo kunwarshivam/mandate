@@ -12,6 +12,19 @@ import { STEP_HEADING } from "./steps";
 
 const FIXTURE_COMPILER = fixtureCompiler();
 
+/** Over the API: the account's room, who trades a symbol, and the independent-approval policy are not served, so the deployment judges V-002, V-006 and V-047 itself. */
+const SERVER_JUDGES: Checks = { room: null, claimedBy: () => null, independentApproval: false };
+
+/** Over the API with no established connection: a version names its connection, so none can be created yet. */
+export const NO_CONNECTION = "Connect your Alpaca paper account first, in Connections. A version names the account it trades on.";
+
+/**
+ * Over the API until the deployment serves its registered instruments and signal models: the
+ * version must name each instrument's registered asset id and the model's registered content hash,
+ * and this page knows neither, so it creates nothing rather than send an id it made up.
+ */
+export const CATALOGUE_NOT_SERVED = "Your deployment does not list its registered instruments and models to this page yet, so the version can't be created from here.";
+
 /**
  * Setting up an agent on the fixture workspace (brief A0 to A2, A5 and B3, DEC-476, DEC-477,
  * DEC-2401): one conversation gathers the owner's values, shows the whole agent once, and then three
@@ -23,17 +36,24 @@ const FIXTURE_COMPILER = fixtureCompiler();
  * second user can approve). Words handed over from Messages or the
  * copilot wait in the message field; nothing is read until the owner sends them.
  */
-export function NewAgentFlow({ compiler = FIXTURE_COMPILER }: { compiler?: Compiler }) {
-  const { ws, setUps } = useRuntime();
-  const [conversation, setConversation] = useState<Conversation>(startConversation);
+export function NewAgentFlow({ compiler: given }: { compiler?: Compiler }) {
+  const { ws, setUps, source } = useRuntime();
+  /**
+   * Over the API no compiler is served (spec §4.1: drafts and compile are planned), so the owner's
+   * words are read by the deterministic figures-only reader, never by a stand-in model.
+   */
+  const overApi = source === "api";
+  const compiler = given ?? (overApi ? figuresOnly : FIXTURE_COMPILER);
+  const start = () => startConversation({ figuresOnly: overApi });
+  const [conversation, setConversation] = useState<Conversation>(start);
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
   /** Each summary revision's latest set-up, by its id. */
   const [sent, setSent] = useState<Readonly<Record<number, string>>>({});
 
   const checks = useMemo<Checks>(
-    () => ({ room: unallocatedUsd(ws), claimedBy: (symbol) => claimedBy(ws, symbol)?.label ?? null, independentApproval: independentApprovalRequired(ws) }),
-    [ws],
+    () => (overApi ? SERVER_JUDGES : { room: unallocatedUsd(ws), claimedBy: (symbol) => claimedBy(ws, symbol)?.label ?? null, independentApproval: independentApprovalRequired(ws) }),
+    [ws, overApi],
   );
   const checksRef = useRef(checks);
   useEffect(() => {
@@ -86,7 +106,7 @@ export function NewAgentFlow({ compiler = FIXTURE_COMPILER }: { compiler?: Compi
   const creation: Creation = {
     draft,
     request,
-    blocked: blocker(conversation, checks),
+    blocked: blocker(conversation, checks) ?? (overApi ? (ws.connection.connection_id ? CATALOGUE_NOT_SERVED : NO_CONNECTION) : null),
     setUps: shown,
   };
 
@@ -118,7 +138,7 @@ export function NewAgentFlow({ compiler = FIXTURE_COMPILER }: { compiler?: Compi
           },
           onCreated: (id, revision) => setSent((map) => ({ ...map, [revision]: id })),
           onStartOver: () => {
-            setConversation(startConversation());
+            setConversation(start());
             setSent({});
             setAttempt((n) => n + 1);
           },

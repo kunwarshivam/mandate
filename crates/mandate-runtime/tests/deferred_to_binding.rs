@@ -369,6 +369,7 @@ proptest! {
         let want = expected(&verdict, opening);
         let version = if want.is_some() { 3 } else { 1 };
         prop_assert_eq!(parsed(made, version), Ok(version));
+        prop_assert_eq!(made.schema_version(), version, "the draft names the version it parses at");
         let got = names(made).map(|names| names.into_iter().map(str::to_owned).collect::<Vec<_>>());
         prop_assert_eq!(&got, &want);
         let deferring = want.as_ref().is_some_and(|names| !names.is_empty());

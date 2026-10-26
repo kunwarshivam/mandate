@@ -135727,7 +135727,7 @@
   ]
  },
  "real_money": {
-  "spec": "docs/specs/journal.md v0.88 §9.35 (DEC-2134)",
+  "spec": "docs/specs/journal.md v0.89 §9.35 (DEC-2134)",
   "drafts": {
    "real_money_gate_changed": {
     "envelope_version": 1,
@@ -136961,6 +136961,465 @@
     ],
     "expect": {
      "enabled": true
+    }
+   }
+  ]
+ },
+ "account_restrictions": {
+  "spec": "docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2137)",
+  "drafts": {
+   "blocked": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01JAE2R0A000000000000000R1",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "AccountRestrictionChanged",
+    "schema_version": 1,
+    "event_time": "2026-10-26T15:00:00.250000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "restriction": "blocked",
+     "cause": "broker_notice",
+     "reason_code": "account_trading_blocked",
+     "risk_clock": "2026-10-26T15:00:01.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "closing_only": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01JAE2R0A000000000000000R2",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "AccountRestrictionChanged",
+    "schema_version": 1,
+    "event_time": "2026-10-26T15:00:00.250000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "restriction": "closing_only",
+     "cause": "broker_reject",
+     "reason_code": "account_restricted",
+     "risk_clock": "2026-10-26T15:00:01.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "blocked_restricted",
+    "clause": "rule 279: `blocked` exactly with `account_trading_blocked`",
+    "base_draft": "blocked",
+    "changes": [
+     {
+      "path": "payload.reason_code",
+      "value": "account_restricted"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason_code"
+    }
+   },
+   {
+    "name": "closing_blocked_code",
+    "clause": "rule 279: `account_trading_blocked` only for `blocked`",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.reason_code",
+      "value": "account_trading_blocked"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason_code"
+    }
+   },
+   {
+    "name": "blocked_by_a_reject",
+    "clause": "rule 280: a blocked account is a broker notice (§7.3 row 1)",
+    "base_draft": "blocked",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "broker_reject"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "blocked_by_the_connection",
+    "clause": "rule 280: the connection never blocks (§7.3 row 5)",
+    "base_draft": "blocked",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "connection_unavailable"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "both_rules",
+    "clause": "rule 279 reports first",
+    "base_draft": "blocked",
+    "changes": [
+     {
+      "path": "payload.reason_code",
+      "value": "account_restricted"
+     },
+     {
+      "path": "payload.cause",
+      "value": "broker_reject"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason_code"
+    }
+   },
+   {
+    "name": "no_risk_clock",
+    "clause": "§9.5: every member present",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "extra_message",
+    "clause": "§9.5: the schema is closed",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.message",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.message"
+    }
+   },
+   {
+    "name": "version_2",
+    "clause": "§9.5: registered at `schema_version` 1 only",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "on_the_control_stream",
+    "clause": "§9.5: an account-stream record",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "restriction_unknown",
+    "clause": "§9.5: `restriction` is one of its values",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "restricted"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.restriction"
+    }
+   },
+   {
+    "name": "restriction_null",
+    "clause": "§9.5: `restriction` is never null",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.restriction"
+    }
+   },
+   {
+    "name": "restriction_number",
+    "clause": "§9.5: `restriction` is text",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.restriction"
+    }
+   },
+   {
+    "name": "restriction_missing",
+    "clause": "§9.5: every member present",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.restriction"
+    }
+   },
+   {
+    "name": "cause_unknown",
+    "clause": "§9.5: `cause` is one of its values",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "broker"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "cause_null",
+    "clause": "§9.5: `cause` is never null",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "cause_number",
+    "clause": "§9.5: `cause` is text",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "cause_missing",
+    "clause": "§9.5: every member present",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "reason_code_unknown",
+    "clause": "§9.5: `reason_code` is one of its values",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.reason_code",
+      "value": "restricted"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason_code"
+    }
+   },
+   {
+    "name": "reason_code_null",
+    "clause": "§9.5: `reason_code` is never null",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.reason_code",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason_code"
+    }
+   },
+   {
+    "name": "reason_code_number",
+    "clause": "§9.5: `reason_code` is text",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.reason_code",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason_code"
+    }
+   },
+   {
+    "name": "reason_code_missing",
+    "clause": "§9.5: every member present",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.reason_code",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason_code"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "closing_by_broker_reject",
+    "clause": "rule 280: any cause restricts to closing only",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "broker_reject"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "closing_by_broker_notice",
+    "clause": "rule 280: any cause restricts to closing only",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "broker_notice"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "closing_by_connection_unavailable",
+    "clause": "rule 280: any cause restricts to closing only",
+    "base_draft": "closing_only",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "connection_unavailable"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "live",
+    "clause": "§9.5: either environment",
+    "base_draft": "blocked",
+    "changes": [
+     {
+      "path": "environment",
+      "value": "live"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
     }
    }
   ]

@@ -529,7 +529,7 @@ SCHEMAS[("ctl", "StepUpConfirmed")] = rec(
     ("confirmed_at", INT),
 )
 
-# §9.35 v0.88 (DEC-2134): the customer real-money gate's setting, by a platform operator, and the
+# §9.35 v0.89 (DEC-2134): the customer real-money gate's setting, by a platform operator, and the
 # workspace API's refusal of a request that named another environment while it was off.
 SCHEMAS[("ctl", "RealMoneyGateChanged")] = rec(
     ("enabled", BOOL),
@@ -1313,6 +1313,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "ProtectionChanged"): (1, 2),
     ("acct", "OwnerConfirmationReceived"): (1,),
     ("acct", "AccountCloseRequested"): (1,),
+    ("acct", "AccountRestrictionChanged"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2, 3),
@@ -1367,6 +1368,14 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("floor", DEC),
         ("expires_at", INT),
         ("copied_from", ULID),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # §9.5 (DEC-2137): an account restriction the executor detected, with its closed cause
+    # (trading spec §7.3, DEC-441 item 23), journaled before the modes it applies.
+    ("acct", "AccountRestrictionChanged", 1): rec(
+        ("restriction", one_of("closing_only", "blocked")),
+        ("cause", one_of("broker_reject", "broker_notice", "connection_unavailable")),
+        ("reason_code", one_of("account_trading_blocked", "account_restricted")),
         ("risk_clock", RISK_CLOCK),
     ),
     # v0.75 §9.5 (DEC-2337): one instrument's close-position under an account kill switch,
@@ -1904,6 +1913,19 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
         wrong = next((m for m in prices if not positive(m)), None)
         rule("247", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "AccountRestrictionChanged":
+        blocked = p["restriction"] == "blocked"
+        if "rule.279.closing_only_any_code" in skip:
+            coded = not blocked or p["reason_code"] == "account_trading_blocked"
+        else:
+            coded = blocked == (p["reason_code"] == "account_trading_blocked")
+        noticed = p["cause"] == "broker_notice" or (
+            "rule.280.any_reject" in skip and p["cause"] == "broker_reject"
+        )
+        if not coded:
+            rule("279", coded, "schema", "payload.reason_code")
+        else:
+            rule("280", not blocked or noticed, "schema", "payload.cause")
     if event_type == "AccountCloseRequested":
         qty = normalize_decimal(p["qty"])
         if qty is None:

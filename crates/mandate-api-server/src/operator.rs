@@ -1,5 +1,5 @@
 //! The platform operator's setting of the customer real-money gate ([DEC-2134] items 3 and 6;
-//! journal spec v0.88 §9.35): `mandate-api-server real-money`, run with the deployment's own
+//! journal spec v0.89 §9.35): `mandate-api-server real-money`, run with the deployment's own
 //! settings and credentials, never through an HTTP route. It appends one `RealMoneyGateChanged`,
 //! written by a `platform_operator` actor as itself (rule 273), to the hosted workspace's control
 //! stream.

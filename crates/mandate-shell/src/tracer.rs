@@ -1327,12 +1327,12 @@ impl<'s> Session<'s> {
     /// `model_registry` and `policy_set` beside `mandate_version`, at schema version 2 (journal
     /// spec v0.16, DEC-484 item 4). Every other record, and every record of an ungoverned run,
     /// stays at version 1 with `mandate_version` alone, except an `ApprovalRequested` whose
-    /// content binds the builder's plan, which is version 2 ([`planned_request_version`]).
+    /// content binds the builder's plan, which is version 2 (`EventDraft::schema_version`).
     fn agent_refs(&self, draft: &EventDraft) -> Result<(u64, Object), ShellError> {
         let event_type = draft.event_type.as_str();
         let mut refs = vec![("mandate_version", Value::Str(self.view.version.clone()))];
         let reference = |digest: Digest| Value::Str(format!("sha256:{digest}"));
-        let mut version = planned_request_version(draft);
+        let mut version = draft.schema_version();
         if let Some(governed) = self.governed {
             let decision = event_type == "DecisionMade";
             if decision || event_type == "ModelOutputRecorded" {
@@ -1570,18 +1570,6 @@ fn consecutive_executor_journals(
     drafts
 }
 
-/// `ApprovalRequested`'s schema version for the content it carries: 2 when the content binds the
-/// order builder's plan, which version 1's closed content refuses, and 1 otherwise (DEC-942
-/// item 2). Every other agent-stream draft starts at version 1.
-fn planned_request_version(draft: &EventDraft) -> u64 {
-    let planned = draft.event_type == "ApprovalRequested"
-        && draft
-            .payload
-            .get("content")
-            .is_some_and(|content| content.get("execution").is_some());
-    if planned { 2 } else { 1 }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -1597,10 +1585,7 @@ mod tests {
     };
     use mandate_num::Qty;
 
-    use super::{
-        consecutive_executor_journals, entry_read, entry_status, planned_request_version,
-        with_environment,
-    };
+    use super::{consecutive_executor_journals, entry_read, entry_status, with_environment};
 
     fn entry() -> Result<ClientOrderId, String> {
         ClientOrderId::parse("md-01JABCDEFGHJKMNPQRSTVWXYZ0").map_err(|e| e.to_string())
@@ -1730,22 +1715,10 @@ mod tests {
             causation_id: None,
             payload: payload.clone(),
         };
-        assert_eq!(
-            planned_request_version(&agent("ApprovalRequested", &with_plan)),
-            2
-        );
-        assert_eq!(
-            planned_request_version(&agent("ApprovalRequested", &without)),
-            1
-        );
-        assert_eq!(
-            planned_request_version(&agent("ApprovalDelivered", &with_plan)),
-            1
-        );
-        assert_eq!(
-            planned_request_version(&agent("ApprovalRequested", &Value::Null)),
-            1
-        );
+        assert_eq!(agent("ApprovalRequested", &with_plan).schema_version(), 2);
+        assert_eq!(agent("ApprovalRequested", &without).schema_version(), 1);
+        assert_eq!(agent("ApprovalDelivered", &with_plan).schema_version(), 1);
+        assert_eq!(agent("ApprovalRequested", &Value::Null).schema_version(), 1);
         Ok(())
     }
 

@@ -1,0 +1,49 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-26T14:30:00.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 12,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-26T14:00:00.000000000Z"
+    }
+  ],
+  "models": [
+    {
+      "model_id": "quant.ma_crossover",
+      "model_version": "1.0.0",
+      "content_hash": "sha256:cfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcf",
+      "params": [
+        "fast_periods",
+        "slow_periods"
+      ],
+      "admits_instruments": false,
+      "content": {
+        "authorship": "platform",
+        "methodology": "Long when the mean of the last fast_periods daily closes is strictly above the mean of the last slow_periods daily closes; otherwise no output.",
+        "params_schema": {
+          "constraints": [
+            "fast_periods < slow_periods"
+          ],
+          "params": [
+            {
+              "max": 1000,
+              "min": 1,
+              "name": "fast_periods",
+              "type": "integer"
+            },
+            {
+              "max": 1000,
+              "min": 2,
+              "name": "slow_periods",
+              "type": "integer"
+            }
+          ]
+        }
+      },
+      "registered_at": "2026-10-26T14:00:00.000000000Z"
+    }
+  ]
+}

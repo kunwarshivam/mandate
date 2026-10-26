@@ -1,4 +1,4 @@
-//! The customer real-money gate ([DEC-2134]; journal spec v0.88 §9.35): one decision in front of
+//! The customer real-money gate ([DEC-2134]; journal spec v0.89 §9.35): one decision in front of
 //! every workspace API point that can name an environment other than `paper`, creating a mandate
 //! version, deploying, starting a connect, and going live.
 //!

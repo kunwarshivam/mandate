@@ -33,6 +33,7 @@ from pathlib import Path
 
 import account
 import account_closes
+import account_restrictions
 import acknowledgments
 import approval
 import audit
@@ -4259,6 +4260,7 @@ def render(
     connection_roles_section: dict,
     stepped_up_section: dict,
     real_money_section: dict,
+    account_restrictions_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -4313,6 +4315,7 @@ def render(
             "connection_roles": connection_roles_section,
             "stepped_up_records": stepped_up_section,
             "real_money": real_money_section,
+            "account_restrictions": account_restrictions_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -4398,6 +4401,7 @@ def main(argv: list[str] | None = None) -> int:
     connection_roles_section = connection_roles.build_section()
     stepped_up_section = stepped_up.build_section()
     real_money_section = real_money.build_section()
+    account_restrictions_section = account_restrictions.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -4469,6 +4473,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += stepped_up.run_mutants(stepped_up_section)
     problems += real_money.check_section(real_money_section)
     problems += real_money.run_mutants(real_money_section)
+    problems += account_restrictions.check_section(account_restrictions_section)
+    problems += account_restrictions.run_mutants(account_restrictions_section)
     problems += connection_requested.check_section(connection_requested_section)
     problems += connection_requested.run_mutants(connection_requested_section)
     problems += check_broker_profile(broker_profile)
@@ -4556,6 +4562,7 @@ def main(argv: list[str] | None = None) -> int:
         connection_roles_section,
         stepped_up_section,
         real_money_section,
+        account_restrictions_section,
     )
     reread = yaml.safe_load(rendered)
     canonical_self_test()
@@ -4610,6 +4617,7 @@ def main(argv: list[str] | None = None) -> int:
         or account_closes.check_section(reread["account_closes"])
         or stepped_up.check_section(reread["stepped_up_records"])
         or real_money.check_section(reread["real_money"])
+        or account_restrictions.check_section(reread["account_restrictions"])
         or connection_roles.check_section(reread["connection_roles"])
         or connection_requested.check_section(reread["connection_requested"])
     ):
@@ -4707,6 +4715,9 @@ def main(argv: list[str] | None = None) -> int:
         f"real-money gate drafts and {len(real_money_section['streams'])} setting streams, "
         f"{len(real_money.VALIDATOR_MUTANTS)} validator, {len(real_money.FOLD_MUTANTS)} fold and "
         f"{len(real_money.vector_mutants(real_money_section))} vector mutants caught; "
+        f"{len(account_restrictions_section['invalid_drafts'])} invalid and {len(account_restrictions_section['valid_drafts'])} valid "
+        f"AccountRestrictionChanged drafts, {len(account_restrictions.VALIDATOR_MUTANTS)} validator and "
+        f"{len(account_restrictions.vector_mutants(account_restrictions_section))} vector mutants caught; "
         f"{len(connection_requested_section['invalid_drafts'])} invalid and {len(connection_requested_section['valid_drafts'])} valid "
         f"rule-255 ConnectionRequested drafts, {len(connection_requested.VALIDATOR_MUTANTS)} validator and "
         f"{len(connection_requested.vector_mutants(connection_requested_section))} vector mutants caught; "
