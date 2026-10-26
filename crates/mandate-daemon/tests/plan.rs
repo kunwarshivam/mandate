@@ -734,3 +734,332 @@ fn a_crypto_thesis_exit_is_routed_as_crypto() {
         Some(mandate_runtime::TimeInForce::Day)
     );
 }
+
+/// The research model's content hash in the demo's research envelope.
+const RESEARCH_HASH: &str = "bff754a2e669add9a7928a4b8c71c764cfe61455e361621ae6f6c262af0824cd";
+
+/// The deployment's agent stream, which carries its thesis records.
+const AGENT_STREAM: &str = "agent:ws1:demo-spy";
+
+/// Another US equity, which no envelope here pins.
+const QQQ: &str = "3a9e1f0c-2b7d-4c55-8e61-0f4d2a6b9c13";
+
+/// A `ThesisProposed` on the agent stream (journal spec §9.4): `thesis` on `instrument`, of
+/// `asset_class`, admitted, as of `as_of` and expiring at `expires_at`.
+fn thesis(
+    rows: &mut Rows,
+    thesis: &str,
+    instrument: &str,
+    asset_class: &str,
+    (as_of, expires_at): (&str, &str),
+) {
+    let hash = Digest::of(b"x").to_hex();
+    rows.push(
+        AGENT_STREAM,
+        "ThesisProposed",
+        &format!(
+            r#"{{"model_id":"llm.research_agent","model_version":"0.1.0","content_hash":"sha256:{RESEARCH_HASH}","thesis_id":"{thesis}","lineage_id":"{thesis}","revision":0,"predecessor_thesis_id":null,"autopsy_ref":null,"instrument_id":"{instrument}","asset_class":"{asset_class}","direction":"long","as_of":"{as_of}","expires_at":"{expires_at}","horizon_s":86400,"conviction":"0.6","confidence":"0.6","evidence_ref":null,"evidence_sources":["src.newswire"],"corroboration":"independent_source","invalidation":"a guidance cut","allowlist_version":3,"prompt_ref":"sha256:{hash}","response_ref":"sha256:{hash}","admitted":true,"reason":null}}"#
+        ),
+    );
+}
+
+/// A model's `ThesisInvalidated` of `thesis` on `instrument` (journal spec §9.22).
+fn invalidated(rows: &mut Rows, thesis: &str, instrument: &str) {
+    rows.push(
+        AGENT_STREAM,
+        "ThesisInvalidated",
+        &format!(
+            r#"{{"thesis_id":"{thesis}","lineage_id":"{thesis}","instrument_id":"{instrument}","cause":"model","candidate":0,"evidence":["01OBS"],"source":"src.newswire"}}"#
+        ),
+    );
+}
+
+/// The day before `REGULAR` to the day after: a thesis current at `REGULAR`.
+const CURRENT: (&str, &str) = (
+    "2026-10-25T15:00:00.000000000Z",
+    "2026-10-27T15:00:00.000000000Z",
+);
+
+/// [`journaled`] with the research model registered too, as the cell's research workspace has it,
+/// and no thesis yet.
+fn research_registered(now: &str) -> Rows {
+    let mut rows = journaled(now);
+    rows.push(
+        CONTROL,
+        "ConfigSnapshotRegistered",
+        &format!(
+            r#"{{"kind":"model_version","content_hash":"sha256:{RESEARCH_HASH}","model_id":"llm.research_agent","model_version":"0.1.0","params":[],"admits_instruments":true}}"#
+        ),
+    );
+    rows
+}
+
+/// [`research_registered`] with SPY's admitted thesis current at `now`, as the cell's research
+/// workspace has them.
+fn research_journaled(now: &str) -> Rows {
+    let mut rows = research_registered(now);
+    thesis(
+        &mut rows,
+        "01J8Z3MTHE5000000000000001",
+        SPY,
+        "us_equity",
+        CURRENT,
+    );
+    rows
+}
+
+/// What the cell's research loop hands the plan at `now`: the research model's `Long` on SPY from
+/// its admitted thesis (conviction 0.6) and ma_crossover's `Long` on SPY, that thesis naming SPY a
+/// US equity (DEC-2827 keeps a `Long` only on the instrument a surviving thesis holds).
+fn working_inputs(now: &str) -> SignalInputs {
+    long_on(SPY, now)
+}
+
+/// As [`working_inputs`], both `Long`s on `instrument`, its thesis class a US equity.
+fn long_on(instrument: &str, now: &str) -> SignalInputs {
+    let mut inputs = inputs(now);
+    let spy = InstrumentId::new(SPY).unwrap();
+    let on = InstrumentId::new(instrument).unwrap();
+    let quant = ModelOutput {
+        instrument_id: on.clone(),
+        ..inputs.outputs[MODEL][&spy].clone()
+    };
+    let research = ModelOutput {
+        model_id: "llm.research_agent".into(),
+        model_version: "0.1.0".into(),
+        content_hash: Digest::from_hex(RESEARCH_HASH).unwrap(),
+        conviction: Conviction::parse("0.6").unwrap(),
+        confidence: Unit::parse("0.6").unwrap(),
+        thesis_id: Some("01J8Z3MTHE5000000000000001".into()),
+        lineage_id: Some("01J8Z3MTHE5000000000000001".into()),
+        ..quant.clone()
+    };
+    inputs.outputs = BTreeMap::from([
+        (MODEL.to_owned(), BTreeMap::from([(on.clone(), quant)])),
+        (
+            "llm.research_agent".to_owned(),
+            BTreeMap::from([(on.clone(), research)]),
+        ),
+    ]);
+    inputs.thesis_classes = [(on, mandate_accounting::AssetClass::UsEquity)].into();
+    inputs
+}
+
+/// E21-2, DEC-2827, the cell's research loop (lane GW's replay of 2026-10-27): an unpinned
+/// research mandate opens on its working universe, the instrument the one surviving admitted
+/// thesis on its agent stream holds, replayed as the executor replays it (DEC-2819). Both models'
+/// `Long` on it is sized from journaled facts as a pinned opening is: a buy at no more than the bid
+/// within the envelope's order cap, with its protective stop; and the owner is asked (the research
+/// envelope's `default: ask`), never AUTO.
+#[test]
+#[ignore = "pending E21-2"]
+fn an_unpinned_mandate_opens_on_its_working_universe_and_asks() {
+    let rows = research_journaled(REGULAR);
+    let plan = research_plan(&rows);
+    let proposal = plan
+        .plan(&view(), &working_inputs(REGULAR))
+        .expect("an opening on the working universe's SPY");
+    assert_eq!(proposal.side, Side::Buy);
+    assert_eq!(proposal.purpose, Purpose::Open);
+    assert_eq!(proposal.instrument.as_str(), SPY);
+    assert!(
+        proposal.limit <= Price::parse("99.95").unwrap(),
+        "{proposal:?}"
+    );
+    let cap = research_document()
+        .get("risk")
+        .and_then(|risk| risk.get("max_order_usd"))
+        .and_then(Value::as_str)
+        .map(|cap| mandate_num::Usd::parse(cap).unwrap())
+        .unwrap();
+    let cost = proposal.qty.notional(proposal.limit).unwrap();
+    assert!(cost <= cap, "{proposal:?} within the envelope's order cap");
+    assert!(proposal.qty >= Qty::parse("1").unwrap(), "{proposal:?}");
+    assert!(
+        proposal.execution.is_some_and(
+            |execution| execution.protection_required && execution.protection.is_some()
+        ),
+        "an opening carries its protective stop: {proposal:?}"
+    );
+    let classified = plan.classify(&view(), &proposal);
+    assert_eq!(classified.autonomy, Autonomy::Ask, "{classified:?}");
+}
+
+/// A pinned mandate is unchanged by the working universe: a `Long` on an instrument it does not
+/// pin proposes nothing, whatever a thesis says, and a proposal on it is denied.
+#[test]
+fn a_pinned_mandate_never_opens_outside_its_pins() {
+    let mut rows = journaled(REGULAR);
+    rows.push(
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"{QQQ}","price":"50.05","source":"quote","feed":"fixture","bid":"49.95","sane":true,"session":"regular","risk_clock":"{REGULAR}"}}"#
+        ),
+    );
+    thesis(
+        &mut rows,
+        "01J8Z3MTHE5000000000000009",
+        QQQ,
+        "us_equity",
+        CURRENT,
+    );
+    let plan = plan_over(&rows);
+    assert!(
+        plan.plan(&view(), &long_on(QQQ, REGULAR)).is_none(),
+        "not a pin"
+    );
+    let spy = plan.plan(&view(), &inputs(REGULAR)).unwrap();
+    let elsewhere = Proposal {
+        instrument: InstrumentId::new(QQQ).unwrap(),
+        ..spy
+    };
+    assert_eq!(plan.classify(&view(), &elsewhere).autonomy, Autonomy::Deny);
+}
+
+/// DEC-2819 item 2, as the executor opens: two surviving theses mean no one working instrument,
+/// so no opening, even with a `Long` on one of them.
+#[test]
+#[ignore = "pending E21-2"]
+fn two_surviving_theses_open_nothing() {
+    let mut rows = research_journaled(REGULAR);
+    rows.push(
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"{QQQ}","price":"50.05","source":"quote","feed":"fixture","bid":"49.95","sane":true,"session":"regular","risk_clock":"{REGULAR}"}}"#
+        ),
+    );
+    thesis(
+        &mut rows,
+        "01J8Z3MTHE5000000000000002",
+        QQQ,
+        "us_equity",
+        CURRENT,
+    );
+    let plan = research_plan(&rows);
+    assert!(plan.plan(&view(), &working_inputs(REGULAR)).is_none());
+}
+
+/// A `Long` on an instrument a thesis once admitted but no longer holds, its thesis expired or
+/// invalidated, proposes nothing.
+#[test]
+#[ignore = "pending E21-2"]
+fn a_long_on_an_instrument_whose_thesis_no_longer_holds_opens_nothing() {
+    let mut expired = research_registered(REGULAR);
+    thesis(
+        &mut expired,
+        "01J8Z3MTHE5000000000000001",
+        SPY,
+        "us_equity",
+        (
+            "2026-10-24T15:00:00.000000000Z",
+            "2026-10-25T15:00:00.000000000Z",
+        ),
+    );
+    assert!(
+        research_plan(&expired)
+            .plan(&view(), &working_inputs(REGULAR))
+            .is_none(),
+        "expired"
+    );
+    let mut ended = research_journaled(REGULAR);
+    invalidated(&mut ended, "01J8Z3MTHE5000000000000001", SPY);
+    assert!(
+        research_plan(&ended)
+            .plan(&view(), &working_inputs(REGULAR))
+            .is_none(),
+        "invalidated"
+    );
+}
+
+/// `AGENTS.md` rule 3: a thesis record that does not replay (a member it cannot give) opens
+/// nothing; and while an opening is held so, a held instrument whose thesis ended is still sold
+/// (rule 13).
+#[test]
+#[ignore = "pending E21-2"]
+fn an_unreadable_thesis_record_opens_nothing_and_never_holds_an_exit() {
+    let mut rows = research_journaled(REGULAR);
+    rows.push(
+        AGENT_STREAM,
+        "ThesisRevised",
+        r#"{"thesis_id":"01J8Z3MTHE5000000000000003"}"#,
+    );
+    assert!(
+        research_plan(&rows)
+            .plan(&view(), &working_inputs(REGULAR))
+            .is_none(),
+        "the replay stops at a record it cannot read"
+    );
+    let held = research_plan(&holding(rows, "3", REGULAR));
+    let ending = SignalInputs {
+        ended_theses: [InstrumentId::new(SPY).unwrap()].into(),
+        ..working_inputs(REGULAR)
+    };
+    let exit = held
+        .plan(&view(), &ending)
+        .expect("the ended thesis's holding is sold");
+    assert_eq!(exit.side, Side::Sell);
+    assert_eq!(exit.purpose, Purpose::DiscretionaryExit);
+    assert_eq!(held.classify(&view(), &exit).autonomy, Autonomy::Auto);
+}
+
+/// Mandate spec §2, `universe.asset_classes`: an instrument whose admitted thesis names an asset
+/// class the envelope does not allow (the research envelope allows `us_equity` alone) is never
+/// opened, and a proposal on an instrument the working universe does not name is denied.
+#[test]
+#[ignore = "pending E21-2"]
+fn an_instrument_outside_the_envelopes_asset_classes_is_never_opened() {
+    let mut crypto = research_registered(REGULAR);
+    thesis(
+        &mut crypto,
+        "01J8Z3MTHE5000000000000001",
+        SPY,
+        "crypto",
+        CURRENT,
+    );
+    let inputs = SignalInputs {
+        thesis_classes: [(
+            InstrumentId::new(SPY).unwrap(),
+            mandate_accounting::AssetClass::Crypto,
+        )]
+        .into(),
+        ..working_inputs(REGULAR)
+    };
+    assert!(
+        research_plan(&crypto).plan(&view(), &inputs).is_none(),
+        "crypto is not allowed"
+    );
+    let rows = research_journaled(REGULAR);
+    let plan = research_plan(&rows);
+    let spy = plan
+        .plan(&view(), &working_inputs(REGULAR))
+        .expect("the allowed opening");
+    let unnamed = Proposal {
+        instrument: InstrumentId::new(QQQ).unwrap(),
+        ..spy
+    };
+    assert_eq!(plan.classify(&view(), &unnamed).autonomy, Autonomy::Deny);
+}
+
+/// `AGENTS.md` rule 3: an opening whose thesis ended between the plan and its classification is
+/// denied, since its instrument is no longer the working one.
+#[test]
+#[ignore = "pending E21-2"]
+fn an_opening_whose_thesis_ended_before_it_is_classified_is_denied() {
+    let mut rows = research_journaled(REGULAR);
+    let facts = Facts::new(CLOCK, AGENT);
+    facts.follow(ACCOUNT);
+    facts.feed(&rows.0);
+    let plan = Plan::new(
+        facts.clone(),
+        Mandate::parse(&research_document()).unwrap(),
+        FRESH,
+    );
+    let proposal = plan
+        .plan(&view(), &working_inputs(REGULAR))
+        .expect("the opening");
+    invalidated(&mut rows, "01J8Z3MTHE5000000000000001", SPY);
+    facts.feed(&rows.0);
+    assert_eq!(plan.classify(&view(), &proposal).autonomy, Autonomy::Deny);
+}
