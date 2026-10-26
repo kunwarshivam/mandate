@@ -99,7 +99,7 @@ pub fn unspent(
 
 /// The lapse over its real inputs (DEC-933 item 3; DEC-529 item 3; DEC-918 item 1): a live
 /// connection's `held` is counted from the agentic account's own snapshot (DEC-470 item 1: every
-/// position record, a zero quantity included, and every working order), and its `rows` are the
+/// position record of a non-zero quantity, and every working order; DEC-2390 item 1), and its `rows` are the
 /// journal's own read of `stream`, the account stream [`account_stream`] named, through the run's
 /// own journal (`journal`, ungated by `--place-one-order`, DEC-918 item 2); a run that kept no
 /// journal has no account stream and reads no rows. A live connection with no snapshot is
