@@ -551,3 +551,53 @@ fn instruments_left_unmarked_by_a_stopped_pass_stay_due() -> Result<(), Error> {
     );
     Ok(())
 }
+
+/// DEC-2823: the pass's thesis copy is handed before its marks, and a copy that commits never ends
+/// the pass: the same pass both copies the admission and marks the instrument.
+#[test]
+fn a_pass_that_copies_a_thesis_still_writes_its_marks() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    journal.write(
+        &support::agent_stream(AGENT),
+        "01JTHES0000000000000000002",
+        "ThesisProposed",
+        1,
+        None,
+        support::object(vec![
+            ("thesis_id", Value::Str("th-1".to_owned())),
+            ("lineage_id", Value::Str("ln-1".to_owned())),
+            (
+                "instrument_id",
+                Value::Str("00000000-0000-4000-8000-000000000015".to_owned()),
+            ),
+            (
+                "revision",
+                Value::Int(mandate_canon::Int::new(1).ok_or("revision")?),
+            ),
+            (
+                "expires_at",
+                Value::Str("2026-09-30T00:00:00.000000000Z".to_owned()),
+            ),
+            ("admitted", Value::Bool(true)),
+            ("reason", Value::Null),
+        ])?,
+    )?;
+    let broker = Paper::new(&journal);
+    let mut wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    wiring.quotes = Box::new(Quoting(vec![AAPL]));
+    wiring.marked = Box::new(Naming(vec![AAPL]));
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    process.step(at(NOON)?);
+    assert_eq!(
+        journal.payloads("UniverseChanged").len(),
+        1,
+        "the admission is copied"
+    );
+    assert_eq!(
+        marks_of(&journal).len(),
+        1,
+        "and the pass marks the instrument"
+    );
+    Ok(())
+}

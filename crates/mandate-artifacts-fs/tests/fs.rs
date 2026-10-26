@@ -415,3 +415,49 @@ proptest! {
         prop_assert_eq!(get_artifact(&store, &reference), Err(ArtifactError::Corrupt));
     }
 }
+
+#[test]
+#[ignore = "pending E21-62"]
+fn put_counted_says_whether_it_linked_a_new_object() {
+    let (_, mut store) = open("counted");
+    let (first, linked) = store.put_counted(b"thesis").unwrap();
+    assert_eq!(first, ArtifactRef::of(b"thesis"));
+    assert!(linked, "the first put links the object");
+    let (again, linked) = store.put_counted(b"thesis").unwrap();
+    assert_eq!(again, first);
+    assert!(!linked, "the same bytes again link nothing new");
+    assert_eq!(store.put_artifact(b"thesis"), Ok(first));
+}
+
+#[test]
+#[ignore = "pending E21-62"]
+fn put_counted_never_changes_an_existing_objects_bytes() {
+    let (_, mut store) = open("counted-create-only");
+    let reference = store.put_artifact(b"thesis").unwrap();
+    tamper(&store, &reference, b"thesix");
+    assert_eq!(store.put_counted(b"thesis"), Err(ArtifactError::Corrupt));
+    assert_eq!(fs::read(store.object_path(&reference)).unwrap(), b"thesix");
+}
+
+#[test]
+#[ignore = "pending E21-62"]
+fn stored_bytes_counts_every_file_in_the_store_crashed_writes_among_them() {
+    let (dir, mut store) = open("stored-bytes");
+    assert_eq!(store.stored_bytes().unwrap(), 0);
+    store.put_artifact(b"abc").unwrap();
+    store.put_artifact(b"thesis").unwrap();
+    store.put_artifact(b"abc").unwrap();
+    assert_eq!(store.stored_bytes().unwrap(), 9, "each object counted once");
+    fs::write(dir.join("tmp").join("crashed.1.0"), b"left").unwrap();
+    assert_eq!(
+        store.stored_bytes().unwrap(),
+        13,
+        "a write a crash left behind still takes space"
+    );
+    fs::write(dir.join("elsewhere"), b"not the store's").unwrap();
+    assert_eq!(
+        store.stored_bytes().unwrap(),
+        13,
+        "only sha256/ and tmp/ count"
+    );
+}

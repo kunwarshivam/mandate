@@ -11,8 +11,8 @@ use mandate_executor::{
     BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect,
     EventDraft, EventId, ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input,
     InstrumentSnapshot, IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion,
-    MandateView, OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch,
-    fold, handle, limit_fills, recorded_fills,
+    MandateView, OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, ThesisRow,
+    WriterEpoch, fold, handle, limit_fills, recorded_fills,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
@@ -21,7 +21,8 @@ use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::{ExchangeCalendar, UtcNanos};
 
-use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches};
+use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches, theses};
+use crate::health::{Health, PROBE_EVERY_S};
 use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
 use crate::robinhood::AccountReads;
@@ -226,6 +227,12 @@ pub struct ExecutorProcess<S, B> {
     /// nothing is marked, so the gate holds (`AGENTS.md` rule 3).
     calendar: Option<ExchangeCalendar>,
     written_at: UtcNanos,
+    /// The connection's health as this process's broker answers show it (DEC-2832): each pass
+    /// tells the core of every trouble it holds, which restricts the account first (DEC-2826).
+    health: Health,
+    /// When the connection's health was last probed (DEC-2837): the start counts as the first, and
+    /// a probe is due every [`PROBE_EVERY_S`] after it.
+    probed: UtcNanos,
 }
 
 /// What one pass reads from the agents' streams: the kill switches this stream has not applied,
@@ -234,6 +241,9 @@ pub struct ExecutorProcess<S, B> {
 struct Followed {
     switches: Vec<(AgentId, Switch)>,
     proposals: Vec<(AgentId, Proposal)>,
+    /// Each followed agent's thesis records, in stream order, which the core copies onto the
+    /// account stream as its working universe (DEC-2823).
+    theses: Vec<(AgentId, Vec<ThesisRow>)>,
     unreadable: bool,
     released: bool,
     /// Whether every followed agent's stream parsed and read: one that did not may hold a switch,
@@ -275,6 +285,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             deployed: BTreeMap::new(),
             max_chain: config.max_chain,
             written_at: now,
+            health: Health::default(),
+            probed: now,
             polled: QuotePoll::new(Duration::from_secs(
                 u64::try_from(wiring_step).unwrap_or_default(),
             )),
@@ -387,6 +399,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let Some(Followed {
             switches,
             proposals: proposed,
+            theses: researched,
             unreadable,
             released,
             all_read,
@@ -404,6 +417,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return alerts;
         }
+        if !self.report_troubles(now, &mut alerts) {
+            return alerts;
+        }
         if !self.read_quotes(now, &mut alerts).unwrap_or(true) {
             return alerts;
         }
@@ -418,7 +434,15 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             } else {
                 Action::RiskExit
             };
+            if !self.report_troubles(now, &mut alerts) {
+                return alerts;
+            }
             if self.lifecycle.permits(action) && !self.take(now, agent, proposal, &mut alerts) {
+                return alerts;
+            }
+        }
+        for (agent, records) in researched {
+            if !self.hand(now, now, Input::Theses { agent, records }, &mut alerts, 0) {
                 return alerts;
             }
         }
@@ -429,6 +453,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         }
         if nothing_read && all_read && released && self.owes_nothing() {
             self.lifecycle.observe(now, Lifecycled::Completed);
+        }
+        self.probe(now);
+        if !self.report_troubles(now, &mut alerts) {
+            return alerts;
         }
         self.reconcile_on_schedule(now, &mut alerts);
         alerts
@@ -484,7 +512,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// one of the fold's orders): every status it reports is final. A read that fails, or a status
     /// it does not name, keeps the executor running (DEC-2347 item 3.5).
     fn broker_quiet(&mut self) -> bool {
-        let listed = match self.broker.account_reads() {
+        let listed = match self.account_reads() {
             Some(read) => read
                 .map(|reads| BrokerOutcome::OpenOrders(reads.open_orders))
                 .map_err(read_error),
@@ -711,6 +739,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let workspace = self.state.scope().workspace.0.clone();
         let mut pending = Vec::new();
         let mut proposed = Vec::new();
+        let mut researched = Vec::new();
         let mut unreadable = false;
         let mut all_read = true;
         for agent in following.agents.keys().cloned() {
@@ -727,11 +756,15 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 .filter(|row| row.environment == self.environment.as_str())
                 .map(folded)
                 .collect();
-            let Ok((held, asked)) = read.and_then(|rows| Ok((switches(&rows)?, proposals(&rows)?)))
+            let Ok((held, asked, records)) =
+                read.and_then(|rows| Ok((switches(&rows)?, proposals(&rows)?, theses(&rows))))
             else {
                 unreadable = true;
                 continue;
             };
+            if !records.is_empty() {
+                researched.push((agent.clone(), records));
+            }
             let openings_held = following.held.contains(&agent);
             proposed.extend(
                 asked
@@ -782,6 +815,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         Some(Followed {
             switches: pending,
             proposals: proposed,
+            theses: researched,
             unreadable,
             released: following.released(),
             all_read,
@@ -889,7 +923,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     }
                     return true;
                 }
-                if !failed_on_broker(&input) {
+                if !held_on_core_error(&input) {
                     self.lifecycle.observe(now, Lifecycled::Failed);
                     return false;
                 }
@@ -983,7 +1017,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     fn flush(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>, depth: usize) -> bool {
         let next = depth.saturating_add(1);
         while let Some(request) = self.outbox.pop_front() {
-            let answer = match self.broker.call(&request) {
+            let answer = match self.call(&request) {
                 Ok(outcome) => Input::Broker(Ok(outcome)),
                 Err(ConnectorError::Unknown(unknown)) => Input::Broker(Err(unknown)),
                 Err(_) => {
@@ -1057,11 +1091,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             .checkpoint()
             .cloned()
             .unwrap_or_else(|| ActivityCursor(String::new()));
-        if let Some(read) = self.broker.account_reads() {
+        if let Some(read) = self.account_reads() {
             let mut reads = read.map_err(read_error)?;
             if self.list_unlisted(&reads.open_orders, now, alerts, depth)? {
                 reads = self
-                    .broker
                     .account_reads()
                     .ok_or(Read::Unusable)?
                     .map_err(read_error)?;
@@ -1168,8 +1201,63 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         Ok(handed)
     }
 
+    /// A read of the broker. One whose credential the broker refused is an unknown outcome
+    /// (`Unauthorized`, connections spec §5.4), so it is read again on a later pass like a lost
+    /// one, and counted until the connection is `suspended` and the account restricted
+    /// (DEC-2832), never a stop that a restart would repeat with its count lost.
     fn read(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, Read> {
-        self.broker.call(request).map_err(read_error)
+        self.call(request).map_err(read_error)
+    }
+
+    /// Every request to the broker, its answer counted toward the connection's health (DEC-2832).
+    fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
+        let answer = self.broker.call(request);
+        self.health.observe(&answer);
+        answer
+    }
+
+    /// Tells the core of every trouble the connection's health holds (DEC-2832): after the pass's
+    /// kill switches, so none waits on it, and again before each proposal, so a count that crossed
+    /// its threshold earlier in the pass restricts the account before the next opening is taken.
+    /// The core journals each restriction and state change once (DEC-2826). `false` when a handoff
+    /// stopped the pass.
+    fn report_troubles(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> bool {
+        self.health
+            .troubles()
+            .into_iter()
+            .all(|trouble| self.hand(now, now, Input::Connection(trouble), alerts, 0))
+    }
+
+    /// The scheduled health probe (connections spec §8.2, DEC-2837): once every [`PROBE_EVERY_S`],
+    /// a read of the broker's account that only feeds the health counts, so an executor with
+    /// nothing working still notices a connection it cannot use. It runs last in a pass that went
+    /// through, as the scheduled reconciliation does, so no read goes ahead of what the pass sent,
+    /// and the troubles it finds are reported at once. Its answer is never handed to the
+    /// core and never stops the process: a probe places and alters nothing, and a failed one is
+    /// counted, never read as healthy. A pass that finds the journal down returns before it, so
+    /// while an append is in doubt nothing reaches the broker (E21-26); a restriction a probe leads
+    /// to is an append like any other, held in doubt and retried first.
+    /// A process that has exited, or is exiting this pass, probes nothing. A one-read broker is
+    /// probed through its account reads, since it offers no single account read.
+    fn probe(&mut self, now: UtcNanos) {
+        let due = now.secs().saturating_sub(self.probed.secs()) >= PROBE_EVERY_S;
+        if !due || self.exited() {
+            return;
+        }
+        self.probed = now;
+        if self.account_reads().is_none() {
+            let _counted = self.call(&BrokerRequest::GetAccount);
+        }
+    }
+
+    /// A one-read broker's account reads, counted as one answer (DEC-2832).
+    fn account_reads(&mut self) -> Option<Result<AccountReads, ConnectorError>> {
+        let read = self.broker.account_reads()?;
+        match &read {
+            Ok(_) => self.health.observe_answered(),
+            Err(error) => self.health.observe_error(error),
+        }
+        Some(read)
     }
 
     fn account_head(&self) -> u64 {
@@ -1358,13 +1446,19 @@ fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> 
 }
 
 /// Whether a core error on `input` is held and the process goes on (DEC-2821): the broker's
-/// answers, updates and snapshots, and the quotes its feed sends, which the restart would read
-/// again, so stopping on one would be a crash loop that also stops every exit, protective order and
-/// kill switch. Any other input's error, the hold's own included, stops the process as before.
-fn failed_on_broker(input: &Input) -> bool {
+/// answers, updates and snapshots, the quotes its feed sends, an agent's thesis records (DEC-2823),
+/// and the connection's troubles (DEC-2832), which the restart would read or count again, so
+/// stopping on one would be a crash loop that also stops every exit, protective order and kill
+/// switch. Any other input's error, the hold's own included, stops the process as before.
+fn held_on_core_error(input: &Input) -> bool {
     matches!(
         input,
-        Input::Broker(_) | Input::BrokerUpdate(_) | Input::BrokerSnapshot(_) | Input::Market(_)
+        Input::Broker(_)
+            | Input::BrokerUpdate(_)
+            | Input::BrokerSnapshot(_)
+            | Input::Market(_)
+            | Input::Theses { .. }
+            | Input::Connection(_)
     )
 }
 
@@ -1478,10 +1572,14 @@ mod tests {
     /// DEC-2821: a core error is held for a broker answer, and for no other input, the hold's
     /// own among them.
     #[test]
-    fn a_core_error_is_held_for_a_broker_input_alone() -> Result<(), Error> {
-        assert!(failed_on_broker(&Input::Broker(Ok(
+    fn a_core_error_is_held_for_a_broker_input_or_thesis_records_alone() -> Result<(), Error> {
+        assert!(held_on_core_error(&Input::Broker(Ok(
             mandate_executor::BrokerOutcome::AccountWideAccepted
         ))));
+        assert!(held_on_core_error(&Input::Theses {
+            agent: AgentId("agenta".to_owned()),
+            records: Vec::new(),
+        }));
         for other in [
             Input::Tick(RiskClock::from_secs(0)),
             Input::Started(WriterEpoch(1)),
@@ -1489,7 +1587,7 @@ mod tests {
             Input::BatchRefused,
             handoff(Purpose::Open)?,
         ] {
-            assert!(!failed_on_broker(&other), "{other:?}");
+            assert!(!held_on_core_error(&other), "{other:?}");
         }
         Ok(())
     }

@@ -161,6 +161,7 @@ fn every_unknown_outcome_and_connector_failure_has_its_code() {
         (BrokerUnknown::Timeout, "timeout"),
         (BrokerUnknown::Ambiguous, "ambiguous"),
         (BrokerUnknown::Transport, "transport"),
+        (BrokerUnknown::Unauthorized, "unauthorized"),
     ] {
         assert_eq!(unknown.code(), code);
         assert!(!format!("{unknown}").is_empty());
