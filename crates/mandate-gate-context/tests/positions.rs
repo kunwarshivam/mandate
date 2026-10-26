@@ -1235,12 +1235,12 @@ fn an_acknowledgment_ends_every_awaited_plain_entrys_interval_and_nothing_else()
 fn an_end_naming_a_bracket_ends_that_brackets_interval() {
     let mut read = bought();
     bracket_entry(&mut read, "mdt-b");
-    on(&mut read, "ProtectionChanged", &starts(None, ASSET, 1));
     on(
         &mut read,
         "ProtectionChanged",
-        &starts(Some("mdt-b"), ASSET, 2),
+        &starts(Some("mdt-b"), ASSET, 1),
     );
+    on(&mut read, "ProtectionChanged", &starts(None, ASSET, 2));
     on(
         &mut read,
         "ProtectionChanged",
@@ -1248,7 +1248,7 @@ fn an_end_naming_a_bracket_ends_that_brackets_interval() {
     );
     assert_eq!(
         open_since(&read, ASSET),
-        Some(1),
-        "mdt-b's ended; the first stays"
+        Some(2),
+        "mdt-b's ended; the other stays"
     );
 }
