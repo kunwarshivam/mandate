@@ -528,7 +528,7 @@ fn a_responder_is_an_approver_exactly_when_an_active_approver_answers_a_referenc
             .map(|r| (*r).to_owned())
             .chain(named.iter().map(|u| format!("user:{u}")))
             .collect();
-        let refs: Vec<ApproverRef> = texts.iter().cloned().collect();
+        let refs: Vec<ApproverRef> = texts.to_vec();
         let responder = ULIDS[responder];
         let resolved = resolve(&refs, &members(&records, CONNECTION));
         let names = texts.iter().any(|t| match t.as_str() {
@@ -598,7 +598,7 @@ proptest! {
             .chain(named.iter().map(|u| format!("user:{u}")))
             .collect();
         let refs: Vec<ApproverRef> =
-            texts.iter().cloned().collect();
+            texts.to_vec();
         let members = member.map_or(Members::Unread, |i| owner(POOL[i]));
         let responder = POOL[responder];
         let resolved = resolve(&refs, &members);
