@@ -4,6 +4,11 @@
 //! passed, an exit defers nothing, and with nothing deferred the advisory pass is the binding
 //! gate's own decision, which the executor's gate still makes over every check (rule 1).
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "these tests pin the advisory pass itself against the binding gate (DEC-2378 item 11)"
+)]
+
 mod common;
 
 use std::collections::BTreeSet;
