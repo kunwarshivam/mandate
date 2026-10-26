@@ -956,6 +956,9 @@ async fn deployed(
     if stopped(control, agent) {
         return Err(Answer::schema("/agent_id", "agent_stopped"));
     }
+    if mandate.universe.max_instruments > 1 {
+        return Err(Answer::schema("/mandate_version", "second_instrument"));
+    }
     let objects = admitted.objects.as_ref();
     let date = admitted.gate.now.date();
     let account = match account_ref(control, mandate.connection_id.as_str()) {

@@ -421,6 +421,7 @@ fn document(name: &str) -> String {
         "qqq" => (r#""symbol":"SPY""#, r#""symbol":"QQQ""#),
         "big_order" => (r#""max_order_usd":"300""#, r#""max_order_usd":"2000""#),
         "live" => (r#""environment":"paper""#, r#""environment":"live""#),
+        "wide" => (r#""max_instruments":1"#, r#""max_instruments":2"#),
         _ => panic!("{name}"),
     };
     assert!(MANDATE.contains(from), "{from}");
@@ -1622,6 +1623,25 @@ fn a_stopped_agent_is_never_deployed_again() {
     assert_eq!(
         violations(&reply),
         vec![("/agent_id".to_owned(), "agent_stopped".to_owned())]
+    );
+    assert_eq!(control(&f).len(), before, "nothing written");
+}
+
+/// DEC-2809 item 1: a confirmed version whose universe may hold a second instrument is refused at
+/// deploy, `invalid` at `/mandate_version` with `second_instrument`, and nothing is written.
+#[test]
+fn a_version_that_may_hold_a_second_instrument_is_refused_at_deploy() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    confirmed(&f, &cookie, "wide");
+    let before = control(&f).len();
+    let reply = deploy(&f, &cookie, KEY, &deploy_body("agt_a", "wide", EVIDENCE));
+    assert_eq!(
+        violations(&reply),
+        vec![(
+            "/mandate_version".to_owned(),
+            "second_instrument".to_owned()
+        )]
     );
     assert_eq!(control(&f).len(), before, "nothing written");
 }

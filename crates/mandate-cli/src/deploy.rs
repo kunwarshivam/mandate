@@ -5,7 +5,9 @@
 //! deployment is version 2, naming the document's connection, exactly when journal spec v0.54
 //! §9.24 rule 201 holds on the control stream, and version 1 otherwise (DEC-1171); an agent id is
 //! deployed once (DEC-1173 item 1). Rule 200 holds by construction: the `connection_id` it names
-//! is the one parsed from the stored document it deploys.
+//! is the one parsed from the stored document it deploys. A version whose universe may hold a
+//! second instrument is refused `second_instrument`, after the checks on the agent and before the
+//! V-rules: the executor's risk fold reads one instrument (DEC-2809 item 1, DEC-2804 item 8).
 
 use mandate_journal::ArtifactStore;
 
@@ -132,6 +134,9 @@ fn decide_and_commit(
         }
         Some(_) => return Err(refused("agent_stopped")),
         None => {}
+    }
+    if mandate.universe.max_instruments > 1 {
+        return Err(refused("second_instrument"));
     }
     check_rules(&rows, store, (&mandate, agent), None, now)?;
     check_instruments(&rows, store, &document)?;

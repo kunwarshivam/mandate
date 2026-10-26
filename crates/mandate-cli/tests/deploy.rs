@@ -43,11 +43,11 @@ const ESTABLISHED_V1: &str = r#"{"broker":"alpaca","connection_id":"conn_alpaca_
 /// The fixture's top-level members but the two system fields (mandate spec §4.1 V-020).
 const PATHS: &str = "autonomy behavior capital connection_id environment goal name notifications \
                      protection risk universe";
-/// DEC-530 item 9's codes for `agent deploy`.
+/// DEC-530 item 9's codes for `agent deploy`, with DEC-2809 item 1's `second_instrument`.
 const CODES: &str = "agent_active agent_invalid agent_stopped code_mismatch \
                      control_stream_invalid document_corrupt document_missing \
-                     instrument_unregistered paper_only version_invalid version_superseded \
-                     version_unconfirmed version_unknown";
+                     instrument_unregistered paper_only second_instrument version_invalid \
+                     version_superseded version_unconfirmed version_unknown";
 
 fn json(text: &str) -> Value {
     parse(text.as_bytes()).unwrap()
@@ -69,6 +69,7 @@ fn document(name: &str) -> String {
         "v2" => (r#"max_order_usd":"300"#, r#"max_order_usd":"200"#),
         "m101" => (r#""version":"1.0.0""#, r#""version":"1.0.1""#),
         "qqq" => (r#""symbol":"SPY""#, r#""symbol":"QQQ""#),
+        "wide" => (r#""max_instruments":1"#, r#""max_instruments":2"#),
         _ => ("conn_alpaca_paper_01", "conn_alpaca_paper_02"),
     };
     assert!(MANDATE.contains(from), "{from}");
@@ -457,7 +458,7 @@ fn every_refusal_has_its_own_code_and_writes_nothing() {
     let other = Deploy(OTHER_AGENT, "v1", None);
     let other_stop = Seed("AgentStopped", OTHER_STOPPED);
     let codes = [deploy_code(OTHER_AGENT, "v1"), deploy_code(AGENT, "v2")];
-    let cases: [(&str, &[Do<'_>], Do<'_>); 21] = [
+    let cases: [(&str, &[Do<'_>], Do<'_>); 22] = [
         ("paper_only", &[v1, c1, As(Environment::Live)], d1),
         ("paper_only", &[v1, c1, As(Environment::Backtest)], d1),
         ("agent_invalid", &[v1, c1], Deploy("agent a", "v1", None)),
@@ -518,6 +519,11 @@ fn every_refusal_has_its_own_code_and_writes_nothing() {
             "instrument_unregistered",
             &[Created("qqq"), Confirmed("qqq")],
             Deploy(AGENT, "qqq", None),
+        ),
+        (
+            "second_instrument",
+            &[Created("wide"), Confirmed("wide")],
+            Deploy(AGENT, "wide", None),
         ),
     ];
     let mut seen = BTreeSet::new();
@@ -619,4 +625,21 @@ fn a_version_3_deployment_reads_as_its_version_2() {
     assert_eq!(version_3, version_2);
     assert_eq!(versions_3.iter().filter(|v| **v == 3).count(), 2);
     assert_eq!(versions_2.iter().filter(|v| **v == 2).count(), 2);
+}
+
+/// DEC-2809 item 1: a version whose universe may hold a second instrument is refused at deploy,
+/// after the checks on the agent, so an agent already deployed on it answers with its deployment,
+/// and before the V-rules; it was confirmed, which DEC-2809 leaves to the envelope.
+#[test]
+fn a_version_that_may_hold_a_second_instrument_is_refused_at_deploy() {
+    let mut world = World::new();
+    for step in [Created("wide"), Confirmed("wide")] {
+        world.run(step).unwrap();
+    }
+    let before = world.appends();
+    assert_eq!(
+        refused(world.run(Deploy(AGENT, "wide", None))),
+        "second_instrument"
+    );
+    assert_eq!(world.appends(), before, "a refusal writes nothing");
 }
