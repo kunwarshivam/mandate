@@ -543,7 +543,6 @@ fn refused(w: &World, reply: &Reply, expected: ProblemCode, case: &str) {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_confirmed_grant_commits_the_clis_answer_once_before_its_202() {
     let w = world();
     let issued = w.challenge();
@@ -596,7 +595,6 @@ fn a_confirmed_grant_commits_the_clis_answer_once_before_its_202() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_grant_is_judged_as_an_approve_bound_to_the_requests_content_hash() {
     let w = world();
     let issued = w.challenge();
@@ -746,7 +744,6 @@ const CASES: [Case; 11] = [
 ];
 
 #[test]
-#[ignore = "pending E9-4"]
 fn each_refusal_of_dec_2104_item_6_commits_nothing_and_keeps_the_challenge() {
     for case in &CASES {
         let w = world();
@@ -760,7 +757,6 @@ fn each_refusal_of_dec_2104_item_6_commits_nothing_and_keeps_the_challenge() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_hash_other_than_the_journals_is_a_mismatch_since_the_cli_confirms_the_journal() {
     let w = world();
     let issued = w.challenge_by(ALICE, &other_hash());
@@ -775,7 +771,6 @@ fn a_hash_other_than_the_journals_is_a_mismatch_since_the_cli_confirms_the_journ
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_answered_or_late_approval_is_recorded_for_the_runtime_to_refuse() {
     let w = world();
     w.append(
@@ -809,7 +804,6 @@ fn an_answered_or_late_approval_is_recorded_for_the_runtime_to_refuse() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_unknown_approval_is_404_before_the_port_is_asked() {
     let w = world();
     let issued = w.challenge();
@@ -828,7 +822,6 @@ fn an_unknown_approval_is_404_before_the_port_is_asked() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_live_workspace_is_live_unavailable_after_the_row_and_reads_no_evidence() {
     let w = world_in("live");
     let evidence = Issued {
@@ -855,7 +848,6 @@ fn a_live_workspace_is_live_unavailable_after_the_row_and_reads_no_evidence() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_repeat_under_the_key_answers_the_same_though_the_challenge_is_spent() {
     let w = world();
     let issued = w.challenge();
@@ -909,7 +901,6 @@ fn a_grant_without_evidence_is_still_step_up_required() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_grant_naming_a_delegation_is_invalid_and_asks_no_port() {
     let w = world();
     let issued = w.challenge();

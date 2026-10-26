@@ -21,15 +21,17 @@ use mandate_api::lenient::{Api7, ApprovalAnswer, Kept, decode_lenient};
 use mandate_api::problem::Violation;
 use mandate_api::problem::{Effect, Problem, ProblemCode};
 use mandate_api::requests::{
-    KillSwitchRequest, OwnerExitRequest, PauseRequest, ResumeRequest, Scope, StopRequest,
+    ApprovalResponseRequest, KillSwitchRequest, OwnerExitRequest, PauseRequest, ResumeRequest,
+    Scope, StopRequest,
 };
 use mandate_api::wire::{Asset, Decimal, EventId, Id, Ref, decode, encode};
 use mandate_authn::Request;
-use mandate_canon::{Digest, Value, parse, to_canonical};
+use mandate_canon::{Digest, Int, Value, parse, to_canonical};
 use mandate_identity::{Permission, StepUpActionKind};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
+use crate::backtests::paper;
 use crate::commands::{
     Command, Issued, KillScope, Settled, draft, in_workspace, release_warning, same, settle_at,
 };
@@ -39,7 +41,7 @@ use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
 use crate::session::Authenticated;
-use crate::stepup::{Action, Judged, Unverified, journaled};
+use crate::stepup::{Action, Judged, journaled};
 
 /// The `Idempotency-Key` request header (§3.4).
 const IDEMPOTENCY_KEY: &str = "idempotency-key";
@@ -355,8 +357,9 @@ pub(crate) fn unknown(id: EventId) -> Response {
 }
 
 /// `POST /v1/workspaces/{ws}/approvals/{id}/responses` (§5.2, DEC-1007 item 10): a Skip is
-/// recorded; a grant, once the approval is found, carries step-up the port judges (DEC-2104), and
-/// is committed only when E9-4 S6 lands.
+/// recorded; a grant, in paper only and once the approval is found, is recorded with its
+/// `cli_confirm` evidence when the port verifies it as an `approve` bound to the request's content
+/// hash (DEC-2104), and refused with the port's code otherwise.
 pub async fn respond(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
@@ -388,6 +391,12 @@ pub async fn respond(
         Ok(reader) => reader,
         Err(refusal) => return refusal.response(),
     };
+    if matches!(kept.value, ApprovalAnswer::Approved(_)) && !paper(&reader.control) {
+        return problem(
+            StatusCode::CONFLICT,
+            problem_body(ProblemCode::LiveUnavailable),
+        );
+    }
     let agent = match requester(&app, &reader, &approval).await {
         Ok(Some(agent)) => agent,
         Ok(None) => return Refused::NotFound.response(),
@@ -396,13 +405,12 @@ pub async fn respond(
     let skip = match &kept.value {
         ApprovalAnswer::Skipped(skip) => skip,
         ApprovalAnswer::Approved(grant) => {
-            let Some(evidence) = &grant.step_up else {
-                return problem(
-                    StatusCode::UNAUTHORIZED,
-                    problem_body(ProblemCode::StepUpRequired),
-                );
+            let asked = Asked {
+                agent,
+                approval,
+                grant,
             };
-            return judged_grant(&app, &reader, gate.now, &grant.content_hash, evidence);
+            return granted(&app, &gate, &reader, &asked).await;
         }
     };
     let Some(content_hash) = ref_text(&skip.content_hash) else {
@@ -416,22 +424,52 @@ pub async fn respond(
     committed(&app, &gate, &reader, &command, &kept.dropped, None).await
 }
 
-/// A grant's evidence judged by the port as an `approve` bound to the request's content hash
-/// (§3.6, identity spec §7.2 step 1): the port's refusal, else the grant [`granted`] commits.
-fn judged_grant(
-    app: &App,
-    reader: &Reader,
-    now: UtcNanos,
-    content_hash: &Ref,
-    evidence: &StepUpEvidence,
-) -> Response {
-    let Some(digest) = ref_text(content_hash)
-        .as_deref()
-        .and_then(|text| text.strip_prefix("sha256:"))
+/// A grant of the approval `approval` an agent requested.
+struct Asked<'a> {
+    agent: String,
+    approval: String,
+    grant: &'a ApprovalResponseRequest,
+}
+
+/// The grant `asked` recorded with its evidence once the port verifies it as an `approve` bound to
+/// the request's content hash (§3.6, identity spec §7.2 step 1, DEC-2104 item 6), or refused with
+/// the port's code. A grant naming a delegation is §5.3's batch, not served here, and `invalid`.
+/// A repeat whose key holds the same grant replays before the port is asked, since the port spent
+/// the challenge with the first (§3.4 step 1).
+async fn granted(app: &App, gate: &Gate, reader: &Reader, asked: &Asked<'_>) -> Response {
+    let Some(evidence) = &asked.grant.step_up else {
+        return problem(
+            StatusCode::UNAUTHORIZED,
+            problem_body(ProblemCode::StepUpRequired),
+        );
+    };
+    if asked.grant.delegation.is_some() {
+        return invalid(vec![schema_violation("/delegation", "delegation_unserved")]);
+    }
+    let Some(content_hash) = ref_text(&asked.grant.content_hash) else {
+        return Refused::Invalid.response();
+    };
+    let Some(digest) = content_hash
+        .strip_prefix("sha256:")
         .and_then(Digest::from_hex)
     else {
         return Refused::Invalid.response();
     };
+    let Some(step_up) = answered(evidence) else {
+        return problem(
+            StatusCode::UNAUTHORIZED,
+            problem_body(ProblemCode::StepUpStale),
+        );
+    };
+    let command = Command::Grant {
+        agent: asked.agent.clone(),
+        approval: asked.approval.clone(),
+        content_hash,
+        step_up,
+    };
+    if let Some(row) = replayed(gate, reader, &command) {
+        return accepted(command.id_member(), &row, gate.now, &[], None);
+    }
     let action = Action {
         kind: StepUpActionKind::Approve,
         digest,
@@ -439,24 +477,32 @@ fn judged_grant(
     let judged = Judged {
         tenant: &reader.tenant,
         control: &reader.control,
-        now,
+        now: gate.now,
     };
-    match app.step_up.asserted(evidence, None, &action, &judged) {
-        Ok(_) => match granted() {
-            Ok(response) => response,
-            Err(_) => Refused::JournalUnavailable.response(),
-        },
-        Err(
-            Unverified::Code(ProblemCode::JournalUnavailable) | Unverified::Unimplemented { .. },
-        ) => Refused::JournalUnavailable.response(),
-        Err(Unverified::Code(code)) => problem(StatusCode::UNAUTHORIZED, problem_body(code)),
+    if let Err(code) = app.step_up.verify(evidence, &action, &judged) {
+        return problem(StatusCode::UNAUTHORIZED, problem_body(code));
     }
+    committed(app, gate, reader, &command, &[], None).await
 }
 
-/// The verified grant committed as the one `ApprovalResponseSubmitted` `mandate approvals approve`
-/// writes (E9-4 S6, DEC-2104 item 6): not implemented yet, so a verified grant commits nothing.
-fn granted() -> Result<Response, Unverified> {
-    Err(Unverified::Unimplemented { story: "E9-4" })
+/// `evidence` as `ApprovalResponseSubmitted` records it (journal spec §9.7): its assertion id and
+/// method, and `authenticated_at` as the integer second the CLI writes, the second it falls in, so
+/// the recorded evidence is never fresher than the presented; `None` only for an instant the
+/// canonical integer cannot hold.
+fn answered(evidence: &StepUpEvidence) -> Option<Value> {
+    let presented = journaled(Some(evidence))?;
+    let at = UtcNanos::parse(presented.get("authenticated_at")?.as_str()?).ok()?;
+    let second = Value::Int(Int::new(u64::try_from(at.secs()).ok()?)?);
+    let mut object = mandate_canon::Object::new();
+    let members = [
+        ("assertion_id", presented.get("assertion_id")?.clone()),
+        ("authenticated_at", second),
+        ("method", presented.get("method")?.clone()),
+    ];
+    for (name, value) in members {
+        object.insert(mandate_canon::Key::new(name).ok()?, value);
+    }
+    Some(Value::Object(object))
 }
 
 /// The deployed agent whose stream requested `approval`, found by equality with an
