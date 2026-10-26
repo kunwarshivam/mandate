@@ -16,6 +16,7 @@ pub enum OwnerAlertKind {
     AgentHeld,
     RetirementHeld,
     AccountRestriction,
+    ConnectionUnavailable,
     Protection,
     ExitStalled,
     Reconciliation,
@@ -46,9 +47,9 @@ pub enum OwnerAlertKind {
 
 impl OwnerAlertKind {
     #[rustfmt::skip]
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 33] = [
         Self::RiskLimit, Self::KillSwitch, Self::KillSwitchUnapplied, Self::AgentHeld,
-        Self::RetirementHeld, Self::AccountRestriction,
+        Self::RetirementHeld, Self::AccountRestriction, Self::ConnectionUnavailable,
         Self::Protection, Self::ExitStalled, Self::Reconciliation, Self::ExternalActivity,
         Self::AccountState, Self::DataFeedDown, Self::IntegrityIncident, Self::CredentialAdded,
         Self::NewDevice, Self::NotificationAddressChanged, Self::RecoveryUsed, Self::RoleGranted,
@@ -68,6 +69,7 @@ impl OwnerAlertKind {
             Self::AgentHeld => NoticeKind::AgentHeld,
             Self::RetirementHeld => NoticeKind::RetirementHeld,
             Self::AccountRestriction => NoticeKind::AccountRestriction,
+            Self::ConnectionUnavailable => NoticeKind::ConnectionUnavailable,
             Self::Protection => NoticeKind::Protection,
             Self::ExitStalled => NoticeKind::ExitStalled,
             Self::Reconciliation => NoticeKind::Reconciliation,
@@ -107,6 +109,7 @@ impl OwnerAlertKind {
             Self::AgentHeld => "agent_held",
             Self::RetirementHeld => "retirement_held",
             Self::AccountRestriction => "account_restriction",
+            Self::ConnectionUnavailable => "connection_unavailable",
             Self::Protection => "protection",
             Self::ExitStalled => "exit_stalled",
             Self::Reconciliation => "reconciliation",
