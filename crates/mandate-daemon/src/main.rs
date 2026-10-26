@@ -260,7 +260,9 @@ fn serve<S: Store>(
             process.drain(host_now());
             continue;
         }
-        process.step(host_now());
+        for alert in process.step(host_now()) {
+            eprintln!("alert {}", alert.key);
+        }
         status.publish(process.lifecycle().snapshot());
         wake.wait(PASS);
     }

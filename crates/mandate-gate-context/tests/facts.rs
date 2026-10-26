@@ -585,3 +585,33 @@ fn the_account_streams_clock_alone_admits_no_opening() {
     on(&mut state, CLOCK, "ClockAdvanced", &tick(START));
     assert!(state.facts(ASSET, FRESH).is_ok());
 }
+
+/// R1 on #2447: the mandate in force does not depend on which stream reaches the fold first. A
+/// version applied on the account stream, folded before the control stream's deployment, stays
+/// the one in force; a stop is final whichever came first.
+#[test]
+fn the_mandate_in_force_is_the_same_whichever_stream_is_folded_first() {
+    let applied_first = |stop: bool| {
+        let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+        on(&mut state, CLOCK, "ClockAdvanced", &tick(START));
+        acct(
+            &mut state,
+            "AccountSnapshotRecorded",
+            &snapshot("1000", START),
+        );
+        acct(&mut state, "MarkUpdated", &regular("189.5", START));
+        let version = applied(AGENT, "sha256:v2", "applied");
+        acct(&mut state, "MandateVersionApplied", &version);
+        if stop {
+            let stopped = object(&[("agent_id", text(AGENT))]);
+            on(&mut state, CONTROL, "AgentStopped", &stopped);
+        }
+        deploy(&mut state);
+        state
+    };
+    assert_eq!(version(&applied_first(false)), "sha256:v2");
+    assert_eq!(
+        applied_first(true).facts(ASSET, FRESH),
+        Err(Held::NoMandate)
+    );
+}

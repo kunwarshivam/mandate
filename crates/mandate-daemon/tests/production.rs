@@ -315,3 +315,61 @@ fn a_refused_corporate_action_still_leaves_the_flatten_its_sub_ledger() {
     let plan = Flatten::new(facts, classes()).plan(&kill_switch());
     assert_eq!(plan.sells, vec![leg(SPY, AssetClass::UsEquity, "10")]);
 }
+
+/// R1 on #2447: a release and an in-kind fee are additive, so the stream's last row folded a
+/// second time would subtract twice. Each row reaches the fold once, the head row included.
+#[test]
+fn a_release_or_an_in_kind_fee_fed_again_counts_once() {
+    let last_rows = [
+        (
+            "PositionReleased",
+            format!(
+                r#"{{"agent_id":"{AGENT}","instrument":"{SPY}","qty":"4","cause":"owner_release"}}"#
+            ),
+            "6",
+        ),
+        (
+            "FeesCharged",
+            format!(r#"{{"family":"crypto_asset","instrument_id":"{SPY}","accrued":"0.5"}}"#),
+            "9.5",
+        ),
+    ];
+    for (event_type, payload, left) in last_rows {
+        let facts = facts();
+        let mut rows = Vec::new();
+        bought(&mut rows, AGENT, "o1", SPY, "10");
+        account_row(&mut rows, event_type, &payload);
+        facts.feed(&rows);
+        facts.feed(&rows);
+        facts.feed(&rows[rows.len() - 1..]);
+        let plan = Flatten::new(facts, classes()).plan(&kill_switch());
+        assert_eq!(
+            plan.sells,
+            vec![leg(SPY, AssetClass::UsEquity, left)],
+            "{event_type}"
+        );
+    }
+}
+
+/// R1 on #2447: a held instrument the plan cannot sell, with no asset class in the universe or
+/// an id that does not parse, is not dropped silently: the fold records it, and the process
+/// raises the operator alert `flatten_unplanned` (DEC-2378 item 8).
+#[test]
+fn a_held_instrument_the_flatten_cannot_plan_is_recorded() {
+    let facts = facts();
+    let mut rows = Vec::new();
+    bought(
+        &mut rows,
+        AGENT,
+        "o1",
+        "11111111-2222-4333-8444-555555555555",
+        "2",
+    );
+    bought(&mut rows, AGENT, "o2", SPY, "3");
+    facts.feed(&rows);
+    assert_eq!(facts.take_unplanned(), 0);
+    let plan = Flatten::new(facts.clone(), classes()).plan(&kill_switch());
+    assert_eq!(plan.sells, vec![leg(SPY, AssetClass::UsEquity, "3")]);
+    assert_eq!(facts.take_unplanned(), 1);
+    assert_eq!(facts.take_unplanned(), 0);
+}

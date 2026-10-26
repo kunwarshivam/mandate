@@ -1165,3 +1165,60 @@ fn the_production_fold_is_fed_the_named_account_and_the_clock_once_each() {
         Some(Some(at(NOW + 5)))
     );
 }
+
+/// The production flatten's unplanned holding reaches the process's alerts as the fixed key
+/// `flatten_unplanned`, once (DEC-2378 item 8).
+#[test]
+fn a_kill_switch_with_an_unplanned_holding_raises_the_operator_alert_once() {
+    let rig = Rig::default();
+    let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    let stamp = at(NOW).to_string();
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderRequestRecorded",
+        &format!(r#"{{"agent_id":"{AGENT}","purpose":"open","risk_clock":"{stamp}"}}"#),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "OrderSubmitted",
+        r#"{"client_order_id":"o1","instrument_id":"spy","side":"buy"}"#,
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "FillApplied",
+        &format!(
+            r#"{{"fill_id":"f1","client_order_id":"o1","instrument_id":"spy","side":"buy","qty_gross":"3","price":"100","risk_clock":"{stamp}"}}"#
+        ),
+    );
+    let flatten =
+        mandate_daemon::production::Flatten::new(facts.clone(), std::collections::BTreeMap::new());
+    let mut process = RuntimeProcess::start(
+        rig.clone(),
+        Wiring {
+            facts: Some(facts),
+            flatten: Box::new(flatten),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    process.step(at(NOW + 1));
+    kill_switch(&rig);
+    let alerts = process.step(at(NOW + 2));
+    assert_eq!(count(&rig, "KillSwitchActivated"), 1, "{:?}", kinds(&rig));
+    let keys: Vec<&str> = alerts.iter().map(|alert| alert.key).collect();
+    assert!(
+        keys.contains(&mandate_daemon::FLATTEN_UNPLANNED),
+        "{keys:?}"
+    );
+    let again = process.step(at(NOW + 3));
+    assert!(
+        again
+            .iter()
+            .all(|alert| alert.key != mandate_daemon::FLATTEN_UNPLANNED)
+    );
+}

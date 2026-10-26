@@ -72,6 +72,10 @@ pub struct Alert {
     pub subject: Option<String>,
 }
 
+/// The operator alert a pass raises when the production flatten left a held instrument unplanned
+/// (DEC-2378 item 8): a fixed key, nothing about the instrument (`AGENTS.md` rule 6).
+pub const FLATTEN_UNPLANNED: &str = "flatten_unplanned";
+
 /// How one input's effects ended.
 enum Ran {
     Committed,
@@ -198,6 +202,10 @@ impl<S: Store> RuntimeProcess<S> {
             return false;
         };
         self.account = account_of(&control, self.state.deployment(), self.environment);
+        if let (Some(facts), Some(account)) = (&self.wiring.facts, &self.account) {
+            facts.follow(account.as_str());
+        }
+        self.feed(&control);
         match self.account.clone() {
             Some(account) => matches!(self.fold_account(&account), Account::Folded),
             None => true,
@@ -249,6 +257,17 @@ impl<S: Store> RuntimeProcess<S> {
             && self.clock_pass(now, &mut alerts)
         {
             self.research_pass(now, &mut alerts);
+        }
+        if self
+            .wiring
+            .facts
+            .as_ref()
+            .is_some_and(|facts| facts.take_unplanned() > 0)
+        {
+            alerts.push(Alert {
+                key: FLATTEN_UNPLANNED,
+                subject: None,
+            });
         }
         alerts
     }

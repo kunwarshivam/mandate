@@ -53,6 +53,7 @@ pub fn classes(document: &Value) -> BTreeMap<String, AssetClass> {
 pub struct Facts(Rc<RefCell<Fed>>);
 
 struct Fed {
+    unplanned: u32,
     clock: String,
     agent: String,
     journaled: Option<Journaled>,
@@ -63,6 +64,7 @@ impl Facts {
     /// The fold for `agent`, ticked by the scheduler's `clock` stream, before its account is known.
     pub fn new(clock: &str, agent: &str) -> Self {
         Self(Rc::new(RefCell::new(Fed {
+            unplanned: 0,
             clock: clock.to_owned(),
             agent: agent.to_owned(),
             journaled: None,
@@ -119,6 +121,21 @@ impl Facts {
         }
     }
 
+    /// How many held instruments a flatten has left unplanned since the last call, and resets the
+    /// count: the process raises `flatten_unplanned` for each nonzero answer (DEC-2378 item 8).
+    pub fn take_unplanned(&self) -> u32 {
+        self.0
+            .try_borrow_mut()
+            .map(|mut fed| std::mem::take(&mut fed.unplanned))
+            .unwrap_or(0)
+    }
+
+    fn note_unplanned(&self, count: u32) {
+        if let Ok(mut fed) = self.0.try_borrow_mut() {
+            fed.unplanned = fed.unplanned.saturating_add(count);
+        }
+    }
+
     /// `read` over the fold, or `None` before the account is followed.
     pub fn read<T>(&self, read: impl FnOnce(&Journaled) -> T) -> Option<T> {
         let fed = self.0.try_borrow().ok()?;
@@ -130,7 +147,10 @@ impl Facts {
 /// agent's own working orders, never the account's. An owner exit names one instrument and
 /// touches only it. No sell is deferred here: a risk exit and a kill switch are exempt from the
 /// session rules, an owner exit outside the regular session carries the owner's confirmed bid,
-/// and the broker holds what it will not take (`AGENTS.md` rule 13).
+/// and the broker holds what it will not take (`AGENTS.md` rule 13). A held instrument it cannot
+/// plan, one with no asset class in the universe or an id that does not parse, is counted for the
+/// process's `flatten_unplanned` alert rather than dropped silently; the executor still flattens
+/// its own sub-ledger of it.
 pub struct Flatten {
     facts: Facts,
     classes: BTreeMap<String, AssetClass>,
@@ -156,9 +176,13 @@ impl FlattenPlanner for Flatten {
             .facts
             .read(|journaled| (journaled.held(), journaled.working()))
             .unwrap_or_default();
-        let sells = held
+        let scoped_held: Vec<_> = held
             .into_iter()
             .filter(|(instrument, _)| scoped(instrument))
+            .collect();
+        let wanted = scoped_held.len();
+        let sells: Vec<FlattenLeg> = scoped_held
+            .into_iter()
             .filter_map(|(instrument, qty)| {
                 Some(FlattenLeg {
                     asset_class: *self.classes.get(&instrument)?,
@@ -168,6 +192,9 @@ impl FlattenPlanner for Flatten {
                 })
             })
             .collect();
+        let unplanned = wanted.saturating_sub(sells.len());
+        self.facts
+            .note_unplanned(u32::try_from(unplanned).unwrap_or(u32::MAX));
         let cancel_client_order_ids = working
             .into_iter()
             .filter(|(_, instrument)| scoped(instrument))
