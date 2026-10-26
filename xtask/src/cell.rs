@@ -119,12 +119,13 @@ const RUNTIME_DOCKERFILE: &str = "deploy/cell/images/runtime.Dockerfile";
 /// runtime image carries under `research/` in its context and at
 /// `/usr/local/share/mandate/research` in the image (DEC-2246). No release image carries it.
 const DEMO_RESEARCH: &str = "deploy/cell/demo/research";
-const DEMO_RESEARCH_FILES: [&str; 5] = [
+const DEMO_RESEARCH_FILES: [&str; 6] = [
     "research.json",
     "bars.json",
     "news.json",
     "filings.json",
     "instruments.json",
+    "feed.json",
 ];
 const EXECUTOR_DOCKERFILE: &str = "deploy/cell/images/executor.Dockerfile";
 /// The workspace scheduler's image (E21-29): the single writer of the hosted workspace's clock

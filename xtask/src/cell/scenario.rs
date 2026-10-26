@@ -288,6 +288,13 @@ const DR_RESEARCH: Wait = Wait {
     lands: "a check that the research agent's runtime, which the manager starts from its \
             version-2 deployment, journals its first research run over the recorded bundle",
 };
+const DR_RESEARCH_TRADES: Wait = Wait {
+    lane: "DR",
+    story: "E21-54",
+    pr: None,
+    lands: "the research workspace's own trade loop: its runtime's opening asked, approved and \
+            filled under the thesis, so the feed's news item has a held position to sell",
+};
 const DR_CONNECT: Wait = Wait {
     lane: "DR",
     story: "E21-54",
@@ -1015,6 +1022,16 @@ pub fn plan(
                               (#1779, #1782), and the connect check and record that write a \
                               deployment at version 2 (#1759, #1763)",
                     waits: vec![DR_RESEARCH],
+                }),
+                Part::Gap(Gap {
+                    what: "the agent acting on news: the feed's SPY item, arriving 900 seconds \
+                           after the deployment, brings a monitoring run forward, whose recorded \
+                           reply invalidates the thesis, and the position the thesis held is sold",
+                    on_main: "event-triggered monitoring runs in the research core (#2558), the \
+                              recorded feed offered each pass (#2575), the thesis exit (#2578), \
+                              a monitor run's invalidations journaled (#2626), and the recorded \
+                              monitor reply naming the thesis it was shown (#2632)",
+                    waits: vec![DR_RESEARCH, DR_RESEARCH_TRADES],
                 }),
                 ],
             ]
@@ -2585,10 +2602,10 @@ mod tests {
         let research = reference(&research_mandate());
         assert_eq!(
             research,
-            "sha256:d64d0988e24fa754e0e64acad129d378eed55297e3b28cb82d0b1587ebe54a60"
+            "sha256:ec2cd92db438bd53a46dae58c0dbdf4965aaaa085dcb9b3cfe486819f2f74a8b"
         );
-        assert_eq!(confirm_code(&research), "2e7bcfa5");
-        assert_eq!(deploy_code(RESEARCH_AGENT, &research), "5ae8bd0c");
+        assert_eq!(confirm_code(&research), "b7532ea7");
+        assert_eq!(deploy_code(RESEARCH_AGENT, &research), "c7b13550");
     }
 
     /// The steps run 1 to 7 in order, then the record; a shown code precedes the gesture that types
@@ -2887,8 +2904,9 @@ mod tests {
 
     /// The research agent's envelope: paper, every admission and opening asked, an unpinned
     /// universe of one instrument, a research envelope, and exactly one `llm.` model admitting
-    /// instruments beside the demo's quant model, sorted by id (V-009, V-036; DEC-2246 item 4). Its
-    /// connection is the demo's.
+    /// instruments beside the demo's quant model, sorted by id (V-009, V-036; DEC-2246 item 4), and
+    /// a news item may bring a monitoring run forward (DEC-2392, DEC-2275). Its connection is the
+    /// demo's.
     #[test]
     fn the_research_envelope_researches_one_instrument_and_asks_everything() {
         let m = parsed(RESEARCH_MANDATE_FILE);
@@ -2901,7 +2919,12 @@ mod tests {
         assert_eq!(m["universe"]["max_instruments"], 1);
         assert_eq!(
             m["behavior"]["research"],
-            json!({"cost_cap_usd_per_day": "5", "interval_s": 3600, "max_revisions_per_lineage": 3})
+            json!({
+                "cost_cap_usd_per_day": "5",
+                "event_triggers": {"debounce_s": 300, "max_runs_per_day": 4, "sources": ["news"]},
+                "interval_s": 3600,
+                "max_revisions_per_lineage": 3
+            })
         );
         let models: Vec<(&str, bool)> = m["behavior"]["signal_models"]
             .as_array()
@@ -3006,12 +3029,22 @@ mod tests {
         ] {
             assert!(gestures[3].args.windows(2).any(|w| w == pair), "{pair:?}");
         }
+        let last_checked = step
+            .parts
+            .iter()
+            .rposition(|part| !matches!(part, Part::Gap(_)))
+            .unwrap();
         assert!(
             matches!(
-                step.parts.iter().rev().nth(1),
-                Some(Part::Executor(e)) if e.account == research.account
+                &step.parts[last_checked],
+                Part::Executor(e) if e.account == research.account
             ),
-            "the research workspace's executor is checked before the research run's gap"
+            "the research workspace's executor is checked before the step's gaps"
+        );
+        assert_eq!(
+            step.parts.len() - last_checked - 1,
+            2,
+            "the research run's gap, then the agent acting on news"
         );
         for g in &gestures {
             let at = g.args.iter().position(|a| a == "--workspace").unwrap();
