@@ -35,7 +35,7 @@ const NONE: &[&str] = &[];
 
 /// Every event type [`lookup`] admits, in its order. The test below reads `lookup`'s source, so
 /// a type added there and not here fails the build's tests.
-pub(crate) const EVENT_TYPES: [&str; 129] = [
+pub(crate) const EVENT_TYPES: [&str; 135] = [
     "StreamOpened",
     "MeterReserved",
     "MeterSettled",
@@ -74,6 +74,7 @@ pub(crate) const EVENT_TYPES: [&str; 129] = [
     "MarkUpdated",
     "ProtectionChanged",
     "OwnerConfirmationReceived",
+    "AccountCloseRequested",
     "BrokerPositionObserved",
     "ReconciliationRun",
     "CompensatingEvent",
@@ -153,6 +154,10 @@ pub(crate) const EVENT_TYPES: [&str; 129] = [
     "ProcessCrashLooped",
     "CredentialEnrolled",
     "CredentialRemoved",
+    "StepUpAsserted",
+    "ConnectionRolesMade",
+    "ConnectionRolesRefused",
+    "ConnectionRolesRemoved",
     "ConnectionEstablished",
     "ConnectionCredentialRotated",
     "ConnectionRefused",
@@ -165,6 +170,7 @@ pub(crate) const EVENT_TYPES: [&str; 129] = [
     "OwnerAlertSent",
     "NoticeIssued",
     "NoticeAttempted",
+    "NotificationAddressChanged",
 ];
 
 /// The catalogue entry for `event_type`. `TradingDayStarted` and `ClockAdvanced` are owned by the
@@ -218,6 +224,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "MarkUpdated"
         | "ProtectionChanged"
         | "OwnerConfirmationReceived"
+        | "AccountCloseRequested"
         | "BrokerPositionObserved"
         | "ReconciliationRun"
         | "CompensatingEvent"
@@ -290,7 +297,11 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "ProcessStopIssued"
         | "ProcessCrashLooped"
         | "CredentialEnrolled"
-        | "CredentialRemoved" => entry(CONTROL, NONE),
+        | "CredentialRemoved"
+        | "StepUpAsserted"
+        | "ConnectionRolesMade"
+        | "ConnectionRolesRefused"
+        | "ConnectionRolesRemoved" => entry(CONTROL, NONE),
 
         "ConnectionEstablished" | "ConnectionCredentialRotated" => entry(&[Control, Account], NONE),
         "ConnectionRefused" | "ConnectionRequested" => entry(CONTROL, NONE),
@@ -300,6 +311,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         "ClockOffsetRecorded" | "ClockToleranceExceeded" => entry(&[Scheduler], NONE),
         "OwnerAlertSent" => entry(&[Account, Agent, Control], NONE),
         "NoticeIssued" | "NoticeAttempted" => entry(&[Notice], NONE),
+        "NotificationAddressChanged" => entry(CONTROL, NONE),
         _ => return None,
     };
     Some(e)

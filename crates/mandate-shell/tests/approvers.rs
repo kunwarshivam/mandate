@@ -1,7 +1,10 @@
-//! The mandate's approver references resolved to the workspace owner before the runtime sees them
-//! (DEC-953; mandate spec §6.4 check 3, V-024). The owner is the `user` who recorded the mandate
-//! connection's latest `ConnectionEstablished`, the record `mandate approvals approve` reads for
-//! DEC-923's check. Nothing here reaches a host or a credential (`AGENTS.md` rule 8).
+//! The mandate's approver references resolved before the runtime sees them (DEC-953, DEC-2384;
+//! mandate spec §6.4 check 3, V-024). On a stream with no §9.12 record the owner is the `user` who
+//! recorded the mandate connection's latest `ConnectionEstablished`, the record `mandate approvals
+//! approve` reads for DEC-923's check; on a founded stream the references resolve among the members
+//! the membership fold reads active. Nothing here reaches a host or a credential (`AGENTS.md`
+//! rule 8). The resolution's own cases moved with it to `mandate-identity`'s `tests/approvers.rs`;
+//! these pin what the shell hands the runtime.
 
 mod common;
 
@@ -14,26 +17,25 @@ use mandate_alpaca::{Exchange, HttpRequest, Response, TradingTransport, Transpor
 use mandate_canon::to_canonical;
 use mandate_domain::Environment;
 use mandate_shell::adapters::{Sources, production};
-use mandate_shell::approvers::{Members, members, resolve};
+use mandate_shell::approvers::{members, resolve};
 use mandate_shell::control::{ControlRecord, Origin};
 use mandate_shell::paper::load_contexts;
 use mandate_shell::symbols::BrokerSymbols;
 use mandate_spec::document::ApproverRef;
 use mandate_time::{Date, UtcNanos};
-use proptest::prelude::*;
 
 use common::{SPY, Stream, json, model, spy_facts, spy_mandate};
 
 /// The connection SPY's mandate names.
 const CONNECTION: &str = "conn_alpaca_paper_01";
 const FOUNDER: &str = "user_founder";
-const OTHER: &str = "user_other";
 /// Tuesday 13:00 in New York.
 const TUESDAY: &str = "2026-09-29T17:00:00Z";
 
 fn record(seq: u64, event_type: &str, payload: &str) -> ControlRecord {
     ControlRecord {
         seq,
+        event_time: None,
         event_type: event_type.to_owned(),
         payload: json(payload),
         origin: Origin {
@@ -41,29 +43,6 @@ fn record(seq: u64, event_type: &str, payload: &str) -> ControlRecord {
             environment: Environment::Paper,
         },
     }
-}
-
-/// The CLI's version-2 `ConnectionEstablished` of `connection`, recorded by `user`.
-fn established(seq: u64, connection: &str, user: &str) -> ControlRecord {
-    record(
-        seq,
-        "ConnectionEstablished",
-        &format!(
-            r#"{{"account_ref":"acct_spy","broker":"alpaca","connection_id":"{connection}","environment":"paper","scopes":["trading"],"user":"{user}"}}"#
-        ),
-    )
-}
-
-fn revoked(seq: u64, connection: &str) -> ControlRecord {
-    record(
-        seq,
-        "ConnectionRevoked",
-        &format!(r#"{{"connection_id":"{connection}","reason":"owner"}}"#),
-    )
-}
-
-fn owner(user: &str) -> Members {
-    Members::Owner(user.to_owned())
 }
 
 fn references(texts: &[&str]) -> Vec<ApproverRef> {
@@ -77,170 +56,49 @@ fn users(ids: &[&str]) -> BTreeSet<String> {
     ids.iter().map(|id| (*id).to_owned()).collect()
 }
 
-/// The owner is the user on the mandate connection's latest record, read in `seq` order, and only
-/// while that record is an establishment naming a user.
-#[test]
-fn the_owner_is_the_user_who_recorded_the_mandates_connection() {
-    assert_eq!(members(&[], CONNECTION), Members::Unread, "no record");
-    let ours = [established(1, CONNECTION, FOUNDER)];
-    assert_eq!(members(&ours, CONNECTION), owner(FOUNDER), "the record");
-    let theirs = [established(1, "conn_other", OTHER)];
-    assert_eq!(
-        members(&theirs, CONNECTION),
-        Members::Unread,
-        "another connection"
-    );
-    let both = [
-        established(1, CONNECTION, FOUNDER),
-        established(2, "conn_other", OTHER),
-    ];
-    assert_eq!(members(&both, CONNECTION), owner(FOUNDER), "beside another");
-    let gone = [established(1, CONNECTION, FOUNDER), revoked(2, CONNECTION)];
-    assert_eq!(members(&gone, CONNECTION), Members::Unread, "revoked");
-    let signed = [
-        established(1, CONNECTION, FOUNDER),
-        record(
-            2,
-            "ConnectionRevoked",
-            &format!(r#"{{"connection_id":"{CONNECTION}","reason":"owner","user":"{FOUNDER}"}}"#),
-        ),
-    ];
-    assert_eq!(
-        members(&signed, CONNECTION),
-        Members::Unread,
-        "a revocation names no owner, whatever it carries"
-    );
-    let back = [
-        established(1, CONNECTION, FOUNDER),
-        revoked(2, CONNECTION),
-        established(3, CONNECTION, OTHER),
-    ];
-    assert_eq!(members(&back, CONNECTION), owner(OTHER), "re-established");
-    let shuffled = [
-        established(3, CONNECTION, OTHER),
-        established(1, CONNECTION, FOUNDER),
-        revoked(2, CONNECTION),
-    ];
-    assert_eq!(members(&shuffled, CONNECTION), owner(OTHER), "by seq");
-    let unsorted = [revoked(2, CONNECTION), established(1, CONNECTION, FOUNDER)];
-    assert_eq!(members(&unsorted, CONNECTION), Members::Unread, "by seq");
-    let tied = [revoked(1, CONNECTION), established(1, CONNECTION, FOUNDER)];
-    assert_eq!(members(&tied, CONNECTION), Members::Unread, "a tie revokes");
-    let tied = [established(1, CONNECTION, FOUNDER), revoked(1, CONNECTION)];
-    assert_eq!(members(&tied, CONNECTION), Members::Unread, "either order");
+/// The user ids check 3 compares a responder with for `ids`, ULIDs: each in its canonical upper
+/// case and in the lower case the CLI's `--user` takes (DEC-2384 item 3).
+fn principals(ids: &[&str]) -> BTreeSet<String> {
+    ids.iter()
+        .flat_map(|id| [(*id).to_owned(), id.to_ascii_lowercase()])
+        .collect()
 }
 
-/// A record whose user cannot be read names no one.
-#[test]
-fn an_establishment_with_no_readable_user_names_no_one() {
-    for payload in [
-        format!(r#"{{"connection_id":"{CONNECTION}","environment":"paper"}}"#),
-        format!(r#"{{"connection_id":"{CONNECTION}","environment":"paper","user":null}}"#),
-        format!(r#"{{"connection_id":"{CONNECTION}","environment":"paper","user":7}}"#),
-        format!(r#"{{"connection_id":"{CONNECTION}","environment":"paper","user":""}}"#),
-    ] {
-        let records = [record(1, "ConnectionEstablished", &payload)];
-        assert_eq!(members(&records, CONNECTION), Members::Unread, "{payload}");
+/// The founder's principal, an opaque ULID as `mandate workspace found` writes it (identity spec
+/// §3.1).
+const ULID_FOUNDER: &str = "01K6C00000000000000000000F";
+
+/// The instant `secs` after 2026-10-01T00:00:00Z.
+fn at(secs: i64) -> UtcNanos {
+    let start = UtcNanos::parse_rfc3339("2026-10-01T00:00:00Z").unwrap();
+    UtcNanos::from_parts(start.secs() + secs, 0).unwrap()
+}
+
+/// `record` committed at `at(secs)`.
+fn timed(seq: u64, secs: i64, event_type: &str, payload: &str) -> ControlRecord {
+    ControlRecord {
+        event_time: Some(at(secs)),
+        ..record(seq, event_type, payload)
     }
 }
 
-/// Any §9.12 membership record means a membership the run does not fold, before or after the
-/// connection's record, so no one is named.
-#[test]
-fn a_membership_record_leaves_the_members_unread() {
-    for event_type in [
-        "MemberInvited",
-        "MemberInvitationRevoked",
+/// The founding grant `mandate workspace found` writes (DEC-991; journal spec §9.12): the owner
+/// bundle, no invitation, no cool-off.
+fn founding(seq: u64, secs: i64, member: &str) -> ControlRecord {
+    let ends = at(secs);
+    timed(
+        seq,
+        secs,
         "MemberActivated",
-        "MemberRoleChanged",
-        "MemberDeactivated",
-        "MemberReactivated",
-        "MemberRemoved",
-    ] {
-        let after = [
-            established(1, CONNECTION, FOUNDER),
-            record(2, event_type, r#"{"member":"01K6C000000000000000000000"}"#),
-        ];
-        assert_eq!(members(&after, CONNECTION), Members::Unread, "{event_type}");
-        let before = [
-            record(1, event_type, r#"{"member":"01K6C000000000000000000000"}"#),
-            established(2, CONNECTION, FOUNDER),
-        ];
-        assert_eq!(
-            members(&before, CONNECTION),
-            Members::Unread,
-            "{event_type}"
-        );
-    }
+        &format!(
+            r#"{{"cool_off_ends_at":"{ends}","independent_approval_required":false,"invitation":null,"member":"{member}","reason":"founding","roles":["approver","operator","workspace_admin"]}}"#
+        ),
+    )
 }
 
-/// Each role reference and the owner's own `user:` reference resolve to the owner; another user's
-/// reference and every reference among unread members resolve to no one.
-#[test]
-fn each_reference_resolves_to_the_owner_and_nothing_else() {
-    let founder = owner(FOUNDER);
-    for role in ["role:approver", "role:owner", "role:workspace_admin"] {
-        assert_eq!(
-            resolve(&references(&[role]), &founder),
-            users(&[FOUNDER]),
-            "{role}"
-        );
-        assert_eq!(
-            resolve(&references(&[role]), &Members::Unread),
-            users(&[]),
-            "{role}"
-        );
-    }
-    let mine = references(&["user:user_founder"]);
-    assert_eq!(resolve(&mine, &founder), users(&[FOUNDER]));
-    let theirs = references(&["user:user_other"]);
-    assert_eq!(resolve(&theirs, &founder), users(&[]), "not a member");
-    assert_eq!(resolve(&mine, &Members::Unread), users(&[]));
-    let every = references(&["role:approver", "role:owner", "user:user_founder"]);
-    assert_eq!(resolve(&every, &founder), users(&[FOUNDER]), "once");
-    let mixed = references(&["user:user_other", "role:approver"]);
-    assert_eq!(resolve(&mixed, &founder), users(&[FOUNDER]));
-    assert_eq!(resolve(&[], &founder), users(&[]), "no reference");
-}
-
-const POOL: [&str; 3] = [FOUNDER, OTHER, "user_third"];
-const ROLES: [&str; 3] = ["role:approver", "role:owner", "role:workspace_admin"];
-
-proptest! {
-    /// Over any reference set, any members and any responder, check 3's membership test on the
-    /// resolved set admits exactly the owner, and only when a reference names them. The oracle
-    /// reads the reference texts itself, not `resolve`.
-    #[test]
-    fn a_responder_is_an_approver_exactly_when_the_owner_answers_a_reference_naming_them(
-        roles in proptest::sample::subsequence(ROLES.to_vec(), 0..=3),
-        named in proptest::sample::subsequence(POOL.to_vec(), 0..=3),
-        member in proptest::option::of(0..POOL.len()),
-        responder in 0..POOL.len(),
-    ) {
-        let texts: Vec<String> = roles
-            .iter()
-            .map(|r| (*r).to_owned())
-            .chain(named.iter().map(|u| format!("user:{u}")))
-            .collect();
-        let refs: Vec<ApproverRef> =
-            texts.iter().map(|t| ApproverRef::parse(t).unwrap()).collect();
-        let members = member.map_or(Members::Unread, |i| owner(POOL[i]));
-        let responder = POOL[responder];
-        let resolved = resolve(&refs, &members);
-        let expected = member.is_some_and(|i| {
-            POOL[i] == responder
-                && texts
-                    .iter()
-                    .any(|t| t.starts_with("role:") || *t == format!("user:{responder}"))
-        });
-        prop_assert_eq!(resolved.contains(responder), expected);
-        prop_assert!(resolved.len() <= 1, "one owner at most: {:?}", resolved);
-        if let Some(i) = member {
-            prop_assert!(resolved.iter().all(|u| u == POOL[i]));
-        } else {
-            prop_assert!(resolved.is_empty());
-        }
-    }
+/// What the approvers `texts` resolve to over `records`.
+fn resolved(records: &[ControlRecord], texts: &[&str]) -> BTreeSet<String> {
+    resolve(&references(texts), &members(records, CONNECTION))
 }
 
 /// A broker the mandate stage never reaches.
@@ -316,4 +174,82 @@ fn the_production_view_hands_the_runtime_the_owner_not_the_role() {
     assert_eq!(admitted_approvers(&recorded), users(&[FOUNDER]));
     let unrecorded = Stream::deployed(&snapshot(), common::RULES, common::FEE);
     assert_eq!(admitted_approvers(&unrecorded), users(&[]));
+}
+
+/// E7-31 (DEC-2384): on a stream `mandate workspace found` founded, as the local cell's is, the
+/// production view hands the runtime the founder, so check 3 admits the founder's grant, the
+/// web app's and the CLI's alike, and no one else's.
+#[test]
+fn the_production_view_hands_the_runtime_the_founder_of_a_founded_workspace() {
+    let mut founded = Stream::deployed(&snapshot(), common::RULES, common::FEE);
+    let ends = founded.records.len() + 1;
+    let start = UtcNanos::parse_rfc3339("2026-09-20T00:00:00Z").unwrap();
+    let ends = UtcNanos::from_parts(start.secs() + i64::try_from(ends).unwrap(), 0).unwrap();
+    founded.record(
+        "MemberActivated",
+        &format!(
+            r#"{{"cool_off_ends_at":"{ends}","independent_approval_required":false,"invitation":null,"member":"{ULID_FOUNDER}","reason":"founding","roles":["approver","operator","workspace_admin"]}}"#
+        ),
+    );
+    let payload = format!(
+        r#"{{"account_ref":"acct_spy","broker":"alpaca","connection_id":"{CONNECTION}","environment":"paper","scopes":["trading"],"user":"{FOUNDER}"}}"#
+    );
+    founded.record("ConnectionEstablished", &payload);
+    assert_eq!(admitted_approvers(&founded), principals(&[ULID_FOUNDER]));
+}
+
+/// The run reads a stored envelope's `event_time` only in the journal's canonical form; an
+/// envelope with none, or with any other text, carries none, so its stream folds no one.
+#[test]
+fn a_record_carries_its_envelopes_canonical_event_time_only() {
+    let canonical = json(r#"{"event_time":"2026-10-01T00:00:00.000000000Z","payload":{}}"#);
+    assert_eq!(ControlRecord::event_time_of(&canonical), Some(at(0)));
+    for body in [
+        r#"{"payload":{}}"#,
+        r#"{"event_time":null}"#,
+        r#"{"event_time":7}"#,
+        r#"{"event_time":"2026-10-01T00:00:00Z"}"#,
+    ] {
+        assert_eq!(ControlRecord::event_time_of(&json(body)), None, "{body}");
+    }
+}
+
+/// E7-31 (DEC-2384 item 3): the CLI's lower-case `--user` names the founder its upper-case
+/// founding grant activated, as a responder and as a `user:` reference; a near miss of the
+/// founder's id, as either, names no one.
+#[test]
+fn a_lower_case_cli_responder_is_the_founder_and_no_near_miss_is() {
+    let founded = [founding(1, 0, ULID_FOUNDER)];
+    let resolved = resolved(&founded, &["role:approver"]);
+    assert!(
+        resolved.contains(&ULID_FOUNDER.to_ascii_lowercase()),
+        "{resolved:?}"
+    );
+    assert!(resolved.contains(ULID_FOUNDER), "{resolved:?}");
+    let lower = format!("user:{}", ULID_FOUNDER.to_ascii_lowercase());
+    assert_eq!(resolved_by(&founded, &lower), principals(&[ULID_FOUNDER]));
+    let (head, _) = ULID_FOUNDER.split_at(25);
+    for miss in [
+        format!("user:{head}"),
+        format!("user:{ULID_FOUNDER}0"),
+        format!("user: {ULID_FOUNDER}"),
+        format!("user:{ULID_FOUNDER} "),
+        format!("user:{head}E"),
+        format!("user:{head}I"),
+        format!("user:{head}L"),
+        format!("user:{head}O"),
+        format!("user:{head}U"),
+    ] {
+        assert_eq!(resolved_by(&founded, &miss), users(&[]), "{miss:?}");
+        assert!(!resolved.contains(&miss[5..]), "{miss:?} as a responder");
+    }
+}
+
+/// What the one reference `text` resolves to over `records`, or nothing when the mandate schema's
+/// own grammar refuses it.
+fn resolved_by(records: &[ControlRecord], text: &str) -> BTreeSet<String> {
+    ApproverRef::parse(text).map_or_else(
+        |_| BTreeSet::new(),
+        |reference| resolve(&[reference], &members(records, CONNECTION)),
+    )
 }

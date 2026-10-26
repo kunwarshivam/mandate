@@ -5,6 +5,10 @@
 //! `connection_id` differs from the document's is refused at `connection_id`, and with no document
 //! stored it is refused at `mandate_version` first. Before DEC-1171's code change the mismatch
 //! mapped to the document's fact, the answer `another_connection` fails on.
+//!
+//! Journal spec v0.84 (DEC-2131 item 4): the `stepped_up_records` section's mappings hold each
+//! version-3 record, `MandateConfirmed` and `AgentDeployed`, to its version 2's fact, rule 200
+//! included, so the mapping reads a version 3 as a version 2 and ignores `step_up`.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -16,13 +20,17 @@ use mandate_spec::SpecError;
 use mandate_spec::context::JournaledFact;
 use serde_json::json;
 
-fn section() -> Json {
+fn section_named(name: &str) -> Json {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
     let fixture = Arc::unwrap_or_clone(read_fixture(&dir, "journal.json").expect("the fixture"));
     fixture
-        .get("agent_deployed")
+        .get(name)
         .cloned()
-        .expect("journal.json has an agent_deployed section")
+        .unwrap_or_else(|| panic!("journal.json has a {name} section"))
+}
+
+fn section() -> Json {
+    section_named("agent_deployed")
 }
 
 fn list<'a>(value: &'a Json, key: &str) -> &'a [Json] {
@@ -86,19 +94,23 @@ fn answer(got: Result<Option<JournaledFact>, SpecError>) -> Json {
             "environment": format!("{environment:?}").to_lowercase(),
             "allocation_usd": allocation_usd.to_string(),
             "pinned": pinned.iter().map(|a| a.as_str()).collect::<Vec<_>>()}}),
+        Ok(Some(JournaledFact::MandateConfirmed {
+            version,
+            confirmed_paths,
+        })) => json!({"refused": null, "fact": {"kind": "MandateConfirmed",
+            "version": format!("sha256:{}", version.digest().to_hex()),
+            "confirmed_paths": confirmed_paths.iter().map(|p| p.as_str()).collect::<Vec<_>>()}}),
         Err(SpecError::InvalidInput { what }) => json!({"refused": format!("payload.{what}")}),
         other => json!({"unexpected": format!("{other:?}")}),
     }
 }
 
-#[test]
-fn every_agent_deployed_mapping_is_the_fact_or_the_refusal_its_vector_lists() {
-    let section = section();
-    let cases = list(&section, "mappings");
+/// Every mapping case of `section`, against its vector: the failures, one line each.
+fn mapping_failures(section: &Json) -> Vec<String> {
     let mut failed = Vec::new();
-    for case in cases {
-        let body = draft(&section, case);
-        let documents = stored(&section, case);
+    for case in list(section, "mappings") {
+        let body = draft(section, case);
+        let documents = stored(section, case);
         let payload = to_canon(&body["payload"]).expect("canonical");
         let got = answer(JournaledFact::from_record(
             text(&body, "event_type"),
@@ -115,6 +127,33 @@ fn every_agent_deployed_mapping_is_the_fact_or_the_refusal_its_vector_lists() {
             ));
         }
     }
+    failed
+}
+
+/// A version-3 `MandateConfirmed` and `AgentDeployed` map to their version 2's facts, and rule
+/// 200 refuses a version 3 whose `connection_id` differs from the document's (DEC-2131 item 4).
+#[test]
+fn every_version_3_mapping_is_its_version_2s_fact_or_refusal() {
+    let section = section_named("stepped_up_records");
+    let failed = mapping_failures(&section);
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+    let cases = list(&section, "mappings");
+    let kinds: Vec<&Json> = cases.iter().map(|c| &c["expect"]["fact"]["kind"]).collect();
+    assert!(
+        kinds.contains(&&json!("MandateConfirmed"))
+            && kinds.contains(&&json!("AgentVersionActive"))
+            && cases
+                .iter()
+                .any(|c| c["expect"]["refused"] == "payload.connection_id"),
+        "both records mapped and rule 200 refused at version 3"
+    );
+}
+
+#[test]
+fn every_agent_deployed_mapping_is_the_fact_or_the_refusal_its_vector_lists() {
+    let section = section();
+    let cases = list(&section, "mappings");
+    let failed = mapping_failures(&section);
     assert!(failed.is_empty(), "{}", failed.join("\n"));
     let refused = cases
         .iter()

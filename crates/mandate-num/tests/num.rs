@@ -2149,3 +2149,27 @@ proptest! {
         }
     }
 }
+
+/// The equity bracket the executor places and the cell's runtime proposes (DEC-2378 item 10):
+/// each leg is a sell, so each moves up onto the Reg NMS grid, never down.
+#[test]
+fn an_equity_bracket_rounds_both_legs_up_onto_the_grid() {
+    let price = |text: &str| Price::parse(text).unwrap();
+    let fraction = |text: &str| Fraction::parse(text).unwrap();
+    assert_eq!(
+        price("100").equity_bracket(fraction("0.05"), Some(fraction("0.1"))),
+        Ok((price("95"), Some(price("110"))))
+    );
+    assert_eq!(
+        price("100.05").equity_bracket(fraction("0.05"), Some(fraction("0.1"))),
+        Ok((price("95.05"), Some(price("110.06"))))
+    );
+    assert_eq!(
+        price("99.95").equity_bracket(fraction("0.05"), None),
+        Ok((price("94.96"), None))
+    );
+    assert_eq!(
+        price("0.5").equity_bracket(fraction("0.03"), Some(fraction("0.07"))),
+        Ok((price("0.485"), Some(price("0.535"))))
+    );
+}

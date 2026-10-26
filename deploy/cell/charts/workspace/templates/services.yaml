@@ -1,7 +1,11 @@
 {{- /* One Deployment per long-running process whose image is built (§3.1, §3.2); the API server's
-is its own template, api.yaml, and the deployment manager's deploy-manager.yaml. A process the
+is its own template, api.yaml, the deployment manager's deploy-manager.yaml, the role
+provisioner's role-provisioner.yaml, and the connect finish's connect-finish.yaml. A process the
 manager starts (the runtime and the executor, `started_by`) has no Deployment once the manager
-renders: only the manager starts it, from its pod template (DEC-1170). */ -}}
+renders: only the manager starts it, from its pod template (DEC-1170). Without the manager the
+executor is a Deployment on `default`, the fixture broker's alone: a paper executor, which reaches
+the vault for its connection's lease, needs the manager, and the render fails without it
+(DEC-2365). */ -}}
 {{- define "mandate.service" -}}
 {{- $ctx := . -}}
 apiVersion: apps/v1
@@ -23,6 +27,9 @@ spec:
     {{- $_ := set $launch "args" (include "mandate.fill" (dict "root" $ctx.root "words" . "probe" "") | fromJsonArray) }}
     {{- end }}
     {{- if eq .p.name "executor" }}
+    {{- if eq .root.Values.executor.broker "alpaca-paper" }}
+    {{- fail "executor.broker=alpaca-paper needs images.deploy-manager: a paper executor runs only as the pod the manager starts as its connection's own account, never as this Deployment's default (DEC-2365)" }}
+    {{- end }}
     {{- $_ := set $launch "args" (concat ($launch.args | default list) (include "mandate.executorBroker" .root | fromJsonArray)) }}
     {{- end }}
     {{- with .p.probe }}
@@ -34,7 +41,7 @@ spec:
 {{- end -}}
 {{- $root := . }}
 {{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) }}
-{{- if and (not (has .name (list "api" "deploy-manager"))) (not (include "mandate.startedElsewhere" (dict "root" $root "p" .))) }}
+{{- if and (not (has .name (list "api" "deploy-manager" "role-provisioner" "connect-finish"))) (not (include "mandate.startedElsewhere" (dict "root" $root "p" .))) }}
 ---
 {{ include "mandate.emit" (include "mandate.service" (dict "root" $root "p" .)) }}
 {{- end }}

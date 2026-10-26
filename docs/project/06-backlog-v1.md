@@ -9,6 +9,9 @@ Epics map to [milestones](02-milestones-and-wbs.md) and [PRD](../product/04-prd-
 requirements. Priority uses MoSCoW: **Must**, **Should**, **Could**, **Won't (v1)**.
 Stories follow "As a … I want … so that …" with acceptance criteria.
 
+New rows, stories and debt alike, are one file each under [backlog/](backlog/README.md) until they
+are folded in here ([DEC-2373](decisions/DEC-2373.md)); add none to this file.
+
 ## Epic overview
 
 | Epic | Milestone | PRD | Priority |
@@ -425,6 +428,21 @@ the spec invariants (DP-n) its tests cover.
   to MC-L09 pass.
 - **E6-5 (Must)** As an owner, I want kill switches per agent, connection, and workspace so
   that I can stop everything immediately.
+  - **Retirement leaves nothing of the agent's** ([DEC-2344](decisions/DEC-2344.md) item 2; mandate
+    spec v0.9 §3.1, journal spec v0.76 §9.2). Once the runtime writes `AgentStopped` for an agent
+    that ran (goal completion, `release`, and the owner's Stop under DEC-136's flat-or-release
+    precondition), it writes it only when the account stream's fold shows no position attributed to
+    the agent and no working order of its own (every non-terminal trading §5.7 state); a release
+    cancels every working order of the agent's first, and a retirement waiting 24 hours raises
+    `retirement_held`, then each 24 hours. The deployment manager stops the
+    runtime, and the account's last executor, on that record alone. Nothing writes it for an agent
+    that ran today, so this lands with that writer. *Accepted when:* a property test over random
+    sequences of fills, exits, protective cancels, releases, `Unknown` orders and Stops shows no
+    `AgentStopped` while the account fold, computed by its own accumulator, holds a position or a
+    working order of the agent's, and that oracle is shown to catch a seeded retirement on a sent but
+    unfilled exit and on an unconfirmed cancel. An agent that ran and crash-looped holding nothing has
+    no writer for its retirement yet (DEC-2344 Risks). Safety-critical (autonomy policy and kill
+    switches), DEC-77 sequence.
 - **E6-6 (Must)** As an owner, I want US account rules (day-trading regime, settlement, short
   sales, market hours) enforced by the risk gate so that agents never get my account restricted.
   *Accepted when:* simulation tests for each rule pass; blocked orders are journaled with the rule.
@@ -1406,6 +1424,25 @@ after U-A1 to U-A5 are recorded.
   the request's event id, and only after sign-in (spec §3.9, DEC-436 item 19; the payload is the
   notifications spec's, E8-9).
 
+- **E8-17 (Must, M7; SC; needed before staging)** As an owner, I want to hear when a kill switch
+  did not reach my account, and when an agent's retirement is held, so that I can act in the
+  broker's own console ([DEC-2344](decisions/DEC-2344.md) items 1 and 2,
+  [DEC-2351](decisions/DEC-2351.md)). Today only the operator is told (RB-14).
+  - `kill_switch_unapplied` (notifications spec v0.9 §3.2, journal spec v0.78): the kind in
+    `mandate-notify` and `mandate-journal`'s closed set, its class and text key, and the deployment
+    manager's `OwnerAlertSent` in its `ProcessCrashLooped`'s batch for an executor last started for
+    a kill switch. Tests first: the kind parses and maps to `safety` and `attention_needed`; the
+    manager writes exactly one `OwnerAlertSent` per such loop and none for any other loop or after
+    a restart.
+  - `retirement_held` (DEC-2344 item 2, [DEC-2352](decisions/DEC-2352.md); journal spec v0.79
+    §9.34, notifications spec v0.10): `mandate-journal`'s `RetirementHeld` schema, rule 265, and
+    stream rule 266, turning the `retirements` refcases from pending to passing; the kind in
+    `mandate-notify` and `mandate-journal`; and the runtime's writer (E6-5's): period n at the first
+    tick at or after it is due while the agent still holds anything of its own, in every mode, with
+    its `OwnerAlertSent` as the next row, one sequence per agent, none after the retirement ends
+    (`AgentStopped`, a resume, a version applied), the next period after downtime, and none twice
+    across a restart.
+
 ### E9 Identity, tenancy, and policy
 
 The [identity spec](../specs/identity.md) (v0.1 draft, [DEC-437](decisions/DEC-437.md)) defines these
@@ -1576,6 +1613,15 @@ story buys a service, and none uses a real identity-provider account in tests (s
   renamed the second; confirm no other use remains); (6) the Status row matches DEC-437 after round 2.
   ID-13's founding-grant exception and ID-10's note on item 15 were taken in round 2 because the
   blocker fixes touched those lines.
+- **E9-13 (Must, M8, under E9-1; SC)** As an admin, I want a member disabled at the identity
+  provider to lose route 2 at once and across a restart, so that route 2's deprovision check rests
+  on a journaled signal rather than an in-memory record ([DEC-2319](decisions/DEC-2319.md) item 3,
+  option (b), the founder's on 2026-10-25). *Accepted when:* the server learns of a deprovision from
+  a back-channel logout or from a refresh's `invalid_grant`, and journals `SessionRevoked` with
+  reason `deprovisioned` on the control stream, registered (journal spec, tests first) and folded;
+  route 2 refuses a member whose latest fold holds that revocation, after a restart too; DEC-2319
+  item 2's in-memory interim is removed only once this lands; and nothing in the event or its logs
+  carries a token or the provider's subject beyond its opaque id.
 
 ### E10 Mandate authoring
 
@@ -1704,7 +1750,9 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   true` commits the connection-scope kill switch and then `ConnectionRevoked` in one batch, never
   waits on positions, commits the kill switch even without step-up or with the control stream
   frozen, destroys the credential after the kill switch's requests are sent, and tells the owner
-  which positions remain at the broker (spec §5.6, DEC-436 item 20).
+  which positions remain at the broker (spec §5.6, DEC-436 item 20). *Owed at E9-4 S4* (DEC-2126):
+  the interim `cli_confirm` step-up for the connect start ([DEC-2125](decisions/DEC-2125.md)) ends,
+  with a test that `cli_confirm` then refuses `connection`, `step_up_method`.
 - **E10-14 (Must, M8, before E10-6; SC)** As an owner, I want my connected agent's token limited to
   `read`, `request`, `propose`, `dry_run`, and `hold`, so that it is owner input and never the owner
   (spec §3.8, DEC-141). *Accepted when:* every other route refuses a client token; `requested_by` is
@@ -1785,6 +1833,53 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   retried until it succeeds or the entry is absent; and tests show a code written between the
   callback's open-request check and its vault write, and a token an exchange wrote after the
   close, both gone once the close is journaled.
+- **E10-22 (Must, M8, with or after lane D1's K1; before the founder's staging connect; SC)** As
+  the owner, I want the real token-exchange pod proven against the cell's fixture provider and the
+  cell's vault, so that the first exchange on staging is not the first time the pod, its vault
+  login and its token write run together ([DEC-2330](decisions/DEC-2330.md) item 5). *Accepted
+  when:* a cell drill starts the exchange pod the deployment manager starts, with its pinned
+  `run --vault-address <address> --vault-dir <dir>`, its projected ServiceAccount token and the
+  cell vault's CA, against `oauth-fixture` with a code entry the API wrote; the pod exits 0, the
+  code is taken, and the connection's token entry, format 1, is in the vault; the drill runs in the
+  cell jobs, plain and seeded; and the founder's staging connect waits on it. *The drill*
+  ([DEC-2063](decisions/DEC-2063.md)): `cargo xtask cell drill exchange` and the CI job
+  `cell-exchange` run the whole paper connect (stub sign-in, the `connection` challenge,
+  `mandate step-up confirm-connect` in a Job, the start, the fixture's authorize page, the callback)
+  and hold on the exchange pod's success, the taken code and the token entry; the seeded run skips
+  the CLI confirmation and must see the start refused `step_up_missing`. It is also the CLI and
+  API's contract test for DEC-2125.
+- **E10-23 (Should, M8, after E10-22; SC)** As the owner, I want the cell to establish a connection
+  end to end, so that the executor's connect check after an exchange is proven before staging
+  ([DEC-2063](decisions/DEC-2063.md) item 6). *Accepted when:* the cell's executor reads the
+  account from the `oauth-fixture` pod (`GET /v2/account`) through an account reader swapped in at
+  `Start.account`, built only with debug assertions and refused outside the dev and ci tiers, with
+  a test that a release build cannot select it, never through a paper-host override; the fixture
+  answers that route and the executor's dev and ci egress reaches it (lane D1); and a cell drill
+  holds on `ConnectionChecked` and the connection's establishment, plain and seeded.
+
+- **E10-24 (Should, M8, before the founder's staging connect; SC)** As an engineer, I want a test
+  that forces the OpenBao code take to lose its check-and-set, so that the take-once of
+  [DEC-2628](decisions/DEC-2628.md) item 2 is pinned on the backend staging runs, not only on the
+  local vault ([DEC-2363](decisions/DEC-2363.md) item 4). *Accepted when:* a test in
+  `mandate-vault`'s OpenBao suite reads the code, has another writer overwrite it before the
+  tombstone's `cas` write, and asserts the take answers `None` (or `Denied` when the session lacks
+  the right) and never the code; reading a lost check-and-set's `Denied` as a won take fails it,
+  and `cargo mutants` finds no missed mutant in `take_code` and `lost_or_denied`.
+
+- **E10-25 (Must, M8, before the founder's staging connect; SC)** As the founder, I want every image
+  that holds `mandate-token-exchange` to carry a CA bundle, so that the exchange's token client can
+  be built and a connect does not end `endpoint_failed` before it sends anything
+  ([DEC-2063](decisions/DEC-2063.md) item 8: on an empty base reqwest's platform verifier finds no
+  roots and the client build fails). *Accepted when:* any image that holds
+  `mandate-token-exchange` (cell or release) carries a CA bundle, and a release check fails the
+  build when the image has no roots, for example by starting the binary in the built image far
+  enough to build its live client.
+
+- **E10-26 (Should, M8; SC)** As an engineer, I want the token exchange's HTTP client to ignore any
+  ambient proxy, as the vault client does (`no_proxy()`), so that the one live token request never
+  goes through a proxy an environment variable names. *Accepted when:* the client is built with
+  `no_proxy()` and a test shows a request built with a proxy variable set still reaches the
+  endpoint directly.
 
 ### E11 Web app: dashboard and controls
 
@@ -1885,6 +1980,16 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   - the version applies only after the second user's approval, and V-047 is checked again at
     application;
   - the interim refusal and its tests are replaced, not kept beside the flow.
+- **E11-13 (Should; lane W2)** As an owner, I want every agent the API lists to open in the web app,
+  so that no agent of mine is a 404. `web/src/lib/ids.ts`'s `AGENT_ID` admits only `agt_` and a
+  ULID, and every agent route calls `notFound()` for any other id, while the workspace API types
+  `agent_id` as the opaque `Id`, `^[A-Za-z0-9_-]{1,64}$` (`schemas/workspace-api/common.schema.json`),
+  which the CLI deploys under. The cell demo's second agent was `demo-web` and its page never
+  loaded; the demo now names it `agt_01KDEM00000000000000000WEB`, which hides the gap without
+  closing it.
+  *Accepted when:* `web/`'s agent routes, the demo router and the messages routes admit exactly the
+  API's `Id` grammar for an agent id; an id outside it is still a 404; a static segment such as
+  `new` still wins over the dynamic one; and a test opens an agent whose id is not `agt_`-shaped.
 
 ### E12 Audit explorer
 
@@ -2949,7 +3054,8 @@ enables `live` (ES-23, OPS-5).
   process runs anywhere beyond the dev and CI cell: E7-4's flatten-intent body and its account and
   workspace kill-switch scopes, so a kill switch reaches the executor from the control stream
   without the runtime (design §3.6, `AGENTS.md` rule 13). Until then it reaches the executor only
-  through the runtime's copy.
+  through the runtime's copy. The account scope waits on the close-position re-ask row from
+  [DEC-2364](decisions/DEC-2364.md).
 - **E21-31 (Proposed, M8; SC; lane A1)** As a workspace member, I want the workspace API served by
   its own process in the cell, so that the web app and the CLI reach my deployment the same way
   (design §3.1, §9; the API server, "A2" in `deploy/README.md`). *Accepted when:* a new crate
@@ -3035,6 +3141,44 @@ enables `live` (ES-23, OPS-5).
   - The chart test of the gate seeds no 9153 allow in the manager's policy.
   - `PgControl`'s `rows_after` reads the whole control stream on every pass.
   - `pg.rs` has no competing-writer test for the writer epoch taken for each append.
+  - From #2178's review: a token exchange's pod ends by its deadline, but its account is deleted
+    only on its request's closing record, which the connection manager's teardown journals
+    (DEC-2332 item 3); a sweep at the deadline itself, for a teardown that never comes, is left.
+  - From #2178's review: an exchange whose pod the API server keeps refusing is retried on every
+    pass while its request has time left, making and deleting its account each time; a retry
+    bound or backoff is left. Open until R1 lands: DEC-2332 items 4 to 6 (the environment pin, the
+    vault CA, the exchange's launch).
+  - From DEC-2336 item 2 (K2a): a reconnect that reuses its `account_ref` (connections spec
+    CN-12) starts no executor for its connect, since that account's executor already used
+    generation 1 and rule 167 holds `exchanged` to it, so the connect fails by its deadline until a
+    reconnect start is specified (a new cause, or `exchanged` at the next generation). This reaches
+    the staging reconnect path.
+  - K2b, after K2a: the executor's `<hex>` account, its vault-token volume and vault CA,
+    `MANDATE_WORKSPACE_NAMESPACE` among the manager's names, the pod-policy pin of the executor's
+    account, and the Kubernetes adapter reporting a pod's `Succeeded` as its own phase; until then
+    the adapter reports it `Exited`, so no connect's executor starts in the cell.
+  - Lane V2, a dependency of K2b (DEC-2336 risks): `mandate-executord` refuses to start unless
+    `MANDATE_SUBJECT_ACCOUNT` is the lowercase hex of its connection id's bytes, beside #2196's
+    namespace check, as DEC-1177 item 6 has the token exchange do.
+  - Done ([DEC-2365](decisions/DEC-2365.md)): a paper executor, the one that reaches the vault,
+    runs only as the pod the manager starts as its connection's `<hex>` account, and the chart
+    refuses to render it without the manager. The fixture broker's Deployment executor stays on
+    `default`, with no connection and no credential.
+  - **The role provisioner** ([DEC-2350](decisions/DEC-2350.md), DEC-2630 item 7; journal spec v0.77
+    §9.33). Nothing makes a connection's Kubernetes-auth roles today, so every exchange's and every
+    managed executor's login is refused. Spec first (this row's first PR), then: the vault side with
+    lane V2 (the provisioner identity and AppRole, `delete` on the token exchange's mount alone in `provisioner_policy`, making and
+    removing a connection's roles); the journal crate's three records (the `connection_roles`
+    vectors, pending until then); the `provisioner` process; its chart, with vault-only egress to
+    lane GO's pattern; and the manager's wait for `ConnectionRolesMade` before an exchange starts.
+    *Accepted when:* a property test over requests, closes, revocations, executor starts and stops,
+    crashes and vault refusals shows every record the provisioner journals keeps rules 262 and 263,
+    against an oracle rebuilt from the stream, with no executor's role ever removed, a revocation
+    right after a kill switch among them; and the manager starts no exchange before its
+    `ConnectionRolesMade`. Left: a sweep of the executor's roles the provisioner never removes, one
+    per connection whose request closed without an establishment or that was revoked, once no
+    executor of its account runs; the manager does not journal a held generation's own exit
+    (DEC-2344), so the sweep needs a signal it does not have yet.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
@@ -3382,6 +3526,10 @@ enables `live` (ES-23, OPS-5).
   select` (DEC-1190); and the founder's one bootstrap, from an address the cluster's API firewall
   admits, installs Flux and creates the workload secrets (the tunnel token and the archive key)
   from lane IAC's outputs, never committed and never by an agent, until E21-32's vault holds them.
+  Follow-up (DEC-2371 item 4): the public CA bundle every public-TLS process trusts comes from the
+  pinned postgres image, whose one digest is bumped by hand in three values files and regenerated
+  into `deploy/cell/compose/compose.json`; automate that bump (a scheduled check that opens the
+  pull request) so the bundle never goes stale, with a test that the four files name one digest.
 
 - **E21-59 (Proposed, M8, after E21-54's step 3; lane I2; DEC-2214)** As the founder, I want the
   runtime process's research source to fold an agent's theses, lineages, working universe and
@@ -3442,6 +3590,14 @@ enables `live` (ES-23, OPS-5).
   - **Wipe the provider key when dropped.** `ProviderKey` holds a plain `String` (DEC-2326 item 5).
     Hold it in a type that zeroizes on drop, adding `secrecy` to `mandate-gateway`'s allowed
     dependencies.
+- **E21-63 (Proposed, M8; lane A1)** As an owner, I want the web app's status strip to show the
+  deployment's health, so that I see when market data, the broker, the deployment or the relay is
+  stale or down (workspace API spec §4.7, `GET /health`, the status strip G1). The API server routes
+  no `GET /v1/workspaces/{ws}/health` yet and answers it with its one 401 (API-1), so web/ does not
+  read it, and the strip shows each component as not reported; web/ reads routed paths only.
+  *Accepted when:* `read-models/health.schema.json` defines the body; the API server serves it from
+  the journal's observations, each component with its state and freshness; and web/'s `loadApi`
+  reads it again, with a test that a served health shows on the strip.
 
 ## Won't (v1)
 
@@ -4225,6 +4381,125 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   after `max_unprotected_s` ended its sell; register the executor's own intent ids (`w-<record>`, `k-<switch>-<n>`)
   in journal spec §9.5's `IntentReceived`; and, with the account scope, add `KillSwitchActivated` to
   `properties::every_catalogue_event_is_interpreted_or_named`'s `INTERPRETED`.
+- **E7-4 (journal), from [DEC-2337](decisions/DEC-2337.md) item 5:** close the account stream's
+  `KillSwitchActivated` in journal spec §9.5, then add a stream rule that an `AccountCloseRequested`'s
+  `kill_switch_event` names an earlier account-scope `KillSwitchActivated` of the stream whose
+  `closes` or `deferred` lists its `instrument_id`. Until then, the executor's fold guarantees it.
+- **E7-4 (executor process), from [DEC-2343](decisions/DEC-2343.md) Alternatives option (1), for
+  the founder:** whether the executor reads every connection- and workspace-scope kill switch from
+  the control stream itself, independent of the runtime (`AGENTS.md` rule 13), at the cost of the
+  owner's confirmed bid on those switches. Until the founder decides, it reads one only for an agent
+  whose connection is revoked at or after it.
+- **E7-4 (executor process), from the review of [DEC-2343](decisions/DEC-2343.md), a follow-on
+  tightening:** an opening an agent proposed while deployed on another account is handed here once
+  the agent is deployed back on this account, unless the core abandons it as too old. Hold any
+  proposal older than the agent's latest deployment on this account; the agent stream's rows have
+  no order against the control stream's, so how to tell "older" (event time, or a deployment
+  marker the runtime writes on the agent stream) is the follow-on's to decide.
+- **E7-4 (deployment manager and executor), from [DEC-2343](decisions/DEC-2343.md) Not covered
+  here:** lane D1's [DEC-2344](decisions/DEC-2344.md) starts the executor for a kill switch that
+  covers only stopped agents, and the executor exits 0 once no agent it follows is desired and every
+  covering switch it read is applied, with nothing in flight and no `Unknown` order in scope. The
+  executor's half, a tighter exit, is [DEC-2347](decisions/DEC-2347.md)'s.
+- **E7-4 (executor process), from [DEC-2347](decisions/DEC-2347.md) item 6, with DEC-2333's slice
+  A2b:** the exit's `owes_nothing` reads agent-scoped work only; once the account-scope switch
+  lands, an account switch still closing (`closing_all`) keeps the executor running too, with a
+  test. Taken by [DEC-2364](decisions/DEC-2364.md)'s pair: an instrument the switch closes that the
+  fold still reads held keeps it running.
+- **E7-4 (executor, account kill switch), from [DEC-2364](decisions/DEC-2364.md) Not covered
+  here:** a close-position the broker accepts and then drops at once (rejected, or expired before
+  the next read) is asked again on the read that confirms its own answer, whose answer asks another
+  read, within one pass, until the chain bound fails the cycle. Ask a close again only on the
+  in-doubt hold's reads (DEC-2337 item 3), with a test over the fake broker's dropped close.
+  Latent: only the core's account-scope switch sends a close-position, and no process hands the
+  core that scope today. **Blocks** handing the account scope to `mandate-executord` or the shell
+  (E21-30's *Left*, DEC-2003 item 6): neither ships without the other (the coordinator's ruling).
+- **E7-4 (kill switch sizing), from [DEC-2347](decisions/DEC-2347.md) item 9, rule 13:** a buy
+  the broker reports filled whose fill named no order (Alpaca's fill activity names only the
+  broker's order id, so the reconciliation applies it unattributed) leaves nothing in `kill.rs`'s
+  `sub_ledger`, so the agent's kill switch sells none of those shares. Attribute such a fill to the
+  order through the broker's order id (DEC-955 item 3), with a test that the switch then sells the
+  agent's whole position.
+- **E6-4 (executor fold), from [DEC-2347](decisions/DEC-2347.md) item 8:** when the executor's fold
+  interprets `PositionReleased`, the released quantity leaves the agent's sub-ledger (`kill.rs`'s
+  `sub_ledger`, read by the kill switch and by `ExecutorState::holds_lots`), so the switch sells
+  none of the owner's shares and the exit's item 3.6 no longer waits on them. Tests: released lots
+  let the executor exit `completed`; unreleased lots still hold it. All three are in
+  `mandate-executord/tests/released.rs` (a release alone, a connection's kill switch after it, and
+  a release of part of the position). Until this lands, an account stream holding a `PositionReleased` cannot be
+  folded by its executor, so a kill switch on that account cannot be applied by the executor
+  (`AGENTS.md` rule 13), and the only signal is the manager's `kill_switch_unapplied`
+  ([DEC-2344](decisions/DEC-2344.md) item 1): rank this staging-relevant if a release can happen on
+  staging. Done by [DEC-2354](decisions/DEC-2354.md)'s pair, for `PositionReleased`; §9.27's other records stay E6-4's.
+- **E6-4 (executor kill switch), from the review of [DEC-2354](decisions/DEC-2354.md):** a release
+  written after an agent's kill switch has sized its flatten sells does not shrink them, so the
+  switch can still offer the released shares. Re-size an agent flatten sell not yet sent against
+  the sub-ledger at send time, or cancel the part a later release takes.
+  [DEC-2360](decisions/DEC-2360.md) takes the first: each send, the first and every rung, is capped
+  at the sub-ledger; its tests are in `hand.rs`, pending E6-4.
+- **E6-4 (protection sizing after a release), from [DEC-2360](decisions/DEC-2360.md) item 4:**
+  protection the executor places again (the sequence end's `re_place`, `re_cover`, `new_day`) is
+  sized at the long position, so after a release it covers the owner's released shares with the
+  agent's protective order. [DEC-2362](decisions/DEC-2362.md) sizes it at the long position less
+  the released shares the owner still holds; its tests are in `hand.rs`, pending E6-4.
+- **E7-4 (executor kill switch), from [DEC-2361](decisions/DEC-2361.md):** a switch's close that
+  no limit can be named for (no quote, no protective stop, no floor) is skipped silently by
+  `flatten_closes`. Journal it `exit_unpriced` and alert once per switch and instrument; the
+  tests are in `hand.rs`, pending E7-4.
+- **E21-30 (executor process), from [DEC-2358](decisions/DEC-2358.md):** `mandate-executord` hands
+  the core no quote, so §5.6's ladder never prices an exit there and every exit beside resting
+  protection goes at its own limit or is held for want of a price. Add a quote feed: poll
+  `mandate-alpaca`'s `DataClient::latest_quote` for each instrument with a held or sequenced exit,
+  with the data host's credential from the vault, and hand each as `Input::Market` with its sanity
+  verdict; a recorded fake for the tests. A design note on claim #137 first. Once it lands, the
+  founder may revert DEC-2358 to DEC-160 (12)'s hold. Taken by [DEC-2359](decisions/DEC-2359.md)'s
+  pair (claim #2354): a REST poll behind a `QuoteFeed` port, with the connection's own credential,
+  handing only sane, fresh quotes, until E21-44's pushed channel replaces it.
+- **E7-4 (executor, lane LV), from [DEC-2359](decisions/DEC-2359.md) item 7:** the quote feed reads
+  no instrument whose only exit is protection resting at the broker, so a resting stop or
+  take-profit is never repriced or re-protected from a quote. Decide whether one should be (a gap or
+  a stale stop), and if so add the instrument to `ExecutorState::quote_wanted` with its own DEC-77
+  pair.
+- **E7-4 (executor process), from the review of [DEC-2357](decisions/DEC-2357.md):** while a
+  connection record does not read, `agents_of` follows every agent with a version-2 deployment,
+  those deployed only on another account's connection included: journal noise, no risk. Skip an
+  agent whose every deployment names a connection a readable establishment shows is another
+  account's.
+- **E7-4 (executor), from the review of [DEC-2358](decisions/DEC-2358.md):** pin a discretionary
+  exit with a limit of its own whose price vanishes mid-sequence: it falls back to its limit, and
+  the sequence goes on, rather than ending and re-protecting as an exit with no limit does.
+  Done: `hand.rs`'s `a_discretionary_exits_rung_falls_back_to_its_own_limit_when_its_price_vanishes`
+  (a `max_unprotected_s` above the five-minute staleness is what lets the price vanish inside the
+  sequence; a lone exit with a limit of its own is never laddered, so it has no rung to price).
+- **E7-4 (tests), from the review of #2395 (option (b)):** `plain_entry_protection`'s property
+  accepts the bound's exit as an outcome, so an executor that stopped placing a fill's own stop
+  and left it to the bound passes it (S5 and S6 in the review). Assert that every ended opening
+  with fills has its own stop sent before its bound, unless an exit sequence, a reject or the
+  bound itself intervenes, with a model exact enough to keep it from false failures. The hand
+  tests `a_fill_beside_an_unanswered_stop_being_cancelled_gets_its_own_stop` and
+  `a_fill_beside_an_accepted_stop_being_cancelled_gets_its_own_stop` pin the two cases meanwhile.
+- **E7-4 (executor), from the review of [DEC-2356](decisions/DEC-2356.md) item 8:** `closes_due`
+  holds the close only for a `Submitting` sell of ours a read does not list. A sell whose
+  submission answer is lost becomes `Unknown`, and a later read that omits it releases the close
+  beside it. Hold the close on any sell of ours journaled after the read's `taken_at`, whatever its
+  state, with its own DEC-77 pair. **Unreachable under `mandate-executord`'s ordering** (the
+  coordinator's ruling, 2026-10-25): the process hands each answer before it sends the next
+  request and gathers a reconciliation's reads only once everything else queued was answered, so a
+  read beside a submission is taken after it was sent, and a read that omits an `Unknown` sell of
+  ours was requested after that sell went out. `mandate-executord/tests/ordering.rs`
+  (`each_answer_is_handed_before_the_next_request_is_sent`,
+  `a_reconciliation_is_read_only_once_every_other_request_is_answered`) pins that ordering. Reopen
+  this row if a shell sends broker requests before handing earlier answers.
+- **E7-4 (executor), broker eventual consistency, from the same analysis:** a broker may accept an
+  order and not list it yet in an open-orders read taken just after. A read that omits a sell of
+  ours the broker accepted a moment before can release `closes_due`'s close beside it, and no
+  `taken_at` rule covers it, since the read was requested after the sell went out. Measure the
+  paper and live brokers' listing lag, then decide whether `closes_due` waits a settle interval
+  after the newest sell of ours in the instrument, or reads twice.
+- **E7-4 A1c (stream K), from [DEC-2333](decisions/DEC-2333.md) item 3:** at §5.4's bound, re-place
+  protection in an instrument the account kill switch closes for the held quantity less every sell
+  not confirmed cancelled, placing nothing where that leaves none, with its own DEC-77 pair. Until
+  then the bound journals `interval_limit` and alerts, and places nothing there.
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on

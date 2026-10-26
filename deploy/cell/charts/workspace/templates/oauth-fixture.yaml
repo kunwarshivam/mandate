@@ -1,0 +1,134 @@
+{{- /*
+The fixture OAuth provider of a dev or ci cell (DEC-1176): the stub issuer's image, run as the
+Alpaca provider alone (`--alpaca-only`, DEC-1176 item 8) on its own pod, so no sign-in issuer is
+served to the namespace. A ClusterIP Service `oauth-fixture` fronts it on 8091; its policy admits
+only this workspace's token-exchange pods and, for the connect check's account read (DEC-1178), its
+executor pods, on 8091, and allows it no egress at all, not even DNS. The
+browser reaches it as it reaches the API, through `kubectl port-forward`, with `oauth-fixture`
+resolved to loopback, so its `Host` header is the one the fixture answers. The stub compares that
+header alone, never an absolute-form request target's authority.
+Its client secret is the Secret `oauth-fixture-client`, key `client-secret`, which the chart does
+not make (DEC-822 item 4): `cargo xtask cell up` makes it once, before this release, and seeds the
+same value into the cell's vault for the token exchange (lane V2, #2197). It is mounted group-readable for fsGroup, as every Secret here is, and
+copied by an init container to a memory-backed directory as 0600, since the stub refuses a client
+secret file any group can read (DEC-2625 item 2).
+Rendered only with `oauthFixture.enabled`, which any tier but dev or ci refuses, whether or not
+`images.stub-issuer` is named (item 2).
+*/ -}}
+{{- define "mandate.oauthFixtureProcess" -}}
+{{- dict "name" "oauth-fixture" "colocate" false "egress" (list) "db_role" "" "guaranteed" false "resources" (dict "limits" (dict "cpu" "50m" "memory" "32Mi") "requests" (dict "cpu" "50m" "memory" "32Mi")) | toJson -}}
+{{- end -}}
+{{- define "mandate.oauthFixtureCopy" -}}
+- name: client-secret
+  image: {{ .root.Values.images.postgres | quote }}
+  imagePullPolicy: IfNotPresent
+  command: ["install", "-m", "0600", "/run/secrets/oauth-fixture-client/client-secret", "/run/oauth-fixture/client-secret"]
+  securityContext:
+    {{- include "mandate.containerSecurity" . | nindent 4 }}
+  resources:
+    limits: {cpu: "50m", memory: "32Mi"}
+    requests: {cpu: "50m", memory: "32Mi"}
+  volumeMounts:
+    - {name: client, mountPath: /run/oauth-fixture}
+    - {name: client-secret, mountPath: /run/secrets/oauth-fixture-client, readOnly: true}
+{{- end -}}
+{{- define "mandate.oauthFixtureContainer" -}}
+{{- $v := .root.Values -}}
+- name: oauth-fixture
+  image: {{ index $v.images "stub-issuer" | quote }}
+  imagePullPolicy: IfNotPresent
+  args:
+    - --alpaca-only
+    - --bind
+    - 0.0.0.0:8091
+    - --public-host
+    - oauth-fixture:8091
+    - --alpaca-client-id
+    - {{ required "alpacaOAuth.clientId is required once oauthFixture.enabled is set (DEC-1176 item 6)" $v.alpacaOAuth.clientId | quote }}
+    - --alpaca-client-secret-file
+    - /run/oauth-fixture/client-secret
+    - --alpaca-redirect-uri
+    - {{ required "alpacaOAuth.redirectUri is required once oauthFixture.enabled is set" $v.alpacaOAuth.redirectUri | quote }}
+  ports:
+    - {name: oauth, containerPort: 8091, protocol: TCP}
+  env:
+    - {name: MANDATE_DEPLOYMENT_TIER, value: {{ $v.deploymentTier | quote }}}
+    - {name: HOME, value: /tmp}
+  securityContext:
+    {{- include "mandate.containerSecurity" . | nindent 4 }}
+  resources:
+    {{- include "mandate.resources" . | nindent 4 }}
+  volumeMounts:
+    - {name: tmp, mountPath: /tmp}
+    - {name: client, mountPath: /run/oauth-fixture, readOnly: true}
+{{- end -}}
+{{- define "mandate.oauthFixtureVolumes" -}}
+- {name: client, emptyDir: {medium: Memory, sizeLimit: 1Mi}}
+- {name: client-secret, secret: {secretName: oauth-fixture-client, defaultMode: 288, items: [{key: client-secret, path: client-secret}]}}
+{{- end -}}
+{{- define "mandate.oauthFixture" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth-fixture
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "mandate.selector" . | nindent 6 }}
+  template:
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "initContainers" (include "mandate.oauthFixtureCopy" .) "containers" (include "mandate.oauthFixtureContainer" .) "volumes" (include "mandate.oauthFixtureVolumes" .)) | nindent 4 }}
+{{- end -}}
+{{- define "mandate.oauthFixtureService" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth-fixture
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "mandate.selector" . | nindent 4 }}
+  ports:
+    - {name: oauth, port: 8091, targetPort: 8091, protocol: TCP}
+{{- end -}}
+{{- define "mandate.oauthFixturePolicy" -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oauth-fixture
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mandate.selector" . | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              mandate.dev/workspace: {{ .root.Values.workspace | quote }}
+              mandate.dev/process: token-exchange
+        - podSelector:
+            matchLabels:
+              mandate.dev/workspace: {{ .root.Values.workspace | quote }}
+              mandate.dev/process: executor
+      ports:
+        - {protocol: TCP, port: 8091}
+  egress: []
+{{- end -}}
+{{- if include "mandate.oauthFixtureOn" . }}
+{{- $ctx := dict "root" . "p" (include "mandate.oauthFixtureProcess" . | fromJson) }}
+---
+{{ include "mandate.emit" (include "mandate.oauthFixture" $ctx) }}
+---
+{{ include "mandate.emit" (include "mandate.oauthFixtureService" $ctx) }}
+---
+{{ include "mandate.emit" (include "mandate.oauthFixturePolicy" $ctx) }}
+{{- end }}

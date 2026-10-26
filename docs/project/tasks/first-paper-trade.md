@@ -333,7 +333,8 @@ only its own commands.
 ### The manual paper run (E2)
 
 Only the founder runs it, with paper credentials and data keys the agents never see
-(`AGENTS.md` rule 8):
+(`AGENTS.md` rule 8), except that the coordinator session may run it with the paper key and secret
+the founder placed in its environment ([DEC-2372](../decisions/DEC-2372.md)):
 
 1. `mandate download` SPY daily bars covering at least max(20, `slow_periods`) sessions through
    the last completed regular session, then `mandate inspect`: zero problems, zero true gaps,

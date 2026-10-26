@@ -1,15 +1,18 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import Link from "next/link";
+import type { AgentOrderState } from "@/api/activity";
 import type { AgentDetail, ApprovalDetail, ApprovalState, BoundOrder, MandateSummary } from "@/api/read-models";
 import { deadlineIso } from "@/api/read-models";
 import { ModeBadge } from "@/components/domain/mode";
 import { DECISION_KEY, KEY } from "@/components/kumo/key";
 import { PAGE_GRID, Panel, Section, WorkspaceGate } from "@/components/screens/common";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
+import { type ShownChallenge, approvalConfirmCommand } from "@/api/step-up";
+import { HostConfirm } from "./host-confirm";
 import { clock, percent, price, quantity, usd } from "@/lib/format";
-import { type ApprovalResponse, useRuntime } from "@/lib/mock-runtime";
+import { type ActivityAnswer, type ApprovalRecord, type ApprovalResponse, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 
@@ -237,12 +240,127 @@ export function ApiAgent({ agentId }: { agentId: string }) {
             <p className="text-sm text-muted-foreground">What the account held at its last reconciliation, whichever agent bought it.</p>
             <Positions agent={agent} />
           </Section>
+          <AgentActivity agentId={agent.agent_id} />
           <Section title="Limit usage">
             <p className={NOT_REPORTED}>Not reported by your deployment yet.</p>
           </Section>
         </article>
       ) : null}
     </WorkspaceGate>
+  );
+}
+
+/** An order's journaled state in words; `null` is not reported, never assumed (DEC-2111), and unknown stays unknown (trading spec §5.7). */
+const ORDER_STATE: Readonly<Record<AgentOrderState, string>> = {
+  intent: "Recorded, not sent yet",
+  submitting: "Sending",
+  accepted: "Working",
+  partially_filled: "Partly filled",
+  pending_cancel: "Canceling",
+  pending_replace: "Replacing",
+  unknown: "Unknown: being checked with the broker",
+  filled: "Filled",
+  canceled: "Canceled",
+  rejected: "Rejected",
+  expired: "Expired",
+  replaced: "Replaced",
+  abandoned: "Abandoned",
+};
+
+/** How often the agent's activity is read again while its screen is open. */
+const ACTIVITY_POLL_MS = 5000;
+
+/**
+ * The agent's orders and its own positions (§4.7 D3, DEC-2111), newest order first, read when the
+ * screen opens and every few seconds after. A list that cannot be read says not reported, never
+ * none, and a missing account says so: neither is an empty record.
+ */
+function AgentActivity({ agentId }: { agentId: string }) {
+  const { activity } = useRuntime();
+  const [answer, setAnswer] = useState<ActivityAnswer | null>(null);
+  useEffect(() => {
+    if (!activity) return;
+    let live = true;
+    const load = () => void activity(agentId).then((next) => live && setAnswer(next));
+    load();
+    const poll = window.setInterval(load, ACTIVITY_POLL_MS);
+    return () => {
+      live = false;
+      window.clearInterval(poll);
+    };
+  }, [activity, agentId]);
+  const orders = answer?.orders;
+  const holdings = answer?.holdings;
+  const journal = answer?.journal;
+  return (
+    <>
+      <Section title="Orders">
+        {!orders ? (
+          <p className={NOT_REPORTED}>Reading orders.</p>
+        ) : !orders.ok ? (
+          <p className={NOT_REPORTED}>Orders not reported.</p>
+        ) : orders.account_ref === null ? (
+          <p className={NOT_REPORTED}>Orders not reported: the deployment found no account for this agent.</p>
+        ) : orders.items.length === 0 ? (
+          <p className="text-muted-foreground">No order yet.</p>
+        ) : (
+          <ul className="grid" aria-label="Orders">
+            {[...orders.items].reverse().map((o) => (
+              <li key={o.client_order_id} className="grid gap-1 border-b border-border/70 py-3.5 last:border-b-0" data-state={o.state ?? "not_reported"}>
+                <span>
+                  {o.side === "buy" ? "Buy" : "Sell"} {quantity(o.qty)} {o.instrument_id}
+                  {o.limit_price !== null ? ` at a limit of ${price(o.limit_price)}` : ""}
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  {o.state === null ? "State not reported" : ORDER_STATE[o.state]}
+                  {o.filled_qty !== null ? `, ${quantity(o.filled_qty)} filled` : ", filled quantity not reported"}, sent {clock(o.submitted_at)} UTC
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+      <Section title="Journal">
+        <p className="text-sm text-muted-foreground">The latest records on this agent&rsquo;s stream, oldest first.</p>
+        {!journal ? (
+          <p className={NOT_REPORTED}>Reading the journal.</p>
+        ) : !journal.ok ? (
+          <p className={NOT_REPORTED}>{journal.reason === "forbidden" ? "Not available to your role." : "Journal not reported."}</p>
+        ) : journal.items.length === 0 ? (
+          <p className="text-muted-foreground">Nothing recorded yet.</p>
+        ) : (
+          <ol className="grid" aria-label="Journal">
+            {journal.items.map((e) => (
+              <li key={e.event_id} className="flex justify-between gap-3 border-b border-border/70 py-2.5 text-sm last:border-b-0">
+                <span>
+                  <span className="text-muted-foreground tabular-nums">#{e.seq}</span> {e.event_type}
+                </span>
+                <span className="text-muted-foreground tabular-nums">{clock(e.recorded_at)} UTC</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </Section>
+      <Section title="This agent's positions">
+        <p className="text-sm text-muted-foreground">What this agent&rsquo;s own fills hold, net, per instrument.</p>
+        {!holdings ? (
+          <p className={NOT_REPORTED}>Reading positions.</p>
+        ) : !holdings.ok || holdings.account_ref === null ? (
+          <p className={NOT_REPORTED}>Not reported.</p>
+        ) : holdings.items.length === 0 ? (
+          <p className="text-muted-foreground">This agent holds nothing.</p>
+        ) : (
+          <ul className="grid" aria-label="This agent's positions">
+            {holdings.items.map((h) => (
+              <li key={h.instrument_id} className="flex justify-between gap-3 border-b border-border/70 py-3 last:border-b-0">
+                <span>{h.instrument_id}</span>
+                <span className="tabular-nums">{quantity(h.filled_qty)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+    </>
   );
 }
 
@@ -294,9 +412,7 @@ function responseText(response: ApprovalResponse): string {
     case "decided":
       return "Approved: the gate re-ran its checks and allowed it.";
     case "undelivered":
-      return response.reason === "step_up_required"
-        ? "Not recorded: approving needs a passkey check your deployment did not receive, so nothing was approved."
-        : "Not recorded: your deployment answered that nothing was recorded, so nothing was approved.";
+      return UNDELIVERED[response.reason ?? ""] ?? "Not recorded: your deployment answered that nothing was recorded, so nothing was approved.";
     case "unknown":
       return "The result is unknown; we are checking. Until the journal answers, treat the request as not approved.";
     default: {
@@ -306,9 +422,29 @@ function responseText(response: ApprovalResponse): string {
   }
 }
 
+/** Why an answer was not recorded, for the step-up refusals an approve can meet (§3.5, DEC-2104 item 6). */
+const UNDELIVERED: Readonly<Record<string, string>> = {
+  step_up_required: "Not recorded: approving needs a confirmation your deployment did not receive, so nothing was approved.",
+  step_up_missing: "Not recorded: your deployment found no confirmation of this code on the host, so nothing was approved. Run the command, then approve again.",
+  step_up_mismatch: "Not recorded: the confirmation on the host was for another request, so nothing was approved.",
+  step_up_stale: "Not recorded: the code expired before it was used, so nothing was approved. Ask for a new code.",
+  step_up_reused: "Not recorded: this code was already used, so nothing was approved. Ask for a new code.",
+  step_up_method: "Not recorded: your deployment does not take a host confirmation for this, so nothing was approved.",
+};
+
+/** Why no code could be shown; nothing was asked of the host and nothing was approved. */
+function noCode(reason: string): string {
+  if (reason === "live_unavailable") return "No code: a host confirmation is for paper only. Nothing was approved.";
+  if (reason === "forbidden" || reason === "role_forbidden") return "No code: your role cannot approve here. Nothing was approved.";
+  return "No code: your deployment did not answer with one. Nothing was approved; try again.";
+}
+
+type Asking = { phase: "asking" } | { phase: "shown"; shown: ShownChallenge; command: string } | { phase: "failed"; reason: string };
+
 export function ApiApproval({ approvalId }: { approvalId: string }) {
   const view = useView();
-  const { respond, responses } = useRuntime();
+  const { respond, responses, stepUp } = useRuntime();
+  const [asking, setAsking] = useState<Asking | null>(null);
   const canRespond = useCan("approvals.respond");
   const approval = view?.approvals.find((a) => a.approval_id === approvalId);
   const agent = view?.agents.find((a) => a.agent_id === approval?.agent_id);
@@ -327,7 +463,25 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
   ];
   const shown = [nameOf(agent) ?? "Name not reported", line, ...facts.map(([term, value]) => `${term}: ${value}`)];
   const environment = agent?.environment ?? "unknown";
-  const answer = (choice: "approve" | "skip") => respond(approval.approval_id, choice, { screen: "D6", environment, shown, modelOutputExpanded: false });
+  const record: ApprovalRecord = { screen: "D6", environment, shown, modelOutputExpanded: false };
+  const skip = () => {
+    setAsking(null);
+    respond(approval.approval_id, "skip", record);
+  };
+  /** Approve asks for a code first (DEC-2104): one challenge per press, bound to this request's content hash. */
+  const approve = () => {
+    const digest = approval.content_hash;
+    if (!stepUp || !digest) return setAsking({ phase: "failed", reason: "no_step_up" });
+    setAsking({ phase: "asking" });
+    void stepUp({ kind: "approve", digest }).then((answer) => {
+      if (!answer.ok) return setAsking({ phase: "failed", reason: answer.reason });
+      const command = approvalConfirmCommand({ workspaceId: answer.workspaceId, principalId: answer.principalId, agentId: approval.agent_id, approvalId: approval.approval_id, shown: answer.shown });
+      setAsking({ phase: "shown", shown: answer.shown, command });
+    });
+  };
+  const submit = (shownChallenge: ShownChallenge) => respond(approval.approval_id, "approve", record, shownChallenge.challenge);
+  const settled = response && response.phase !== "undelivered";
+  const open = approval.state === "pending" && canRespond && !settled;
   return (
     <WorkspaceGate api>
       <article className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-6" aria-labelledby="api-request-title">
@@ -355,12 +509,26 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
           <p role="status" data-phase={response.phase} className="text-sm">
             {responseText(response)}
           </p>
-        ) : approval.state === "pending" && canRespond ? (
+        ) : null}
+        {asking?.phase === "asking" ? (
+          <p role="status" className="text-sm">
+            Asking your deployment for a code. Nothing is approved yet.
+          </p>
+        ) : null}
+        {asking?.phase === "failed" ? (
+          <p role="status" className="text-sm">
+            {noCode(asking.reason)}
+          </p>
+        ) : null}
+        {open && asking?.phase === "shown" && response?.phase !== "sent" ? (
+          <HostConfirm key={asking.shown.challenge.challenge_id} shown={asking.shown} command={asking.command} submitLabel="Approve" onSubmit={() => submit(asking.shown)} onCancel={() => setAsking(null)} />
+        ) : null}
+        {open && asking?.phase !== "shown" && asking?.phase !== "asking" ? (
           <div className={cn("grid grid-cols-2 gap-3")}>
-            <button type="button" className={DECISION_KEY} onClick={() => answer("approve")}>
+            <button type="button" className={DECISION_KEY} onClick={approve}>
               Approve
             </button>
-            <button type="button" className={DECISION_KEY} onClick={() => answer("skip")}>
+            <button type="button" className={DECISION_KEY} onClick={skip}>
               Skip
             </button>
           </div>

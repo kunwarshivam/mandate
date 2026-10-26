@@ -8,22 +8,28 @@ use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
-    BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, ExecutorConfig,
-    ExecutorError, ExecutorState, IdGen, Input, InstrumentSnapshot, IntentBody, IntentHandoff,
-    IntentId, KillScope, MandateVersion, MandateView, Ports, ProtectionPrices, ReconcileReason,
-    RiskClock, Seq, WriterEpoch, fold, handle,
+    BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, EventId,
+    ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot,
+    IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, Ports,
+    ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
 use mandate_process::{Action, Input as Lifecycled, Kind, Lifecycle, State};
 use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
-use mandate_time::UtcNanos;
+use mandate_time::{ExchangeCalendar, UtcNanos};
 
 use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches};
+use crate::marks::{MARK_EVERY, Marked, mark_draft};
+use crate::quotes::{QuoteFeed, QuotePoll};
 
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// How often, in seconds, a process with an order working asks for a reconciliation (X1b-3): four
+/// broker reads, well inside Alpaca's limit of 200 requests a minute.
+pub const SCHEDULED_RECONCILE_S: i64 = 10;
 
 /// The broker as the process calls it: one request, one answer, in order. The connector is
 /// `mandate_executor::BrokerConnector`; an adapter that owns its runtime drives it (X2).
@@ -62,6 +68,11 @@ pub struct Wiring {
     pub fees: mandate_accounting::Config,
     pub gate: Box<dyn BindingGateSource>,
     pub protections: Box<dyn Protections>,
+    /// The latest quote of each instrument whose exit waits on a price (E21-30, DEC-2359), and
+    /// of each instrument marked.
+    pub quotes: Box<dyn QuoteFeed>,
+    /// The instruments the executor marks (DEC-2380 item 3).
+    pub marked: Box<dyn Marked>,
 }
 
 impl Wiring {
@@ -151,11 +162,21 @@ pub struct ExecutorProcess<S, B> {
     /// core takes no other input until it is handed again, and the retry offers the journal the
     /// same bytes (journal spec §5.1). Nothing it asks of the broker leaves before it commits.
     pending: Option<(Input, UtcNanos)>,
+    /// The mark whose append is in doubt, with the time it was first written at: offered to the
+    /// journal again, the same bytes, before any other append, so a mark that committed with its
+    /// answer lost is found already committed rather than conflicting with the next (DEC-2380
+    /// item 3, journal spec §5.1).
+    pending_mark: Option<(EventDraft, UtcNanos)>,
     /// Requests whose drafts committed and which have not been sent, in order: what an answer
     /// whose own batch went in doubt left behind (DEC-2003 item 7).
     outbox: VecDeque<BrokerRequest>,
     /// Whether the core asked for a reconciliation that has not been handed yet.
     reconcile: bool,
+    /// When the last scheduled reconciliation was asked for (X1b-3): while an order works, the
+    /// process reads the broker every [`SCHEDULED_RECONCILE_S`], so a fill the broker reports
+    /// after the order's answer is booked without a restart. The start's own reconciliation
+    /// counts as the first.
+    scheduled: UtcNanos,
     /// The followed streams that did not read on their last read, each alerted once.
     unreadable: BTreeSet<String>,
     /// The handoffs the core refused for a missing binding-gate input, each alerted once by
@@ -170,15 +191,29 @@ pub struct ExecutorProcess<S, B> {
     /// mandate port answers with (DEC-2034 item 1).
     deployed: BTreeMap<AgentId, MandateVersion>,
     max_chain: usize,
+    /// When each instrument whose exit waits on a price was last read, so each is read at most
+    /// once per `exit_step_s` (DEC-2359).
+    polled: QuotePoll,
+    /// When each marked instrument was last marked, so each is marked at most once per
+    /// [`MARK_EVERY`] (DEC-2380 item 3).
+    marked_at: QuotePoll,
+    /// The US-equities calendar a mark's session is read from; `None` when it cannot load, and then
+    /// nothing is marked, so the gate holds (`AGENTS.md` rule 3).
+    calendar: Option<ExchangeCalendar>,
     written_at: UtcNanos,
 }
 
 /// What one pass reads from the agents' streams: the kill switches this stream has not applied,
-/// the proposals the core does not hold yet, each with its agent, and whether a row did not read.
+/// the proposals the core does not hold yet, each with its agent, whether a row did not read, and
+/// whether nothing the journal shows still wants the executor ([`Following::released`]).
 struct Followed {
     switches: Vec<(AgentId, Switch)>,
     proposals: Vec<(AgentId, Proposal)>,
     unreadable: bool,
+    released: bool,
+    /// Whether every followed agent's stream parsed and read: one that did not may hold a switch,
+    /// so it holds the exit (DEC-2347 item 3.3).
+    all_read: bool,
 }
 
 impl<S: Store, B: Broker> ExecutorProcess<S, B> {
@@ -189,6 +224,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     pub fn start(store: S, broker: B, wiring: Wiring, config: &Config, now: UtcNanos) -> Self {
         let scope = &config.scope;
         let workspace = scope.workspace.0.as_str();
+        let wiring_step = wiring.config.exit_step_s;
         let stream = |id: String| StreamId::parse(&id);
         let mut this = Self {
             store,
@@ -202,14 +238,21 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             clock: stream(format!("clock:{workspace}")),
             epoch: 0,
             pending: None,
+            pending_mark: None,
             outbox: VecDeque::new(),
             reconcile: false,
+            scheduled: now,
             unreadable: BTreeSet::new(),
             held: BTreeSet::new(),
             journal_down: false,
             deployed: BTreeMap::new(),
             max_chain: config.max_chain,
             written_at: now,
+            polled: QuotePoll::new(Duration::from_secs(
+                u64::try_from(wiring_step).unwrap_or_default(),
+            )),
+            marked_at: QuotePoll::new(MARK_EVERY),
+            calendar: ExchangeCalendar::us_equities().ok(),
         };
         if config.environment != Environment::Paper {
             this.lifecycle.observe(now, Lifecycled::Failed);
@@ -274,11 +317,12 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         self.journal(now, &[opened])
     }
 
-    /// One pass of the loop at the injected time `now`: an input in doubt first, then requests
-    /// left unsent and a due reconciliation, then (once started) every kill switch the account's
-    /// agents' streams hold that the fold has not applied, then the latest tick, then every order
-    /// they propose that the fold has not taken, an opening or an increase only while ready
-    /// (DEC-2033 item 1). Before the start,
+    /// One pass of the loop at the injected time `now`: an input in doubt first, then a mark in
+    /// doubt, then requests left unsent and a due reconciliation, then (once started) every kill
+    /// switch the account's agents' streams hold that the fold has not applied, then the latest
+    /// tick, then every order they propose that the fold has not taken, an opening or an increase
+    /// only while ready (DEC-2033 item 1), then the marks due at the tick, so a mark never holds
+    /// the tick's exit ladder or an exit. Before the start,
     /// the pass hands the first tick it reads and `Input::Started`. Returns the alerts whose drafts
     /// committed.
     pub fn step(&mut self, now: UtcNanos) -> Vec<Alert> {
@@ -289,6 +333,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         self.lifecycle.observe(now, Lifecycled::Heartbeat);
         if let Some((input, at)) = self.pending.take()
             && !self.hand(now, at, input, &mut alerts, 0)
+        {
+            return alerts;
+        }
+        if let Some((draft, at)) = self.pending_mark.take()
+            && !self.append_mark(now, at, draft, &mut alerts)
         {
             return alerts;
         }
@@ -312,10 +361,13 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             switches,
             proposals: proposed,
             unreadable,
+            released,
+            all_read,
         }) = self.switches(now, &mut alerts)
         else {
             return alerts;
         };
+        let nothing_read = switches.is_empty() && proposed.is_empty();
         for (agent, switch) in switches {
             if !self.apply(now, agent, switch, &mut alerts) {
                 return alerts;
@@ -323,6 +375,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         }
         if unreadable {
             self.lifecycle.observe(now, Lifecycled::Failed);
+            return alerts;
+        }
+        if !self.read_quotes(now, &mut alerts).unwrap_or(true) {
             return alerts;
         }
         if let Some(tick) = tick
@@ -340,7 +395,178 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 return alerts;
             }
         }
+        if let Some(tick) = tick
+            && !self.write_marks(now, tick, &mut alerts)
+        {
+            return alerts;
+        }
+        if nothing_read && all_read && released && self.owes_nothing() {
+            self.lifecycle.observe(now, Lifecycled::Completed);
+        }
+        self.reconcile_on_schedule(now, &mut alerts);
         alerts
+    }
+
+    /// Journals `copy`'s establishment copy on the account stream at `now`, under this process's
+    /// writer epoch, as [`crate::establish::copy_draft`] writes it with the next event id, and
+    /// folds it (DEC-2341 item 2).
+    ///
+    /// # Errors
+    /// `copy_refused` when the draft cannot be made or the journal does not commit it.
+    pub fn copy_establishment(
+        &mut self,
+        now: UtcNanos,
+        copy: &crate::establish::ToCopy,
+    ) -> Result<(), &'static str> {
+        let head = self.account_head();
+        let id = self
+            .wiring
+            .ids
+            .event_id(WriterEpoch(self.epoch), Seq(head), 0);
+        let draft = crate::establish::copy_draft(copy, id, now)?;
+        match self.journal(now, &[draft]) {
+            Ran::Committed => Ok(()),
+            _ => Err("copy_refused"),
+        }
+    }
+
+    /// Whether the account owes nothing more (DEC-2347): the process is ready, no reconciliation
+    /// is due, every order the account stream holds is terminal, `Unknown` included, and no agent
+    /// followed holds lots its kill switch or exits would still sell. A pass that reads a switch
+    /// or a proposal, or reaches here with anything in doubt or unsent, never asks: it returned
+    /// earlier, or reads again on the next pass. An account switch still closing an instrument the
+    /// account holds owes its close (DEC-2364).
+    fn owes_nothing(&mut self) -> bool {
+        self.ready()
+            && !self.reconcile
+            && !self.state.account_closing()
+            && self
+                .state
+                .orders()
+                .values()
+                .all(|order| order.state.is_terminal())
+            && self
+                .deployed
+                .keys()
+                .all(|agent| self.state.holds_lots(agent) == Ok(false))
+            && self.broker_quiet()
+    }
+
+    /// Whether the broker, read now, lists no order on the account that may still work, ours or
+    /// one the fold never held (an order the platform did not place is external activity, never
+    /// one of the fold's orders): every status it reports is final. A read that fails, or a status
+    /// it does not name, keeps the executor running (DEC-2347 item 3.5).
+    fn broker_quiet(&mut self) -> bool {
+        match self.read(&BrokerRequest::ListOpenOrders) {
+            Ok(BrokerOutcome::OpenOrders(orders)) => orders.iter().all(|order| {
+                matches!(
+                    order.status.as_str(),
+                    "filled" | "canceled" | "expired" | "rejected" | "replaced"
+                )
+            }),
+            _ => false,
+        }
+    }
+
+    /// Hands the core, before the pass's tick, the latest quote of each instrument whose exit waits
+    /// on a price and is due a read (DEC-2359), so the tick's ladder step prices from it. A quote
+    /// the feed cannot give hands nothing. `Ok(false)` when a handoff stopped the pass.
+    ///
+    /// # Errors
+    /// The core's refusal to name the instruments it wants; the pass then reads no quote and goes
+    /// on, as it would with the feed down (`AGENTS.md` rule 3).
+    fn read_quotes(
+        &mut self,
+        now: UtcNanos,
+        alerts: &mut Vec<Alert>,
+    ) -> Result<bool, ExecutorError> {
+        let wanted = self.state.quote_wanted()?;
+        let Ok(due) = self.polled.due(&wanted, now) else {
+            return Ok(true);
+        };
+        for instrument in due {
+            let Ok(observation) = self.wiring.quotes.observe(&instrument, now) else {
+                continue;
+            };
+            if !observation.sane {
+                continue;
+            }
+            if !self.hand(now, now, Input::Market(observation), alerts, 0) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Journals, at the tick `at`, a `MarkUpdated` version 2 for each instrument the wiring marks
+    /// that is due one (DEC-2380 item 3): at most once per [`MARK_EVERY`] of the risk clock, from
+    /// the quote the feed hands at `now`. An instrument the feed has no quote for, the snapshot no
+    /// asset class for, or no session names, is not marked. `false` when the journal stopped the
+    /// pass; an append in doubt raises the journal's one opaque alert, and the instruments after
+    /// it stay due.
+    fn write_marks(&mut self, now: UtcNanos, at: RiskClock, alerts: &mut Vec<Alert>) -> bool {
+        let Some(calendar) = self.calendar.clone() else {
+            return true;
+        };
+        let Ok(instant) = UtcNanos::from_parts(at.secs(), 0) else {
+            return true;
+        };
+        let wanted = self.wiring.marked.instruments();
+        let Ok(due) = self.marked_at.due(&wanted, instant) else {
+            return true;
+        };
+        let mut due = due.into_iter();
+        while let Some(instrument) = due.next() {
+            let Some(class) = self.wiring.instruments.asset_class(&instrument) else {
+                continue;
+            };
+            let Ok(observation) = self.wiring.quotes.observe(&instrument, now) else {
+                continue;
+            };
+            let id = self
+                .wiring
+                .ids
+                .event_id(WriterEpoch(self.epoch), Seq(self.account_head()), 0);
+            let feed = self.wiring.quotes.feed();
+            let Some(draft) = mark_draft(&observation, class, &calendar, feed, id, at) else {
+                continue;
+            };
+            if !self.append_mark(now, now, draft, alerts) {
+                for unmarked in due {
+                    self.marked_at.forget(&unmarked);
+                }
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Journals the mark `draft` with the event time `at`; whether it committed. An append in
+    /// doubt keeps the draft, unchanged, to be offered again first on the next pass, and raises the
+    /// journal's one opaque alert for the outage.
+    fn append_mark(
+        &mut self,
+        now: UtcNanos,
+        at: UtcNanos,
+        draft: EventDraft,
+        alerts: &mut Vec<Alert>,
+    ) -> bool {
+        self.written_at = at;
+        match self.journal(now, std::slice::from_ref(&draft)) {
+            Ran::Committed => {
+                self.journal_down = false;
+                true
+            }
+            Ran::InDoubt => {
+                if !self.journal_down {
+                    self.journal_down = true;
+                    alerts.push(journal_unavailable());
+                }
+                self.pending_mark = Some((draft, at));
+                false
+            }
+            Ran::Stopped => false,
+        }
     }
 
     /// Drains at `now`: no new input; an input in doubt is handed once more, then the process exits
@@ -432,20 +658,23 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     fn switches(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> Option<Followed> {
         let control = self.control.clone()?;
         let rows = self.follow(&control, alerts)?;
-        let Ok(agents) = agents_of(&rows, self.state.scope(), self.environment) else {
+        let Ok(following) = agents_of(&rows, self.state.scope(), self.environment) else {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return None;
         };
-        self.deployed.clone_from(&agents);
+        self.deployed.clone_from(&following.agents);
         let workspace = self.state.scope().workspace.0.clone();
         let mut pending = Vec::new();
         let mut proposed = Vec::new();
         let mut unreadable = false;
-        for agent in agents.into_keys() {
+        let mut all_read = true;
+        for agent in following.agents.keys().cloned() {
             let Some(stream) = StreamId::parse(&format!("agent:{workspace}:{}", agent.0)) else {
+                all_read = false;
                 continue;
             };
             let Some(rows) = self.follow(&stream, alerts) else {
+                all_read = false;
                 continue;
             };
             let read: Result<Vec<_>, _> = rows
@@ -458,9 +687,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 unreadable = true;
                 continue;
             };
+            let openings_held = following.held.contains(&agent);
             proposed.extend(
                 asked
                     .into_iter()
+                    .filter(|proposal| !(openings_held && proposal.purpose.adds_risk()))
                     .filter(|proposal| {
                         self.state
                             .intent(&IntentId(proposal.intent.clone()))
@@ -468,9 +699,38 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     })
                     .map(|proposal| (agent.clone(), proposal)),
             );
+            let applied = |source: &EventId| self.state.applied_for(&agent, source);
+            let copied: Vec<&EventId> = held
+                .iter()
+                .filter(|switch| self.state.applied_copy(&switch.switch))
+                .filter_map(|switch| switch.cause.as_ref())
+                .collect();
+            let direct: Vec<Switch> = following
+                .commands_for(&agent)
+                .into_iter()
+                .filter(|command| !applied(command) && !copied.contains(&command))
+                .map(|command| Switch {
+                    switch: command,
+                    cause: None,
+                    initiator: Initiator::Owner,
+                    confirmation: None,
+                })
+                .collect();
+            let read: Vec<EventId> = direct.iter().map(|switch| switch.switch.clone()).collect();
+            let copies: Vec<Switch> = held
+                .into_iter()
+                .filter(|switch| !self.state.applied_copy(&switch.switch))
+                .filter(|switch| {
+                    switch
+                        .cause
+                        .as_ref()
+                        .is_none_or(|cause| !applied(cause) && !read.contains(cause))
+                })
+                .collect();
             pending.extend(
-                held.into_iter()
-                    .filter(|switch| !self.state.applied_copy(&switch.switch))
+                direct
+                    .into_iter()
+                    .chain(copies)
                     .map(|switch| (agent.clone(), switch)),
             );
         }
@@ -478,6 +738,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             switches: pending,
             proposals: proposed,
             unreadable,
+            released: following.released(),
+            all_read,
         })
     }
 
@@ -635,6 +897,26 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         self.flush(now, alerts, depth)
     }
 
+    /// Asks for a reconciliation once [`SCHEDULED_RECONCILE_S`] have passed since the last one this
+    /// asked for, while any order the account stream holds may still work (X1b-3). The broker
+    /// reports a fill only on a read, so without it an order accepted and filled later is booked
+    /// only by the next start's reconciliation. It runs last in a pass that went through, so no
+    /// read goes ahead of what the pass sent, and none while the journal is down; a run that does
+    /// not commit has already told the lifecycle, and the next pass picks up what it left.
+    fn reconcile_on_schedule(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) {
+        let working = self
+            .state
+            .orders()
+            .values()
+            .any(|order| !order.state.is_terminal());
+        let due = now.secs().saturating_sub(self.scheduled.secs()) >= SCHEDULED_RECONCILE_S;
+        if working && due {
+            self.reconcile = true;
+            self.scheduled = now;
+            self.flush(now, alerts, 0);
+        }
+    }
+
     /// Sends the requests left in the outbox in order, handing each answer to the core, then the
     /// reconciliation if one is due. A request that cannot be sent, or an answer that cannot be
     /// read, stops the process (DEC-85); whether everything handed committed.
@@ -660,12 +942,14 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     }
 
     /// The reconciliation the core asked for (trading spec §11): the broker's four reads as one
-    /// snapshot, its account reported first, as the shell's start does, so the reconciliation
-    /// runs at the head the report left. A read whose answer is lost leaves it due for the next
-    /// pass, since a read changes nothing at the broker, and the pass goes on, so a kill switch
+    /// snapshot, its account reported first, as the shell's start does. The snapshot keeps the
+    /// head it was taken at, before its own report, so the reconciliation reads that report as
+    /// the snapshot's own and counts every fill since the base it replaced once (DEC-948 item 5);
+    /// a fill the broker already booked in the reported cash is never subtracted twice. A read
+    /// whose answer is lost leaves it due for the next pass, since a read changes nothing at the broker, and the pass goes on, so a kill switch
     /// never waits on it (`AGENTS.md` rule 13). It stays due until its snapshot is handed.
     fn reconciliation(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>, depth: usize) -> bool {
-        let mut snapshot = match self.snapshot() {
+        let snapshot = match self.snapshot() {
             Ok(snapshot) => snapshot,
             Err(Read::Lost) => return true,
             Err(Read::Unusable) => {
@@ -679,7 +963,6 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             self.reconcile = true;
             return false;
         }
-        snapshot.taken_at_head = Seq(self.account_head());
         self.hand(
             now,
             self.written_at,

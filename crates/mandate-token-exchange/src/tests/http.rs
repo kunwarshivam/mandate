@@ -20,14 +20,20 @@ use axum::http::{HeaderMap, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use secrecy::{ExposeSecret, SecretString};
 
+use super::vault;
+use super::{Waitless, deadline};
 use crate::cell::parse;
 use crate::http::{HttpTokenEndpoint, Target};
 use crate::response::MAX_BODY;
+use crate::run::run;
+use crate::startup::{Endpoint, Settings};
 use mandate_connections::ConnectError;
 use mandate_connections::exchange::{ClientSecret, ExchangedGrant, PendingConnect, exchange_code};
-use mandate_connections::grant::GrantedScopes;
+use mandate_connections::grant::{GrantedScopes, check_scope};
 use mandate_connections::start::{ClientId, Environment, OAuthClient, PkceVerifier, RedirectUri};
+use mandate_connections::token_entry;
 use mandate_connections::vault::{AccessToken, AuthorizationCode, Vault, VaultKey, WaitingCode};
+use mandate_vault::policy::SecretPath;
 
 const TOKEN_PATH: &str = "/alpaca/oauth/token";
 const GRANT: &str = r#"{"access_token":"tok-CANARY","scope":"trading data","token_type":"bearer"}"#;
@@ -383,7 +389,11 @@ fn an_unreachable_endpoint_is_endpoint_failed_and_names_no_secret() {
 
 #[test]
 fn the_live_adapter_builds_without_sending_anything() {
-    assert!(HttpTokenEndpoint::live().is_ok());
+    assert!(
+        HttpTokenEndpoint::live().is_ok(),
+        "the live token client did not build: the likeliest cause is no CA roots where this runs \
+         (an image on an empty base without a CA bundle; DEC-2063 item 8, E10-25)"
+    );
 }
 
 /// The live adapter's client refuses a plain `http` URL before anything is sent.
@@ -437,5 +447,61 @@ fn a_hung_endpoint_fails_at_the_total_timeout() {
         started.elapsed() < Duration::from_secs(5),
         "{:?}",
         started.elapsed()
+    );
+}
+
+/// The whole exchange after the start checks (DEC-2330 item 5): `run` through the vault adapter
+/// over a scripted session and the real HTTP adapter against the loopback fixture provider. The
+/// client secret is read, then the code entry taken, then the one request sent with both, then the
+/// token entry written at the connection's token, and nothing else asked of the vault.
+#[test]
+fn the_exchange_runs_through_the_vault_adapter_and_the_http_adapter() {
+    let (addr, hits) = serve(Answer::Grant);
+    let url = format!("http://{addr}{TOKEN_PATH}");
+    let settings = Settings {
+        connection: vault::connection(vault::CONNECTION),
+        endpoint: Endpoint::Cell(parse(Some("ci"), &url).unwrap()),
+        client: OAuthClient {
+            client_id: ClientId("client-1".to_owned()),
+            redirect_uri: RedirectUri::production(),
+        },
+    };
+    let script = vault::Script::waiting();
+    let adapter = vault::adapter(&script);
+    let mut endpoint = HttpTokenEndpoint::for_cell(parse(Some("ci"), &url).unwrap()).unwrap();
+    let grant = run(
+        &settings,
+        &mut &adapter,
+        &mut &adapter,
+        &mut endpoint,
+        &mut Waitless,
+        deadline(),
+    )
+    .unwrap();
+    assert_eq!(grant.connection_id, vault::CONNECTION);
+    let hits = hits.lock().unwrap().clone();
+    assert_eq!(hits.len(), 1, "one request");
+    let body = String::from_utf8(hits[0].body.clone()).unwrap();
+    for sent in [
+        format!("code={}", vault::CODE),
+        format!("code_verifier={}", vault::VERIFIER),
+        format!("client_secret={}", vault::CLIENT_SECRET),
+        "client_id=client-1".to_owned(),
+    ] {
+        assert!(body.contains(&sent), "{sent} in {body}");
+    }
+    let scopes = check_scope("trading data").unwrap();
+    let token =
+        token_entry::encode(&AccessToken(SecretString::from("tok-CANARY")), &scopes).unwrap();
+    assert_eq!(
+        script.calls(),
+        vec![
+            vault::Call::Read(SecretPath::ClientSecret),
+            vault::Call::Take(vault::connection(vault::CONNECTION)),
+            vault::Call::Put(
+                SecretPath::Token(vault::connection(vault::CONNECTION)),
+                token.expose_secret().as_bytes().to_vec()
+            ),
+        ]
     );
 }

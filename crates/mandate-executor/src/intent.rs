@@ -14,11 +14,11 @@ use crate::gate::{
     PartialGateDecision, Proposal, SESSION_CLOSED, SESSION_UNKNOWN, UNPRICED, binding_checks,
 };
 use crate::ids::{ClientOrderId, IntentId};
-use crate::kill::{confirmed_bid, is_flatten};
+use crate::kill::{confirmed_bid, flatten_room, is_flatten};
 use crate::payload::{int, text};
 use crate::protection::{
-    ExitPrice, alone, awaits_cancel, begin_exit, crypto_add, exit_limit, fallback, passive_exit,
-    reference_price, reprotect_unpriced, rests,
+    ExitPrice, alone, awaits_cancel, begin_exit, changed, crypto_add, exit_limit, fallback,
+    passive_exit, reference_price, reprotect_unpriced, rests, whole_shares,
 };
 use crate::session::{closed_hold, extended_hours};
 use crate::shape::offers_bracket;
@@ -173,6 +173,7 @@ fn intended_fields(
         ("sent", Value::Null),
         ("uncovered", Value::Null),
         ("acknowledged", Value::Null),
+        ("unprotected_fraction", Value::Null),
     ])
 }
 
@@ -281,7 +282,11 @@ fn decide(
             side: *side,
             qty: *qty,
             purpose: *purpose,
-            protection: *protection,
+            protection: if fractional(batch, instrument, *qty)? {
+                None
+            } else {
+                *protection
+            },
             limit: limit.or_else(|| reference_price(batch, intent, instrument, *purpose)),
             market: limit.is_none(),
             tif: order_tif(batch, instrument),
@@ -441,7 +446,26 @@ fn submit(
     {
         return Ok(());
     }
-    let bracket = bracket_of(batch, &instrument, purpose, protection)?;
+    let room = flatten_room(&batch.view, intent, qty)?;
+    if room == Qty::ZERO {
+        let abandoned = abandon_record(batch, intent, "released_to_owner")?;
+        batch.notify(abandoned, "exit_released");
+        return Ok(());
+    }
+    if room < qty {
+        let pairs = vec![
+            ("intent_id", text(intent.0.0.clone())),
+            ("qty", text(qty.checked_sub(room)?.to_string())),
+            ("sent", text(room.to_string())),
+        ];
+        changed(batch, &instrument, "rung_short", pairs)?;
+    }
+    let qty = room;
+    let bracket = if fractional(batch, &instrument, qty)? {
+        None
+    } else {
+        bracket_of(batch, &instrument, purpose, protection)?
+    };
     let lone = !batch.view.exiting.contains_key(&instrument)
         && !rests(&batch.view, &instrument)
         && alone(
@@ -500,11 +524,24 @@ fn submit(
     Ok(())
 }
 
+/// Whether `qty` of `instrument` is a fractional equity quantity: §5.2 and §5.3 rule 7 allow it
+/// only as a plain DAY order, never in a bracket, so it is sent plain and the gate sees it plain,
+/// whatever protective prices it carries; its protection follows its fill and covers the whole
+/// shares ([`crate::protection::settle`], DEC-2312 items 1 and 2).
+fn fractional(
+    batch: &Batch<'_, '_>,
+    instrument: &InstrumentId,
+    qty: Qty,
+) -> Result<bool, ExecutorError> {
+    Ok(whole_shares(batch.ports, instrument, qty)? != qty)
+}
+
 /// §5.4's tranche model: an equity entry that carries its protective prices goes as one GTC
 /// bracket at exactly those prices, an add where protection already rests included, which is a new
 /// bracket beside it and never a replacement of it (DEC-346 item 1). An entry with no prices goes
 /// plain, and an exit never carries a bracket. A crypto entry is never a bracket (§5.4: simple
-/// orders only); its stop-limit is slice 5's. On a profile that offers no bracket (§5.2's
+/// orders only); its stop-limit is placed once it has filled, as a plain entry's is
+/// ([`crate::protection::settle`]). On a profile that offers no bracket (§5.2's
 /// Robinhood table) the entry goes plain whatever its prices, and its stop-limit is placed once it
 /// has filled ([`crate::protection::settle`], DEC-966 item 2). On a profile that does, an equity
 /// entry with a stop and no take-profit has no bracket to go as, and answers slice 5's stub rather
@@ -728,6 +765,15 @@ pub(crate) fn abandon(
     intent: &IntentId,
     reason: &str,
 ) -> Result<(), ExecutorError> {
+    abandon_record(batch, intent, reason).map(|_| ())
+}
+
+/// [`abandon`], answering the `OrderAbandoned` record's id.
+fn abandon_record(
+    batch: &mut Batch<'_, '_>,
+    intent: &IntentId,
+    reason: &str,
+) -> Result<EventId, ExecutorError> {
     batch.journal(
         "OrderAbandoned",
         None,
@@ -739,8 +785,7 @@ pub(crate) fn abandon(
             ("intent_id", text(intent.0.0.clone())),
             ("reason", text(reason)),
         ],
-    )?;
-    Ok(())
+    )
 }
 
 /// `Unknown → Intent` after a confirmed absence: the gate re-runs and the order is resubmitted

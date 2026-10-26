@@ -223,16 +223,24 @@ pub fn connect_digest(
     Ok(Digest::of(&to_canonical(&Value::Object(object))))
 }
 
-/// An OAuth connect's step-up digest (kind `connection`, DEC-2621 item 4, amending DEC-693 items
-/// 1 and 2): SHA-256 of the canonical `{action: "connect", broker: "alpaca", disclosure:
-/// {document, version}, environment: "paper", workspace_id}`, so the step-up proves which
-/// version of the token-breadth disclosure the owner confirmed. Alpaca OAuth connects paper only
-/// (DEC-821 item 7), so neither the broker nor the environment is a parameter.
-pub fn oauth_connect_digest(
+/// The token-breadth disclosure an OAuth connect's owner confirms (DEC-2621 item 5): its document.
+pub const DISCLOSURE_DOCUMENT: &str = "alpaca_oauth_token_breadth";
+
+/// The disclosure's current version, the one the founder accepted (DEC-2622): a start or a CLI
+/// confirmation of a connect names this one and no other.
+pub const DISCLOSURE_VERSION: &str = "1";
+
+/// The canonical bytes of an OAuth connect's action object, the preimage of
+/// [`oauth_connect_digest`]: what the CLI stores when it confirms a connect (DEC-2125 item 3), so
+/// the record's `action_digest` names an object anyone can read back and re-hash.
+///
+/// # Errors
+/// [`ConnectError::InvalidRecord`] when a member cannot be keyed.
+pub fn oauth_connect_object(
     workspace_id: &str,
     document: &str,
     version: &str,
-) -> Result<Digest, ConnectError> {
+) -> Result<Vec<u8>, ConnectError> {
     let invalid = |_| ConnectError::InvalidRecord {
         member: "connect digest",
     };
@@ -259,7 +267,20 @@ pub fn oauth_connect_digest(
         .map(|(name, value)| Key::new(name).map(|key| (key, value)))
         .collect::<Result<Object, _>>()
         .map_err(invalid)?;
-    Ok(Digest::of(&to_canonical(&Value::Object(object))))
+    Ok(to_canonical(&Value::Object(object)))
+}
+
+/// An OAuth connect's step-up digest (kind `connection`, DEC-2621 item 4, amending DEC-693 items
+/// 1 and 2): SHA-256 of the canonical `{action: "connect", broker: "alpaca", disclosure:
+/// {document, version}, environment: "paper", workspace_id}`, so the step-up proves which
+/// version of the token-breadth disclosure the owner confirmed. Alpaca OAuth connects paper only
+/// (DEC-821 item 7), so neither the broker nor the environment is a parameter.
+pub fn oauth_connect_digest(
+    workspace_id: &str,
+    document: &str,
+    version: &str,
+) -> Result<Digest, ConnectError> {
+    oauth_connect_object(workspace_id, document, version).map(|object| Digest::of(&object))
 }
 
 /// Plans a connect's start: exactly `[Requested]` with the request's members, or the first

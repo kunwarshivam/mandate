@@ -58,8 +58,38 @@ pub fn control_entry(seq: u64, envelope: &Value) -> Result<ControlEntry, Unreada
     if !MEMBERSHIP_TYPES.contains(&event_type) {
         return Ok(ControlEntry::Other { seq, event_time });
     }
+    let payload = envelope.get("payload").ok_or(fault("payload"))?;
+    mapped(seq, event_type, event_time, payload).map(ControlEntry::Membership)
+}
+
+/// The membership record at `seq` of type `event_type`, committed at `event_time`, whose envelope's
+/// `payload` is `payload`, mapped as [`control_entry`] maps it; `None` for any other type. For a
+/// reader that holds a record's members rather than its envelope (DEC-2384).
+///
+/// # Errors
+/// [`UnreadableRecord`] for a `Member*` record whose payload does not map.
+pub fn membership_record(
+    seq: u64,
+    event_type: &str,
+    event_time: UtcNanos,
+    payload: &Value,
+) -> Result<Option<MembershipRecord>, UnreadableRecord> {
+    if !MEMBERSHIP_TYPES.contains(&event_type) {
+        return Ok(None);
+    }
+    mapped(seq, event_type, event_time, payload).map(Some)
+}
+
+/// The `Member*` record `event_type` at `seq`, its payload mapped.
+fn mapped(
+    seq: u64,
+    event_type: &str,
+    event_time: UtcNanos,
+    payload: &Value,
+) -> Result<MembershipRecord, UnreadableRecord> {
+    let fault = |member| UnreadableRecord { seq, member };
     let payload = Payload {
-        value: envelope.get("payload").ok_or(fault("payload"))?,
+        value: payload,
         seq,
     };
     let event = match event_type {
@@ -110,12 +140,7 @@ pub fn control_entry(seq: u64, envelope: &Value) -> Result<ControlEntry, Unreada
             member: payload.member()?,
         },
     };
-    Ok(ControlEntry::Membership(MembershipRecord::new(
-        Seal::grant(),
-        seq,
-        event_time,
-        event,
-    )))
+    Ok(MembershipRecord::new(Seal::grant(), seq, event_time, event))
 }
 
 /// A membership record's payload, read member by member.

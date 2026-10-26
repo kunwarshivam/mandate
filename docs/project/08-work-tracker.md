@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document, one page. Updated at the end of every working session |
-| **Last updated** | 2026-10-21, session close: an autonomous coordinator session repaired `main`'s four red gates (DEC-2632), took `cell-demo-web` off the per-PR path so merges could resume at all (DEC-2634), and landed seventeen PRs across lanes LV, X, V2, L1, TW, AH, I2 and D1. DEC-917 and DEC-2635 narrow ES-22's split guard for a crate's `tests/` directory and for J1. The M5, M6 and M8 rows, the Next list and the log were trued |
+| **Last updated** | 2026-10-26 06:00 UTC: the coordinator session that took over from [the handover](handover-2026-10-26.md) landed thirteen PRs (passkey enrolment, the trade loop's browser spec and driver, the fixture fills, the cell's bars, its plan, Alpaca connect, the approvers fold), fixed the cell's API startup on `main` (DEC-2132), and recorded DEC-2131. The handover holds the open PRs and the next builds |
 
 Where the project stands, what is waiting on whom, and what comes next, on one page. How the work
 ran, with every PR number, lives in [11-work-log.md](11-work-log.md). Plans live in
@@ -45,10 +45,9 @@ row 14): an approved PR merges right after its independent review, without waiti
 
 ## Next, in order
 
-1. **The first paper trade.** The paper path's code is complete through E3 and every E2
-   prerequisite is verified satisfied; what remains is the founder's run (E2), which waits for
-   the founder's explicit confirmation (DEC-450; record the open-orders read after the fill,
-   DEC-878).
+1. **The product flow.** See [the handover](handover-2026-10-26.md) and [the product-flow
+   map](product-flow-map.md): the founder's whole autonomous agent lifecycle on the managed cell,
+   blockers X1–X8, owners, and every founder decision of 2026-10-25/26.
 2. **The first live trade** (DEC-529, target 2026-10-23, deadline 2026-11-02): every code row is
    merged and the agent rehearsal passes; what remains is the founder's R0 run, the DEC-529
    live-door items, R23, and the founder's timing call on E6-15 slice C.
@@ -75,7 +74,9 @@ Streams that touch different crates run in parallel; reviews and merges run one 
 - **Readings left Proposed**, on which agents take the most conservative option meanwhile:
   DEC-104 item 5; DEC-129 items 25 to 27; DEC-250; DEC-265 item 1; DEC-266 item 4; DEC-285
   item 6; DEC-476 item 7 (which model reads the owner's words at `/agents/new`, through which
-  route, its spend cap and data terms); DEC-480 (acting from a message).
+  route, its spend cap and data terms); DEC-480 (acting from a message). The founder accepted
+  [DEC-2355](decisions/DEC-2355.md) on 2026-10-25 (alert once per resting set; lane LV implements
+  it).
 - **E21-2's long-running process** ([DEC-968](decisions/DEC-968.md), claim #1424): item 9, one
   PR over ES-13's 400 lines instead of DEC-77's two; and item 6's hook in an R0 file (a
   production-cycle constructor that takes its journal stage) before the process can host a real

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { type Fetch, OPERATIONS, createWorkspaceClient } from "./client";
 import { type CommandScope, prepareApprovalResponse, prepareConfirm, prepareOwnerCommand } from "./commands";
 import { createMockServer } from "./mock-server";
-import { WEB_OPERATIONS, operationFor } from "./operations";
+import { NOT_COMMANDS, WEB_OPERATIONS, operationFor } from "./operations";
 import { type ApiView, loadApi } from "./read-models";
 import type { Operation } from "./types";
 import { prepareCreateVersion, readConfirmation, versionCreated } from "./versions";
@@ -27,7 +27,9 @@ const shape = (route: string) => route.replace(/\{[a-z_]+\}/g, "{}");
 
 /**
  * Every `METHOD /path` the spec's operation tables and §5 headings document under the workspace
- * prefix, with its query members. A `.../resume` cell continues the path before it.
+ * prefix, with its query members, the prefix itself dropped where the spec writes it out
+ * (`/v1/workspaces/{ws}/...`); and every `/v1/me/...` route, whole. A `.../resume` cell continues
+ * the path before it.
  */
 function documented(): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
@@ -37,8 +39,9 @@ function documented(): Map<string, Set<string>> {
     if (!method) continue;
     let path = match[2];
     if (path.startsWith(".../")) path = `${last.split(" ")[1].replace(/\/[^/]+$/, "")}/${path.slice(4)}`;
-    const [route, query = ""] = path.split("?");
-    if (route.startsWith("/v1/")) continue;
+    const [full, query = ""] = path.split("?");
+    const route = full.replace(/^\/v1\/workspaces\/\{ws\}(?=\/)/, "");
+    if (route.startsWith("/v1/") && !route.startsWith("/v1/me/")) continue;
     last = `${method} ${route}`;
     const key = `${method} ${shape(route)}`;
     const names = out.get(key) ?? new Set<string>();
@@ -109,7 +112,7 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
 
   it("lists every command the client can prepare, and no order ticket (DEC-528)", () => {
     for (const operation of Object.keys(OPERATIONS)) expect(WEB_OPERATIONS.some((op) => op.id === operation && op.method === "POST")).toBe(true);
-    const posts = WEB_OPERATIONS.filter((op) => op.method === "POST").map((op) => op.id);
+    const posts = WEB_OPERATIONS.filter((op) => op.method === "POST" && !NOT_COMMANDS.has(op.id)).map((op) => op.id);
     expect(posts.sort()).toEqual(Object.keys(OPERATIONS).sort());
   });
 
@@ -130,6 +133,11 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
     expect(operationFor("GET", `/v1/workspaces/${WS}/agents/`, WS)).toBeNull();
     expect(operationFor("GET", `/v2/workspaces/${WS}/agents`, WS)).toBeNull();
     expect(operationFor("POST", `/v1/workspaces/${WS}/agents/agt_1/orders`, WS)).toBeNull();
+    expect(operationFor("POST", `/v1/workspaces/${WS}/step-up/challenges`, WS)?.id).toBe("step_up_challenge");
+    expect(operationFor("GET", "https://api.owlhead.ai/v1/me/session", WS)?.id).toBe("session");
+    expect(operationFor("GET", "/v1/me/session?x=1", WS)).toBeNull();
+    expect(operationFor("POST", "/v1/me/session", WS)).toBeNull();
+    expect(operationFor("GET", `/v1/workspaces/${WS}/v1/me/session`, WS)).toBeNull();
   });
 
   it("makes no request outside the table while loading the workspace and sending every command and answer", async () => {
@@ -145,6 +153,15 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
         const prepared = prepareApprovalResponse(client, approval, response, { screen: "D6", environment: scope.environment, shown: ["line"], modelOutputExpanded: false });
         if (prepared.ok) for (const command of prepared.commands) sent.push(await client.send(command));
       }
+    const pendingOne = view.approvals.find((a) => a.state === "pending");
+    if (!pendingOne) throw new Error("the approvals fixture has an open request");
+    const challenge = await client.askChallenge({ kind: "approve", digest: pendingOne.content_hash });
+    expect(challenge.ok).toBe(true);
+    expect((await client.readSession()).ok).toBe(true);
+    if (challenge.ok) {
+      const confirmed = prepareApprovalResponse(client, pendingOne, "approve", { screen: "D6", environment: scope.environment, shown: ["line"], modelOutputExpanded: false }, challenge.value);
+      if (confirmed.ok) for (const command of confirmed.commands) sent.push(await client.send(command));
+    }
     sent.push(await client.send(prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification: "risk_increasing" } })));
     const created = await client.send(prepareCreateVersion(client, buildWorkspace("normal").agents[0].mandate));
     const version = versionCreated(created.ok ? created.body : null);
@@ -155,8 +172,9 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
     expect(sent.length).toBeGreaterThan(KINDS.length);
     expect(calls.length).toBeGreaterThan(10);
     for (const call of calls) {
-      expect(call.url.startsWith("https://api.owlhead.ai/v1/workspaces/"), call.url).toBe(true);
-      expect(operationFor(call.method, call.url, WS), `${call.method} ${call.url}`).not.toBeNull();
+      const op = operationFor(call.method, call.url, WS);
+      expect(op, `${call.method} ${call.url}`).not.toBeNull();
+      expect(call.url.startsWith(op?.outside ? "https://api.owlhead.ai/v1/me/" : "https://api.owlhead.ai/v1/workspaces/"), call.url).toBe(true);
     }
   });
 
@@ -173,6 +191,18 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
     for (const response of ["approve", "skip"] as const) {
       const prepared = prepareApprovalResponse(client, approval, response, { screen: "D6", environment: scope.environment, shown: ["line"], modelOutputExpanded: true });
       if (prepared.ok) for (const c of prepared.commands) bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
+    }
+    const challenge = await client.askChallenge({ kind: "approve", digest: approval.content_hash });
+    if (!challenge.ok) throw new Error("the mock issues a challenge");
+    const confirmed = prepareApprovalResponse(client, approval, "approve", { screen: "D6", environment: scope.environment, shown: ["line"], modelOutputExpanded: true }, challenge.value);
+    if (confirmed.ok) for (const c of confirmed.commands) bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
+    const evidence = JSON.parse(readFileSync(join(SCHEMAS, "..", "envelope.schema.json"), "utf8")) as { $defs: { StepUpEvidence: Schema } };
+    const withStepUp = bodies.filter((b) => b.body.step_up !== null && b.body.step_up !== undefined);
+    expect(withStepUp).toHaveLength(1);
+    for (const { body } of withStepUp) {
+      const step = body.step_up as Record<string, unknown>;
+      expect(Object.keys(step).sort()).toEqual([...(evidence.$defs.StepUpEvidence.required ?? [])].sort());
+      expect(evidence.$defs.StepUpEvidence.properties?.method.enum).toContain(step.method);
     }
     for (const classification of ["risk_increasing", "risk_reducing", "neutral"] as const) {
       const c = prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification } });

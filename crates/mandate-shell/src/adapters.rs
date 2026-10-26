@@ -26,9 +26,10 @@
 //! | [`AlpacaConnector`] | `mandate_alpaca::TradingClient` over a `TradingTransport` (stream K) |
 //! | [`ExecutorReconciler`] | `mandate_executor::reconcile` on the connector's snapshot (E7-3) |
 //!
-//! The stored daily bars and typed closes the run trusts are read by [`crate::paper`] through
-//! `trusted_daily_bars` and `trusted_daily_closes` (`mandate_marketdata::dataset::read_manifest`
-//! and `dataset::read`, E2-1, E2-2), not by a stage: the model host owns every signal, and the
+//! The stored daily figures and typed closes the run trusts are read by [`crate::paper`] through
+//! `trusted_daily_liquidity` and `trusted_daily_closes`, `mandate_bars`'s one trust rule (DEC-2385,
+//! DEC-2274)
+//! over `mandate_marketdata`'s datasets (E2-1, E2-2), not by a stage: the model host owns every signal, and the
 //! shell computes none (DEC-475 items 1 and 6, DEC-503).
 
 use std::cell::{Ref, RefCell};
@@ -53,9 +54,7 @@ use mandate_journal::{
     AppendOutcome, ArtifactRef, ArtifactSource, ArtifactStore, MemoryJournal, StoredEvent, StreamId,
 };
 use mandate_journal_pg::PgJournal;
-use mandate_marketdata::dataset;
-use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
-use mandate_marketdata::model::{Bar, Kind, Records, TimeUnit, Timeframe};
+use mandate_liquidity::DailyLiquidity;
 use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
 use mandate_risk::{Decision, FlattenInitiator, FlattenInput, agent_flatten};
 use mandate_robinhood::Tools;
@@ -66,9 +65,9 @@ use mandate_runtime::{
 };
 use mandate_spec::policy::PolicyLevel;
 use mandate_spec::{ValidatedMandate, ValidationContext};
-use mandate_time::{Date, ExchangeCalendar, TradingCalendar, UtcNanos};
+use mandate_time::{Date, TradingCalendar, UtcNanos};
 
-use crate::approvers::{Members, resolve};
+use crate::approvers::{ApproverSource, Members, resolve};
 use crate::control::Governance;
 use crate::envelope::account_stream;
 use crate::error::Cause;
@@ -882,6 +881,10 @@ impl MandateSource for SpecMandate {
         Ok(Admitted {
             environment: view.approval.environment,
             view,
+            approvers: ApproverSource {
+                references: document.autonomy.approval.approvers.clone(),
+                connection: document.connection_id.as_str().to_owned(),
+            },
             governed: context.governance.as_ref().map(|governance| GovernedRefs {
                 policy_set: governance.policy_set.content_hash,
                 model_registry: governance.model_registry.content_hash,
@@ -890,129 +893,40 @@ impl MandateSource for SpecMandate {
     }
 }
 
-/// The daily bars the run trusts, exactly as stored and only once `trusted` admits the dataset at
-/// `now`, so the paper assembly's liquidity facts read the same span as the model host's closes.
-pub(crate) fn trusted_daily_bars(
+/// The daily liquidity figures the run trusts: `mandate_bars`'s one reading (DEC-2274) over its
+/// trust check (DEC-2385), so the paper assembly's liquidity facts read the same span as the model
+/// host's closes, and the same figures the runtime and the executor read.
+pub(crate) fn trusted_daily_liquidity(
     dir: &Path,
     symbol: &str,
     now: UtcNanos,
-) -> Result<Vec<Bar>, Cause> {
-    let inspection = inspect::inspect(dir)?;
-    trusted(&inspection, symbol, now)?;
-    listed_bars(dir, inspection.dataset.kind())
+) -> Result<DailyLiquidity, Cause> {
+    Ok(mandate_bars::trusted_daily_liquidity(dir, symbol, now)?)
 }
 
-/// The pinned symbol's closes, each with its session, exactly as stored and only once `trusted`
-/// admits the dataset at `now`: the span the liquidity facts read, handed to the model host
-/// (DEC-846 item 2).
+/// The pinned symbol's closes, each with its session, as `mandate_bars`'s trust check admits them
+/// (DEC-846 item 2, DEC-2385).
 pub(crate) fn trusted_daily_closes(
     dir: &Path,
     symbol: &str,
     now: UtcNanos,
 ) -> Result<Vec<(Date, Price)>, Cause> {
-    let inspection = inspect::inspect(dir)?;
-    trusted(&inspection, symbol, now)?;
-    listed_days(dir, inspection.dataset.kind())?
-        .into_iter()
-        .map(|(day, bar)| Ok((day, Price::parse(bar.close.as_str())?)))
-        .collect()
-}
-
-fn listed_bars(dir: &Path, kind: Kind) -> Result<Vec<Bar>, Cause> {
-    Ok(listed_days(dir, kind)?
-        .into_iter()
-        .map(|(_, bar)| bar)
-        .collect())
-}
-
-/// One bar per day the manifest lists with a file, in its date order, with that day.
-fn listed_days(dir: &Path, kind: Kind) -> Result<Vec<(Date, Bar)>, Cause> {
-    let (_, days) = dataset::read_manifest(dir)?;
-    let mut listed_bars = Vec::new();
-    for listed in days.iter().filter(|listed| listed.file.is_some()) {
-        let path = dir.join(dataset::partition_name(listed.day));
-        match dataset::read(&path, kind)? {
-            Records::Bars(bars) => match <[Bar; 1]>::try_from(bars) {
-                Ok([bar]) => listed_bars.push((listed.day, bar)),
-                Err(_) => return Err(untrusted("a listed day does not hold exactly one bar")),
-            },
-            Records::Trades(_) | Records::Quotes(_) => {
-                return Err(untrusted("the dataset holds no bars"));
-            }
-        }
-    }
-    Ok(listed_bars)
-}
-
-/// Whether `inspect` found the dataset fit to decide on: the pinned symbol's daily bars through
-/// the last completed equity session, every partition intact, no trading day without its bar, and
-/// no split inside the span, whose prices the shell may not adjust (DEC-138 item 3). `inspect`'s
-/// quality warnings are the vendor's records as stored (DEC-89) and are not refusals.
-fn trusted(inspection: &Inspection, symbol: &str, now: UtcNanos) -> Result<(), Cause> {
-    let daily = Kind::Bars(Timeframe::new(1, TimeUnit::Day)?);
-    let latest = latest_completed_equity_day(now)?;
-    let refusal = if inspection.dataset.symbol().as_str() != symbol {
-        Some("the dataset is another instrument's")
-    } else if inspection.dataset.kind() != daily {
-        Some("the dataset is not daily bars")
-    } else if !inspection.problems.is_empty() {
-        Some("a partition cannot be trusted")
-    } else if !inspection.duplicates.is_empty() {
-        Some("two bars share a start")
-    } else if !inspection.coverage.empty.is_empty() {
-        Some("a trading day has no bar")
-    } else if inspection.gaps.iter().any(|gap| {
-        gap.stretches
-            .iter()
-            .any(|stretch| matches!(stretch.class, GapClass::TrueGap | GapClass::Unclassified))
-    }) {
-        Some("a trading day was never fetched")
-    } else if inspection.coverage.span.map(|span| span.last()) != Some(latest) {
-        Some("the dataset does not end on the last completed equity session")
-    } else if split_inside(inspection) {
-        Some("a split lies inside the span, or the corporate actions do not cover it")
-    } else {
-        None
-    };
-    match refusal {
-        Some(what) => Err(untrusted(what)),
-        None => Ok(()),
-    }
-}
-
-/// The newest US-equity regular session whose end is not after the injected run clock. Calendar
-/// data, session hours, holidays, and early closes all come from `mandate-time`; the shell invents
-/// none of them, and the session is `mandate-time`'s
-/// [`ExchangeCalendar::last_completed_regular_session`], the one the model host names too. A clock
-/// before the calendar's first completed session, or past its range (DEC-517), is untrusted.
-fn latest_completed_equity_day(now: UtcNanos) -> Result<Date, Cause> {
-    let cannot_name = || untrusted("the equity calendar cannot name the last completed session");
-    ExchangeCalendar::us_equities()
-        .map_err(|_| cannot_name())?
-        .last_completed_regular_session(now)
-        .map_err(|_| cannot_name())?
-        .ok_or_else(cannot_name)
-}
-
-/// Whether a split could have moved a close inside the span. Actions recorded for only part of the
-/// span say nothing about the rest, so they count as one.
-fn split_inside(inspection: &Inspection) -> bool {
-    match &inspection.corporate_actions {
-        ActionsReport::NotApplicable | ActionsReport::NotRecorded => false,
-        ActionsReport::Incomplete(_) => true,
-        ActionsReport::Applied { recorded, .. } => match inspection.coverage.span {
-            Some(span) => recorded
-                .actions
-                .splits
-                .iter()
-                .any(|split| split.ex_date > span.first() && split.ex_date <= span.last()),
-            None => false,
-        },
-    }
+    Ok(mandate_bars::trusted_daily_closes(dir, symbol, now)?)
 }
 
 pub(crate) fn untrusted(what: &'static str) -> Cause {
     Cause::Untrusted { what }
+}
+
+/// Whether `view` is the run's own admitted view `own`, but for approvers narrowed to a subset of
+/// its own by a later control-stream read (DEC-2384 item 6): narrowing removes approvers and
+/// changes nothing sizing or classification reads, while any other difference, a wider approver
+/// set included, is not the admitted view.
+pub(crate) fn admitted_view(own: MandateView, view: &MandateView) -> bool {
+    let narrowed = view.approval.approvers.is_subset(&own.approval.approvers);
+    let mut own = own;
+    own.approval.approvers.clone_from(&view.approval.approvers);
+    narrowed && own == *view
 }
 
 /// `mandate-builder`'s `conviction_linear` sizing and §6 classification.
@@ -1025,7 +939,7 @@ impl Sizing for BuilderPlan {
     fn size(&self, view: &MandateView, inputs: &SignalInputs) -> Result<Option<Proposal>, Cause> {
         let context = required_context(&self.context)?;
         let validated = validated_mandate(&self.mandate, context)?;
-        if runtime_view(&validated, context)? != *view {
+        if !admitted_view(runtime_view(&validated, context)?, view) {
             return Err(Cause::Absent {
                 what: "the admitted mandate view used for sizing",
             });
@@ -1047,7 +961,7 @@ impl Classifier for BuilderPlan {
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> Result<Classified, Cause> {
         let context = required_context(&self.context)?;
         let validated = validated_mandate(&self.mandate, context)?;
-        if runtime_view(&validated, context)? != *view {
+        if !admitted_view(runtime_view(&validated, context)?, view) {
             return Err(Cause::Absent {
                 what: "the admitted mandate view used for classification",
             });
@@ -1305,7 +1219,7 @@ impl Sink for ExecutorSink {
                     instrument: instrument.clone(),
                     side: *side,
                     qty: *qty,
-                    limit: Some(*limit),
+                    limit: *limit,
                     purpose: executor_purpose(*purpose),
                     protection: execution.protection.map(|prices| {
                         mandate_executor::ProtectionPrices {
@@ -1921,26 +1835,18 @@ fn assembled(
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet, VecDeque};
-    use std::fs;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::rc::Rc;
 
     use super::{
         AdvisoryGateContext, AdvisoryOrderFacts, CoreExecutor, DecisionContext, ExecutorContext,
         ExecutorMandateView, ExecutorOrder, ExecutorProtection, ExecutorSink, Protection,
         ProtectionProbePorts, RiskGate, RunContext, StoreJournal, is_unattributed_exit,
-        listed_days, working_order_of,
+        working_order_of,
     };
-    use mandate_canon::{DecStr, Value};
+    use mandate_canon::Value;
     use mandate_journal::AppendOutcome;
     use mandate_journal::{ArtifactSource, ArtifactStore};
-    use mandate_marketdata::actions::{RecordedActions, write_actions};
-    use mandate_marketdata::dataset::{Store, partition_name};
-    use mandate_marketdata::inspect::{self, ActionsReport, Problem};
-    use mandate_marketdata::model::{
-        AssetClass, Bar, CorporateActions, DatasetId, DayRange, Feed, Kind, Records, Split,
-        SplitRatio, Symbol, TimeUnit, Timeframe,
-    };
     use mandate_num::{Price, Qty};
     use mandate_ports::proposed_order;
     use mandate_runtime::{
@@ -2545,7 +2451,7 @@ mod tests {
                     instrument: instrument.clone(),
                     side: mandate_accounting::Side::Buy,
                     qty: Qty::parse("1").map_err(|e| e.to_string())?,
-                    limit: Price::parse("255.2").map_err(|e| e.to_string())?,
+                    limit: Some(Price::parse("255.2").map_err(|e| e.to_string())?),
                     purpose: RuntimePurpose::Open,
                 },
                 execution: Some(OrderExecution {
@@ -2597,7 +2503,7 @@ mod tests {
                     instrument: instrument.clone(),
                     side,
                     qty: Qty::parse("1").map_err(|e| e.to_string())?,
-                    limit: Price::parse("255.2").map_err(|e| e.to_string())?,
+                    limit: Some(Price::parse("255.2").map_err(|e| e.to_string())?),
                     purpose,
                 },
                 execution,
@@ -2769,192 +2675,11 @@ mod tests {
         SubmitOrder, TimeInForce,
     };
 
-    use super::{Disconnected, split_inside, trusted, trusted_daily_closes};
+    use super::Disconnected;
     use crate::error::Cause;
-
-    /// A scratch directory, removed when dropped.
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new(name: &str) -> Result<Scratch, String> {
-            let path = std::env::temp_dir().join(format!(
-                "mandate-shell-adapters-{name}-{}",
-                std::process::id()
-            ));
-            let _ = fs::remove_dir_all(&path);
-            fs::create_dir_all(&path).map_err(|e| e.to_string())?;
-            Ok(Scratch(path))
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
 
     fn day(text: &str) -> Result<Date, String> {
         Date::parse(text).map_err(|e| e.to_string())
-    }
-
-    fn as_of() -> Result<UtcNanos, String> {
-        UtcNanos::parse("2026-09-25T20:00:00.000000000Z").map_err(|error| error.to_string())
-    }
-
-    fn dataset(symbol: &str, timeframe: &str) -> Result<DatasetId, String> {
-        DatasetId::new(
-            AssetClass::UsEquity,
-            Feed::Iex,
-            Kind::Bars(timeframe.parse().map_err(|e| format!("{e:?}"))?),
-            Symbol::parse(symbol).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())
-    }
-
-    fn bar(on: Date, close: &str) -> Result<Bar, String> {
-        let dec = |text: &str| DecStr::parse(text).map_err(|e| e.to_string());
-        Ok(Bar {
-            start: UtcNanos::parse_rfc3339(&format!("{on}T04:00:00Z"))
-                .map_err(|e| e.to_string())?,
-            open: dec(close)?,
-            high: dec(close)?,
-            low: dec(close)?,
-            close: dec(close)?,
-            volume: dec("50000000")?,
-            vwap: dec(close)?,
-            trade_count: 400_000,
-        })
-    }
-
-    /// One daily bar per weekday from 2026-08-24, a Monday, with these closes; `skip` names
-    /// weekdays given no partition at all, and `empty` weekdays listed with no bar.
-    fn write(
-        root: &Path,
-        id: &DatasetId,
-        closes: &[&str],
-        skip: &[&str],
-        empty: &[&str],
-    ) -> Result<PathBuf, String> {
-        let store = Store::new(root);
-        let mut on = day("2026-08-24")?;
-        for close in closes {
-            while on.is_weekend()
-                || skip.contains(&on.to_string().as_str())
-                || empty.contains(&on.to_string().as_str())
-            {
-                if empty.contains(&on.to_string().as_str()) {
-                    store
-                        .put_day(id, on, &Records::Bars(Vec::new()))
-                        .map_err(|e| e.to_string())?;
-                }
-                on = on.next().map_err(|e| e.to_string())?;
-            }
-            store
-                .put_day(id, on, &Records::Bars(vec![bar(on, close)?]))
-                .map_err(|e| e.to_string())?;
-            on = on.next().map_err(|e| e.to_string())?;
-        }
-        Ok(store.dataset_dir(id))
-    }
-
-    fn rising() -> Vec<String> {
-        (231..256).map(|whole| format!("{whole}.20")).collect()
-    }
-
-    fn aapl(root: &Path, skip: &[&str], empty: &[&str]) -> Result<PathBuf, String> {
-        let closes = rising();
-        let closes: Vec<&str> = closes.iter().map(String::as_str).collect();
-        write(root, &dataset("AAPL", "1Day")?, &closes, skip, empty)
-    }
-
-    fn untrusted(answer: Result<Vec<(Date, Price)>, Cause>) -> Result<&'static str, String> {
-        match answer {
-            Err(Cause::Untrusted { what }) => Ok(what),
-            other => Err(format!("expected an untrusted refusal, got {other:?}")),
-        }
-    }
-
-    /// Storage order and time order differ: the partitions are written newest day first, so only
-    /// a read in the manifest's date order answers oldest first.
-    #[test]
-    fn stored_closes_are_read_oldest_first_exactly_as_stored() -> Result<(), String> {
-        let scratch = Scratch::new("read")?;
-        let id = dataset("AAPL", "1Day")?;
-        let store = Store::new(&scratch.0);
-        let closes = rising();
-        let mut days = Vec::new();
-        let mut on = day("2026-08-24")?;
-        while days.len() < closes.len() {
-            if !on.is_weekend() {
-                days.push(on);
-            }
-            on = on.next().map_err(|e| e.to_string())?;
-        }
-        for (on, close) in days.iter().zip(&closes).rev() {
-            store
-                .put_day(&id, *on, &Records::Bars(vec![bar(*on, close)?]))
-                .map_err(|e| e.to_string())?;
-        }
-        store
-            .put_day(&id, day("2026-08-29")?, &Records::Bars(Vec::new()))
-            .map_err(|e| e.to_string())?;
-        let read = trusted_daily_closes(&store.dataset_dir(&id), "AAPL", as_of()?)
-            .map_err(|e| e.to_string())?;
-        let expected: Vec<String> = closes.iter().map(|c| canonical(c)).collect();
-        let read: Vec<String> = read.iter().map(|(_, close)| close.to_string()).collect();
-        assert_eq!(read, expected);
-        Ok(())
-    }
-
-    #[test]
-    fn stored_bars_must_end_on_the_last_completed_equity_session() -> Result<(), String> {
-        let scratch = Scratch::new("stale")?;
-        let dir = aapl(&scratch.0, &[], &[])?;
-        let before_monday_close =
-            UtcNanos::parse("2026-09-28T19:59:59.000000000Z").map_err(|e| e.to_string())?;
-        let fresh =
-            trusted_daily_closes(&dir, "AAPL", before_monday_close).map_err(|e| e.to_string())?;
-        assert_eq!(
-            fresh.len(),
-            25,
-            "Friday remains the last completed session until Monday's regular close"
-        );
-        let after_monday_close =
-            UtcNanos::parse("2026-09-28T20:00:00.000000000Z").map_err(|e| e.to_string())?;
-        let what = untrusted(trusted_daily_closes(&dir, "AAPL", after_monday_close))?;
-        assert_eq!(
-            what,
-            "the dataset does not end on the last completed equity session"
-        );
-        Ok(())
-    }
-
-    /// Review round 1, major 2: two bars on one listed day, newest first, would put the closes out
-    /// of time order and make the windows span fewer days than the envelope names.
-    #[test]
-    fn a_listed_day_holding_more_than_one_bar_is_refused() -> Result<(), String> {
-        let scratch = Scratch::new("two-bars")?;
-        let dir = aapl(&scratch.0, &["2026-08-26"], &[])?;
-        let on = day("2026-08-26")?;
-        let at = |hour: &str, close: &str| -> Result<Bar, String> {
-            Ok(Bar {
-                start: UtcNanos::parse_rfc3339(&format!("{on}T{hour}:00:00Z"))
-                    .map_err(|e| e.to_string())?,
-                ..bar(on, close)?
-            })
-        };
-        Store::new(&scratch.0)
-            .put_day(
-                &dataset("AAPL", "1Day")?,
-                on,
-                &Records::Bars(vec![at("09", "999.99")?, at("04", "111.11")?]),
-            )
-            .map_err(|e| e.to_string())?;
-        let after_last_listed =
-            UtcNanos::parse("2026-09-28T20:00:00.000000000Z").map_err(|e| e.to_string())?;
-        let what = untrusted(trusted_daily_closes(&dir, "AAPL", after_last_listed))?;
-        assert_eq!(what, "a listed day does not hold exactly one bar");
-        Ok(())
     }
 
     /// Review round 1, major 3: the only connector the shipped binary holds refuses every request
@@ -2991,233 +2716,6 @@ mod tests {
                 })
             );
         }
-        Ok(())
-    }
-
-    #[test]
-    fn another_instruments_bars_are_refused() -> Result<(), String> {
-        let scratch = Scratch::new("symbol")?;
-        let dir = aapl(&scratch.0, &[], &[])?;
-        let what = untrusted(trusted_daily_closes(&dir, "MSFT", as_of()?))?;
-        assert_eq!(what, "the dataset is another instrument's");
-        Ok(())
-    }
-
-    #[test]
-    fn bars_that_are_not_daily_are_refused() -> Result<(), String> {
-        let scratch = Scratch::new("hourly")?;
-        let dir = write(
-            &scratch.0,
-            &dataset("AAPL", "1Hour")?,
-            &["231.20"],
-            &[],
-            &[],
-        )?;
-        let what = untrusted(trusted_daily_closes(&dir, "AAPL", as_of()?))?;
-        assert_eq!(what, "the dataset is not daily bars");
-        Ok(())
-    }
-
-    #[test]
-    fn an_altered_partition_is_refused() -> Result<(), String> {
-        let scratch = Scratch::new("altered")?;
-        let dir = aapl(&scratch.0, &[], &[])?;
-        let path = dir.join(partition_name(day("2026-08-26")?));
-        let mut bytes = fs::read(&path).map_err(|e| e.to_string())?;
-        bytes.push(0);
-        fs::write(&path, bytes).map_err(|e| e.to_string())?;
-        let what = untrusted(trusted_daily_closes(&dir, "AAPL", as_of()?))?;
-        assert_eq!(what, "a partition cannot be trusted");
-        Ok(())
-    }
-
-    #[test]
-    fn two_bars_with_one_start_are_refused() -> Result<(), String> {
-        let scratch = Scratch::new("duplicate")?;
-        let dir = aapl(&scratch.0, &["2026-08-26"], &[])?;
-        let on = day("2026-08-26")?;
-        Store::new(&scratch.0)
-            .put_day(
-                &dataset("AAPL", "1Day")?,
-                on,
-                &Records::Bars(vec![bar(on, "233.20")?, bar(on, "233.30")?]),
-            )
-            .map_err(|e| e.to_string())?;
-        let what = untrusted(trusted_daily_closes(&dir, "AAPL", as_of()?))?;
-        assert_eq!(what, "two bars share a start");
-        Ok(())
-    }
-
-    #[test]
-    fn a_trading_day_listed_without_a_bar_is_refused() -> Result<(), String> {
-        let scratch = Scratch::new("empty")?;
-        let dir = aapl(&scratch.0, &[], &["2026-08-26"])?;
-        let what = untrusted(trusted_daily_closes(&dir, "AAPL", as_of()?))?;
-        assert_eq!(what, "a trading day has no bar");
-        Ok(())
-    }
-
-    #[test]
-    fn a_trading_day_never_fetched_is_refused() -> Result<(), String> {
-        let scratch = Scratch::new("gap")?;
-        let dir = aapl(&scratch.0, &["2026-08-26"], &[])?;
-        let what = untrusted(trusted_daily_closes(&dir, "AAPL", as_of()?))?;
-        assert_eq!(what, "a trading day was never fetched");
-        Ok(())
-    }
-
-    #[test]
-    fn a_split_inside_the_span_or_actions_short_of_it_are_refused() -> Result<(), String> {
-        let scratch = Scratch::new("split")?;
-        let dir = aapl(&scratch.0, &[], &[])?;
-        let mut inspection = inspect::inspect(&dir).map_err(|e| e.to_string())?;
-        assert!(trusted(&inspection, "AAPL", as_of()?).is_ok());
-        let span = inspection.coverage.span.ok_or("no span")?;
-        let symbol = Symbol::parse("AAPL").map_err(|e| e.to_string())?;
-        let split = |ex_date: Date| -> Result<Split, String> {
-            Ok(Split {
-                id: "split".to_owned(),
-                ex_date,
-                ratio: SplitRatio::new(4, 1).map_err(|e| e.to_string())?,
-            })
-        };
-        let with = |splits: Vec<Split>| RecordedActions {
-            range: span,
-            actions: CorporateActions {
-                splits,
-                ..CorporateActions::none(symbol.clone())
-            },
-        };
-        let cases = [
-            (span.first(), false),
-            (span.first().next().map_err(|e| e.to_string())?, true),
-            (span.last(), true),
-            (span.last().next().map_err(|e| e.to_string())?, false),
-        ];
-        for (ex_date, refused) in cases {
-            inspection.corporate_actions = ActionsReport::Applied {
-                recorded: with(vec![split(ex_date)?]),
-                as_of: span.last(),
-            };
-            assert_eq!(split_inside(&inspection), refused, "{ex_date}");
-        }
-        inspection.corporate_actions = ActionsReport::Applied {
-            recorded: with(Vec::new()),
-            as_of: span.last(),
-        };
-        assert!(!split_inside(&inspection));
-        inspection.corporate_actions = ActionsReport::Incomplete(with(Vec::new()));
-        assert!(split_inside(&inspection));
-        assert!(matches!(
-            trusted(&inspection, "AAPL", as_of()?),
-            Err(Cause::Untrusted {
-                what: "a split lies inside the span, or the corporate actions do not cover it"
-            })
-        ));
-        inspection.corporate_actions = ActionsReport::Applied {
-            recorded: with(vec![split(span.last())?]),
-            as_of: span.last(),
-        };
-        inspection.coverage.span = None;
-        assert!(!split_inside(&inspection));
-        Ok(())
-    }
-
-    #[test]
-    fn stored_actions_covering_the_span_with_no_split_are_trusted() -> Result<(), String> {
-        let scratch = Scratch::new("actions")?;
-        let dir = aapl(&scratch.0, &[], &[])?;
-        let span =
-            DayRange::new(day("2026-08-24")?, day("2026-09-25")?).map_err(|e| e.to_string())?;
-        let symbol = Symbol::parse("AAPL").map_err(|e| e.to_string())?;
-        write_actions(
-            &dir,
-            &RecordedActions {
-                range: span,
-                actions: CorporateActions::none(symbol),
-            },
-        )
-        .map_err(|e| e.to_string())?;
-        let closes = trusted_daily_closes(&dir, "AAPL", as_of()?).map_err(|e| e.to_string())?;
-        assert_eq!(closes.len(), 25);
-        Ok(())
-    }
-
-    /// `mandate-num`'s canonical text of a decimal: trailing fractional zeros and a bare point
-    /// dropped, and nothing else, so `"100"` stays `"100"` (#248 review, minor 2).
-    fn canonical(text: &str) -> String {
-        match text.split_once('.') {
-            Some((whole, places)) => match places.trim_end_matches('0') {
-                "" => whole.to_owned(),
-                kept => format!("{whole}.{kept}"),
-            },
-            None => text.to_owned(),
-        }
-    }
-
-    /// The closes as prices, in canonical text (`Price` refuses a trailing fractional zero).
-    fn prices(closes: &[String]) -> Result<Vec<Price>, String> {
-        closes
-            .iter()
-            .map(|close| Price::parse(&canonical(close)).map_err(|e| e.to_string()))
-            .collect()
-    }
-
-    /// #248 review, minor 2: a close whose digits end in 0 is read as itself. The old helper
-    /// trimmed every trailing `0`, so `"100"` became `"1"`.
-    #[test]
-    fn a_close_ending_in_zero_keeps_its_value() -> Result<(), String> {
-        let closes = ["100", "250.50", "1000.000", "0.10", "99.9"].map(str::to_owned);
-        let read: Vec<String> = prices(&closes)?.iter().map(ToString::to_string).collect();
-        assert_eq!(read, ["100", "250.5", "1000", "0.1", "99.9"]);
-        Ok(())
-    }
-
-    /// #241 review round 2, minor 3: a partition on disk that the manifest does not list is never
-    /// read. `inspect` reports it as unlisted, so the whole dataset is refused before any partition
-    /// is read, and the stray close cannot reach the windows.
-    #[test]
-    fn a_partition_the_manifest_does_not_list_is_never_read() -> Result<(), String> {
-        let scratch = Scratch::new("unlisted")?;
-        let dir = aapl(&scratch.0, &[], &[])?;
-        let listed = dir.join(partition_name(day("2026-08-26")?));
-        let stray = dir.join(partition_name(day("2026-08-29")?));
-        fs::copy(&listed, &stray).map_err(|e| e.to_string())?;
-        let problems = inspect::inspect(&dir).map_err(|e| e.to_string())?.problems;
-        assert_eq!(
-            problems,
-            vec![Problem::Unlisted {
-                file: "2026-08-29.parquet".to_owned()
-            }],
-            "the one problem `inspect` finds is the unlisted partition (#248 review, minor 1)"
-        );
-        let what = untrusted(trusted_daily_closes(&dir, "AAPL", as_of()?))?;
-        assert_eq!(what, "a partition cannot be trusted");
-        Ok(())
-    }
-
-    /// #248 review, minor 1: the loop in `closes` walks the manifest, not the directory. Called
-    /// past `trusted`, over a directory holding an unlisted partition with a close of its own,
-    /// it reads the listed closes and never the stray.
-    #[test]
-    fn the_closes_are_read_from_the_manifest_and_never_the_directory() -> Result<(), String> {
-        let scratch = Scratch::new("manifest-only")?;
-        let dir = aapl(&scratch.0, &[], &[])?;
-        let elsewhere = Scratch::new("manifest-only-stray")?;
-        let stray = write(&elsewhere.0, &dataset("AAPL", "1Day")?, &["1.23"], &[], &[])?;
-        fs::copy(
-            stray.join(partition_name(day("2026-08-24")?)),
-            dir.join(partition_name(day("2026-08-29")?)),
-        )
-        .map_err(|e| e.to_string())?;
-        let daily = Kind::Bars(Timeframe::new(1, TimeUnit::Day).map_err(|e| e.to_string())?);
-        let read: Vec<String> = listed_days(&dir, daily)
-            .map_err(|e| e.to_string())?
-            .iter()
-            .map(|(_, bar)| bar.close.as_str().to_owned())
-            .collect();
-        let expected: Vec<String> = rising().iter().map(|c| canonical(c)).collect();
-        assert_eq!(read, expected, "the stray 1.23 is never read");
         Ok(())
     }
 

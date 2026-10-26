@@ -376,6 +376,10 @@ pub enum CheckOutcome {
     Failed(Check, ReasonCode),
     /// The gate stopped before this check, so it says nothing about it.
     NotReached(Check),
+    /// The advisory pass skipped part or all of this check (DEC-2378 item 11): what it evaluated
+    /// did not refuse, but it is never reported as passed. The binding gate defers nothing, so it
+    /// never answers this.
+    Deferred(Check),
 }
 
 /// The eight checks of §9.1, in evaluation order.
@@ -851,6 +855,96 @@ pub fn fold_day_trades(input: &DayTradeInput<'_>) -> Result<DayTradeFold, GateEr
 /// unread working universe above all, which is never an allow.
 pub fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
     gate::evaluate(input)
+}
+
+/// A check, or part of one, the cell's runtime's advisory pass may defer to the executor's binding
+/// gate, because nothing journals its facts yet. The binding gate defers none of them.
+///
+/// The first four are skipped (DEC-2378 item 11). The rest are never skipped (DEC-2388 item 8):
+/// the gate evaluates each on whatever its caller gives it, so a refusal still refuses, but a
+/// caller that cannot see the part's fact names it here and the check it belongs to is never
+/// reported passed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Deferred {
+    /// §3.2's instrument items: status, exchange, IPO and PTP, the crypto pair's quote currency,
+    /// and the ETP rule.
+    Eligibility,
+    /// §3.2's price floor and liquidity floors, read from the instrument's bars.
+    LiquidityFloor,
+    /// §9.6's participation caps, read from the trailing and daily volumes.
+    Participation,
+    /// §9.2's day-trade budget, check 8.
+    DayTradeBudget,
+    /// The agent's mode and the risk engine's, and the account's `closing_only` restriction
+    /// (check 1).
+    AgentMode,
+    /// The agent's marked equity, which mandate §5.3's position cap scales by, and the agent's
+    /// instrument restrictions (check 2).
+    AgentEquity,
+    /// Mandate §5.3's re-entry cooldown, read from the agent's last exit fill (check 2).
+    ReentryCooldown,
+    /// §4.4's halt, read from the instrument's status (check 3).
+    Halt,
+    /// §5.3 rules 5, 6 and 8 and the `Unknown`-order rule, read from every agent's working and
+    /// unknown orders on the account (check 4).
+    OtherOrders,
+    /// The quote's ask, which a buy's collar is measured from, and a `stale_mark` restriction
+    /// (check 5).
+    QuoteAsk,
+    /// §9.6's order-to-fill ratio and opposite-fill interval and the mandate's orders per day,
+    /// read from the agent's orders and fills today (check 6).
+    ConductHistory,
+    /// §9.6's self-trade prevention, read from the related accounts' resting orders (check 6).
+    RelatedAccounts,
+    /// §9.5's fee reservation in the buying-power comparison (check 7).
+    FeeReservation,
+    /// §9.3's gross exposure: every agent's working opening orders on the account, and the agent's
+    /// marked equity in its own limit (check 7).
+    AccountExposure,
+}
+
+impl Deferred {
+    /// The check of §9.1 this deferral skips part or all of.
+    #[must_use]
+    pub fn check(self) -> Check {
+        match self {
+            Self::AgentMode => Check::AccountAndMode,
+            Self::Eligibility
+            | Self::LiquidityFloor
+            | Self::AgentEquity
+            | Self::ReentryCooldown => Check::UniverseAndLimits,
+            Self::Halt => Check::SessionAndHalt,
+            Self::OtherOrders => Check::OrderConstraints,
+            Self::QuoteAsk => Check::MarkAndCollar,
+            Self::Participation | Self::ConductHistory | Self::RelatedAccounts => {
+                Check::ConductControls
+            }
+            Self::FeeReservation | Self::AccountExposure => Check::BuyingPowerAndExposure,
+            Self::DayTradeBudget => Check::DayTradeBudget,
+        }
+    }
+}
+
+/// The advisory pass's answer: the decision over every check not deferred, and the deferred
+/// checks, named, never reported passed (DEC-2378 item 11, condition (i)). An exit defers
+/// nothing, so its decision is the binding gate's (`AGENTS.md` rule 13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Advisory {
+    pub decision: Decision,
+    pub deferred: BTreeSet<Deferred>,
+}
+
+/// The advisory pass of an opening whose `deferred` checks' facts are not journaled: every other
+/// check as [`evaluate`] makes it, which is this with nothing deferred. Only the cell's runtime's
+/// dry run calls it; the executor's binding gate calls [`evaluate`] (`AGENTS.md` rule 1).
+///
+/// # Errors
+/// As [`evaluate`].
+pub fn evaluate_deferring(
+    input: &GateInput<'_>,
+    deferred: &BTreeSet<Deferred>,
+) -> Result<Advisory, GateError> {
+    gate::evaluate_deferring(input, deferred)
 }
 
 /// §9.6's minimum resting time, and §5.3 rule 5's cancels before a risk-reducing order.

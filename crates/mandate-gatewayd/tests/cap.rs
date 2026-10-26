@@ -42,16 +42,27 @@ fn with_cap(cap: &str) -> Vec<u8> {
 
 /// A control-stream row as the workspace services commit it.
 fn row(seq: u64, event_type: &str, environment: &str, payload: &str) -> StoredEvent {
+    row_versioned(seq, event_type, environment, payload, 1)
+}
+
+/// [`row`] at `schema_version`, set on both the stored row and the body.
+fn row_versioned(
+    seq: u64,
+    event_type: &str,
+    environment: &str,
+    payload: &str,
+    schema_version: u64,
+) -> StoredEvent {
     let event_id = format!("01J8Z3MC{seq:018}");
     let body = format!(
-        r#"{{"actor":{{"build":null,"id":"user-owner","kind":"user","version":"1"}},"artifact_refs":[],"causation_id":null,"clock_source":"system","config_refs":{{}},"correlation_id":null,"envelope_version":1,"environment":"{environment}","event_id":"{event_id}","event_time":"2026-10-16T13:00:00.000000000Z","event_type":"{event_type}","payload":{payload},"pii_refs":[],"schema_version":1,"stream_id":"ctl:ws1"}}"#
+        r#"{{"actor":{{"build":null,"id":"user-owner","kind":"user","version":"1"}},"artifact_refs":[],"causation_id":null,"clock_source":"system","config_refs":{{}},"correlation_id":null,"envelope_version":1,"environment":"{environment}","event_id":"{event_id}","event_time":"2026-10-16T13:00:00.000000000Z","event_type":"{event_type}","payload":{payload},"pii_refs":[],"schema_version":{schema_version},"stream_id":"ctl:ws1"}}"#
     );
     StoredEvent {
         stream_id: "ctl:ws1".into(),
         seq,
         event_id,
         event_type: event_type.into(),
-        schema_version: 1,
+        schema_version,
         environment: environment.into(),
         recorded_at: "2026-10-16T13:00:00.000000000Z".into(),
         prev_hash: Digest::of(b"prev"),
@@ -389,4 +400,43 @@ fn a_never_deployed_or_stopped_agent_is_not_held() {
         Ok(Usd6::ZERO)
     );
     assert_eq!(caps.held(), 0, "stopped since");
+}
+
+/// Journal spec v0.84, DEC-2131 item 4: an `AgentDeployed` version 3 is its version 2's payload
+/// with a trailing `step_up`, and the service reads it as that version 2: the same deployment, the
+/// same agents and the same cap.
+#[test]
+fn a_version_3_deployment_reads_as_its_version_2() {
+    let mut v2 = World::default();
+    let version = v2.stored(with_cap("5.25"));
+    let mut v3 = World {
+        control: Vec::new(),
+        store: v2.store.clone(),
+    };
+    let payload = format!(
+        r#"{{"agent_id":"{AGENT}","mandate_version":"{version}","record_ref":"{version}","connection_id":"conn_alpaca_paper_01"}}"#
+    );
+    v2.control
+        .push(row_versioned(1, "AgentDeployed", "paper", &payload, 2));
+    let stepped_up = payload.replace(
+        r#""connection_id":"conn_alpaca_paper_01"}"#,
+        r#""connection_id":"conn_alpaca_paper_01","step_up":{"assertion_id":"01JAA3P0A000000000000000H1","authenticated_at":"2026-10-16T12:59:57.000000000Z","method":"passkey"}}"#,
+    );
+    assert_ne!(stepped_up, payload, "the version 3 payload carries step_up");
+    v3.control
+        .push(row_versioned(1, "AgentDeployed", "paper", &stepped_up, 3));
+    assert_eq!(
+        deployment(&v3.control, AGENT, Environment::Paper),
+        deployment(&v2.control, AGENT, Environment::Paper)
+    );
+    assert_eq!(
+        deployment(&v3.control, AGENT, Environment::Paper),
+        Ok(Deployment::Deployed(version))
+    );
+    assert_eq!(
+        agents(&v3.control, Environment::Paper),
+        agents(&v2.control, Environment::Paper)
+    );
+    assert_eq!(v3.cap(), v2.cap());
+    assert_eq!(v3.cap(), Ok(usd("5.25")));
 }

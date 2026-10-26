@@ -18,9 +18,10 @@ use crate::manager::AccountRefFold::{CannotAnswer as RefUnknown, Unused, Used};
 use crate::manager::IdFold::{CannotAnswer as IdUnknown, Established, Free, RequestOpen};
 use crate::manager::StartRefusal as R;
 use crate::manager::{
-    AccountRefFold, ConnectOutcome, FinishPlan, FinishRefusal, IdFold, ManagerEffect, RefusalCause,
-    RefusedAs, RequestFold, RequestMembers, StartFacts, StartPlan, StartRequest, StepUpCheck,
-    StepUpEvidence, connect_digest, oauth_connect_digest, plan_finish, plan_start,
+    AccountRefFold, ConnectOutcome, DISCLOSURE_DOCUMENT, DISCLOSURE_VERSION, FinishPlan,
+    FinishRefusal, IdFold, ManagerEffect, RefusalCause, RefusedAs, RequestFold, RequestMembers,
+    StartFacts, StartPlan, StartRequest, StepUpCheck, StepUpEvidence, connect_digest,
+    oauth_connect_digest, oauth_connect_object, plan_finish, plan_start,
 };
 use crate::record::Broker::{Alpaca, KrakenDerivativesUs, Robinhood};
 use crate::record::Environment::{Live, Paper};
@@ -543,6 +544,31 @@ fn a_finish_closes_its_request_once_or_plans_no_effect() {
         .unwrap();
 }
 
+/// DEC-2125 item 3: the object the CLI stores is the connect's canonical action object, written out
+/// by hand here, whose digest is the one the start route binds; and the disclosure is the founder's
+/// version 1 (DEC-2622).
+#[test]
+fn the_stored_connect_object_is_the_digest_s_preimage() {
+    let canonical = br#"{"action":"connect","broker":"alpaca","disclosure":{"document":"alpaca_oauth_token_breadth","version":"1"},"environment":"paper","workspace_id":"ws_01"}"#;
+    assert_eq!(
+        (DISCLOSURE_DOCUMENT, DISCLOSURE_VERSION),
+        ("alpaca_oauth_token_breadth", "1")
+    );
+    let object = oauth_connect_object("ws_01", DISCLOSURE_DOCUMENT, DISCLOSURE_VERSION).unwrap();
+    assert_eq!(object, canonical.to_vec());
+    for (workspace, document, version) in [
+        ("ws_01", DISCLOSURE_DOCUMENT, DISCLOSURE_VERSION),
+        ("ws_02", DISCLOSURE_DOCUMENT, DISCLOSURE_VERSION),
+        ("ws_01", "another_document", "2"),
+    ] {
+        assert_eq!(
+            Digest::of(&oauth_connect_object(workspace, document, version).unwrap()),
+            oauth_connect_digest(workspace, document, version).unwrap(),
+            "{workspace} {document} {version}"
+        );
+    }
+}
+
 /// DEC-2621 item 4: an OAuth connect's digest binds the disclosure's document and version, written
 /// out by hand here, so evidence for one version is refused for another.
 #[test]
@@ -550,6 +576,11 @@ fn an_oauth_connect_digest_binds_the_disclosure_it_confirms() {
     let canonical = br#"{"action":"connect","broker":"alpaca","disclosure":{"document":"alpaca_oauth_token_breadth","version":"1"},"environment":"paper","workspace_id":"ws_01"}"#;
     let one = oauth_connect_digest("ws_01", "alpaca_oauth_token_breadth", "1").unwrap();
     assert_eq!(one, Digest::of(canonical));
+    assert_eq!(
+        one.to_hex(),
+        "3df08a75075094b6caf39b686e7262825ead70b36711631621c47a14e32749c2",
+        "the vector web/'s connectStepUpDigest test pins for ws_01"
+    );
     let two = oauth_connect_digest("ws_01", "alpaca_oauth_token_breadth", "2").unwrap();
     let other = oauth_connect_digest("ws_02", "alpaca_oauth_token_breadth", "1").unwrap();
     let document = oauth_connect_digest("ws_01", "another_document", "1").unwrap();

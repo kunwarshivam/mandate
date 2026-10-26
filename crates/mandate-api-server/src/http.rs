@@ -26,6 +26,7 @@ use crate::lifecycle::{Drain, Lifecycle};
 use crate::me;
 use crate::members::{Hosted, ParseMembers};
 use crate::objects::ObjectStore;
+use crate::passkeys;
 use crate::reduction::{self, Reduction};
 use crate::routes;
 use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
@@ -81,8 +82,9 @@ pub struct App {
     /// The same store, which the version routes add objects to (DEC-2101 item 8); `None` when
     /// the deployment names none, and those routes then answer `journal_unavailable`.
     pub objects: Option<Arc<dyn ObjectStore>>,
-    /// The step-up port (DEC-2101 item 2): the deployment binds [`crate::confirm::CliConfirm`]
-    /// (DEC-2104), and tests bind [`crate::stepup::Unbound`] or their own.
+    /// The step-up port (DEC-2101 item 2): the deployment binds [`crate::methods::Methods`]
+    /// (DEC-2126: passkey and DEC-2104's `cli_confirm`), and tests bind [`crate::stepup::Unbound`] or
+    /// their own.
     pub step_up: Arc<dyn StepUp>,
     /// The step-up challenges issued and not yet expired (DEC-2103 item 5).
     pub challenges: Arc<Challenges>,
@@ -123,6 +125,10 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/reduction-sessions/challenges",
             post(reduction::challenge).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/reduction-sessions",
+            post(reduction::open).fallback(otherwise.clone()),
         )
         .route(
             "/v1/me/session",
@@ -217,6 +223,16 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/step-up/challenges",
             post(challenges::challenge).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/passkeys/registration-challenges",
+            post(passkeys::registration_challenge).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/passkeys",
+            get(passkeys::list)
+                .post(passkeys::enrol)
+                .fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/connections",
@@ -333,10 +349,17 @@ async fn open_session(State(app): State<Arc<App>>, headers: HeaderMap, body: Byt
     }
 }
 
-/// `POST /v1/sessions/refresh` (§3.11 item 6).
+/// `POST /v1/sessions/refresh` (§3.11 item 6). A session route 2 opened is refused
+/// `reduction_only` and kept, whatever the provider answers (§4.10 route 2 item 5).
 async fn refresh_session(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> Response {
     if !browser(&headers, &app.settings.app_origin) {
         return forbidden();
+    }
+    let presented = session_cookie(&headers);
+    if let (Some(cookie), Some(now)) = (presented.as_deref(), app.clock.now())
+        && app.sessions.opened_by_passkey(cookie, now)
+    {
+        return routes::Refused::ReductionOnly.response();
     }
     let refreshed = (|| {
         let cookie = session_cookie(&headers)?;

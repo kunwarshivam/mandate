@@ -1,0 +1,26 @@
+[package]
+name = "mandate-datad"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The workspace data process in the local cell: the deployed instrument's stored daily bars, from the cell's recorded series, for the runtime's model host and liquidity figures (E21-29 lane SC)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-artifacts-fs.workspace = true
+mandate-bars.workspace = true
+mandate-canon.workspace = true
+mandate-journal.workspace = true
+mandate-marketdata.workspace = true
+mandate-num.workspace = true
+mandate-process.workspace = true
+mandate-time.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "signal"] }
+
+[dev-dependencies]
+mandate-liquidity.workspace = true
+proptest.workspace = true

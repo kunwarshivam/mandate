@@ -10,6 +10,11 @@ disallowed-methods = [
     { path = "mandate_journal_pg::migrate::migrate_known", reason = "only `mandate db migrate` applies migrations, never a process at start (ES-08, OPS-13)" },
     { path = "sqlx::migrate::Migrator::run", reason = "the journal's one ledger is `mandate db migrate`'s; no sqlx migrator runs beside it (E21-50)" },
     { path = "sqlx::migrate::Migrator::run_direct", reason = "the journal's one ledger is `mandate db migrate`'s; no sqlx migrator runs beside it (E21-50)" },
+    # DEC-2378 item 11 condition 3, DEC-2388: only the cell's runtime's advisory dry run may defer a
+    # check. The executor's binding gate, and every other caller, calls `evaluate` and defers none.
+    # The one allowed call of each is `mandate-ports`'s wrapper and `mandate-daemon`'s dry run.
+    { path = "mandate_risk::evaluate_deferring", reason = "only the advisory dry run defers checks; the binding gate calls `mandate_risk::evaluate` (DEC-2378 item 11)" },
+    { path = "mandate_ports::evaluate_deferring", reason = "only the cell's runtime's advisory dry run defers checks; the binding gate calls `mandate_risk::evaluate` (DEC-2378 item 11)" },
 ]
 disallowed-types = [
     { path = "std::collections::HashMap", reason = "iteration order breaks replay; use BTreeMap (ES-21)" },

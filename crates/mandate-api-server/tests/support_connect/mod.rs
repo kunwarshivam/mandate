@@ -4,7 +4,7 @@
 
 #![allow(dead_code, reason = "each test file uses part of the shared helpers")]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -13,10 +13,12 @@ use mandate_api::envelope::StepUpEvidence;
 use mandate_api::idempotency::{Derivation, IdempotencyKey, event_id};
 use mandate_api::problem::{Problem, ProblemCode};
 use mandate_api::wire::{Id, decode};
+use mandate_api_server::challenges::Challenges;
 use mandate_api_server::config::{SESSION_KEY_FILE, read_session_key};
 use mandate_api_server::connect::{CodeVault, Connect};
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
+use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::{COOKIE_NAME, OsRandom, Random, Sessions, Unauthenticated};
 use mandate_api_server::stepup::{Action, Judged, StepUp};
 use mandate_api_server::token::{FixedKeys, Issuer};
@@ -24,7 +26,8 @@ use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_connections::ConnectError;
 use mandate_connections::start::{
-    Binding, ClientId, Environment, OAuthClient, PkceVerifier, RedirectUri,
+    AuthorizePage, Authorizer, Binding, ClientId, Environment, OAuthClient, PkceVerifier,
+    RedirectUri,
 };
 use mandate_connections::vault::AuthorizationCode;
 use mandate_identity::{MembershipEvent, MembershipRecord, PrincipalId, Role, StepUpActionKind};
@@ -145,6 +148,10 @@ pub struct Fixture {
     pub codes: Arc<Codes>,
     /// The membership records the server reads, which a test may change mid-flight.
     pub records: Arc<Mutex<Vec<MembershipRecord>>>,
+    /// The challenges the server holds.
+    pub challenges: Arc<Challenges>,
+    /// The object store, when the fixture binds one.
+    pub objects: Option<Arc<dyn ObjectStore>>,
 }
 
 static DIRS: Mutex<u32> = Mutex::new(0);
@@ -170,6 +177,50 @@ pub fn fixture_random(
     offered: bool,
     accepting: bool,
     random: Box<dyn Random>,
+) -> Fixture {
+    fixture_port(environment, offered, accepting, random, None)
+}
+
+/// [`fixture`] whose callback writes through `vault` when given, rather than [`Codes`].
+pub fn fixture_port(
+    environment: &str,
+    offered: bool,
+    accepting: bool,
+    random: Box<dyn Random>,
+    vault: Option<Arc<dyn CodeVault>>,
+) -> Fixture {
+    fixture_bound(environment, offered, accepting, random, vault, None)
+}
+
+/// An object store in memory.
+pub type MemObjects = Objects<BTreeMap<Digest, Vec<u8>>>;
+
+/// What a fixture binds at the step-up port instead of its [`Port`]: the binding, given the
+/// fixture's challenge store, and the object store the server reads and adds to.
+pub struct StepUpBinding {
+    pub bind: Box<dyn FnOnce(Arc<Challenges>) -> Arc<dyn StepUp>>,
+    pub objects: Arc<dyn ObjectStore>,
+}
+
+/// A paper workspace offering a connect, whose step-up port and object store are `binding`'s.
+pub fn fixture_binding(binding: StepUpBinding) -> Fixture {
+    fixture_bound(
+        "paper",
+        true,
+        true,
+        Box::new(Draws(Mutex::new(0))),
+        None,
+        Some(binding),
+    )
+}
+
+fn fixture_bound(
+    environment: &str,
+    offered: bool,
+    accepting: bool,
+    random: Box<dyn Random>,
+    vault: Option<Arc<dyn CodeVault>>,
+    binding: Option<StepUpBinding>,
 ) -> Fixture {
     let mut n = DIRS.lock().expect("unpoisoned");
     *n += 1;
@@ -205,11 +256,22 @@ pub fn fixture_random(
     let codes = Arc::new(Codes::default());
     let connect = offered.then(|| {
         Arc::new(Connect::new(
-            client(),
+            Authorizer {
+                page: AuthorizePage::alpaca(),
+                client: client(),
+            },
             random,
-            Arc::clone(&codes) as Arc<dyn CodeVault>,
+            vault.unwrap_or_else(|| Arc::clone(&codes) as Arc<dyn CodeVault>),
         ))
     });
+    let challenges = Arc::new(Challenges::default());
+    let (step_up, objects) = match binding {
+        Some(binding) => (
+            (binding.bind)(Arc::clone(&challenges)),
+            Some(binding.objects),
+        ),
+        None => (Arc::clone(&port) as Arc<dyn StepUp>, None),
+    };
     let app = App {
         settings: Settings {
             app_origin: APP.to_owned(),
@@ -223,10 +285,12 @@ pub fn fixture_random(
             Ok(read_records.lock().expect("unpoisoned").clone())
         }),
         hosted: hosted(),
-        artifacts: None,
-        objects: None,
-        step_up: Arc::clone(&port) as Arc<dyn StepUp>,
-        challenges: Arc::default(),
+        artifacts: objects
+            .clone()
+            .map(|store| store as Arc<dyn mandate_journal::ArtifactSource + Send + Sync>),
+        objects: objects.clone(),
+        step_up,
+        challenges: Arc::clone(&challenges),
         connect: connect.clone(),
         reduction: Arc::default(),
     };
@@ -244,6 +308,8 @@ pub fn fixture_random(
         port,
         codes,
         records,
+        challenges,
+        objects,
     }
 }
 

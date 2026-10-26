@@ -9,6 +9,9 @@ import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
 import type { CommandPhase, PreparedCommand } from "@/api/types";
+import { activityRead, journalPageRead } from "@/api/activity";
+import { connectStartBody, connectionRead, connectionsRead } from "@/api/connect";
+import { type StepUpAction, type StepUpChallenge, confirmCode, connectStepUpDigest } from "@/api/step-up";
 import { prepareCreateVersion, readConfirmation, versionCreated } from "@/api/versions";
 import type { Iso, Workspace } from "@/fixtures/types";
 import type { ApiSource } from "./data-source";
@@ -16,7 +19,10 @@ import { mandateVersion } from "./fixture-journey";
 import {
   type ApprovalRecord,
   type ApprovalResponse,
+  type ActivityAnswer,
+  type ChallengeAnswer,
   type Command,
+  type ConnectPort,
   type CommandKind,
   type CommandRecord,
   type MandateChangeRequest,
@@ -25,6 +31,8 @@ import {
   type SetUp,
 } from "./mock-runtime";
 
+/** How many of an agent stream's latest events its screen lists. */
+const JOURNAL_TAIL = 20;
 /** How many times an unanswered command is sent again, with the same key and body (API-4), before it is called unknown. */
 const SENDS = 4;
 /** How many times a recorded command's status is read before the runtime stops following it (spec §6.3 item 4). */
@@ -230,12 +238,12 @@ export function ApiRuntimeProvider({
   );
 
   const respond = useCallback(
-    (approvalId: string, response: "approve" | "skip", record: ApprovalRecord) => {
+    (approvalId: string, response: "approve" | "skip", record: ApprovalRecord, challenge: StepUpChallenge | null = null) => {
       const entry: ApprovalResponse = { approvalId, response, phase: "sent", sentAt: nowRef.current, record };
       const update = (patch: Partial<ApprovalResponse>) => setResponses((map) => ({ ...map, [approvalId]: { ...entry, ...map[approvalId], ...patch } }));
       setResponses((map) => ({ ...map, [approvalId]: entry }));
       const approval = lastRead.current?.view.approvals.find((a) => a.approval_id === approvalId);
-      const prepared = approval ? prepareApprovalResponse(client, approval, response, record) : ({ ok: false, reason: "not_found" } as const);
+      const prepared = approval ? prepareApprovalResponse(client, approval, response, record, challenge) : ({ ok: false, reason: "not_found" } as const);
       void (async () => {
         if (!prepared.ok) return update({ phase: "undelivered", reason: prepared.reason });
         const [delivered] = await Promise.all(prepared.commands.map(deliver));
@@ -252,6 +260,89 @@ export function ApiRuntimeProvider({
       })();
     },
     [client, deliver, follow],
+  );
+
+  /**
+   * A `cli_confirm` challenge for `action` (§3.6, DEC-2104), with the session's principal the host
+   * command names. Asked for only when the owner presses a button that needs it; nothing is retried,
+   * since each press is its own challenge.
+   */
+  const stepUp = useCallback(
+    async (action: StepUpAction): Promise<ChallengeAnswer> => {
+      const [session, issued] = await Promise.all([client.readSession(), client.askChallenge(action)]);
+      if (!issued.ok) return { ok: false, reason: issued.error.code };
+      if (!session.ok) return { ok: false, reason: session.error.code };
+      const code = confirmCode(issued.value.webauthn_challenge);
+      if (code === null) return { ok: false, reason: "invalid_response" };
+      return { ok: true, shown: { challenge: issued.value, code }, workspaceId: client.workspaceId, principalId: session.value.principal_id };
+    },
+    [client],
+  );
+
+  /**
+   * The Alpaca paper connect (§4.5). The start commits the pending connection, so an answer lost on
+   * the way is sent again with the same key and body, which answers the same start (DEC-2623 item 8);
+   * it is never sent under a new key, which would be a second connect.
+   */
+  const connect = useMemo<ConnectPort>(
+    () => ({
+      challenge: () => stepUp({ kind: "connection", digest: connectStepUpDigest(client.workspaceId) }),
+      start: async (challenge) => {
+        const body = connectStartBody(challenge);
+        if (!body) return { ok: false, reason: "step_up_mismatch", effect: "none" };
+        const prepared = client.prepareConnect(body);
+        let last: { reason: string; effect: "none" | "recorded" | "unknown" } = { reason: "network", effect: "unknown" };
+        for (let attempt = 0; attempt < SENDS; attempt += 1) {
+          const outcome = await client.sendConnect(prepared);
+          if (outcome.ok) return { ok: true, authorizationUrl: outcome.value.authorization_url, connectionId: outcome.value.connection_id };
+          last = { reason: outcome.error.code, effect: outcome.error.effect };
+          if (outcome.error.effect !== "unknown" || !outcome.error.retryable) break;
+          await wait(retryMs * 2 ** attempt);
+        }
+        return { ok: false, ...last };
+      },
+      read: async (connectionId) => {
+        const read = await client.read(`/connections/${encodeURIComponent(connectionId)}`, connectionRead);
+        return read.ok ? { ok: true, connection: read.value.connection } : { ok: false, reason: read.error.code };
+      },
+      list: async () => {
+        const read = await client.read("/connections", connectionsRead);
+        return read.ok ? { ok: true, connections: read.value.connections } : { ok: false, reason: read.error.code };
+      },
+    }),
+    [client, stepUp, retryMs],
+  );
+
+  /**
+   * The last `JOURNAL_TAIL` events of a stream (§4.8.1): one page of one event finds the head, a second
+   * reads the tail up to it. An append between the two only adds to the next read.
+   */
+  const journalTail = useCallback(
+    async (streamId: string): Promise<ActivityAnswer["journal"]> => {
+      const route = `/journal/streams/${encodeURIComponent(streamId)}/events` as const;
+      const decoder = journalPageRead(streamId);
+      const first = await client.read(`${route}?after_seq=0&limit=1`, decoder);
+      if (!first.ok) return { ok: false, reason: first.error.code };
+      const after = Math.max(0, first.value.head_seq - JOURNAL_TAIL);
+      const tail = await client.read(`${route}?after_seq=${after}&limit=${JOURNAL_TAIL}`, decoder);
+      return tail.ok ? { ok: true, items: tail.value.events } : { ok: false, reason: tail.error.code };
+    },
+    [client],
+  );
+
+  /** `GET /agents/{id}/orders` and `/positions` (DEC-2111), with the agent stream's tail, read together when the agent's screen asks. */
+  const activity = useCallback(
+    async (agentId: string): Promise<ActivityAnswer> => {
+      const decoders = activityRead(agentId);
+      const base = `/agents/${encodeURIComponent(agentId)}` as const;
+      const [orders, holdings, journal] = await Promise.all([client.read(`${base}/orders`, decoders.orders), client.read(`${base}/positions`, decoders.holdings), journalTail(`agent:${client.workspaceId}:${agentId}`)]);
+      return {
+        journal,
+        orders: orders.ok ? { ok: true, account_ref: orders.value.account_ref, items: orders.value.items } : { ok: false, reason: orders.error.code },
+        holdings: holdings.ok ? { ok: true, account_ref: holdings.value.account_ref, items: holdings.value.items } : { ok: false, reason: holdings.error.code },
+      };
+    },
+    [client, journalTail],
   );
 
   /** Mandate changes go through drafts, versions and confirmation (spec §4.1), which this slice does not send. */
@@ -358,8 +449,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [view, ws, now, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

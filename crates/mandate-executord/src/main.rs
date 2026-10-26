@@ -23,12 +23,20 @@
 //!
 //! The broker is the fixture paper broker unless `--broker alpaca-paper` names Alpaca's paper
 //! trading host (DEC-2306 item 1). Then the process trusts the vault's CA mounted in
-//! `--vault-dir`, logs in by Kubernetes auth with the pod's projected ServiceAccount token, takes
-//! the lease on the connection the account stream's latest connect check passed for, and only
-//! then takes the account stream; each pass ticks the
+//! `--vault-dir`, logs in by Kubernetes auth with the pod's projected ServiceAccount token as its
+//! own connection's executor, runs that connection's connect check once if its account stream
+//! holds none ([`mandate_executord::oauth_check::exchanged_start`]), takes the lease on the connection the stream's
+//! latest connect check passed for, and waits while that connection is still connecting
+//! ([`mandate_executord::serve::wait`], DEC-2346); only then does it take the account stream. Each pass ticks the
 //! lease, a lost or rotated credential drains the process, and the lease is given back when it
-//! stops ([`credential`]). It runs the fixture wiring ([`fixture`]), which admits no opening. This
-//! is the one place the host clock is read (ES-05).
+//! stops ([`credential`]). It runs the fixture wiring ([`fixture`]), which admits no opening, behind
+//! journal rule 68's gate: until its account stream holds its establishment's copy, which each pass
+//! writes once it is due, no opening reaches the binding gate. A connection refused or revoked
+//! before it, or a record that does not read, is reported once and keeps the gate shut, never
+//! stopping the process, so every exit still goes until the manager stops it ([`establish`],
+//! DEC-2341 item 4). The run is the library's ([`mandate_executord::serve::serve`]); this binary hands it the host
+//! clock, the lease's tick, SIGTERM and stderr. This is the one place the host clock is read
+//! (ES-05).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -37,23 +45,29 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use mandate_alpaca::TokioPause;
 use mandate_connections::record::ConnectionId;
 use mandate_executor::{AccountRef, AccountScope, WorkspaceId};
 use mandate_executord::alpaca::AlpacaBroker;
 use mandate_executord::connect::connect_check;
 use mandate_executord::credential::{
-    RunLease, VaultMount, checked_connection, paper_broker, paper_settings, vault_config,
-    vault_login,
+    RunLease, SUBJECT_ACCOUNT_ENV, VaultMount, WORKSPACE_NAMESPACE_ENV, own_checked_connection,
+    paper_account, paper_broker, paper_settings, paper_transport, subject_account,
+    subject_connection, vault_config, vault_login, workspace_namespace,
 };
+use mandate_executord::oauth_check::{Start, exchanged_start};
 use mandate_executord::paper::FixturePaper;
-use mandate_executord::{Broker, Config, ExecutorProcess, fixture, launch};
+use mandate_executord::serve::{self, Edge, Waited, wait};
+use mandate_executord::{Broker, Config, fixture, launch, run};
 use mandate_journal::Environment;
-use mandate_process::State;
 use mandate_process::probe::{self, Probe, Status};
 use mandate_store::{MemoryStore, PgStore, Store};
 use mandate_time::UtcNanos;
-use mandate_vault::mounted::{SERVICE_ACCOUNT_TOKEN_DIR, read_service_account_token};
+use mandate_vault::mounted::{
+    SERVICE_ACCOUNT_TOKEN_DIR, read_service_account_namespace, read_service_account_token,
+};
 use mandate_vault::openbao::OpenBaoSource;
+use mandate_vault::personal::OsRandom;
 use tokio::signal::unix::{SignalKind, signal};
 
 const LIVENESS: Duration = Duration::from_secs(10);
@@ -180,21 +194,75 @@ fn run(
 }
 
 /// The broker the run names, before the process takes the account stream: the fixture, or
-/// Alpaca's paper host over the lease on the checked connection, refused without one.
+/// Alpaca's paper host over the lease on the checked connection, refused without one. On the
+/// paper host the run waits while its connection is still connecting (DEC-2346). The probe is
+/// served from the start, and the run itself is the library's ([`serve::serve`]).
 fn serve<S: Store>(
-    store: S,
+    mut store: S,
     named: &launch::Named,
     socket: &Path,
     terminate: &AtomicBool,
     paper: Option<&VaultMount>,
 ) -> Result<u8, &'static str> {
-    let Some(mount) = paper else {
-        let broker = AlpacaBroker::new(FixturePaper::new(host_now()))?;
-        return serve_on(store, broker, None, named, socket, terminate);
+    let config = Config {
+        scope: scope(named),
+        environment: Environment::Paper,
+        liveness: LIVENESS,
+        max_chain: MAX_CHAIN,
     };
-    let connection = checked_connection(&store, &scope(named))?;
-    let (broker, mut lease) = leased_broker(mount, &connection)?;
-    let served = serve_on(store, broker, Some(&mut lease), named, socket, terminate);
+    let status = Status::new(serve::starting(host_now()));
+    probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
+    let terminated = || terminate.load(Ordering::SeqCst);
+    let mut say = |line: &str| eprintln!("{line}");
+    let Some(mount) = paper else {
+        let run = run::fixture(
+            AlpacaBroker::new(FixturePaper::filling(host_now()))?,
+            &config.scope,
+        )?;
+        let edge = Edge {
+            now: &host_now,
+            tick: &mut |_| None,
+            terminated: &terminated,
+            say: &mut say,
+            interval: PASS,
+        };
+        return serve::serve_run(store, run, &config, &status, edge);
+    };
+    let connection = subject_connection(std::env::var(SUBJECT_ACCOUNT_ENV).ok())?;
+    let vault = logged_in(mount, &connection)?;
+    let start = Start {
+        connection: &connection,
+        vault: &vault,
+        account: |token| paper_transport(token).and_then(paper_account).ok(),
+        random: &mut OsRandom,
+    };
+    exchanged_start(
+        &mut store,
+        &fixture::Ids::of(&config.scope),
+        &config.scope,
+        start,
+        host_now(),
+    )?;
+    own_checked_connection(&store, &config.scope, &connection)?;
+    let (broker, mut lease) = paper_broker(vault, &connection, host_now())?;
+    let run = run::paper(broker, TokioPause, &config.scope)?;
+    let mut tick = |now| lease.pass(now);
+    let mut edge = Edge {
+        now: &host_now,
+        tick: &mut tick,
+        terminated: &terminated,
+        say: &mut say,
+        interval: PASS,
+    };
+    let served = match wait(&store, &config, &status, &mut edge) {
+        Ok(Waited::Ready) => serve::serve_run(store, run, &config, &status, edge),
+        Ok(Waited::Stopped) => Ok(0),
+        Ok(Waited::Closed) => {
+            (edge.say)("connection_closed");
+            Ok(0)
+        }
+        Err(code) => Err(code),
+    };
     if let Err(code) = lease.give_back() {
         eprintln!("{code}");
     }
@@ -206,65 +274,33 @@ fn leased_broker(
     mount: &VaultMount,
     connection: &ConnectionId,
 ) -> Result<(impl Broker, PaperLease), &'static str> {
+    paper_broker(logged_in(mount, connection)?, connection, host_now())
+}
+
+/// The vault session of `connection`'s executor, logged in by Kubernetes auth.
+fn logged_in(mount: &VaultMount, connection: &ConnectionId) -> Result<OpenBaoSource, &'static str> {
     let config = vault_config(mount)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|_| "runtime_unavailable")?;
-    let vault = vault_login(
+    subject_account(std::env::var(SUBJECT_ACCOUNT_ENV).ok(), connection)?;
+    let namespace = workspace_namespace(std::env::var(WORKSPACE_NAMESPACE_ENV).ok(), || {
+        read_service_account_namespace(Path::new(SERVICE_ACCOUNT_TOKEN_DIR))
+    })?;
+    vault_login(
         || read_service_account_token(Path::new(SERVICE_ACCOUNT_TOKEN_DIR)),
         |identity, jwt| {
             runtime.block_on(OpenBaoSource::login_kubernetes(
                 &config,
                 identity,
                 &jwt,
+                &namespace,
                 host_now(),
             ))
         },
         connection,
-    )?;
-    paper_broker(vault, connection, host_now())
-}
-
-fn serve_on<S: Store, B: Broker>(
-    store: S,
-    broker: B,
-    mut lease: Option<&mut PaperLease>,
-    named: &launch::Named,
-    socket: &Path,
-    terminate: &AtomicBool,
-) -> Result<u8, &'static str> {
-    let config = Config {
-        scope: scope(named),
-        environment: Environment::Paper,
-        liveness: LIVENESS,
-        max_chain: MAX_CHAIN,
-    };
-    let mut process =
-        ExecutorProcess::start(store, broker, fixture::wiring()?, &config, host_now());
-    let status = Status::new(process.lifecycle().snapshot());
-    probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
-    loop {
-        let credential_stop = lease.as_deref_mut().and_then(|held| held.pass(host_now()));
-        let terminated = credential_stop.is_some() || terminate.load(Ordering::SeqCst);
-        if terminated {
-            process.drain(host_now());
-        }
-        if let State::Exited(stopped) = process.lifecycle().state() {
-            status.publish(process.lifecycle().snapshot());
-            if let Some(code) = credential_stop {
-                eprintln!("{code}");
-            }
-            eprintln!("{}", stopped.code());
-            return Ok(stopped.exit_status());
-        }
-        if terminated {
-            return Err(credential_stop.unwrap_or("drain_unfinished"));
-        }
-        process.step(host_now());
-        status.publish(process.lifecycle().snapshot());
-        thread::sleep(PASS);
-    }
+    )
 }
 
 fn check(
@@ -313,7 +349,7 @@ fn checked_on<S: Store, B: Broker>(
     let checked = connect_check(
         &mut store,
         &mut broker,
-        &fixture::Ids,
+        &fixture::Ids::of(&scope(named)),
         &scope(named),
         connection,
         pii,

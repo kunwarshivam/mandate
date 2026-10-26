@@ -509,6 +509,23 @@ fn the_store_sink_says_stored_only_for_the_bytes_own_reference() {
     assert!(!StoreSink(Misfiled).put(b"a record"));
 }
 
+/// The store sink reads back exactly the bytes stored under a digest, and nothing for a digest it
+/// never stored or for stored bytes that no longer hash to it.
+#[test]
+fn the_store_sink_reads_back_only_bytes_that_hash_to_their_digest() {
+    let mut kept = StoreSink(BTreeMap::new());
+    assert!(kept.put(b"a record"));
+    let digest = ArtifactRef::of(b"a record").digest();
+    assert_eq!(kept.get(&digest), Some(b"a record".to_vec()));
+    assert_eq!(kept.get(&ArtifactRef::of(b"never stored").digest()), None);
+    kept.0.insert(digest, b"a tampered record".to_vec());
+    assert_eq!(
+        kept.get(&digest),
+        None,
+        "bytes that do not hash to the digest are none"
+    );
+}
+
 /// As [`called`], the call made as `call_id`: the core gives every call an id of its own, so a
 /// call after a restart is never the first call again (journal spec rule 158).
 fn called_as(worker: &mut RecordedWorker, call_id: &str) -> mandate_gateway::CallRecord {
