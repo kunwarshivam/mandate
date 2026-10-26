@@ -74,6 +74,11 @@ struct Pending {
 }
 
 impl Acknowledgments {
+    /// Whether the control-stream record `original` has been copied.
+    pub(crate) fn copied(&self, original: &str) -> bool {
+        self.copied.contains(original)
+    }
+
     /// Marks every standing trigger of `agent`'s `limit` superseded but `keep`, answering those it
     /// marked.
     fn supersede(&mut self, agent: &str, limit: &str, keep: Option<&str>) -> Vec<String> {
