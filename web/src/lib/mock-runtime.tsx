@@ -73,8 +73,12 @@ export interface ApprovalRecord {
 export interface ApprovalResponse {
   approvalId: string;
   response: "approve" | "skip";
-  /** `undelivered`: the deployment answered that nothing was recorded (`effect: none`), for the reason in `reason`. */
-  phase: "sent" | "recorded" | "decided" | "undelivered" | "unknown";
+  /**
+   * `undelivered`: the deployment answered that nothing was recorded (`effect: none`), for the reason
+   * in `reason`. `refused`: recorded, and the runtime refused it (`ApprovalResponded` refused), for
+   * the reason in `reason`; nothing was approved, and the answer is not sent again.
+   */
+  phase: "sent" | "recorded" | "decided" | "refused" | "undelivered" | "unknown";
   sentAt: Iso;
   recordedAt?: Iso;
   reason?: string;

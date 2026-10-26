@@ -30,7 +30,9 @@ function actionName(kind: CommandKind): string {
 
 /**
  * A toast appears only once the runtime has journaled the action. Sending raises nothing; the
- * Stop sheet and the approval screen say "sent" in their own status text.
+ * Stop sheet and the approval screen say "sent" in their own status text. An approval is announced
+ * only once the runtime acted on it: a recorded grant may still be refused (DEC-2822), and a toast
+ * cannot be taken back.
  */
 export function JournalToasts() {
   const { commands, responses, setUps } = useRuntime();
@@ -46,7 +48,8 @@ export function JournalToasts() {
     }
     for (const r of Object.values(responses)) {
       const key = `resp:${r.approvalId}`;
-      if ((r.phase !== "recorded" && r.phase !== "decided") || announced.current.has(key)) continue;
+      const journaled = r.response === "skip" ? r.phase === "recorded" || r.phase === "decided" : r.phase === "decided";
+      if (!journaled || announced.current.has(key)) continue;
       announced.current.add(key);
       toasts.add({ title: "Recorded in the journal", description: r.response === "skip" ? "Your skip." : "Your approval." });
     }
