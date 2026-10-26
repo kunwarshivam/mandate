@@ -26,6 +26,8 @@
 //!   screen, a new mandate's confirm, deploy, and go-live, judged and recorded as the CLI records
 //!   them (DEC-2101). [`stepup`] is the port every step-up goes through, which counts no evidence
 //!   until E9-4 binds it; [`objects`] is the content-addressed store those routes add records to.
+//! - [`catalogue`]: the registered instruments and signal models a version may name, folded as
+//!   the create folds them (DEC-2136).
 //! - [`challenges`]: the step-up challenge route and the store of the challenges it issues, each
 //!   issued under the context `authorize` returned for its action's row (DEC-2103).
 //! - [`passkeys`]: one's own passkeys, the registration challenge and the list (§3.6, DEC-2124),
@@ -57,6 +59,7 @@
 //! `xtask/layers.toml` keeps it from every crate that could.
 
 pub mod backtests;
+pub mod catalogue;
 pub mod challenges;
 pub mod clock;
 pub mod commands;

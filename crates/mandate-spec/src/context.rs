@@ -531,6 +531,21 @@ impl ValidationContext {
     }
 }
 
+/// The model registry V-007 reads, folded from `facts` in journal order by the same fold
+/// [`ValidationContext::from_journal`] runs: the latest [`JournaledFact::ModelRegistered`] per
+/// model id, whatever its version, less every id a later [`JournaledFact::ModelWithdrawn`]
+/// withdrew. A reader that lists what V-007 admits reads it here rather than folding again
+/// (DEC-2136).
+pub fn registry<'a>(
+    facts: impl IntoIterator<Item = &'a JournaledFact>,
+) -> BTreeMap<ModelId, RegisteredModel> {
+    let mut fold = Fold::default();
+    for fact in facts {
+        fold.apply(fact);
+    }
+    fold.registry
+}
+
 /// An agent as the fold last saw it.
 #[derive(Debug, Default)]
 struct AgentState {
