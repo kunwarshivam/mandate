@@ -18,6 +18,9 @@
   environment and broker; `crates/mandate-gate-inputs/tests/mandate.rs`: the limits and ladder
   copied field by field, and the fee reservation equal to `mandate-accounting`'s;
   `tests/reviewed.rs`: the registered instrument and objects bound, the Nasdaq listing, and a
-  binding from another stream, another model and another instrument refused; `tests/control.rs`, `tests/governance.rs` and `tests/registrations.rs`, moved with their module. The shell's own
+  binding from another stream, another model and another instrument refused; `tests/view.rs`:
+  fill references, the stop-limit offset only while protection is on, the bracket or a refusal
+  without a stop, and the view answering only its agent and instrument; `tests/control.rs`,
+  `tests/governance.rs` and `tests/registrations.rs`, moved with their module. The shell's own
   paper tests still pin the assembly through its stages.
 - **Run:** `cargo nextest run -p mandate-gate-inputs -p mandate-shell`.
