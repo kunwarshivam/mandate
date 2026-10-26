@@ -1253,7 +1253,7 @@ fn an_end_naming_a_bracket_ends_that_brackets_interval() {
     );
 }
 
-/// A fill that names no order is the account's, no agent's (DEC-2809): the agent's read passes
+/// A fill that names no order is the account's, no agent's (DEC-2812): the agent's read passes
 /// over it, and its sub-ledger and net filled quantity are as before.
 #[test]
 fn an_unattributed_fill_is_passed_over() {

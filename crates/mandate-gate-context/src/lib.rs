@@ -397,7 +397,7 @@ impl Journaled {
     /// A fill of one of the agent's own orders, each `fill_id` once. An order is the agent's when
     /// the `OrderRequestRecorded` journaled immediately before its `OrderSubmitted` names the agent
     /// (journal spec rule 45). A fill that names no order (`FillApplied` version 2's `null`,
-    /// DEC-2809) moves the account's position and no agent's.
+    /// DEC-2812) moves the account's position and no agent's.
     fn fill(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
         let ours = positions::optional_text(payload, "client_order_id")?
             .is_some_and(|order| self.orders.contains_key(order));

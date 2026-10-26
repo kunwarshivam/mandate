@@ -592,7 +592,7 @@ fn replaced(
 /// accounting, unattributed, as external activity: every agent goes `exits_only` and the owner is
 /// alerted (§7.1), so filled quantity never exceeds an order's quantity. Its `FillApplied` is
 /// version 2's, naming no order (`null`), and moves the account's position and cash, no agent's
-/// (journal spec §9.5, DEC-2809).
+/// (journal spec §9.5, DEC-2812).
 ///
 /// `before` is the state a reconciliation began from, when the fill is one it found missing: an
 /// order the same reconciliation adopted as terminal was not terminal when the fill happened, so

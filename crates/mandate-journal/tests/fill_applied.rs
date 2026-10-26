@@ -1,4 +1,4 @@
-//! Journal spec v0.94 §9.5 (DEC-2809; X10c): `FillApplied` at schema version 2, whose
+//! Journal spec v0.94 §9.5 (DEC-2812; X10c): `FillApplied` at schema version 2, whose
 //! `client_order_id` is `null` for a fill that names no order of ours, with rule 299, through the
 //! journal's own checks against the vectors' `fill_applied` section. Every base and valid draft
 //! parses; every invalid draft is refused with its reason at its path. Before version 2 the journal

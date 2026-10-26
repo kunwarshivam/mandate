@@ -335,7 +335,7 @@ impl Positions {
     /// (DEC-2112 item 2). A fill of a protective leg whose id names no known entry, in an
     /// instrument the agent holds, may be the agent's (DEC-160's single-holder rule, which needs
     /// every agent's lots), so it is refused rather than guessed (DEC-2138 item 1). A fill that
-    /// names no order (`FillApplied` version 2's `null`, DEC-2809) is the account's, no agent's,
+    /// names no order (`FillApplied` version 2's `null`, DEC-2812) is the account's, no agent's,
     /// and is passed over too.
     fn fill(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
         let Some(order) = optional_text(payload, "client_order_id")? else {

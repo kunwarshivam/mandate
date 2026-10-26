@@ -1476,7 +1476,7 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("reason", one_of("intent_too_old", "gate_recheck", "released_to_owner", "unprotected_interval_limit")),
         ("risk_clock", RISK_CLOCK),
     ),
-    # v0.94 §9.5 (DEC-2809): one broker fill. Version 2 is version 1's members with
+    # v0.94 §9.5 (DEC-2812): one broker fill. Version 2 is version 1's members with
     # `client_order_id` nullable, `null` for a fill that names no order of ours; `LateFillApplied`
     # stays at version 1, since a late fill is always of an order of ours.
     ("acct", "FillApplied", 1): FILL_APPLIED_V1,

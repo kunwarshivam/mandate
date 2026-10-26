@@ -74,7 +74,7 @@ const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 /// `AccountRestrictionChanged` (DEC-2137), the account stream's `KillSwitchActivated`
 /// (DEC-2139), and `ExternalActivityIngested`, `RejectObserved` and `OrderAbandoned` (DEC-2803).
 /// `FillApplied` closes at version 2 and stays at version 1, and `LateFillApplied` stays at
-/// version 1 (DEC-2809).
+/// version 1 (DEC-2812).
 const EXECUTOR: [&str; 18] = [
     "IntentReceived",
     "GateDecided",
@@ -126,7 +126,7 @@ const REJECT: &str = "RejectObserved";
 /// client order id the executor derives from an intent.
 const ABANDONED: &str = "OrderAbandoned";
 
-/// One broker fill applied to the account (§9.5, DEC-2809): version 2's `client_order_id` is `null`
+/// One broker fill applied to the account (§9.5, DEC-2812): version 2's `client_order_id` is `null`
 /// for a fill that names no order of ours, and rule 299 binds a named one to trading spec §2.3.
 const FILL: &str = "FillApplied";
 
@@ -697,7 +697,7 @@ fn external_rules(p: Payload<'_>) -> Result<(), Invalid> {
     Ok(())
 }
 
-/// Rule 299 (DEC-2809): a `FillApplied` version 2 that names an order names one of ours, as trading
+/// Rule 299 (DEC-2812): a `FillApplied` version 2 that names an order names one of ours, as trading
 /// spec §2.3 states it: `md-`, then one or more ASCII letters, digits or hyphens, at most 128
 /// characters in all. A fill that names no order of ours is `null`.
 fn fill_rules(p: Payload<'_>) -> Result<(), Invalid> {
@@ -1487,7 +1487,7 @@ static EXTERNAL_ACTIVITY_INGESTED: Ty = Ty::Record(&[
     ("risk_clock", Ty::RiskClock),
 ]);
 
-/// §9.5's `FillApplied` version 2 (DEC-2809): version 1's members, in version 1's order, with
+/// §9.5's `FillApplied` version 2 (DEC-2812): version 1's members, in version 1's order, with
 /// `client_order_id` nullable.
 static FILL_APPLIED_V2: Ty = Ty::Record(&[
     ("fill_id", Ty::Str),

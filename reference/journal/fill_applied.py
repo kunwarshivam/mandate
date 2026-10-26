@@ -1,4 +1,4 @@
-"""Journal spec §9.5's reference vectors for `FillApplied` version 2 (DEC-2809): one broker fill
+"""Journal spec §9.5's reference vectors for `FillApplied` version 2 (DEC-2812): one broker fill
 applied to the account, whose `client_order_id` is `null` for a fill that names no order of ours.
 
 The schemas and rule 299 live in `control.py`, beside §9.5's other account-stream records, so one
@@ -31,7 +31,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md §9.5 `FillApplied` version 2 and rule 299 (DEC-2809)"
+SPEC = "docs/specs/journal.md §9.5 `FillApplied` version 2 and rule 299 (DEC-2812)"
 ACCOUNT = f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}"
 AT = "2026-10-26T15:00:00.250000000Z"
 RISK_CLOCK = "2026-10-26T15:00:01.000000000Z"
