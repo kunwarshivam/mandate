@@ -1,0 +1,7 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "a_gap_in_an_open_episode_is_journaled_without_another_alert"
+reason = """
+`mandate-executor` does not journal DEC-2368's gap yet: the fold refuses a `ProtectionChanged` whose
+action is `protection_gap` as non-canonical. The test fails on that behaviour, not at a stub.
+DEC-2368's implementation journals the gap and alerts once per episode, and deletes this row.
+"""

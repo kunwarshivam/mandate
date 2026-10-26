@@ -1,0 +1,8 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "an_edge_under_cover_is_journaled_as_a_gap_and_alerted"
+reason = """
+`mandate-executor` does not journal DEC-2368's gap yet: the buffer day's re-placement in the edge
+covers 6 and journals no `protection_gap` and sends no alert. The test fails on that behaviour, not
+at a stub. DEC-2368's implementation journals the gap and alerts once per episode, and deletes this
+row.
+"""

@@ -6763,6 +6763,12 @@ fn a_switch_close_alerted_unpriced_sells_once_a_quote_arrives() {
 /// The buffer day's replacement of the protected 10 after `before` folds onto it: the quantity
 /// re-placed once the expiring OCO's cancel is confirmed.
 fn buffer_day_after(before: &[mandate_executor::FoldedEvent]) -> mandate_num::Qty {
+    re_placed(&buffer_day_ran(before), None)
+}
+
+/// The step that confirms the expiring OCO's cancel on the buffer day, after `before` folds onto
+/// the protected 10: what it journals, sends and alerts.
+fn buffer_day_ran(before: &[mandate_executor::FoldedEvent]) -> common::Ran {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
@@ -6783,13 +6789,12 @@ fn buffer_day_after(before: &[mandate_executor::FoldedEvent]) -> mandate_num::Qt
     );
     shell.fold_one(&day).expect("the trading day folds");
     shell.run(Input::Journal(day), &ports);
-    let confirmed = shell.run(
+    shell.run(
         Input::Broker(Ok(BrokerOutcome::CancelAccepted {
             client_order_id: "md-oco-1".to_owned(),
         })),
         &ports,
-    );
-    re_placed(&confirmed, None)
+    )
 }
 
 /// The owner's release of `qty` of `instrument` from the agent (journal spec §9.27), unplaced.
@@ -7066,6 +7071,286 @@ fn a_buffer_day_re_placement_after_a_release_protects_only_the_agents_shares() {
         qty("6"),
         "{:?}",
         confirmed.draft_types()
+    );
+}
+
+/// DEC-2368's edge: the agent's buy of 2 that the broker reports filled but whose fill named no
+/// order (so it is applied unattributed), the owner's release of 4 of the agent's 10, and the
+/// owner's sale of 3 of them, unattributed too. The position is 9: the agent's 8 and the owner's 1.
+/// With `owner_sells` false the owner keeps the 4, and the position is 12.
+fn unattributed_edge(owner_sells: bool) -> Vec<mandate_executor::FoldedEvent> {
+    let fill = |id: &str, side: &str, qty: &str| {
+        event(
+            ACCOUNT_STREAM,
+            0,
+            "FillApplied",
+            with_clock(
+                &[
+                    ("fill_id", text(id)),
+                    ("instrument", text(AAPL)),
+                    ("side", text(side)),
+                    ("qty_gross", text(qty)),
+                    ("price", text("150")),
+                ],
+                26,
+            ),
+        )
+    };
+    let mut events = vec![
+        released_of(AAPL, "4"),
+        event(
+            ACCOUNT_STREAM,
+            0,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-unattributed")),
+                    ("agent", text(common::AGENT)),
+                    ("instrument", text(AAPL)),
+                    ("side", text("buy")),
+                    ("qty", text("2")),
+                    ("limit", text("150")),
+                ],
+                26,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            0,
+            "OrderStateChanged",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-unattributed")),
+                    ("state", text("filled")),
+                    ("filled_qty", text("2")),
+                ],
+                26,
+            ),
+        ),
+        fill("f-unattributed", "buy", "2"),
+    ];
+    if owner_sells {
+        events.push(fill("f-owner", "sell", "3"));
+    }
+    events
+}
+
+/// The `protection_gap` records `ran` journaled, as their `qty`.
+fn gaps(ran: &common::Ran) -> Vec<String> {
+    ran.drafts
+        .iter()
+        .filter(|draft| {
+            draft.event_type == "ProtectionChanged"
+                && draft
+                    .payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("protection_gap")
+        })
+        .filter_map(|draft| {
+            draft
+                .payload
+                .get("qty")
+                .and_then(mandate_canon::Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+/// A `ProtectionChanged` of `action` for AAPL, as the executor journals it, unplaced.
+fn protection_record(
+    action: &str,
+    members: &[(&str, mandate_canon::Value)],
+) -> mandate_executor::FoldedEvent {
+    let mut all = vec![("instrument", text(AAPL)), ("action", text(action))];
+    all.extend(members.iter().cloned());
+    event(ACCOUNT_STREAM, 0, "ProtectionChanged", with_clock(&all, 27))
+}
+
+/// DEC-2368 items 1 to 3, the founder's option A: in the edge the buffer day's re-placement still
+/// covers 6, never the owner's released share, and the 2 of the agent's it may leave uncovered are
+/// journaled as `protection_gap` after the placement and alerted (`protection_gap`, rule 6).
+#[test]
+#[ignore = "pending E6-4"]
+fn an_edge_under_cover_is_journaled_as_a_gap_and_alerted() {
+    let ran = buffer_day_ran(&unattributed_edge(true));
+    assert_eq!(re_placed(&ran, None), qty("6"), "{:?}", ran.draft_types());
+    assert_eq!(gaps(&ran), ["2"], "{:?}", ran.draft_types());
+    let placed = ran.drafts.iter().rposition(|draft| {
+        draft.event_type == "ProtectionChanged"
+            && draft
+                .payload
+                .get("action")
+                .and_then(mandate_canon::Value::as_str)
+                == Some("placed")
+    });
+    let gap = ran.drafts.iter().rposition(|draft| {
+        draft
+            .payload
+            .get("action")
+            .and_then(mandate_canon::Value::as_str)
+            == Some("protection_gap")
+    });
+    assert!(
+        placed < gap,
+        "the gap follows its placement: {:?}",
+        ran.draft_types()
+    );
+    assert_eq!(
+        ran.notifications
+            .iter()
+            .filter(|key| **key == "protection_gap")
+            .count(),
+        1,
+        "{:?}",
+        ran.notifications
+    );
+}
+
+/// DEC-2368 invariant 2: with the same unattributed 2 and no owner sale, the placement covers the
+/// agent's 8, every share it can read as the agent's, so there is no gap to journal or alert.
+#[test]
+fn no_gap_is_journaled_while_the_owner_keeps_the_released_shares() {
+    let ran = buffer_day_ran(&unattributed_edge(false));
+    assert_eq!(re_placed(&ran, None), qty("8"), "{:?}", ran.draft_types());
+    assert!(gaps(&ran).is_empty(), "{:?}", ran.draft_types());
+    assert!(!ran.notifications.contains(&"protection_gap"));
+}
+
+/// DEC-2368 item 3: a gap journaled at an earlier placement, with no placement since, is the same
+/// episode. The buffer day journals its gap again but does not alert again.
+#[test]
+#[ignore = "pending E6-4"]
+fn a_gap_in_an_open_episode_is_journaled_without_another_alert() {
+    let mut before = unattributed_edge(true);
+    before.push(protection_record("protection_gap", &[("qty", text("2"))]));
+    let ran = buffer_day_ran(&before);
+    assert_eq!(gaps(&ran), ["2"], "{:?}", ran.draft_types());
+    assert!(
+        !ran.notifications.contains(&"protection_gap"),
+        "{:?}",
+        ran.notifications
+    );
+}
+
+/// DEC-2368 item 3: a placement after the earlier gap ends that episode, so the buffer day's gap
+/// is a new one and is alerted.
+#[test]
+#[ignore = "pending E6-4"]
+fn a_placement_after_a_gap_ends_its_episode() {
+    let mut before = unattributed_edge(true);
+    before.push(protection_record("protection_gap", &[("qty", text("2"))]));
+    before.push(protection_record(
+        "placed",
+        &[
+            ("orders", text("md-oco-1")),
+            ("qty", text("10")),
+            ("stop", text("147")),
+            ("take_profit", text("157.5")),
+        ],
+    ));
+    let ran = buffer_day_ran(&before);
+    assert_eq!(gaps(&ran), ["2"], "{:?}", ran.draft_types());
+    assert!(
+        ran.notifications.contains(&"protection_gap"),
+        "{:?}",
+        ran.notifications
+    );
+}
+
+/// The edge folded onto the protected 10, then the agent's risk exit of 2 that fills, so the
+/// executor places protection again, which the broker accepts and then reports expired: the
+/// sequence end's step and the expiry's step.
+fn edge_then_lost() -> (common::Ran, common::Ran) {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    for event in unattributed_edge(true) {
+        let mut event = event.clone();
+        event.seq = mandate_executor::Seq(shell.head().0.saturating_add(1));
+        shell.fold_one(&event).expect("folds");
+    }
+    shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "2", "155")),
+        &ports,
+    );
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let exit = format!("md-{INTENT}");
+    let ended = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-exit",
+            Some(&exit),
+            AAPL,
+            Side::Sell,
+            "2",
+            "2",
+            "filled",
+        ))),
+        &ports,
+    );
+    let Some(placed) = ended
+        .submissions()
+        .into_iter()
+        .find(|order| order.purpose == Purpose::Protective)
+        .cloned()
+    else {
+        return (ended, common::Ran::default());
+    };
+    let report = |status| {
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-placed",
+            Some(placed.client_order_id.as_str()),
+            AAPL,
+            Side::Sell,
+            &placed.qty.to_string(),
+            "0",
+            status,
+        )))
+    };
+    shell.run(report("accepted"), &ports);
+    let lost = shell.run(report("expired"), &ports);
+    (ended, lost)
+}
+
+/// DEC-2368 item 2 at the end of an exit sequence: in the edge, the agent's risk exit of 2 that
+/// fills leaves a position of 7. The fold reads the agent's attributed lots as 10 less the exit's
+/// 2 and the release's 4, so 4, and the owner's as 3; the re-placement covers 4 and journals the
+/// unattributed 2 it may leave uncovered, and alerts it.
+#[test]
+#[ignore = "pending E6-4"]
+fn an_exits_re_placement_in_the_edge_journals_its_gap() {
+    let (ended, _) = edge_then_lost();
+    assert_eq!(
+        re_placed(&ended, None),
+        qty("4"),
+        "{:?}",
+        ended.draft_types()
+    );
+    assert_eq!(gaps(&ended), ["2"], "{:?}", ended.draft_types());
+    assert!(ended.notifications.contains(&"protection_gap"));
+}
+
+/// DEC-2368 items 2 and 3 at `re_cover`: the re-placed protection, lost at the broker, is placed
+/// again for the same 4 and journals the same gap, within the episode the sequence end opened, so
+/// without another alert.
+#[test]
+#[ignore = "pending E6-4"]
+fn a_re_cover_in_the_edge_journals_its_gap_without_another_alert() {
+    let (_, lost) = edge_then_lost();
+    assert_eq!(re_placed(&lost, None), qty("4"), "{:?}", lost.draft_types());
+    assert_eq!(gaps(&lost), ["2"], "{:?}", lost.draft_types());
+    assert!(
+        !lost.notifications.contains(&"protection_gap"),
+        "{:?}",
+        lost.notifications
     );
 }
 
