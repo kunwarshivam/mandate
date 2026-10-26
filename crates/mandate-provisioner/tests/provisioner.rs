@@ -145,9 +145,16 @@ impl ControlJournal for Stream {
 
     async fn append(
         &mut self,
-        draft: &[u8],
+        drafts: &[&[u8]],
         _recorded_at: UtcNanos,
     ) -> Result<AppendOutcome, Unavailable> {
+        let [draft] = drafts else {
+            panic!(
+                "the provisioner appends one record at a time: {}",
+                drafts.len()
+            );
+        };
+        let draft: &[u8] = draft;
         if *self.down.borrow() > 0 {
             *self.down.borrow_mut() -= 1;
             return Err(Unavailable);
