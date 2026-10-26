@@ -7,7 +7,11 @@
 //! deployed once (DEC-1173 item 1). Rule 200 holds by construction: the `connection_id` it names
 //! is the one parsed from the stored document it deploys. A version whose universe may hold a
 //! second instrument is refused `second_instrument`, after the checks on the agent and before the
-//! V-rules: the executor's risk fold reads one instrument (DEC-2809 item 1, DEC-2804 item 8).
+//! V-rules: the executor's risk fold reads one instrument (DEC-2809 item 1, DEC-2804 item 8). Then a
+//! deployment on an account where another agent that has not stopped is deployed is refused
+//! `second_agent_on_account`, since the fold reads one agent (DEC-2809 item 2).
+
+use std::collections::BTreeSet;
 
 use mandate_journal::ArtifactStore;
 
@@ -29,6 +33,38 @@ const REVOKED: &str = "ConnectionRevoked";
 /// later.
 pub(crate) fn active<'a>(rows: &'a [Row], agent: &str) -> Option<&'a Row> {
     last_of(rows, agent).filter(|latest| latest.event_type == DEPLOYED)
+}
+
+/// The accounts each version-2 `ConnectionEstablished` of `connection` names, with its
+/// environment: none for a connection never established at version 2, whose deployment names no
+/// account (DEC-1171 item 3).
+fn accounts<'a>(rows: &'a [Row], connection: &str) -> BTreeSet<(&'a str, &'a str)> {
+    rows.iter()
+        .filter(|r| r.event_type == ESTABLISHED && r.schema_version == 2)
+        .filter(|r| r.member("connection_id") == Some(connection))
+        .filter_map(|r| Some((r.member("account_ref")?, r.member("environment")?)))
+        .collect()
+}
+
+/// DEC-2809 item 2: whether an agent other than `agent`, with a version-2 or version-3
+/// `AgentDeployed` on a connection naming an account `connection` names, has no `AgentStopped`.
+/// The executor's risk fold reads one agent on an account (DEC-2804 item 8).
+fn another_on_account(rows: &[Row], connection: &str, agent: &str) -> bool {
+    let ours = accounts(rows, connection);
+    if ours.is_empty() {
+        return false;
+    }
+    let stopped: BTreeSet<&str> = rows
+        .iter()
+        .filter(|r| r.event_type == STOPPED)
+        .filter_map(|r| r.member("agent_id"))
+        .collect();
+    rows.iter()
+        .filter(|r| r.event_type == DEPLOYED && matches!(r.schema_version, 2 | 3))
+        .filter_map(|r| Some((r.member("agent_id")?, r.member("connection_id")?)))
+        .any(|(other, named)| {
+            other != agent && !stopped.contains(other) && !accounts(rows, named).is_disjoint(&ours)
+        })
 }
 
 /// The agent's latest `AgentDeployed` or `AgentStopped`.
@@ -137,6 +173,9 @@ fn decide_and_commit(
     }
     if mandate.universe.max_instruments > 1 {
         return Err(refused("second_instrument"));
+    }
+    if another_on_account(&rows, mandate.connection_id.as_str(), agent) {
+        return Err(refused("second_agent_on_account"));
     }
     check_rules(&rows, store, (&mandate, agent), None, now)?;
     check_instruments(&rows, store, &document)?;

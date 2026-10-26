@@ -1555,6 +1555,60 @@ fn a_deploy_names_its_connection_exactly_when_rule_201_holds() {
     }
 }
 
+/// DEC-2809 item 2: while an agent that has not stopped is deployed on the account, another
+/// agent's deployment there is `invalid` at `/agent_id`, `second_agent_on_account`, and nothing is
+/// written; the first agent's stop frees the account.
+#[test]
+fn a_second_running_agent_on_the_account_is_refused_at_deploy() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    seed_control_v2(&f, "ConnectionEstablished", &established_payload());
+    f.journal.streams.lock().expect("unpoisoned").insert(
+        account(),
+        vec![row(
+            &account(),
+            1,
+            "AccountSnapshotRecorded",
+            r#"{"equity":"25000"}"#,
+        )],
+    );
+    confirmed(&f, &cookie, "v1");
+    let first = deploy(&f, &cookie, KEY, &deploy_body("agt_a", "v1", EVIDENCE));
+    assert_eq!(
+        first.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&first.body)
+    );
+    let before = control(&f).len();
+    let second = deploy(&f, &cookie, KEY_2, &deploy_body("agt_b", "v1", EVIDENCE));
+    assert_eq!(
+        violations(&second),
+        vec![("/agent_id".to_owned(), "second_agent_on_account".to_owned())]
+    );
+    assert_eq!(control(&f).len(), before, "nothing written");
+    seed_control(
+        &f,
+        "AgentStopped",
+        &format!(
+            r#"{{"agent_id":"agt_a","connection_id":"{CONNECTION}","loss_added":"0","reason":"owner_stop","retired_on":"2026-09-20"}}"#
+        ),
+    );
+    let freed = deploy(
+        &f,
+        &cookie,
+        "k4Z-9_cccccccccc",
+        &deploy_body("agt_b", "v1", EVIDENCE),
+    );
+    assert!(
+        !violations(&freed)
+            .iter()
+            .any(|(_, code)| code == "second_agent_on_account"),
+        "the first agent's stop frees the account of this refusal: {}",
+        String::from_utf8_lossy(&freed.body)
+    );
+}
+
 /// A connection established and then revoked fails rule 201, but is never deployed at version 1:
 /// the fold knows it with no environment, so V-001 refuses the deployment, 422, and nothing is
 /// written (journal spec §9.24, "Revoked").
@@ -1644,6 +1698,55 @@ fn a_version_that_may_hold_a_second_instrument_is_refused_at_deploy() {
         )]
     );
     assert_eq!(control(&f).len(), before, "nothing written");
+}
+
+/// DEC-2809 item 1's place in the order: after the checks on the agent, so a stopped agent meeting
+/// a wide version is still `agent_stopped`; and before the V-rules, so a wide version that also
+/// fails one (V-002, with no account snapshot to read the equity from) answers `second_instrument`
+/// alone.
+#[test]
+fn second_instrument_is_judged_after_the_agent_and_before_the_rules() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    confirmed(&f, &cookie, "wide");
+    seed_control(
+        &f,
+        "AgentDeployed",
+        &format!(
+            r#"{{"agent_id":"agt_a","mandate_version":"{}","record_ref":"{}"}}"#,
+            version("v1"),
+            reference("{}")
+        ),
+    );
+    seed_control(
+        &f,
+        "AgentStopped",
+        &format!(
+            r#"{{"agent_id":"agt_a","connection_id":"{CONNECTION}","loss_added":"0","reason":"owner_stop","retired_on":"2026-09-20"}}"#
+        ),
+    );
+    let reply = deploy(&f, &cookie, KEY, &deploy_body("agt_a", "wide", EVIDENCE));
+    assert_eq!(
+        violations(&reply),
+        vec![("/agent_id".to_owned(), "agent_stopped".to_owned())]
+    );
+
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    confirmed(&f, &cookie, "wide");
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .remove(&account());
+    let reply = deploy(&f, &cookie, KEY, &deploy_body("agt_b", "wide", EVIDENCE));
+    assert_eq!(
+        violations(&reply),
+        vec![(
+            "/mandate_version".to_owned(),
+            "second_instrument".to_owned()
+        )]
+    );
 }
 
 /// A version-2 deployment is appended at the head the request read the control stream at, so rule

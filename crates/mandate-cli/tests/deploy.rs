@@ -43,11 +43,12 @@ const ESTABLISHED_V1: &str = r#"{"broker":"alpaca","connection_id":"conn_alpaca_
 /// The fixture's top-level members but the two system fields (mandate spec §4.1 V-020).
 const PATHS: &str = "autonomy behavior capital connection_id environment goal name notifications \
                      protection risk universe";
-/// DEC-530 item 9's codes for `agent deploy`, with DEC-2809 item 1's `second_instrument`.
+/// DEC-530 item 9's codes for `agent deploy`, with DEC-2809's `second_instrument` and
+/// `second_agent_on_account`.
 const CODES: &str = "agent_active agent_invalid agent_stopped code_mismatch \
                      control_stream_invalid document_corrupt document_missing \
-                     instrument_unregistered paper_only second_instrument version_invalid \
-                     version_superseded version_unconfirmed version_unknown";
+                     instrument_unregistered paper_only second_agent_on_account second_instrument \
+                     version_invalid version_superseded version_unconfirmed version_unknown";
 
 fn json(text: &str) -> Value {
     parse(text.as_bytes()).unwrap()
@@ -458,7 +459,8 @@ fn every_refusal_has_its_own_code_and_writes_nothing() {
     let other = Deploy(OTHER_AGENT, "v1", None);
     let other_stop = Seed("AgentStopped", OTHER_STOPPED);
     let codes = [deploy_code(OTHER_AGENT, "v1"), deploy_code(AGENT, "v2")];
-    let cases: [(&str, &[Do<'_>], Do<'_>); 22] = [
+    let established = SeedV2("ConnectionEstablished", ESTABLISHED);
+    let cases: [(&str, &[Do<'_>], Do<'_>); 23] = [
         ("paper_only", &[v1, c1, As(Environment::Live)], d1),
         ("paper_only", &[v1, c1, As(Environment::Backtest)], d1),
         ("agent_invalid", &[v1, c1], Deploy("agent a", "v1", None)),
@@ -525,6 +527,7 @@ fn every_refusal_has_its_own_code_and_writes_nothing() {
             &[Created("wide"), Confirmed("wide")],
             Deploy(AGENT, "wide", None),
         ),
+        ("second_agent_on_account", &[established, v1, c1, d1], other),
     ];
     let mut seen = BTreeSet::new();
     for (code, setup, step) in cases {
@@ -642,4 +645,90 @@ fn a_version_that_may_hold_a_second_instrument_is_refused_at_deploy() {
         "second_instrument"
     );
     assert_eq!(world.appends(), before, "a refusal writes nothing");
+}
+
+/// DEC-2809 item 1's place in DEC-530 item 9's order: after the checks on the agent, so a stopped
+/// agent meeting a wide version is still `agent_stopped`; before the V-rules, so a wide version
+/// that also fails one (a revoked connection, `version_invalid` on its own) is `second_instrument`.
+#[test]
+fn second_instrument_is_judged_after_the_agent_and_before_the_rules() {
+    let mut world = World::confirmed();
+    for step in [
+        Deploy(AGENT, "v1", None),
+        Seed("AgentStopped", STOPPED),
+        Created("wide"),
+        Confirmed("wide"),
+    ] {
+        world.run(step).unwrap();
+    }
+    assert_eq!(
+        refused(world.run(Deploy(AGENT, "wide", None))),
+        "agent_stopped"
+    );
+
+    let mut world = World::new();
+    for step in [
+        Seed("ConnectionRevoked", REVOKED),
+        Created("v1"),
+        Confirmed("v1"),
+    ] {
+        world.run(step).unwrap();
+    }
+    assert_eq!(
+        refused(world.run(Deploy(AGENT, "v1", None))),
+        "version_invalid",
+        "a revoked connection fails a rule on its own"
+    );
+    for step in [Created("wide"), Confirmed("wide")] {
+        world.run(step).unwrap();
+    }
+    assert_eq!(
+        refused(world.run(Deploy(AGENT, "wide", None))),
+        "second_instrument"
+    );
+}
+
+/// DEC-2809 item 2: while an agent that has not stopped is deployed on an account, through this
+/// connection or another naming the same account, a second agent's deployment there is refused
+/// `second_agent_on_account` and writes nothing; a connection to another account is not; the
+/// first agent's stop frees the account.
+#[test]
+fn a_second_running_agent_on_the_account_is_refused_at_deploy() {
+    let sibling = ESTABLISHED.replace("conn_alpaca_paper_01", "conn_alpaca_paper_02");
+    let elsewhere = sibling.replace("01J0ACC0VNT000000000000000", "01J0ACC0VNT000000000000001");
+    let running = |connection: &str| {
+        let mut world = World::new();
+        for step in [
+            SeedV2("ConnectionEstablished", ESTABLISHED),
+            SeedV2("ConnectionEstablished", connection),
+            Created("v1"),
+            Confirmed("v1"),
+            Deploy(AGENT, "v1", None),
+            Created("conn2"),
+            Confirmed("conn2"),
+        ] {
+            world.run(step).unwrap();
+        }
+        world
+    };
+
+    let mut world = running(&sibling);
+    let before = world.appends();
+    assert_eq!(
+        refused(world.run(Deploy(OTHER_AGENT, "conn2", None))),
+        "second_agent_on_account",
+        "a sibling connection to the same account"
+    );
+    assert_eq!(world.appends(), before, "a refusal writes nothing");
+    world.run(Seed("AgentStopped", STOPPED)).unwrap();
+    assert!(
+        world.run(Deploy(OTHER_AGENT, "conn2", None)).is_ok(),
+        "the first agent's stop frees the account"
+    );
+
+    let mut world = running(&elsewhere);
+    assert!(
+        world.run(Deploy(OTHER_AGENT, "conn2", None)).is_ok(),
+        "another account is free"
+    );
 }

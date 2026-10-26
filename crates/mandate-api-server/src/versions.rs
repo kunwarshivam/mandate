@@ -113,6 +113,41 @@ pub fn stopped(control: &[StoredEvent], agent: &str) -> bool {
     last_of(control, agent).is_some_and(|row| row.event_type == STOPPED)
 }
 
+/// The accounts each version-2 `ConnectionEstablished` of `connection` names, with its
+/// environment: none for a connection never established at version 2 (DEC-1171 item 3).
+fn accounts(control: &[StoredEvent], connection: &str) -> BTreeSet<(String, String)> {
+    control
+        .iter()
+        .filter(|row| row.event_type == ESTABLISHED && row.schema_version == 2)
+        .filter(|row| member(row, "connection_id").as_deref() == Some(connection))
+        .filter_map(|row| Some((member(row, "account_ref")?, member(row, "environment")?)))
+        .collect()
+}
+
+/// DEC-2809 item 2: whether an agent other than `agent`, with a version-2 or version-3
+/// `AgentDeployed` on a connection naming an account `connection` names, has no `AgentStopped`.
+/// The executor's risk fold reads one agent on an account (DEC-2804 item 8).
+pub fn another_on_account(control: &[StoredEvent], connection: &str, agent: &str) -> bool {
+    let ours = accounts(control, connection);
+    if ours.is_empty() {
+        return false;
+    }
+    let stopped: BTreeSet<String> = control
+        .iter()
+        .filter(|row| row.event_type == STOPPED)
+        .filter_map(|row| member(row, "agent_id"))
+        .collect();
+    control
+        .iter()
+        .filter(|row| row.event_type == DEPLOYED && matches!(row.schema_version, 2 | 3))
+        .filter_map(|row| Some((member(row, "agent_id")?, member(row, "connection_id")?)))
+        .any(|(other, named)| {
+            other != agent
+                && !stopped.contains(&other)
+                && !accounts(control, &named).is_disjoint(&ours)
+        })
+}
+
 /// Journal spec v0.54 §9.24 rule 201 for a deployment on `connection`: a version-2
 /// `ConnectionEstablished` of it is on the control stream, and its latest establishment or
 /// revocation is an establishment. A deployment is written at version 2 exactly when it holds.
