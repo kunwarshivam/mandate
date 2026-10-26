@@ -41,6 +41,7 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
+                        secrets |
                         postgres | openbao | objectstore | stub-release | exchange-release |
                         provisionerd-release | api-release | mutants |
                         schema-mutants | cell | cell-seeded | cell-upgrade | cell-demo |
@@ -54,8 +55,9 @@ commands:
                         base, all of them
   ci select             print which scoped jobs this diff runs, as GITHUB_OUTPUT lines
   land-check [BASE]     before landing: merge BASE (origin/main, fetched first) into HEAD in a
-                        scratch worktree, run spec-guard, lint and the diff's tests on the merged
-                        tree, and end with one `land-check summary:` line (DEC-2642)
+                        scratch worktree, run spec-guard, gitleaks over the diff, lint and the
+                        diff's tests on the merged tree, and end with one `land-check summary:`
+                        line (DEC-2642, DEC-2645)
   ci sweep --plan       print tonight's share of the whole-crate mutation sweep (DEC-1190)
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
                         MANDATE_TEST_PARTITION=K/N is set (CI's fast-test matrix)
@@ -553,20 +555,9 @@ fn ci(job: &str) -> Result<()> {
         "supply-chain" => {
             sh("cargo", &["deny", "--locked", "check"])?;
             deps()?;
-            match base_ref()? {
-                Some(base) => sh(
-                    "gitleaks",
-                    &[
-                        "git",
-                        "--no-banner",
-                        "--redact",
-                        &format!("--log-opts={base}..HEAD"),
-                    ],
-                ),
-                None => sh("gitleaks", &["dir", "--no-banner", "--redact", "."]),
-            }?;
-            gitleaks_exceptions()
+            secrets()
         }
+        "secrets" => secrets(),
         "spec-guard" => spec_guard(),
         "postgres" => postgres(),
         "openbao" => openbao(),
@@ -3486,13 +3477,14 @@ fn ci_select() -> Result<()> {
 /// The base [`land_check_cmd`] merges when it is given none.
 const LAND_CHECK_BASE: &str = "origin/main";
 
-/// The `ci` jobs [`land_check`] runs on the merged tree, in order: the spec guard (ES-22), lint, and
-/// each part of `ci test`, which run over the crates the diff from the base selects (DEC-1190). The
-/// parts run as jobs of their own, so a failing nextest run never keeps the doctests, the rehearsal
-/// or the Python tests from running. No cell and no mutants, so the check stays fast enough to run
-/// before every landing (DEC-2642).
-const LAND_CHECK_JOBS: [&str; 6] = [
+/// The `ci` jobs [`land_check`] runs on the merged tree, in order: the spec guard (ES-22), gitleaks
+/// over the diff (`secrets`, DEC-2645), lint, and each part of `ci test`, which run over the crates
+/// the diff from the base selects (DEC-1190). The parts run as jobs of their own, so a failing
+/// nextest run never keeps the doctests, the rehearsal or the Python tests from running. No cell
+/// and no mutants, so the check stays fast enough to run before every landing (DEC-2642).
+const LAND_CHECK_JOBS: [&str; 7] = [
     "spec-guard",
+    "secrets",
     "lint",
     "test-nextest",
     "test-doc",
@@ -4571,6 +4563,25 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         ("stray-canary.rs".to_owned(), canary, generic),
         (stub_issuer.to_owned(), not_canary, generic),
     ]
+}
+
+/// `ci secrets`, a part of `supply-chain` that land-check also runs (DEC-2645): gitleaks over the
+/// commits since the diff base, or over the tree with none, then the `.gitleaks.toml` exceptions'
+/// own cases, so a secret, or an exception that stopped working, is caught before a landing.
+fn secrets() -> Result<()> {
+    match base_ref()? {
+        Some(base) => sh(
+            "gitleaks",
+            &[
+                "git",
+                "--no-banner",
+                "--redact",
+                &format!("--log-opts={base}..HEAD"),
+            ],
+        ),
+        None => sh("gitleaks", &["dir", "--no-banner", "--redact", "."]),
+    }?;
+    gitleaks_exceptions()
 }
 
 /// Scans [`gitleaks_plants`], written to a temporary directory, with the repository's
@@ -14301,7 +14312,7 @@ mod tests {
                 &head[..12],
                 &base[..12]
             )) && line.ends_with(
-                " merge=clean spec-guard=pass lint=pass test-nextest=pass test-doc=pass \
+                " merge=clean spec-guard=pass secrets=pass lint=pass test-nextest=pass test-doc=pass \
                  test-rh-sim=pass test-python=pass rerun_unprivileged=[] verdict=pass"
             ),
             "{line}"
@@ -14342,7 +14353,7 @@ mod tests {
         assert!(
             line.contains(" fetched=no ")
                 && line.ends_with(
-                    " merge=clean spec-guard=pass lint=pass test-nextest=pass test-doc=pass \
+                    " merge=clean spec-guard=pass secrets=pass lint=pass test-nextest=pass test-doc=pass \
                  test-rh-sim=pass test-python=pass rerun_unprivileged=[] verdict=fail"
                 ),
             "{line}"
@@ -14410,7 +14421,7 @@ mod tests {
         assert!(
             line.contains(" fetched=yes merged=none merge=conflict ")
                 && line.ends_with(
-                    "spec-guard=not-run lint=not-run test-nextest=not-run test-doc=not-run \
+                    "spec-guard=not-run secrets=not-run lint=not-run test-nextest=not-run test-doc=not-run \
                  test-rh-sim=not-run test-python=not-run rerun_unprivileged=[] verdict=fail"
                 ),
             "{line}"
@@ -14437,7 +14448,7 @@ mod tests {
         assert!(
             line.contains(" fetched=yes ")
                 && line.ends_with(
-                    " merge=clean spec-guard=pass lint=fail test-nextest=pass test-doc=pass \
+                    " merge=clean spec-guard=pass secrets=pass lint=fail test-nextest=pass test-doc=pass \
                  test-rh-sim=pass test-python=pass rerun_unprivileged=[] verdict=fail"
                 ),
             "{line}"
