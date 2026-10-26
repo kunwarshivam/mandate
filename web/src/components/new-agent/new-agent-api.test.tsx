@@ -11,19 +11,24 @@ import { mockAuthenticator } from "@/test/set-up";
 import { renderWithRuntime } from "@/test/harness";
 import { API_NOTE } from "./chat";
 import { StepStatus } from "./set-up-steps";
-import { CATALOGUE_NOT_SERVED } from "./new-agent-flow";
+import { MOCK_MODEL } from "@/api/mock-server";
+import { INSTRUMENTS } from "@/fixtures/mandates";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
 const ORIGIN = "https://api.owlhead.ai";
 
-function mount() {
+function mount(wrap: (send: Fetch) => Fetch = (send) => send) {
   setPathname("/agents/new");
   const server = createMockServer({ workspaceId: WS, scenario: "normal" });
   const posts: string[] = [];
-  const fetch: Fetch = (input, init) => {
-    if (init.method === "POST") posts.push(new URL(input).pathname);
+  const bodies: Array<Record<string, unknown>> = [];
+  const fetch: Fetch = wrap((input, init) => {
+    if (init.method === "POST") {
+      posts.push(new URL(input).pathname);
+      bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+    }
     return server.fetch(input, init);
-  };
+  });
   render(
     <RoleProvider initial="owner">
       <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={fetch} refreshMs={60_000} statusPollMs={5} retryMs={5} authenticator={mockAuthenticator(MOCK_PASSKEY_ID).get}>
@@ -33,7 +38,7 @@ function mount() {
       </ApiRuntimeProvider>
     </RoleProvider>,
   );
-  return { posts };
+  return { posts, bodies };
 }
 
 async function send(text: string) {
@@ -53,18 +58,64 @@ describe("setting up an agent over the workspace API (DEC-975, DEC-2128)", () =>
     expect(screen.getByRole("main")).not.toHaveTextContent(/fixture stands in/i);
   });
 
-  it("reads the owner's figures exactly as written, and creates nothing while the deployment does not list its instruments and models", async () => {
-    const { posts } = mount();
+  /** The owner's answers up to the model, with `symbol` as the instrument. */
+  async function toModel(symbol: string) {
     await screen.findByRole("textbox", { name: "Your answer" });
     await send("$3,000");
     await send("Grow it steadily");
     await send("$300");
-    await send("MSFT");
-    fireEvent.click(within(screen.getByRole("group", { name: "Models" })).getByRole("button", { name: /^Momentum/ }));
+    await send(symbol);
+  }
+
+  it("refuses a symbol the deployment has not registered, naming the ones it lists", async () => {
+    mount();
+    await toModel("MSFT");
+    const listed = Object.values(INSTRUMENTS)
+      .map((i) => i.symbol)
+      .sort()
+      .join(", ");
+    expect(screen.getByRole("main")).toHaveTextContent(`MSFT is not registered on your deployment. It lists ${listed}.`);
+  });
+
+  it("offers only the models the deployment registered, and creates the version with their registered asset id, version and content hash", async () => {
+    const { posts, bodies } = mount();
+    await toModel("XYZ");
+    const choices = within(screen.getByRole("group", { name: "Models" })).getAllByRole("button");
+    expect(choices.map((c) => c.querySelector("span")?.textContent)).toEqual(["Moving-average crossover"]);
+    expect(choices[0]).toHaveTextContent(MOCK_MODEL.content.methodology);
+    fireEvent.click(choices[0]);
+    await send("5");
     await send("20");
-    await waitFor(() => expect(document.querySelector("[data-slot=set-up-steps] [data-slot=blocked]")?.textContent).toBe(CATALOGUE_NOT_SERVED));
+    fireEvent.click(await screen.findByRole("button", { name: "Create the version" }));
+    await waitFor(() => expect(posts.filter((p) => p.endsWith("/mandate-versions"))).toHaveLength(1));
+    const mandate = bodies[posts.findIndex((p) => p.endsWith("/mandate-versions"))] as { universe: { pinned_instruments: unknown[] }; behavior: { signal_models: Array<Record<string, unknown>> } };
+    expect(mandate.universe.pinned_instruments).toEqual([{ asset_id: INSTRUMENTS.XYZ.asset_id, symbol: "XYZ", asset_class: "us_equity" }]);
+    expect(mandate.behavior.signal_models[0]).toMatchObject({
+      id: MOCK_MODEL.model_id,
+      version: MOCK_MODEL.model_version,
+      content_hash: MOCK_MODEL.content_hash,
+      params: [
+        { key: "fast_periods", value: "5" },
+        { key: "slow_periods", value: "20" },
+      ],
+    });
+  });
+
+  it("holds the create while the model's own constraint does not hold, saying which", async () => {
+    const { posts } = mount();
+    await toModel("XYZ");
+    fireEvent.click(within(screen.getByRole("group", { name: "Models" })).getAllByRole("button")[0]);
+    await send("20");
+    await send("5");
+    await waitFor(() => expect(screen.getByRole("main")).toHaveTextContent("Fast periods must be less than slow periods."));
     expect(screen.queryByRole("button", { name: "Create the version" })).toBeNull();
     expect(posts.filter((p) => p.endsWith("/mandate-versions"))).toEqual([]);
+  });
+
+  it("offers nothing when the deployment does not report its catalogue, and says so", async () => {
+    mount((send) => (input, init) => (new URL(input).pathname.endsWith("/signal-models") ? Promise.reject(new TypeError("down")) : send(input, init)));
+    await waitFor(() => expect(document.querySelector("[data-slot=catalogue-unreported]")).not.toBeNull());
+    expect(screen.queryByRole("textbox", { name: "Your answer" })).toBeNull();
   });
 });
 

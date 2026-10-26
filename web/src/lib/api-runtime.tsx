@@ -7,6 +7,7 @@ import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCom
 import { confirmAccepted, confirmStepUpDigest } from "@/api/confirm";
 import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPasskey, browserAuthenticator, deployStepUpDigest, passkeysRead, usablePasskeys } from "@/api/passkey";
 import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDigest, passkeyList } from "@/api/enrol";
+import { type CatalogueAnswer, instrumentsRead, signalModelsRead } from "@/api/catalogue";
 import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
@@ -454,6 +455,14 @@ export function ApiRuntimeProvider({
     [client],
   );
 
+  /** `GET /instruments` and `GET /signal-models` (§4.1, DEC-2136), read together when the set-up opens. */
+  const catalogue = useCallback(async (): Promise<CatalogueAnswer> => {
+    const [instruments, models] = await Promise.all([client.read("/instruments", instrumentsRead), client.read("/signal-models", signalModelsRead)]);
+    if (!instruments.ok) return { ok: false, reason: instruments.error.code };
+    if (!models.ok) return { ok: false, reason: models.error.code };
+    return { ok: true, instruments: instruments.value.instruments, models: models.value.models };
+  }, [client]);
+
   /** Mandate changes go through drafts, versions and confirmation (spec §4.1), which this slice does not send. */
   const changeMandate = useCallback<Runtime["changeMandate"]>((proposal, origin, record) => {
     counter.current += 1;
@@ -640,8 +649,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, streamTail: journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, catalogue, streamTail: journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, catalogue, journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }
