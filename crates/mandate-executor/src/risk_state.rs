@@ -275,11 +275,12 @@ fn fill_version(event_type: &str, version: u64) -> bool {
 
 /// Whether the version-1 `CompensatingEvent` `row` corrects `corrects`, the row right before it
 /// (DEC-2829): its `difference` is `order_state`, its `from` is text, and `corrects` is an
-/// `OrderStateChanged` in the same batch (the same journal-assigned `recorded_at`), named by the
+/// `OrderStateChanged` in the same append (the same `recorded_at` its writer gave it), named by the
 /// compensation's `causation_id` and its one corrected event id, whose order is the compensation's
 /// `subject` and whose state is its `to`. Such a compensation moves no figure: the order's state is
 /// that record's, read for ownership already, and its fill is its own `FillApplied`. Any other is
-/// an input the fold does not read, and the view fails closed (DEC-2304 item 1).
+/// an input the fold does not read, and the view fails closed (DEC-2304 item 1); a paired one
+/// whose `risk_clock` is not a whole-second timestamp is undecodable.
 fn compensates(
     row: &StoredEvent,
     body: &Value,
@@ -631,6 +632,7 @@ impl<'c> AccountRiskFold<'c> {
             }
             (Some(Reading::Fee), 1) => self.fee(row, payload),
             (Some(Reading::Compensation), 1) if compensates(row, &body, payload, corrects) => {
+                whole_second(payload, "risk_clock")?;
                 Ok(Vec::new())
             }
             (Some(_), _) => Err(UnreadableCause::UnknownSchemaVersion),
