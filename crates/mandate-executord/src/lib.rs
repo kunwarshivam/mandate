@@ -36,6 +36,7 @@
 pub mod alpaca;
 pub mod connect;
 pub mod credential;
+pub mod deployment;
 pub mod establish;
 pub mod fixture;
 pub mod follow;

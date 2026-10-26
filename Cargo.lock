@@ -2080,6 +2080,8 @@ version = "0.0.0"
 dependencies = [
  "mandate-accounting",
  "mandate-alpaca",
+ "mandate-artifacts-fs",
+ "mandate-bars",
  "mandate-canon",
  "mandate-connections",
  "mandate-domain",
@@ -2088,6 +2090,7 @@ dependencies = [
  "mandate-gate-inputs",
  "mandate-journal",
  "mandate-journal-pg",
+ "mandate-marketdata",
  "mandate-mcp",
  "mandate-num",
  "mandate-ports",
