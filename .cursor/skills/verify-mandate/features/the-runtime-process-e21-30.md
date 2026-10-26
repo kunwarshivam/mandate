@@ -46,7 +46,11 @@
   approvers DEC-953's owner or the founded workspace's roster resolves, an unreadable membership
   record resolving no one, the admitted approvers narrowing at each read and never growing
   (DEC-2818), and an unknown author. `crates/mandate-runtime-models/tests/pg.rs`: the binary
-  on Postgres opening its agent stream once across two runs and draining. `deploy/tests/test_cell.py`:
+  on Postgres opening its agent stream once across two runs and draining. `tests/working.rs`: a
+  research mandate's quant model pinned on its admitted instrument, a `Long` only on the one
+  instrument a surviving thesis holds, an ended, refused or unreadable thesis or unread control rows
+  holding the `Long` while an admitted instrument keeps its exit, and a property test whose oracle
+  replays the thesis records its own way (DEC-2827). `deploy/tests/test_cell.py`:
   each service started and probed as its process list says, and no runtime rendered for no
   deployment. `mandate-runtime`'s
   `an_owner_kill_switch_without_a_bid_records_null_bid_members_and_its_owner`.

@@ -321,6 +321,7 @@ describe("no order ticket (DEC-528)", () => {
     confirm: ["APPLIES", "CLASSIFICATIONS", "confirmAccepted", "confirmStepUpDigest"],
     catalogue: ["instrumentsRead", "signalModelsRead"],
     enrol: ["CREATE_TIMEOUT_MS", "ENROL_ROUTE", "REGISTRATION_ROUTE", "browserCreator", "createPasskey", "enrolBody", "enrolStepUpDigest", "enrolled", "passkeyList", "registrationChallenge"],
+    decisions: ["DEFERRED_CHECKS", "decisionsOf"],
     decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],
     "mock-server": ["MOCK_AUTHORIZATION_ORIGIN", "MOCK_MODEL", "MOCK_PASSKEY_ID", "MOCK_PRINCIPAL", "MOCK_RP_ID", "MOCK_USER_HANDLE", "createMockServer"],
     operations: ["NOT_COMMANDS", "WEB_OPERATIONS", "operationFor"],

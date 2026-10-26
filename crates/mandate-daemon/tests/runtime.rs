@@ -11,7 +11,7 @@ use std::time::Duration;
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Key, Object, Value, parse};
 use mandate_daemon::deployment::ApproverSource;
-use mandate_daemon::models::{Evaluated, Models};
+use mandate_daemon::models::{Evaluated, Models, Streams};
 use mandate_daemon::{ArtifactSink, Config, ModelsWiring, Refs, RuntimeProcess, Wiring, fixture};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Conviction, Price, Qty, Unit};
@@ -1198,16 +1198,24 @@ proptest! {
     }
 }
 
-/// The model host as a test lays it down: the evaluations it answers at any tick, and how many
-/// times it was asked.
+/// The event ids of the control rows, when they read, and of the agent rows one ask was handed.
+type Handed = (Option<Vec<String>>, Vec<String>);
+
+/// The model host as a test lays it down: the evaluations it answers at any tick, how many times
+/// it was asked, and what each ask was handed.
 #[derive(Clone, Default)]
 struct Host {
     answer: Rc<RefCell<Vec<Evaluated>>>,
     asked: Rc<Cell<u32>>,
+    handed: Rc<RefCell<Vec<Handed>>>,
 }
 impl Models for Host {
-    fn evaluate(&self, _: RiskClock) -> Vec<Evaluated> {
+    fn evaluate(&self, _: RiskClock, streams: Streams<'_>) -> Vec<Evaluated> {
         self.asked.set(self.asked.get() + 1);
+        let ids = |rows: &[StoredEvent]| rows.iter().map(|row| row.event_id.clone()).collect();
+        self.handed
+            .borrow_mut()
+            .push((streams.control.map(ids), ids(streams.agent)));
         self.answer.borrow().clone()
     }
 }
@@ -1291,6 +1299,21 @@ fn a_tick_records_each_new_model_output_once_after_its_observation() {
     tick(&rig, NOW + 5);
     process.step(at(NOW + 6));
     assert_eq!(host.asked.get(), 1);
+    let ids = |rows: Vec<StoredEvent>| -> Vec<String> {
+        rows.into_iter().map(|row| row.event_id).collect()
+    };
+    let control = rig.rows(&StreamId::parse(CONTROL).unwrap()).unwrap();
+    let [(handed_control, handed_agent)] = host.handed.borrow().clone().try_into().unwrap();
+    assert_eq!(
+        handed_control,
+        Some(ids(control)),
+        "the host is handed the control rows (DEC-2827)"
+    );
+    let agent = ids(agent_rows(&rig));
+    assert!(
+        !handed_agent.is_empty() && agent.starts_with(&handed_agent),
+        "the host is handed the agent rows read for the tick: {handed_agent:?}"
+    );
     let (observed, output) = (
         positions(&rig, "ObservationRecorded"),
         positions(&rig, "ModelOutputRecorded"),
@@ -2658,7 +2681,7 @@ fn demo_in_session() -> (Rig, RuntimeProcess<Rig>) {
                 },
                 ..daily(IN_SESSION - 60)
             }])),
-            asked: Rc::new(Cell::new(0)),
+            ..Host::default()
         }),
         artifacts: Box::new(Closes::default()),
     });
