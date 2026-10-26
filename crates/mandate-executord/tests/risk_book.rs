@@ -11,8 +11,10 @@ use std::rc::Rc;
 
 use mandate_canon::{Value, parse};
 use mandate_domain::{AgentMode, AssetClass, Environment};
-use mandate_executor::AgentId;
 use mandate_executor::risk_state::{RiskView, UnreadableCause};
+use mandate_executor::{AgentId, EventId};
+use mandate_executord::Alert;
+use mandate_executord::establish::ToCopy;
 use mandate_executord::risk::{NOT_OPENED, RiskOpening, RiskOpenings};
 use mandate_journal::StoredEvent;
 use mandate_num::Usd;
@@ -21,8 +23,9 @@ use mandate_spec::document::ProvenanceMap;
 use mandate_spec::{Mandate, ValidatedMandate, ValidationContext};
 use mandate_time::Date;
 use support::{
-    ACCOUNT_STREAM, AGENT, CONNECTION, CONTROL_STREAM, Error, Journal, NOON, NoFacts, OTHER_AGENT,
-    Paper, TwoPercentStop, at, deploy, deployed, start_wired, stopped, tick, wired,
+    ACCOUNT, ACCOUNT_STREAM, AGENT, CONNECTION, CONTROL_STREAM, Error, Fault, Journal, NOON,
+    NoFacts, OTHER_AGENT, Paper, TwoPercentStop, at, deploy, deployed, start_wired, stopped, tick,
+    wired,
 };
 
 /// `research_equity_pinned`'s pinned XYZ, by its canonical asset id.
@@ -593,5 +596,131 @@ fn the_book_settles_before_the_core_takes_a_tick() -> Result<(), Error> {
     let (doubted, steady) = (run(true)?, run(false)?);
     assert!(doubted.2, "the doubted run stays ready");
     assert_eq!((doubted.0, doubted.1), (steady.0, steady.1));
+    Ok(())
+}
+
+/// The journal's opaque alerts for an outage in `alerts`.
+fn outages(alerts: &[Alert]) -> usize {
+    alerts
+        .iter()
+        .filter(|alert| alert.key == "journal_unavailable" && alert.subject.is_none())
+        .count()
+}
+
+/// The control stream's establishment `c1` of `conn1` as account `acct1`, due to be copied.
+fn establishment() -> Result<ToCopy, Error> {
+    let Value::Object(members) = support::object(vec![
+        ("account_ref", Value::Str(ACCOUNT.to_owned())),
+        ("connection_id", Value::Str(CONNECTION.to_owned())),
+        ("environment", Value::Str("paper".to_owned())),
+    ])?
+    else {
+        return Err("members".into());
+    };
+    Ok(ToCopy {
+        original: EventId("c1".to_owned()),
+        members,
+    })
+}
+
+/// A process whose book's day start went in doubt at Tuesday's first tick, its copy committed.
+fn day_start_in_doubt(
+    journal: &Journal,
+    faults: &[Fault],
+) -> Result<mandate_executord::ExecutorProcess<Journal, Paper>, Error> {
+    let mut process = process(journal, Fixed::new(1))?;
+    process.step(at(NOON)?);
+    tick(journal, "t3", TUESDAY)?;
+    journal.fail_next_of("RiskDayStarted", faults);
+    process.step(at(TUESDAY)?);
+    Ok(process)
+}
+
+/// The journal's one opaque alert for an outage: an owed batch in doubt raises it on the pass it
+/// goes in doubt, and not again while it stays in doubt.
+#[test]
+fn an_owed_batch_in_doubt_is_alerted_once() -> Result<(), Error> {
+    let journal = deployed()?;
+    let mut process = process(&journal, Fixed::new(1))?;
+    process.step(at(NOON)?);
+    tick(&journal, "t3", TUESDAY)?;
+    journal.fail_next_of("RiskDayStarted", &[Fault::Unavailable, Fault::Unavailable]);
+    let first = process.step(at(TUESDAY)?);
+    let later = "2026-09-22T04:00:06Z";
+    tick(&journal, "t4", later)?;
+    let second = process.step(at(later)?);
+    assert_eq!((outages(&first), outages(&second)), (1, 0));
+    Ok(())
+}
+
+/// A copy in doubt raises the outage's alert, and the pass that commits it ends the outage, so the
+/// next one is alerted again.
+#[test]
+fn a_copy_in_doubt_is_alerted_and_its_commit_ends_the_outage() -> Result<(), Error> {
+    let journal = deployed()?;
+    let mut process = process(&journal, Fixed::new(1))?;
+    process.step(at(NOON)?);
+    tick(&journal, "t3", TUESDAY)?;
+    journal.fail_next_of("ClockAdvanced", &[Fault::Unavailable]);
+    let first = process.step(at(TUESDAY)?);
+    let later = "2026-09-22T04:00:06Z";
+    tick(&journal, "t4", later)?;
+    let second = process.step(at(later)?);
+    let wednesday = "2026-09-23T04:00:05Z";
+    tick(&journal, "t5", wednesday)?;
+    journal.fail_next_of("ClockAdvanced", &[Fault::Unavailable]);
+    let third = process.step(at(wednesday)?);
+    assert_eq!(
+        (outages(&first), outages(&second), outages(&third)),
+        (1, 0, 1),
+        "{:?}",
+        journal.types(ACCOUNT_STREAM)
+    );
+    Ok(())
+}
+
+/// DEC-2804 item 4: an establishment's copy waits behind the book's batch in doubt, and is built
+/// again at the head that batch leaves: both commit, the book's records right after their cause.
+#[test]
+fn an_establishment_copy_follows_the_books_batch_in_doubt() -> Result<(), Error> {
+    let journal = deployed()?;
+    let mut process = day_start_in_doubt(&journal, &[Fault::Unavailable])?;
+    assert_eq!(
+        process.copy_establishment(at(TUESDAY)?, &establishment()?),
+        Ok(())
+    );
+    let types = journal.types(ACCOUNT_STREAM);
+    assert_eq!(
+        types.get(types.len().saturating_sub(3)..),
+        Some(
+            &[
+                "ClockAdvanced".to_owned(),
+                "RiskDayStarted".to_owned(),
+                "ConnectionEstablished".to_owned()
+            ][..]
+        )
+    );
+    assert!(process.ready(), "{:?}", process.lifecycle().state());
+    Ok(())
+}
+
+/// A fenced process offers nothing more: when the book's batch in doubt is fenced on its retry,
+/// the establishment's copy is refused, nothing else is appended, and the process stops.
+#[test]
+fn a_fenced_retry_of_the_books_batch_appends_nothing_more() -> Result<(), Error> {
+    let journal = deployed()?;
+    let mut process = day_start_in_doubt(&journal, &[Fault::Unavailable, Fault::Fenced])?;
+    let before = journal.appends();
+    assert_eq!(
+        process.copy_establishment(at(TUESDAY)?, &establishment()?),
+        Err("copy_refused")
+    );
+    assert_eq!(journal.appends(), before + 1, "only the fenced retry");
+    assert!(
+        !journal
+            .types(ACCOUNT_STREAM)
+            .contains(&"RiskDayStarted".to_owned())
+    );
+    assert!(!process.ready(), "{:?}", process.lifecycle().state());
     Ok(())
 }

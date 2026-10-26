@@ -86,6 +86,8 @@ pub enum Fault {
     /// Nothing written: the journal refuses the batch as invalid, as it refuses a draft its schema
     /// does not admit (DEC-2805).
     Invalid,
+    /// Nothing written: a newer writer holds the stream, and this one is fenced (journal spec §2).
+    Fenced,
 }
 
 #[derive(Default)]
@@ -342,6 +344,11 @@ impl Store for Journal {
         let fault = typed.or_else(|| rows.faults.pop_front());
         if fault == Some(Fault::Unavailable) {
             return AppendOutcome::Unavailable;
+        }
+        if fault == Some(Fault::Fenced) {
+            return AppendOutcome::Fenced {
+                current_epoch: epoch.saturating_add(1),
+            };
         }
         if fault == Some(Fault::Invalid) {
             return AppendOutcome::Invalid {

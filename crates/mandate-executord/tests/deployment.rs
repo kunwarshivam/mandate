@@ -1048,8 +1048,8 @@ fn unread_answers_nothing() -> Result<(), Error> {
     Ok(())
 }
 
-/// The wiring the deployment replaces answers the binding gate from it: with every fact read,
-/// the untraded agent's opening reaches the gate.
+/// The wiring the deployment replaces answers the binding gate and the risk book's openings from
+/// it: with every fact read, the untraded agent's opening reaches the gate, and its fold opens.
 #[test]
 fn the_wired_gate_reads_the_deployment() -> Result<(), Error> {
     let (journal, store, _) = deployed()?;
@@ -1073,6 +1073,18 @@ fn the_wired_gate_reads_the_deployment() -> Result<(), Error> {
             .gate
             .input(&request(&agent, &spy, Purpose::Open, Side::Buy)?)
             .is_some()
+    );
+    assert!(
+        wiring
+            .risk
+            .opening(
+                &agent,
+                &journal.rows_of(CONTROL_STREAM),
+                Usd::parse("25000")?,
+                Date::parse("2026-09-21")?,
+            )
+            .is_some(),
+        "the wired risk book opens the agent's fold from the deployment"
     );
     Ok(())
 }
