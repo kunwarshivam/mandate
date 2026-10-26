@@ -186,7 +186,9 @@ runtime:
 # deployment whose meter stream it writes, both required once `images.model-gateway` is named. The
 # two monthly budgets are spending values (DEC-79): left empty, the service refuses to start, with
 # each one's code, rather than run on a number no one named. Only the local cell's values set them,
-# to the recorded bundle's own caps, over a recording that spends nothing.
+# to the recorded bundle's own caps, over a recording that spends nothing, and the chart refuses them
+# anywhere else. The service reads each agent's daily cap from the artifact store, which mounts only
+# with `images.api`; without it, the service refuses to start (`artifact_store_unavailable`).
 modelGateway:
   workspace: ""
   deployment: ""

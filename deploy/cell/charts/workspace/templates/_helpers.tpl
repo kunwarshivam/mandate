@@ -235,6 +235,9 @@ start without them (AGENTS.md rule 3).
 budgets, rendered only when named, so an unnamed one stops its start with its code (DEC-2326). */}}
 {{- if eq .p.name "model-gateway" }}
 {{- $g := .root.Values.modelGateway }}
+{{- if and (or $g.workspaceMonthlyUsd $g.deploymentMonthlyUsd) (not .root.Values.localImages) }}
+{{- fail "modelGateway's monthly budgets are named only by the local cell's values (localImages), over the recorded bundle; a hosted cell's budgets are the founder's (DEC-2326 item 2, DEC-2396)" }}
+{{- end }}
 - name: MANDATE_GATEWAY_WORKSPACE
   value: {{ required "modelGateway.workspace, the one workspace the model gateway serves, is required with images.model-gateway" $g.workspace | quote }}
 - name: MANDATE_GATEWAY_DEPLOYMENT

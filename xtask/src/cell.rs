@@ -1044,7 +1044,7 @@ fn image_sets() -> Result<Vec<String>> {
 }
 
 /// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `scheduler`, `data`,
-/// `deploy-manager` and `role-provisioner` images from this checkout (never with the `live` feature), bring up the k3d
+/// `model-gateway`, `deploy-manager` and `role-provisioner` images from this checkout (never with the `live` feature), bring up the k3d
 /// cluster if it is not up, install the CloudNativePG operator, the journal's Postgres and the
 /// vault, issue the vault's AppRole Secrets once the provisioner runs ([`provision_vault`]), install
 /// the workspace chart, and wait until every pod is ready and the migration Job has finished.
@@ -1143,6 +1143,7 @@ pub fn up() -> Result<()> {
         exchange.as_ref(),
         manager.as_ref(),
         provisioner.as_ref(),
+        gateway.as_ref(),
     ]
     .into_iter()
     .flatten()
@@ -6441,12 +6442,47 @@ mod tests {
             recorded.and_then(|i| args.get(i + 1)).copied(),
             Some("/usr/local/share/mandate/research/research.json")
         );
-        assert!(!args.iter().any(|a| a.starts_with("--registry")), "{args:?}");
+        assert!(
+            !args.iter().any(|a| a.starts_with("--registry")),
+            "{args:?}"
+        );
         assert!(
             demo_research()
                 .iter()
                 .any(|(_, name)| name == "research/research.json")
         );
+        Ok(())
+    }
+
+    /// Every image `cell up` builds is imported into the cluster: each `*_image()` or
+    /// `*_image_tag()` it binds is in the import list, so no process the chart names an image for
+    /// waits on a pull that cannot succeed (`IfNotPresent` on a `mandate.local/` tag).
+    #[test]
+    fn every_image_cell_up_builds_is_imported() -> Result<()> {
+        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cell.rs"))?;
+        let up = source
+            .split_once("pub fn up() -> Result<()> {")
+            .and_then(|(_, rest)| rest.split_once("\n}\n"))
+            .map(|(body, _)| body)
+            .context("cell.rs has no up()")?;
+        let imported = up
+            .split_once("for image in [")
+            .and_then(|(_, rest)| rest.split_once(']'))
+            .map(|(list, _)| list)
+            .context("up() has no import list")?;
+        let bound: Vec<&str> = up
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("let "))
+            .filter(|line| line.contains("_image()?;") || line.contains("_image_tag()?;"))
+            .filter_map(|line| line.split_once(" = ").map(|(name, _)| name))
+            .collect();
+        assert!(bound.len() >= 8, "{bound:?}");
+        for name in bound {
+            assert!(
+                imported.contains(&format!("{name}.as_ref()")),
+                "{name} is built but never imported"
+            );
+        }
         Ok(())
     }
 
