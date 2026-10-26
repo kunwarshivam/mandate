@@ -62,6 +62,7 @@ use crate::state::{RuntimeState, UnresolvedAppend};
 use crate::step::{Batch, observed};
 use crate::types::{
     Effect, EventId, FoldedEvent, Input, Mode, NotificationRef, Observation, RiskClock,
+    RuntimeAlert,
 };
 use judge::Judged;
 
@@ -1267,7 +1268,7 @@ fn treat(
     if treatment.alert_operator {
         batch.notify(NotificationRef {
             subject_event: record.clone(),
-            message_key: "research_call_refused",
+            kind: RuntimeAlert::ResearchCallRefused,
         });
     }
     if !treatment.deadline_streak {
@@ -1279,7 +1280,7 @@ fn treat(
         research.deadline_streak = 0;
         batch.notify(NotificationRef {
             subject_event: record,
-            message_key: "research_deadline_streak",
+            kind: RuntimeAlert::ResearchDeadlineStreak,
         });
     }
 }

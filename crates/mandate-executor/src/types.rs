@@ -889,13 +889,13 @@ pub enum TimerRequest {
     Cancel { id: TimerId },
 }
 
-/// An owner alert. It carries an opaque id and a message key only: no instrument, quantity, price,
-/// reject message, or account field ever reaches a notification (`AGENTS.md` rule 6, DEC-11). The
-/// type is the enforcement.
+/// An owner alert. It carries an opaque id and a closed kind only: no instrument, quantity, price,
+/// reject message, or account field ever reaches a notification (`AGENTS.md` rule 6, DEC-11), and
+/// no alert without a catalogued kind can be raised (DEC-2514). The type is the enforcement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationRef {
     pub subject_event: EventId,
-    pub message_key: &'static str,
+    pub kind: mandate_notify::OwnerAlertKind,
 }
 
 /// A draft for the account stream. The shell wraps it in the journal envelope, so the core cannot

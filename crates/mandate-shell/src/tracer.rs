@@ -571,6 +571,9 @@ pub(crate) struct Session<'s> {
     recorded: BTreeSet<String>,
     /// The `client_order_id` of every `OrderSubmitted` committed **in this run** (TI-1).
     submitted_drafts: BTreeSet<String>,
+    /// The event id of every unprotected interval's record at its bound committed in this run, so
+    /// an alert naming one is reported under the interval's own key on every path (DEC-2514).
+    interval_limits: BTreeSet<String>,
     /// Whether the replayed agent stream already carries an intent (TI-12).
     pub(crate) cycle_open: bool,
     /// Whether an asked cycle's wait holds its released opening (DEC-940 item 2).
@@ -613,6 +616,7 @@ impl<'s> Session<'s> {
             heads: BTreeMap::new(),
             recorded: BTreeSet::new(),
             submitted_drafts: BTreeSet::new(),
+            interval_limits: BTreeSet::new(),
             cycle_open: false,
             holding: false,
             held: None,
@@ -1216,7 +1220,7 @@ impl<'s> Session<'s> {
                 }
                 Effect::Intent(handoff) => self.hand(&handoff)?,
                 Effect::Timer(_) => {}
-                Effect::Notify(notification) => self.report.alerts.push(notification.message_key),
+                Effect::Notify(notification) => self.report.alerts.push(notification.kind.key()),
                 Effect::NotifyApproval(_) => self.report.alerts.push("approval_needed"),
             }
         }
@@ -1267,7 +1271,12 @@ impl<'s> Session<'s> {
                 }
                 mandate_executor::Effect::Timer(_) => {}
                 mandate_executor::Effect::Notify(notification) => {
-                    self.report.alerts.push(notification.message_key);
+                    let key = if self.interval_limits.contains(&notification.subject_event.0) {
+                        INTERVAL_LIMIT_ALERT
+                    } else {
+                        notification.kind.key()
+                    };
+                    self.report.alerts.push(key);
                 }
             }
         }
@@ -1414,6 +1423,9 @@ impl<'s> Session<'s> {
                 && let Some(id) = draft.payload.get("client_order_id").and_then(Value::as_str)
             {
                 self.submitted_drafts.insert(id.to_owned());
+            }
+            if interval_limit_record(draft) {
+                self.interval_limits.insert(draft.event_id.0.clone());
             }
         }
         Ok(())
@@ -1570,6 +1582,23 @@ fn consecutive_executor_journals(
     drafts
 }
 
+/// The report's key for an owner alert about an unprotected interval that reached its bound: LT-10
+/// releases an uncovered run on it alone (`crate::lt10::watch_may_end`), and the alert's kind,
+/// `protection`, is shared with the stop watchdog's, so the key is read from the record the alert
+/// names (DEC-2514).
+pub(crate) const INTERVAL_LIMIT_ALERT: &str = "unprotected_interval_limit";
+
+/// Whether `draft` is the executor's record of an unprotected interval at its bound
+/// (`ProtectionChanged` with the action `interval_limit`, trading-domain spec §5.4).
+fn interval_limit_record(draft: &mandate_executor::EventDraft) -> bool {
+    draft.event_type == "ProtectionChanged"
+        && draft
+            .payload
+            .get("action")
+            .and_then(mandate_canon::Value::as_str)
+            == Some("interval_limit")
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -1681,13 +1710,51 @@ mod tests {
         }
     }
 
+    /// LT-10's release reads the interval's own record only (DEC-2514 item 5): a stop watchdog's
+    /// `ProtectionChanged`, which shares the alert's `protection` kind, and another record that
+    /// says `interval_limit` are not it.
+    #[test]
+    fn only_an_intervals_protection_record_at_its_bound_is_the_intervals_own() {
+        let with_action = |event_type: &str, action: &str| {
+            let mut members = Object::new();
+            if let Ok(key) = mandate_canon::Key::new("action") {
+                members.insert(key, Value::Str(action.to_owned()));
+            }
+            EventDraft {
+                payload: Value::Object(members),
+                ..draft("r", event_type, 2)
+            }
+        };
+        assert!(super::interval_limit_record(&with_action(
+            "ProtectionChanged",
+            "interval_limit"
+        )));
+        assert!(!super::interval_limit_record(&with_action(
+            "ProtectionChanged",
+            "watchdog"
+        )));
+        assert!(!super::interval_limit_record(&with_action(
+            "ProtectionChanged",
+            "expiry_unreplaceable"
+        )));
+        assert!(!super::interval_limit_record(&with_action(
+            "GateDecided",
+            "interval_limit"
+        )));
+        assert!(!super::interval_limit_record(&draft(
+            "r",
+            "ProtectionChanged",
+            2
+        )));
+    }
+
     #[test]
     fn consecutive_executor_drafts_stay_in_one_append_run() {
         let companion = draft("companion", "OrderRequestRecorded", 1);
         let submitted = draft("submitted", "OrderSubmitted", 2);
         let boundary = Effect::Notify(NotificationRef {
             subject_event: EventId("submitted".to_owned()),
-            message_key: "submitted",
+            kind: mandate_executor::OwnerAlertKind::Protection,
         });
         let mut effects = VecDeque::from([Effect::Journal(submitted), boundary]);
         let drafts = consecutive_executor_journals(companion, &mut effects);

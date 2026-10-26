@@ -6,6 +6,7 @@
 //! interpretation 20).
 
 use mandate_canon::{Digest, Key, Object, Value};
+use mandate_notify::OwnerAlertKind;
 
 use crate::error::ExecutorError;
 use crate::fold::fold;
@@ -24,7 +25,14 @@ pub(crate) struct Batch<'p, 'a> {
     binding_gate: Option<&'p dyn BindingGateSource>,
     epoch: WriterEpoch,
     head: Seq,
+    /// The drafts this batch took ids for from the draft ordinals, which [`Self::id_after`]
+    /// predicts from.
     drafted: u32,
+    /// Every draft this batch wrote, owner alert records included: where the next one sits.
+    sequenced: u32,
+    /// The owner alerts this batch raised, in order, one per subject (journal spec §9.15 rule
+    /// 130, notifications spec §3.4).
+    alerted: Vec<(EventId, OwnerAlertKind)>,
 }
 
 impl<'p, 'a> Batch<'p, 'a> {
@@ -39,6 +47,8 @@ impl<'p, 'a> Batch<'p, 'a> {
             effects: Vec::new(),
             binding_gate: default_binding_gate(),
             drafted: 0,
+            sequenced: 0,
+            alerted: Vec::new(),
         })
     }
 
@@ -89,12 +99,37 @@ impl<'p, 'a> Batch<'p, 'a> {
     ) -> Result<EventId, ExecutorError> {
         pairs.push(("risk_clock", risk_clock_stamp(self.at())?));
         let payload = object(pairs)?;
+        self.draft(event_type, causation_id, config_refs, payload)
+    }
+
+    /// Drafts `payload` as it is under the next draft id, folds it into the working copy, and
+    /// answers its id.
+    fn draft(
+        &mut self,
+        event_type: &str,
+        causation_id: Option<EventId>,
+        config_refs: Object,
+        payload: Value,
+    ) -> Result<EventId, ExecutorError> {
         let event_id = self.next_id();
+        self.drafted = self.drafted.saturating_add(1);
+        self.fold_draft(event_id, event_type, causation_id, config_refs, payload)
+    }
+
+    /// Drafts `payload` under `event_id` at the batch's next `seq`, folds it, and answers its id.
+    fn fold_draft(
+        &mut self,
+        event_id: EventId,
+        event_type: &str,
+        causation_id: Option<EventId>,
+        config_refs: Object,
+        payload: Value,
+    ) -> Result<EventId, ExecutorError> {
         let stream = self.view.account_stream();
         let seq = Seq(self
             .head
             .0
-            .saturating_add(u64::from(self.drafted))
+            .saturating_add(u64::from(self.sequenced))
             .saturating_add(1));
         fold(
             &mut self.view,
@@ -107,7 +142,7 @@ impl<'p, 'a> Batch<'p, 'a> {
                 payload: payload.clone(),
             },
         )?;
-        self.drafted = self.drafted.saturating_add(1);
+        self.sequenced = self.sequenced.saturating_add(1);
         self.effects.push(Effect::Journal(EventDraft {
             event_id: event_id.clone(),
             event_type: event_type.to_owned(),
@@ -123,12 +158,53 @@ impl<'p, 'a> Batch<'p, 'a> {
         self.effects.push(Effect::Broker(request));
     }
 
-    /// An owner alert: the id of the event it is about and a message key, nothing else
-    /// (`AGENTS.md` rule 6, DEC-11).
-    pub(crate) fn notify(&mut self, subject_event: EventId, message_key: &'static str) {
+    /// An owner alert about `subject_event`, of `kind`, and nothing else (`AGENTS.md` rule 6,
+    /// DEC-11): its `OwnerAlertSent` here, beside the subject it names, which is the dispatcher's
+    /// cause (notifications spec §3.2, §5.1; DEC-2514), then the effect the process reports. One
+    /// per subject, the first kind winning (§3.4, journal spec rule 130). The record takes its id
+    /// from [`ALERT_ORDINALS`] on, never from the drafts' own ordinals, so it moves no id a draft
+    /// predicted for a later one ([`Self::id_after`]). A subject this batch did not draft gets the
+    /// effect alone, since its record would refuse the batch, and raising an alert never fails
+    /// what it rides in (`AGENTS.md` rule 13).
+    pub(crate) fn notify(&mut self, subject_event: EventId, kind: OwnerAlertKind) {
+        if self
+            .alerted
+            .iter()
+            .any(|(subject, _)| *subject == subject_event)
+        {
+            return;
+        }
+        let drafted_here = self.effects.iter().any(|effect| {
+            matches!(effect, Effect::Journal(draft)
+                if draft.event_id == subject_event && draft.event_type != OWNER_ALERT_SENT)
+        });
+        if drafted_here {
+            let alerts = u32::try_from(self.alerted.len()).unwrap_or(u32::MAX);
+            let id = self.ports.ids.event_id(
+                self.epoch,
+                self.head,
+                ALERT_ORDINALS.saturating_add(alerts),
+            );
+            let recorded = object(vec![
+                ("subject", Value::Str(subject_event.0.clone())),
+                ("kind", Value::Str(kind.key().to_owned())),
+                ("owner_command", Value::Null),
+            ])
+            .and_then(|payload| {
+                self.fold_draft(
+                    id,
+                    OWNER_ALERT_SENT,
+                    Some(subject_event.clone()),
+                    Object::new(),
+                    payload,
+                )
+            });
+            let _an_alert_never_fails_its_batch = recorded;
+        }
+        self.alerted.push((subject_event.clone(), kind));
         self.effects.push(Effect::Notify(NotificationRef {
             subject_event,
-            message_key,
+            kind,
         }));
     }
 
@@ -162,6 +238,14 @@ pub(crate) fn config_refs(refs: &[(&'static str, Option<&str>)]) -> Result<Objec
     }
     Ok(object)
 }
+
+/// The first ordinal an owner alert record's id is derived at, far above any batch's drafts, so
+/// an alert never takes an ordinal a draft predicted (DEC-2514). Six digits, as the deployed ids
+/// format an ordinal.
+pub(crate) const ALERT_ORDINALS: u32 = 900_000;
+
+/// The subject stream owner's alert record (journal spec §9.15).
+pub(crate) const OWNER_ALERT_SENT: &str = "OwnerAlertSent";
 
 pub(crate) fn schema_version(event_type: &str) -> u64 {
     match event_type {

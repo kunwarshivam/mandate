@@ -90,6 +90,9 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
     if kind == "StreamOpened" {
         return stream_opened(state, payload);
     }
+    if kind == "OwnerAlertSent" {
+        return Ok(());
+    }
     if let Some(story) = owner_elsewhere(kind) {
         return not_interpreted(kind, story);
     }
