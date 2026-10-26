@@ -35,10 +35,8 @@
 //! `--gateway <host:port>` beside it calls models through the model-gateway service there, whose
 //! meter stream the runtime then only reads (DEC-2397); without it, the in-process recorded fake.
 
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -47,14 +45,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_daemon::bars::{BARS_ENV, BarsReader};
 use mandate_daemon::cell::{self, CellDeployment};
-use mandate_daemon::remote::RemoteGateway;
+use mandate_daemon::remote::GatewayAddress;
 use mandate_daemon::wake::Sleep;
 use mandate_daemon::{Config, RuntimeProcess, Wake, deployment, fixture, launch, production};
 use mandate_journal::{Environment, StreamId};
 use mandate_process::State;
 use mandate_process::probe::{self, Probe, Status};
 use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
-use mandate_store::meter::{JournalMeter, ReadMeter};
 use mandate_store::{MemoryStore, PgStore, Store};
 use mandate_time::UtcNanos;
 use tokio::signal::unix::{SignalKind, signal};
@@ -177,7 +174,7 @@ fn run(
     socket: &Path,
     fixture: bool,
     research: Option<&Path>,
-    gateway: Option<SocketAddr>,
+    gateway: Option<GatewayAddress>,
 ) -> Result<u8, &'static str> {
     let terminate = Arc::new(AtomicBool::new(false));
     watch_terminate(Arc::clone(&terminate)).map_err(|_| "signal_unavailable")?;
@@ -255,29 +252,15 @@ fn run(
             wiring.models = models;
             if let Some(opted) = opted {
                 let rows = Box::new(PgStore::connect(&dsn)?);
-                let wired = match gateway {
-                    Some(address) => cell::research_remote(
-                        opted,
-                        rows,
-                        Box::new(ReadMeter::open(PgStore::connect(&dsn)?, &workspace)),
-                        Path::new(&root),
-                        Box::new(host_now),
-                        RemoteGateway::new(address, host_now),
-                    ),
-                    None => cell::research_metered(
-                        opted,
-                        rows,
-                        Box::new(JournalMeter::open(
-                            PgStore::connect(&dsn)?,
-                            &workspace,
-                            Environment::Paper,
-                            Rc::new(host_now),
-                            Box::new(cell::meter_opened_ids(&workspace)),
-                        )),
-                        Path::new(&root),
-                        Box::new(host_now),
-                    ),
-                }
+                let wired = cell::research_through(
+                    opted,
+                    rows,
+                    PgStore::connect(&dsn)?,
+                    &workspace,
+                    Path::new(&root),
+                    host_now,
+                    gateway,
+                )
                 .map_err(|error| error.code())?;
                 wiring.research = Some(wired.wiring);
                 wiring.refs = wired.refs;

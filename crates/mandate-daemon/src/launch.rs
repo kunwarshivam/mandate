@@ -9,7 +9,7 @@
 //! connection and the owner may be left unnamed, to be read from the agent's deployment.
 //! [`gateway`] reads the model-gateway service's address a researching runtime calls (DEC-2397).
 
-use std::net::{SocketAddr, ToSocketAddrs};
+use crate::remote::GatewayAddress;
 
 /// The deployment a launch names; the connection and the owner are `None` when it leaves them to
 /// be resolved.
@@ -83,14 +83,14 @@ pub fn fixture_permitted(
 }
 
 /// The model-gateway service's address `run` was given with `--gateway <host:port>` (DEC-2397 item
-/// 6), resolved once, or `None` when the flag is absent, so the runtime keeps its in-process recorded
-/// fake (DEC-2257 item 6). The flag is read only beside `--research`, since only research calls a
-/// model.
+/// 6), parsed and never resolved here, since [`crate::remote::RemoteGateway`] resolves it for each
+/// call; or `None` when the flag is absent, so the runtime keeps its in-process recorded fake
+/// (DEC-2257 item 6). The flag is read only beside `--research`, since only research calls a model.
 ///
 /// # Errors
 /// `gateway_address_invalid` for the flag written `--gateway=`, with no value, with a value that is
-/// another flag or names no address, or without `--research`.
-pub fn gateway(args: &[String], research: bool) -> Result<Option<SocketAddr>, &'static str> {
+/// another flag or does not parse as `host:port`, given twice, or without `--research`.
+pub fn gateway(args: &[String], research: bool) -> Result<Option<GatewayAddress>, &'static str> {
     let joined = args.iter().any(|a| a.starts_with("--gateway="));
     let Some(at) = args.iter().position(|a| a == "--gateway") else {
         return if joined {
@@ -99,12 +99,13 @@ pub fn gateway(args: &[String], research: bool) -> Result<Option<SocketAddr>, &'
             Ok(None)
         };
     };
-    if joined || !research {
+    let twice = args.iter().filter(|a| *a == "--gateway").nth(1).is_some();
+    if joined || twice || !research {
         return Err("gateway_address_invalid");
     }
     args.get(at.saturating_add(1))
         .filter(|value| !value.starts_with("--"))
-        .and_then(|value| value.to_socket_addrs().ok()?.next())
+        .and_then(|value| GatewayAddress::parse(value))
         .map(Some)
         .ok_or("gateway_address_invalid")
 }

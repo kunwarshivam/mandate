@@ -19,12 +19,14 @@ use mandate_num::Usd;
 use mandate_research::PolicyOverlay;
 use mandate_research_run::agentic::{OutputMode, Tool, ToolClass};
 use mandate_runtime::{AgenticConfig, EventDraft, ResearchConfig};
+use mandate_store::Store;
+use mandate_store::meter::{JournalMeter, ReadMeter};
 use mandate_time::UtcNanos;
 
 use crate::deployment;
 use crate::meter::CellMeter;
 use crate::recorded::{Bundle, BundleError};
-use crate::remote::RemoteGateway;
+use crate::remote::{GatewayAddress, RemoteGateway};
 use crate::runtime::{Refs, ResearchWiring};
 use crate::source::{CellSource, Rows, SourceFor};
 use crate::worker::{RecordedWorker, StoreSink, WorkerError, WorkerFor};
@@ -240,6 +242,47 @@ pub fn research_remote(
     remote: RemoteGateway,
 ) -> Result<CellResearch, CellError> {
     wired_through(opted, rows, meter, artifacts, now, Some(remote))
+}
+
+/// The research a journaled process wires for `workspace`'s paper deployment, its meter stream in
+/// `journal` (DEC-2397 items 4 and 6): with a `gateway`, through the model-gateway service there,
+/// reading that stream with a [`ReadMeter`], which never takes the service's writer epoch; without
+/// one, [`research_metered`] over a [`JournalMeter`], its writer. Both read the clock `clock`.
+///
+/// # Errors
+/// As [`research_metered`].
+pub fn research_through<S: Store + 'static>(
+    opted: OptIn,
+    rows: Box<dyn Rows>,
+    journal: S,
+    workspace: &str,
+    artifacts: &Path,
+    clock: fn() -> UtcNanos,
+    gateway: Option<GatewayAddress>,
+) -> Result<CellResearch, CellError> {
+    match gateway {
+        Some(address) => research_remote(
+            opted,
+            rows,
+            Box::new(ReadMeter::open(journal, workspace)),
+            artifacts,
+            Box::new(clock),
+            RemoteGateway::new(address, clock),
+        ),
+        None => research_metered(
+            opted,
+            rows,
+            Box::new(JournalMeter::open(
+                journal,
+                workspace,
+                Environment::Paper,
+                Rc::new(clock),
+                Box::new(meter_opened_ids(workspace)),
+            )),
+            artifacts,
+            Box::new(clock),
+        ),
+    }
 }
 
 /// The research `opted` asks for, reading the streams through `rows` and the mandate documents and

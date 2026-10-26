@@ -164,14 +164,22 @@ fn words(text: &str) -> Vec<String> {
     text.split_whitespace().map(str::to_owned).collect()
 }
 
-/// DEC-2397 item 6: `--gateway <host:port>` beside `--research` names the model-gateway service;
-/// without the flag the runtime keeps its in-process recorded fake.
+/// DEC-2397 item 6: `--gateway <host:port>` beside `--research` names the model-gateway service,
+/// by address or by a name that is never resolved at the start, so a name that does not resolve yet
+/// still starts the runtime; without the flag the runtime keeps its in-process recorded fake.
 #[test]
 fn the_gateway_flag_names_the_service_beside_research() {
-    assert_eq!(
-        launch::gateway(&words("run --research /b --gateway 127.0.0.1:8080"), true),
-        Ok(Some("127.0.0.1:8080".parse().unwrap()))
-    );
+    for (text, host, port) in [
+        ("127.0.0.1:8080", "127.0.0.1", 8080),
+        ("model-gateway:8080", "model-gateway", 8080),
+        ("not-yet.invalid:1", "not-yet.invalid", 1),
+        ("[::1]:65535", "::1", 65535),
+    ] {
+        let named = launch::gateway(&words(&format!("run --research /b --gateway {text}")), true)
+            .unwrap()
+            .unwrap();
+        assert_eq!((named.host(), named.port()), (host, port), "{text}");
+    }
     assert_eq!(launch::gateway(&words("run --research /b"), true), Ok(None));
     assert_eq!(launch::gateway(&words("run"), false), Ok(None));
 }
@@ -185,6 +193,13 @@ fn a_gateway_flag_that_names_no_service_refuses_the_start() {
         ("run --research /b --gateway", true),
         ("run --research /b --gateway --probe /p", true),
         ("run --research /b --gateway nowhere", true),
+        ("run --research /b --gateway :8080", true),
+        ("run --research /b --gateway []:8080", true),
+        ("run --research /b --gateway model-gateway:0", true),
+        ("run --research /b --gateway model-gateway:65536", true),
+        ("run --research /b --gateway model-gateway:http", true),
+        ("run --research /b --gateway a:1 --gateway b:2", true),
+        ("run --research /b --gateway a:1 --gateway a:1", true),
         ("run --gateway 127.0.0.1:8080", false),
         ("run --gateway=127.0.0.1:8080", false),
     ] {

@@ -286,6 +286,52 @@ fn research_asked_for_without_a_bundle_refuses() {
     assert!(!path.exists(), "a refused process serves no probe");
 }
 
+/// DEC-2397 item 6: `--gateway` that does not parse as `host:port`, given twice, or without
+/// `--research` refuses the start `gateway_address_invalid` before the process is ready; one that
+/// parses is taken without being resolved, so a name that does not resolve yet starts as far as
+/// the research opt-in, as one with no `--gateway` does.
+#[test]
+fn a_gateway_flag_that_names_no_service_refuses_the_start() {
+    let path = socket("gateway");
+    let launch = |tail: &[&str]| {
+        let mut args = vec!["run"];
+        args.extend(DEPLOYMENT);
+        args.push("--probe");
+        let out = Command::new(BIN)
+            .args(&args)
+            .arg(&path)
+            .args(tail)
+            .env_remove("MANDATE_JOURNAL_DSN")
+            .env_remove("MANDATE_ARTIFACTS")
+            .stdin(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap();
+        (out.status.code(), String::from_utf8(out.stderr).unwrap())
+    };
+    let refused = (Some(2), "gateway_address_invalid\n".to_owned());
+    for tail in [
+        &["--research", BUNDLE, "--gateway", "nowhere"][..],
+        &["--research", BUNDLE, "--gateway", "model-gateway:0"],
+        &["--research", BUNDLE, "--gateway"],
+        &["--research", BUNDLE, "--gateway=model-gateway:8080"],
+        &["--research", BUNDLE, "--gateway", "a:1", "--gateway", "b:2"],
+        &["--gateway", "model-gateway:8080"],
+    ] {
+        assert_eq!(launch(tail), refused, "{tail:?}");
+    }
+    let opted_in = (
+        Some(2),
+        "runtime_start_failed: research_needs_resolved_deployment\n".to_owned(),
+    );
+    assert_eq!(
+        launch(&["--research", BUNDLE, "--gateway", "not-yet.invalid:8080"]),
+        opted_in
+    );
+    assert_eq!(launch(&["--research", BUNDLE]), opted_in);
+    assert!(!path.exists(), "a refused process serves no probe");
+}
+
 /// A launch that leaves its connection and owner to be resolved reads them from the journal and
 /// the artifact store `MANDATE_ARTIFACTS` names (DEC-1016). A root that is not a store, a store with
 /// no journal, a fixture run with nothing to read them from, and a launch naming only one of the two
