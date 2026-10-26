@@ -330,7 +330,7 @@ mod tests {
         );
         assert!(matches!(
             first.iter().find_map(|e| match e { Effect::Journal(d) => d.causation_id.clone(), _ => None }),
-            Some(id) if id == records[0].event_id
+            Some(id) if records.first().is_some_and(|row| row.event_id == id)
         ));
         assert_eq!(
             universe(&executor),
@@ -430,24 +430,24 @@ mod tests {
             let mut invalid = BTreeSet::new();
             let mut retired = BTreeSet::new();
             for step in steps {
-                let seq = records.len() + 1;
+                let seq = records.len().saturating_add(1);
                 match step {
                     Step::Admit { on, lineage, lasts } => {
                         let thesis = format!("th-{seq}");
-                        records.push(proposed(seq, &thesis, &format!("ln-{lineage}"), on, now + lasts, None));
-                        admitted.push((on, thesis, lineage, now + lasts));
+                        records.push(proposed(seq, &thesis, &format!("ln-{lineage}"), on, now.saturating_add(lasts), None));
+                        admitted.push((on, thesis, lineage, now.saturating_add(lasts)));
                     }
                     Step::Invalidate { which } => {
-                        let Some((_, thesis, ..)) = admitted.get(which % admitted.len().max(1)).cloned() else { continue };
+                        let Some((_, thesis, ..)) = which.checked_rem(admitted.len()).and_then(|index| admitted.get(index)).cloned() else { continue };
                         records.push(invalidated(seq, &thesis));
                         invalid.insert(thesis);
                     }
                     Step::Retire { lineage } => {
-                        records.push(proposed(seq, &format!("th-{seq}"), &format!("ln-{lineage}"), 0, now + 10, Some("lineage_retired")));
+                        records.push(proposed(seq, &format!("th-{seq}"), &format!("ln-{lineage}"), 0, now.saturating_add(10), Some("lineage_retired")));
                         retired.insert(lineage);
                     }
                     Step::Wait { secs } => {
-                        now += secs;
+                        now = now.saturating_add(secs);
                         executor.run(Input::Tick(RiskClock::from_secs(now)), &ports).map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
                     }
                 }

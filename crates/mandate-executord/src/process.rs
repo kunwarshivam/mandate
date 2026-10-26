@@ -11,8 +11,8 @@ use mandate_executor::{
     BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect,
     EventDraft, EventId, ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input,
     InstrumentSnapshot, IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion,
-    MandateView, OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch,
-    fold, handle, limit_fills, recorded_fills,
+    MandateView, OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, ThesisRow,
+    WriterEpoch, fold, handle, limit_fills, recorded_fills,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
@@ -21,7 +21,7 @@ use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::{ExchangeCalendar, UtcNanos};
 
-use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches};
+use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches, theses};
 use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
 use crate::robinhood::AccountReads;
@@ -234,6 +234,9 @@ pub struct ExecutorProcess<S, B> {
 struct Followed {
     switches: Vec<(AgentId, Switch)>,
     proposals: Vec<(AgentId, Proposal)>,
+    /// Each followed agent's thesis records, in stream order, which the core copies onto the
+    /// account stream as its working universe (DEC-2823).
+    theses: Vec<(AgentId, Vec<ThesisRow>)>,
     unreadable: bool,
     released: bool,
     /// Whether every followed agent's stream parsed and read: one that did not may hold a switch,
@@ -387,6 +390,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let Some(Followed {
             switches,
             proposals: proposed,
+            theses: researched,
             unreadable,
             released,
             all_read,
@@ -411,6 +415,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             && !self.hand(now, now, Input::Tick(tick), &mut alerts, 0)
         {
             return alerts;
+        }
+        for (agent, records) in researched {
+            if !self.hand(now, now, Input::Theses { agent, records }, &mut alerts, 0) {
+                return alerts;
+            }
         }
         for (agent, proposal) in proposed {
             let action = if proposal.purpose.adds_risk() {
@@ -711,6 +720,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let workspace = self.state.scope().workspace.0.clone();
         let mut pending = Vec::new();
         let mut proposed = Vec::new();
+        let mut researched = Vec::new();
         let mut unreadable = false;
         let mut all_read = true;
         for agent in following.agents.keys().cloned() {
@@ -727,11 +737,15 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 .filter(|row| row.environment == self.environment.as_str())
                 .map(folded)
                 .collect();
-            let Ok((held, asked)) = read.and_then(|rows| Ok((switches(&rows)?, proposals(&rows)?)))
+            let Ok((held, asked, records)) =
+                read.and_then(|rows| Ok((switches(&rows)?, proposals(&rows)?, theses(&rows))))
             else {
                 unreadable = true;
                 continue;
             };
+            if !records.is_empty() {
+                researched.push((agent.clone(), records));
+            }
             let openings_held = following.held.contains(&agent);
             proposed.extend(
                 asked
@@ -782,6 +796,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         Some(Followed {
             switches: pending,
             proposals: proposed,
+            theses: researched,
             unreadable,
             released: following.released(),
             all_read,
