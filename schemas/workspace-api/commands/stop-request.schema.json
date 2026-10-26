@@ -42,9 +42,19 @@
           "type": "null"
         }
       ]
+    },
+    "step_up_assertion": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpAssertion"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
-  "description": "POST /agents/{agent_id}/stop (\u00a74.2): release and warning_shown as DEC-290 item 2 journals them; the warning digest exactly when release is true.",
+  "description": "POST /agents/{agent_id}/stop (\u00a74.2): release and warning_shown as DEC-290 item 2 journals them; the warning digest exactly when release is true. step_up_assertion only beside a step_up whose method is passkey (DEC-2140).",
   "if": {
     "properties": {
       "release": {
@@ -65,5 +75,31 @@
         "type": "null"
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "step_up_assertion": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "step_up_assertion"
+        ]
+      },
+      "then": {
+        "properties": {
+          "step_up": {
+            "type": "object",
+            "properties": {
+              "method": {
+                "const": "passkey"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }
