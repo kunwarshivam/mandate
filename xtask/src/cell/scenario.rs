@@ -360,7 +360,7 @@ const W2_WEB: Wait = Wait {
 };
 const WB_SETUP: Wait = Wait {
     lane: "WB",
-    story: "E11-9",
+    story: "E9-4",
     pr: None,
     lands: "web/'s confirm and deploy with a passkey in the cell, once the founder decides whether \
             a dev or ci cell may waive a first passkey's 24-hour cool-off (workspace API spec \
