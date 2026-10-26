@@ -3015,6 +3015,21 @@ pub fn journey(workspace: &str, agent: &str) -> Result<()> {
     Ok(())
 }
 
+/// The owner's set-up from web/ ([`web::setup_from_web`]) against a running cell, printing each
+/// step it reached.
+///
+/// # Errors
+/// As [`web::setup_from_web`].
+pub fn setup(workspace: &str) -> Result<()> {
+    eprintln!(
+        "==> the owner's set-up from web/ (paper only; confirm and deploy wait for the passkey's first 24 hours)"
+    );
+    for (name, value) in web::setup_from_web(workspace)? {
+        eprintln!("    {name}: {value}");
+    }
+    Ok(())
+}
+
 /// Opens a fresh control stream with the CLI in the cell, then exports and verifies it.
 fn journal(seeded: bool) -> Result<Verdict> {
     let id = run_id()?;
