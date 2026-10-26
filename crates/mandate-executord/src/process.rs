@@ -7,11 +7,12 @@ use mandate_accounting::InstrumentId;
 use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
-    BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, EventId,
-    ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot,
-    IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, Ports,
-    ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle,
+    AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOrder, BrokerOutcome,
+    BrokerRequest, BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft,
+    EventId, ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input,
+    InstrumentSnapshot, IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion,
+    MandateView, OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch,
+    fold, handle, limit_fills, recorded_fills,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
@@ -23,6 +24,7 @@ use mandate_time::{ExchangeCalendar, UtcNanos};
 use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches};
 use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
+use crate::robinhood::AccountReads;
 
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -37,6 +39,12 @@ pub trait Broker {
     /// The broker's capability profile, set on the state before `Input::Started` (DEC-838 item 5).
     fn profile(&self) -> Result<CapabilityProfile, ProfileError>;
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError>;
+    /// The account in one read, for a broker that publishes no account activity (Robinhood,
+    /// DEC-933 item 1, DEC-2386 item 4); `None` for a broker that answers the four reads a
+    /// reconciliation asks for, as Alpaca does.
+    fn account_reads(&mut self) -> Option<Result<AccountReads, ConnectorError>> {
+        None
+    }
 }
 
 /// The protections port could not answer. The process stops rather than hand an opening without
@@ -137,6 +145,8 @@ enum Read {
     /// The broker answered something that is not the read's answer, or the request could not be
     /// sent.
     Unusable,
+    /// An answer handed before the snapshot did not commit; the pass stops as a handoff does.
+    Halted,
 }
 
 /// How one input's effects ended.
@@ -457,7 +467,13 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// one of the fold's orders): every status it reports is final. A read that fails, or a status
     /// it does not name, keeps the executor running (DEC-2347 item 3.5).
     fn broker_quiet(&mut self) -> bool {
-        match self.read(&BrokerRequest::ListOpenOrders) {
+        let listed = match self.broker.account_reads() {
+            Some(read) => read
+                .map(|reads| BrokerOutcome::OpenOrders(reads.open_orders))
+                .map_err(read_error),
+            None => self.read(&BrokerRequest::ListOpenOrders),
+        };
+        match listed {
             Ok(BrokerOutcome::OpenOrders(orders)) => orders.iter().all(|order| {
                 matches!(
                     order.status.as_str(),
@@ -949,15 +965,23 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// whose answer is lost leaves it due for the next pass, since a read changes nothing at the broker, and the pass goes on, so a kill switch
     /// never waits on it (`AGENTS.md` rule 13). It stays due until its snapshot is handed.
     fn reconciliation(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>, depth: usize) -> bool {
-        let snapshot = match self.snapshot() {
+        self.reconcile = false;
+        let snapshot = match self.snapshot(now, alerts, depth) {
             Ok(snapshot) => snapshot,
-            Err(Read::Lost) => return true,
+            Err(Read::Lost) => {
+                self.reconcile = true;
+                return true;
+            }
+            Err(Read::Halted) => {
+                self.reconcile = true;
+                return false;
+            }
             Err(Read::Unusable) => {
+                self.reconcile = true;
                 self.lifecycle.observe(now, Lifecycled::Failed);
                 return false;
             }
         };
-        self.reconcile = false;
         let reported = Input::BrokerUpdate(BrokerUpdate::Account(snapshot.account.clone()));
         if !self.hand(now, self.written_at, reported, alerts, depth) {
             self.reconcile = true;
@@ -972,13 +996,37 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         )
     }
 
-    /// The broker's open orders, positions, account and activity since the executor's cursor.
-    fn snapshot(&mut self) -> Result<BrokerSnapshot, Read> {
+    /// The broker's open orders, positions, account and activity since the executor's cursor. A
+    /// broker that publishes no activity is read once instead, and its fills are the ones its
+    /// order records and positions imply, an entry's (`recorded_fills`, DEC-1151) and a
+    /// risk-reducing sell's at its limit (`limit_fills`, DEC-2300), with the cursor left where it
+    /// was (DEC-2386 item 4), as the shell's reconciler takes them.
+    fn snapshot(
+        &mut self,
+        now: UtcNanos,
+        alerts: &mut Vec<Alert>,
+        depth: usize,
+    ) -> Result<BrokerSnapshot, Read> {
         let since = self
             .state
             .checkpoint()
             .cloned()
             .unwrap_or_else(|| ActivityCursor(String::new()));
+        if let Some(read) = self.broker.account_reads() {
+            let reads = read.map_err(read_error)?;
+            self.list_unlisted(&reads.open_orders, now, alerts, depth)?;
+            let mut fills = recorded_fills(&self.state, &reads.positions);
+            fills.extend(limit_fills(&self.state, &reads.positions).map_err(|_| Read::Unusable)?);
+            return Ok(BrokerSnapshot {
+                open_orders: reads.open_orders,
+                positions: reads.positions,
+                account: reads.account,
+                fills,
+                cursor: since,
+                reason: ReconcileReason::Startup,
+                taken_at_head: Seq(self.account_head()),
+            });
+        }
         let BrokerOutcome::OpenOrders(open_orders) = self.read(&BrokerRequest::ListOpenOrders)?
         else {
             return Err(Read::Unusable);
@@ -1005,12 +1053,52 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         })
     }
 
-    fn read(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, Read> {
-        match self.broker.call(request) {
-            Ok(outcome) => Ok(outcome),
-            Err(ConnectorError::Unknown(_)) => Err(Read::Lost),
-            Err(_) => Err(Read::Unusable),
+    /// Before a one-read broker's snapshot is reconciled, each of our sent orders that may still
+    /// work but that the read no longer lists as working is listed, and the answer handed to the
+    /// core, which adopts the one record naming it at our prices (DEC-862, DEC-1150 item 2,
+    /// DEC-2395 item 2). Robinhood reports a fill only on the order's record, so this is what
+    /// books an order that filled between two reads before its position is compared: without it,
+    /// every fill would read as an unexplained position and pause the agent (DEC-2396).
+    ///
+    /// # Errors
+    /// [`Read::Lost`] for a listing whose answer was lost, [`Read::Unusable`] for one that could
+    /// not be sent, and [`Read::Halted`] when a handed answer did not commit.
+    fn list_unlisted(
+        &mut self,
+        working: &[BrokerOrder],
+        now: UtcNanos,
+        alerts: &mut Vec<Alert>,
+        depth: usize,
+    ) -> Result<(), Read> {
+        let listed: BTreeSet<&str> = working
+            .iter()
+            .filter_map(|order| order.client_order_id.as_deref())
+            .collect();
+        let listings: Vec<_> = self
+            .state
+            .orders()
+            .values()
+            .filter(|order| !order.state.is_terminal() && order.state != OrderState::Intent)
+            .filter(|order| !listed.contains(order.client_order_id.as_str()))
+            .filter_map(|order| self.state.listing(&order.client_order_id))
+            .collect();
+        for listing in listings {
+            let answer = self.read(&BrokerRequest::ListOrders(listing))?;
+            if !self.hand(
+                now,
+                self.written_at,
+                Input::Broker(Ok(answer)),
+                alerts,
+                depth,
+            ) {
+                return Err(Read::Halted);
+            }
         }
+        Ok(())
+    }
+
+    fn read(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, Read> {
+        self.broker.call(request).map_err(read_error)
     }
 
     fn account_head(&self) -> u64 {
@@ -1090,6 +1178,14 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             fold(&mut self.state, &event).ok()?;
         }
         Some(self.account_head())
+    }
+}
+
+/// A broker read that did not answer: a lost answer may be retried, anything else is unusable.
+fn read_error(error: ConnectorError) -> Read {
+    match error {
+        ConnectorError::Unknown(_) => Read::Lost,
+        _ => Read::Unusable,
     }
 }
 

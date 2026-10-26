@@ -8,19 +8,26 @@
 //! shell's reconciler does (DEC-933 item 1, DEC-2386 item 2).
 
 use mandate_domain::{CapabilityProfile, ProfileError};
+use mandate_executor::BrokerConnector;
 use mandate_executor::{
     BrokerAccount, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest, ConnectorError,
     FoldedEvent,
 };
-use mandate_robinhood::{RobinhoodConnector, Tickers, Tools};
+use mandate_robinhood::{RobinhoodConnector, Tickers, Tools, broker_account};
 use tokio::runtime::Runtime;
 
 use crate::Broker;
 
-/// The stub's answer until DEC-2386 slice C's implementation lands (DEC-77).
-const UNIMPLEMENTED: ConnectorError = ConnectorError::NotSent {
-    code: "unimplemented",
-};
+/// The runtime that drives the connector: one current-thread runtime, built once, that holds
+/// nothing a restart would lose, as `AlpacaBroker`'s does.
+fn runtime() -> Result<Runtime, ConnectorError> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .map_err(|_| ConnectorError::NotSent {
+            code: "runtime_unavailable",
+        })
+}
 
 /// One read of the agentic account, as a reconciliation takes it: its working orders, its
 /// positions, and the account as DEC-933 item 1 maps it.
@@ -44,8 +51,10 @@ impl<T: Tools> RobinhoodBroker<T> {
     /// `NotSent` (`runtime_unavailable`) when the runtime that drives the connector cannot be
     /// built.
     pub fn new(tools: T, account_number: String, tickers: Tickers) -> Result<Self, ConnectorError> {
-        let _ = (tools, account_number, tickers);
-        Err(UNIMPLEMENTED)
+        Ok(Self {
+            connector: RobinhoodConnector::new(tools, account_number, tickers),
+            runtime: runtime()?,
+        })
     }
 
     /// The broker after a restart, its connector restored from the account stream's `records`
@@ -60,8 +69,12 @@ impl<T: Tools> RobinhoodBroker<T> {
         tickers: Tickers,
         records: &[FoldedEvent],
     ) -> Result<Self, ConnectorError> {
-        let _ = (tools, account_number, tickers, records);
-        Err(UNIMPLEMENTED)
+        let connector = RobinhoodConnector::restore(tools, account_number, tickers, records)
+            .map_err(|_| ConnectorError::NotSent { code: "restore" })?;
+        Ok(Self {
+            connector,
+            runtime: runtime()?,
+        })
     }
 
     /// The agentic account in one read: `account_snapshot`, mapped by `broker_account`.
@@ -69,19 +82,30 @@ impl<T: Tools> RobinhoodBroker<T> {
     /// # Errors
     /// `Unreadable` (`account_snapshot`) when the read is refused or cannot be read.
     pub fn account_reads(&mut self) -> Result<AccountReads, ConnectorError> {
-        let _ = (&self.connector, &self.runtime);
-        Err(UNIMPLEMENTED)
+        let snapshot = self
+            .runtime
+            .block_on(self.connector.account_snapshot())
+            .map_err(|_| ConnectorError::Unreadable {
+                code: "account_snapshot",
+            })?;
+        Ok(AccountReads {
+            account: broker_account(&snapshot),
+            open_orders: snapshot.open_orders,
+            positions: snapshot.positions,
+        })
     }
 }
 
 impl<T: Tools> Broker for RobinhoodBroker<T> {
     fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
-        let _ = (&self.connector, &self.runtime);
-        Err(ProfileError::Unimplemented)
+        self.connector.profile()
     }
 
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
-        let _ = (&self.connector, &self.runtime, request);
-        Err(UNIMPLEMENTED)
+        self.runtime.block_on(self.connector.call(request))
+    }
+
+    fn account_reads(&mut self) -> Option<Result<AccountReads, ConnectorError>> {
+        Some(RobinhoodBroker::account_reads(self))
     }
 }
