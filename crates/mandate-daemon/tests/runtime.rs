@@ -2477,7 +2477,9 @@ fn demo_in_session() -> (Rig, RuntimeProcess<Rig>) {
     (rig, process)
 }
 
-/// The owner's grant of `approval`, as the workspace services journal it on the control stream.
+/// The owner's grant of `approval`, as the workspace services journal it on the control stream: the
+/// members of `mandate-runtime`'s own grant fixture (`tests/common/escalation.rs`, `Answer::grant`),
+/// which the core's approval tests read, so the two stay in step.
 fn granted(rig: &Rig, approval: &str, content_hash: &str) {
     let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
     let payload = format!(
