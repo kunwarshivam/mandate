@@ -294,7 +294,7 @@ pub fn size(
 
 /// The `decided_by` label of mandate spec §6.2 step 5c, the policy overlay (DEC-536 item 2;
 /// journal spec §9.1).
-const POLICY_OVERLAY: &str = "policy_overlay";
+pub const POLICY_OVERLAY: &str = "policy_overlay";
 
 /// Mandate spec §6 classification of `proposal` against `action`, its trusted facts, with §6.2
 /// step 5c (DEC-534 item 2, DEC-536): an opening or an increase while the confirmed mandate is
@@ -341,6 +341,22 @@ pub fn classify(
         autonomy,
         decided_by: Some(classification.by.label()),
     })
+}
+
+/// Mandate spec §6.2 step 5c when the effective policy's `auto_allowed` is false: an opening or
+/// an increase `classify` answered `auto` becomes `ask`, naming the overlay (`policy_overlay`)
+/// since it changed the decision. An `ask` or a `deny` keeps its own label, and an exit is never
+/// touched (`AGENTS.md` rule 13), so this only tightens.
+#[must_use]
+pub fn auto_not_allowed(classified: Classified, proposal: &Proposal) -> Classified {
+    if classified.autonomy == Autonomy::Auto && proposal.purpose.adds_risk() {
+        Classified {
+            autonomy: Autonomy::Ask,
+            decided_by: Some(POLICY_OVERLAY.to_owned()),
+        }
+    } else {
+        classified
+    }
 }
 
 #[cfg(test)]

@@ -576,6 +576,11 @@ fn an_oauth_connect_digest_binds_the_disclosure_it_confirms() {
     let canonical = br#"{"action":"connect","broker":"alpaca","disclosure":{"document":"alpaca_oauth_token_breadth","version":"1"},"environment":"paper","workspace_id":"ws_01"}"#;
     let one = oauth_connect_digest("ws_01", "alpaca_oauth_token_breadth", "1").unwrap();
     assert_eq!(one, Digest::of(canonical));
+    assert_eq!(
+        one.to_hex(),
+        "3df08a75075094b6caf39b686e7262825ead70b36711631621c47a14e32749c2",
+        "the vector web/'s connectStepUpDigest test pins for ws_01"
+    );
     let two = oauth_connect_digest("ws_01", "alpaca_oauth_token_breadth", "2").unwrap();
     let other = oauth_connect_digest("ws_02", "alpaca_oauth_token_breadth", "1").unwrap();
     let document = oauth_connect_digest("ws_01", "another_document", "1").unwrap();

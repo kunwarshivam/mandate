@@ -23,6 +23,8 @@ use mandate_runtime::{
 };
 use mandate_time::UtcNanos;
 
+use crate::approvers::ApproverSource;
+use crate::control::ControlRecord;
 use crate::envelope::{
     DraftFields, Envelope, IdSpace, Ids, Writer, account_stream, agent_stream, control_stream,
     draft_bytes, journal_environment,
@@ -173,7 +175,7 @@ fn open_asking<'s>(
     output: mandate_runtime::ModelOutput,
 ) -> Result<(Session<'s>, Option<ShellError>), ShellError> {
     let clock = RiskClock::from_secs(setup.now.secs());
-    let mut session = Session::open_governed(stages, setup, &admitted.view, admitted.governed)?;
+    let mut session = Session::open_governed(stages, setup, admitted)?;
     session.start()?;
     if session.cycle_open && !setup.new_cycle {
         return Err(ShellError::CycleAlreadyOpen);
@@ -496,7 +498,9 @@ impl AskedCycle for Session<'_> {
             .journal
             .read(&stream)
             .map_err(refused(Stage::Journal))?;
+        self.reresolve(&control);
         for event in tailed(&control)? {
+            self.reresolve_at(&control, event.seq.0);
             self.feed_asked(Input::Journal(event))?;
         }
         self.feed_asked(Input::Tick(RiskClock::from_secs(now.secs())))?;
@@ -550,6 +554,12 @@ pub(crate) struct Session<'s> {
     stages: &'s mut Stages,
     setup: &'s Setup,
     view: &'s MandateView,
+    /// What `view`'s approvers are resolved from again at each control-stream read (DEC-2384
+    /// item 6).
+    approvers: &'s ApproverSource,
+    /// `view` with its approvers narrowed to the latest control-stream read's, once one was
+    /// read: the view every step hands the runtime.
+    current: Option<MandateView>,
     /// The registered objects a governed run's version-2 agent records reference (DEC-484).
     governed: Option<GovernedRefs>,
     state: RuntimeState,
@@ -583,9 +593,9 @@ impl<'s> Session<'s> {
     pub(crate) fn open_governed(
         stages: &'s mut Stages,
         setup: &'s Setup,
-        view: &'s MandateView,
-        governed: Option<GovernedRefs>,
+        admitted: &'s Admitted,
     ) -> Result<Self, ShellError> {
+        let (view, governed) = (&admitted.view, admitted.governed);
         let deployment = &setup.deployment;
         let agent = agent_stream(&deployment.workspace.0, &deployment.agent.0);
         let account = account_stream(&deployment.workspace.0, &setup.account_ref);
@@ -594,6 +604,8 @@ impl<'s> Session<'s> {
             stages,
             setup,
             view,
+            approvers: &admitted.approvers,
+            current: None,
             governed,
             agent_stream: agent,
             account_stream: account,
@@ -672,10 +684,39 @@ impl<'s> Session<'s> {
             .journal
             .read(&stream)
             .map_err(refused(Stage::Journal))?;
+        self.reresolve(&rows);
         for event in tailed(&rows)? {
+            self.reresolve_at(&rows, event.seq.0);
             self.feed(Input::Journal(event))?;
         }
         Ok(())
+    }
+
+    /// Narrows the approvers every later step hands the runtime to those `rows`, a fresh read
+    /// of the control stream, still resolve to (DEC-2384 item 6): a row the run cannot read
+    /// leaves no approver, so every grant is refused (`AGENTS.md` rule 3).
+    fn reresolve(&mut self, rows: &[StoredEvent]) {
+        let records: Option<Vec<ControlRecord>> = rows.iter().map(ControlRecord::of_row).collect();
+        let mut view = self.view.clone();
+        view.approval.approvers = match records {
+            Some(records) => self
+                .approvers
+                .current(&self.view.approval.approvers, &records),
+            None => BTreeSet::new(),
+        };
+        self.current = Some(view);
+    }
+
+    /// [`Self::reresolve`] over the rows of `rows`, read in `seq` order, up to and including `seq`:
+    /// each tailed event is judged against the roster as of its own record, so a membership record
+    /// later in the same read neither lends a grant a role its member lacked when it was made nor
+    /// takes one away (DEC-2384 item 6). A split that cannot be made reads no row, which resolves
+    /// no approver (`AGENTS.md` rule 3).
+    fn reresolve_at(&mut self, rows: &[StoredEvent], seq: u64) {
+        match rows.split_at_checked(rows.partition_point(|row| row.seq <= seq)) {
+            Some((judged, _)) => self.reresolve(judged),
+            None => self.reresolve(&[]),
+        }
     }
 
     /// Journals `mark` as the account stream's `MarkUpdated` for the pinned instrument (journal
@@ -1143,7 +1184,10 @@ impl<'s> Session<'s> {
             gate: &bridge,
             plan: &bridge,
             flatten: &bridge,
-            view: self.view,
+            view: match &self.current {
+                Some(current) => current,
+                None => self.view,
+            },
         };
         let effects = mandate_runtime::handle(&mut self.state, input, &ports)?;
         let findings = bridge.findings.into_inner();

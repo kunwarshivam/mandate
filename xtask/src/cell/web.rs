@@ -3,6 +3,7 @@
 //! gestures (`scenario.rs`, lane E2E) call [`kill_switch_from_web`], which starts its own `web/`
 //! and drives it with Playwright (`web/e2e-cell/`).
 
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::os::unix::process::CommandExt;
@@ -77,6 +78,142 @@ const POLL: Duration = Duration::from_millis(250);
 /// `cell-demo` job's ten minutes hold many times over (DEC-464). Counted, since xtask reads no clock
 /// (ES-05).
 const GESTURE_POLLS: u32 = 600;
+/// The trade loop's polls: 500 seconds, the spec's own waits (a proposal within 120 s, the host's
+/// confirmation within 60 s, the fill within 120 s, the kill switch) and `next dev`'s start.
+const TRADE_LOOP_POLLS: u32 = 2_000;
+/// How long the spec waits for the agent's approval request: 20 seconds, since the runtime decides
+/// on the scheduler's tick every second and the browser opens after the gestures' Job, and a loop
+/// with no proposal must leave the `cell-demo-web` job its ten minutes (DEC-464).
+const PROPOSAL_MS: &str = "20000";
+/// Playwright's bound on the whole trade loop run (`OWLHEAD_CELL_TIMEOUT_MS`, the config's
+/// `globalTimeout`): 400 seconds, past the spec's `test.setTimeout` of 320 s with `PROPOSAL_MS`
+/// and `next dev`'s start, and inside [`TRADE_LOOP_POLLS`]' 500 s, so Playwright ends the run and
+/// writes its result before the driver gives up on it. Unset, the config's 90 s ends every loop
+/// before its fill.
+const TRADE_LOOP_TIMEOUT_MS: &str = "400000";
+/// The trade loop spec under `web/e2e-cell/` (lane W, #2462).
+const TRADE_LOOP_SPEC: &str = "trade-loop.spec.ts";
+/// The trade loop's steps, in the order the spec reaches them; its result names each one reached.
+pub const TRADE_LOOP_STEPS: [&str; 7] = [
+    "approval",
+    "challenge",
+    "approved",
+    "order_filled",
+    "position",
+    "journal",
+    "kill_switch",
+];
+
+/// What the trade loop spec asks the host to confirm: the owner's step-up for one approval, the
+/// code the page showed for the API's challenge (DEC-2104, DEC-2129).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmRequest {
+    pub workspace: String,
+    pub principal: String,
+    pub agent: String,
+    pub approval: String,
+    pub challenge: String,
+    pub code: String,
+}
+
+/// The spec's confirm request file as a [`ConfirmRequest`]; every member must be non-empty text.
+///
+/// # Errors
+/// A file that is not JSON or lacks a member.
+pub fn confirm_request(text: &str) -> Result<ConfirmRequest> {
+    let value: Value = serde_json::from_str(text).context("the confirm request is not JSON")?;
+    let field = |name: &str| {
+        value[name]
+            .as_str()
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+            .with_context(|| format!("the confirm request has no {name}"))
+    };
+    Ok(ConfirmRequest {
+        workspace: field("workspace")?,
+        principal: field("principal")?,
+        agent: field("agent")?,
+        approval: field("approval")?,
+        challenge: field("challenge")?,
+        code: field("code")?,
+    })
+}
+
+/// The host's `mandate step-up confirm` for `request`, against the cell's `journal` and `store`.
+pub fn confirm_args(request: &ConfirmRequest, journal: &str, store: &str) -> Vec<String> {
+    [
+        "step-up",
+        "confirm",
+        "--workspace",
+        &request.workspace,
+        "--principal",
+        &request.principal,
+        "--agent",
+        &request.agent,
+        "--approval",
+        &request.approval,
+        "--challenge",
+        &request.challenge,
+        "--code",
+        &request.code,
+        "--journal",
+        journal,
+        "--store",
+        store,
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
+
+/// What the trade loop reached: each step's recorded value, and why it stopped if it did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TradeLoop {
+    pub reached: BTreeMap<String, String>,
+    pub error: Option<String>,
+}
+
+impl TradeLoop {
+    /// Whether every step was reached and nothing stopped it.
+    pub fn whole(&self) -> bool {
+        self.error.is_none()
+            && TRADE_LOOP_STEPS
+                .iter()
+                .all(|s| self.reached.get(*s).is_some_and(|v| !v.is_empty()))
+    }
+
+    /// The first step, in the spec's order, not reached.
+    pub fn first_missing(&self) -> Option<&'static str> {
+        TRADE_LOOP_STEPS
+            .iter()
+            .copied()
+            .find(|s| self.reached.get(*s).is_none_or(String::is_empty))
+    }
+}
+
+/// The trade loop's result file: every step it names, and its `error`.
+///
+/// # Errors
+/// A file that is not a JSON object of text.
+pub fn trade_loop_result(text: &str) -> Result<TradeLoop> {
+    let value: Value = serde_json::from_str(text).context("the trade loop's result is not JSON")?;
+    let object = value
+        .as_object()
+        .context("the trade loop's result is not an object")?;
+    let mut reached = BTreeMap::new();
+    let mut error = None;
+    for (name, member) in object {
+        let text = member
+            .as_str()
+            .with_context(|| format!("the trade loop's {name} is not text"))?
+            .to_owned();
+        if name == "error" {
+            error = Some(text);
+        } else {
+            reached.insert(name.clone(), text);
+        }
+    }
+    Ok(TradeLoop { reached, error })
+}
 
 /// Why the gesture cannot run on this machine, or `None`: it installs nothing and downloads no
 /// browser, so each missing piece is the scenario's gap, named.
@@ -187,12 +324,19 @@ impl Group {
         })
     }
 
-    /// The leader's exit status, once it has one within `polls` polls; `None` when it ran past them.
-    pub fn wait_within(&mut self, polls: u32) -> Result<(Option<ExitStatus>, u32)> {
+    /// The leader's exit status, once it has one within `polls` polls, `None` when it ran past them,
+    /// calling `each` before every poll so a driver can answer the run while it waits. An error from
+    /// `each` stops the wait with it.
+    pub fn wait_answering(
+        &mut self,
+        polls: u32,
+        each: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<(Option<ExitStatus>, u32)> {
         for polled in 0..=polls {
             if let Some(status) = self.child.try_wait()? {
                 return Ok((Some(status), polled));
             }
+            each()?;
             if polled < polls {
                 sleep(POLL);
             }
@@ -285,11 +429,129 @@ fn signal(sig: &str, pgid: u32) -> bool {
 /// recorded. An `Err` is the gap the scenario prints: a missing tool, no agent to kill, or a run
 /// that failed or ran past [`GESTURE_POLLS`] (its log is named).
 pub fn kill_switch_from_web(workspace: &str, agent: Option<&str>) -> Result<WebGesture> {
+    let run = spec_run(
+        workspace,
+        &[("OWLHEAD_CELL_AGENT", agent.unwrap_or_default().to_owned())],
+        "web-gesture",
+        GESTURE_POLLS,
+        &mut || Ok(()),
+    )?;
+    match (run.status.success(), run.result) {
+        (_, Some(text)) if text.contains("\"error\"") => gesture_result(&text),
+        (true, Some(text)) => gesture_result(&text),
+        _ => bail!(
+            "web/'s gesture failed ({}); its log is {}",
+            run.status,
+            run.log.display()
+        ),
+    }
+}
+
+/// The trade loop from `web/` (lane W's `trade-loop.spec.ts`, #2462) on `agent` in `workspace`:
+/// the owner, signed in, waits for the agent's approval request, approves it with the code the
+/// page shows, which the driver confirms on the host as the owner would, by calling `confirm` with
+/// the spec's request, then sees the order filled, the position and the journal, and presses the
+/// agent's kill switch. Its result names every step reached; a run that stopped is a
+/// [`TradeLoop`] with `error`, not an `Err`. An `Err` is a missing tool, a run past
+/// [`TRADE_LOOP_POLLS`], or a run that wrote no result (its log is named).
+pub fn trade_loop_from_web(
+    workspace: &str,
+    agent: &str,
+    confirm: &mut dyn FnMut(&ConfirmRequest) -> std::result::Result<(), String>,
+) -> Result<TradeLoop> {
+    let dir = crate::repo_root()?.join(state()?).join("web-trade-loop");
+    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let (request, done) = (
+        dir.join("confirm-request.json"),
+        dir.join("confirm-done.json"),
+    );
+    let _ = fs::remove_file(&request);
+    let _ = fs::remove_file(&done);
+    let mut answered = false;
+    let mut answer = || -> Result<()> {
+        if answered {
+            return Ok(());
+        }
+        let Ok(text) = fs::read_to_string(&request) else {
+            return Ok(());
+        };
+        answered = true;
+        let reply = match confirm_request(&text) {
+            Ok(asked) => match confirm(&asked) {
+                Ok(()) => serde_json::json!({"ok": true}),
+                Err(why) => serde_json::json!({"ok": false, "error": why}),
+            },
+            Err(why) => serde_json::json!({"ok": false, "error": format!("{why:#}")}),
+        };
+        fs::write(&done, reply.to_string()).with_context(|| format!("writing {}", done.display()))
+    };
+    let run = spec_run(
+        workspace,
+        &trade_loop_env(agent, &request, &done),
+        "web-trade-loop",
+        TRADE_LOOP_POLLS,
+        &mut answer,
+    )?;
+    match run.result {
+        Some(text) => trade_loop_result(&text),
+        None => bail!(
+            "web/'s trade loop wrote no result ({}); its log is {}",
+            run.status,
+            run.log.display()
+        ),
+    }
+}
+
+/// What the trade loop's Playwright run is handed beside the shared environment: the spec, the
+/// agent, the host's confirmation files, the proposal's wait, and the run's bound.
+fn trade_loop_env(agent: &str, request: &Path, done: &Path) -> [(&'static str, String); 6] {
+    [
+        ("OWLHEAD_CELL_SPEC", TRADE_LOOP_SPEC.to_owned()),
+        ("OWLHEAD_CELL_AGENT", agent.to_owned()),
+        ("OWLHEAD_CELL_CONFIRM_REQUEST", path_text(request)),
+        ("OWLHEAD_CELL_CONFIRM_DONE", path_text(done)),
+        ("OWLHEAD_CELL_PROPOSAL_MS", PROPOSAL_MS.to_owned()),
+        ("OWLHEAD_CELL_TIMEOUT_MS", TRADE_LOOP_TIMEOUT_MS.to_owned()),
+    ]
+}
+
+/// Whether lane W's trade loop spec is in this checkout (#2462).
+///
+/// # Errors
+/// When the repository's root cannot be found.
+pub fn trade_loop_spec_present() -> Result<bool> {
+    Ok(crate::repo_root()?
+        .join("web/e2e-cell")
+        .join(TRADE_LOOP_SPEC)
+        .is_file())
+}
+
+fn path_text(path: &Path) -> String {
+    path.display().to_string()
+}
+
+/// One finished Playwright run of a cell spec: its status, its result file's text, and its log.
+struct SpecRun {
+    status: ExitStatus,
+    result: Option<String>,
+    log: PathBuf,
+}
+
+/// Runs a cell spec against the cell's API as the demo owner, signed in through the stub, with
+/// `extra` beside the shared environment, under `state/<dir>`, for at most `polls` polls, calling
+/// `each` before every poll.
+fn spec_run(
+    workspace: &str,
+    extra: &[(&str, String)],
+    dir: &str,
+    polls: u32,
+    each: &mut dyn FnMut() -> Result<()>,
+) -> Result<SpecRun> {
     if let Some(why) = unavailable()? {
         bail!(why);
     }
     let web = crate::repo_root()?.join("web");
-    let dir = crate::repo_root()?.join(state()?).join("web-gesture");
+    let dir = crate::repo_root()?.join(state()?).join(dir);
     fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let (key, cert, result, log) = (
         dir.join("key.pem"),
@@ -335,33 +597,30 @@ pub fn kill_switch_from_web(workspace: &str, agent: Option<&str>) -> Result<WebG
             .env("OWLHEAD_CELL_TLS_KEY", &key)
             .env("OWLHEAD_CELL_TLS_CERT", &cert)
             .env("OWLHEAD_CELL_RESULT", &result)
-            .env("OWLHEAD_CELL_AGENT", agent.unwrap_or_default())
+            .envs(extra.iter().map(|(n, v)| (*n, v.as_str())))
             .stdout(output.try_clone()?)
             .stderr(output),
     )
-    .context("starting web/'s Playwright gesture")?;
-    let (status, polls) = group.wait_within(GESTURE_POLLS)?;
+    .context("starting web/'s Playwright run")?;
+    let waited = group.wait_answering(polls, each);
     group.stop()?;
+    let (status, polled) = waited?;
     let Some(status) = status else {
         bail!(
-            "web/'s gesture ran past {}s and was stopped; its log is {}",
-            (POLL * GESTURE_POLLS).as_secs(),
+            "web/'s run ran past {}s and was stopped; its log is {}",
+            (POLL * polls).as_secs(),
             log.display()
         );
     };
     eprintln!(
-        "    web/: the gesture's Playwright run took about {:.1}s",
-        (POLL * polls).as_secs_f64()
+        "    web/: the Playwright run took about {:.1}s",
+        (POLL * polled).as_secs_f64()
     );
-    let text = fs::read_to_string(&result).ok();
-    match (status.success(), text) {
-        (_, Some(text)) if text.contains("\"error\"") => gesture_result(&text),
-        (true, Some(text)) => gesture_result(&text),
-        _ => bail!(
-            "web/'s gesture failed ({status}); its log is {}",
-            log.display()
-        ),
-    }
+    Ok(SpecRun {
+        status,
+        result: fs::read_to_string(&result).ok(),
+        log,
+    })
 }
 
 /// Prints what the gesture recorded, for `cargo xtask cell web-kill-switch`.
@@ -386,6 +645,129 @@ mod tests {
 
     use super::super::{API_LOCAL_PORT, DEMO_WORKSPACE, STUB_PORT};
     use super::*;
+
+    /// The trade loop spec's own waits past the proposal, as `trade-loop.spec.ts` defaults them: the
+    /// host's confirmation (60 s), the fill (120 s), and the 120 s it allows the rest of its steps.
+    const TRADE_LOOP_SPEC_WAITS_MS: u64 = 60_000 + 120_000 + 120_000;
+    /// The longest `next dev` takes to start, as `playwright.cell.config.ts`'s `webServer` bounds it.
+    const NEXT_DEV_START_MS: u64 = 60_000;
+    /// Playwright's bound on the trade loop holds the spec's own test timeout and `next dev`'s
+    /// start, and ends before the driver's polls do, so a slow loop is the spec's failure with a
+    /// result rather than a run the driver kills (#2466's review).
+    #[test]
+    fn the_trade_loops_playwright_bound_holds_the_spec_and_ends_before_the_polls() -> Result<()> {
+        let env = trade_loop_env("agent", Path::new("request"), Path::new("done"));
+        let handed = env
+            .iter()
+            .find(|(name, _)| *name == "OWLHEAD_CELL_TIMEOUT_MS")
+            .map(|(_, value)| value.as_str())
+            .context("the run is handed no OWLHEAD_CELL_TIMEOUT_MS")?;
+        let bound: u64 = handed.parse()?;
+        let proposal: u64 = PROPOSAL_MS.parse()?;
+        let polls_ms = u64::from(TRADE_LOOP_POLLS) * u64::try_from(POLL.as_millis())?;
+        assert_eq!(
+            polls_ms, 500_000,
+            "the driver's polls, as their doc gives them"
+        );
+        assert!(
+            bound >= proposal + TRADE_LOOP_SPEC_WAITS_MS + NEXT_DEV_START_MS,
+            "{bound} ms cannot hold the spec's {} ms and next dev's start",
+            proposal + TRADE_LOOP_SPEC_WAITS_MS
+        );
+        assert!(bound < polls_ms, "{bound} ms outlasts the driver's polls");
+        Ok(())
+    }
+
+    /// The trade loop's request is read whole, every member non-empty; the host's confirmation
+    /// passes exactly its members and the cell's journal and store; the result names the steps
+    /// reached, and the first one missing is the one after the last reached.
+    #[test]
+    fn the_trade_loop_reads_its_request_and_result_and_confirms_with_their_members() -> Result<()> {
+        let text = r#"{"workspace":"W","principal":"P","agent":"A","approval":"AP","challenge":"C","code":"ABCD-EFGH"}"#;
+        let asked = confirm_request(text)?;
+        assert_eq!(
+            confirm_args(&asked, "$(DSN)", "/store"),
+            [
+                "step-up",
+                "confirm",
+                "--workspace",
+                "W",
+                "--principal",
+                "P",
+                "--agent",
+                "A",
+                "--approval",
+                "AP",
+                "--challenge",
+                "C",
+                "--code",
+                "ABCD-EFGH",
+                "--journal",
+                "$(DSN)",
+                "--store",
+                "/store"
+            ]
+        );
+        for member in [
+            "workspace",
+            "principal",
+            "agent",
+            "approval",
+            "challenge",
+            "code",
+        ] {
+            let mut value: Value = serde_json::from_str(text)?;
+            value[member] = Value::String(String::new());
+            assert!(
+                confirm_request(&value.to_string()).is_err(),
+                "{member} empty"
+            );
+            value.as_object_mut().context("an object")?.remove(member);
+            assert!(
+                confirm_request(&value.to_string()).is_err(),
+                "{member} missing"
+            );
+        }
+        assert!(confirm_request("not json").is_err());
+        let partial =
+            trade_loop_result(r#"{"approval":"AP1","challenge":"C1","error":"no code"}"#)?;
+        assert_eq!(partial.first_missing(), Some("approved"));
+        assert_eq!(partial.error.as_deref(), Some("no code"));
+        assert!(!partial.whole());
+        let mut all: BTreeMap<String, String> = TRADE_LOOP_STEPS
+            .iter()
+            .map(|s| ((*s).to_owned(), "x".to_owned()))
+            .collect();
+        let whole = trade_loop_result(&serde_json::to_string(&all)?)?;
+        assert!(whole.whole());
+        assert_eq!(whole.first_missing(), None);
+        all.insert("order_filled".into(), String::new());
+        let empty = trade_loop_result(&serde_json::to_string(&all)?)?;
+        assert_eq!(
+            empty.first_missing(),
+            Some("order_filled"),
+            "an empty value is not reached"
+        );
+        assert!(trade_loop_result(r#"{"approval":3}"#).is_err());
+        assert!(trade_loop_result("[]").is_err());
+        Ok(())
+    }
+
+    /// The wait answers the run before every poll, and an answer's error stops the wait.
+    #[test]
+    fn the_wait_answers_before_every_poll_and_stops_on_an_error() -> Result<()> {
+        let mut group = Group::spawn(Command::new("sleep").arg("30"))?;
+        let mut asked = 0;
+        let (status, polls) = group.wait_answering(3, &mut || {
+            asked += 1;
+            Ok(())
+        })?;
+        assert_eq!((status, polls, asked), (None, 3, 4));
+        let stopped = group.wait_answering(3, &mut || anyhow::bail!("no"));
+        assert!(stopped.is_err());
+        group.stop()?;
+        Ok(())
+    }
 
     #[test]
     fn web_reads_the_cells_api_as_the_demo_owner_only_once_sign_in_is_ready() -> Result<()> {
@@ -530,7 +912,7 @@ mod tests {
         let mut group = Group::spawn(
             Command::new("sh").args(["-c", "trap '' TERM; sleep 60 & sleep 60 & wait"]),
         )?;
-        let (status, _) = group.wait_within(2)?;
+        let (status, _) = group.wait_answering(2, &mut || Ok(()))?;
         assert!(
             status.is_none(),
             "the group is still running before it is stopped"
