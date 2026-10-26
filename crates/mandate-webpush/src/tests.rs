@@ -837,6 +837,7 @@ mod bridge {
             | K::AgentHeld
             | K::RetirementHeld
             | K::AccountRestriction
+            | K::ConnectionUnavailable
             | K::Protection
             | K::ExitStalled
             | K::Reconciliation
