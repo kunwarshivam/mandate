@@ -369,7 +369,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const approvalRoute = route.match(/^\/approvals\/([^/]+)$/);
     if (approvalRoute) {
       const approval = approvalBy(decodeURIComponent(approvalRoute[1]));
-      return approval ? read({ approval: { ...approvalRow(approval), content: { action: { side: approval.bound.side } }, schema_version: 2 } }) : problem(404, "not_found", "none");
+      return approval ? read({ approval: { ...approvalRow(approval), content: { action: { side: approval.bound.side } }, schema_version: 2, decision_deferred_to_binding: [] } }) : problem(404, "not_found", "none");
     }
     const backtestRoute = route.match(/^\/backtests\/([^/]+)$/);
     if (backtestRoute) {
