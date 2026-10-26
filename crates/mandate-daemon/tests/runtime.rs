@@ -2125,9 +2125,10 @@ fn a_deferring_opening_is_journaled_at_version_3_and_asked_never_proposed() {
 
 const RESEARCH_SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
 
-/// An admitted thesis on SPY (journal spec §9.4) as of `as_of`, expiring an hour later at `expires_at`, appended to the
-/// agent stream through the journal's own append, as the research writer would leave it.
-fn thesis_expired_at(rig: &Rig, as_of: &str, expires_at: &str) {
+/// An admitted thesis on SPY (journal spec §9.4) as of `as_of`, expiring an hour later at
+/// `expires_at`, appended to the agent stream through the journal's own append as the research
+/// writer would leave it. It takes the stream's writer epoch, fencing any process before it.
+fn thesis_at(rig: &Rig, as_of: &str, expires_at: &str) {
     let stream = StreamId::parse(AGENT_STREAM).unwrap();
     let mut journal = rig.journal.clone();
     let head = journal.rows(&stream).unwrap().len();
@@ -2183,12 +2184,10 @@ fn thesis_expired_at(rig: &Rig, as_of: &str, expires_at: &str) {
     );
 }
 
-/// D1's ask on #2551, end to end over the journal's own append (journal spec rule 8, DEC-2391): a
-/// held instrument whose thesis expired is sold whole by the deployed plan, and the `DecisionMade`
-/// with `exit_origin` `removed_instrument` and its `IntentProposed` commit, decided AUTO by the
-/// built-in risk-reducing rule, with the process still ready.
-#[test]
-fn a_held_instrument_whose_thesis_ended_is_proposed_for_sale_through_the_journal() {
+/// The demo's research deployment over the journal's own append, holding 3 SPY from its own filled
+/// buy under a thesis that expires at `expires_at`, ticked three times from `NOW`; the process is
+/// still ready. The first start only opens the stream, so the thesis lands after `StreamOpened`.
+fn held_spy_under_a_thesis_expiring_at(expires_at: i64) -> Rig {
     let rig = Rig::default();
     established(&rig, CONNECTION, ACCOUNT_REF, 2);
     reconciled(&rig, ACCOUNT);
@@ -2225,10 +2224,10 @@ fn a_held_instrument_whose_thesis_ended_is_proposed_for_sale_through_the_journal
         &config(),
         at(NOW),
     ));
-    thesis_expired_at(
+    thesis_at(
         &rig,
-        &at(NOW - 3_660).to_string(),
-        &at(NOW - 60).to_string(),
+        &at(expires_at - 3_600).to_string(),
+        &at(expires_at).to_string(),
     );
     on_account(
         &rig,
@@ -2290,26 +2289,77 @@ fn a_held_instrument_whose_thesis_ended_is_proposed_for_sale_through_the_journal
         "{:?}",
         kinds(&rig)
     );
-    let rows = agent_rows(&rig);
-    let decision = rows
-        .iter()
-        .find(|row| row.event_type == "DecisionMade")
-        .unwrap_or_else(|| panic!("the exit was decided: {:?}", kinds(&rig)));
-    let payload = parse(&decision.body)
-        .unwrap()
-        .get("payload")
-        .cloned()
-        .unwrap();
-    assert_eq!(
-        payload.get("exit_origin").and_then(Value::as_str),
-        Some("removed_instrument"),
-        "{payload:?}"
-    );
-    assert_eq!(payload.get("combined_score"), Some(&Value::Null));
-    assert_eq!(
-        payload.get("decided_by").and_then(Value::as_str),
-        Some("builtin_risk_reducing")
-    );
+    rig
+}
+
+fn member<'a>(payload: &'a Value, name: &str) -> Option<&'a str> {
+    payload.get(name).and_then(Value::as_str)
+}
+
+/// D1's ask on #2551, end to end over the journal's own append (journal spec rule 8, DEC-2391): a
+/// held instrument whose thesis expired is sold whole at the bid by the deployed plan. The
+/// `DecisionMade`, `exit_origin` `removed_instrument` with no convictions, score, outputs, weights
+/// or clips, decided AUTO by the built-in risk-reducing rule, and the `IntentProposed` it causes
+/// commit, once, with no ask.
+#[test]
+fn a_held_instrument_whose_thesis_ended_is_proposed_for_sale_through_the_journal() {
+    let rig = held_spy_under_a_thesis_expiring_at(NOW - 60);
+    assert_eq!(count(&rig, "DecisionMade"), 1, "{:?}", kinds(&rig));
     assert_eq!(count(&rig, "IntentProposed"), 1, "{:?}", kinds(&rig));
     assert_eq!(count(&rig, "ApprovalRequested"), 0, "{:?}", kinds(&rig));
+    let rows = agent_rows(&rig);
+    let row = |event_type: &str| {
+        rows.iter()
+            .find(|row| row.event_type == event_type)
+            .unwrap_or_else(|| panic!("{event_type}: {:?}", kinds(&rig)))
+    };
+    let (decision, intent) = (row("DecisionMade"), row("IntentProposed"));
+    let payload = |row: &StoredEvent| parse(&row.body).unwrap().get("payload").cloned().unwrap();
+    let decided = payload(decision);
+    for (name, want) in [
+        ("instrument_id", RESEARCH_SPY),
+        ("side", "sell"),
+        ("qty", "3"),
+        ("limit_price", "99.95"),
+        ("purpose", "discretionary_exit"),
+        ("exit_origin", "removed_instrument"),
+        ("dry_run", "allow"),
+        ("autonomy", "auto"),
+        ("decided_by", "builtin_risk_reducing"),
+    ] {
+        assert_eq!(member(&decided, name), Some(want), "{name}: {decided:?}");
+    }
+    for name in ["exit_conviction", "buy_conviction", "combined_score"] {
+        assert_eq!(decided.get(name), Some(&Value::Null), "{name}");
+    }
+    for name in ["outputs_used", "model_weights", "clips_applied"] {
+        assert_eq!(
+            decided
+                .get(name)
+                .and_then(Value::as_array)
+                .map(<[Value]>::len),
+            Some(0),
+            "{name}"
+        );
+    }
+    let proposed = payload(intent);
+    for (name, want) in [
+        ("instrument_id", RESEARCH_SPY),
+        ("side", "sell"),
+        ("qty", "3"),
+        ("limit_price", "99.95"),
+        ("purpose", "discretionary_exit"),
+    ] {
+        assert_eq!(member(&proposed, name), Some(want), "{name}: {proposed:?}");
+    }
+    assert_eq!(causation_of(intent), Some(decision.event_id.clone()));
+}
+
+/// The control: the same holding under a thesis still current decides and proposes nothing.
+#[test]
+fn a_held_instrument_whose_thesis_is_current_is_not_sold() {
+    let rig = held_spy_under_a_thesis_expiring_at(NOW + 3_600);
+    assert_eq!(count(&rig, "ThesisProposed"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "DecisionMade"), 0, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
 }
