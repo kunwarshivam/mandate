@@ -1006,7 +1006,6 @@ fn bobs_grant(w: &World) -> (Issued, Vec<u8>) {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_principal_the_mandate_does_not_list_is_forbidden_and_appends_nothing() {
     let listed = format!("user:{ALICE}");
     let w = world_with(&Setup {
@@ -1027,7 +1026,6 @@ fn a_principal_the_mandate_does_not_list_is_forbidden_and_appends_nothing() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_approver_listed_by_user_id_is_recorded() {
     let listed = format!("user:{ALICE}");
     let w = world_with(&Setup {
@@ -1041,7 +1039,6 @@ fn an_approver_listed_by_user_id_is_recorded() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_approver_listed_by_role_is_recorded_and_a_member_without_the_role_is_not() {
     let roles: [(&str, &[Role]); 3] = [
         ("role:approver", &[Role::Approver]),
@@ -1075,7 +1072,6 @@ fn an_approver_listed_by_role_is_recorded_and_a_member_without_the_role_is_not()
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_bound_mandate_that_cannot_be_read_fails_closed_and_reads_no_evidence() {
     for bound in [
         Bound::Absent,
@@ -1104,7 +1100,6 @@ fn a_bound_mandate_that_cannot_be_read_fails_closed_and_reads_no_evidence() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_first_failing_check_in_dec_2129_item_1s_order_answers() {
     let listed = format!("user:{ALICE}");
     let only_alice = Setup {

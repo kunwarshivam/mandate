@@ -71,13 +71,21 @@ impl StepUp for Methods {
         }
     }
 
+    /// `cli_confirm` evidence is judged as [`CliConfirm`] judges it, with no assertion to append
+    /// ([DEC-2129](../../../docs/project/decisions/DEC-2129.md) item 5); a passkey's waits for its
+    /// verifier.
     fn asserted(
         &self,
-        _evidence: &StepUpEvidence,
-        _assertion: Option<&StepUpAssertion>,
-        _action: &Action,
-        _judged: &Judged<'_>,
+        evidence: &StepUpEvidence,
+        assertion: Option<&StepUpAssertion>,
+        action: &Action,
+        judged: &Judged<'_>,
     ) -> Result<Option<Asserted>, Unverified> {
-        Err(Unverified::Unimplemented { story: "E9-4" })
+        match evidence.method {
+            StepUpMethod::Passkey => Err(Unverified::Unimplemented { story: "E9-4" }),
+            StepUpMethod::CliConfirm => self
+                .cli_confirm
+                .asserted(evidence, assertion, action, judged),
+        }
     }
 }

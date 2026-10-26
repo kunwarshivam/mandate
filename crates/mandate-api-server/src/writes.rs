@@ -27,7 +27,7 @@ use mandate_api::requests::{
 use mandate_api::wire::{Asset, Decimal, EventId, Id, Ref, decode, encode};
 use mandate_authn::Request;
 use mandate_canon::{Digest, Int, Value, parse, to_canonical};
-use mandate_identity::{Permission, StepUpActionKind};
+use mandate_identity::{Permission, PrincipalId, Role, StepUpActionKind};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
@@ -36,12 +36,14 @@ use crate::commands::{
     Command, Issued, KillScope, Settled, draft, in_workspace, release_warning, same, settle_at,
 };
 use crate::http::{App, browser, invalid, problem, problem_body};
+use crate::members::ControlLookup;
 use crate::reads::deployed;
 use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
 use crate::session::Authenticated;
-use crate::stepup::{Action, Judged, journaled};
+use crate::stepup::{Action, Judged, Unverified, journaled};
+use crate::versions::stored;
 
 /// The `Idempotency-Key` request header (§3.4).
 const IDEMPOTENCY_KEY: &str = "idempotency-key";
@@ -391,20 +393,19 @@ pub async fn respond(
         Ok(reader) => reader,
         Err(refusal) => return refusal.response(),
     };
-    if matches!(kept.value, ApprovalAnswer::Approved(_)) && !paper(&reader.control) {
-        return problem(
-            StatusCode::CONFLICT,
-            problem_body(ProblemCode::LiveUnavailable),
-        );
-    }
-    let agent = match requester(&app, &reader, &approval).await {
-        Ok(Some(agent)) => agent,
+    let (agent, version) = match requester(&app, &reader, &approval).await {
+        Ok(Some(found)) => found,
         Ok(None) => return Refused::NotFound.response(),
         Err(refusal) => return refusal.response(),
     };
     let skip = match &kept.value {
         ApprovalAnswer::Skipped(skip) => skip,
         ApprovalAnswer::Approved(grant) => {
+            match approves(&app, &reader, version.as_deref(), gate.admitted.principal) {
+                Ok(true) => {}
+                Ok(false) => return Refused::Forbidden.response(),
+                Err(refusal) => return refusal.response(),
+            }
             let asked = Asked {
                 agent,
                 approval,
@@ -437,15 +438,21 @@ struct Asked<'a> {
 /// A repeat whose key holds the same grant replays before the port is asked, since the port spent
 /// the challenge with the first (§3.4 step 1).
 async fn granted(app: &App, gate: &Gate, reader: &Reader, asked: &Asked<'_>) -> Response {
+    if asked.grant.delegation.is_some() {
+        return invalid(vec![schema_violation("/delegation", "delegation_unserved")]);
+    }
+    if !paper(&reader.control) {
+        return problem(
+            StatusCode::CONFLICT,
+            problem_body(ProblemCode::LiveUnavailable),
+        );
+    }
     let Some(evidence) = &asked.grant.step_up else {
         return problem(
             StatusCode::UNAUTHORIZED,
             problem_body(ProblemCode::StepUpRequired),
         );
     };
-    if asked.grant.delegation.is_some() {
-        return invalid(vec![schema_violation("/delegation", "delegation_unserved")]);
-    }
     let Some(content_hash) = ref_text(&asked.grant.content_hash) else {
         return Refused::Invalid.response();
     };
@@ -479,10 +486,14 @@ async fn granted(app: &App, gate: &Gate, reader: &Reader, asked: &Asked<'_>) -> 
         control: &reader.control,
         now: gate.now,
     };
-    if let Err(code) = app.step_up.verify(evidence, &action, &judged) {
-        return problem(StatusCode::UNAUTHORIZED, problem_body(code));
+    match app.step_up.asserted(evidence, None, &action, &judged) {
+        Ok(None) => committed(app, gate, reader, &command, &[], None).await,
+        Ok(Some(_)) | Err(Unverified::Code(ProblemCode::JournalUnavailable)) => {
+            Refused::JournalUnavailable.response()
+        }
+        Err(Unverified::Unimplemented { .. }) => Refused::JournalUnavailable.response(),
+        Err(Unverified::Code(code)) => problem(StatusCode::UNAUTHORIZED, problem_body(code)),
     }
-    committed(app, gate, reader, &command, &[], None).await
 }
 
 /// `evidence` as `ApprovalResponseSubmitted` records it (journal spec §9.7): its assertion id and
@@ -505,11 +516,62 @@ fn answered(evidence: &StepUpEvidence) -> Option<Value> {
     Some(Value::Object(object))
 }
 
+/// Whether the principal is one the mandate version an approval binds lists in
+/// `autonomy.approval.approvers` ([DEC-2129] item 7), against the membership fold the matrix check
+/// reads: `user:<id>` names the principal's ULID while it is an active member, and `role:approver`,
+/// `role:workspace_admin` and `role:owner` the active members holding the approver, workspace
+/// admin, and org owner roles. A version that is not named, not stored, or not a mandate, or a
+/// fold that cannot be read, is `journal_unavailable`, never a pass.
+///
+/// [DEC-2129]: ../../../docs/project/decisions/DEC-2129.md
+fn approves(
+    app: &App,
+    reader: &Reader,
+    version: Option<&str>,
+    principal: PrincipalId,
+) -> Result<bool, Refused> {
+    let store = app
+        .artifacts
+        .as_deref()
+        .ok_or(Refused::JournalUnavailable)?;
+    let (_, mandate) = version
+        .and_then(|version| stored(store, version))
+        .ok_or(Refused::JournalUnavailable)?;
+    let lookup = ControlLookup::new(app.hosted, (app.members)(&reader.control), reader.now);
+    let Some(roles) = lookup
+        .own_roles(principal)
+        .map_err(|_| Refused::JournalUnavailable)?
+    else {
+        return Ok(false);
+    };
+    let id = principal
+        .to_ulid_text()
+        .map_err(|_| Refused::JournalUnavailable)?;
+    let listed = |approver: &str| match approver.split_once(':') {
+        Some(("user", user)) => user == id,
+        Some(("role", "approver")) => roles.contains(&Role::Approver),
+        Some(("role", "workspace_admin")) => roles.contains(&Role::WorkspaceAdmin),
+        Some(("role", "owner")) => roles.contains(&Role::OrgOwner),
+        _ => false,
+    };
+    Ok(mandate
+        .autonomy
+        .approval
+        .approvers
+        .iter()
+        .any(|approver| listed(approver.as_str())))
+}
+
 /// The deployed agent whose stream requested `approval`, found by equality with an
-/// `ApprovalRequested` event id. A stream that cannot be read does not hide the approval on another
-/// that can; only when none that was read holds it and one could not be read is the answer
-/// `journal_unavailable` rather than `not_found`.
-async fn requester(app: &App, reader: &Reader, approval: &str) -> Result<Option<String>, Refused> {
+/// `ApprovalRequested` event id, with the mandate version its content binds
+/// (`trigger.mandate_version`) when it names one. A stream that cannot be read does not hide the
+/// approval on another that can; only when none that was read holds it and one could not be read
+/// is the answer `journal_unavailable` rather than `not_found`.
+async fn requester(
+    app: &App,
+    reader: &Reader,
+    approval: &str,
+) -> Result<Option<(String, Option<String>)>, Refused> {
     let mut unreadable = false;
     for deployment in deployed(&reader.control) {
         let stream = format!("agent:{}:{}", reader.workspace, deployment.0);
@@ -519,9 +581,16 @@ async fn requester(app: &App, reader: &Reader, approval: &str) -> Result<Option<
         };
         let requested = rows
             .iter()
-            .any(|row| row.event_type == "ApprovalRequested" && row.event_id == approval);
-        if requested {
-            return Ok(Some(deployment.0));
+            .find(|row| row.event_type == "ApprovalRequested" && row.event_id == approval);
+        if let Some(row) = requested {
+            let version = parse(&row.body).ok().and_then(|event| {
+                ["payload", "content", "trigger", "mandate_version"]
+                    .iter()
+                    .try_fold(&event, |value, name| value.get(name))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            });
+            return Ok(Some((deployment.0, version)));
         }
     }
     match unreadable {

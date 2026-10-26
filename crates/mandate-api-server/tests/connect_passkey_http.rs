@@ -557,7 +557,6 @@ fn crockford40(bytes: &[u8]) -> String {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_cli_confirm_start_still_commits_the_request_alone_while_the_interim_lasts() {
     let w = world();
     let issued = w.challenge();
