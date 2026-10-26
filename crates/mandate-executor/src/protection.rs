@@ -1100,7 +1100,7 @@ const CLOSED_MEMBERS: [(&str, &[&str]); 15] = [
         &["placed", "cancelled", "passive_start", "unprotected_start"],
     ),
     ("awaiting", &["interval_limit", "unprotected_end"]),
-    ("qty", &["placed", "cancelled"]),
+    ("qty", &["placed", "cancelled", "protection_gap"]),
     ("stop", &["placed", "passive_start", "unprotected_start"]),
     (
         "take_profit",
@@ -2006,7 +2006,7 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             agent,
             prices: Some(prices),
         };
-        re_place(batch, &instrument, &sequence)?;
+        protect_again(batch, &instrument, &sequence)?;
     }
     Ok(())
 }
@@ -2094,7 +2094,7 @@ fn replacements(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .map(|(instrument, recorded)| (instrument.clone(), recorded.clone()))
         .collect();
     for (instrument, recorded) in due {
-        re_place(batch, &instrument, &recorded)?;
+        protect_again(batch, &instrument, &recorded)?;
     }
     Ok(())
 }
@@ -2296,15 +2296,37 @@ fn still_selling(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty,
 /// With nothing released it is the long position, so only the owner's released shares leave it.
 fn protectable(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
     let held = long(view, instrument)?;
-    let released: BTreeMap<&AgentId, Qty> = view
-        .released
-        .iter()
-        .filter(|((_, of), _)| of == instrument)
-        .map(|((agent, _), qty)| (agent, *qty))
-        .collect();
+    let released = released_in(view, instrument);
     if released.is_empty() {
         return Ok(held);
     }
+    let agents = agents_lots(view, instrument, &released)?;
+    let total = released
+        .values()
+        .try_fold(Qty::ZERO, |sum, qty| sum.checked_add(*qty))?;
+    let owners = held.checked_sub(agents).unwrap_or(Qty::ZERO);
+    Ok(held.checked_sub(total.min(owners)).unwrap_or(Qty::ZERO))
+}
+
+/// What each agent released to the owner in `instrument` (DEC-2354).
+fn released_in<'a>(
+    view: &'a ExecutorState,
+    instrument: &InstrumentId,
+) -> BTreeMap<&'a AgentId, Qty> {
+    view.released
+        .iter()
+        .filter(|((_, of), _)| of == instrument)
+        .map(|((agent, _), qty)| (agent, *qty))
+        .collect()
+}
+
+/// The agents' own lots in `instrument` as [`protectable`] reads them: each agent's applied buys
+/// less its sells (`sold`) and less what it `released`, floored at zero, summed (DEC-2362 item 1).
+fn agents_lots(
+    view: &ExecutorState,
+    instrument: &InstrumentId,
+    released: &BTreeMap<&AgentId, Qty>,
+) -> Result<Qty, ExecutorError> {
     let mut lots: BTreeMap<&AgentId, SignedQty> = BTreeMap::new();
     for (id, order) in view
         .orders
@@ -2326,11 +2348,70 @@ fn protectable(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, E
         let kept = own.checked_add(SignedQty::from(gave).negated())?;
         agents = agents.checked_add(kept.max(SignedQty::ZERO).abs())?;
     }
-    let total = released
-        .values()
-        .try_fold(Qty::ZERO, |sum, qty| sum.checked_add(*qty))?;
-    let owners = held.checked_sub(agents).unwrap_or(Qty::ZERO);
-    Ok(held.checked_sub(total.min(owners)).unwrap_or(Qty::ZERO))
+    Ok(agents)
+}
+
+/// The shares the broker reports the agents bought in `instrument` that no fill update attributed
+/// to them (DEC-2368 item 2): over each agent buy not `Rejected` or `Abandoned`, its reported fill
+/// less its applied fill, floored at zero. A buy still working, or ended with nothing reported,
+/// adds nothing.
+fn unattributed_bought(
+    view: &ExecutorState,
+    instrument: &InstrumentId,
+) -> Result<Qty, ExecutorError> {
+    let mut bought = Qty::ZERO;
+    for (id, order) in &view.orders {
+        if order.agent.is_none()
+            || &order.instrument != instrument
+            || order.side != Side::Buy
+            || matches!(order.state, OrderState::Rejected | OrderState::Abandoned)
+        {
+            continue;
+        }
+        let reported = view
+            .details
+            .get(id)
+            .and_then(|detail| detail.reported_filled)
+            .unwrap_or(Qty::ZERO);
+        bought = bought.checked_add(reported.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO))?;
+    }
+    Ok(bought)
+}
+
+/// DEC-2368 items 2 and 3, after [`re_place`]'s placement: the shares that may be the agents' and
+/// are not covered, journaled as `protection_gap` after the placement's own records. They are the
+/// agents' own lots plus [`unattributed_bought`], less what is protectable, at most the shares
+/// left uncovered; the edge is a fill the fold could not attribute where the owner sold released
+/// shares (DEC-2362 item 5). The first gap of an episode alerts (`protection_gap`, rule 6); one
+/// while the episode is `open`, as the fold read it before this placement (no placement since its
+/// last gap), is journaled alone.
+fn gap(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+    open: bool,
+) -> Result<(), ExecutorError> {
+    let held = long(&batch.view, instrument)?;
+    let covered = protectable(&batch.view, instrument)?;
+    let released = released_in(&batch.view, instrument);
+    let possible = agents_lots(&batch.view, instrument, &released)?
+        .checked_add(unattributed_bought(&batch.view, instrument)?)?;
+    let gap = possible
+        .checked_sub(covered)
+        .unwrap_or(Qty::ZERO)
+        .min(held.checked_sub(covered).unwrap_or(Qty::ZERO));
+    if gap == Qty::ZERO {
+        return Ok(());
+    }
+    let record = changed(
+        batch,
+        instrument,
+        "protection_gap",
+        vec![("qty", text(gap.to_string()))],
+    )?;
+    if !open {
+        batch.notify(record, "protection_gap");
+    }
+    Ok(())
 }
 
 /// What a sell of ours has sold as [`long`] reads it: its applied fills, or, once it ended, the
@@ -2460,7 +2541,7 @@ fn replace(
         agent: sequence.agent.clone(),
         prices: sequence.prices,
     };
-    re_place(batch, instrument, &recorded)
+    protect_again(batch, instrument, &recorded)
 }
 
 /// Ends a re-placement that has shares to cover and nothing to cover them with: the shortfall is
@@ -2485,6 +2566,21 @@ fn protected_class(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> AssetCla
 /// What [`re_place`] hands [`protective_shape`] as the clock's session, which it never reads:
 /// protection reads the protective order's own session (DEC-838 item 4).
 const UNREAD_CLOCK: MarketSession = MarketSession::Regular;
+
+/// [`re_place`], then DEC-2368's [`gap`] for what it leaves uncovered of the agents' shares,
+/// reading the gap's episode as the fold had it before this placement.
+fn protect_again(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+    sequence: &Replacement,
+) -> Result<(), ExecutorError> {
+    if batch.view.closing_all.contains(instrument) {
+        return Ok(());
+    }
+    let open = batch.view.gapped.contains(instrument);
+    re_place(batch, instrument, sequence)?;
+    gap(batch, instrument, open)
+}
 
 /// [`replace`] for the entry, agent and prices a sequence or a re-placement before expiry
 /// recorded. With shares left to cover and no prices to place at, the shortfall is journaled and

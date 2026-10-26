@@ -1358,6 +1358,7 @@ fn protection_changed(
             }
         }
         "placed" => {
+            state.gapped.remove(&instrument);
             if let Some(entry) = optional_text(payload, "bracket") {
                 let entry = ClientOrderId::parse(entry)?;
                 state.details.entry(entry).or_default().bracket_placed = true;
@@ -1505,6 +1506,9 @@ fn protection_changed(
         }
         "expiry_unreplaceable" => {}
         "exit_unpriced" | "ladder_floor" => {}
+        "protection_gap" => {
+            state.gapped.insert(instrument.clone());
+        }
         "rung_short" if optional_qty(payload, "sent")? == Some(Qty::ZERO) => {
             let intent = required_text(payload, "intent_id")?;
             if let Some(sequence) = state

@@ -1,7 +1,0 @@
-file = "crates/mandate-executor/tests/hand.rs"
-test = "an_exits_re_placement_in_the_edge_journals_its_gap"
-reason = """
-`mandate-executor` does not journal DEC-2368's gap yet: the sequence end's re-placement in the edge
-covers 4 and journals no `protection_gap`. The test fails on that behaviour, not at a stub.
-DEC-2368's implementation journals the gap and alerts once per episode, and deletes this row.
-"""

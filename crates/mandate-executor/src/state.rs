@@ -142,6 +142,11 @@ pub struct ExecutorState {
     /// a confirmed cancel or an order's end changes the set. The record names no order (journal
     /// spec §9.5, rule 41), so the fold keeps the instrument.
     pub(crate) alerted: BTreeSet<InstrumentId>,
+    /// The instruments whose latest placement of protection journaled a `protection_gap` (DEC-2368
+    /// item 3): the gap's episode is open, so a later gap there is journaled without another
+    /// alert. The instrument's next `placed` closes it, and the gap that placement journals, if
+    /// any, opens it again.
+    pub(crate) gapped: BTreeSet<InstrumentId>,
     /// What each agent released to the owner in each instrument, from its `PositionReleased`
     /// records (journal spec §9.27, mandate spec §3.1, DEC-2354): shares no longer its lots.
     pub(crate) released: BTreeMap<(AgentId, InstrumentId), Qty>,
@@ -435,6 +440,7 @@ impl ExecutorState {
             pending_requests: BTreeMap::new(),
             switches: BTreeMap::new(),
             alerted: BTreeSet::new(),
+            gapped: BTreeSet::new(),
             day_started: None,
             released: BTreeMap::new(),
             closing_all: BTreeSet::new(),

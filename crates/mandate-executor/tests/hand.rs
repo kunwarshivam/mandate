@@ -7171,7 +7171,6 @@ fn protection_record(
 /// covers 6, never the owner's released share, and the 2 of the agent's it may leave uncovered are
 /// journaled as `protection_gap` after the placement and alerted (`protection_gap`, rule 6).
 #[test]
-#[ignore = "pending E6-4"]
 fn an_edge_under_cover_is_journaled_as_a_gap_and_alerted() {
     let ran = buffer_day_ran(&unattributed_edge(true));
     assert_eq!(re_placed(&ran, None), qty("6"), "{:?}", ran.draft_types());
@@ -7220,7 +7219,6 @@ fn no_gap_is_journaled_while_the_owner_keeps_the_released_shares() {
 /// DEC-2368 item 3: a gap journaled at an earlier placement, with no placement since, is the same
 /// episode. The buffer day journals its gap again but does not alert again.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_gap_in_an_open_episode_is_journaled_without_another_alert() {
     let mut before = unattributed_edge(true);
     before.push(protection_record("protection_gap", &[("qty", text("2"))]));
@@ -7236,7 +7234,6 @@ fn a_gap_in_an_open_episode_is_journaled_without_another_alert() {
 /// DEC-2368 item 3: a placement after the earlier gap ends that episode, so the buffer day's gap
 /// is a new one and is alerted.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_placement_after_a_gap_ends_its_episode() {
     let mut before = unattributed_edge(true);
     before.push(protection_record("protection_gap", &[("qty", text("2"))]));
@@ -7325,7 +7322,6 @@ fn edge_then_lost() -> (common::Ran, common::Ran) {
 /// 2 and the release's 4, so 4, and the owner's as 3; the re-placement covers 4 and journals the
 /// unattributed 2 it may leave uncovered, and alerts it.
 #[test]
-#[ignore = "pending E6-4"]
 fn an_exits_re_placement_in_the_edge_journals_its_gap() {
     let (ended, _) = edge_then_lost();
     assert_eq!(
@@ -7342,7 +7338,6 @@ fn an_exits_re_placement_in_the_edge_journals_its_gap() {
 /// again for the same 4 and journals the same gap, within the episode the sequence end opened, so
 /// without another alert.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_re_cover_in_the_edge_journals_its_gap_without_another_alert() {
     let (_, lost) = edge_then_lost();
     assert_eq!(re_placed(&lost, None), qty("4"), "{:?}", lost.draft_types());
