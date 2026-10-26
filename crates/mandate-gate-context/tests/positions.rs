@@ -835,3 +835,65 @@ fn a_release_of_nothing_leaves_the_basis_reported() {
     on(&mut read, "PositionReleased", &release);
     assert_eq!(read.cost_basis(ASSET), Some(position("10", "5122.5")));
 }
+
+#[test]
+fn a_counted_session_is_spelled_as_the_journal_spells_it() {
+    assert_eq!(CountedSession::Regular.as_str(), "regular");
+    assert_eq!(CountedSession::Crypto.as_str(), "crypto");
+}
+
+/// An order the executor ended as abandoned before submitting it is known, so a later change of
+/// its state is read, not refused (as the executor's `order_abandoned` records it).
+#[test]
+fn an_abandoned_order_is_known() {
+    let mut read = bought();
+    let abandoned = object(&[
+        ("client_order_id", text("mdt-7")),
+        ("intent_id", text("i-7")),
+    ]);
+    on(&mut read, "OrderAbandoned", &abandoned);
+    on(
+        &mut read,
+        "OrderStateChanged",
+        &state_changed("mdt-7", "abandoned"),
+    );
+    assert_eq!(read.cost_basis(ASSET), Some(position("10", "5122.5")));
+}
+
+/// A version-1 submission with no companion names its own agent and, with no bracket, is a plain
+/// entry, whose interval only its own stop's acknowledgment ends (DEC-966 item 2).
+#[test]
+fn a_legacy_submission_without_a_bracket_is_a_plain_entry() {
+    let mut read = Positions::new(ACCOUNT, AGENT);
+    on(
+        &mut read,
+        "OrderSubmitted",
+        &submitted("mdt-1", ASSET, "buy", "10").with("agent_id", text(AGENT)),
+    );
+    on(
+        &mut read,
+        "FillApplied",
+        &fill("f1", "mdt-1", ASSET, "buy", "10", "1"),
+    );
+    assert_eq!(read.cost_basis(ASSET), Some(position("10", "10")));
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &protection("unprotected_start", START + 1),
+    );
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &protection("unprotected_end", START + 2).with("uncovered", Value::Bool(true)),
+    );
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &protection("unprotected_start", START + 3).with("bracket", text("mdt-1")),
+    );
+    assert_eq!(
+        read.protection(ASSET).unprotected_since,
+        Some(instant(START + 1)),
+        "a plain entry's start ends no other interval, not even an uncovered one"
+    );
+}

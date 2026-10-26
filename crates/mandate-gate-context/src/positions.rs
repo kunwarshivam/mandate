@@ -218,6 +218,15 @@ impl Positions {
             "OrderSubmitted" => self.submitted(&payload)?,
             "FillApplied" | "LateFillApplied" => self.fill(&payload)?,
             "OrderStateChanged" => self.changed(&payload)?,
+            "OrderAbandoned" => {
+                let order = payload.text("client_order_id")?.to_owned();
+                self.orders.entry(order).or_insert(Order {
+                    protective: false,
+                    qty: Qty::ZERO,
+                    filled: Qty::ZERO,
+                    attributed: true,
+                });
+            }
             "PositionReleased" if payload.text("agent_id")? == self.agent => {
                 if !quantity(&payload, "qty")?.is_zero() {
                     self.unreported.insert(instrument(&payload)?);
@@ -301,7 +310,12 @@ impl Positions {
                 self.plain.insert(order.clone(), !request.bracket);
                 Some(request.agent.as_str())
             }
-            None => payload.text("agent_id").ok(),
+            None => {
+                let bracket =
+                    payload.value.get("order_class").and_then(|c| c.as_str()) == Some("bracket");
+                self.plain.insert(order.clone(), !bracket);
+                payload.text("agent_id").ok()
+            }
         };
         if agent == Some(self.agent.as_str()) {
             self.own.insert(order.clone());
