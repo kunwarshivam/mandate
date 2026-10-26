@@ -70,7 +70,39 @@
           "type": "null"
         }
       ]
+    },
+    "step_up_assertion": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpAssertion"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
-  "description": "POST /mandate-versions/{mandate_version}/confirm (\u00a75.1). Users only. step_up is bound to SHA-256 of {mandate_version, agent_id, base_version}; missing for risk_increasing is 401 step_up_required, not 422."
+  "if": {
+    "properties": {
+      "step_up_assertion": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "step_up_assertion"
+    ]
+  },
+  "then": {
+    "properties": {
+      "step_up": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "const": "passkey"
+          }
+        }
+      }
+    }
+  },
+  "description": "POST /mandate-versions/{mandate_version}/confirm (\u00a75.1). Users only. step_up is bound to SHA-256 of {mandate_version, agent_id, base_version}; missing for risk_increasing is 401 step_up_required, not 422. step_up_assertion is DEC-2108 item 7's object beside passkey step-up, optional so a body written before it still decodes; set only beside a step_up whose method is passkey (DEC-2128 item 1)."
 }
