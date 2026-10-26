@@ -12,7 +12,7 @@
 //!
 //! `mandate-datad run --store <root> --symbol <symbol> --anchor <YYYY-MM-DD>=<close> --probe
 //! <socket>` stores the recorded series ([`mandate_datad::series`]) under `<root>`, once at start,
-//! which is its start-up check, and again every [`REFRESH`], so a session that completes while it
+//! which is its start-up check, and again every [`series::REFRESH`], so a session that completes while it
 //! runs is added. Any failed write exits, fail closed, and the orchestrator restarts it. It drains
 //! on SIGTERM. `mandate-datad probe livez|readyz --probe <socket>` is its `exec` probe (DEC-994
 //! item 5). This is the one place the host clock is read (ES-05).
@@ -32,8 +32,6 @@ use tokio::signal::unix::{SignalKind, signal};
 
 const LIVENESS: Duration = Duration::from_secs(10);
 const TICK: Duration = Duration::from_secs(1);
-/// How often the series is stored again: a completed session is added within this.
-const REFRESH: Duration = Duration::from_secs(60);
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -118,7 +116,7 @@ fn run(store: &Path, symbol: &str, anchor: &Anchor, socket: &Path) -> Result<u8,
             lifecycle.observe(now, Input::Settled);
             continue;
         }
-        let due = stored_at.is_none_or(|at| at.elapsed() >= REFRESH);
+        let due = series::due(stored_at.map(|at| at.elapsed()));
         let input = if !due {
             Input::Heartbeat
         } else {

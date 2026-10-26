@@ -8,6 +8,7 @@
 //! [`RECORDED_ROOT`], so its path says what it is.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use mandate_canon::DecStr;
 use mandate_marketdata::dataset::{DatasetError, Status, Store};
@@ -31,6 +32,16 @@ pub const RECORDED_ROOT: &str = "cell-recorded";
 /// The farthest a session may be from the anchor, in calendar days: past it the walk is refused
 /// rather than run, so a wrong anchor cannot drift a price without bound.
 pub const REACH_DAYS: u32 = 400;
+/// How often the binary stores the series again, so a session that completes while it runs is
+/// added within this.
+pub const REFRESH: Duration = Duration::from_secs(60);
+
+/// Whether a write is due: at start (`since_last` is `None`), and once [`REFRESH`] has passed since
+/// the last one.
+pub fn due(since_last: Option<Duration>) -> bool {
+    since_last.is_none_or(|elapsed| elapsed >= REFRESH)
+}
+
 /// How far back the walk for the sessions starts, in days: comfortably more than [`SESSIONS`]
 /// sessions, holidays included.
 const LOOKBACK_DAYS: i64 = 60;

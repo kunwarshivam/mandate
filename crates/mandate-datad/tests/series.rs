@@ -4,6 +4,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use mandate_datad::series::{self, Anchor, SESSIONS};
 use mandate_marketdata::inspect::{GapClass, inspect};
@@ -134,6 +135,49 @@ fn an_anchor_and_its_reach_are_checked() {
         series::close_on(&calendar, &anchor(), far).is_err(),
         "past the reach"
     );
+}
+
+/// The reach is the last day walked, inclusive: a session exactly [`series::REACH_DAYS`] calendar
+/// days from the anchor has its close, one day further does not, either side of the anchor.
+#[test]
+fn the_reach_ends_on_its_last_day() {
+    let calendar = ExchangeCalendar::us_equities().unwrap();
+    let a = Anchor::parse("2026-10-23=150").unwrap();
+    assert_eq!(series::REACH_DAYS, 400);
+    let at_reach = Date::new(2025, 9, 18).unwrap();
+    let past_reach = Date::new(2025, 9, 17).unwrap();
+    assert!(
+        calendar.is_trading_day(at_reach).unwrap() && calendar.is_trading_day(past_reach).unwrap()
+    );
+    assert!(
+        series::close_on(&calendar, &a, at_reach).is_ok(),
+        "400 days back"
+    );
+    assert!(
+        series::close_on(&calendar, &a, past_reach).is_err(),
+        "401 days back"
+    );
+    let near = Anchor::parse("2025-09-18=150").unwrap();
+    assert!(
+        series::close_on(&calendar, &near, Date::new(2026, 10, 23).unwrap()).is_ok(),
+        "400 days on"
+    );
+    let near = Anchor::parse("2025-09-17=150").unwrap();
+    assert!(
+        series::close_on(&calendar, &near, Date::new(2026, 10, 23).unwrap()).is_err(),
+        "401 days on"
+    );
+}
+
+/// A write is due at start and once [`series::REFRESH`] has passed, and not before.
+#[test]
+fn a_write_is_due_at_start_and_each_refresh() {
+    let refresh = series::REFRESH;
+    assert!(series::due(None));
+    assert!(!series::due(Some(Duration::ZERO)));
+    assert!(!series::due(Some(refresh - Duration::from_nanos(1))));
+    assert!(series::due(Some(refresh)));
+    assert!(series::due(Some(refresh * 2)));
 }
 
 /// The stored dataset is one the shell's trust check admits: daily bars of the symbol, no problem,
