@@ -621,6 +621,7 @@ pub fn snapshot(head: u64, reason: ReconcileReason) -> BrokerSnapshot {
         fills: Vec::new(),
         cursor: mandate_executor::ActivityCursor("cursor-1".to_owned()),
         reason,
+        declared: None,
         taken_at_head: Seq(head),
     }
 }

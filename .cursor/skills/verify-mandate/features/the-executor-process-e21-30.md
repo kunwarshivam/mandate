@@ -72,7 +72,7 @@
   check and the process on Postgres. `tests/binding_gate.rs` (`src/gate.rs`, DEC-2380 item 2): the
   binding gate's input from the reviewed deployment, the journal's facts and the asset record,
   day-trade rules and liquidity, held when any is missing, when the account is not flat or not
-  active, or under a regime whose day trades could bind, never answered for an order reducing
+  active, or under a regime whose day trades could bind (intraday margin answered unless the broker reports a deficit), never answered for an order reducing
   risk, and refused by an inactive or untradable asset, the liquidity and price floors and
   participation. `tests/deployment.rs` (`src/deployment.rs`, X1b-3 G2b): the production ports read
   from the control stream's confirmed version and registrations and the artifact store, a

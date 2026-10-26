@@ -95,11 +95,49 @@ impl<'p, 'a> Batch<'p, 'a> {
         event_type: &str,
         causation_id: Option<EventId>,
         config_refs: Object,
+        pairs: Vec<(&str, Value)>,
+    ) -> Result<EventId, ExecutorError> {
+        let version = schema_version(event_type);
+        self.journal_at(event_type, version, causation_id, config_refs, pairs)
+    }
+
+    /// [`Self::journal`] at `schema_version`, for a record whose writer chooses its version from
+    /// what it read: an `AccountSnapshotRecorded` whose connector declares no account rules is
+    /// version 1, since its figures are not the connector's statement (journal spec §9.35,
+    /// DEC-2398 item 4).
+    pub(crate) fn journal_version(
+        &mut self,
+        event_type: &str,
+        schema_version: u64,
+        causation_id: Option<EventId>,
+        pairs: Vec<(&str, Value)>,
+    ) -> Result<EventId, ExecutorError> {
+        self.journal_at(
+            event_type,
+            schema_version,
+            causation_id,
+            Object::new(),
+            pairs,
+        )
+    }
+
+    fn journal_at(
+        &mut self,
+        event_type: &str,
+        schema_version: u64,
+        causation_id: Option<EventId>,
+        config_refs: Object,
         mut pairs: Vec<(&str, Value)>,
     ) -> Result<EventId, ExecutorError> {
         pairs.push(("risk_clock", risk_clock_stamp(self.at())?));
         let payload = object(pairs)?;
-        self.draft(event_type, causation_id, config_refs, payload)
+        self.draft(
+            event_type,
+            schema_version,
+            causation_id,
+            config_refs,
+            payload,
+        )
     }
 
     /// Drafts `payload` as it is under the next draft id, folds it into the working copy, and
@@ -107,20 +145,27 @@ impl<'p, 'a> Batch<'p, 'a> {
     fn draft(
         &mut self,
         event_type: &str,
+        schema_version: u64,
         causation_id: Option<EventId>,
         config_refs: Object,
         payload: Value,
     ) -> Result<EventId, ExecutorError> {
         let event_id = self.next_id();
         self.drafted = self.drafted.saturating_add(1);
-        self.fold_draft(event_id, event_type, causation_id, config_refs, payload)
+        self.fold_draft(
+            event_id,
+            (event_type, schema_version),
+            causation_id,
+            config_refs,
+            payload,
+        )
     }
 
     /// Drafts `payload` under `event_id` at the batch's next `seq`, folds it, and answers its id.
     fn fold_draft(
         &mut self,
         event_id: EventId,
-        event_type: &str,
+        (event_type, schema_version): (&str, u64),
         causation_id: Option<EventId>,
         config_refs: Object,
         payload: Value,
@@ -146,7 +191,7 @@ impl<'p, 'a> Batch<'p, 'a> {
         self.effects.push(Effect::Journal(EventDraft {
             event_id: event_id.clone(),
             event_type: event_type.to_owned(),
-            schema_version: schema_version(event_type),
+            schema_version,
             config_refs,
             causation_id,
             payload,
@@ -193,7 +238,7 @@ impl<'p, 'a> Batch<'p, 'a> {
             .and_then(|payload| {
                 self.fold_draft(
                     id,
-                    OWNER_ALERT_SENT,
+                    (OWNER_ALERT_SENT, schema_version(OWNER_ALERT_SENT)),
                     Some(subject_event.clone()),
                     Object::new(),
                     payload,
@@ -249,8 +294,12 @@ pub(crate) const OWNER_ALERT_SENT: &str = "OwnerAlertSent";
 
 pub(crate) fn schema_version(event_type: &str) -> u64 {
     match event_type {
-        "IntentReceived" | "GateDecided" | "OrderSubmitted" | "OrderStateChanged"
-        | "ProtectionChanged" => 2,
+        "IntentReceived"
+        | "GateDecided"
+        | "OrderSubmitted"
+        | "OrderStateChanged"
+        | "ProtectionChanged"
+        | "AccountSnapshotRecorded" => 2,
         _ => 1,
     }
 }
@@ -271,7 +320,12 @@ mod tests {
 
     #[test]
     fn the_executor_owns_each_account_draft_schema_version() {
-        for event_type in ["IntentReceived", "GateDecided", "OrderSubmitted"] {
+        for event_type in [
+            "IntentReceived",
+            "GateDecided",
+            "OrderSubmitted",
+            "AccountSnapshotRecorded",
+        ] {
             assert_eq!(schema_version(event_type), 2, "{event_type}");
         }
         for event_type in [

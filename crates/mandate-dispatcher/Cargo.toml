@@ -14,13 +14,14 @@ mandate-canon.workspace = true
 mandate-journal.workspace = true
 mandate-journal-pg.workspace = true
 mandate-notify.workspace = true
+mandate-process.workspace = true
 mandate-push-relay.workspace = true
 mandate-time.workspace = true
 mandate-webpush.workspace = true
 ring.workspace = true
 secrecy.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "signal", "time"] }
 
 [dev-dependencies]
 aes-gcm.workspace = true
@@ -30,4 +31,4 @@ p256 = { workspace = true, features = ["ecdh", "ecdsa"] }
 proptest.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "signal", "time"] }

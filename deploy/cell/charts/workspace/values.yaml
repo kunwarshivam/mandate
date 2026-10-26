@@ -34,6 +34,10 @@ images:
   executor: ""
   token-exchange: ""
   scheduler: ""
+  # The notification dispatcher (X8, DEC-2500, DEC-2516): the hosted workspace's notices, mailed
+  # only through the recorded transport, which sends nothing. It needs `api.workspace`, whose
+  # control stream names the streams it follows, `api.appOrigin`, and the `dispatcher` values.
+  dispatcher: ""
   model-gateway: ""
   exporter: ""
   data: ""
@@ -62,6 +66,19 @@ alpacaOAuth:
 # tier but dev or ci refuses it, in the schema and in the chart.
 oauthFixture:
   enabled: false
+
+# The notification dispatcher's configuration file, once images.dispatcher is named (DEC-2500 item
+# 7, DEC-2516 item 2): the ConfigMap `dispatcher-config`, mounted read-only. `recipient` is the one
+# recipient its email channel mails, in DEC-710 item 4's form (`[a-z][a-z0-9_]{0,63}`), required
+# with the image, and `build` its binary's digest, `sha256:<64 hex>`, which an image pinned by
+# digest may leave empty: its digest is the build then. `subjects` are streams it
+# follows beside those the control stream names, a floor and never a filter. The workspace, the
+# environment (paper only) and the app origin are `api.workspace`, `environment` and
+# `api.appOrigin`. Web push stays off (DEC-2504).
+dispatcher:
+  recipient: ""
+  build: ""
+  subjects: []
 
 # The data process (mandate-datad), once images.data is named: each instrument whose daily and
 # minute bars it stores from the cell's recorded series, as `{symbol, assetId, anchor}`. The asset

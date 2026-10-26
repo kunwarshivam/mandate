@@ -276,6 +276,11 @@ news per workspace, and no paid vendor before the DEC-99 evaluation passes. Cate
 | Issuer press releases | Wire services that carry issuer releases | Paid, or free with delay | Later, as a licensed source |
 | Social media, forums, blogs | — | — | **Not allowed** in v1 (R-05: anyone can write them) |
 
+**Interim, the cell's paper workspace only ([DEC-2277](../project/decisions/DEC-2277.md)).** Until a
+key per workspace is decided, Alpaca news is read with one platform paper data key that only the
+news reader reads, never a connection's trading token. The news reader runs only in the founder's
+workspace. Per workspace, on its own connection, stays the target this row states.
+
 A source enters the research agent's view only by being added to the vetted allowlist, a new
 version of versioned configuration ([mandate spec §8.4](mandate.md#84-the-research-agent-dec-97-adr-0002)).
 How a source is vetted is mandate spec §12 item 8, still open.
