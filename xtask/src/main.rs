@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
+use std::fmt;
 use std::fs;
 use std::io::{BufRead as _, BufReader, Read as _, Write};
 use std::path::{Path, PathBuf};
@@ -3549,6 +3550,13 @@ fn land_check_cmd(root: &Path, base: &str) -> Result<()> {
                 &scratch.display().to_string(),
             ],
         )?;
+        if let Some(reason) = rerun_blocked(&[&target, dir, &scratch], unprivileged_reaches) {
+            return Err(anyhow::Error::new(RerunUnavailable(reason)).context(format!(
+                "`cargo xtask ci {job}` failed with {status} as root, and no test can run again \
+                 as uid {UNPRIVILEGED_ID} here: give land-check a checkout that user can reach \
+                 (DEC-2644)"
+            )));
+        }
         let rerun = || -> Result<Vec<String>> {
             let mut passed = Vec::new();
             for (binary, test) in &failed {
@@ -3577,6 +3585,53 @@ fn land_check_cmd(root: &Path, base: &str) -> Result<()> {
     });
     println!("{line}");
     verdict
+}
+
+/// Why no test that failed as root can run again here, as land-check's summary names it
+/// (`rerun_unavailable=`): the paths the run needs are not traversable by uid [`UNPRIVILEGED_ID`],
+/// or `setpriv` cannot run. The test stays red (DEC-2644).
+#[derive(Debug)]
+struct RerunUnavailable(&'static str);
+
+impl fmt::Display for RerunUnavailable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "rerun_unavailable={}", self.0)
+    }
+}
+
+impl std::error::Error for RerunUnavailable {}
+
+/// Why a re-run as uid [`UNPRIVILEGED_ID`] cannot reach `paths` (the build, the merged tree, its
+/// TMPDIR), or `None` when it can: `reaches` answers for one path, `None` when it could not ask.
+/// Checked before any test runs again, so an unreachable path reads as itself and never as the
+/// test failing (lane NE's `identity_link`, 2026-10-26).
+fn rerun_blocked(paths: &[&Path], reaches: impl Fn(&Path) -> Option<bool>) -> Option<&'static str> {
+    for path in paths {
+        match reaches(path) {
+            None => return Some("setpriv_unavailable"),
+            Some(false) => return Some("path_not_traversable"),
+            Some(true) => {}
+        }
+    }
+    None
+}
+
+/// Whether uid and gid [`UNPRIVILEGED_ID`] can search `path`, every directory above it included:
+/// `setpriv` runs `test -x` as that user. `None` when `setpriv` cannot start.
+fn unprivileged_reaches(path: &Path) -> Option<bool> {
+    Command::new("setpriv")
+        .args([
+            &format!("--reuid={UNPRIVILEGED_ID}"),
+            &format!("--regid={UNPRIVILEGED_ID}"),
+            "--clear-groups",
+            "--",
+            "test",
+            "-x",
+        ])
+        .arg(path)
+        .status()
+        .ok()
+        .map(|status| status.success())
 }
 
 /// Runs `command` with its stderr read as it comes, each line echoed, and returns its status beside
@@ -3799,6 +3854,7 @@ fn land_check(
     let mut results: Vec<(&str, Option<bool>)> =
         LAND_CHECK_JOBS.iter().map(|job| (*job, None)).collect();
     let mut rerun = Vec::new();
+    let mut unavailable = None;
     let made = land_check_git(
         root,
         &[
@@ -3831,6 +3887,11 @@ fn land_check(
                         }
                         Err(err) => {
                             eprintln!("    land-check: {job}: {err:#}");
+                            unavailable = unavailable.or_else(|| {
+                                err.chain()
+                                    .find_map(|cause| cause.downcast_ref::<RerunUnavailable>())
+                                    .map(|why| why.0)
+                            });
                             *passed = Some(false);
                         }
                     }
@@ -3856,12 +3917,13 @@ fn land_check(
         .collect();
     let line = format!(
         "land-check summary: head={} base={base}@{} fetched={fetched_word} merged={} \
-         merge={merge_word} {} rerun_unprivileged=[{}] verdict={}",
+         merge={merge_word} {} rerun_unprivileged=[{}]{} verdict={}",
         short(&head),
         short(&base_sha),
         merged.as_deref().map_or_else(|| "none".to_owned(), short),
         jobs.join(" "),
         rerun.join(","),
+        unavailable.map_or_else(String::new, |why| format!(" rerun_unavailable={why}")),
         if passed { "pass" } else { "fail" },
     );
     let verdict = if passed {
@@ -12824,10 +12886,10 @@ mod tests {
         references_path, select, selection_in, source_references, tokens, withhold_web_demo,
     };
     use super::{
-        CARGO_INCREMENTAL, LAND_CHECK_DIR, LAND_CHECK_JOBS, NO_FAIL_FAST_ENV, TIMED_OUT_MUTANTS,
-        conflict_markers_in, filtered, incremental_overridden, land_check, land_check_job,
-        mutants_job_within, mutants_summary, nextest_failures, root_mismatch, summarised,
-        unprivileged_rerun,
+        CARGO_INCREMENTAL, LAND_CHECK_DIR, LAND_CHECK_JOBS, NO_FAIL_FAST_ENV, RerunUnavailable,
+        TIMED_OUT_MUTANTS, conflict_markers_in, filtered, incremental_overridden, land_check,
+        land_check_job, mutants_job_within, mutants_summary, nextest_failures, rerun_blocked,
+        root_mismatch, summarised, unprivileged_rerun,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
@@ -14337,6 +14399,39 @@ mod tests {
             "{line}"
         );
         land_check_left_nothing(&fx)?;
+        Ok(())
+    }
+
+    /// A re-run that cannot reach its paths as uid 65534 is named as such, never as the test
+    /// failing again; the first path it cannot reach, or a `setpriv` that cannot run, decides.
+    #[test]
+    fn a_rerun_that_cannot_reach_its_paths_says_so() -> Result<()> {
+        let (a, b) = (Path::new("/a"), Path::new("/b"));
+        assert_eq!(rerun_blocked(&[a, b], |_| Some(true)), None);
+        assert_eq!(
+            rerun_blocked(&[a, b], |p| Some(p == a)),
+            Some("path_not_traversable")
+        );
+        assert_eq!(
+            rerun_blocked(&[a, b], |_| None),
+            Some("setpriv_unavailable")
+        );
+        let (fx, _) = land_check_fixture("land-check-unreachable", "b.txt", "b from main\n")?;
+        let (line, verdict) = land_check(&fx.0, "base", Some(true), |_, _, job| {
+            if job == "test-nextest" {
+                return Err(anyhow::Error::new(RerunUnavailable("path_not_traversable"))
+                    .context("no test can run again here"));
+            }
+            Ok(Vec::new())
+        });
+        assert!(verdict.is_err());
+        assert!(
+            line.contains(" test-nextest=fail ")
+                && line.ends_with(
+                    " rerun_unprivileged=[] rerun_unavailable=path_not_traversable verdict=fail"
+                ),
+            "{line}"
+        );
         Ok(())
     }
 
