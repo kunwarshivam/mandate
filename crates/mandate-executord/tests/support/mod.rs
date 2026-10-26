@@ -27,6 +27,7 @@ use mandate_executor::{
 };
 use mandate_executord::marks::NoMarks;
 use mandate_executord::quotes::NoQuotes;
+use mandate_executord::risk::Unopened;
 use mandate_executord::serve::ScriptedBroker;
 use mandate_executord::{Broker, Config, ExecutorProcess, Protections, Unplanned, Wiring};
 use mandate_journal::{AppendOutcome, Environment, Invalid, InvalidReason, StoredEvent, StreamId};
@@ -87,6 +88,8 @@ pub enum Fault {
     /// Nothing written: the journal refuses the batch as invalid, as it refuses a draft its schema
     /// does not admit (DEC-2805).
     Invalid,
+    /// Nothing written: a newer writer holds the stream, and this one is fenced (journal spec §2).
+    Fenced,
 }
 
 #[derive(Default)]
@@ -123,6 +126,13 @@ impl Journal {
                     .map(str::to_owned)
             })
             .collect()
+    }
+
+    /// Keeps the first `len` rows of `stream`, as a crash that lost the rest would have left it.
+    pub fn truncate(&self, stream: &str, len: usize) {
+        if let Some(rows) = self.0.borrow_mut().streams.get_mut(stream) {
+            rows.truncate(len);
+        }
     }
 
     pub fn rows_of(&self, stream: &str) -> Vec<StoredEvent> {
@@ -336,6 +346,11 @@ impl Store for Journal {
         let fault = typed.or_else(|| rows.faults.pop_front());
         if fault == Some(Fault::Unavailable) {
             return AppendOutcome::Unavailable;
+        }
+        if fault == Some(Fault::Fenced) {
+            return AppendOutcome::Fenced {
+                current_epoch: epoch.saturating_add(1),
+            };
         }
         if fault == Some(Fault::Invalid) {
             return AppendOutcome::Invalid {
@@ -907,6 +922,7 @@ pub fn wired(
         protections,
         quotes: Box::new(NoQuotes),
         marked: Box::new(NoMarks),
+        risk: Box::new(Unopened),
     })
 }
 

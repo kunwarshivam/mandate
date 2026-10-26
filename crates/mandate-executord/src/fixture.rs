@@ -16,6 +16,7 @@ use mandate_time::{Date, TradingCalendar};
 
 use crate::marks::NoMarks;
 use crate::quotes::NoQuotes;
+use crate::risk::Unopened;
 use crate::{Protections, Unplanned, Wiring};
 
 /// The account stream's deterministic event ids, derived from the stream as well as the epoch,
@@ -113,6 +114,7 @@ pub fn wiring(scope: &AccountScope) -> Result<Wiring, &'static str> {
         protections: Box::new(NoProtection),
         quotes: Box::new(NoQuotes),
         marked: Box::new(NoMarks),
+        risk: Box::new(Unopened),
     })
 }
 

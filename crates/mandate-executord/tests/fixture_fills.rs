@@ -18,6 +18,7 @@ use mandate_executord::alpaca::AlpacaBroker;
 use mandate_executord::marks::NoMarks;
 use mandate_executord::paper::{CASH, FixturePaper};
 use mandate_executord::quotes::NoQuotes;
+use mandate_executord::risk::Unopened;
 use mandate_executord::{Broker, ExecutorProcess, Wiring};
 use mandate_journal::Environment;
 use mandate_num::{Price, Qty, ShareIncrement, Usd};
@@ -427,6 +428,7 @@ fn wiring() -> Result<Wiring, Error> {
         protections: Box::new(TwoPercentStop),
         quotes: Box::new(NoQuotes),
         marked: Box::new(NoMarks),
+        risk: Box::new(Unopened),
     })
 }
 
