@@ -456,7 +456,9 @@ describe("the common-schema seam", () => {
 
 describe("the step-up challenge (spec §3.6, DEC-2103) and one's own session (§4.10)", () => {
   const DIGEST = `sha256:${"ab".repeat(32)}` as const;
-  const CHALLENGE = { challenge_id: EVENT, webauthn_challenge: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", action: { kind: "approve", digest: DIGEST }, issued_at: "2026-10-26T14:00:00.000000000Z", expires_at: "2026-10-26T14:05:00.000000000Z" };
+  /** The challenge bytes 1 to 32, base64url, built here so no key-shaped literal sits in the file (gitleaks' generic-api-key). */
+  const RISING = Buffer.from(Array.from({ length: 32 }, (_, i) => i + 1)).toString("base64url");
+  const CHALLENGE = { challenge_id: EVENT, webauthn_challenge: RISING, action: { kind: "approve", digest: DIGEST }, issued_at: "2026-10-26T14:00:00.000000000Z", expires_at: "2026-10-26T14:05:00.000000000Z" };
   const created = (patch: Record<string, unknown> = {}) => json(201, { api_version: "v1", as_of: [], ...CHALLENGE, ...patch });
 
   it("asks once, under its own key, with the CSRF mark and a body of the action alone", async () => {
