@@ -2568,6 +2568,568 @@ policy_overlay:
       value: policy_overlay
     expect:
       outcome: Valid
+deferred_to_binding:
+  spec: docs/specs/journal.md v0.85 §9.1 rules 269 and 270 (DEC-2388 item 10)
+  base: agent_stream
+  parts:
+  - account_exposure
+  - agent_equity
+  - agent_mode
+  - conduct_history
+  - day_trade_budget
+  - eligibility
+  - fee_reservation
+  - halt
+  - liquidity_floor
+  - other_orders
+  - participation
+  - quote_ask
+  - reentry_cooldown
+  - related_accounts
+  invalid_drafts:
+  - name: deferred_out_of_order
+    clause: §9.1 rule 269
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value:
+      - participation
+      - liquidity_floor
+      - account_exposure
+      - agent_equity
+      - agent_mode
+      - conduct_history
+      - day_trade_budget
+      - eligibility
+      - fee_reservation
+      - halt
+      - other_orders
+      - quote_ask
+      - reentry_cooldown
+      - related_accounts
+    - path: payload.liquidity
+      value: null
+    - path: payload.autonomy
+      value: ask
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.deferred_to_binding
+  - name: deferred_part_repeated
+    clause: §9.1 rule 269
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value:
+      - halt
+      - halt
+    - path: payload.liquidity
+      value:
+        prior_close: '150'
+        median_dollar_volume_20d: '20000000000'
+        adv_20d: '80000000'
+        trailing_5m_volume: '500000'
+        read_at: '2026-09-21T14:00:00.000000000Z'
+    - path: payload.autonomy
+      value: ask
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.deferred_to_binding
+  - name: deferred_part_unknown
+    clause: §9.1 DecisionMade version 3
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value:
+      - exposure
+    - path: payload.liquidity
+      value:
+        prior_close: '150'
+        median_dollar_volume_20d: '20000000000'
+        adv_20d: '80000000'
+        trailing_5m_volume: '500000'
+        read_at: '2026-09-21T14:00:00.000000000Z'
+    - path: payload.autonomy
+      value: ask
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.deferred_to_binding[0]
+  - name: deferred_nothing_on_an_allowed_opening
+    clause: §9.1 rule 269
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value: []
+    - path: payload.liquidity
+      value:
+        prior_close: '150'
+        median_dollar_volume_20d: '20000000000'
+        adv_20d: '80000000'
+        trailing_5m_volume: '500000'
+        read_at: '2026-09-21T14:00:00.000000000Z'
+    - path: payload.autonomy
+      value: ask
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deferred_to_binding
+  - name: deferred_on_a_denied_opening
+    clause: §9.1 rule 269
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value:
+      - account_exposure
+      - agent_equity
+      - agent_mode
+      - conduct_history
+      - day_trade_budget
+      - eligibility
+      - fee_reservation
+      - halt
+      - other_orders
+      - quote_ask
+      - reentry_cooldown
+      - related_accounts
+    - path: payload.liquidity
+      value:
+        prior_close: '150'
+        median_dollar_volume_20d: '20000000000'
+        adv_20d: '80000000'
+        trailing_5m_volume: '500000'
+        read_at: '2026-09-21T14:00:00.000000000Z'
+    - path: payload.dry_run
+      value: deny
+    - path: payload.reason_code
+      value: below_liquidity_floor
+    - path: payload.autonomy
+      value: null
+    - path: payload.decided_by
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deferred_to_binding
+  - name: deferred_on_an_allowed_exit
+    clause: §9.1 rule 269
+    base_seq: 8
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value:
+      - halt
+    - path: payload.liquidity
+      value: null
+    - path: payload.dry_run
+      value: allow
+    - path: payload.reason_code
+      value: null
+    - path: payload.autonomy
+      value: auto
+    - path: payload.decided_by
+      value: builtin_risk_reducing
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deferred_to_binding
+  - name: figures_on_an_exit
+    clause: §9.1 rule 270
+    base_seq: 8
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value: []
+    - path: payload.liquidity
+      value:
+        prior_close: '150'
+        median_dollar_volume_20d: '20000000000'
+        adv_20d: '80000000'
+        trailing_5m_volume: '500000'
+        read_at: '2026-09-21T14:00:00.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.liquidity
+  - name: floor_deferred_without_participation
+    clause: §9.1 rule 270
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value:
+      - account_exposure
+      - agent_equity
+      - agent_mode
+      - conduct_history
+      - day_trade_budget
+      - eligibility
+      - fee_reservation
+      - halt
+      - liquidity_floor
+      - other_orders
+      - quote_ask
+      - reentry_cooldown
+      - related_accounts
+    - path: payload.liquidity
+      value: null
+    - path: payload.autonomy
+      value: ask
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deferred_to_binding
+  - name: participation_deferred_without_the_floor
+    clause: §9.1 rule 270
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value:
+      - account_exposure
+      - agent_equity
+      - agent_mode
+      - conduct_history
+      - day_trade_budget
+      - eligibility
+      - fee_reservation
+      - halt
+      - other_orders
+      - participation
+      - quote_ask
+      - reentry_cooldown
+      - related_accounts
+    - path: payload.liquidity
+      value:
+        prior_close: '150'
+        median_dollar_volume_20d: '20000000000'
+        adv_20d: '80000000'
+        trailing_5m_volume: '500000'
+        read_at: '2026-09-21T14:00:00.000000000Z'
+    - path: payload.autonomy
+      value: ask
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deferred_to_binding
+  - name: version_3_without_its_mandate_version
+    clause: '§9 DecisionMade v3: man'
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value:
+      - account_exposure
+      - agent_equity
+      - agent_mode
+      - conduct_history
+      - day_trade_budget
+      - eligibility
+      - fee_reservation
+      - halt
+      - liquidity_floor
+      - other_orders
+      - participation
+      - quote_ask
+      - reentry_cooldown
+      - related_accounts
+    - path: payload.liquidity
+      value: null
+    - path: payload.autonomy
+      value: ask
+    - path: config_refs.mandate_version
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.mandate_version
+  - name: figures_beside_a_deferred_floor
+    clause: §9.1 rule 270
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value:
+      - account_exposure
+      - agent_equity
+      - agent_mode
+      - conduct_history
+      - day_trade_budget
+      - eligibility
+      - fee_reservation
+      - halt
+      - liquidity_floor
+      - other_orders
+      - participation
+      - quote_ask
+      - reentry_cooldown
+      - related_accounts
+    - path: payload.liquidity
+      value:
+        prior_close: '150'
+        median_dollar_volume_20d: '20000000000'
+        adv_20d: '80000000'
+        trailing_5m_volume: '500000'
+        read_at: '2026-09-21T14:00:00.000000000Z'
+    - path: payload.autonomy
+      value: ask
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.liquidity
+  - name: no_figures_with_the_floor_evaluated
+    clause: §9.1 rule 270
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value:
+      - account_exposure
+      - agent_equity
+      - agent_mode
+      - conduct_history
+      - day_trade_budget
+      - eligibility
+      - fee_reservation
+      - halt
+      - other_orders
+      - quote_ask
+      - reentry_cooldown
+      - related_accounts
+    - path: payload.liquidity
+      value: null
+    - path: payload.autonomy
+      value: ask
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.liquidity
+  - name: figures_untyped
+    clause: §9.1 DecisionMade version 3
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value:
+      - account_exposure
+      - agent_equity
+      - agent_mode
+      - conduct_history
+      - day_trade_budget
+      - eligibility
+      - fee_reservation
+      - halt
+      - other_orders
+      - quote_ask
+      - reentry_cooldown
+      - related_accounts
+    - path: payload.liquidity
+      value:
+        prior_close: '150'
+        median_dollar_volume_20d: '20000000000'
+        adv_20d: 80000000
+        trailing_5m_volume: '500000'
+        read_at: '2026-09-21T14:00:00.000000000Z'
+    - path: payload.autonomy
+      value: ask
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.liquidity.adv_20d
+  - name: version_1_names_a_deferral
+    clause: §9.1 DecisionMade
+    base_seq: 4
+    changes:
+    - path: payload.deferred_to_binding
+      value:
+      - account_exposure
+      - agent_equity
+      - agent_mode
+      - conduct_history
+      - day_trade_budget
+      - eligibility
+      - fee_reservation
+      - halt
+      - liquidity_floor
+      - other_orders
+      - participation
+      - quote_ask
+      - reentry_cooldown
+      - related_accounts
+    - path: payload.autonomy
+      value: ask
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.deferred_to_binding
+  - name: version_4_is_unknown
+    clause: §9 catalogue
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value:
+      - account_exposure
+      - agent_equity
+      - agent_mode
+      - conduct_history
+      - day_trade_budget
+      - eligibility
+      - fee_reservation
+      - halt
+      - liquidity_floor
+      - other_orders
+      - participation
+      - quote_ask
+      - reentry_cooldown
+      - related_accounts
+    - path: payload.liquidity
+      value: null
+    - path: payload.autonomy
+      value: ask
+    - path: schema_version
+      value: 4
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  valid_drafts:
+  - name: every_part_deferred_and_asked
+    clause: docs/specs/journal.md v0.85 §9.1 rules 269 and 270 (DEC-2388 item 10)
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value:
+      - account_exposure
+      - agent_equity
+      - agent_mode
+      - conduct_history
+      - day_trade_budget
+      - eligibility
+      - fee_reservation
+      - halt
+      - liquidity_floor
+      - other_orders
+      - participation
+      - quote_ask
+      - reentry_cooldown
+      - related_accounts
+    - path: payload.liquidity
+      value: null
+    - path: payload.autonomy
+      value: ask
+    expect:
+      outcome: Valid
+  - name: the_bars_read_and_asked
+    clause: docs/specs/journal.md v0.85 §9.1 rules 269 and 270 (DEC-2388 item 10)
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value:
+      - account_exposure
+      - agent_equity
+      - agent_mode
+      - conduct_history
+      - day_trade_budget
+      - eligibility
+      - fee_reservation
+      - halt
+      - other_orders
+      - quote_ask
+      - reentry_cooldown
+      - related_accounts
+    - path: payload.liquidity
+      value:
+        prior_close: '150'
+        median_dollar_volume_20d: '20000000000'
+        adv_20d: '80000000'
+        trailing_5m_volume: '500000'
+        read_at: '2026-09-21T14:00:00.000000000Z'
+    - path: payload.autonomy
+      value: ask
+    expect:
+      outcome: Valid
+  - name: denied_on_the_figures_read
+    clause: docs/specs/journal.md v0.85 §9.1 rules 269 and 270 (DEC-2388 item 10)
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value: []
+    - path: payload.liquidity
+      value:
+        prior_close: '150'
+        median_dollar_volume_20d: '20000000000'
+        adv_20d: '80000000'
+        trailing_5m_volume: '500000'
+        read_at: '2026-09-21T14:00:00.000000000Z'
+    - path: payload.dry_run
+      value: deny
+    - path: payload.reason_code
+      value: below_liquidity_floor
+    - path: payload.autonomy
+      value: null
+    - path: payload.decided_by
+      value: null
+    expect:
+      outcome: Valid
+  - name: denied_before_any_read
+    clause: docs/specs/journal.md v0.85 §9.1 rules 269 and 270 (DEC-2388 item 10)
+    base_seq: 4
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value: []
+    - path: payload.liquidity
+      value: null
+    - path: payload.dry_run
+      value: deny
+    - path: payload.reason_code
+      value: below_liquidity_floor
+    - path: payload.autonomy
+      value: null
+    - path: payload.decided_by
+      value: null
+    expect:
+      outcome: Valid
+  - name: a_deferred_exit_defers_nothing
+    clause: docs/specs/journal.md v0.85 §9.1 rules 269 and 270 (DEC-2388 item 10)
+    base_seq: 8
+    changes:
+    - path: schema_version
+      value: 3
+    - path: payload.deferred_to_binding
+      value: []
+    - path: payload.liquidity
+      value: null
+    expect:
+      outcome: Valid
 control_stream:
   spec: docs/specs/journal.md v0.7 §9.2 (DEC-261)
   stream_id: ctl:ws_01J8Z2
