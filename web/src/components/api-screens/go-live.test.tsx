@@ -131,6 +131,7 @@ describe("whose acceptance counts (DEC-2134, V-005)", () => {
   it.each<[string, Acceptances, string]>([
     ["the signed-in owner's own, with step-up", [own], "accepted"],
     ["the owner's own by passkey", [{ ...own, method: "passkey" }], "accepted"],
+    ["the owner's own, its ULID written lower case on the host", [{ ...own, user: MOCK_PRINCIPAL.toLowerCase() }], "accepted"],
     ["the owner's own after another record", [{ ...own, user: "01JB3K6F0C9R2V7N4M8Q1T5W99" }, own], "accepted"],
     ["only another member's", [{ ...own, user: "01JB3K6F0C9R2V7N4M8Q1T5W99" }], "not_accepted"],
     ["one without step-up", [{ ...own, method: null }], "not_accepted"],
