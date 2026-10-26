@@ -17,7 +17,7 @@ use common::{
 use mandate_canon::Value;
 use mandate_deploy_manager::fake::Call;
 use mandate_deploy_manager::orchestrator::CRASH_LOOP;
-use mandate_deploy_manager::{Cause, Record, Slot, StopCause, backoff};
+use mandate_deploy_manager::{Cause, KILL_SWITCH_UNAPPLIED, Record, Slot, StopCause, backoff};
 use proptest::collection::vec;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
@@ -232,6 +232,17 @@ fn a_kill_switch_start_that_crash_loops_before_it_ends_raises_kill_switch_unappl
         vec![UNAPPLIED],
         "an unapplied switch raises its own opaque alert, once, in place of crash_loop"
     );
+    let looped: Vec<String> = journal
+        .rows()
+        .iter()
+        .filter(|row| row.event_type == "ProcessCrashLooped")
+        .map(|row| row.event_id.clone())
+        .collect();
+    assert_eq!(
+        owner_alerts(&journal),
+        looped,
+        "and its owner is told once, in the loop's own batch (E8-17)"
+    );
     clean(&mut m);
 }
 
@@ -289,6 +300,43 @@ const AGENTS: [(&str, &str); 3] = [
 ];
 const ACCOUNTS: [&str; 2] = [ACCOUNT, OTHER];
 const UNAPPLIED: &str = "kill_switch_unapplied";
+
+/// Every owner alert on the control stream, each checked against the record it answers (E8-17,
+/// DEC-2351 items 2 and 3): an `OwnerAlertSent` of kind `kill_switch_unapplied` that names, as its
+/// subject and its cause, the `ProcessCrashLooped` journaled just before it, with opaque ids and
+/// nothing else (`AGENTS.md` rule 6). Its batch is the loop's: the journal refuses any other (rule
+/// 130). Returns the loops they name.
+fn owner_alerts(journal: &Journal) -> Vec<String> {
+    let rows = journal.rows();
+    let mut named = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        if row.event_type != "OwnerAlertSent" {
+            continue;
+        }
+        let body = mandate_canon::parse(&row.body).unwrap();
+        let payload = body.get("payload").and_then(Value::as_object).unwrap();
+        let members: Vec<&str> = payload.keys().map(|key| key.as_str()).collect();
+        assert_eq!(
+            members,
+            ["kind", "owner_command", "subject"],
+            "opaque ids and the kind only"
+        );
+        assert_eq!(payload.get("kind").and_then(Value::as_str), Some(UNAPPLIED));
+        assert_eq!(payload.get("owner_command"), Some(&Value::Null));
+        let subject = payload.get("subject").and_then(Value::as_str).unwrap();
+        let cause = index.checked_sub(1).map(|before| &rows[before]);
+        assert!(
+            cause.is_some_and(|c| c.event_type == "ProcessCrashLooped" && c.event_id == subject),
+            "the alert follows the loop it names"
+        );
+        assert_eq!(
+            body.get("causation_id").and_then(Value::as_str),
+            Some(subject)
+        );
+        named.push(subject.to_owned());
+    }
+    named
+}
 
 #[derive(Debug, Clone)]
 enum Op {
@@ -418,6 +466,9 @@ enum Bug {
     Looped,
     /// A `crash_loop` alert where only `kill_switch_unapplied` may be raised.
     Alerted,
+    /// An owner's `kill_switch_unapplied` in the batch of a loop no switch left unapplied: the
+    /// loop of an executor an agent wants (E8-17).
+    Told,
 }
 
 fn inject(journal: &Journal, record: &Record, now: i64) {
@@ -445,6 +496,7 @@ fn seed(
             .copied()
             .find(|a| !oracle.wanted(a) && oracle.pending(a)),
         Bug::Alerted => ACCOUNTS.iter().copied().find(|a| oracle.known(a)),
+        Bug::Told => ACCOUNTS.iter().copied().find(|a| oracle.wanted(a)),
     };
     let Some(account) = pick else {
         return false;
@@ -479,6 +531,16 @@ fn seed(
             m.alerts().0.push(CRASH_LOOP);
             return true;
         }
+        Bug::Told => {
+            let told = Record::CrashLooped {
+                slot,
+                generation: 902,
+                restarts: 5,
+                alert: KILL_SWITCH_UNAPPLIED,
+            };
+            journal.services_batch(&told.drafts(&identity(), "paper", at(now)), at(now));
+            return true;
+        }
     };
     inject(journal, &record, now);
     true
@@ -496,6 +558,7 @@ fn check_seeded(ops: &[Op], bug: Bug) -> Result<(), TestCaseError> {
     let mut now = 1_i64;
     let mut seen = journal.rows().len();
     let mut alerted = 0;
+    let mut owners = 0;
     let mut nth = 0_u32;
     for op in ops {
         let mut switches: Vec<(String, Vec<&'static str>)> = Vec::new();
@@ -661,6 +724,12 @@ fn check_seeded(ops: &[Op], bug: Bug) -> Result<(), TestCaseError> {
                 oracle.live.remove(account);
             }
         }
+        owners += unapplied;
+        prop_assert_eq!(
+            owner_alerts(&journal).len(),
+            owners,
+            "each crash loop that leaves a switch unapplied tells its owner once, in its batch, and a restarted manager never again"
+        );
         let alerts: Vec<&str> = m
             .alerts()
             .0
@@ -705,12 +774,14 @@ fn every_check_of_the_oracle_catches_its_seeded_bug() {
         Op::Advance(1),
         Op::KillConnection(0),
     ];
-    let cases: [(Bug, &[Op], &str); 5] = [
+    let wanted = [Op::Deploy(0), Op::Advance(1)];
+    let cases: [(Bug, &[Op], &str); 6] = [
         (Bug::Unswitched, &retired, "answers a switch"),
         (Bug::Twice, &waiting, "exactly one start"),
         (Bug::Stopped, &held, "never stopped by the manager"),
         (Bug::Looped, &retired, "follows only a kill switch"),
         (Bug::Alerted, &retired, "nothing else alerts"),
+        (Bug::Told, &wanted, "tells its owner once"),
     ];
     for (bug, ops, message) in cases {
         let caught = check_seeded(ops, bug).expect_err(&format!("{bug:?} escaped"));
@@ -801,6 +872,11 @@ fn a_restarted_manager_raises_kill_switch_unapplied_again_once() {
     }
     let codes: Vec<&str> = m.alerts().0.iter().map(|alert| alert.code).collect();
     assert_eq!(codes, vec![UNAPPLIED, UNAPPLIED]);
+    assert_eq!(
+        owner_alerts(&journal).len(),
+        1,
+        "the operator is told again; the owner was told once, by the loop's batch (DEC-2351 item 3)"
+    );
 }
 
 /// An executor an agent still wants is restarted after any exit, a successful one included: only one
@@ -895,6 +971,10 @@ fn a_redeploy_after_a_kill_switch_run_makes_a_later_crash_loop_an_ordinary_one()
         vec![CRASH_LOOP.code, CRASH_LOOP.code],
         "and a restarted manager raises crash_loop again, never kill_switch_unapplied"
     );
+    assert!(
+        owner_alerts(&journal).is_empty(),
+        "an ordinary loop tells no owner of an unapplied switch"
+    );
 }
 
 /// DEC-2344 item 1 and rule 13: a switch that covers the executor after an unapplied loop starts a
@@ -936,6 +1016,11 @@ fn a_covering_switch_after_an_unapplied_loop_starts_a_new_run_that_can_loop_agai
         codes,
         vec![UNAPPLIED, UNAPPLIED],
         "each unapplied switch is reported"
+    );
+    assert_eq!(
+        owner_alerts(&journal).len(),
+        2,
+        "and each loop tells its owner once"
     );
     clean(&mut m);
 }

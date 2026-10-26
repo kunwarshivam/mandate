@@ -336,3 +336,51 @@ fn a_restricting_reject_names_a_broker_reject_and_is_accepted_by_the_journal() {
         );
     }
 }
+
+/// E7-2v (journal spec v0.96 rule 309, DEC-2816): a block, then a reject's closing-only
+/// restriction, is one account stream the journal admits from its start: the reject is a second
+/// cause in force, and its record follows the block's in the stream rule's order.
+#[test]
+fn a_second_cause_in_force_is_admitted_by_the_journals_stream_rule() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FixedInstruments::LIQUID_EQUITY]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = opened(&ports);
+    let mut drafts = shell
+        .run(
+            Input::BrokerUpdate(BrokerUpdate::Account(BrokerAccount {
+                trading_blocked: true,
+                ..common::broker_account()
+            })),
+            &ports,
+        )
+        .drafts;
+    drafts.extend(
+        shell
+            .run(
+                Input::BrokerUpdate(BrokerUpdate::Reject(common::broker_reject(
+                    None,
+                    403,
+                    "account is closing transactions only",
+                ))),
+                &ports,
+            )
+            .drafts,
+    );
+    let causes = drafts
+        .iter()
+        .filter(|draft| draft.event_type == "AccountRestrictionChanged")
+        .count();
+    assert_eq!(causes, 2, "both causes are journaled");
+    let ulids = ulids(&drafts);
+    let parsed: Vec<Draft> = drafts
+        .iter()
+        .map(|draft| Draft::parse(&enveloped_as(draft, &ulids)).unwrap())
+        .collect();
+    assert_eq!(
+        mandate_journal::check_stream(&[], &parsed).map_err(|(i, e)| (i, e.reason.code(), e.path)),
+        Ok(())
+    );
+}

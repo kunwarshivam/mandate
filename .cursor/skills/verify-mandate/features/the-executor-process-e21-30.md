@@ -31,7 +31,11 @@
   `draft_bytes_with_pii`; `src/launch.rs` (the account from `run`'s flags or the deployment
   manager's variables) and the `mandate-executord` binary (`run`, `connect-check`, `probe`;
   SIGTERM drains, DEC-2007 item 3).
-- **Tests:** `crates/mandate-executord/tests/refused.rs` (DEC-2805): a refused batch holds every
+- **Tests:** `crates/mandate-executord/tests/broker_input.rs` (DEC-2821): a broker answer the
+  core cannot apply holds every agent's openings once, alerts the operator once, and a later kill
+  switch still applies; `src/process.rs`'s `a_core_error_is_held_for_a_broker_input_alone`; in
+  `mandate-executor`, `reconcile.rs`'s `a_failed_broker_input_holds_every_agents_openings_once`.
+  `crates/mandate-executord/tests/refused.rs` (DEC-2805): a refused batch holds every
   agent's openings once and alerts, the process stays up and a later kill switch still applies, a
   refused exit's order is not sent and the exit goes at the next pass, and a refused hold stops
   it; `src/process.rs`'s `a_refusal_is_held_unless_it_is_of_the_hold_or_the_start`;
@@ -100,5 +104,9 @@
   sent under its asset id, filled on the fixture, booked by asset id, its stop resting and every
   later reconciliation clean, on a test deployment and on the cell's demo deployment as checked in
   (`deploy/cell/demo`), and a deployed run's broker answering by asset id (DEC-2813).
+  A research agent's deployment (DEC-2819): its instrument only one its admission admitted, an
+  ended or unreadable thesis holding openings while exits, fills, marks and the ticker map keep
+  it, and the research loop in process: one opening filled and protected, the next held as
+  `opening_held`, and the thesis exit cancelling the protection and selling.
   `tests/fixture_fills.rs` also shows the fixture answering an asset-id symbol by its ticker.
 - **Run:** `cargo nextest run -p mandate-executord` (with `MANDATE_PG_URL` for `tests/pg.rs`).

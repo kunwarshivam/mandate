@@ -495,6 +495,15 @@ impl Manager {
                 .any(|agent| !agent.stopped && agent.account == slot.subject)
     }
 
+    /// Whether `slot`'s latest crash loop left a kill switch unapplied (DEC-2351 item 2, journal spec
+    /// rule 264): it looped while its run was held and no agent of its account was deployed and not
+    /// stopped, read from the control stream alone.
+    pub fn unapplied(&self, slot: &Slot) -> bool {
+        self.slots
+            .get(slot)
+            .is_some_and(|state| state.looped && state.unapplied)
+    }
+
     /// Whether `slot` is to run: [`Self::desired`], or an executor no agent wants whose current
     /// generation a kill switch started (DEC-2344 item 1), so a start journaled for it is carried
     /// out.

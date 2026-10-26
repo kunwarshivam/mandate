@@ -348,7 +348,13 @@ fn a_first_pass_deny_is_recorded_with_its_reason_and_ends_the_intent() {
             ACCOUNT_STREAM,
             next_seq(&shell),
             "AccountRestrictionChanged",
-            with_clock(&[("restriction", text("blocked"))], 1),
+            with_clock(
+                &[
+                    ("restriction", text("blocked")),
+                    ("cause", text("broker_notice")),
+                ],
+                1,
+            ),
         ))
         .expect("folds");
     let ran = shell.run(
@@ -514,7 +520,13 @@ fn closing_only_denies_an_opening_and_lets_an_exit_through() {
             ACCOUNT_STREAM,
             next_seq(&shell),
             "AccountRestrictionChanged",
-            with_clock(&[("restriction", text("closing_only"))], 1),
+            with_clock(
+                &[
+                    ("restriction", text("closing_only")),
+                    ("cause", text("broker_reject")),
+                ],
+                1,
+            ),
         ))
         .expect("folds");
     let opening_ran = shell.run(
@@ -1615,7 +1627,13 @@ fn a_blocked_account_holds_an_exit_for_the_broker_and_never_denies_it() {
             ACCOUNT_STREAM,
             next_seq(&shell),
             "AccountRestrictionChanged",
-            with_clock(&[("restriction", text("blocked"))], 1),
+            with_clock(
+                &[
+                    ("restriction", text("blocked")),
+                    ("cause", text("broker_notice")),
+                ],
+                1,
+            ),
         ))
         .expect("folds");
     let ran = shell.run(

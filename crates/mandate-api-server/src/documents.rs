@@ -15,6 +15,10 @@ pub struct Envelope {
     pub mandate: Value,
     /// The connection the document names, for the account's positions.
     pub connection_id: String,
+    /// Whether the document pins its universe (`universe.pinned`): an unpinned mandate's agent is
+    /// a research agent, whose openings wait on a multi-instrument risk state once the account
+    /// has traded (DEC-2143, DEC-2819 item 4).
+    pub pinned: bool,
 }
 
 /// The envelope of the document `version` names in `store`: `None` when the store does not hold
@@ -42,6 +46,10 @@ pub fn envelope(store: &dyn ArtifactSource, version: &str) -> Option<Envelope> {
         label: text(&["name"])?,
         mandate: Value::Object(summary),
         connection_id: text(&["connection_id"])?,
+        pinned: match member(&["universe", "pinned"])? {
+            Value::Bool(pinned) => pinned,
+            _ => return None,
+        },
     })
 }
 

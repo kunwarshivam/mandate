@@ -173,8 +173,15 @@ fn the_recording_is_read_strictly() {
     );
 }
 
+/// The demo recording as a single-call one, whose one call is answered with its final reply: its
+/// entry is agentic, and these tests are about the meters, which a call's run kind does not change.
 fn demo() -> RecordedModel {
-    read_recorded(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(DEMO)).unwrap()
+    let mut demo = read_recorded(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(DEMO)).unwrap();
+    assert!(demo.entry.agentic.is_some(), "the demo entry is agentic");
+    demo.entry.agentic = None;
+    demo.turns.clear();
+    demo.monitor_reply = None;
+    demo
 }
 
 fn config(workspace_monthly: &str) -> Config {

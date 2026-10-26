@@ -18,6 +18,7 @@ use mandate_api::wire::encode;
 use mandate_canon::Value;
 use mandate_journal::ArtifactSource;
 
+use crate::catalogue;
 use crate::challenges::{self, Challenges};
 use crate::clock::Clock;
 use crate::journal::Journal;
@@ -157,6 +158,10 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             get(routes::agent_positions_read).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/workspaces/{workspace}/alerts",
+            get(routes::list_alerts).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/workspaces/{workspace}/approvals",
             get(routes::list_approvals).fallback(otherwise.clone()),
         )
@@ -195,6 +200,14 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/mandate-versions",
             post(version_routes::create_version).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/instruments",
+            get(catalogue::instruments).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/signal-models",
+            get(catalogue::signal_models).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/mandate-versions/{version}/confirmation",

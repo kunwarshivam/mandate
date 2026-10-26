@@ -2719,6 +2719,115 @@ pub(crate) mod tests {
         Ok(())
     }
 
+    /// DEC-2821: a broker input the core could not apply holds every agent's openings under
+    /// `reconciliation:incomplete` and alerts the owner, once: with the hold in force, another
+    /// adds nothing. The owner's acknowledgment of `incomplete` lifts it.
+    #[test]
+    fn a_failed_broker_input_holds_every_agents_openings_once() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        let held = executor.run(Input::InputFailed, &ports)?;
+        assert_eq!(drafted(&held), vec!["AgentModeApplied", "OwnerAlertSent"]);
+        for effect in &held {
+            if let Effect::Journal(draft) = effect {
+                journal_accepts_with_refs(draft)?;
+            }
+        }
+        let agent = AgentId("agent-a".to_owned());
+        assert_eq!(executor.state.effective_mode(&agent), Mode::ExitsOnly);
+        assert_eq!(
+            drafted(&executor.run(Input::InputFailed, &ports)?),
+            Vec::<&str>::new(),
+            "the hold is already in force"
+        );
+        executor.commit_one(
+            "OwnerAcknowledged",
+            object(vec![
+                ("subject", Value::Str("incomplete".to_owned())),
+                ("user", Value::Str("user-1".to_owned())),
+                ("step_up", Value::Str("assertion-1".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
+        assert_eq!(executor.state.effective_mode(&agent), Mode::Normal);
+        Ok(())
+    }
+
+    /// DEC-2821: the failed input may have been the answer to a submission, which the core never
+    /// learns of. An order still awaiting its answer goes `Unknown` and is looked up by its own id,
+    /// as when the broker answers nothing, so its acceptance or fill is found and its protection
+    /// placed; it is never sent again.
+    #[test]
+    fn a_failed_broker_input_looks_up_the_order_awaiting_its_answer() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        executor.run(
+            Input::BrokerSnapshot(BrokerSnapshot {
+                account: account("100000")?,
+                ..snapshot(ReconcileReason::Scheduled)?
+            }),
+            &ports,
+        )?;
+        let opening = executor.run(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ0",
+                "agent-a",
+                Side::Buy,
+                Purpose::Open,
+            )?,
+            &ports,
+        )?;
+        assert_eq!(
+            submitted(&opening),
+            1,
+            "the opening is sent and awaits its answer"
+        );
+        let failed = executor.run(Input::InputFailed, &ports)?;
+        assert!(
+            drafted(&failed).contains(&"OrderStateChanged"),
+            "{:?}",
+            drafted(&failed)
+        );
+        assert!(
+            failed.iter().any(|effect| matches!(
+                effect,
+                Effect::Broker(BrokerRequest::GetOrderByClientId(_))
+            )),
+            "the order is looked up: {failed:?}"
+        );
+        assert_eq!(submitted(&failed), 0, "and never sent again");
+        assert!(
+            executor
+                .state
+                .orders
+                .values()
+                .all(|order| order.state != OrderState::Submitting),
+            "no order is left awaiting an answer that will not come"
+        );
+        Ok(())
+    }
+
     /// DEC-2805: a refused batch leaves no tick of its own behind. The batch keeps `now` and
     /// `previous_now` as they stood before its input, and a refusal puts them back, so the next
     /// tick is judged against the last tick that committed and an edge it crosses still fires.

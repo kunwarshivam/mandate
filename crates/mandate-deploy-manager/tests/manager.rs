@@ -800,14 +800,14 @@ fn a_second_managers_draft_of_the_same_step_is_the_same_event_and_never_commits_
     let mut port = journal.clone();
     let first = block_on(ControlJournal::append(
         &mut port,
-        &record.draft(&id, "paper", at(1)),
+        &[&record.draft(&id, "paper", at(1))],
         at(1),
     ))
     .unwrap();
     assert!(matches!(first, AppendOutcome::Committed(_)), "{first:?}");
     let again = block_on(ControlJournal::append(
         &mut port,
-        &record.draft(&id, "paper", at(1)),
+        &[&record.draft(&id, "paper", at(1))],
         at(1),
     ))
     .unwrap();
@@ -817,7 +817,7 @@ fn a_second_managers_draft_of_the_same_step_is_the_same_event_and_never_commits_
     );
     let later = block_on(ControlJournal::append(
         &mut port,
-        &record.draft(&id, "paper", at(2)),
+        &[&record.draft(&id, "paper", at(2))],
         at(2),
     ))
     .unwrap();

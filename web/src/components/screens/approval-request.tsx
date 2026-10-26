@@ -19,6 +19,7 @@ import { dec, max, mul, sub, ZERO } from "@/lib/decimal";
 import { clock, price, quantity, usd, zoneLabel } from "@/lib/format";
 import { useFrozen } from "@/lib/frozen";
 import { APPROVAL_STATUS_LABEL, PURPOSE_LABEL, RISK_CAP_LABEL, RISK_FIGURE_LABEL } from "@/lib/labels";
+import { refusedText } from "@/lib/grant-refusals";
 import { type ApprovalResponse, approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,13 @@ function ResponseStatus({ approval, response }: { approval: Approval; response: 
           ? "Not recorded: approving needs a passkey check your deployment did not receive, so nothing was approved."
           : "Not recorded: your deployment answered that nothing was recorded."}{" "}
         If no answer is recorded before {clock(approval.deadline)}, the action is skipped.
+      </p>
+    );
+  }
+  if (response.phase === "refused") {
+    return (
+      <p className="text-sm" data-phase="refused" role="alert">
+        {refusedText(response.reason ?? null)}
       </p>
     );
   }
