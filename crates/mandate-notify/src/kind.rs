@@ -82,7 +82,12 @@ pub enum NoticeKind {
     ApprovalReminder,
     RiskLimit,
     KillSwitch,
+    /// A kill switch the deployment manager started an executor for crash-looped before it was
+    /// applied (spec §3.2, DEC-2351).
+    KillSwitchUnapplied,
     AgentHeld,
+    /// An agent's retirement waited another 24 hours of risk clock (spec §3.2, DEC-2352).
+    RetirementHeld,
     AccountRestriction,
     Protection,
     ExitStalled,
@@ -118,9 +123,10 @@ pub enum NoticeKind {
 
 impl NoticeKind {
     #[rustfmt::skip]
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 35] = [
         Self::ApprovalRequested, Self::ApprovalReminder, Self::RiskLimit, Self::KillSwitch,
-        Self::AgentHeld, Self::AccountRestriction, Self::Protection, Self::ExitStalled,
+        Self::KillSwitchUnapplied, Self::AgentHeld, Self::RetirementHeld,
+        Self::AccountRestriction, Self::Protection, Self::ExitStalled,
         Self::Reconciliation, Self::ExternalActivity, Self::AccountState, Self::DataFeedDown,
         Self::IntegrityIncident, Self::CredentialAdded, Self::NewDevice,
         Self::NotificationAddressChanged, Self::RecoveryUsed, Self::RoleGranted,
@@ -140,7 +146,9 @@ impl NoticeKind {
             Self::ApprovalReminder => "approval_reminder",
             Self::RiskLimit => "risk_limit",
             Self::KillSwitch => "kill_switch",
+            Self::KillSwitchUnapplied => "kill_switch_unapplied",
             Self::AgentHeld => "agent_held",
+            Self::RetirementHeld => "retirement_held",
             Self::AccountRestriction => "account_restriction",
             Self::Protection => "protection",
             Self::ExitStalled => "exit_stalled",
@@ -181,7 +189,9 @@ impl NoticeKind {
             Self::ApprovalRequested | Self::ApprovalReminder => Class::Action,
             Self::RiskLimit
             | Self::KillSwitch
+            | Self::KillSwitchUnapplied
             | Self::AgentHeld
+            | Self::RetirementHeld
             | Self::AccountRestriction
             | Self::Protection
             | Self::ExitStalled
@@ -223,7 +233,9 @@ impl NoticeKind {
             Self::ApprovalRequested | Self::ApprovalReminder => Some(TextKey::ApprovalNeeded),
             Self::RiskLimit
             | Self::KillSwitch
+            | Self::KillSwitchUnapplied
             | Self::AgentHeld
+            | Self::RetirementHeld
             | Self::AccountRestriction
             | Self::Protection
             | Self::ExitStalled

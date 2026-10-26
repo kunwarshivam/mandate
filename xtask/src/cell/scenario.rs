@@ -334,13 +334,6 @@ const GW_RESEARCH: Wait = Wait {
             workspace's clock (DEC-2071), research over the recorded bundle through the model \
             gateway and propose its thesis",
 };
-const NE_NEWS: Wait = Wait {
-    lane: "NE",
-    story: "E19-12",
-    pr: None,
-    lands: "the news item that ends the thesis reaching the research runtime in the cell, and its \
-            monitor run's invalidation (DEC-2394)",
-};
 const DR_CONNECT: Wait = Wait {
     lane: "DR",
     story: "E21-54",
@@ -1345,14 +1338,17 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
                    trading day, so outside it this link waits for the next";
     vec![
         link(
-            "the research agent's runtime starts a research run on its own clock",
+            "the research agent's runtime makes its research call through the model gateway",
             &agent,
-            "RunStarted",
-            None,
+            "ModelInvocationRecorded",
+            Some(r#""purpose":"research""#),
             "a research run in the research agent's runtime, over the recorded bundle its image \
-             carries, through the model gateway's recorded fake",
+             carries, through the model gateway's recorded fake: its one call's record, since a \
+             single-call run journals no RunStarted (journal spec §9.19); its runtime holds paused \
+             until the research account's executor reconciles (awaiting_reconciliation)",
             "the runtime calls the model gateway (#2636) and ticks on its own workspace's clock \
-             (DEC-2071)",
+             (DEC-2071); a local run of the cell's processes reaches an admitted thesis once the \
+             account's executor reconciles",
             vec![GW_RESEARCH],
         ),
         link(
@@ -1432,7 +1428,7 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
              MANDATE_CELL_LOOP_WAIT_S",
             "the research pass offers arrived items to the core (#2575), and the recorded feed's \
              item in the runtime image's bundle (#2653)",
-            vec![NE_NEWS],
+            vec![GW_RESEARCH],
         ),
         link(
             "the monitor run invalidates the thesis",
@@ -1440,8 +1436,9 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
             "ThesisInvalidated",
             None,
             "the monitor run's verdict that ends the thesis",
-            "a recording's monitor reply naming the thesis (#2632)",
-            vec![NE_NEWS],
+            "a monitor run's invalidations journaled (#2626), and the bundle's recorded monitor \
+             reply naming the thesis it was shown (#2632, #2653)",
+            vec![GW_RESEARCH],
         ),
         link(
             "the thesis exit submits its sell",
@@ -1450,7 +1447,7 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
             Some(r#""purpose":"discretionary_exit""#),
             "the thesis exit's sell of the position",
             "the order builder's signal exit (trading spec §8.3 step 2)",
-            vec![NE_NEWS, E2E_FILL],
+            vec![E2E_FILL],
         ),
         link(
             "the sell fills on the fixture",
@@ -1459,7 +1456,7 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
             Some(r#""side":"sell""#),
             "the paper fill of the thesis exit",
             "the executor on its fixture paper broker (DEC-2031)",
-            vec![NE_NEWS, E2E_FILL],
+            vec![E2E_FILL],
         ),
     ]
 }
@@ -2709,11 +2706,13 @@ pub fn unproposed(
     agent: &str,
 ) -> TradeOutcome {
     let none_listed = match listed {
-        Ok((200, body)) => serde_json::from_str::<Value>(body).ok().and_then(|v| {
-            v["approvals"]
-                .as_array()
-                .map(|a| !a.iter().any(|x| x["agent_id"] == agent))
-        }),
+        Ok((200, reply)) => serde_json::from_str::<Value>(reply_body(reply))
+            .ok()
+            .and_then(|v| {
+                v["approvals"]
+                    .as_array()
+                    .map(|a| !a.iter().any(|x| x["agent_id"] == agent))
+            }),
         _ => None,
     };
     if none_listed == Some(true) {
@@ -3171,10 +3170,10 @@ mod tests {
         let research = reference(&research_mandate());
         assert_eq!(
             research,
-            "sha256:f63145eb604ff161807d849c23a24e53fbd2e535a0e0db52ff775a9de6b533ce"
+            "sha256:74c62ef9b06275bfec0cfaaddd0ccf95693a1375640f3d8f29d93d176e2db350"
         );
-        assert_eq!(confirm_code(&research), "30eb4e5e");
-        assert_eq!(deploy_code(RESEARCH_AGENT, &research), "9400be68");
+        assert_eq!(confirm_code(&research), "92847110");
+        assert_eq!(deploy_code(RESEARCH_AGENT, &research), "a6fe7565");
     }
 
     /// The steps run 1 to 7 in order, then the record; a shown code precedes the gesture that types
@@ -3488,8 +3487,10 @@ mod tests {
 
     /// The research agent's envelope: paper, every admission and opening asked, an unpinned
     /// universe of one instrument, a research envelope, and exactly one `llm.` model admitting
-    /// instruments beside the demo's quant model, sorted by id (V-009, V-036; DEC-2246 item 4). Its
-    /// connection is the demo's.
+    /// instruments beside the demo's quant model, sorted by id (V-009, V-036; DEC-2246 item 4), and
+    /// a news item may bring a monitoring run forward (DEC-2392, DEC-2275). Its order, position,
+    /// exposure and allocation caps are the demo's, so one whole SPY share fits. Its connection is
+    /// its own (DEC-2070 item 2).
     #[test]
     fn the_research_envelope_researches_one_instrument_and_asks_everything() {
         let m = parsed(RESEARCH_MANDATE_FILE);
@@ -3502,7 +3503,12 @@ mod tests {
         assert_eq!(m["universe"]["max_instruments"], 1);
         assert_eq!(
             m["behavior"]["research"],
-            json!({"cost_cap_usd_per_day": "5", "interval_s": 3600, "max_revisions_per_lineage": 3})
+            json!({
+                "cost_cap_usd_per_day": "5",
+                "event_triggers": {"debounce_s": 300, "max_runs_per_day": 4, "sources": ["news"]},
+                "interval_s": 3600,
+                "max_revisions_per_lineage": 3
+            })
         );
         let models: Vec<(&str, bool)> = m["behavior"]["signal_models"]
             .as_array()
@@ -3519,6 +3525,18 @@ mod tests {
             models,
             [("llm.research_agent", true), ("quant.ma_crossover", false)]
         );
+        let demo = parsed(MANDATE_FILE);
+        for cap in [
+            "max_order_usd",
+            "max_position_usd",
+            "max_gross_exposure_usd",
+        ] {
+            assert_eq!(
+                m["risk"][cap], demo["risk"][cap],
+                "{cap}: the demo's, so one whole SPY share fits one order (#2609)"
+            );
+        }
+        assert_eq!(m["capital"], demo["capital"]);
         assert_eq!(m["connection_id"], RESEARCH_CONNECTION);
         assert_ne!(
             m["connection_id"],
@@ -3632,7 +3650,11 @@ mod tests {
         assert_eq!(
             links,
             [
-                (agent.clone(), "RunStarted", None),
+                (
+                    agent.clone(),
+                    "ModelInvocationRecorded",
+                    Some(r#""purpose":"research""#)
+                ),
                 (agent.clone(), "ThesisProposed", Some(r#""admitted":true"#)),
                 (
                     agent.clone(),
@@ -3686,8 +3708,9 @@ mod tests {
         assert_eq!(deployed[2..4], [RESEARCH_AGENT, version.as_str()]);
         assert_eq!(
             lanes(step),
-            ["GW", "D1", "E2E", "NE"],
-            "the loop's links wait on the research run, the ask, the fill and the news"
+            ["GW", "D1", "E2E"],
+            "the loop's links wait on the research run, the ask and the fill; the news item is the \
+             bundle's recorded feed (#2653)"
         );
         let others: Vec<&Gesture> = gestures_of(&steps, |n| n != 3);
         assert!(
@@ -4411,7 +4434,7 @@ mod tests {
         let gap = Gap {
             what: "the fill",
             on_main: "x",
-            waits: vec![E2E_FILL, NE_NEWS],
+            waits: vec![E2E_FILL, GW_RESEARCH],
         };
         let mut looped = Looped::Open;
         assert_eq!(
@@ -4431,7 +4454,7 @@ mod tests {
             said.starts_with("the fill (waits on E2E (E21-54): "),
             "{said}"
         );
-        assert!(said.contains("NE (E19-12): "), "{said}");
+        assert!(said.contains("GW (E21-62): "), "{said}");
         assert_eq!(looped, Looped::Stopped("the fill"));
         assert_eq!(
             link_verdict(false, false, &mut looped, None, &gap),
@@ -4636,10 +4659,14 @@ mod tests {
                 continue;
             };
             let member = fragment.split('"').nth(1).unwrap();
+            let value = fragment.rsplit(':').next().unwrap().trim_matches('"');
             let written =
                 check.event_type == "FillApplied" && writer.contains(&format!("(\"{member}\", "));
+            let closed = spec.lines().any(|l| {
+                l.starts_with(&format!("| `{member}` |")) && l.contains(&format!("`{value}`"))
+            });
             assert!(
-                row.contains(member) || written,
+                row.contains(member) || written || closed,
                 "{}: {member}",
                 check.event_type
             );
@@ -5213,14 +5240,24 @@ mod tests {
 
     /// #2466's review: a loop left at its approval is pending only on the API's word that the
     /// agent has no approval at all. One the runtime requested and `web/` never showed, any state,
-    /// or a list that cannot be read, a non-200, or a body that is not the list, all fail.
+    /// or a list that cannot be read, a non-200, or a body that is not the list, all fail. The
+    /// answer is the whole reply `api_answer` reads, headers first, as the cell run at 0646d52
+    /// met it: parsed whole, `{"approvals":[]}` read as no list, and a Monday's loop as failed.
     #[test]
     fn a_loop_left_at_its_approval_is_pending_only_when_the_api_lists_none_of_the_agent_s() {
         let stopped = || web::TradeLoop {
             reached: BTreeMap::new(),
             error: Some("no approval within 20000 ms".into()),
         };
-        let listed = |status: u16, body: &str| Ok((status, body.to_owned()));
+        let listed = |status: u16, body: &str| {
+            Ok((
+                status,
+                format!(
+                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+                    body.len()
+                ),
+            ))
+        };
         let pending = |outcome: &TradeOutcome| matches!(outcome, TradeOutcome::Unproposed(_));
         let other = r#"{"approvals":[{"agent_id":"other","state":"pending"}]}"#;
         assert!(pending(&unproposed(
@@ -5244,6 +5281,7 @@ mod tests {
             listed(503, r#"{"approvals":[]}"#),
             listed(200, "not json"),
             listed(200, r#"{"agents":[]}"#),
+            Ok((200, r#"{"approvals":[]}"#.to_owned())),
             Err("no kubectl".to_owned()),
         ] {
             assert!(

@@ -9,9 +9,10 @@ import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPa
 import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDigest, passkeyList } from "@/api/enrol";
 import { type CatalogueAnswer, instrumentsRead, signalModelsRead } from "@/api/catalogue";
 import { type ApiView, agentRead, loadApi } from "@/api/read-models";
+import { recordsRead } from "@/api/records";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
-import type { CommandPhase, Decoder, PreparedCommand } from "@/api/types";
+import type { CommandPhase, CommandStatus, Decoder, PreparedCommand } from "@/api/types";
 import { activityRead, journalPageRead, holdingsRead } from "@/api/activity";
 import { alertsRead } from "@/api/alerts";
 import { connectStartBody, connectionRead, connectionsRead } from "@/api/connect";
@@ -36,6 +37,7 @@ import {
   type PasskeyPort,
   type AlertsAnswer,
   type PositionsAnswer,
+  type RecordsAnswer,
   type Runtime,
   RuntimeContext,
   type SetUp,
@@ -79,6 +81,12 @@ const SENDS = 4;
 /** How many times a recorded command's status is read before the runtime stops following it (spec §6.3 item 4). */
 const STATUS_READS = 30;
 const SETTLED: ReadonlySet<CommandPhase> = new Set(["applied", "refused", "ended"]);
+
+/** Why the runtime refused an approval answer: the reason its `ApprovalResponded` step carries (journal spec rule 47), or none. */
+function refusalOf(status: CommandStatus): string | null {
+  const responded = status.steps.find((step) => step.event_type === "ApprovalResponded" && step.reason !== null);
+  return responded?.reason ?? status.steps.find((step) => step.reason !== null)?.reason ?? null;
+}
 
 type Delivery = { phase: "recorded"; eventId: string; body?: unknown } | { phase: "undelivered"; reason: string } | { phase: "unknown"; eventId: string | null };
 
@@ -244,14 +252,14 @@ export function ApiRuntimeProvider({
     [client, retryMs],
   );
 
-  /** Follows a recorded command to `applied`, `refused` or `ended`, then reads the workspace again (spec §6.3). */
-  const follow = useCallback(
-    async (eventId: string): Promise<CommandPhase | null> => {
+  /** Follows a recorded command to `applied`, `refused` or `ended`, then reads the workspace again (spec §6.3); the settled status, with its steps. */
+  const settle = useCallback(
+    async (eventId: string): Promise<CommandStatus | null> => {
       for (let read = 0; read < STATUS_READS && mounted.current; read += 1) {
         const status = await client.commandStatus(eventId);
         if (status.ok && SETTLED.has(status.value.phase)) {
           await refresh();
-          return status.value.phase;
+          return status.value;
         }
         await wait(statusPollMs);
       }
@@ -260,6 +268,8 @@ export function ApiRuntimeProvider({
     },
     [client, refresh, statusPollMs],
   );
+
+  const follow = useCallback(async (eventId: string): Promise<CommandPhase | null> => (await settle(eventId))?.phase ?? null, [settle]);
 
   const passkeyStepUp = useCallback(
     async (kind: PasskeyKind, digest: ContentRef): Promise<{ ok: true; value: PasskeyStepUp } | { ok: false; reason: AssertionRefusal | string }> => {
@@ -368,17 +378,16 @@ export function ApiRuntimeProvider({
         const [delivered] = await Promise.all(prepared.commands.map(deliver));
         if (!mounted.current) return;
         if (delivered.phase === "undelivered") return update({ phase: "undelivered", reason: delivered.reason });
-        if (delivered.phase === "unknown") {
-          update({ phase: "unknown" });
-          if (delivered.eventId) void follow(delivered.eventId);
-          return;
-        }
-        update({ phase: "recorded", recordedAt: nowRef.current });
-        const settled = await follow(delivered.eventId);
-        if (response === "approve" && settled === "applied" && mounted.current) update({ phase: "decided" });
+        if (delivered.phase === "unknown") update({ phase: "unknown" });
+        else update({ phase: "recorded", recordedAt: nowRef.current });
+        if (!delivered.eventId) return;
+        const settled = await settle(delivered.eventId);
+        if (!mounted.current) return;
+        if (settled?.phase === "refused") return update({ phase: "refused", reason: refusalOf(settled) ?? undefined });
+        if (response === "approve" && settled?.phase === "applied") update({ phase: "decided" });
       })();
     },
-    [client, deliver, follow],
+    [client, deliver, settle],
   );
 
   /**
@@ -504,6 +513,20 @@ export function ApiRuntimeProvider({
       const after = Math.max(0, first.value.head_seq - count);
       const tail = await client.read(`${route}?after_seq=${after}&limit=${count}`, decoder);
       return tail.ok ? { ok: true, items: tail.value.events } : { ok: false, reason: tail.error.code };
+    },
+    [client],
+  );
+
+  /** The latest `count` records of a stream with their bodies, each checked against its hash (§4.8.1), oldest first. */
+  const streamRecords = useCallback(
+    async (streamId: string, count: number): Promise<RecordsAnswer> => {
+      const route = `/journal/streams/${encodeURIComponent(streamId)}/events` as const;
+      const decoder = recordsRead(streamId);
+      const first = await client.read(`${route}?after_seq=0&limit=1`, decoder);
+      if (!first.ok) return { ok: false, reason: first.error.code };
+      const after = Math.max(0, first.value.head_seq - count);
+      const tail = await client.read(`${route}?after_seq=${after}&limit=${count}`, decoder);
+      return tail.ok ? { ok: true, items: tail.value.events, fromStart: after === 0 } : { ok: false, reason: tail.error.code };
     },
     [client],
   );
@@ -718,8 +741,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, streamTail: journalTail, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, journalTail, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

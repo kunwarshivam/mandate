@@ -11,6 +11,7 @@ import { backtestOfVersion, servedBacktestFixture } from "@/fixtures/backtests";
 import type { ApiView, ReadPosition } from "@/api/read-models";
 import type { Enrolled, ListedPasskey } from "@/api/enrol";
 import type { CatalogueAnswer } from "@/api/catalogue";
+import type { JournalRecord } from "@/api/records";
 import type { Applies, Classification } from "@/api/confirm";
 import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-up";
 import type { AgentHolding, AgentOrder, JournalLine } from "@/api/activity";
@@ -72,8 +73,12 @@ export interface ApprovalRecord {
 export interface ApprovalResponse {
   approvalId: string;
   response: "approve" | "skip";
-  /** `undelivered`: the deployment answered that nothing was recorded (`effect: none`), for the reason in `reason`. */
-  phase: "sent" | "recorded" | "decided" | "undelivered" | "unknown";
+  /**
+   * `undelivered`: the deployment answered that nothing was recorded (`effect: none`), for the reason
+   * in `reason`. `refused`: recorded, and the runtime refused it (`ApprovalResponded` refused), for
+   * the reason in `reason`; nothing was approved, and the answer is not sent again.
+   */
+  phase: "sent" | "recorded" | "decided" | "refused" | "undelivered" | "unknown";
   sentAt: Iso;
   recordedAt?: Iso;
   reason?: string;
@@ -215,6 +220,8 @@ export interface Runtime {
    * outcome; `onRecorded` runs once the journal holds it. `null` over the fixtures.
    */
   ownerExit: ((agentId: string, instrument: string, record: CommandRecord, onRecorded: () => void) => Promise<ExitOutcome>) | null;
+  /** A stream's latest `count` records with their bodies, each checked against its hash (§4.8.1), oldest first; `null` over the fixtures. */
+  streamRecords: ((streamId: string, count: number) => Promise<RecordsAnswer>) | null;
   /** A stream's latest `count` records, oldest first (§4.8.1), for the audit screens; `null` over the fixtures. */
   streamTail: ((streamId: string, count: number) => Promise<ActivityAnswer["journal"]>) | null;
   /** The owner alerts about the workspace's agents and accounts (`GET /alerts`, DEC-2141); `null` over the fixtures. */
@@ -279,6 +286,9 @@ export type ExitOutcome = { phase: "applied" | "refused" | "ended" | "recorded" 
 
 /** The owner alerts the API served (DEC-2141), or why not. */
 export type AlertsAnswer = { ok: true; read: Alerts } | { ok: false; reason: string };
+
+/** A stream's records with their bodies, and whether they reach back to the stream's first record; or why they were not read. */
+export type RecordsAnswer = { ok: true; items: JournalRecord[]; fromStart: boolean } | { ok: false; reason: string };
 
 /** An agent's own positions with its account's holdings from the same read (DEC-2111), or why not. */
 export type PositionsAnswer = { ok: true; account_ref: string | null; items: AgentHolding[]; account_positions: ReadPosition[] | null } | { ok: false; reason: string };
@@ -690,7 +700,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, catalogue: null, streamTail: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, catalogue: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

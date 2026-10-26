@@ -12,7 +12,9 @@ use crate::NoticeKind;
 pub enum OwnerAlertKind {
     RiskLimit,
     KillSwitch,
+    KillSwitchUnapplied,
     AgentHeld,
+    RetirementHeld,
     AccountRestriction,
     Protection,
     ExitStalled,
@@ -44,8 +46,9 @@ pub enum OwnerAlertKind {
 
 impl OwnerAlertKind {
     #[rustfmt::skip]
-    pub const ALL: [Self; 30] = [
-        Self::RiskLimit, Self::KillSwitch, Self::AgentHeld, Self::AccountRestriction,
+    pub const ALL: [Self; 32] = [
+        Self::RiskLimit, Self::KillSwitch, Self::KillSwitchUnapplied, Self::AgentHeld,
+        Self::RetirementHeld, Self::AccountRestriction,
         Self::Protection, Self::ExitStalled, Self::Reconciliation, Self::ExternalActivity,
         Self::AccountState, Self::DataFeedDown, Self::IntegrityIncident, Self::CredentialAdded,
         Self::NewDevice, Self::NotificationAddressChanged, Self::RecoveryUsed, Self::RoleGranted,
@@ -61,7 +64,9 @@ impl OwnerAlertKind {
         match self {
             Self::RiskLimit => NoticeKind::RiskLimit,
             Self::KillSwitch => NoticeKind::KillSwitch,
+            Self::KillSwitchUnapplied => NoticeKind::KillSwitchUnapplied,
             Self::AgentHeld => NoticeKind::AgentHeld,
+            Self::RetirementHeld => NoticeKind::RetirementHeld,
             Self::AccountRestriction => NoticeKind::AccountRestriction,
             Self::Protection => NoticeKind::Protection,
             Self::ExitStalled => NoticeKind::ExitStalled,
@@ -98,7 +103,9 @@ impl OwnerAlertKind {
         match self {
             Self::RiskLimit => "risk_limit",
             Self::KillSwitch => "kill_switch",
+            Self::KillSwitchUnapplied => "kill_switch_unapplied",
             Self::AgentHeld => "agent_held",
+            Self::RetirementHeld => "retirement_held",
             Self::AccountRestriction => "account_restriction",
             Self::Protection => "protection",
             Self::ExitStalled => "exit_stalled",
