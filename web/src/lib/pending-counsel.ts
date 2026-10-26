@@ -6,6 +6,9 @@
  * trades paper, and the customer real-money gate stays off (DEC-2134).
  */
 
+import { canonicalJson } from "./fixture-journey";
+import { sha256Hex } from "./sha256";
+
 /** The mark every placeholder carries, word for word. */
 export const PENDING_COUNSEL = "Pending counsel — not for real-money use";
 
@@ -66,3 +69,14 @@ export const PENDING_POLICY: readonly PendingValue[] = [
   { label: "Allowed jurisdictions", value: "United States only", source: "DEC-22" },
   { label: "Environments", value: "Paper only", source: "Retail profile (DEC-98); real money off (DEC-2134)" },
 ];
+
+/** The go-live disclosure as the workspace stores it (`fixtures/disclosures/go_live_risk.json`), which a test holds equal to the file. */
+export const GO_LIVE_RISK = { document: "go_live_risk", status: PENDING_COUNSEL, sections: RISK_DISCLOSURES } as const;
+
+/** Its version: `sha256:` over its canonical JSON, the value `DisclosureAccepted` names when the owner accepts it on the host. */
+export const GO_LIVE_RISK_VERSION = `sha256:${sha256Hex(canonicalJson(GO_LIVE_RISK))}`;
+
+/** The command the owner runs on the host to accept it; without `--code` it shows the code, which the owner then passes. */
+export function acceptCommand(workspaceId: string, principalId: string): string {
+  return `mandate disclosure accept ${GO_LIVE_RISK.document} --workspace ${workspaceId} --user ${principalId} --journal "$MANDATE_JOURNAL_DSN" --store <artifact store>`;
+}

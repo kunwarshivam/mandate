@@ -1,13 +1,14 @@
+import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { GoLive } from "./go-live";
 import { ApiConnections } from "./connections";
 import { type Fetch } from "@/api/client";
-import { createMockServer } from "@/api/mock-server";
+import { MOCK_PRINCIPAL, createMockServer } from "@/api/mock-server";
 import { ApiRuntimeProvider } from "@/lib/api-runtime";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { RuntimeProvider } from "@/lib/mock-runtime";
-import { PENDING_COUNSEL, PENDING_POLICY, RISK_DISCLOSURES } from "@/lib/pending-counsel";
+import { GO_LIVE_RISK, GO_LIVE_RISK_VERSION, PENDING_COUNSEL, PENDING_POLICY, RISK_DISCLOSURES } from "@/lib/pending-counsel";
 import { type Role, RoleProvider } from "@/lib/roles";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
@@ -96,5 +97,22 @@ describe("Robinhood on the connections screen (DEC-2134)", () => {
     expect(card.textContent).toContain("Real money: off.");
     expect(screen.queryByRole("button", { name: /Robinhood/ })).toBeNull();
     expect(screen.getByRole("link", { name: "Going live" }).getAttribute("href")).toBe("/go-live");
+  });
+});
+
+describe("the go-live disclosure's acceptance (DEC-2134; journal spec §9.2 DisclosureAccepted)", () => {
+  it("shows exactly the text the host accepts, at the version the CLI pins", () => {
+    const file = JSON.parse(readFileSync("../fixtures/disclosures/go_live_risk.json", "utf8")) as unknown;
+    expect(file).toEqual(JSON.parse(JSON.stringify(GO_LIVE_RISK)));
+    expect(GO_LIVE_RISK_VERSION).toBe("sha256:35ab1cb9c3861954a3d846866198e8b4c801532de56e8b00ee86e51404d541f2");
+  });
+
+  it("says when the deployment does not report the acceptance, and gives the host command to accept", async () => {
+    mount(<GoLive />);
+    const panel = await screen.findByRole("region", { name: "Your acceptance" });
+    expect(await within(panel).findByText("Your deployment did not report whether you accepted it.")).toBeTruthy();
+    const command = await within(panel).findByText(/^mandate disclosure accept go_live_risk /);
+    expect(command.textContent).toContain(`--workspace ${WS} --user ${MOCK_PRINCIPAL}`);
+    expect(panel.getAttribute("data-version")).toBe(GO_LIVE_RISK_VERSION);
   });
 });

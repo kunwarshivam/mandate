@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DECISION_KEY } from "@/components/kumo/key";
 import { Panel, WorkspaceGate } from "@/components/screens/common";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
-import { useRuntime } from "@/lib/mock-runtime";
-import { PENDING_COUNSEL, PENDING_POLICY, RISK_DISCLOSURES } from "@/lib/pending-counsel";
+import { type Acceptance, useRuntime } from "@/lib/mock-runtime";
+import { GO_LIVE_RISK, GO_LIVE_RISK_VERSION, PENDING_COUNSEL, PENDING_POLICY, RISK_DISCLOSURES, acceptCommand } from "@/lib/pending-counsel";
 import { useCan } from "@/lib/roles";
 
 /**
@@ -71,6 +71,55 @@ export function PendingPolicy() {
           </div>
         ))}
       </dl>
+    </section>
+  );
+}
+
+const ACCEPTANCE_TEXT: Readonly<Record<Acceptance, string>> = {
+  accepted: "Accepted: your acceptance of this version is recorded in your journal.",
+  not_accepted: "Not yet accepted. Accept it on the host before your agent trades.",
+  unknown: "Your deployment did not report whether you accepted it.",
+};
+
+/**
+ * The owner's acceptance of the disclosure (journal spec §9.2 `DisclosureAccepted`, V-005): made on
+ * the host with `mandate disclosure accept`, which shows a code and records the acceptance with
+ * step-up once the code is typed back; this panel reads whether this exact version is recorded.
+ */
+function Acceptance() {
+  const { disclosures } = useRuntime();
+  const [state, setState] = useState<Acceptance | null>(null);
+  const [owner, setOwner] = useState<{ workspaceId: string; principalId: string } | null>(null);
+  useEffect(() => {
+    if (!disclosures) return;
+    let live = true;
+    void disclosures.accepted(GO_LIVE_RISK.document, GO_LIVE_RISK_VERSION).then((answer) => live && setState(answer));
+    void disclosures.owner().then((who) => live && setOwner(who));
+    return () => {
+      live = false;
+    };
+  }, [disclosures]);
+  return (
+    <section className="grid gap-2" aria-labelledby="acceptance-title" data-slot="acceptance" data-version={GO_LIVE_RISK_VERSION}>
+      <h2 id="acceptance-title" className="text-h3">
+        Your acceptance
+      </h2>
+      {!disclosures ? <p className="text-sm text-muted-foreground">Connect a deployment to record your acceptance.</p> : null}
+      {disclosures && state === null ? <p className="text-sm text-muted-foreground">Reading your journal.</p> : null}
+      {state ? (
+        <p role="status" data-state={state}>
+          {ACCEPTANCE_TEXT[state]}
+        </p>
+      ) : null}
+      {state && state !== "accepted" && owner ? (
+        <div className="grid gap-1">
+          <p className="text-sm">On the host, run this. It shows a code; run it again with <code>--code</code> and that code to accept.</p>
+          <pre className="overflow-x-auto rounded-md border border-border p-2 text-xs" data-slot="accept-command">
+            {acceptCommand(owner.workspaceId, owner.principalId)}
+          </pre>
+        </div>
+      ) : null}
+      <p className="text-xs text-muted-foreground">Version {GO_LIVE_RISK_VERSION}</p>
     </section>
   );
 }
@@ -150,7 +199,10 @@ export function GoLive() {
           <p className="text-sm text-muted-foreground">Read these before an agent trades. They are placeholders until counsel writes them.</p>
         </header>
         <Panel well>
-          <RiskDisclosures />
+          <div className="grid gap-6">
+            <RiskDisclosures />
+            <Acceptance />
+          </div>
         </Panel>
         <Panel>
           <PendingPolicy />

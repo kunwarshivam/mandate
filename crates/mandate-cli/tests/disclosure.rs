@@ -19,6 +19,10 @@ type Store = BTreeMap<Digest, Vec<u8>>;
 const NOW: i64 = 1_792_000_000;
 const FILE: &str = include_str!("../../../fixtures/disclosures/go_live_risk.json");
 const PENDING_COUNSEL: &str = "Pending counsel — not for real-money use";
+/// The go-live disclosure's version as `web/` and `cargo xtask cell journey` compute it, each by its
+/// own canonical JSON; a changed word changes all three together.
+const PINNED_VERSION: &str =
+    "sha256:35ab1cb9c3861954a3d846866198e8b4c801532de56e8b00ee86e51404d541f2";
 
 fn version() -> String {
     let canonical = to_canonical(&parse(FILE.as_bytes()).unwrap());
@@ -37,6 +41,10 @@ fn gesture_code(version: &str) -> String {
 fn the_go_live_disclosure_is_a_placeholder_pending_counsel_with_its_own_version() {
     let doc = document("go_live_risk").unwrap();
     assert_eq!(doc.version, version());
+    assert_eq!(
+        doc.version, PINNED_VERSION,
+        "web/ and xtask pin the same version"
+    );
     assert_eq!(code(&doc).unwrap(), gesture_code(&version()));
     let parsed = parse(&doc.canonical).unwrap();
     assert_eq!(

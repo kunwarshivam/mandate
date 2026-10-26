@@ -518,9 +518,10 @@ fn trade_loop_env(agent: &str, request: &Path, done: &Path) -> [(&'static str, S
 /// The customer journey spec under `web/e2e-cell/` (lane GL, DEC-2134).
 const JOURNEY_SPEC: &str = "customer-journey.spec.ts";
 /// The customer journey's steps, in the order the spec reaches them; its result names each one.
-pub const JOURNEY_STEPS: [&str; 4] = [
+pub const JOURNEY_STEPS: [&str; 5] = [
     "connections",
     "disclosures",
+    "disclosure_accepted",
     "real_money_refused",
     "refusal_journaled",
 ];
@@ -711,12 +712,12 @@ mod tests {
     /// runs is in this checkout and writes each step the driver reads.
     #[test]
     fn the_journey_reads_every_step_and_names_the_first_one_missing() -> Result<()> {
-        let all = r#"{"connections":"ok","disclosures":"4","real_money_refused":"ok","refusal_journaled":"01JB"}"#;
-        assert_eq!(journey_result(all)?.len(), 4);
+        let all = r#"{"connections":"ok","disclosures":"4","disclosure_accepted":"ok","real_money_refused":"ok","refusal_journaled":"01JB"}"#;
+        assert_eq!(journey_result(all)?.len(), 5);
         let stopped = r#"{"connections":"ok","error":"no Alpaca connection is listed"}"#;
         let why = format!("{:#}", journey_result(stopped).err().context("an error")?);
         assert!(why.contains("no Alpaca connection is listed"), "{why}");
-        let short = r#"{"connections":"ok","disclosures":"4","real_money_refused":"ok"}"#;
+        let short = r#"{"connections":"ok","disclosures":"4","disclosure_accepted":"ok","real_money_refused":"ok"}"#;
         let why = format!(
             "{:#}",
             journey_result(short).err().context("a missing step")?

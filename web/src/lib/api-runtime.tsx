@@ -8,7 +8,7 @@ import { confirmAccepted } from "@/api/confirm";
 import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
-import type { CommandPhase, PreparedCommand } from "@/api/types";
+import type { CommandPhase, Decoder, PreparedCommand } from "@/api/types";
 import { activityRead, journalPageRead } from "@/api/activity";
 import { connectStartBody, connectionRead, connectionsRead } from "@/api/connect";
 import { type StepUpAction, type StepUpChallenge, confirmCode, connectStepUpDigest } from "@/api/step-up";
@@ -24,6 +24,7 @@ import {
   type Command,
   type ConnectPort,
   type RealMoneyPort,
+  type DisclosurePort,
   type CommandKind,
   type CommandRecord,
   type MandateChangeRequest,
@@ -34,6 +35,23 @@ import {
 
 /** How many of an agent stream's latest events its screen lists. */
 const JOURNAL_TAIL = 20;
+/** The most control-stream pages the disclosure read walks, 1000 events each. */
+const DISCLOSURE_PAGES = 50;
+
+/** One served event's `payload.document` and `payload.version`, decoded from its base64 body; `null` for a body that names neither. */
+const acceptedRead: Decoder<{ document: string; version: string } | null> = (value, path) => {
+  const body = typeof value === "object" && value !== null ? (value as Record<string, unknown>).body : undefined;
+  if (typeof body !== "string") return { ok: false, issue: { path: `${path}/body`, problem: "wrong_type", value: null, allowed: null } };
+  try {
+    const bytes = Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
+    const payload = (JSON.parse(new TextDecoder().decode(bytes)) as { payload?: Record<string, unknown> }).payload;
+    const { document, version } = payload ?? {};
+    return { ok: true, value: typeof document === "string" && typeof version === "string" ? { document, version } : null };
+  } catch {
+    return { ok: false, issue: { path: `${path}/body`, problem: "not_canonical", value: null, allowed: null } };
+  }
+};
+
 /** How many times an unanswered command is sent again, with the same key and body (API-4), before it is called unknown. */
 const SENDS = 4;
 /** How many times a recorded command's status is read before the runtime stops following it (spec §6.3 item 4). */
@@ -286,6 +304,43 @@ export function ApiRuntimeProvider({
    * it is never sent under a new key, which would be a second connect.
    */
   /**
+   * Whether the owner accepted a disclosure's version on the host (DEC-2134): every
+   * `DisclosureAccepted` on the control stream, read through the audit read, newest first, each
+   * event's body read for its document and version alone. A read that fails is `unknown`, never
+   * "not accepted".
+   */
+  const disclosures = useMemo<DisclosurePort>(
+    () => ({
+      accepted: async (document, version) => {
+        const stream = `ctl:${client.workspaceId}`;
+        const route = `/journal/streams/${encodeURIComponent(stream)}/events` as const;
+        const decoder = journalPageRead(stream);
+        const found: string[] = [];
+        let after = 0;
+        for (let page = 0; page < DISCLOSURE_PAGES; page += 1) {
+          const read = await client.read(`${route}?after_seq=${after}&limit=1000`, decoder);
+          if (!read.ok) return "unknown";
+          for (const e of read.value.events) if (e.event_type === "DisclosureAccepted") found.push(e.event_id);
+          const last = read.value.events.at(-1)?.seq ?? read.value.head_seq;
+          if (last >= read.value.head_seq) break;
+          after = last;
+        }
+        for (const eventId of found.reverse()) {
+          const one = await client.read(`/journal/events/${encodeURIComponent(eventId)}`, acceptedRead);
+          if (!one.ok) return "unknown";
+          if (one.value?.document === document && one.value.version === version) return "accepted";
+        }
+        return "not_accepted";
+      },
+      owner: async () => {
+        const session = await client.readSession();
+        return session.ok ? { workspaceId: client.workspaceId, principalId: session.value.principal_id } : null;
+      },
+    }),
+    [client],
+  );
+
+  /**
    * The real-money request (DEC-2134): sent once, under a key of its own. The deployment always
    * refuses it until counsel signs off; an answer that is not a refusal it names is shown as not
    * known, never as live.
@@ -466,8 +521,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

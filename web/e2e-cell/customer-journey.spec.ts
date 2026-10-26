@@ -8,7 +8,9 @@ import { type Page, expect, test } from "@playwright/test";
  *
  * 1. sees the workspace on paper with its Alpaca paper connection, and Robinhood shown as real money,
  *    off;
- * 2. reads the go-live screen: every risk disclosure and platform limit marked pending counsel;
+ * 2. reads the go-live screen: every risk disclosure and platform limit marked pending counsel, and
+ *    the disclosure's acceptance, which the driver made on the host first, read back from the
+ *    journal;
  * 3. asks to trade real money for the agent, and is refused: real money stays off for a customer
  *    workspace until counsel signs off;
  * 4. finds that refusal journaled as `RealMoneyRefused` on the workspace's control stream, read
@@ -80,6 +82,9 @@ test("the customer's journey on Alpaca paper: connections, going live, and real 
     await expect(disclosures.getByText(PENDING_COUNSEL)).toBeVisible();
     await expect(page.getByRole("region", { name: "Platform limits" }).getByText(PENDING_COUNSEL)).toBeVisible();
     step("disclosures", String(await disclosures.getByRole("article").count()));
+    const acceptance = page.getByRole("region", { name: "Your acceptance" }).getByRole("status");
+    await expect(acceptance).toHaveAttribute("data-state", "accepted", { timeout: 30_000 });
+    step("disclosure_accepted");
   });
 
   await test.step("asking for real money is refused, and the agent stays on paper", async () => {
