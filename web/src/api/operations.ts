@@ -6,6 +6,7 @@
  * is no order ticket (DEC-528).
  */
 import { OPERATIONS, SESSION_ROUTE, STEP_UP_CHALLENGE_ROUTE } from "./client";
+import { CONNECT_START_ROUTE } from "./connect";
 import type { Operation } from "./types";
 
 export interface DocumentedOperation {
@@ -32,6 +33,7 @@ export type ReadId =
   | "approvals"
   | "approval"
   | "connections"
+  | "connection"
   | "backtest"
   | "command_status"
   | "confirmation";
@@ -46,6 +48,7 @@ const READS: ReadonlyArray<DocumentedOperation & { id: ReadId }> = [
   { id: "approvals", method: "GET", route: "/approvals", query: ["state"], section: "§4.3" },
   { id: "approval", method: "GET", route: "/approvals/{approval}", query: [], section: "§4.3" },
   { id: "connections", method: "GET", route: "/connections", query: [], section: "§4.5" },
+  { id: "connection", method: "GET", route: "/connections/{connection}", query: [], section: "§4.5, DEC-2620" },
   { id: "backtest", method: "GET", route: "/backtests/{backtest}", query: [], section: "§4.2" },
   { id: "command_status", method: "GET", route: "/commands/{event}", query: [], section: "§5.5" },
   { id: "confirmation", method: "GET", route: "/mandate-versions/{version}/confirmation", query: [], section: "§4.1, §3.11 item 11" },
@@ -66,11 +69,14 @@ const COMMAND_SECTIONS: Readonly<Record<Operation, string>> = {
 };
 
 /**
- * The calls that are neither a read of the workspace nor a command: the step-up challenge, which
- * records nothing (§3.6, DEC-2103), and one's own session (§4.10, DEC-2113).
+ * The calls that are neither a read of the workspace nor a command of `OPERATIONS`: the step-up
+ * challenge, which records nothing (§3.6, DEC-2103), a connect's start, whose answer is the
+ * authorization page rather than a command's 202 (§4.5, DEC-2623), and one's own session (§4.10,
+ * DEC-2113).
  */
 const OTHERS: readonly DocumentedOperation[] = [
   { id: "step_up_challenge", method: "POST", route: STEP_UP_CHALLENGE_ROUTE, query: [], section: "§3.6" },
+  { id: "connect_start", method: "POST", route: CONNECT_START_ROUTE, query: [], section: "§4.5, DEC-2623" },
   { id: "session", method: "GET", route: SESSION_ROUTE, query: [], section: "§4.10", outside: true },
 ];
 

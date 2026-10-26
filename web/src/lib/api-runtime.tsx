@@ -10,7 +10,8 @@ import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
 import type { CommandPhase, PreparedCommand } from "@/api/types";
 import { activityRead, journalPageRead } from "@/api/activity";
-import { type StepUpAction, type StepUpChallenge, confirmCode } from "@/api/step-up";
+import { connectStartBody, connectionRead, connectionsRead } from "@/api/connect";
+import { type StepUpAction, type StepUpChallenge, confirmCode, connectStepUpDigest } from "@/api/step-up";
 import { prepareCreateVersion, readConfirmation, versionCreated } from "@/api/versions";
 import type { Iso, Workspace } from "@/fixtures/types";
 import type { ApiSource } from "./data-source";
@@ -21,6 +22,7 @@ import {
   type ActivityAnswer,
   type ChallengeAnswer,
   type Command,
+  type ConnectPort,
   type CommandKind,
   type CommandRecord,
   type MandateChangeRequest,
@@ -278,6 +280,40 @@ export function ApiRuntimeProvider({
   );
 
   /**
+   * The Alpaca paper connect (§4.5). The start commits the pending connection, so an answer lost on
+   * the way is sent again with the same key and body, which answers the same start (DEC-2623 item 8);
+   * it is never sent under a new key, which would be a second connect.
+   */
+  const connect = useMemo<ConnectPort>(
+    () => ({
+      challenge: () => stepUp({ kind: "connection", digest: connectStepUpDigest(client.workspaceId) }),
+      start: async (challenge) => {
+        const body = connectStartBody(challenge);
+        if (!body) return { ok: false, reason: "step_up_mismatch", effect: "none" };
+        const prepared = client.prepareConnect(body);
+        let last: { reason: string; effect: "none" | "recorded" | "unknown" } = { reason: "network", effect: "unknown" };
+        for (let attempt = 0; attempt < SENDS; attempt += 1) {
+          const outcome = await client.sendConnect(prepared);
+          if (outcome.ok) return { ok: true, authorizationUrl: outcome.value.authorization_url, connectionId: outcome.value.connection_id };
+          last = { reason: outcome.error.code, effect: outcome.error.effect };
+          if (outcome.error.effect !== "unknown" || !outcome.error.retryable) break;
+          await wait(retryMs * 2 ** attempt);
+        }
+        return { ok: false, ...last };
+      },
+      read: async (connectionId) => {
+        const read = await client.read(`/connections/${encodeURIComponent(connectionId)}`, connectionRead);
+        return read.ok ? { ok: true, connection: read.value.connection } : { ok: false, reason: read.error.code };
+      },
+      list: async () => {
+        const read = await client.read("/connections", connectionsRead);
+        return read.ok ? { ok: true, connections: read.value.connections } : { ok: false, reason: read.error.code };
+      },
+    }),
+    [client, stepUp, retryMs],
+  );
+
+  /**
    * The last `JOURNAL_TAIL` events of a stream (§4.8.1): one page of one event finds the head, a second
    * reads the tail up to it. An append between the two only adds to the next read.
    */
@@ -413,8 +449,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }
