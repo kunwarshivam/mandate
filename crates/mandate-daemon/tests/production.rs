@@ -265,3 +265,53 @@ fn a_document_that_does_not_parse_has_no_classes() {
     let document = mandate_canon::parse(br#"{"universe":{}}"#).unwrap();
     assert!(mandate_daemon::production::classes(&document).is_empty());
 }
+
+fn account_row(rows: &mut Vec<StoredEvent>, event_type: &str, payload: &str) {
+    let seq = u64::try_from(rows.len()).unwrap() + 1;
+    rows.push(row(ACCOUNT, seq, event_type, payload));
+}
+
+/// R1's probe through the planner: the agent buys 10 and releases 4 to the owner, so a kill
+/// switch sells 6 and never the owner's released shares (DEC-2354 invariant 1).
+#[test]
+fn a_kill_switch_sells_what_is_left_after_a_release_to_the_owner() {
+    let facts = facts();
+    let mut rows = Vec::new();
+    bought(&mut rows, AGENT, "o1", SPY, "10");
+    account_row(
+        &mut rows,
+        "PositionReleased",
+        &format!(
+            r#"{{"agent_id":"{AGENT}","instrument":"{SPY}","qty":"4","cause":"owner_release"}}"#
+        ),
+    );
+    facts.feed(&rows);
+    let plan = Flatten::new(facts, classes()).plan(&kill_switch());
+    assert_eq!(plan.sells, vec![leg(SPY, AssetClass::UsEquity, "6")]);
+}
+
+/// R1's check on #2432: a refused corporate action holds every later opening but never leaves a
+/// flatten without the sub-ledger (`AGENTS.md` rule 13); the executor caps each sell at what the
+/// account holds.
+#[test]
+fn a_refused_corporate_action_still_leaves_the_flatten_its_sub_ledger() {
+    let facts = facts();
+    let mut rows = Vec::new();
+    bought(&mut rows, AGENT, "o1", SPY, "10");
+    account_row(
+        &mut rows,
+        "CorporateActionApplied",
+        &format!(r#"{{"instrument_id":"{SPY}","kind":"split"}}"#),
+    );
+    facts.feed(&rows);
+    let fresh = mandate_gate_context::Freshness {
+        mark_max_age_s: 60,
+        snapshot_max_age_s: 60,
+    };
+    assert_eq!(
+        facts.read(|journaled| journaled.facts(SPY, fresh)),
+        Some(Err(mandate_gate_context::Held::Unreadable))
+    );
+    let plan = Flatten::new(facts, classes()).plan(&kill_switch());
+    assert_eq!(plan.sells, vec![leg(SPY, AssetClass::UsEquity, "10")]);
+}
