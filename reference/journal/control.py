@@ -711,6 +711,8 @@ CONFIRMED_V2 = rec(
     ("agent_id", opt(IDENT_T)),
     ("base_version", opt(REF)),
 )
+# v0.84 §9.9 (DEC-2131): version 2's members, then the passkey step-up rule 253 reads; never null.
+CONFIRMED_V3 = rec(*CONFIRMED_V2.fields, ("step_up", STEP_UP))
 REQUIRED_REFS["ModelInvocationRecorded"] = ("model_version",)
 
 # §9.19 (DEC-998): the agent stream's `ModelInvocationRecorded` and the model gateway's meter stream.
@@ -1296,12 +1298,12 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "AccountCloseRequested"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
-    ("ctl", "MandateConfirmed"): (1, 2),
+    ("ctl", "MandateConfirmed"): (1, 2, 3),
     ("ctl", "ConnectionRevoked"): (1, 2),
     ("agent", "AgentModeChanged"): (1, 2),
     ("agent", "OwnerCommandRefused"): (1, 2),
     ("ctl", "VerificationRun"): (1, 2),
-    ("ctl", "AgentDeployed"): (1, 2),
+    ("ctl", "AgentDeployed"): (1, 2, 3),
     ("acct", "MarkUpdated"): (1, 2),
     ("ctl", "ConnectionRequested"): (1, 2),
 }
@@ -1362,6 +1364,7 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("ctl", "ConnectionEstablished", 2): ESTABLISHED_V2,
     ("acct", "ConnectionEstablished", 2): rec(*ESTABLISHED_V2.fields, ("risk_clock", RISK_CLOCK)),
     ("ctl", "MandateConfirmed", 2): CONFIRMED_V2,
+    ("ctl", "MandateConfirmed", 3): CONFIRMED_V3,
     ("ctl", "ConnectionRevoked", 2): REVOKED_V2,
     ("agent", "AgentModeChanged", 1): rec(
         ("from", one_of(*MODE_ORDER)),
@@ -1374,6 +1377,8 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("ctl", "VerificationRun", 2): VERIFICATION_RUN_V2,
     # v0.51 §9.24 (DEC-1171): version 1's members, then the stored document's connection.
     ("ctl", "AgentDeployed", 2): rec(*SCHEMAS[("ctl", "AgentDeployed")].fields, ("connection_id", IDENT_T)),
+    # v0.84 §9.24 (DEC-2131): version 2's members, then the passkey step-up rule 253 reads.
+    ("ctl", "AgentDeployed", 3): rec(*SCHEMAS[("ctl", "AgentDeployed")].fields, ("connection_id", IDENT_T), ("step_up", STEP_UP)),
     # v0.68 §9.8 (DEC-2621): version 1's members, then how the credential is obtained and, for an
     # OAuth connect, the token's possible breadth and the disclosure the owner confirmed.
     ("ctl", "ConnectionRequested", 2): rec(
@@ -2384,13 +2389,20 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
             and (p["attempts"] != 0 or rule("157.tokens", all(v == 0 for v in p["tokens"].values()), "payload.tokens"))
             and (p["attempts"] != 0 or rule("157.free", Decimal(p["cost_usd"]) == 0, "payload.cost_usd"))
         )
-    if event_type == "MandateConfirmed" and draft["schema_version"] == 2:
+    linked = (2,) if "rule.77.v2_only" in skip else (2, 3)
+    if event_type == "MandateConfirmed" and draft["schema_version"] in linked:
         (
             rule("77.paired", (p["base_version"] is None) == (p["agent_id"] is None), "payload.base_version")
             and rule("77.moved", p["base_version"] != p["mandate_version"], "payload.base_version")
         )
         confirmer = actor["kind"] != "system" if "rule.78.not_system_only" in skip else actor["kind"] == "user"
         rule("78", confirmer, "actor.kind")
+    if event_type == "MandateConfirmed" and draft["schema_version"] == 3:
+        passkey_step_up("267", draft, skip, rule)
+    if event_type == "AgentDeployed" and draft["schema_version"] == 3:
+        deployer = actor["kind"] in ("user", "system") if "loose.268.system" in skip else actor["kind"] == "user"
+        if rule("268.user", deployer, "actor.kind"):
+            passkey_step_up("268", draft, skip, rule)
     if event_type == "OwnerRequestSubmitted":
         expected = {"user": "owner", "client": "client"}.get(actor["kind"])
         if "rule.79.not_system_only" in skip and actor["kind"] != "system":
@@ -2559,6 +2571,21 @@ def gap_nanos(start, end) -> int | None:
     if not all(isinstance(v, str) and is_timestamp(v) for v in (start, end)):
         return None
     return instant_nanos(end) - instant_nanos(start)
+
+
+def passkey_step_up(number: str, draft: dict, skip: frozenset[str], rule) -> bool:
+    """Rules 267 and 268's evidence clauses (v0.84, DEC-2131): a passkey's step-up, authenticated 0
+    to 300 seconds before the envelope's `event_time`, the method judged first."""
+    step_up = draft["payload"]["step_up"]
+    passkey = step_up["method"] in ("passkey", "cli_confirm") if f"loose.{number}.cli_confirm" in skip else step_up["method"] == "passkey"
+    if not rule(f"{number}.method", passkey, "payload.step_up.method"):
+        return False
+    gap = gap_nanos(step_up["authenticated_at"], draft["event_time"])
+    if gap is not None and f"boundary.rule_{number}_after" in skip:
+        gap = abs(gap)
+    limit = STEP_UP_WINDOW_SECONDS * 10**9 + (1 if f"boundary.rule_{number}_window" in skip else 0)
+    fresh = gap is not None and 0 <= gap <= limit
+    return rule(f"{number}.fresh", fresh, "payload.step_up.authenticated_at")
 
 
 def step_up_fresh(authenticated_at, at, skip: frozenset[str]) -> bool:
@@ -3395,6 +3422,8 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     versions = VERSIONED_VERSIONS.get((stream[0], event_type), (1,))
     if event_type == "AgentDeployed" and "versions.agent_deployed_v2" in skip:
         versions = (1,)
+    if event_type in ("MandateConfirmed", "AgentDeployed") and "versions.v3" in skip:
+        versions = tuple(v for v in versions if v != 3)
     if event_type == "CredentialEnrolled" and "versions.credential_enrolled_v2" in skip:
         versions = (1,)
     if event_type == "MarkUpdated" and "versions.mark_updated_v1" in skip:

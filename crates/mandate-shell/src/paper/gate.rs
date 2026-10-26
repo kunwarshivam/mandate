@@ -4,19 +4,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_accounting::{
-    AccountingError, AssetClass, InstrumentId, ProspectiveOrder, Side, fee_reservation,
-};
+use mandate_accounting::Side;
 use mandate_alpaca::{AccountRules, DeclaredRegime};
 use mandate_executor::{BindingGateInput, BrokerAccount};
-use mandate_num::{Fraction, Price, Qty, Ratio, Usd};
-use mandate_risk::spec_types::{GoalState, RiskLimits, Rung, RungAction, ScaleAction};
+use mandate_num::{Ratio, Usd};
 use mandate_risk::{
     AccountSnapshot, AccountState, AgentId as GateAgentId, AgentMode, AgentSnapshot,
     AssetId as GateAssetId, ClientOrderId as GateOrderId, ConductState, DayTradeLedger,
     DayTradeRegime, GateConfig, GatePass, InstrumentSnapshot as GateInstrumentSnapshot,
     MarketSnapshot, Origin, ProposedKind, QuoteCurrency, RiskSnapshot, SaneQuote,
-    TimeInForce as GateTimeInForce, ValidatedMandate as GateMandate, WorkingUniverse,
+    TimeInForce as GateTimeInForce, WorkingUniverse,
 };
 use mandate_time::UtcNanos;
 
@@ -25,6 +22,9 @@ use super::facts::PaperFacts;
 use super::{absent, usd};
 use crate::adapters::{AdvisoryGateContext, AdvisoryOrderFacts};
 use crate::error::Cause;
+
+pub(super) use mandate_gate_inputs::reservation;
+pub(super) use mandate_ports::gate_mandate;
 
 /// The binding gate's input, the same for every request the reviewed agent makes on the reviewed
 /// instrument: the gate itself judges the proposal against it.
@@ -160,76 +160,6 @@ fn opening_regime(rules: AccountRules, account: &BrokerAccount) -> Result<DayTra
             Ok(DayTradeRegime::IntradayMargin { maintenance_excess })
         }
     }
-}
-
-/// `mandate-accounting`'s fee reservation for one equity order on the reviewed instrument.
-pub(super) fn reservation(
-    fees: &mandate_accounting::Config,
-    instrument: &InstrumentId,
-    side: Side,
-    qty: Qty,
-    limit: Price,
-    at: UtcNanos,
-) -> Result<Usd, AccountingError> {
-    fee_reservation(
-        &ProspectiveOrder {
-            instrument: instrument.clone(),
-            asset_class: AssetClass::UsEquity,
-            side,
-            qty,
-            limit,
-            at,
-        },
-        fees,
-    )
-}
-
-pub(super) fn gate_mandate(document: &mandate_spec::Mandate) -> Result<GateMandate, Cause> {
-    let risk = &document.risk;
-    let scale_action = match risk.scale_action {
-        mandate_spec::document::ScaleAction::LimitBuys => ScaleAction::LimitBuys,
-        mandate_spec::document::ScaleAction::TrimToTarget => ScaleAction::TrimToTarget,
-    };
-    let drawdown_ladder = risk
-        .drawdown_ladder
-        .iter()
-        .enumerate()
-        .map(|(index, rung)| {
-            Ok(Rung {
-                index: u8::try_from(index).map_err(|_| absent("the mandate's drawdown ladder"))?,
-                at: Fraction::parse(rung.at.as_str())?,
-                action: match rung.action {
-                    mandate_spec::document::LadderAction::ScaleSizes => RungAction::ScaleSizes,
-                    mandate_spec::document::LadderAction::ExitsOnly => RungAction::ExitsOnly,
-                    mandate_spec::document::LadderAction::FlattenAndPause => {
-                        RungAction::FlattenAndPause
-                    }
-                },
-                factor: rung
-                    .factor
-                    .as_ref()
-                    .map(|factor| Fraction::parse(factor.as_str()))
-                    .transpose()?,
-                scale_action: Some(scale_action),
-            })
-        })
-        .collect::<Result<Vec<_>, Cause>>()?;
-    Ok(GateMandate::from_validated_parts(
-        RiskLimits {
-            max_position_usd: usd(document.risk.max_position_usd.as_str())?,
-            max_position_fraction: Fraction::parse(document.risk.max_position_fraction.as_str())?,
-            max_order_usd: usd(document.risk.max_order_usd.as_str())?,
-            max_gross_exposure_usd: usd(document.risk.max_gross_exposure_usd.as_str())?,
-            max_orders_per_day: document.risk.max_orders_per_day,
-            reentry_cooldown_s: document.risk.reentry_cooldown_s,
-            rebalance_band: Fraction::parse(document.behavior.sizing.rebalance_band.as_str())?,
-            breach_confirm_s: document.risk.breach_confirm_s,
-            drawdown_ladder,
-        },
-        GoalState::Running,
-        document.universe.leveraged_etps_enabled,
-        document.universe.leveraged_etp_disclosure_version.is_some(),
-    ))
 }
 
 /// The advisory gate's context from the binding gate's `template`, with the account risk view and

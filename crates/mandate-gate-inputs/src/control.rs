@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value};
 use mandate_domain::Environment;
-use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, get_artifact};
+use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, StoredEvent, get_artifact};
 use mandate_num::Usd;
 use mandate_spec::context::{
     AgentId, ContextArgs, JournaledFact, Membership, unrecorded_stop_limit_asset_classes,
@@ -24,12 +24,14 @@ use mandate_time::{Date, UtcNanos};
 
 use crate::approvers::{Members, members};
 
-/// One record of the workspace control stream as the run read it: its sequence number, type and
-/// payload (journal spec §9.2), and the stream it was journaled on. The journal has already
-/// verified the chain it came from.
+/// One record of the workspace control stream as the run read it: its sequence number, its
+/// envelope's `event_time` when the run read one, type and payload (journal spec §9.2), and the
+/// stream it was journaled on. The journal has already verified the chain it came from. The §9.12
+/// membership fold reads `event_time` (DEC-2384); a record the run read none for folds no one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControlRecord {
     pub seq: u64,
+    pub event_time: Option<UtcNanos>,
     pub event_type: String,
     pub payload: Value,
     pub origin: Origin,
@@ -43,6 +45,34 @@ pub struct ControlRecord {
 pub struct Origin {
     pub stream_id: String,
     pub environment: Environment,
+}
+
+impl ControlRecord {
+    /// The record a stored row of the control stream holds: its `seq`, its body's `event_time`,
+    /// type and `payload`, and the stream and environment it was journaled on; `None` when its
+    /// body does not parse, carries no payload, or names no environment the run reads.
+    pub fn of_row(row: &StoredEvent) -> Option<Self> {
+        let Ok(body) = mandate_canon::parse(&row.body) else {
+            return None;
+        };
+        let payload = body.get("payload")?.clone();
+        Some(Self {
+            seq: row.seq,
+            event_time: Self::event_time_of(&body),
+            event_type: row.event_type.clone(),
+            payload,
+            origin: Origin::of(&row.stream_id, &row.environment)?,
+        })
+    }
+
+    /// The `event_time` a stored envelope `body` carries in the journal's canonical form, or
+    /// `None` when it carries none the run can read (DEC-2384 item 4).
+    pub fn event_time_of(body: &Value) -> Option<UtcNanos> {
+        body.get("event_time")
+            .and_then(Value::as_str)
+            .map(UtcNanos::parse)
+            .and_then(Result::ok)
+    }
 }
 
 impl Origin {

@@ -584,17 +584,24 @@ fn origin(purpose: Purpose) -> Origin {
     }
 }
 
+/// The binding gate's checks as §9's records carry them. The binding gate defers nothing, so a
+/// [`CheckOutcome::Deferred`] here is not its answer and nothing is recorded (DEC-2378 item 11).
 fn binding_checks_value(checks: &[CheckOutcome]) -> Result<Value, ExecutorError> {
-    let rows = checks
+    let judged = checks
         .iter()
-        .flat_map(|outcome| {
-            let (check, result) = match outcome {
-                CheckOutcome::Passed(check) => (*check, "pass"),
-                CheckOutcome::Failed(check, _) => (*check, "fail"),
-                CheckOutcome::NotReached(check) => (*check, "not_reached"),
-            };
-            binding_check_ids(check).iter().map(move |id| (id, result))
+        .map(|outcome| match outcome {
+            CheckOutcome::Passed(check) => Ok((*check, "pass")),
+            CheckOutcome::Failed(check, _) => Ok((*check, "fail")),
+            CheckOutcome::NotReached(check) => Ok((*check, "not_reached")),
+            CheckOutcome::Deferred(_) => Err(ExecutorError::NotInterpreted {
+                what: "a deferred check in the binding gate's answer".to_owned(),
+                story: "DEC-2378 item 11",
+            }),
         })
+        .collect::<Result<Vec<_>, _>>()?;
+    let rows = judged
+        .into_iter()
+        .flat_map(|(check, result)| binding_check_ids(check).iter().map(move |id| (id, result)))
         .map(|(id, result)| {
             object(vec![
                 ("id", text(*id)),

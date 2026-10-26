@@ -126,6 +126,7 @@ function wranglerProblems(tree) {
     [services.some((s) => s?.binding === "WORKER_SELF_REFERENCE" && s?.service === WORKER), `services must bind WORKER_SELF_REFERENCE to "${WORKER}"`],
     [!/account_id/.test(text), "account_id must not be committed; the founder's dashboard holds the account (DEC-823 item 4)"],
     [vars === undefined, "vars must not be committed; the founder sets the public variables in the dashboard (DEC-823 items 4 and 5)"],
+    [config.keep_vars === true, "keep_vars must be true, so a deploy keeps the variables the founder set in the dashboard (DEC-823 item 5, DEC-975)"],
     [!SECRET_LOOKING.test(JSON.stringify(rest)), "holds a secret-looking value; no credential goes in the Worker's configuration (DEC-823 item 4)"],
   ];
   return checks.filter(([ok]) => !ok).map(([, message]) => `wrangler.jsonc: ${message}`);

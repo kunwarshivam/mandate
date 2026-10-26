@@ -38,6 +38,7 @@ const TUESDAY: &str = "2026-09-29T17:00:00Z";
 fn record(seq: u64, event_type: &str, payload: &str) -> ControlRecord {
     ControlRecord {
         seq,
+        event_time: None,
         event_type: event_type.to_owned(),
         payload: json(payload),
         origin: Origin {
@@ -183,7 +184,7 @@ fn a_record_naming_no_owner_gives_no_scope() {
     assert_eq!(
         scoped(&[live_robinhood(1), member]),
         None,
-        "a membership the run does not fold"
+        "a membership stream gives no live scope (DEC-2384 item 5)"
     );
 }
 

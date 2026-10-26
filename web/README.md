@@ -153,8 +153,12 @@ request is served, never at build, and nothing of it is a `NEXT_PUBLIC_` variabl
 | Variable | What it is |
 |---|---|
 | `OWLHEAD_DATA_SOURCE` | `fixtures` (the default when unset) or `api`. Anything else shows the deployment unreachable |
-| `OWLHEAD_API_ORIGIN` | The API's origin, `https://api.owlhead.ai` for the demo; `http` only on a loopback host |
-| `OWLHEAD_WORKSPACE_ID` | The workspace the app reads, until `GET /v1/me/workspaces` is wired |
+| `OWLHEAD_API_ORIGIN` | The API's origin: staging's is `https://api-staging.owlhead.ai` (DEC-2636); `http` only on a loopback host |
+| `OWLHEAD_WORKSPACE_ID` | The workspace the app reads, until `GET /v1/me/workspaces` is wired: staging's is `01KDEM0000000000000000000W` (`deploy/gitops/clusters/staging/workspace.yaml`) |
+
+The deployed Worker reads all three from its own variables, which the founder sets in the Cloudflare
+dashboard (DEC-823 items 4 and 5). Nothing in the repository sets them, and `keep_vars` in
+`wrangler.jsonc` keeps them across deploys. Unset, the Worker serves the fixtures.
 
 Over the API (`src/lib/api-runtime.tsx`) the browser reads the workspace with its own session
 cookie from the documented reads (`src/api/reads.ts`), polls them every five seconds, and sends
@@ -176,7 +180,19 @@ Approving a request is step-up by `cli_confirm` (DEC-2104, DEC-2103 item 7): App
 Its Approve then sends the grant with that challenge's evidence, and the screen says what the server answered
 (`step_up_missing` while the host has not confirmed). A code's five minutes are counted from when it
 was shown, never against this device's clock; paper only, and Skip still carries no step-up. The
-mock API stands in for the host's confirmation. Stop works over the API too (DEC-2408): the sheet lists the agents the API serves, each with its kill
+mock API stands in for the host's confirmation. Connections lists every connection
+`GET /connections` serves with its state, and the owner connects Alpaca paper trading there (DEC-2623): the
+screen shows the token-breadth disclosure in DEC-2622's version 1 wording, asks for a code of kind
+`connection` bound to that version (DEC-2621 item 4) with the `mandate step-up confirm-connect` line
+(DEC-2125), then sends `POST /connections/oauth/start` and the browser to the authorization page it
+answers, an `https` page only. Alpaca returns the browser to the API's callback, which redirects to
+`/connections/{id}`, read until it settles. Stop-all and Close-all take only an established connection
+as their scope, and the workspace scope when none is. An agent's screen lists its orders, newest first, and the net quantity its own fills hold per
+instrument, from `GET /agents/{id}/orders` and `/positions` (DEC-2111), read every five seconds; a
+state the journal has not given is "not reported", a list that cannot be read is never shown as
+empty, and an agent with no account found says so. It also lists the latest 20 records on the
+agent's stream from `GET /journal/streams/agent:{ws}:{agent}/events`, by sequence, type and time,
+never a body (DEC-2377). Stop works over the API too (DEC-2408): the sheet lists the agents the API serves, each with its kill
 switch, and the record screens build from the API's view, with open orders and per-agent positions
 shown as not reported, never as none. Release is not offered there. `/demo` always reads the fixtures. With sign-in on, the browser first opens an API session with
 `POST /v1/sessions` from its Supabase access token and refreshes it every four minutes, one tab at a

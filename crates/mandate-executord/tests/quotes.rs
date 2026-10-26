@@ -83,6 +83,15 @@ fn feed(
 
 /// What a sane read of AAPL at `bid` and `ask` observed at `observed` must be.
 fn observed(bid: &str, ask: &str, observed: i64) -> Result<MarketObservation, Error> {
+    judged(bid, ask, observed, true)
+}
+
+/// [`observed`] judged not sane: its prices kept, so a mark can name them.
+fn insane(bid: &str, ask: &str, observed: i64) -> Result<MarketObservation, Error> {
+    judged(bid, ask, observed, false)
+}
+
+fn judged(bid: &str, ask: &str, observed: i64, sane: bool) -> Result<MarketObservation, Error> {
     Ok(MarketObservation {
         instrument: aapl()?,
         bid: Some(Price::parse(bid)?),
@@ -90,7 +99,7 @@ fn observed(bid: &str, ask: &str, observed: i64) -> Result<MarketObservation, Er
         ask: Some(Price::parse(ask)?),
         last_trade: None,
         mark: None,
-        sane: true,
+        sane,
         observed_at: RiskClock::from_secs(observed),
     })
 }
@@ -121,7 +130,8 @@ fn a_wanted_instrument_is_read_at_once_then_once_per_step() -> Result<(), Error>
 
 /// Trading spec §8.2: a quote with `0 < bid ≤ ask` and a spread within the profile's bound is
 /// sane, a locked one too, and is observed at its own stamp, or at the clock's now when stamped
-/// ahead. A wider or a crossed one hands nothing (DEC-2359), so the core prices nothing from it.
+/// ahead. A wider or a crossed one is observed not sane (DEC-2380 item 3); the process hands the
+/// core none of those (DEC-2359), so the core prices nothing from it.
 #[test]
 fn a_quote_is_handed_only_when_sane() -> Result<(), Error> {
     let now = at(NOON)?;
@@ -133,7 +143,7 @@ fn a_quote_is_handed_only_when_sane() -> Result<(), Error> {
     }
     for (bid, ask) in [("150", "151.6"), ("150.2", "150")] {
         let read = feed(answer(bid, ask, before), now)?.observe(&aapl()?, now);
-        assert_eq!(read, Err("quote_insane"), "{bid} × {ask}");
+        assert_eq!(read, Ok(insane(bid, ask, noon - 2)?), "{bid} × {ask}");
     }
     let ahead = "2026-09-21T15:00:00.200Z";
     assert_eq!(
@@ -214,7 +224,7 @@ fn the_paper_bounds_are_ten_seconds_and_two_percent() -> Result<(), Error> {
     );
     assert_eq!(
         paper(answer("150", "153.01", ten))?.observe(&aapl()?, now),
-        Err("quote_insane"),
+        Ok(insane("150", "153.01", noon - 10)?),
         "a cent past 2 %"
     );
     Ok(())

@@ -125,6 +125,16 @@ const DEMO_RESEARCH_FILES: [&str; 5] = [
     "instruments.json",
 ];
 const EXECUTOR_DOCKERFILE: &str = "deploy/cell/images/executor.Dockerfile";
+/// The workspace scheduler's image (E21-29): the single writer of the hosted workspace's clock
+/// stream, whose ticks the runtime and the executor read.
+const SCHEDULER_DOCKERFILE: &str = "deploy/cell/images/scheduler.Dockerfile";
+const SCHEDULER_PROCESS: &str = "scheduler";
+const SCHEDULER_PACKAGE: &str = "mandate-scheduler";
+/// The workspace data process's image (E21-29 lane SC): the deployed instrument's daily bars from
+/// the cell's recorded series, which the runtime reads read-only from the artifact store.
+const DATA_DOCKERFILE: &str = "deploy/cell/images/data.Dockerfile";
+const DATA_PROCESS: &str = "data";
+const DATA_PACKAGE: &str = "mandate-datad";
 /// The token-exchange process's image (DEC-1175), which the deployment manager starts once per
 /// OAuth connect.
 const EXCHANGE_DOCKERFILE: &str = "deploy/cell/images/token-exchange.Dockerfile";
@@ -182,9 +192,13 @@ pub enum Drill {
     /// archived, and Barman's own tools, reading the store with the archive's key, list the backup
     /// and fetch the segment back (E21-41).
     Archive,
-    /// An agent deployed on a recorded paper connection, and the deployment manager starting that
-    /// account's executor until its pod runs and answers `livez`, not `readyz`, which needs a
-    /// scheduler tick the cell does not journal yet (E21-30, DEC-2035); see [`executor`].
+    /// The scheduler ticking a fresh workspace's clock stream once the chart names it the hosted
+    /// workspace: two exports of its `clock:` stream a few seconds apart, the second longer
+    /// (E21-29); see [`executor::ticks_drill`].
+    Ticks,
+    /// The scheduler ticking the run's workspace's clock stream (E21-29), then an agent deployed on
+    /// a recorded paper connection, and the deployment manager starting that account's executor
+    /// until its pod runs and answers `livez` (E21-30, DEC-2035); see [`executor`].
     Executor,
     /// `mandate vault provision` sets the cell's vault up, then each AppRole logs in from a pod
     /// labelled as the executor and reads only what DEC-977 item 2's table gives it: a runtime
@@ -216,9 +230,9 @@ pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
 /// DEC-2602).
 pub const KILL_SWITCH_DRILLS: [Drill; 2] = [Drill::KillSwitch, Drill::Admission];
 
-/// The executor drill (E21-30, DEC-2035), which `cargo xtask ci cell-executor` runs on a cell of
-/// its own, so `ci cell-kill-switch` stays within its ten minutes (DEC-464, DEC-2615).
-pub const EXECUTOR_DRILLS: [Drill; 1] = [Drill::Executor];
+/// The scheduler's ticks drill (E21-29) and the executor drill (E21-30, DEC-2035), which `cargo
+/// xtask ci cell-executor` runs on a cell of its own, so `ci cell-kill-switch` stays within its ten minutes (DEC-464, DEC-2615).
+pub const EXECUTOR_DRILLS: [Drill; 2] = [Drill::Ticks, Drill::Executor];
 
 /// The vault's drill (E21-32, DEC-2022), which `cargo xtask ci cell-vault` runs on a cell of its
 /// own, so each cell job stays within its ten minutes (DEC-464, DEC-2616).
@@ -240,6 +254,7 @@ impl Drill {
             Self::Admission => "admission",
             Self::StandbyDown => "standby-down",
             Self::Archive => "archive",
+            Self::Ticks => "ticks",
             Self::Executor => "executor",
             Self::Vault => "vault",
             Self::Exchange => "exchange",
@@ -284,6 +299,10 @@ impl Drill {
                 "the cluster's durability set to `preferred`, so the primary commits alone"
             }
             Self::Archive => "the archive pointed at another bucket of the same store",
+            Self::Ticks => {
+                "the scheduler scaled to zero replicas once it ticks the run's workspace, so its \
+                 clock stream stops"
+            }
             Self::Executor => {
                 "the connect check skipped, so the connection is never recorded and the agent \
                  deploys at version 1"
@@ -312,6 +331,7 @@ impl Drill {
             Self::Admission => "admitted a service account's change to a person's control Job",
             Self::StandbyDown => "committed with the standby fenced",
             Self::Archive => "is not in the archive",
+            Self::Ticks => "the scheduler is not ticking",
             Self::Executor => "no executor pod",
             Self::Vault => "wildcard in mandate-runtime",
             Self::Exchange | Self::ExchangeLate => "step_up_missing",
@@ -640,7 +660,7 @@ const RUNNER: &str = "mandate-backtest-runner";
 
 /// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
 /// them.
-const BUILT_PACKAGES: [&str; 8] = [
+const BUILT_PACKAGES: [&str; 10] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
@@ -649,6 +669,8 @@ const BUILT_PACKAGES: [&str; 8] = [
     "mandate-executord",
     "mandate-provisionerd",
     EXCHANGE_PACKAGE,
+    SCHEDULER_PACKAGE,
+    DATA_PACKAGE,
 ];
 
 /// The token exchange's package (DEC-1175), a dev-profile build like the rest, so its cell token
@@ -661,7 +683,7 @@ const STUB_PACKAGE: &str = "mandate-stub-issuer";
 /// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
 /// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
 /// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
-pub const IMAGE_PACKAGES: [&str; 9] = [
+pub const IMAGE_PACKAGES: [&str; 11] = [
     BUILT_PACKAGES[0],
     BUILT_PACKAGES[1],
     BUILT_PACKAGES[2],
@@ -670,6 +692,8 @@ pub const IMAGE_PACKAGES: [&str; 9] = [
     BUILT_PACKAGES[5],
     BUILT_PACKAGES[6],
     BUILT_PACKAGES[7],
+    BUILT_PACKAGES[8],
+    BUILT_PACKAGES[9],
     STUB_PACKAGE,
 ];
 
@@ -857,6 +881,24 @@ fn executor_image() -> Result<Option<String>> {
     local_tag("executor", &["mandate-executord"]).map(Some)
 }
 
+/// The cell's `scheduler` image (E21-29): this checkout's `mandate-scheduler`. `None` where the
+/// `mandate` image is pulled, as for the runtime and executor, whose ticks it writes.
+fn scheduler_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag(SCHEDULER_PROCESS, &[SCHEDULER_PACKAGE]).map(Some)
+}
+
+/// The cell's `data` image (E21-29 lane SC): this checkout's `mandate-datad`. `None` where the
+/// `mandate` image is pulled, as for the runtime, which reads what it stores.
+fn data_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag(DATA_PROCESS, &[DATA_PACKAGE]).map(Some)
+}
+
 /// The cell's `token-exchange` image, this checkout's build of `mandate-token-exchange`: none
 /// without the deployment manager, the one process that starts it, as for the manager itself.
 fn exchange_image() -> Result<Option<String>> {
@@ -937,11 +979,17 @@ fn image_sets() -> Result<Vec<String>> {
     if let Some(executor) = executor_image()? {
         sets.push(format!("images.executor={executor}"));
     }
+    if let Some(scheduler) = scheduler_image()? {
+        sets.push(format!("images.{SCHEDULER_PROCESS}={scheduler}"));
+    }
+    if let Some(data) = data_image()? {
+        sets.push(format!("images.{DATA_PROCESS}={data}"));
+    }
     Ok(sets)
 }
 
-/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `deploy-manager` and
-/// `role-provisioner` images from this checkout (never with the `live` feature), bring up the k3d
+/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `scheduler`, `data`,
+/// `deploy-manager` and `role-provisioner` images from this checkout (never with the `live` feature), bring up the k3d
 /// cluster if it is not up, install the CloudNativePG operator, the journal's Postgres and the
 /// vault, issue the vault's AppRole Secrets once the provisioner runs ([`provision_vault`]), install
 /// the workspace chart, and wait until every pod is ready and the migration Job has finished.
@@ -956,6 +1004,8 @@ pub fn up() -> Result<()> {
     let provisioner = role_provisioner_image_tag()?;
     let runtime = runtime_image()?;
     let executor = executor_image()?;
+    let scheduler = scheduler_image()?;
+    let data = data_image()?;
     let stub = stub_image_tag()?;
     let exchange = exchange_image()?;
     if source == ImageSource::Build {
@@ -972,6 +1022,12 @@ pub fn up() -> Result<()> {
     }
     if let Some(executor) = &executor {
         build_image(executor, EXECUTOR_DOCKERFILE, "mandate-executord", &[])?;
+    }
+    if let Some(scheduler) = &scheduler {
+        build_image(scheduler, SCHEDULER_DOCKERFILE, SCHEDULER_PACKAGE, &[])?;
+    }
+    if let Some(data) = &data {
+        build_image(data, DATA_DOCKERFILE, DATA_PACKAGE, &[])?;
     }
     if let Some(stub) = &stub {
         build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
@@ -1012,6 +1068,8 @@ pub fn up() -> Result<()> {
         api.as_ref(),
         runtime.as_ref(),
         executor.as_ref(),
+        scheduler.as_ref(),
+        data.as_ref(),
         stub.as_ref(),
         exchange.as_ref(),
         manager.as_ref(),
@@ -1197,7 +1255,16 @@ pub(super) fn api_diagnosis() {
         "jsonpath={range .items[*]}{.metadata.name}{range .status.containerStatuses[*]} {.name}: {.lastState.terminated.reason} {.lastState.terminated.exitCode} restarts {.restartCount}{end}{\"\\n\"}{end}",
     ];
     let current = logs("--previous=false");
-    let previous = logs("--previous=true");
+    let restarted = [
+        "get",
+        "pods",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        selector.as_str(),
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.name}{range .status.initContainerStatuses[*]} {.name} {.restartCount}{end}{range .status.containerStatuses[*]} {.name} {.restartCount}{end}{\"\\n\"}{end}",
+    ];
     let events = [
         "get",
         "events",
@@ -1206,13 +1273,55 @@ pub(super) fn api_diagnosis() {
         "--sort-by",
         ".lastTimestamp",
     ];
-    let shown: [&[&str]; 5] = [&pods, &ended, &current, &previous, &events];
+    let shown: [&[&str]; 3] = [&pods, &ended, &current];
     for args in shown {
-        match kubectl(args) {
-            Ok(text) => eprintln!("    api diagnosis `kubectl {}`:\n{text}", args.join(" ")),
-            Err(e) => eprintln!("    api diagnosis `kubectl {}`: {e:#}", args.join(" ")),
-        }
+        diagnose(args);
     }
+    let listing = kubectl(&restarted).unwrap_or_else(|e| {
+        eprintln!("    api diagnosis `kubectl {}`: {e:#}", restarted.join(" "));
+        String::new()
+    });
+    for (pod, container) in restarted_containers(&listing) {
+        diagnose(&[
+            "logs",
+            "--namespace",
+            NAMESPACE,
+            pod.as_str(),
+            "--container",
+            container.as_str(),
+            "--previous=true",
+            "--tail",
+            "40",
+        ]);
+    }
+    diagnose(&events);
+}
+
+/// Prints what `kubectl args` answers, or why it failed, under the API's diagnosis.
+fn diagnose(args: &[&str]) {
+    match kubectl(args) {
+        Ok(text) => eprintln!("    api diagnosis `kubectl {}`:\n{text}", args.join(" ")),
+        Err(e) => eprintln!("    api diagnosis `kubectl {}`: {e:#}", args.join(" ")),
+    }
+}
+
+/// Each `(pod, container)` that has restarted, from a listing of one pod a line, its name then
+/// `<container> <restarts>` pairs, init containers first. Only those have logs from a run before: `kubectl logs
+/// --previous` over every container of a selector fails outright on the first one that has none,
+/// an init container among them, which hid the API's own last run (main's run 40254976469).
+fn restarted_containers(listing: &str) -> Vec<(String, String)> {
+    listing
+        .lines()
+        .flat_map(|line| {
+            let mut words = line.split_whitespace();
+            let pod = words.next().unwrap_or_default().to_owned();
+            let rest: Vec<&str> = words.collect();
+            rest.chunks(2)
+                .filter(|pair| pair.len() == 2 && pair[1] != "0")
+                .map(|pair| (pod.clone(), pair[0].to_owned()))
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 /// `cargo xtask cell down`: delete the cluster and everything in it.
@@ -1229,11 +1338,12 @@ const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
 /// `mandate-cli`, the backtest runner, `mandate-api-server` and the runtime's `mandate-daemon`
-/// (DEC-1013), the deployment manager's `mandate-deployd` (DEC-1172) and the executor's
-/// `mandate-executord` (DEC-2031) linked statically, so their images need no base (DEC-993 item
-/// 9), with no feature at all: never `live`; with them the stub issuer once [`stub_ready`], which
-/// the dev profile's debug assertions are what compile in (DEC-2100 item 2). The dev profile, for
-/// the CI job's ten minutes (DEC-464): it keeps overflow checks, and the cell's journals are small.
+/// (DEC-1013), the deployment manager's `mandate-deployd` (DEC-1172), the executor's
+/// `mandate-executord` (DEC-2031), the scheduler's `mandate-scheduler` (E21-29) and the data
+/// process's `mandate-datad` linked statically, so their images need no base (DEC-993 item 9),
+/// with no feature at all: never `live`; with them the stub issuer once [`stub_ready`], which the
+/// dev profile's debug assertions are what compile in (DEC-2100 item 2). The dev profile, for the
+/// CI job's ten minutes (DEC-464): it keeps overflow checks, and the cell's journals are small.
 fn build_binary() -> Result<()> {
     let mut args = vec!["build", "--locked"];
     for package in BUILT_PACKAGES {
@@ -2565,6 +2675,7 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Admission => admission_drill::drill(seeded),
             Drill::StandbyDown => standby_down(seeded),
             Drill::Archive => archive(seeded),
+            Drill::Ticks => executor::ticks_drill(seeded),
             Drill::Executor => executor::drill(seeded),
             Drill::Vault => vault_drill(seeded),
             Drill::Exchange => exchange::drill(seeded, false),
@@ -3656,9 +3767,10 @@ fn compose_api(service: &mut Value) -> Result<()> {
     Ok(())
 }
 
-/// A service's `args` or `probe` from processes.json for Compose (DEC-1013): `{workspace}` and the
-/// `runtime` values' placeholders become the variables the operator sets, each required, and
-/// `{probe}` becomes `probe`.
+/// A service's `args` or `probe` from processes.json for Compose (DEC-1013): `{workspace}`, and
+/// `{hosted_workspace}`, which is the same one workspace there, and the `runtime` values'
+/// placeholders become the variables the operator sets, each required, and `{probe}` becomes
+/// `probe`.
 fn compose_words(words: &[Value], probe: &str) -> Result<Vec<String>> {
     words
         .iter()
@@ -3666,6 +3778,10 @@ fn compose_words(words: &[Value], probe: &str) -> Result<Vec<String>> {
             let word = w.as_str().context("a launch word is not a string")?;
             Ok(word
                 .replace("{workspace}", "${MANDATE_WORKSPACE:?set the workspace}")
+                .replace(
+                    "{hosted_workspace}",
+                    "${MANDATE_WORKSPACE:?set the workspace}",
+                )
                 .replace(
                     "{agent}",
                     "${MANDATE_RUNTIME_AGENT:?set the runtime's agent}",
@@ -5610,6 +5726,20 @@ mod tests {
 
     use super::*;
 
+    /// The API's diagnosis asks for the logs of a run before only of the containers that restarted.
+    #[test]
+    fn only_restarted_containers_are_asked_for_their_previous_logs() {
+        let listing = "api-1 api 5\nconnect-finish-1 credentials 0 finish 0\npending-1\napi-2 api 0 sidecar 2\n";
+        assert_eq!(
+            restarted_containers(listing),
+            vec![
+                ("api-1".to_owned(), "api".to_owned()),
+                ("api-2".to_owned(), "sidecar".to_owned()),
+            ]
+        );
+        assert!(restarted_containers("").is_empty());
+    }
+
     /// The fixture's client secret is written at the client secret's own path in the `mandate`
     /// mount, from stdin alone: the root token is read as its first line and the value is the
     /// rest, already base64, so neither reaches an argument, and nothing is printed.
@@ -6152,6 +6282,60 @@ mod tests {
             .context("processes.json has no role provisioner")?;
         assert_eq!(process["image"], ROLE_PROVISIONER_PROCESS);
         assert_eq!(process["built"], true);
+        Ok(())
+    }
+
+    /// The scheduler's image (E21-29): its package is built with the cell's others and is one the
+    /// cell jobs follow, its Dockerfile copies exactly that binary, its key is the chart's process
+    /// and image name, and `cell up` names it, so the clock stream the runtime and executor read
+    /// is ticked in the cell.
+    #[test]
+    fn the_cell_builds_the_schedulers_image() -> Result<()> {
+        assert!(BUILT_PACKAGES.contains(&SCHEDULER_PACKAGE));
+        assert!(IMAGE_PACKAGES.contains(&SCHEDULER_PACKAGE));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dockerfile = fs::read_to_string(root.join(SCHEDULER_DOCKERFILE))?;
+        assert!(
+            dockerfile.contains("COPY mandate-scheduler /mandate-scheduler"),
+            "{dockerfile}"
+        );
+        assert!(
+            dockerfile.contains("FROM scratch") && dockerfile.contains("USER 65532:65532"),
+            "{dockerfile}"
+        );
+        let process = processes_in(&root)?
+            .into_iter()
+            .find(|p| p["name"] == SCHEDULER_PROCESS)
+            .context("processes.json has no scheduler")?;
+        assert_eq!(process["image"], SCHEDULER_PROCESS);
+        assert_eq!(process["built"], true);
+        assert_eq!(process["probe"][0], "/mandate-scheduler");
+        Ok(())
+    }
+
+    /// The data process's image (E21-29 lane SC): built with the cell's others and followed by the
+    /// cell jobs, its Dockerfile copies exactly that binary on an empty base as non-root, and its
+    /// key is the chart's process and image name.
+    #[test]
+    fn the_cell_builds_the_data_image() -> Result<()> {
+        assert!(BUILT_PACKAGES.contains(&DATA_PACKAGE));
+        assert!(IMAGE_PACKAGES.contains(&DATA_PACKAGE));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dockerfile = fs::read_to_string(root.join(DATA_DOCKERFILE))?;
+        assert!(
+            dockerfile.contains("COPY mandate-datad /mandate-datad")
+                && dockerfile.contains("FROM scratch")
+                && dockerfile.contains("USER 65532:65532"),
+            "{dockerfile}"
+        );
+        let process = processes_in(&root)?
+            .into_iter()
+            .find(|p| p["name"] == DATA_PROCESS)
+            .context("processes.json has no data process")?;
+        assert_eq!(process["image"], DATA_PROCESS);
+        assert_eq!(process["built"], true);
+        assert_eq!(process["db_role"], Value::Null);
+        assert_eq!(process["probe"][0], "/mandate-datad");
         Ok(())
     }
 

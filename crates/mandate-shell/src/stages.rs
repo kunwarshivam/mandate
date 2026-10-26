@@ -19,6 +19,7 @@ use mandate_runtime::{
     SignalInputs,
 };
 
+use crate::approvers::ApproverSource;
 use crate::error::Cause;
 
 /// One stage of the path, in the order the tracer reaches it (task brief, "The `Stage` enum").
@@ -150,6 +151,9 @@ impl fmt::Display for Stage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Admitted {
     pub view: MandateView,
+    /// What the run resolves `view`'s approvers from again at each control-stream read
+    /// (DEC-2384 item 6).
+    pub approvers: ApproverSource,
     pub environment: Environment,
     /// The registered policy set and model registry that govern the run, or `None` when nothing
     /// does yet (DEC-484).

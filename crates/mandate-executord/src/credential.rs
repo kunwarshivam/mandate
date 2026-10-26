@@ -465,9 +465,11 @@ impl<D: DataTransport, P: Pause> QuoteFeed for AlpacaQuotes<D, P> {
     ///
     /// # Errors
     /// `quote_unread` for a quote the host does not answer, that does not read, or that is older
-    /// than [`QuoteBounds::max_age`]; `quote_insane` for one that is not sane as trading spec §8.2
-    /// says, `0 < bid ≤ ask` and the ask no higher than `bid × (1 + max_spread)` rounded down.
-    /// Neither code names the instrument or a price.
+    /// than [`QuoteBounds::max_age`]. A quote that is not sane as trading spec §8.2 says,
+    /// `0 < bid ≤ ask` and the ask no higher than `bid × (1 + max_spread)` rounded down, is
+    /// observed with `sane` false, so a mark can restrict the instrument at once (§9.30); the
+    /// process hands the core none of those (DEC-2359, DEC-2380 item 3). The code names neither the
+    /// instrument nor a price.
     fn observe(
         &self,
         instrument: &InstrumentId,
@@ -482,9 +484,6 @@ impl<D: DataTransport, P: Pause> QuoteFeed for AlpacaQuotes<D, P> {
                 .bid
                 .collar_bound(self.bounds.max_spread, Adverse::Up)
                 .is_ok_and(|widest| quote.ask <= widest);
-        if !sane {
-            return Err("quote_insane");
-        }
         Ok(MarketObservation {
             instrument: instrument.clone(),
             bid: Some(quote.bid),
@@ -492,8 +491,13 @@ impl<D: DataTransport, P: Pause> QuoteFeed for AlpacaQuotes<D, P> {
             ask: Some(quote.ask),
             last_trade: None,
             mark: None,
-            sane: true,
+            sane,
             observed_at: RiskClock::from_secs(quote.at.min(now).secs()),
         })
+    }
+
+    /// Alpaca's IEX feed, the one paper reads (DEC-2359).
+    fn feed(&self) -> &'static str {
+        "iex"
     }
 }

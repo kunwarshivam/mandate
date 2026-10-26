@@ -18,10 +18,14 @@ use std::collections::BTreeSet;
 use mandate_canon::Value;
 use mandate_journal::Environment;
 
+use mandate_spec::document::ApproverRef;
+
 use super::doubles::{
-    AAPL, FixtureMandate, World, agent_stream, control_stream, output, seed, setup,
+    AAPL, FIXTURE_CONNECTION, FixtureMandate, NOW, World, agent_stream, control_stream, output,
+    seed, setup,
 };
 use super::{Admitted, MandateSource};
+use crate::adapters::admitted_view;
 use crate::error::Cause;
 use crate::tracer::ProductionCycle;
 
@@ -33,6 +37,10 @@ const REQUEST: &str = "00000100000000000000000001";
 const DELIVERED: &str = "00000100000000000000000008";
 const ANSWER: &str = "00000100000000000000000002";
 const LATER_ANSWER: &str = "00000100000000000000000003";
+const ESTABLISHED: &str = "0000010000000000000000000E";
+const FOUNDING: &str = "0000010000000000000000000F";
+const DEACTIVATION: &str = "0000010000000000000000000D";
+const REACTIVATION: &str = "0000010000000000000000000R";
 const CONTENT_HASH: &str =
     "sha256:3333333333333333333333333333333333333333333333333333333333333333";
 /// The founder answered 100 s before the run's clock (the M7 brief's `submitted_at`), and the
@@ -75,8 +83,30 @@ fn asked_agent_stream(world: &World) -> Result<(), String> {
 /// One committed answer of the workspace control stream: the founder's `cli_confirm` grant,
 /// journaled while no run was open (journal §2, §9.7; DEC-155 item 2).
 fn answered_control_stream(world: &World, seq: u64, event_id: &str) -> Result<(), String> {
+    answered_by(world, seq, event_id, "user-founder")
+}
+
+/// The founder's connection record at the control stream's `seq` 1, the record DEC-953's owner is
+/// read from, which the run reads again at each control-stream read (DEC-2384 item 6).
+pub(super) fn established(world: &World) -> Result<(), String> {
     let payload = format!(
-        r#"{{"agent":"tracer-aapl","approval":"{REQUEST}","verdict":"approved","content_hash":"{CONTENT_HASH}","submitted_at":{ANSWERED_AT},"step_up":{{"assertion_id":"first-gesture","authenticated_at":{ANSWERED_AT},"method":"cli_confirm"}},"responder":"user-founder","role":"approver"}}"#
+        r#"{{"connection_id":"{FIXTURE_CONNECTION}","environment":"paper","user":"user-founder"}}"#
+    );
+    seed(
+        world,
+        &control_stream(),
+        1,
+        ESTABLISHED,
+        "ConnectionEstablished",
+        "user",
+        &payload,
+    )
+}
+
+/// `responder`'s `cli_confirm` grant of the ask at the control stream's `seq`.
+fn answered_by(world: &World, seq: u64, event_id: &str, responder: &str) -> Result<(), String> {
+    let payload = format!(
+        r#"{{"agent":"tracer-aapl","approval":"{REQUEST}","verdict":"approved","content_hash":"{CONTENT_HASH}","submitted_at":{ANSWERED_AT},"step_up":{{"assertion_id":"first-gesture","authenticated_at":{ANSWERED_AT},"method":"cli_confirm"}},"responder":"{responder}","role":"approver"}}"#
     );
     seed(
         world,
@@ -104,17 +134,74 @@ impl MandateSource for ApprovableMandate {
         }
         .admitted()?;
         admitted.view.approval.approvers = BTreeSet::from(["user-founder".to_owned()]);
+        admitted.approvers.references = vec![reference("user:user-founder")?];
         Ok(admitted)
     }
+}
+
+fn reference(text: &str) -> Result<ApproverRef, Cause> {
+    ApproverRef::parse(text).map_err(|_| Cause::Absent {
+        what: "an approver reference",
+    })
+}
+
+/// The founder's principal in a workspace `mandate workspace found` founded (DEC-991).
+const FOUNDER: &str = "01K6C00000000000000000000F";
+
+/// The fixture's mandate in a founded workspace: `role:approver`, which the founder resolved to
+/// when the run was admitted (DEC-2384).
+struct FoundedMandate {
+    world: World,
+}
+
+impl MandateSource for FoundedMandate {
+    fn admitted(&self) -> Result<Admitted, Cause> {
+        let mut admitted = FixtureMandate {
+            world: self.world.clone(),
+            environment: Environment::Paper,
+        }
+        .admitted()?;
+        admitted.view.approval.approvers = BTreeSet::from([FOUNDER.to_owned()]);
+        admitted.approvers.references = vec![reference("role:approver")?];
+        Ok(admitted)
+    }
+}
+
+/// The founding grant of [`FOUNDER`] at the control stream's `seq` 1, committed at the fixture's
+/// clock with no cool-off (journal spec §9.12).
+fn founded(world: &World) -> Result<(), String> {
+    let payload = format!(
+        r#"{{"cool_off_ends_at":"{NOW}","independent_approval_required":false,"invitation":null,"member":"{FOUNDER}","reason":"founding","roles":["approver","operator","workspace_admin"]}}"#
+    );
+    seed(
+        world,
+        &control_stream(),
+        1,
+        FOUNDING,
+        "MemberActivated",
+        "system",
+        &payload,
+    )
 }
 
 /// One cycle over the tailed answer, with every stage the fixture's permissive doubles, whose
 /// report shows the keystone's one submission.
 fn run_of(world: &World) -> Result<crate::tracer::Report, String> {
+    run_with(
+        world,
+        Box::new(ApprovableMandate {
+            world: world.clone(),
+        }),
+    )
+}
+
+/// One cycle as [`run_of`]'s, with `mandate` the mandate stage.
+fn run_with(
+    world: &World,
+    mandate: Box<dyn MandateSource>,
+) -> Result<crate::tracer::Report, String> {
     let mut stages = world.stages();
-    stages.mandate = Box::new(ApprovableMandate {
-        world: world.clone(),
-    });
+    stages.mandate = mandate;
     let output = output().map_err(|cause| cause.to_string())?;
     ProductionCycle::new(stages, setup()?)
         .run(output)
@@ -142,7 +229,8 @@ fn result_member(copy: &Value) -> Option<&str> {
 fn the_open_cycle_hands_the_tailed_ctl_rows_to_the_runtime() -> Result<(), String> {
     let world = World::default();
     asked_agent_stream(&world)?;
-    answered_control_stream(&world, 1, ANSWER)?;
+    established(&world)?;
+    answered_control_stream(&world, 2, ANSWER)?;
     let report = run_of(&world)?;
     assert!(
         report.submitted.len() == 1,
@@ -178,8 +266,9 @@ fn the_open_cycle_hands_the_tailed_ctl_rows_to_the_runtime() -> Result<(), Strin
 fn the_tailed_rows_reach_the_runtime_in_the_journals_own_order() -> Result<(), String> {
     let world = World::default();
     asked_agent_stream(&world)?;
-    answered_control_stream(&world, 1, ANSWER)?;
-    answered_control_stream(&world, 2, LATER_ANSWER)?;
+    established(&world)?;
+    answered_control_stream(&world, 2, ANSWER)?;
+    answered_control_stream(&world, 3, LATER_ANSWER)?;
     run_of(&world)?;
     let copies = responded_copies(&world);
     let [first, second] = &copies[..] else {
@@ -217,4 +306,218 @@ fn the_tailed_rows_reach_the_runtime_in_the_journals_own_order() -> Result<(), S
         "a decided approval refuses the later answer of the same ask"
     );
     Ok(())
+}
+
+/// The one `ApprovalResponded` copy the ledger holds: its result and refusal reason.
+fn the_copy(world: &World) -> Result<(Option<String>, Option<String>), String> {
+    let copies = responded_copies(world);
+    let [copy] = &copies[..] else {
+        return Err(format!("{} copies, not one", copies.len()));
+    };
+    let reason = copy
+        .get("payload")
+        .and_then(|payload| payload.get("reason"))
+        .and_then(Value::as_str);
+    Ok((
+        result_member(copy).map(str::to_owned),
+        reason.map(str::to_owned),
+    ))
+}
+
+/// DEC-2384: in a founded workspace the founder's grant is admitted, its approvers resolved from
+/// the control stream's membership fold.
+#[test]
+fn a_founded_workspaces_founder_grant_is_admitted() -> Result<(), String> {
+    let world = World::default();
+    asked_agent_stream(&world)?;
+    founded(&world)?;
+    answered_by(&world, 2, ANSWER, FOUNDER)?;
+    run_with(
+        &world,
+        Box::new(FoundedMandate {
+            world: world.clone(),
+        }),
+    )?;
+    assert_eq!(the_copy(&world)?, (Some("admitted".to_owned()), None));
+    Ok(())
+}
+
+/// DEC-2384 item 6: the run resolves its approvers again from the control stream it reads at
+/// admission, so a grant from a member deactivated after the run was admitted, and before the
+/// grant is, is refused `not_an_approver` and nothing is sent.
+#[test]
+fn a_grant_from_a_member_deactivated_before_its_admission_is_not_an_approvers() -> Result<(), String>
+{
+    let world = World::default();
+    asked_agent_stream(&world)?;
+    founded(&world)?;
+    let payload = format!(r#"{{"member":"{FOUNDER}"}}"#);
+    seed(
+        &world,
+        &control_stream(),
+        2,
+        DEACTIVATION,
+        "MemberDeactivated",
+        "system",
+        &payload,
+    )?;
+    answered_by(&world, 3, ANSWER, FOUNDER)?;
+    let report = run_with(
+        &world,
+        Box::new(FoundedMandate {
+            world: world.clone(),
+        }),
+    )?;
+    assert_eq!(
+        the_copy(&world)?,
+        (
+            Some("refused".to_owned()),
+            Some("not_an_approver".to_owned())
+        )
+    );
+    assert!(report.submitted.is_empty(), "nothing is sent: {report:?}");
+    Ok(())
+}
+
+/// [`FOUNDER`]'s deactivation at the control stream's `seq`.
+fn deactivated(world: &World, seq: u64) -> Result<(), String> {
+    let payload = format!(r#"{{"member":"{FOUNDER}"}}"#);
+    seed(
+        world,
+        &control_stream(),
+        seq,
+        DEACTIVATION,
+        "MemberDeactivated",
+        "system",
+        &payload,
+    )
+}
+
+/// DEC-2384 item 6, per grant: a grant is judged against the roster as of its own record, not as
+/// of the read's last. With the founder deactivated, then granting, then reactivated, all in one
+/// read, the grant is refused `not_an_approver`: the reactivation after it never lends it the
+/// role it lacked when it was made.
+#[test]
+fn a_grant_made_while_deactivated_is_refused_though_the_same_read_reactivates_its_member()
+-> Result<(), String> {
+    let world = World::default();
+    asked_agent_stream(&world)?;
+    founded(&world)?;
+    deactivated(&world, 2)?;
+    answered_by(&world, 3, ANSWER, FOUNDER)?;
+    let payload = format!(
+        r#"{{"cool_off_ends_at":"{NOW}","independent_approval_required":false,"member":"{FOUNDER}","roles":["approver","operator","workspace_admin"]}}"#
+    );
+    seed(
+        &world,
+        &control_stream(),
+        4,
+        REACTIVATION,
+        "MemberReactivated",
+        "system",
+        &payload,
+    )?;
+    let report = run_with(
+        &world,
+        Box::new(FoundedMandate {
+            world: world.clone(),
+        }),
+    )?;
+    assert_eq!(
+        the_copy(&world)?,
+        (
+            Some("refused".to_owned()),
+            Some("not_an_approver".to_owned())
+        )
+    );
+    assert!(report.submitted.is_empty(), "nothing is sent: {report:?}");
+    Ok(())
+}
+
+/// DEC-2384 item 6, per grant: a grant the founder made while an approver is admitted though
+/// the same read later deactivates them; the deactivation narrows only what comes after it.
+#[test]
+fn a_grant_made_while_an_approver_is_admitted_though_the_same_read_deactivates_its_member()
+-> Result<(), String> {
+    let world = World::default();
+    asked_agent_stream(&world)?;
+    founded(&world)?;
+    answered_by(&world, 2, ANSWER, FOUNDER)?;
+    deactivated(&world, 3)?;
+    run_with(
+        &world,
+        Box::new(FoundedMandate {
+            world: world.clone(),
+        }),
+    )?;
+    assert_eq!(the_copy(&world)?, (Some("admitted".to_owned()), None));
+    Ok(())
+}
+
+/// DEC-2384 item 6: a revoked connection names no owner at the read that admits the grant, so the
+/// grant DEC-953's owner made before the revocation was read is refused `not_an_approver`.
+#[test]
+fn a_grant_after_the_connection_was_revoked_is_not_an_approvers() -> Result<(), String> {
+    let world = World::default();
+    asked_agent_stream(&world)?;
+    established(&world)?;
+    let payload = format!(r#"{{"connection_id":"{FIXTURE_CONNECTION}","reason":"owner"}}"#);
+    seed(
+        &world,
+        &control_stream(),
+        2,
+        DEACTIVATION,
+        "ConnectionRevoked",
+        "user",
+        &payload,
+    )?;
+    answered_control_stream(&world, 3, ANSWER)?;
+    run_of(&world)?;
+    assert_eq!(
+        the_copy(&world)?,
+        (
+            Some("refused".to_owned()),
+            Some("not_an_approver".to_owned())
+        )
+    );
+    Ok(())
+}
+
+/// The same view, or its approvers narrowed, is the admitted view; a wider or different
+/// approver set, or any other member changed, is not.
+#[test]
+fn only_a_narrowed_approver_set_is_still_the_admitted_view() -> Result<(), String> {
+    let fixture = FixtureMandate {
+        world: World::default(),
+        environment: Environment::Paper,
+    };
+    let mut own = fixture.admitted().map_err(|e| e.to_string())?.view;
+    own.approval.approvers = approvers(&["a", "b"]);
+    let with = |ids: &[&str]| {
+        let mut view = own.clone();
+        view.approval.approvers = approvers(ids);
+        view
+    };
+    assert!(admitted_view(own.clone(), &own), "the same view");
+    assert!(admitted_view(own.clone(), &with(&["a"])), "narrowed");
+    assert!(admitted_view(own.clone(), &with(&[])), "narrowed to no one");
+    assert!(
+        !admitted_view(own.clone(), &with(&["a", "b", "c"])),
+        "wider"
+    );
+    assert!(
+        !admitted_view(own.clone(), &with(&["c"])),
+        "another approver"
+    );
+    let mut other = own.clone();
+    other.version = "2".to_owned();
+    assert!(!admitted_view(own.clone(), &other), "another version");
+    let mut other = with(&["a"]);
+    other.approval.timeout_s += 1;
+    assert!(!admitted_view(own, &other), "narrowed, but another timeout");
+    Ok(())
+}
+
+fn approvers(ids: &[&str]) -> BTreeSet<String> {
+    ids.iter().map(|id| (*id).to_owned()).collect()
 }
