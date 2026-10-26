@@ -1636,3 +1636,32 @@ fn an_output_answered_twice_at_once_is_recorded_once() {
     );
     assert_eq!(risk_clock(&process), Some(NOW + 5));
 }
+
+/// #2448's re-review: when the clock has moved on by the time an observation in doubt is retried,
+/// the output queued behind it is handed before the new tick is evaluated, so the same daily
+/// output, answered again at the new tick, is recorded once.
+#[test]
+fn a_tick_that_moves_on_while_an_observation_is_in_doubt_records_its_output_once() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    let mut process = modelled(&rig, &host, &closes);
+    tick(&rig, NOW + 5);
+    rig.lose_answers.set(1);
+    process.step(at(NOW + 6));
+    assert_eq!(count(&rig, "ModelOutputRecorded"), 0, "in doubt");
+    tick(&rig, NOW + 7);
+    process.step(at(NOW + 8));
+    assert_eq!(host.asked.get(), 2, "the new tick asks again");
+    assert_eq!(
+        (
+            count(&rig, "ObservationRecorded"),
+            count(&rig, "ModelOutputRecorded")
+        ),
+        (1, 1),
+        "{:?}",
+        kinds(&rig)
+    );
+    assert_eq!(risk_clock(&process), Some(NOW + 7));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}

@@ -440,16 +440,27 @@ impl<S: Store> RuntimeProcess<S> {
     /// and its `Input::ModelOutput` queued, and the queue is handed in order. Whether the tick may
     /// follow. It always may, unless a hand did not commit: an input whose append is in doubt is
     /// handed again before anything else, the tick included (DEC-131 item 6), and the inputs queued
-    /// after it wait, still ahead of the tick, so an observation is never left without its output;
+    /// after it wait, still ahead of the tick and of any later evaluation, so an observation is never
+    /// left without its output and no output is queued twice;
     /// a stopped process takes nothing. An agent stream that cannot be read, outputs that do not
     /// read, closes that are not stored, or an evaluation the core would refuse are no new output
     /// (MI-10), and the tick still runs, so its expiries and exits never wait on a model (rule 13).
     fn models_pass(&mut self, now: UtcNanos, at: RiskClock, alerts: &mut Vec<Alert>) -> bool {
+        if !self.models_drained(now, alerts) {
+            return false;
+        }
         if self.wiring.models.is_some() && self.models_at != Some(at.secs()) {
             self.models_at = Some(at.secs());
             let queued = self.models_inputs(at);
             self.models_queue.extend(queued);
         }
+        self.models_drained(now, alerts)
+    }
+
+    /// Hands the queued models' inputs in order; whether every one committed. What an earlier
+    /// tick queued is handed before anything new is evaluated, so [`fresh`] reads its outputs
+    /// journaled and never queues one twice.
+    fn models_drained(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> bool {
         while let Some(input) = self.models_queue.pop_front() {
             if !self.hand(now, now, input, alerts) {
                 return false;
