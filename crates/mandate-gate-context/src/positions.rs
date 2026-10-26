@@ -129,13 +129,13 @@ struct Resting {
     prices: Option<(Price, Option<Price>)>,
 }
 
-/// An unprotected interval, as the executor's fold keeps it.
+/// An unprotected interval, as the executor's fold keeps it, less what the read never serves (the
+/// bound's alert, which only the executor's exit ladder reads).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Interval {
     instrument: String,
     started_at: UtcNanos,
     ended: bool,
-    alerted: bool,
     uncovered: bool,
     bracket: Option<String>,
 }
@@ -556,7 +556,6 @@ impl Positions {
                         instrument,
                         started_at: at,
                         ended: false,
-                        alerted: false,
                         uncovered: false,
                         bracket,
                     });
@@ -620,8 +619,6 @@ impl Positions {
                         open.ended = true;
                     } else if uncovered {
                         open.uncovered = true;
-                    } else if !finished {
-                        open.alerted = true;
                     }
                 }
             }

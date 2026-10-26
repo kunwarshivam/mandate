@@ -1106,3 +1106,149 @@ fn a_start_ends_only_an_open_interval_of_its_own_instrument() {
         "the second start ended the first interval, the third the second"
     );
 }
+
+/// A plain entry `order` of the agent's, whose stop follows its fill (DEC-966 item 2).
+fn plain_entry(read: &mut Positions, order: &str) {
+    on(read, "OrderRequestRecorded", &request(AGENT, "open"));
+    on(read, "OrderSubmitted", &submitted(order, ASSET, "buy", "1"));
+}
+
+/// A bracket entry `order` of the agent's.
+fn bracket_entry(read: &mut Positions, order: &str) {
+    on(
+        read,
+        "OrderRequestRecorded",
+        &request(AGENT, "open").with("order_class", text("bracket")),
+    );
+    on(read, "OrderSubmitted", &submitted(order, ASSET, "buy", "1"));
+}
+
+fn starts(bracket: Option<&str>, instrument: &str, at: i64) -> Value {
+    protection("unprotected_start", START + at)
+        .with("instrument_id", text(instrument))
+        .with("bracket", bracket.map_or(Value::Null, text))
+}
+
+fn open_since(read: &Positions, instrument: &str) -> Option<i64> {
+    read.protection(instrument)
+        .unprotected_since
+        .map(|at| at.secs() - START)
+}
+
+/// An acknowledged end ends the first open interval of its own instrument among the entries it
+/// awaited: never another instrument's, and never one already ended.
+#[test]
+fn an_acknowledged_end_ends_an_open_interval_of_its_own_instrument() {
+    let mut read = bought();
+    on(&mut read, "ProtectionChanged", &starts(None, ASSET_B, 1));
+    on(&mut read, "ProtectionChanged", &starts(None, ASSET, 2));
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &protection("unprotected_end", START + 3).with("acknowledged", Value::Bool(true)),
+    );
+    assert_eq!(open_since(&read, ASSET), None);
+    assert_eq!(
+        open_since(&read, ASSET_B),
+        Some(1),
+        "B's interval is not A's to end"
+    );
+
+    let mut read = bought();
+    on(&mut read, "ProtectionChanged", &starts(None, ASSET, 1));
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &protection("unprotected_end", START + 2),
+    );
+    on(&mut read, "ProtectionChanged", &starts(None, ASSET, 3));
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &protection("unprotected_end", START + 4).with("acknowledged", Value::Bool(true)),
+    );
+    assert_eq!(
+        open_since(&read, ASSET),
+        None,
+        "the open one ends, not the ended one again"
+    );
+}
+
+/// An acknowledgment ends every plain entry's interval among the stops it awaited, in its own
+/// instrument (DEC-966 item 7): the awaited stops of plain entries join one another, and a bracket
+/// entry's interval, or a plain entry's in another instrument, stays open.
+#[test]
+fn an_acknowledgment_ends_every_awaited_plain_entrys_interval_and_nothing_else() {
+    let mut read = bought();
+    plain_entry(&mut read, "mdt-p");
+    plain_entry(&mut read, "mdt-q");
+    bracket_entry(&mut read, "mdt-b");
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &starts(Some("mdt-p"), ASSET, 1),
+    );
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &starts(Some("mdt-q"), ASSET, 2),
+    );
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &starts(Some("mdt-b"), ASSET, 3),
+    );
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &starts(Some("mdt-q"), ASSET_B, 4),
+    );
+    for (entry, at) in [("mdt-p", 5), ("mdt-q", 6)] {
+        on(
+            &mut read,
+            "ProtectionChanged",
+            &protection("unprotected_end", START + at)
+                .with("bracket", text(entry))
+                .with("awaiting", list(&[&format!("{entry}-p1")])),
+        );
+    }
+    assert_eq!(open_since(&read, ASSET), Some(1));
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &protection("unprotected_end", START + 7).with("acknowledged", Value::Bool(true)),
+    );
+    assert_eq!(
+        open_since(&read, ASSET),
+        Some(3),
+        "both plain entries' intervals end, and the bracket entry's stays"
+    );
+    assert_eq!(
+        open_since(&read, ASSET_B),
+        Some(4),
+        "another instrument's stays"
+    );
+}
+
+/// An end that names a bracket ends that bracket's open interval, not another's.
+#[test]
+fn an_end_naming_a_bracket_ends_that_brackets_interval() {
+    let mut read = bought();
+    bracket_entry(&mut read, "mdt-b");
+    on(&mut read, "ProtectionChanged", &starts(None, ASSET, 1));
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &starts(Some("mdt-b"), ASSET, 2),
+    );
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &protection("unprotected_end", START + 3).with("bracket", text("mdt-b")),
+    );
+    assert_eq!(
+        open_since(&read, ASSET),
+        Some(1),
+        "mdt-b's ended; the first stays"
+    );
+}
