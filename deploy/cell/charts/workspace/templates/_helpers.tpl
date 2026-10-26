@@ -483,8 +483,9 @@ spec:
 
 {{/*
 A service's launch from processes.json (DEC-1013): its `args`, and its `probe` asked `livez` and
-`readyz` (DEC-994 item 5), with `{workspace}` and the `runtime` values' `{agent}`, `{connection}` and
-`{owner}` filled in. A placeholder whose value is unset fails the render rather than starting a
+`readyz` (DEC-994 item 5), with `{workspace}`, `{hosted_workspace}` (`api.workspace`, the workspace
+the deployment manager hosts and whose clock stream the scheduler writes, E21-29), and the `runtime`
+values' `{agent}`, `{connection}` and `{owner}` filled in. A placeholder whose value is unset fails the render rather than starting a
 process for no deployment.
 */}}
 {{- define "mandate.fill" -}}
@@ -493,6 +494,7 @@ process for no deployment.
 {{- range .words -}}
 {{- $w := . -}}
 {{- if contains "{workspace}" $w }}{{ $w = replace "{workspace}" $v.workspace $w }}{{ end -}}
+{{- if contains "{hosted_workspace}" $w }}{{ $w = replace "{hosted_workspace}" (required "api.workspace, the hosted workspace's ULID whose clock stream the scheduler writes, is required with images.scheduler" $v.api.workspace) $w }}{{ end -}}
 {{- if contains "{agent}" $w }}{{ $w = replace "{agent}" (required "runtime.agent is required once images.runtime is named" $v.runtime.agent) $w }}{{ end -}}
 {{- if contains "{connection}" $w }}{{ $w = replace "{connection}" (required "runtime.connection is required once images.runtime is named" $v.runtime.connection) $w }}{{ end -}}
 {{- if contains "{owner}" $w }}{{ $w = replace "{owner}" (required "runtime.owner is required once images.runtime is named" $v.runtime.owner) $w }}{{ end -}}
