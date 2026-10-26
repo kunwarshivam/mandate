@@ -80,6 +80,8 @@ const API_DOCKERFILE: &str = "deploy/cell/images/api.Dockerfile";
 const DEPLOY_MANAGER_DOCKERFILE: &str = "deploy/cell/images/deploy-manager.Dockerfile";
 /// The deployment manager's process name, which is also its image's key in the chart's values.
 const DEPLOY_MANAGER_PROCESS: &str = "deploy-manager";
+/// The local cell's second deployment manager, for the run's research workspace (DEC-2070).
+const RESEARCH_MANAGER_PROCESS: &str = "deploy-manager-research";
 /// The role provisioner's image (DEC-2350), built beside `mandate` from the same static build.
 const ROLE_PROVISIONER_DOCKERFILE: &str = "deploy/cell/images/role-provisioner.Dockerfile";
 /// The role provisioner's process name, which is also its image's key in the chart's values.
