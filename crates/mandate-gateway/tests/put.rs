@@ -44,7 +44,6 @@ fn put_reply() -> impl Strategy<Value = PutReply> {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn any_put_reads_back_as_itself_from_canonical_bytes() {
     runner()
         .run(&put(), |put| {
@@ -58,7 +57,6 @@ fn any_put_reads_back_as_itself_from_canonical_bytes() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn any_put_reply_reads_back_as_itself_from_canonical_bytes() {
     runner()
         .run(&put_reply(), |reply| {
@@ -73,7 +71,6 @@ fn any_put_reply_reads_back_as_itself_from_canonical_bytes() {
 /// DEC-2279 item 1, pinned: a put, a stored reply and a refusal written out by hand are the
 /// encoder's bytes exactly. The put carries no reference: the service computes one (item 2).
 #[test]
-#[ignore = "pending E21-62"]
 fn the_put_wire_form_is_the_one_written_out_here() {
     let put = PutRequest {
         workspace_id: "ws1".to_owned(),
@@ -104,7 +101,6 @@ fn the_put_wire_form_is_the_one_written_out_here() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_frame_is_a_put_exactly_when_it_has_a_put_member() {
     let call = request(&registry().1, 1);
     assert_eq!(
@@ -133,7 +129,6 @@ fn a_frame_is_a_put_exactly_when_it_has_a_put_member() {
 /// canonical, another version, a member missing, unlisted or of the wrong kind, odd or upper-case
 /// hex, a reference without its prefix, or a refusal code not listed.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_put_frame_the_encoder_would_not_write_reads_as_nothing() {
     for frame in [
         r#"{"put":"616263","workspace_id":"ws1","wire_version":1}"#,
@@ -195,7 +190,6 @@ fn answered(reply: &PutReply) -> Pipe {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_put_crosses_the_exchange_as_one_frame_each_way() {
     let put = PutRequest {
         workspace_id: "ws1".to_owned(),
@@ -215,7 +209,6 @@ fn a_put_crosses_the_exchange_as_one_frame_each_way() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_put_past_the_request_frame_bound_is_never_sent() {
     let past = usize::try_from(MAX_REQUEST_FRAME / 2).unwrap();
     let put = PutRequest {
@@ -228,7 +221,6 @@ fn a_put_past_the_request_frame_bound_is_never_sent() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_put_reply_that_does_not_decode_is_a_frame_error() {
     let mut input = Vec::new();
     write_frame(&mut input, br#"{"stored":"x","wire_version":1}"#, u32::MAX).unwrap();

@@ -66,7 +66,6 @@ fn the_cap_is_512_mib() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_put_is_stored_under_the_reference_the_service_computes() {
     let (reader, root) = store("stored");
     let mut writer = ArtifactWriter::open(&root, "ws_1").unwrap();
@@ -80,7 +79,6 @@ fn a_put_is_stored_under_the_reference_the_service_computes() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn another_workspaces_put_is_refused_and_stores_nothing() {
     let (_, root) = store("foreign");
     let mut writer = ArtifactWriter::open(&root, "ws_1").unwrap();
@@ -94,7 +92,6 @@ fn another_workspaces_put_is_refused_and_stores_nothing() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn an_existing_objects_bytes_never_change_and_a_damaged_one_is_refused() {
     let (reader, root) = store("create-only");
     let reference = ArtifactRef::of(b"thesis");
@@ -121,7 +118,6 @@ fn an_existing_objects_bytes_never_change_and_a_damaged_one_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn the_count_starts_from_every_file_in_the_store_temporary_leftovers_among_them() {
     let (mut earlier, root) = store("counted");
     earlier.put_artifact(b"control run").unwrap();
@@ -132,7 +128,6 @@ fn the_count_starts_from_every_file_in_the_store_temporary_leftovers_among_them(
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn identical_bytes_are_counted_once() {
     let (_, root) = store("once");
     let mut writer = ArtifactWriter::open(&root, "ws_1").unwrap();
@@ -144,7 +139,6 @@ fn identical_bytes_are_counted_once() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_put_past_the_cap_is_refused_store_full_and_stores_nothing() {
     let (_, root) = store("full");
     let mut writer = ArtifactWriter::capped(&root, "ws_1", 10).unwrap();
@@ -167,7 +161,6 @@ fn a_put_past_the_cap_is_refused_store_full_and_stores_nothing() {
 /// DEC-2279 item 4: after a put the store did not take, the count is taken again from the store,
 /// so bytes that came after open (here a crashed put's leftover) bind the cap from then on.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_put_the_store_did_not_take_takes_the_count_again() {
     let (mut earlier, root) = store("recount");
     let mut writer = ArtifactWriter::capped(&root, "ws_1", 30).unwrap();
@@ -197,7 +190,6 @@ fn a_put_the_store_did_not_take_takes_the_count_again() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_store_already_past_the_cap_takes_no_new_object() {
     let (mut earlier, root) = store("past");
     earlier.put_artifact(b"0123456789ab").unwrap();
@@ -206,7 +198,6 @@ fn a_store_already_past_the_cap_takes_no_new_object() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_store_that_does_not_exist_or_is_not_laid_out_never_opens_and_is_never_made() {
     let (_, root) = store("absent");
     let nowhere = root.join("nowhere");
@@ -272,7 +263,6 @@ fn stop(stopper: &Stopper, ended: &mpsc::Receiver<()>) {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_put_crosses_the_service_to_the_writer_and_no_log_line_carries_its_bytes() {
     let (reader, root) = store("served");
     let mut writer = ArtifactWriter::open(&root, "ws_1").unwrap();
@@ -304,7 +294,6 @@ fn a_put_crosses_the_service_to_the_writer_and_no_log_line_carries_its_bytes() {
 }
 
 #[test]
-#[ignore = "pending E21-62"]
 fn a_server_that_stores_nothing_refuses_every_put() {
     let (address, lines, stopper, ended) = serving(None);
     assert_eq!(
