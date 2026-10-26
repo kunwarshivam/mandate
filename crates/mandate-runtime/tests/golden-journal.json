@@ -1,5 +1,5 @@
 {
-  "fold_version": 1,
+  "fold_version": 2,
   "note": "The golden journal of ADR-0001 ES-21: a run whose fold output is pinned, so a change to what the fold derives has to change this file and bump fold_version in the same commit. Streams and payload fields are exactly what journal spec sections 2, 3, and 9 define.",
   "events": [
     { "stream": "acct:ws1:acct-1", "seq": 1, "event_type": "StreamOpened", "payload": { "environment": "paper", "stream_type": "account" } },

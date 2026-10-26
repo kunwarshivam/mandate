@@ -598,6 +598,12 @@ pub struct SignalInputs {
     pub outputs: BTreeMap<String, BTreeMap<InstrumentId, ModelOutput>>,
     pub output_events: BTreeMap<String, BTreeMap<InstrumentId, EventId>>,
     pub now: RiskClock,
+    /// The instruments whose current thesis has ended at `now` (mandate spec §8.6): the plan
+    /// proposes their exit while the agent holds them, whatever the outputs say (§8.3 step 2).
+    pub ended_theses: BTreeSet<InstrumentId>,
+    /// Per instrument, the sells this runtime proposed that are still working, which a plan takes
+    /// off the position before it proposes an exit (§8.3 step 2, "minus working exits").
+    pub working_exits: BTreeMap<InstrumentId, Qty>,
 }
 
 /// Whether the executor is known to hold an intent yet.

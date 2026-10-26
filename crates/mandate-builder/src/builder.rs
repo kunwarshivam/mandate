@@ -697,6 +697,32 @@ fn discretionary_exit(
             reason: HoldReason::DiscretionaryExitsDisabled,
         });
     }
+    sell_whole_position(account, market)
+}
+
+/// §8.3 step 2's first branch (mandate spec v0.10, MI-34, DEC-2391): the instrument's thesis
+/// ended, so the whole position is sold at the bid whatever the signals say, with no model output
+/// read at all. The combined figures are those of no output, which is what the exit used. The
+/// caller decides that the thesis ended and gives the position less its working exits; the session
+/// rule that defers an equity exit is the gate's, as for the signal exit.
+///
+/// # Errors
+/// As [`propose`] with no outputs, and as the exit's notional refuses.
+pub fn propose_thesis_exit(
+    mandate: &BuilderMandate,
+    account: &AccountSnapshot,
+    market: &Market,
+    risk: &RiskContext,
+    now: UtcNanos,
+) -> Result<Proposal, BuilderError> {
+    let mut proposal = propose(mandate, account, market, risk, &[], now)?;
+    proposal.action = sell_whole_position(account, market)?;
+    Ok(proposal)
+}
+
+/// The whole position at the bid, or a hold when there is none. An equity exit inside the close
+/// window goes out marketable (DEC-70).
+fn sell_whole_position(account: &AccountSnapshot, market: &Market) -> Result<Action, BuilderError> {
     if account.position_qty.is_zero() {
         return Ok(Action::Hold {
             reason: HoldReason::NoPosition,

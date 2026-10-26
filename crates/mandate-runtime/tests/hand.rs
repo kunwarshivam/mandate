@@ -235,7 +235,7 @@ fn the_golden_journal_folds_to_the_committed_state() {
 #[test]
 fn the_fold_version_is_pinned_with_the_golden_journal() {
     assert_eq!(
-        FOLD_VERSION, 1,
+        FOLD_VERSION, 2,
         "a change to fold output bumps this and regenerates the golden journal (ES-21)"
     );
     let mut state = RuntimeState::new(common::deployment());

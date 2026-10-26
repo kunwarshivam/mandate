@@ -15,8 +15,8 @@ use mandate_num::{
 };
 use mandate_ports::{BuilderContext, PortError, size};
 use mandate_runtime::{
-    ModelDirection, ModelOutput, OrderExecution, Proposal, ProtectionPrices, Purpose, RiskClock,
-    SignalInputs, TimeInForce,
+    ExitOrigin, ModelDirection, ModelOutput, OrderExecution, Proposal, ProtectionPrices, Purpose,
+    RiskClock, SignalInputs, TimeInForce,
 };
 use mandate_spec::document::ProvenanceMap;
 use mandate_spec::{Mandate, ValidatedMandate, ValidationContext};
@@ -40,9 +40,18 @@ fn secs(text: &str) -> i64 {
 }
 
 fn validated() -> ValidatedMandate {
+    validated_base("two_stock_swing")
+}
+
+/// The reference cases' research base: an unpinned universe, so a thesis can end (DEC-2391).
+fn researched() -> ValidatedMandate {
+    validated_base("research_equity")
+}
+
+fn validated_base(base: &str) -> ValidatedMandate {
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("../../../fixtures/refcases/mandate.json")).unwrap();
-    let document = fixture.pointer("/bases/two_stock_swing/mandate").unwrap();
+    let document = fixture.pointer(&format!("/bases/{base}/mandate")).unwrap();
     let canonical = mandate_canon::parse(&serde_json::to_vec(document).unwrap()).unwrap();
     let context = ValidationContext {
         account_equity_usd: Usd::parse("100000").unwrap(),
@@ -179,6 +188,8 @@ fn inputs() -> SignalInputs {
             .collect(),
         output_events: BTreeMap::new(),
         now: RiskClock::from_secs(secs("2026-09-22T14:00:00Z")),
+        ended_theses: Default::default(),
+        working_exits: Default::default(),
     }
 }
 
@@ -288,4 +299,120 @@ fn an_execution_policy_for_another_asset_class_is_refused() {
         refused(size(&validated(), &builder, &inputs())),
         "the mandate-derived execution policy"
     );
+}
+
+/// `inputs` with SWING's thesis ended (mandate spec v0.10 §8.3 step 2, MI-34, DEC-2391).
+fn ended(mut inputs: SignalInputs, instrument: &str) -> SignalInputs {
+    inputs
+        .ended_theses
+        .insert(InstrumentId::new(instrument).unwrap());
+    inputs
+}
+
+/// Both models now bullish: the signals alone would buy, never sell.
+fn bullish() -> SignalInputs {
+    let mut inputs = inputs();
+    for by_instrument in inputs.outputs.values_mut() {
+        for output in by_instrument.values_mut() {
+            output.conviction = Conviction::parse("0.9").unwrap();
+        }
+    }
+    inputs
+}
+
+#[test]
+fn an_ended_thesis_sells_the_whole_position_at_the_bid_whatever_the_signals() {
+    for (what, inputs) in [
+        ("bullish outputs", bullish()),
+        ("bearish outputs", inputs()),
+        (
+            "no outputs",
+            SignalInputs {
+                outputs: BTreeMap::new(),
+                ..inputs()
+            },
+        ),
+    ] {
+        let proposal = size(&researched(), &builder(), &ended(inputs, SWING))
+            .unwrap()
+            .unwrap_or_else(|| panic!("{what}: proposed"));
+        assert_eq!(proposal.side, Side::Sell, "{what}");
+        assert_eq!(proposal.purpose, Purpose::DiscretionaryExit, "{what}");
+        assert_eq!(
+            proposal.exit_origin,
+            Some(ExitOrigin::RemovedInstrument),
+            "{what}"
+        );
+        assert_eq!(proposal.qty, Qty::parse("5").unwrap(), "{what}");
+        assert_eq!(proposal.limit, Price::parse("99.9").unwrap(), "{what}");
+        assert_eq!(proposal.execution, Some(sell_execution()), "{what}");
+        assert!(
+            proposal.outputs_used.is_empty(),
+            "{what}: it read no output"
+        );
+        assert!(proposal.model_weights.is_empty(), "{what}: journal rule 8");
+        assert!(proposal.clips_applied.is_empty(), "{what}: journal rule 8");
+        assert_eq!(proposal.exit_conviction, None, "{what}: journal rule 8");
+        assert_eq!(proposal.buy_conviction, None, "{what}: journal rule 8");
+        assert_eq!(
+            proposal.combined_score,
+            mandate_canon::Value::Null,
+            "{what}: journal rule 8"
+        );
+    }
+}
+
+#[test]
+fn an_ended_thesis_needs_no_output_the_mandate_still_pins() {
+    let mut inputs = inputs();
+    for by_instrument in inputs.outputs.values_mut() {
+        for output in by_instrument.values_mut() {
+            output.model_version = "9.9.9".to_owned();
+        }
+    }
+    assert_eq!(
+        refused(size(&validated(), &builder(), &inputs)),
+        "a model output pinned by the validated mandate",
+        "the signal path refuses the unpinned output"
+    );
+    let proposal = size(&researched(), &builder(), &ended(inputs, SWING))
+        .unwrap()
+        .unwrap();
+    assert_eq!(proposal.exit_origin, Some(ExitOrigin::RemovedInstrument));
+}
+
+#[test]
+fn an_ended_thesis_with_nothing_held_proposes_nothing() {
+    let mut flat = builder();
+    flat.account.position_qty = Qty::ZERO;
+    assert_eq!(
+        size(&researched(), &flat, &ended(bullish(), SWING)).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn another_instruments_ended_thesis_leaves_the_signal_path() {
+    let proposal = size(&validated(), &builder(), &ended(inputs(), OTHER))
+        .unwrap()
+        .unwrap();
+    assert_eq!(proposal.exit_origin, Some(ExitOrigin::Signal));
+    assert!(!proposal.outputs_used.is_empty());
+}
+
+#[test]
+fn a_pinned_universe_takes_no_thesis_exit() {
+    assert_eq!(
+        size(&validated(), &builder(), &ended(bullish(), SWING))
+            .map(|p| p.map(|p| p.exit_origin))
+            .ok()
+            .flatten()
+            .flatten(),
+        None,
+        "two_stock_swing is pinned: its ended theses (none can exist) sell nothing"
+    );
+    let signal = size(&validated(), &builder(), &ended(inputs(), SWING))
+        .unwrap()
+        .unwrap();
+    assert_eq!(signal.exit_origin, Some(ExitOrigin::Signal));
 }
