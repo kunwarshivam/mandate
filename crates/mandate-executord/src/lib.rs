@@ -42,6 +42,7 @@ pub mod facts;
 pub mod fixture;
 pub mod follow;
 pub mod gate;
+pub mod health;
 pub mod launch;
 pub mod lease;
 pub mod marks;

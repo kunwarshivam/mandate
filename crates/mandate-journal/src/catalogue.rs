@@ -1,7 +1,9 @@
 //! The event catalogue (journal spec §9): which streams may hold each event type, and the
 //! `config_refs` keys each requires at append.
 
-use crate::StreamType::{self, Account, Agent, Control, DeploymentMeter, Meter, Notice, Scheduler};
+use crate::StreamType::{
+    self, Account, Agent, Control, DeploymentMeter, Meter, News, Notice, Scheduler,
+};
 
 pub(crate) const FEE: &str = "fee_config";
 pub(crate) const CAL: &str = "trading_calendar";
@@ -35,10 +37,11 @@ const NONE: &[&str] = &[];
 
 /// Every event type [`lookup`] admits, in its order. The test below reads `lookup`'s source, so
 /// a type added there and not here fails the build's tests.
-pub(crate) const EVENT_TYPES: [&str; 138] = [
+pub(crate) const EVENT_TYPES: [&str; 139] = [
     "StreamOpened",
     "MeterReserved",
     "MeterSettled",
+    "NewsItemStored",
     "TradingDayStarted",
     "ClockAdvanced",
     "KillSwitchActivated",
@@ -193,10 +196,12 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
                 Notice,
                 Meter,
                 DeploymentMeter,
+                News,
             ],
             NONE,
         ),
         "MeterReserved" | "MeterSettled" => entry(&[Meter, DeploymentMeter], NONE),
+        "NewsItemStored" => entry(&[News], NONE),
         "TradingDayStarted" | "ClockAdvanced" => entry(&[Account, Scheduler], NONE),
         "KillSwitchActivated" => entry(&[Account, Agent], NONE),
         "OwnerAcknowledged" | "OwnerAcknowledgmentRequested" => entry(&[Account, Control], NONE),
