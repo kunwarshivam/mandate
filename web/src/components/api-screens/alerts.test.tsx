@@ -62,7 +62,7 @@ describe("alerts over the workspace API (§4.7, DEC-2141)", () => {
     expect(within(kill).getByText(/Email delivered\./)).toBeInTheDocument();
     expect(within(kill).getByRole("link")).toHaveAttribute("href", "/audit");
     expect(within(protection).getByText("A position's protection changed")).toBeInTheDocument();
-    expect(within(protection).getByText(/No notice sent yet\./)).toBeInTheDocument();
+    expect(within(protection).getByText(/No notice recorded for this alert\./)).toBeInTheDocument();
     expect(within(protection).getByRole("link")).toHaveAttribute("href", "/positions");
   });
 

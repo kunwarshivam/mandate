@@ -47,8 +47,18 @@ describe("alertsRead", () => {
     ["an agent stream naming no agent", (a: Record<string, unknown>) => (a.stream = { type: "agent", agent_id: null, account_ref: null })],
     ["a delivery on a pull channel", (a: Record<string, unknown>) => ((a.notice as { delivery: Array<Record<string, unknown>> }).delivery[0].channel = "web_inbox")],
     ["a missing subject", (a: Record<string, unknown>) => delete a.subject],
+    ["an owner command on a kind other than kill_switch", (a: Record<string, unknown>) => ((a.kind = "risk_limit"), (a.owner_command = "01JBH3BTZ8K2M4N6P8R0S2T4V6"))],
+    ["attempt 0", (a: Record<string, unknown>) => ((a.notice as { delivery: Array<Record<string, unknown>> }).delivery[0].attempt = 0)],
+    ["seven deliveries", (a: Record<string, unknown>) => { const n = a.notice as { delivery: unknown[] }; n.delivery = Array(7).fill(n.delivery[0]); }],
+    ["a subject type that is no event type", (a: Record<string, unknown>) => ((a.subject as Record<string, unknown>).event_type = "not a type")],
   ])("refuses %s", (_, change) => {
     expect(alertsRead(withAlert(change), "").ok).toBe(false);
+  });
+
+  it("refuses more than 200 alerts", () => {
+    const body = structuredClone(example) as { alerts: unknown[] };
+    body.alerts = Array(201).fill(body.alerts[1]);
+    expect(alertsRead(body, "").ok).toBe(false);
   });
 
   it("links each alert to where its subject is seen", () => {

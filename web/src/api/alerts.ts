@@ -82,8 +82,28 @@ const fail = (path: string, problem: "wrong_type" | "not_canonical"): Decoded<ne
 
 const boolean: Decoder<boolean> = (value, path) => (typeof value === "boolean" ? { ok: true, value } : fail(path, "wrong_type"));
 
-const delivery = object<AlertDelivery>({ channel: closedEnum(CHANNELS), status: closedEnum(STATUSES), attempt: integer, recorded_at: timestamp });
-const notice = object<AlertNotice>({ issued_at: timestamp, delivery: array(delivery) });
+/** An attempt number: 1 or more (journal spec §9.15). */
+const attempt: Decoder<number> = (value, path) => {
+  const read = integer(value, path);
+  return read.ok && read.value < 1 ? fail(path, "not_canonical") : read;
+};
+
+/** At most `max` items, as the schema bounds the list. */
+function bounded<T>(item: Decoder<T>, max: number): Decoder<T[]> {
+  return (value, path) => {
+    const read = array(item)(value, path);
+    return read.ok && read.value.length > max ? fail(path, "not_canonical") : read;
+  };
+}
+
+const EVENT_TYPE = /^[A-Z][A-Za-z0-9]{0,63}$/;
+const eventType: Decoder<string> = (value, path) => {
+  const read = string(value, path);
+  return read.ok && !EVENT_TYPE.test(read.value) ? fail(path, "not_canonical") : read;
+};
+
+const delivery = object<AlertDelivery>({ channel: closedEnum(CHANNELS), status: closedEnum(STATUSES), attempt, recorded_at: timestamp });
+const notice = object<AlertNotice>({ issued_at: timestamp, delivery: bounded(delivery, CHANNELS.length) });
 
 /** A stream names its agent or its account and nothing else; any other pairing is refused. */
 const stream: Decoder<AlertStream> = (value, path) => {
@@ -94,7 +114,7 @@ const stream: Decoder<AlertStream> = (value, path) => {
   return named ? read : fail(path, "not_canonical");
 };
 
-/** One alert: its class must be its kind's, so a mislabelled alert is refused, not shown under the wrong class. */
+/** One alert: its class must be its kind's, and only a kill switch names an owner command, so a mislabelled alert is refused, not shown. */
 const alert: Decoder<Alert> = (value, path) => {
   const read = object<Alert>({
     alert_id: string,
@@ -102,18 +122,19 @@ const alert: Decoder<Alert> = (value, path) => {
     class: closedEnum(["safety", "info"] as const),
     raised_at: timestamp,
     stream,
-    subject: object<Alert["subject"]>({ event_id: string, event_type: string }),
+    subject: object<Alert["subject"]>({ event_id: string, event_type: eventType }),
     owner_command: nullable(string),
     notice: nullable(notice),
   })(value, path);
   if (!read.ok) return read;
-  return read.value.class === ALERT_KINDS[read.value.kind].class ? read : fail(`${path}/class`, "not_canonical");
+  if (read.value.class !== ALERT_KINDS[read.value.kind].class) return fail(`${path}/class`, "not_canonical");
+  return read.value.owner_command !== null && read.value.kind !== "kill_switch" ? fail(`${path}/owner_command`, "not_canonical") : read;
 };
 
 /** `GET /alerts`' body (`read-models/alerts`). */
 export const alertsRead: Decoder<Alerts> = (value, path) => {
   if (!isRecord(value)) return fail(path, "wrong_type");
-  return object<Alerts>({ alerts: array(alert), truncated: boolean, as_of: array(watermark) })(value, path);
+  return object<Alerts>({ alerts: bounded(alert, 200), truncated: boolean, as_of: array(watermark) })(value, path);
 };
 
 /** Where an alert's subject is seen: its agent, the account's positions, or the workspace's records. */

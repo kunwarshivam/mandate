@@ -57,8 +57,8 @@ function useAlerts(): AlertsAnswer | null {
 }
 
 function Notice({ alert }: { alert: Alert }) {
-  if (alert.notice === null) return <>No notice sent yet.</>;
-  if (alert.notice.delivery.length === 0) return <>Notice issued; not sent to you yet.</>;
+  if (alert.notice === null) return <>No notice recorded for this alert.</>;
+  if (alert.notice.delivery.length === 0) return <>No delivery to you recorded.</>;
   return <>{alert.notice.delivery.map((d) => `${CHANNEL[d.channel]} ${STATUS[d.status]}`).join(", ")}.</>;
 }
 
