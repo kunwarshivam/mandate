@@ -4,6 +4,7 @@ mod research;
 
 pub use research::{ArtifactSink, ResearchParts, ResearchSource, ResearchWiring, ResearchWorker};
 
+use std::collections::VecDeque;
 use std::time::Duration;
 
 use mandate_canon::{Digest, Object, parse};
@@ -128,6 +129,8 @@ pub struct RuntimeProcess<S> {
     /// The latest tick the models were evaluated at in this process; a restart evaluates once
     /// more, and [`fresh`] keeps it from recording an output twice.
     models_at: Option<i64>,
+    /// The models' inputs of the latest evaluation not yet handed, in order, ahead of its tick.
+    models_queue: VecDeque<Input>,
 }
 
 impl<S: Store> RuntimeProcess<S> {
@@ -155,6 +158,7 @@ impl<S: Store> RuntimeProcess<S> {
             written_at: now,
             research,
             models_at: None,
+            models_queue: VecDeque::new(),
         };
         if config.environment != Environment::Paper {
             this.lifecycle.observe(now, Lifecycled::Failed);
@@ -431,46 +435,67 @@ impl<S: Store> RuntimeProcess<S> {
     }
 
     /// The pinned models' new outputs at the tick `at`, before the tick itself (DEC-2383): once per
-    /// tick this process has not evaluated at, each evaluation the agent stream holds no output for
-    /// is handed as its `Input::Observation`, its closes stored first, then its
-    /// `Input::ModelOutput`. Whether the tick may follow. It always may, unless a hand did not
-    /// commit: an input whose append is in doubt is handed again before anything else, the tick
-    /// included (DEC-131 item 6), and a stopped process takes nothing. An agent stream that cannot
-    /// be read, outputs that do not read, or closes that are not stored are no new output (MI-10),
-    /// and the tick still runs, so its expiries and exits never wait on a model (rule 13).
+    /// tick this process has not evaluated at, each evaluation the agent stream holds no output for,
+    /// and whose two inputs the core takes, has its closes stored and then its `Input::Observation`
+    /// and its `Input::ModelOutput` queued, and the queue is handed in order. Whether the tick may
+    /// follow. It always may, unless a hand did not commit: an input whose append is in doubt is
+    /// handed again before anything else, the tick included (DEC-131 item 6), and the inputs queued
+    /// after it wait, still ahead of the tick, so an observation is never left without its output;
+    /// a stopped process takes nothing. An agent stream that cannot be read, outputs that do not
+    /// read, closes that are not stored, or an evaluation the core would refuse are no new output
+    /// (MI-10), and the tick still runs, so its expiries and exits never wait on a model (rule 13).
     fn models_pass(&mut self, now: UtcNanos, at: RiskClock, alerts: &mut Vec<Alert>) -> bool {
-        if self.wiring.models.is_none() || self.models_at == Some(at.secs()) {
-            return true;
+        if self.wiring.models.is_some() && self.models_at != Some(at.secs()) {
+            self.models_at = Some(at.secs());
+            let queued = self.models_inputs(at);
+            self.models_queue.extend(queued);
         }
-        self.models_at = Some(at.secs());
+        while let Some(input) = self.models_queue.pop_front() {
+            if !self.hand(now, now, input, alerts) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// The inputs the pinned models' new evaluations at `at` hand, in order, each evaluation's
+    /// closes stored first; nothing when the agent stream or its outputs do not read.
+    fn models_inputs(&mut self, at: RiskClock) -> Vec<Input> {
         let Some(rows) = self.agent.clone().and_then(|agent| self.store.rows(&agent)) else {
-            return true;
+            return Vec::new();
         };
         let evaluated = match &self.wiring.models {
             Some(wired) => wired.models.evaluate(at),
             None => Vec::new(),
         };
         let Ok(new) = fresh(&rows, evaluated) else {
-            return true;
+            return Vec::new();
         };
+        let mut queued = Vec::new();
         for evaluation in new {
+            let Ok(pair) = inputs(&evaluation, Digest::of(&evaluation.closes)) else {
+                continue;
+            };
+            if !pair.iter().all(|input| self.takes(input)) {
+                continue;
+            }
             let stored = match &mut self.wiring.models {
                 Some(wired) => wired.artifacts.put(&evaluation.closes),
                 None => false,
             };
-            if !stored {
-                continue;
-            }
-            let Ok(pair) = inputs(&evaluation, Digest::of(&evaluation.closes)) else {
-                continue;
-            };
-            for input in pair {
-                if !self.hand(now, now, input, alerts) {
-                    return false;
-                }
+            if stored {
+                queued.extend(pair);
             }
         }
-        true
+        queued
+    }
+
+    /// Whether the core takes `input` as the process stands: handled on a copy of its state, so
+    /// an input the core would refuse, which would stop the process, is never handed (#2448's
+    /// review, rule 13).
+    fn takes(&self, input: &Input) -> bool {
+        let mut probe = self.state.clone();
+        handle(&mut probe, input.clone(), &self.wiring.ports()).is_ok()
     }
 
     /// Feeds `rows` to the production ports' fold, which takes each row once (DEC-2378 S2).

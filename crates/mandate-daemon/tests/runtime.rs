@@ -1540,3 +1540,99 @@ fn a_kill_switch_with_an_unplanned_holding_raises_the_operator_alert_once() {
             .all(|alert| alert.key != mandate_daemon::FLATTEN_UNPLANNED)
     );
 }
+
+/// #2448's re-review (rule 13): an evaluation the core would refuse (an empty source, a negative
+/// horizon, an `as_of` past what a stamp can write) stores no closes and hands nothing, so it
+/// never stops the process; an evaluation beside it is still recorded and the tick still runs.
+#[test]
+fn an_evaluation_the_core_refuses_hands_nothing_and_the_tick_runs() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    let mut unsourced = daily(NOW - 7_200);
+    unsourced.source = String::new();
+    let mut backwards = daily(NOW - 10_800);
+    backwards.output.horizon_s = u64::MAX;
+    let mut unstamped = daily(NOW - 14_400);
+    unstamped.output.as_of = RiskClock::from_secs(i64::MAX);
+    let good = daily(NOW - 3_600);
+    host.answer
+        .borrow_mut()
+        .extend([unsourced, backwards, unstamped, good.clone()]);
+    let mut process = modelled(&rig, &host, &closes);
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+    assert_eq!(risk_clock(&process), Some(NOW + 5), "the tick was handed");
+    assert_eq!(
+        (
+            count(&rig, "ObservationRecorded"),
+            count(&rig, "ModelOutputRecorded")
+        ),
+        (1, 1),
+        "only the evaluation the core takes: {:?}",
+        kinds(&rig)
+    );
+    assert_eq!(*closes.kept.borrow(), vec![good.closes]);
+}
+
+/// DEC-131 item 6 through the models pass: an observation whose append is in doubt is handed
+/// again first, then its output, then the tick, each recorded once, and the host is not asked
+/// again for the same tick.
+#[test]
+fn an_observation_in_doubt_is_followed_by_its_output_before_the_tick() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    let mut process = modelled(&rig, &host, &closes);
+    tick(&rig, NOW + 5);
+    rig.lose_answers.set(1);
+    process.step(at(NOW + 6));
+    assert_eq!(risk_clock(&process), None, "the observation is in doubt");
+    assert_eq!(count(&rig, "ModelOutputRecorded"), 0);
+    process.step(at(NOW + 7));
+    assert_eq!(host.asked.get(), 1, "the same tick asks nothing more");
+    assert_eq!(
+        (
+            count(&rig, "ObservationRecorded"),
+            count(&rig, "ModelOutputRecorded")
+        ),
+        (1, 1),
+        "{:?}",
+        kinds(&rig)
+    );
+    assert!(
+        positions(&rig, "ObservationRecorded")[0] < positions(&rig, "ModelOutputRecorded")[0],
+        "{:?}",
+        kinds(&rig)
+    );
+    assert_eq!(risk_clock(&process), Some(NOW + 5), "then the tick");
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// The same output twice in one answer is recorded once.
+#[test]
+fn an_output_answered_twice_at_once_is_recorded_once() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    host.answer
+        .borrow_mut()
+        .extend([daily(NOW - 3_600), daily(NOW - 3_600)]);
+    let mut process = modelled(&rig, &host, &closes);
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(
+        (
+            count(&rig, "ObservationRecorded"),
+            count(&rig, "ModelOutputRecorded")
+        ),
+        (1, 1),
+        "{:?}",
+        kinds(&rig)
+    );
+    assert_eq!(risk_clock(&process), Some(NOW + 5));
+}

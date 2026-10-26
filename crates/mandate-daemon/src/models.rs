@@ -40,7 +40,7 @@ pub enum ModelsError {
 
 /// The evaluations of `evaluated` that `agent`, the agent stream's records, holds no
 /// `ModelOutputRecorded` for with the same model id, version, instrument and `as_of`, in the order
-/// given.
+/// given, each such key kept once.
 ///
 /// # Errors
 /// [`ModelsError::Unreadable`] for a record whose payload does not read.
@@ -53,11 +53,14 @@ pub fn fresh(
         .filter(|row| row.event_type == "ModelOutputRecorded")
         .map(journaled_key)
         .collect::<Result<Vec<_>, _>>()?;
+    let mut kept = journaled;
     Ok(evaluated
         .into_iter()
         .filter(|e| {
             let key = key_of(&e.output);
-            !journaled.contains(&key)
+            let new = !kept.contains(&key);
+            kept.push(key);
+            new
         })
         .collect())
 }
