@@ -151531,7 +151531,7 @@
   ]
  },
  "news_stream": {
-  "spec": "docs/specs/journal.md v0.97 §9.37 rules 283 to 286 (DEC-2278)",
+  "spec": "docs/specs/journal.md v0.97 §9.37 rules 283 to 286 (DEC-2278), and v0.103 §9.13 (DEC-2280)",
   "drafts": {
    "opened": {
     "envelope_version": 1,
@@ -153505,6 +153505,83 @@
      "index": 2,
      "reason": "schema",
      "path": "payload.item_id"
+    }
+   }
+  ],
+  "named_by_ranges": [
+   {
+    "name": "verification_range_over_the_news_stream",
+    "draft": {
+     "envelope_version": 1,
+     "environment": "paper",
+     "event_id": "01J8Z3V1A000000000000000V1",
+     "stream_id": "ctl:ws_01J8Z2",
+     "event_type": "VerificationRun",
+     "schema_version": 2,
+     "event_time": "2026-10-09T18:30:00.000000000Z",
+     "clock_source": "local",
+     "causation_id": null,
+     "correlation_id": null,
+     "actor": {
+      "kind": "system",
+      "id": "control_services",
+      "version": "0.1.0",
+      "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+     },
+     "config_refs": {},
+     "payload": {
+      "trigger": "weekly",
+      "ranges": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 40,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "manifest",
+         "manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "anchor_event_id": null
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "news:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ],
+      "result": "pass"
+     },
+     "artifact_refs": [],
+     "pii_refs": []
     }
    }
   ],
