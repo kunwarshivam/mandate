@@ -21,7 +21,7 @@ use crate::types::{
 
 /// The `fold_version` of ADR-0001 ES-21. Bumped whenever fold output changes, with the golden
 /// journal regenerated in the same change.
-pub const FOLD_VERSION: u32 = 2;
+pub const FOLD_VERSION: u32 = 3;
 
 /// How long a passing `ConnectionChecked` covers an opening, in risk-clock seconds: one day, the
 /// period of the executor's daily check (connections spec §8.1, §9.2 "Healthy"). A check this old
@@ -43,7 +43,14 @@ pub struct RuntimeState {
     unresolved: Option<UnresolvedAppend>,
     risk_clock: Option<RiskClock>,
     last_evaluated: Option<RiskClock>,
-    copied_mode: Mode,
+    /// This agent's account-stream restrictions, by the `restriction` that set each, as the
+    /// executor keys them: a `normal` lifts only the restriction it names (trading spec §7.3,
+    /// "causes lift independently").
+    own_restrictions: BTreeMap<String, Mode>,
+    /// The executor's account-wide restrictions, its `AgentModeApplied` naming every agent (`*`),
+    /// keyed the same way and kept apart from [`Self::own_restrictions`], as the executor keeps
+    /// them, so neither lifts the other (DEC-2806).
+    every_restrictions: BTreeMap<String, Mode>,
     journaled_mode: Mode,
     lifecycle: Mode,
     switch: Option<Switch>,
@@ -154,7 +161,8 @@ impl RuntimeState {
             unresolved: None,
             risk_clock: None,
             last_evaluated: None,
-            copied_mode: Mode::Normal,
+            own_restrictions: BTreeMap::new(),
+            every_restrictions: BTreeMap::new(),
             journaled_mode: Mode::Normal,
             lifecycle: Mode::Normal,
             switch: None,
@@ -251,11 +259,12 @@ impl RuntimeState {
     }
 
     /// The effective mode a given deployment lifecycle would produce: the strictest of the copied
-    /// account-stream mode, that lifecycle, the startup hold, and the kill switch's final mode. A
+    /// account-stream modes, this agent's and the account-wide one, that lifecycle, the startup
+    /// hold, and the kill switch's final mode. A
     /// maximum over [`Mode`]'s ordering, so the runtime is never less strict than the account stream
     /// and never lifts what the account stream set.
     pub(crate) fn mode_with(&self, lifecycle: Mode) -> Mode {
-        let mut mode = self.copied_mode.max(lifecycle);
+        let mut mode = self.restricted().max(lifecycle);
         if self.awaiting_reconciliation {
             mode = mode.max(LocalHold::AwaitingReconciliation.mode());
         }
@@ -263,6 +272,17 @@ impl RuntimeState {
             mode = mode.max(switch.initiator.final_mode());
         }
         mode
+    }
+
+    /// The strictest restriction the account stream holds this agent in: its own and the
+    /// account-wide ones, as the executor's `effective_mode` takes them.
+    fn restricted(&self) -> Mode {
+        self.own_restrictions
+            .values()
+            .chain(self.every_restrictions.values())
+            .copied()
+            .max()
+            .unwrap_or(Mode::Normal)
     }
 
     /// The deployment's own lifecycle state, as a mode rather than as a set of
@@ -276,7 +296,7 @@ impl RuntimeState {
     /// The same maximum as [`Self::effective_mode`] without the startup hold, which governs new
     /// proposals alone (DEC-131 item 22).
     fn rehand_mode(&self) -> Mode {
-        let mut mode = self.copied_mode.max(self.lifecycle);
+        let mut mode = self.restricted().max(self.lifecycle);
         if let Some(switch) = &self.switch {
             mode = mode.max(switch.initiator.final_mode());
         }
@@ -711,10 +731,12 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 },
             );
         }
+        "AgentModeApplied" if every_agent(&event.payload) => {
+            restrict(&mut state.every_restrictions, event)?;
+        }
         "AgentModeApplied" => {
             if addressed_here(state, &event.payload) {
-                let to = mode_field(event)?;
-                state.copied_mode = to;
+                let to = restrict(&mut state.own_restrictions, event)?;
                 state.switch = retired(state.switch.take(), to, event, &state.acknowledged);
             }
         }
@@ -930,6 +952,32 @@ fn another_agents_switch(state: &RuntimeState, payload: &mandate_canon::Value) -
     payload::str_of(payload, "scope") == Some("agent")
         && payload::str_of(payload, "subject")
             .is_some_and(|subject| !subject.eq_ignore_ascii_case(&state.deployment.agent.0))
+}
+
+/// Folds one `AgentModeApplied` into `restrictions` as the executor folds it: its mode under its
+/// `restriction` (none read as the empty name), which a `normal` removes, so each cause lifts only
+/// itself. Answers the record's mode.
+fn restrict(
+    restrictions: &mut BTreeMap<String, Mode>,
+    event: &FoldedEvent,
+) -> Result<Mode, RuntimeError> {
+    let to = mode_field(event)?;
+    let restriction = payload::str_of(&event.payload, "restriction")
+        .unwrap_or_default()
+        .to_owned();
+    if to == Mode::Normal {
+        restrictions.remove(&restriction);
+    } else {
+        restrictions.insert(restriction, to);
+    }
+    Ok(to)
+}
+
+/// Whether an `AgentModeApplied` is the executor's account-wide restriction, naming every agent of
+/// the account (`EVERY_AGENT` in `mandate-executor`). It moves only the account-wide restrictions:
+/// it never lifts or confirms this agent's own restriction or kill switch.
+fn every_agent(payload: &mandate_canon::Value) -> bool {
+    payload::str_of(payload, "agent") == Some("*")
 }
 
 /// Whether an agent-scoped fact on the shared account stream is this deployment's. Mandate spec
