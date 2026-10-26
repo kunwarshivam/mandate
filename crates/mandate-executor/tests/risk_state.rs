@@ -13,6 +13,9 @@
 //! never, and `open` refuses an instrument that is not a canonical asset id (DEC-2313), so every
 //! instrument here is one. Until B2b-2 lands, each test that reaches such a record or refusal fails
 //! at its `Unimplemented` stub.
+//!
+//! DEC-2829: a version-1 order-state `CompensatingEvent` right after the `OrderStateChanged` it
+//! corrects, in the same batch, steps nothing; any other compensation fails closed.
 
 use mandate_canon::{Key, Value, parse, to_canonical};
 use mandate_domain::{AgentMode, AssetClass, Environment, MarketSession};
@@ -2141,6 +2144,7 @@ fn live_rows(
     inputs: &[Generated],
     mandate: &ValidatedMandate,
     calendar: &Nyse,
+    compensated: bool,
 ) -> (Vec<StoredEvent>, RiskView) {
     let case = case("MC-R01");
     let mut fold = open_case(&case, mandate, calendar);
@@ -2182,12 +2186,20 @@ fn live_rows(
                     "[]",
                 ));
                 cause.push(fees_charged(seq + 3, &order, "0.01", &clock));
-                cause.push(row(
+                let filled = row(
                     seq + 4,
                     "OrderStateChanged",
                     2,
                     &format!(r#"{{"client_order_id":"{order}","state":"filled","ignored":false}}"#),
-                ));
+                );
+                if compensated {
+                    let adopted =
+                        compensation(seq + 5, &filled, |p| p["risk_clock"] = clock.clone().into());
+                    cause.push(filled);
+                    cause.push(adopted);
+                } else {
+                    cause.push(filled);
+                }
             }
         }
         if matches!(input, Generated::Tick) {
@@ -2223,7 +2235,7 @@ proptest::proptest! {
     ) {
         let case = case("MC-R01");
         let (mandate, calendar) = (case_mandate(&case), nyse());
-        let (rows, live) = live_rows(&inputs, &mandate, &calendar);
+        let (rows, live) = live_rows(&inputs, &mandate, &calendar, false);
         proptest::prop_assert!(
             matches!(live, RiskView::Readable { .. }),
             "a stream the executor writes stays readable: {:?}",
@@ -2462,6 +2474,43 @@ fn a_journal_repaired_at_the_head_replays_to_the_live_view() {
             "cut after {appended_before_crash} records"
         );
         assert_eq!(again.owed().count(), 0);
+    }
+}
+
+/// The risk records journaled in `rows`, by type and payload, in order.
+fn records(rows: &[StoredEvent]) -> Vec<(String, Value)> {
+    rows.iter()
+        .filter(|row| FOLD_TYPES.contains(&row.event_type.as_str()))
+        .map(|row| {
+            let body = parse(&row.body).unwrap();
+            (row.event_type.clone(), body.get("payload").unwrap().clone())
+        })
+        .collect()
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+    /// DEC-2829: the reconciler's version-1 compensation beside each order state it adopts moves
+    /// nothing. The oracle is the same inputs journaled with no compensation at all: the view
+    /// stays readable, its snapshot is the oracle's, and the fold journals the oracle's records.
+    #[test]
+    fn a_paired_compensation_moves_no_figure_and_no_record(
+        inputs in proptest::collection::vec(generated(), 1..40),
+    ) {
+        let case = case("MC-R01");
+        let (mandate, calendar) = (case_mandate(&case), nyse());
+        let (plain_rows, plain) = live_rows(&inputs, &mandate, &calendar, false);
+        let (rows, compensated) = live_rows(&inputs, &mandate, &calendar, true);
+        let (RiskView::Readable { snapshot: expected, .. }, RiskView::Readable { snapshot, .. }) =
+            (&plain, &compensated)
+        else {
+            return Err(proptest::test_runner::TestCaseError::fail(format!(
+                "both views stay readable: {plain:?} {compensated:?}"
+            )));
+        };
+        proptest::prop_assert_eq!(snapshot, expected);
+        proptest::prop_assert_eq!(records(&rows), records(&plain_rows));
     }
 }
 
@@ -2916,5 +2965,175 @@ fn a_fill_at_version_1_or_2_steps_the_same() {
         equities,
         ["9900", "9900"],
         "10000 - 1000 + 10 × 90 at either version"
+    );
+}
+
+/// The reconciler's `CompensatingEvent` for the `OrderStateChanged` `corrects` (trading domain spec
+/// §11): its order, adopted from `accepted` to the state `corrects` records, naming `corrects` as
+/// its cause and its one corrected event, at version 1, with `patch` applied to its payload.
+fn compensation(seq: u64, corrects: &StoredEvent, patch: impl FnOnce(&mut Json)) -> StoredEvent {
+    let state: Json = serde_json::from_slice(&corrects.body).unwrap();
+    let mut payload = serde_json::json!({
+        "subject": state["payload"]["client_order_id"],
+        "difference": "order_state",
+        "from": "accepted",
+        "to": state["payload"]["state"],
+        "corrected_event_ids": [corrects.event_id],
+        "risk_clock": OPENED,
+    });
+    patch(&mut payload);
+    caused(
+        seq,
+        "CompensatingEvent",
+        1,
+        Some(&corrects.event_id),
+        &payload.to_string(),
+    )
+}
+
+/// `o-1`'s `OrderStateChanged` to `filled` at seq 5, after [`marked_with_an_order`].
+fn o1_filled() -> StoredEvent {
+    row(
+        5,
+        "OrderStateChanged",
+        2,
+        r#"{"client_order_id":"o-1","state":"filled","ignored":false}"#,
+    )
+}
+
+/// DEC-2829 item 1: the reconciler's compensation right after the order state it adopts steps
+/// nothing, and the order is still the agent's: its fill after it moves E as before.
+#[test]
+fn a_compensation_beside_the_state_it_corrects_steps_nothing() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    let filled = o1_filled();
+    assert_eq!(fold.fold(&filled).unwrap(), Vec::new());
+    let RiskView::Readable {
+        snapshot: before, ..
+    } = fold.view().clone()
+    else {
+        panic!("readable");
+    };
+    assert_eq!(
+        fold.fold(&compensation(6, &filled, |_| {})).unwrap(),
+        Vec::new()
+    );
+    let RiskView::Readable { snapshot, head } = fold.view() else {
+        panic!("readable: {:?}", fold.view());
+    };
+    assert_eq!((snapshot, *head), (&before, 6));
+    fold.fold(&fill(7, "o-1", XYZ, ("buy", "10", "90"), AT_2, "[]"))
+        .unwrap();
+    assert_eq!(equity(fold.view()), "10100", "10000 - 900 + 10 × 100");
+}
+
+/// DEC-2829 item 2: any other compensation is an input the fold does not read, and the view fails
+/// closed: another version, difference, `from`, cause, corrected event or order or state, a batch
+/// other than its order state's, or a row before it that is not an order state at all.
+#[test]
+fn a_compensation_any_other_way_fails_closed() {
+    let mandate = mandate();
+    let filled = o1_filled();
+    let other = "01J8Z4R0000000000000000099";
+    let patched: [(&str, Box<dyn Fn(&mut Json)>); 9] = [
+        (
+            "difference",
+            Box::new(|p| p["difference"] = "position".into()),
+        ),
+        ("from", Box::new(|p| p["from"] = Json::Null)),
+        (
+            "corrected",
+            Box::new(move |p| p["corrected_event_ids"] = serde_json::json!([other])),
+        ),
+        (
+            "none corrected",
+            Box::new(|p| p["corrected_event_ids"] = serde_json::json!([])),
+        ),
+        (
+            "two corrected",
+            Box::new(|p| {
+                let id = p["corrected_event_ids"][0].clone();
+                p["corrected_event_ids"] = serde_json::json!([id, id]);
+            }),
+        ),
+        (
+            "corrected not text",
+            Box::new(|p| p["corrected_event_ids"] = serde_json::json!([5])),
+        ),
+        ("subject", Box::new(|p| p["subject"] = "o-2".into())),
+        ("to", Box::new(|p| p["to"] = "canceled".into())),
+        ("no subject", Box::new(|p| p["subject"] = Json::Null)),
+    ];
+    let fails = |rows: &[StoredEvent], why: &str| {
+        let mut fold = marked_with_an_order(&mandate, &Wall);
+        for row in rows {
+            fold.fold(row).unwrap();
+        }
+        let head = rows.last().unwrap().seq - 1;
+        assert_eq!(
+            unreadable(fold.view()),
+            (UnreadableCause::UnknownSchemaVersion, head),
+            "{why}"
+        );
+    };
+    for (why, patch) in &patched {
+        fails(
+            &[filled.clone(), compensation(6, &filled, |p| patch(p))],
+            why,
+        );
+    }
+    let adopted = compensation(6, &filled, |_| {});
+    let version_2 = StoredEvent {
+        schema_version: 2,
+        ..adopted.clone()
+    };
+    fails(&[filled.clone(), version_2], "version 2");
+    let another_batch = StoredEvent {
+        recorded_at: "2026-09-22T14:30:00.000000001Z".to_owned(),
+        ..adopted.clone()
+    };
+    fails(&[filled.clone(), another_batch], "another batch");
+    let elsewhere = caused(
+        6,
+        "CompensatingEvent",
+        1,
+        Some(other),
+        &serde_json::json!({
+            "subject": "o-1", "difference": "order_state", "from": "accepted", "to": "filled",
+            "corrected_event_ids": [filled.event_id], "risk_clock": OPENED,
+        })
+        .to_string(),
+    );
+    fails(&[filled.clone(), elsewhere], "another cause");
+    let between = fees_charged(6, "o-1", "0.01", AT_2);
+    fails(
+        &[filled.clone(), between, compensation(7, &filled, |_| {})],
+        "a row between",
+    );
+    let lone = compensation(5, &filled, |_| {});
+    fails(&[lone], "no order state before it");
+    let abandoned = row(
+        5,
+        "OrderAbandoned",
+        1,
+        r#"{"client_order_id":"o-1","state":"filled"}"#,
+    );
+    fails(
+        &[abandoned.clone(), compensation(6, &abandoned, |_| {})],
+        "a row before it that is not an order state",
+    );
+    let stateless = row(
+        5,
+        "OrderStateChanged",
+        2,
+        r#"{"client_order_id":"o-1","ignored":false}"#,
+    );
+    fails(
+        &[
+            stateless.clone(),
+            compensation(6, &stateless, |p| p["to"] = "filled".into()),
+        ],
+        "an order state naming no state",
     );
 }
