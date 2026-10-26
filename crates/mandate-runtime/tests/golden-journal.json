@@ -9,14 +9,16 @@
     { "stream": "acct:ws1:acct-1", "seq": 5, "event_type": "OrderSubmitted", "payload": { "attempt": 1, "client_order_id": "o1" } },
     { "stream": "acct:ws1:acct-1", "seq": 6, "event_type": "AgentModeApplied", "payload": { "restriction": "daily_loss", "risk_clock": 400, "to": "normal" } },
     { "stream": "acct:ws1:acct-1", "seq": 7, "event_type": "AgentModeApplied", "payload": { "agent": "*", "originated": true, "restriction": "reconciliation", "risk_clock": 400, "to": "exits_only" } },
+    { "stream": "acct:ws1:acct-1", "seq": 8, "event_type": "AgentModeApplied", "payload": { "agent": "*", "originated": true, "restriction": "fees", "risk_clock": 400, "to": "paused" } },
+    { "stream": "acct:ws1:acct-1", "seq": 9, "event_type": "AgentModeApplied", "payload": { "agent": "*", "originated": true, "restriction": "reconciliation", "risk_clock": 400, "to": "normal" } },
     { "stream": "agent:ws1:agent-a", "seq": 1, "event_type": "ThesisProposed", "payload": { "admitted": true, "as_of": "2026-10-26T13:00:00Z", "asset_class": "us_equity", "expires_at": "2026-10-27T13:00:00Z", "instrument_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001", "lineage_id": "th-a", "reason": null, "revision": 0, "thesis_id": "th-a" } },
     { "stream": "agent:ws1:agent-a", "seq": 2, "event_type": "ThesisProposed", "payload": { "admitted": true, "as_of": "2026-10-26T13:00:00Z", "asset_class": "us_equity", "expires_at": "2026-10-27T13:00:00Z", "instrument_id": "7b4a1c2e-2222-4a2b-9c3d-000000000002", "lineage_id": "th-b", "reason": null, "revision": 0, "thesis_id": "th-b" } },
     { "stream": "agent:ws1:agent-a", "seq": 3, "event_type": "ThesisInvalidated", "payload": { "thesis_id": "th-a" } }
   ],
   "expected": {
-    "effective_mode": "exits_only",
+    "effective_mode": "paused",
     "risk_clock": 400,
-    "account_head": 7,
+    "account_head": 9,
     "pending_approvals": 0,
     "outstanding": 0,
     "ended_theses": ["7b4a1c2e-1111-4a2b-9c3d-000000000001"]
