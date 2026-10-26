@@ -833,7 +833,9 @@ mod bridge {
             }
             K::RiskLimit
             | K::KillSwitch
+            | K::KillSwitchUnapplied
             | K::AgentHeld
+            | K::RetirementHeld
             | K::AccountRestriction
             | K::Protection
             | K::ExitStalled
