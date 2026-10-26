@@ -9367,6 +9367,7 @@ fn mutants_job_within(root: &Path, args: &[&str], left: Duration) -> Command {
         .arg("cargo")
         .args(args)
         .env_remove(CARGO_BUILD_TARGET_DIR)
+        .env_remove(CARGO_INCREMENTAL)
         .env(CARGO_TARGET_DIR, mutants_target_dir(root))
         .envs(MUTANT_BUILD_PROFILE);
     timeout
@@ -10240,6 +10241,13 @@ const CARGO_TARGET_DIR: &str = "CARGO_TARGET_DIR";
 /// one too (lane NE met a gutted function reported missed from a shared directory, 2026-10-26).
 const CARGO_BUILD_TARGET_DIR: &str = "CARGO_BUILD_TARGET_DIR";
 
+/// Turns incremental compilation off when it is `0`, which a mutant's rebuild cannot afford: each
+/// one then builds its crate from scratch, every mutant reaches [`MUTANT_BUILD_TIMEOUT`], and the
+/// run reports timeouts rather than a verdict (lane GL, 2026-10-26). The mutants job's building
+/// children drop it, so cargo's `dev` and `test` default, incremental on, holds whatever the
+/// caller exported. It is never read: only removed from the children's environment.
+const CARGO_INCREMENTAL: &str = "CARGO_INCREMENTAL";
+
 /// The one target directory the mutants job's building children use: `root`'s own `target/`,
 /// absolute, so no caller's [`CARGO_TARGET_DIR`], [`CARGO_BUILD_TARGET_DIR`] or cargo config
 /// `build.target-dir` can point two source trees at one directory, and no child that changes its
@@ -10300,6 +10308,7 @@ fn mutants_job_cargo(root: &Path, args: &[&str]) -> Command {
         .current_dir(root)
         .args(args)
         .env_remove(CARGO_BUILD_TARGET_DIR)
+        .env_remove(CARGO_INCREMENTAL)
         .env(CARGO_TARGET_DIR, mutants_target_dir(root))
         .envs(MUTANT_BUILD_PROFILE);
     cargo
@@ -10546,6 +10555,10 @@ const MUTANT_BUILD_TIMEOUT: &str = "60";
 /// whatever `target/mutants.out` holds (DEC-137).
 const MISSED_MUTANTS: i32 = 2;
 
+/// The status `cargo mutants` exits with when a mutant's build or tests timed out and none was
+/// missed: a mutant that timed out was never judged, so the run is no verdict at all.
+const TIMED_OUT_MUTANTS: i32 = 3;
+
 fn mutants_outcome(
     root: &Path,
     crates: &[MutatedCrate],
@@ -10555,6 +10568,11 @@ fn mutants_outcome(
     match code {
         Some(0) => Ok(()),
         Some(MISSED_MUTANTS) => stub_exemptions(root, crates, started),
+        Some(TIMED_OUT_MUTANTS) => bail!(
+            "`cargo mutants` reports mutants that timed out: each was never judged, so this run is \
+             not a pass and not a \"0 missed\"; see {MUTANTS_OUT}/timeout.txt, and run it again \
+             through `cargo xtask ci mutants`, which builds incrementally"
+        ),
         other => bail!(
             "`cargo mutants` exited with {other:?}, which is not the status it reports for missed \
              mutants ({MISSED_MUTANTS}); the run did not finish, so nothing in {MUTANTS_OUT} is \
@@ -12154,12 +12172,11 @@ mod tests {
     use std::os::unix::process::ExitStatusExt;
     use std::path::{Path, PathBuf};
     use std::process::{Command, ExitStatus, Stdio};
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime};
 
     use anyhow::{Context, Result, bail};
     use serde_json::{Value, json};
 
-    use super::mutants_job_within;
     use super::{
         ATOMIC_EXCEPTIONS, AUTHORIZE_URL_REFUSED, BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, BuildDir,
         CARGO_BUILD_TARGET_DIR, CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency, FAST_JOB,
@@ -12191,6 +12208,7 @@ mod tests {
         infra_workflow_problems, is_docs_path, literal_paths, nextest_args, normalized_join,
         references_path, select, selection_in, source_references, tokens, withhold_web_demo,
     };
+    use super::{CARGO_INCREMENTAL, TIMED_OUT_MUTANTS, mutants_job_within};
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
@@ -13444,7 +13462,33 @@ mod tests {
             "the timed run pins the same directory"
         );
         assert_eq!(within.get(OsStr::new(CARGO_BUILD_TARGET_DIR)), Some(&None));
+        for (child, envs) in [("the listing", &envs), ("the timed run", &within)] {
+            assert_eq!(
+                envs.get(OsStr::new(CARGO_INCREMENTAL)),
+                Some(&None),
+                "{child} drops the caller's CARGO_INCREMENTAL, so `0` cannot make every mutant's \
+                 build reach the build timeout (lane GL, 2026-10-26)"
+            );
+        }
         Ok(())
+    }
+
+    /// A run whose mutants timed out is refused with its own reason, never read as a pass or as
+    /// missed mutants a stub could exempt; a clean run passes.
+    #[test]
+    fn a_run_with_timed_out_mutants_is_refused() {
+        let refused = mutants_outcome(
+            Path::new("."),
+            &[],
+            Some(TIMED_OUT_MUTANTS),
+            SystemTime::UNIX_EPOCH,
+        )
+        .expect_err("timeouts are no verdict");
+        assert!(format!("{refused:#}").contains("timed out"), "{refused:#}");
+        assert!(
+            mutants_outcome(Path::new("."), &[], Some(0), SystemTime::UNIX_EPOCH).is_ok(),
+            "a clean run passes"
+        );
     }
 
     /// The `dev` or `test` profile settings in a workspace manifest that turn debug assertions or
@@ -15613,7 +15657,7 @@ mod tests {
             "a run that missed only a stub's mutants passes"
         );
         assert!(mutants_outcome(&fx.0, &crates, Some(0), before).is_ok());
-        for code in [Some(1), Some(3), Some(4), None] {
+        for code in [Some(1), Some(4), None] {
             let failure = mutants_outcome(&fx.0, &crates, code, before)
                 .expect_err("a run that did not finish keeps its failure, whatever it left behind");
             assert!(
@@ -15621,6 +15665,9 @@ mod tests {
                 "{failure}, for {code:?}"
             );
         }
+        let timed_out = mutants_outcome(&fx.0, &crates, Some(3), before)
+            .expect_err("a stub's missed mutants never exempt a run whose mutants timed out");
+        assert!(timed_out.to_string().contains("timed out"), "{timed_out}");
         let stale = mutants_outcome(&fx.0, &crates, Some(2), after)
             .expect_err("outcomes older than the run are not this run's result");
         assert!(
