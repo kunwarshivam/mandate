@@ -35,6 +35,14 @@ pub const SCENARIOS: &[&str] = &["demo"];
 /// Both are stored as canonical JSON (journal spec §4), so a version is the SHA-256 of the file.
 pub const MANDATE_FILE: &str = "deploy/cell/demo/mandate.json";
 pub const INSTRUMENT_FILE: &str = "deploy/cell/demo/instrument.json";
+/// The reviewed configuration every agent the demo deploys trades under, registered on the
+/// workspace's control stream before any version: the gate's rule set, which the runtime's gate
+/// and the executor's binding gate both read as the stream's latest `rule_set` (one artifact for
+/// both), and the paper fee schedule over its trading calendar, which the executor reads. Each is
+/// the shell's reviewed tracer configuration, as canonical JSON.
+pub const RULE_SET_FILE: &str = "deploy/cell/demo/rule-set.json";
+pub const FEE_CONFIG_FILE: &str = "deploy/cell/demo/fee-config.json";
+pub const TRADING_CALENDAR_FILE: &str = "deploy/cell/demo/trading-calendar.json";
 /// [`WEB_AGENT`]'s own envelope and its instrument's snapshot, as canonical JSON: the demo's
 /// envelope on QQQ, since V-006 refuses a second agent on the account an instrument the demo agent
 /// already pins (DEC-2036).
@@ -547,6 +555,9 @@ pub fn plan(
     };
     let mandate_in = format!("{INPUTS}/mandate.json");
     let instrument_in = format!("{INPUTS}/instrument.json");
+    let rule_set_in = format!("{INPUTS}/rule-set.json");
+    let fee_in = format!("{INPUTS}/fee-config.json");
+    let calendar_in = format!("{INPUTS}/trading-calendar.json");
     let (confirm, deploy) = (confirm_code(&version), deploy_code(AGENT, &version));
     let (web_confirm, web_deploy) = (
         confirm_code(&web_version),
@@ -690,6 +701,28 @@ pub fn plan(
                     })],
                 },
                 vec![
+                    gesture(
+                        "the gate's reviewed rule set, registered: the one both the runtime's \
+                         gate and the executor's read",
+                        owner(&["config", "register", "--kind", "rule_set", &rule_set_in]),
+                        "registered as event".into(),
+                    ),
+                    gesture(
+                        "the paper fee schedule, registered",
+                        owner(&["config", "register", "--kind", "fee_config", &fee_in]),
+                        "registered as event".into(),
+                    ),
+                    gesture(
+                        "its trading calendar, registered",
+                        owner(&[
+                            "config",
+                            "register",
+                            "--kind",
+                            "trading_calendar",
+                            &calendar_in,
+                        ]),
+                        "registered as event".into(),
+                    ),
                     gesture(
                         "SPY's instrument snapshot, registered",
                         owner(&[
@@ -922,17 +955,6 @@ pub fn plan(
             number: 5,
             title: "a backtest of the same mandate version is shown",
             parts: vec![
-                gesture(
-                    "the rule set the backtest runs under, registered: the demo run's settings",
-                    owner(&[
-                        "config",
-                        "register",
-                        "--kind",
-                        "rule_set",
-                        &format!("{BACKTEST_IN}/settings.json"),
-                    ]),
-                    "registered as event".into(),
-                ),
                 gesture(
                     "the backtest of the confirmed version, run on the demo inputs",
                     with(
@@ -1301,6 +1323,15 @@ pub fn demo_inputs() -> Result<DemoInputs> {
         (
             "instrument.json",
             text(read(INSTRUMENT_FILE)?, INSTRUMENT_FILE)?,
+        ),
+        ("rule-set.json", text(read(RULE_SET_FILE)?, RULE_SET_FILE)?),
+        (
+            "fee-config.json",
+            text(read(FEE_CONFIG_FILE)?, FEE_CONFIG_FILE)?,
+        ),
+        (
+            "trading-calendar.json",
+            text(read(TRADING_CALENDAR_FILE)?, TRADING_CALENDAR_FILE)?,
         ),
         (
             "web-mandate.json",
@@ -2299,6 +2330,9 @@ mod tests {
         for path in [
             MANDATE_FILE,
             INSTRUMENT_FILE,
+            RULE_SET_FILE,
+            FEE_CONFIG_FILE,
+            TRADING_CALENDAR_FILE,
             WEB_MANDATE_FILE,
             WEB_INSTRUMENT_FILE,
             RESEARCH_MANDATE_FILE,
@@ -2491,11 +2525,12 @@ mod tests {
         assert_eq!(payload["mandate_version"], reference(&mandate()));
     }
 
-    /// Step 5 registers a rule set, runs the runner on the confirmed version in the pod's store,
-    /// and records the payload it prints, after the confirmation and before the kill switch; the
-    /// API read and web/'s report wait on the membership parser and web/.
+    /// Step 5 runs the runner on the confirmed version in the pod's store and records the payload
+    /// it prints, after the confirmation and before the kill switch, under the rule set step 2
+    /// registered before the version; the API read and web/'s report wait on the membership
+    /// parser and web/.
     #[test]
-    fn step_five_registers_a_rule_set_runs_the_backtest_and_records_it() {
+    fn step_five_runs_the_backtest_under_the_registered_rule_set_and_records_it() {
         let steps = planned("demo5");
         let all = gestures(&steps);
         let at = |name: &str| {
@@ -2517,7 +2552,7 @@ mod tests {
                 .unwrap(),
             at("agent-kill"),
         );
-        assert!(confirm < rule_set && rule_set < runner && runner < record && record < kill);
+        assert!(rule_set < confirm && confirm < runner && runner < record && record < kill);
         assert!(
             all[rule_set]
                 .args
@@ -2562,6 +2597,74 @@ mod tests {
             .flatten()
             .collect();
         assert_eq!(lanes, ["W2"], "only web/'s report screen is left");
+    }
+
+    /// Step 2 registers the reviewed configuration before any version, once each: the gate's
+    /// rule set, which the runtime's gate and the executor's binding gate both read as the
+    /// control stream's latest `rule_set`, so no later registration of that kind may shadow it,
+    /// then the paper fee schedule and its trading calendar. Each file is the shell's reviewed
+    /// tracer configuration, and the rule set has exactly the members the gates accept.
+    #[test]
+    fn step_two_registers_the_reviewed_configuration_both_gates_read_once_before_any_version() {
+        let steps = planned("demo2");
+        let all = gestures(&steps);
+        let first_version = all
+            .iter()
+            .position(|g| g.args[..2] == ["version", "create"])
+            .unwrap();
+        for (kind, file) in [
+            ("rule_set", "rule-set.json"),
+            ("fee_config", "fee-config.json"),
+            ("trading_calendar", "trading-calendar.json"),
+        ] {
+            let registered: Vec<usize> = all
+                .iter()
+                .enumerate()
+                .filter(|(_, g)| g.args.windows(2).any(|w| w == ["--kind", kind]))
+                .map(|(n, _)| n)
+                .collect();
+            assert_eq!(registered.len(), 1, "{kind} is registered once");
+            assert!(registered[0] < first_version, "{kind} before any version");
+            let path = format!("{INPUTS}/{file}");
+            assert!(
+                all[registered[0]].args.contains(&path),
+                "{kind} registers {path}: {:?}",
+                all[registered[0]].args
+            );
+        }
+        for (demo, tracer) in [
+            (RULE_SET_FILE, "rule-set.json"),
+            (FEE_CONFIG_FILE, "fee-config.json"),
+            (TRADING_CALENDAR_FILE, "trading-calendar.json"),
+        ] {
+            assert_eq!(
+                parsed(demo),
+                parsed(&format!(
+                    "crates/mandate-shell/tests/fixtures/tracer/config/{tracer}"
+                )),
+                "{demo} is the shell's reviewed configuration"
+            );
+        }
+        let rule_set = parsed(RULE_SET_FILE);
+        let members: Vec<&str> = rule_set
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            members,
+            [
+                "executor",
+                "gate",
+                "gate_config",
+                "iex_quote_max_age_s",
+                "ruleset_version",
+                "story"
+            ],
+            "mandate-gate-inputs' RULE_MEMBERS"
+        );
+        assert_eq!(rule_set["gate"], "trading-domain-9.1");
     }
 
     /// The runner's five inputs are read from its committed fixtures into their own directory of
