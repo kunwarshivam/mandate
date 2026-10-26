@@ -35,6 +35,7 @@ import account
 import account_closes
 import acknowledgments
 import approval
+import approval_deferrals
 import audit
 import backtest_records
 import canceled
@@ -74,6 +75,7 @@ from common import (
     BOOL,
     CONFIG_REF_KINDS,
     DEC,
+    DEFERRED_PARTS,
     DIGEST,
     ENVELOPE,
     ID,
@@ -309,25 +311,6 @@ REGRESSIONS = {
 }
 
 
-# Journal spec v0.85 (DEC-2388 item 10): the checks, or parts of checks, the cell's runtime's
-# advisory dry run deferred to the executor's binding gate, in strictly ascending byte order.
-DEFERRED_PARTS = (
-    "account_exposure",
-    "agent_equity",
-    "agent_mode",
-    "conduct_history",
-    "day_trade_budget",
-    "eligibility",
-    "fee_reservation",
-    "halt",
-    "liquidity_floor",
-    "other_orders",
-    "participation",
-    "quote_ask",
-    "reentry_cooldown",
-    "related_accounts",
-)
-assert list(DEFERRED_PARTS) == sorted(DEFERRED_PARTS, key=str.encode), "listed in byte order"
 LIQUIDITY = rec(
     ("prior_close", DEC),
     ("median_dollar_volume_20d", DEC),
@@ -3872,6 +3855,25 @@ def deferred_case_failures(chain: list[dict], section: dict, skip: frozenset[str
     return problems
 
 
+def deferral_decisions(chain: list[dict]) -> dict[str, dict]:
+    """The two asked openings `approval_deferrals` pairs requests with (v0.88, DEC-2514): the chain's
+    decision asked at version 1, deferring nothing, and the same decision at version 3 deferring the
+    halt and both liquidity checks, read without figures, asked under the policy overlay."""
+    asked = [change("payload.autonomy", "ask")]
+    plain = {"base_seq": SEQ["decision"], "changes": asked}
+    deferring = {
+        "base_seq": SEQ["decision"],
+        "changes": [
+            change("schema_version", 3),
+            change("payload.deferred_to_binding", list(approval_deferrals.NAMED)),
+            change("payload.liquidity", None),
+            *asked,
+            change("payload.decided_by", "policy_overlay"),
+        ],
+    }
+    return {"plain": apply_changes(chain, plain), "deferring": apply_changes(chain, deferring)}
+
+
 def check_deferred(section: dict, agent_section: dict) -> list[str]:
     problems = deferred_case_failures(agent_section["chain"], section)
     if section["base"] != "agent_stream":
@@ -4212,6 +4214,7 @@ def render(
     production_config_refs: dict,
     policy_overlay: dict,
     deferred_section: dict,
+    deferrals_section: dict,
     control_section: dict,
     risk_section: dict,
     research_section: dict,
@@ -4265,6 +4268,7 @@ def render(
             "production_config_refs": production_config_refs,
             "policy_overlay": policy_overlay,
             "deferred_to_binding": deferred_section,
+            "approval_deferrals": deferrals_section,
             "control_stream": control_section,
             "risk_state": risk_section,
             "research": research_section,
@@ -4350,6 +4354,7 @@ def main(argv: list[str] | None = None) -> int:
     production_config_refs = build_production_config_refs_section(control_section)
     policy_overlay = build_policy_overlay_section()
     deferred_section = build_deferred_section()
+    deferrals_section = approval_deferrals.build_section(deferral_decisions(section["chain"]))
     risk_section = risk_state.build_section()
     research_section = research.build_section()
     account_section = account.build_section(v3["genesis_prev_hash"])
@@ -4403,6 +4408,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += run_policy_overlay_mutants(policy_overlay, section)
     problems += check_deferred(deferred_section, section)
     problems += run_deferred_mutants(deferred_section, section)
+    problems += approval_deferrals.check_section(deferrals_section, violations)
+    problems += approval_deferrals.run_mutants(deferrals_section, violations)
     problems += control.check_section(control_section)
     problems += control.run_mutants(control_section)
     problems += risk_state.check_section(risk_section)
@@ -4504,6 +4511,7 @@ def main(argv: list[str] | None = None) -> int:
         production_config_refs,
         policy_overlay,
         deferred_section,
+        deferrals_section,
         control_section,
         risk_section,
         research_section,
@@ -4562,6 +4570,7 @@ def main(argv: list[str] | None = None) -> int:
         or check_production_config_refs(reread["production_config_refs"])
         or check_policy_overlay(reread["policy_overlay"], reread["agent_stream"])
         or check_deferred(reread["deferred_to_binding"], reread["agent_stream"])
+        or approval_deferrals.check_section(reread["approval_deferrals"], violations)
         or control.check_section(reread["control_stream"])
         or risk_state.check_section(reread["risk_state"])
         or research.check_section(reread["research"])
@@ -4631,6 +4640,10 @@ def main(argv: list[str] | None = None) -> int:
         f"policy-overlay drafts, {len(OVERLAY_VALIDATOR_MUTANTS)} validator and 2 vector mutants caught; "
         f"{len(deferred_section['invalid_drafts'])} invalid and {len(deferred_section['valid_drafts'])} valid "
         f"version-3 DecisionMade drafts, {len(DEFERRED_VALIDATOR_MUTANTS)} validator and 2 vector mutants caught; "
+        f"{len(deferrals_section['invalid_drafts'])} invalid and {len(deferrals_section['valid_drafts'])} valid "
+        f"version-3 ApprovalRequested drafts and {len(deferrals_section['batches'])} rule-292 batches, "
+        f"{len(approval_deferrals.VALIDATOR_MUTANTS)} validator and "
+        f"{len(approval_deferrals.vector_mutants(deferrals_section))} vector mutants caught; "
         f"{len(control_section['chain'])} control-stream events, {len(control_section['drafts'])} base drafts, "
         f"{len(control_section['journaled_facts'])} journaled facts, {len(control_section['invalid_drafts'])} invalid "
         f"and {len(control_section['valid_drafts'])} valid drafts; {len(control.VALIDATOR_MUTANTS)} validator and "

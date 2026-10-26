@@ -3130,6 +3130,584 @@ deferred_to_binding:
       value: null
     expect:
       outcome: Valid
+approval_deferrals:
+  spec: docs/specs/journal.md v0.88 §9.6 rules 291 and 292 (DEC-2514)
+  decisions:
+    plain:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z3M1A000000000000000G4
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: DecisionMade
+      schema_version: 1
+      event_time: '2026-09-21T14:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0
+      payload:
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        side: buy
+        type: limit
+        tif: day
+        qty: '10'
+        limit_price: '150'
+        purpose: open
+        exit_origin: null
+        exit_conviction: '0.85554'
+        buy_conviction: '0.75554'
+        combined_score: '0.882'
+        outputs_used:
+        - 01J8Z3M0R000000000000000G3
+        model_weights:
+        - key: quant.mean_reversion
+          value: '0.9'
+        - key: quant.momentum
+          value: '0.1'
+        clips_applied:
+        - max_order_usd
+        dry_run: allow
+        reason_code: null
+        autonomy: ask
+        ask_suppressed: null
+        decided_by: default
+        delegation_id: null
+        requested_by: agent
+        client_id: null
+      artifact_refs: []
+      pii_refs: []
+    deferring:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z3M1A000000000000000G4
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: DecisionMade
+      schema_version: 3
+      event_time: '2026-09-21T14:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:0279b468bd3b8a544d5a5c71ea6f95b85c08da3fcddaddafbd863a804fccb9f0
+      payload:
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        side: buy
+        type: limit
+        tif: day
+        qty: '10'
+        limit_price: '150'
+        purpose: open
+        exit_origin: null
+        exit_conviction: '0.85554'
+        buy_conviction: '0.75554'
+        combined_score: '0.882'
+        outputs_used:
+        - 01J8Z3M0R000000000000000G3
+        model_weights:
+        - key: quant.mean_reversion
+          value: '0.9'
+        - key: quant.momentum
+          value: '0.1'
+        clips_applied:
+        - max_order_usd
+        dry_run: allow
+        reason_code: null
+        autonomy: ask
+        ask_suppressed: null
+        decided_by: policy_overlay
+        delegation_id: null
+        requested_by: agent
+        client_id: null
+        deferred_to_binding:
+        - halt
+        - liquidity_floor
+        - participation
+        liquidity: null
+      artifact_refs: []
+      pii_refs: []
+  drafts:
+    requested_v2:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z3P0A000000000000000Q1
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ApprovalRequested
+      schema_version: 2
+      event_time: '2026-09-21T14:10:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z3N9A000000000000000Q0
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        instrument: AAPL
+        asset_class: us_equity
+        side: buy
+        qty: '10'
+        limit: '155'
+        purpose: open
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+        decided_by: rule:large_order
+        combined_score: '0.5'
+        reference_mark:
+          price: '155'
+          seq: 41
+        approvers_required: 1
+        independent_required: false
+        deadline: 1790000100
+        timeout_s: 300
+        on_timeout: skip
+        content:
+          action:
+            instrument: AAPL
+            asset_class: us_equity
+            side: buy
+            qty: '10'
+            limit: '155'
+            order_usd: '1550'
+            purpose: open
+          trigger:
+            mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+            decided_by: rule:large_order
+          evidence:
+            combined_score:
+              label: combined model score, not a probability of profit
+              value: '0.5'
+            outputs:
+            - event_id: 01J8Z3N8A000000000000000Q9
+              artifact: null
+              label: Output of software you selected
+          risk_impact: []
+          reference_mark:
+            price: '155'
+            seq: 41
+          deadline: '2026-09-21T14:15:00.000000000Z'
+          default: If you do nothing, this action is skipped
+          choices:
+          - approve
+          - skip
+          approvers:
+            required: 1
+            independent: false
+          execution:
+            asset_class: us_equity
+            tif: gtc
+            protection_required: true
+            protection:
+              stop: '147.25'
+              take_profit: '170.5'
+        content_hash: sha256:70b5f4aeecbcdb74103eab785f26ac943d99c39b19a9cf9dbbafd4804b73029b
+      artifact_refs:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:70b5f4aeecbcdb74103eab785f26ac943d99c39b19a9cf9dbbafd4804b73029b
+      pii_refs: []
+    requested_v3:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z3P0A000000000000000Q1
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ApprovalRequested
+      schema_version: 3
+      event_time: '2026-09-21T14:10:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z3N9A000000000000000Q0
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        instrument: AAPL
+        asset_class: us_equity
+        side: buy
+        qty: '10'
+        limit: '155'
+        purpose: open
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+        decided_by: rule:large_order
+        combined_score: '0.5'
+        reference_mark:
+          price: '155'
+          seq: 41
+        approvers_required: 1
+        independent_required: false
+        deadline: 1790000100
+        timeout_s: 300
+        on_timeout: skip
+        content:
+          action:
+            instrument: AAPL
+            asset_class: us_equity
+            side: buy
+            qty: '10'
+            limit: '155'
+            order_usd: '1550'
+            purpose: open
+          trigger:
+            mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+            decided_by: rule:large_order
+          evidence:
+            combined_score:
+              label: combined model score, not a probability of profit
+              value: '0.5'
+            outputs:
+            - event_id: 01J8Z3N8A000000000000000Q9
+              artifact: null
+              label: Output of software you selected
+          risk_impact: []
+          reference_mark:
+            price: '155'
+            seq: 41
+          deadline: '2026-09-21T14:15:00.000000000Z'
+          default: If you do nothing, this action is skipped
+          choices:
+          - approve
+          - skip
+          approvers:
+            required: 1
+            independent: false
+          execution:
+            asset_class: us_equity
+            tif: gtc
+            protection_required: true
+            protection:
+              stop: '147.25'
+              take_profit: '170.5'
+          deferred_to_binding:
+          - halt
+          - liquidity_floor
+          - participation
+        content_hash: sha256:83c0663b86f3a7dbf66cde53b520643395f6ad61b4cfac7793bede0738314be5
+      artifact_refs:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:83c0663b86f3a7dbf66cde53b520643395f6ad61b4cfac7793bede0738314be5
+      pii_refs: []
+  invalid_drafts:
+  - name: v3_without_its_deferrals
+    clause: '§9.6 v3: the deferrals are required'
+    base_draft: requested_v3
+    changes:
+    - path: payload.content.deferred_to_binding
+      delete: true
+    - path: payload.content_hash
+      value: sha256:70b5f4aeecbcdb74103eab785f26ac943d99c39b19a9cf9dbbafd4804b73029b
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:70b5f4aeecbcdb74103eab785f26ac943d99c39b19a9cf9dbbafd4804b73029b
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.deferred_to_binding
+  - name: v3_with_null_deferrals
+    clause: '§9.6 v3: the deferrals are not nullable'
+    base_draft: requested_v3
+    changes:
+    - path: payload.content.deferred_to_binding
+      value: null
+    - path: payload.content_hash
+      value: sha256:1186d7b14b17fd84da5d7da39e349d634144bc79e8b0e88c0bda671d44c8bd34
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:1186d7b14b17fd84da5d7da39e349d634144bc79e8b0e88c0bda671d44c8bd34
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.deferred_to_binding
+  - name: v2_with_deferrals
+    clause: '§9.6 v2 closed: version 2 names no deferral'
+    base_draft: requested_v2
+    changes:
+    - path: payload.content.deferred_to_binding
+      value:
+      - halt
+      - liquidity_floor
+      - participation
+    - path: payload.content_hash
+      value: sha256:83c0663b86f3a7dbf66cde53b520643395f6ad61b4cfac7793bede0738314be5
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:83c0663b86f3a7dbf66cde53b520643395f6ad61b4cfac7793bede0738314be5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.deferred_to_binding
+  - name: v3_without_a_plan
+    clause: '§9.6 v3: the plan stays required'
+    base_draft: requested_v3
+    changes:
+    - path: payload.content.execution
+      delete: true
+    - path: payload.content_hash
+      value: sha256:fb1eb7d3a1389dbe71c92da799c24febb2bf54e55c2f833d85aec1f21e00148e
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:fb1eb7d3a1389dbe71c92da799c24febb2bf54e55c2f833d85aec1f21e00148e
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.execution
+  - name: deferral_unknown
+    clause: '§9.6 v3: the names are §9.1''s'
+    base_draft: requested_v3
+    changes:
+    - path: payload.content.deferred_to_binding
+      value:
+      - exposure
+    - path: payload.content_hash
+      value: sha256:5cb94b151c86eae575548974d613beb5c97429c26a83bf66a766692a734f7496
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:5cb94b151c86eae575548974d613beb5c97429c26a83bf66a766692a734f7496
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.content.deferred_to_binding[0]
+  - name: deferrals_out_of_order
+    clause: 'rule 291: ascending by bytes'
+    base_draft: requested_v3
+    changes:
+    - path: payload.content.deferred_to_binding
+      value:
+      - participation
+      - liquidity_floor
+      - halt
+    - path: payload.content_hash
+      value: sha256:24afb08ac3e71e8d70601e8859b67f423224cea89787a85aee33ebca95998cda
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:24afb08ac3e71e8d70601e8859b67f423224cea89787a85aee33ebca95998cda
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.content.deferred_to_binding
+  - name: deferral_repeated
+    clause: 'rule 291: strictly ascending'
+    base_draft: requested_v3
+    changes:
+    - path: payload.content.deferred_to_binding
+      value:
+      - halt
+      - halt
+      - liquidity_floor
+      - participation
+    - path: payload.content_hash
+      value: sha256:c840b3615502871a49159e0f0352b9d2311534929502cf92c5069a48b0cc6348
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:c840b3615502871a49159e0f0352b9d2311534929502cf92c5069a48b0cc6348
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.content.deferred_to_binding
+  - name: deferrals_empty
+    clause: 'rule 291: never empty'
+    base_draft: requested_v3
+    changes:
+    - path: payload.content.deferred_to_binding
+      value: []
+    - path: payload.content_hash
+      value: sha256:e85ade5d80dc7f59de4b57d550c181b6c93536e4fdfd5ee74de834574fedad62
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:e85ade5d80dc7f59de4b57d550c181b6c93536e4fdfd5ee74de834574fedad62
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.deferred_to_binding
+  - name: floor_without_participation
+    clause: 'rule 291: the liquidity checks together'
+    base_draft: requested_v3
+    changes:
+    - path: payload.content.deferred_to_binding
+      value:
+      - halt
+      - liquidity_floor
+    - path: payload.content_hash
+      value: sha256:ded17436a32684b901b44f7b7a2c9052e35f8fecd52c8103f11da572d34ab81f
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:ded17436a32684b901b44f7b7a2c9052e35f8fecd52c8103f11da572d34ab81f
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.deferred_to_binding
+  - name: participation_without_the_floor
+    clause: 'rule 291: the liquidity checks together'
+    base_draft: requested_v3
+    changes:
+    - path: payload.content.deferred_to_binding
+      value:
+      - participation
+      - quote_ask
+    - path: payload.content_hash
+      value: sha256:d3205dc527cf5e0198748112a8a74135ec7065d87209ba25c017323896c22679
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:d3205dc527cf5e0198748112a8a74135ec7065d87209ba25c017323896c22679
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.content.deferred_to_binding
+  valid_drafts:
+  - name: one_deferral
+    clause: 'rule 291: one name is enough'
+    base_draft: requested_v3
+    changes:
+    - path: payload.content.deferred_to_binding
+      value:
+      - eligibility
+    - path: payload.content_hash
+      value: sha256:b0c394a78324186e5a0ede17cee78027dd7833f84074e3326114ad873c733d9f
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:b0c394a78324186e5a0ede17cee78027dd7833f84074e3326114ad873c733d9f
+    expect:
+      outcome: Valid
+  - name: every_deferral
+    clause: 'rule 291: all fourteen, in byte order'
+    base_draft: requested_v3
+    changes:
+    - path: payload.content.deferred_to_binding
+      value:
+      - account_exposure
+      - agent_equity
+      - agent_mode
+      - conduct_history
+      - day_trade_budget
+      - eligibility
+      - fee_reservation
+      - halt
+      - liquidity_floor
+      - other_orders
+      - participation
+      - quote_ask
+      - reentry_cooldown
+      - related_accounts
+    - path: payload.content_hash
+      value: sha256:1de6a31a094360338d5580e6d8ca19f49b4a2547a75defe7a054ff235ca92381
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:1de6a31a094360338d5580e6d8ca19f49b4a2547a75defe7a054ff235ca92381
+    expect:
+      outcome: Valid
+  - name: figures_read
+    clause: 'rule 291: neither liquidity check, once figures were read'
+    base_draft: requested_v3
+    changes:
+    - path: payload.content.deferred_to_binding
+      value:
+      - agent_mode
+      - halt
+    - path: payload.content_hash
+      value: sha256:face0b17f73c74f28bd9f9602547b0e47711d1d1ef84f16c01ad9f6596353732
+    - path: artifact_refs
+      value:
+      - sha256:1111111111111111111111111111111111111111111111111111111111111111
+      - sha256:face0b17f73c74f28bd9f9602547b0e47711d1d1ef84f16c01ad9f6596353732
+    expect:
+      outcome: Valid
+  batches:
+  - name: deferring_decision_and_its_request
+    clause: rule 292
+    decision: deferring
+    request:
+      base_draft: requested_v3
+      changes: []
+    expect:
+      outcome: Valid
+  - name: plain_decision_and_a_v2_request
+    clause: 'rule 292: neither names a deferral'
+    decision: plain
+    request:
+      base_draft: requested_v2
+      changes: []
+    expect:
+      outcome: Valid
+  - name: v2_request_hides_a_deferral
+    clause: 'rule 292: absent is empty, which the decision''s names are not'
+    decision: deferring
+    request:
+      base_draft: requested_v2
+      changes: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.content.deferred_to_binding
+  - name: v3_request_names_another_deferral
+    clause: rule 292
+    decision: deferring
+    request:
+      base_draft: requested_v3
+      changes:
+      - path: payload.content.deferred_to_binding
+        value:
+        - agent_mode
+        - liquidity_floor
+        - participation
+      - path: payload.content_hash
+        value: sha256:cb4d37f237de4abd581b90d5109363a0c7a59dbfaddcb46416fab46d782976ec
+      - path: artifact_refs
+        value:
+        - sha256:1111111111111111111111111111111111111111111111111111111111111111
+        - sha256:cb4d37f237de4abd581b90d5109363a0c7a59dbfaddcb46416fab46d782976ec
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.content.deferred_to_binding
+  - name: v3_request_on_a_plain_decision
+    clause: 'rule 292: the decision deferred nothing'
+    decision: plain
+    request:
+      base_draft: requested_v3
+      changes: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.content.deferred_to_binding
+  - name: request_naming_another_decision
+    clause: rule 292 binds only the decision the request names
+    decision: plain
+    request:
+      base_draft: requested_v3
+      changes:
+      - path: causation_id
+        value: 01J8Z3N9A000000000000000Q0
+    expect:
+      outcome: Valid
 control_stream:
   spec: docs/specs/journal.md v0.7 §9.2 (DEC-261)
   stream_id: ctl:ws_01J8Z2
@@ -16465,12 +17043,12 @@ approval_requests:
       outcome: Invalid
       reason: wrong_stream
       path: event_type
-  - name: at_version_3
-    clause: '§9.6: versions 1 and 2 only'
+  - name: at_version_4
+    clause: '§9.6: versions 1 to 3 only (v0.88)'
     base_draft: requested_v2
     changes:
     - path: schema_version
-      value: 3
+      value: 4
     expect:
       outcome: Invalid
       reason: unknown_schema
