@@ -15,13 +15,22 @@ const CERT = process.env.OWLHEAD_CELL_TLS_CERT ?? "";
 const API = process.env.OWLHEAD_API_ORIGIN ?? "";
 const UPSTREAM = process.env.OWLHEAD_CELL_API_UPSTREAM ?? "";
 
+/**
+ * Which gesture this run is: the kill switch by default, as the demo's step 7 has always run, or the
+ * file the driver names (`trade-loop.spec.ts` for the end-to-end loop). One run is one gesture.
+ */
+const SPEC = process.env.OWLHEAD_CELL_SPEC ?? "kill-switch.spec.ts";
+/** The whole run's bound; the trade loop waits on the runtime, the host's confirmation and a fill. */
+const TIMEOUT_MS = Number(process.env.OWLHEAD_CELL_TIMEOUT_MS ?? 90_000);
+
 export default defineConfig({
   testDir: "e2e-cell",
+  testMatch: SPEC,
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,
   workers: 1,
-  globalTimeout: 90_000,
+  globalTimeout: TIMEOUT_MS,
   reporter: "list",
   use: { baseURL: ORIGIN, ignoreHTTPSErrors: true, trace: "retain-on-failure" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], colorScheme: "light" } }],

@@ -60,6 +60,37 @@ test("Approve shows a code to confirm on the host, and the approve that follows 
   for (const call of calls) expect(operationFor(call.method(), call.url(), WS), `${call.method()} ${call.url()}`).not.toBeNull();
 });
 
+test("Connect Alpaca paper shows the disclosure and a host code, starts with that challenge's evidence, and lands on the connection (DEC-2623, DEC-2626)", async ({ page }) => {
+  const calls = apiCalls(page);
+  let authorize = "";
+  await page.route("https://paper-oauth.mock.invalid/**", async (route) => {
+    authorize = route.request().url();
+    await route.fulfill({ status: 200, contentType: "text/html", body: "<title>Alpaca (mock)</title>" });
+  });
+  await page.goto("/connections");
+  await expect(page.getByRole("list", { name: "Broker accounts" })).toContainText("Connected.");
+  await page.getByRole("button", { name: "Connect Alpaca paper" }).click();
+  await expect(page.getByRole("region", { name: "Before you connect Alpaca paper trading" })).toHaveAttribute("data-version", "1");
+  await page.getByRole("button", { name: "Connect with Alpaca" }).click();
+  const panel = page.getByRole("region", { name: "Confirm on the host" });
+  await expect(panel.locator("[data-slot=host-confirm-command]")).toContainText(`mandate step-up confirm-connect --workspace ${WS} --principal `);
+  let started = { connection_id: "" };
+  await page.route(`**/v1/workspaces/${WS}/connections/oauth/start`, async (route) => {
+    const response = await route.fetch();
+    started = (await response.json()) as typeof started;
+    await route.fulfill({ response });
+  });
+  await panel.getByRole("button", { name: "Connect with Alpaca" }).click();
+  await expect(page).toHaveTitle("Alpaca (mock)");
+  expect(started.connection_id).toMatch(/^conn_[0-9A-HJKMNP-TV-Z]{26}$/);
+  expect(new URL(authorize).origin).toBe("https://paper-oauth.mock.invalid");
+  const start = calls.find((c) => c.method() === "POST" && new URL(c.url()).pathname.endsWith("/connections/oauth/start"));
+  expect(start?.postDataJSON()).toMatchObject({ broker: "alpaca", environment: "paper", disclosure: { document: "alpaca_oauth_token_breadth", version: "1" }, step_up: { method: "cli_confirm" } });
+  await page.goto(`/connections/${started.connection_id}`);
+  await expect(page.getByRole("status").filter({ hasText: /^(Connecting|Connected)/ })).toBeVisible();
+  for (const call of calls) expect(operationFor(call.method(), call.url(), WS), `${call.method()} ${call.url()}`).not.toBeNull();
+});
+
 test("a deployment that does not answer shows unreachable, not the fixtures", async ({ page }) => {
   await page.goto("/?scenario=unreachable");
   await expect(page.getByRole("heading", { name: "Cannot reach your deployment" })).toBeVisible();

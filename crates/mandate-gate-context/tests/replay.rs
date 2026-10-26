@@ -159,20 +159,21 @@ fn oracle(steps: &[(i64, Step)]) -> Result<(String, i64, u32, i64), Held> {
         .map(|(at, _)| *at)
         .max()
         .ok_or(Held::NoClock)?;
-    let mandate = steps
-        .iter()
-        .rev()
-        .find_map(|(_, step)| match step {
-            Step::Deployed(version) => Some(Some(version.clone())),
-            Step::Applied {
-                version,
-                applied: true,
-            } => Some(Some(version.clone())),
-            Step::Stopped => Some(None),
-            _ => None,
-        })
-        .flatten()
-        .ok_or(Held::NoMandate)?;
+    if steps.iter().any(|(_, step)| matches!(step, Step::Stopped)) {
+        return Err(Held::NoMandate);
+    }
+    let last_applied = steps.iter().rev().find_map(|(_, step)| match step {
+        Step::Applied {
+            version,
+            applied: true,
+        } => Some(version.clone()),
+        _ => None,
+    });
+    let last_deployed = steps.iter().rev().find_map(|(_, step)| match step {
+        Step::Deployed(version) => Some(version.clone()),
+        _ => None,
+    });
+    let mandate = last_applied.or(last_deployed).ok_or(Held::NoMandate)?;
     let snapshot_at = steps
         .iter()
         .rev()

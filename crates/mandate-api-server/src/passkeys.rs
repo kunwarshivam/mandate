@@ -1,7 +1,6 @@
 //! The passkey routes (workspace API spec §3.6, [DEC-2108] items 4 and 5, [DEC-2115],
-//! [DEC-2118], [DEC-2124]): `POST /v1/workspaces/{ws}/passkeys/registration-challenges` and
-//! `GET /v1/workspaces/{ws}/passkeys`. The enrolment, `POST /v1/workspaces/{ws}/passkeys`, lands
-//! with its own slice.
+//! [DEC-2118], [DEC-2124]): `POST /v1/workspaces/{ws}/passkeys/registration-challenges`,
+//! `POST /v1/workspaces/{ws}/passkeys`, and `GET /v1/workspaces/{ws}/passkeys`.
 //!
 //! Both serve §3.7's row "Enrol or remove one's own passkey", its `own` cell, and read the
 //! member's passkeys from one fold of the control stream, `CredentialFold::passkeys`; a member
@@ -22,18 +21,21 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use mandate_api::envelope::{StepUpAssertion, StepUpEvidence};
 use mandate_api::problem::{Effect, Problem, ProblemCode, Violation};
-use mandate_api::wire::encode;
+use mandate_api::wire::{decode, encode};
 use mandate_authn::Request;
-use mandate_canon::Value;
+use mandate_canon::{Digest, Int, Value, encode_ulid, to_canonical};
 use mandate_identity::{AssertionId, Permission, PrincipalId};
 use mandate_journal::StoredEvent;
-use mandate_passkey::credentials::{CredentialFold, Enrolment, PasskeyAlg};
+use mandate_passkey::credentials::{CredentialFold, CredentialRecord, Enrolment, PasskeyAlg};
+use mandate_passkey::{Challenge, Credential, PublicKey, RelyingParty};
 use mandate_time::UtcNanos;
 
 use crate::backtests::paper;
 use crate::challenges::{Registration, Withheld};
-use crate::http::{App, problem, problem_body};
+use crate::commands::{Event, Settled, Writer, envelope, settle_at};
+use crate::http::{App, invalid, problem, problem_body};
 use crate::members::credential_records;
 use crate::reduction::rp_id;
 use crate::routes::{
@@ -170,6 +172,315 @@ pub async fn list(
     no_store(enveloped(StatusCode::OK, now, members))
 }
 
+/// The enrolment route's operation name (DEC-2108 item 5).
+pub const ENROL_OPERATION: &str = "passkey_enrol";
+
+/// `POST /v1/workspaces/{ws}/passkeys` (DEC-2108 items 4 and 5, DEC-2118 items 3 and 5, DEC-2122,
+/// DEC-2124): the session, the CSRF mark, the key, the strict body, the row, then `live`; then the
+/// registration challenge, taken whatever follows, the member's passkeys, the step-up a first or a
+/// later enrolment needs, the registration response, and a passkey id the stream never enrolled;
+/// then the key's artifact and `CredentialEnrolled` version 2, and the `201`.
+///
+/// A later enrolment's step-up never counts yet: an `own` row's authorization yields no tenant
+/// context for the port to judge it under, so evidence is `step_up_missing` until E9-4 S4 binds
+/// one, and only a first enrolment commits. That only refuses, so it adds no risk.
+pub async fn enrol(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<String>, PathRejection>,
+    body: Body,
+) -> Response {
+    let Ok(Path(workspace)) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let (gate, body) = match strict(&app, &headers, body).await {
+        Ok(admitted) => admitted,
+        Err(refusal) => return refusal.response(),
+    };
+    let Some(request) = Enrol::parse(&body) else {
+        return Refused::Invalid.response();
+    };
+    let reader = match own_authorized(
+        &app,
+        &gate.admitted,
+        gate.now,
+        &workspace,
+        Permission::OwnPasskey,
+        Unreadable::Command,
+    )
+    .await
+    {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    if !paper(&reader.control) {
+        return problem(
+            StatusCode::CONFLICT,
+            problem_body(ProblemCode::LiveUnavailable),
+        );
+    }
+    let principal = gate.admitted.principal;
+    let Some(registration) = app.challenges.take_registration(
+        &request.challenge_id,
+        principal,
+        reader.workspace,
+        gate.now,
+    ) else {
+        return challenge_refused();
+    };
+    let Ok(records) = credential_records(app.hosted.workspace, &reader.control) else {
+        return Refused::JournalUnavailable.response();
+    };
+    let fold = CredentialFold::new(records);
+    let Ok(passkeys) = fold.passkeys(principal) else {
+        return Refused::JournalUnavailable.response();
+    };
+    let fresh = later(gate.admitted.signed_in, FRESH_S).is_some_and(|ends| gate.now <= ends);
+    match (request.stepped_up, passkeys.is_empty()) {
+        (false, true) if !fresh => return stale_session(),
+        (false, true) => {}
+        (true, true) => return Refused::Invalid.response(),
+        (false, false) => {
+            return problem(
+                StatusCode::UNAUTHORIZED,
+                problem_body(ProblemCode::StepUpRequired),
+            );
+        }
+        (true, false) => {
+            return problem(
+                StatusCode::UNAUTHORIZED,
+                problem_body(ProblemCode::StepUpMissing),
+            );
+        }
+    }
+    let Some(rp_id) = rp_id(&app.settings.app_origin) else {
+        return Refused::JournalUnavailable.response();
+    };
+    let rp = RelyingParty {
+        rp_id,
+        origin: app.settings.app_origin.clone(),
+    };
+    let Ok(challenge) = Challenge::new(&registration.challenge) else {
+        return Refused::JournalUnavailable.response();
+    };
+    let registered = mandate_passkey::Registration {
+        attestation_object: &request.attestation_object,
+        client_data_json: &request.client_data_json,
+    };
+    let Ok(credential) = mandate_passkey::enrol(&rp, &challenge, &registered) else {
+        return Refused::Invalid.response();
+    };
+    if URL_SAFE_NO_PAD.encode(&credential.id) != request.passkey_id {
+        return Refused::Invalid.response();
+    }
+    let key = cose_bytes(&credential.public_key);
+    let (alg, alg_name) = match credential.public_key {
+        PublicKey::Es256 { .. } => (PasskeyAlg::Es256, "es256"),
+        PublicKey::Ed25519 { .. } => (PasskeyAlg::EdDsa, "eddsa"),
+    };
+    let public_key = format!("sha256:{}", Digest::of(&key).to_hex());
+    let Some(cool_off_ends) = later(gate.now, COOL_OFF_S) else {
+        return Refused::JournalUnavailable.response();
+    };
+    let enrolment = Enrolment {
+        seq: reader
+            .control
+            .last()
+            .map_or(1, |row| row.seq.saturating_add(1)),
+        member: principal,
+        credential: request.passkey_id.clone(),
+        public_key: public_key.clone(),
+        alg,
+        sign_count: credential.sign_count,
+        cool_off_ends: Some(cool_off_ends),
+        backup_eligible: Some(credential.backup_eligible),
+    };
+    if fold.admits(&CredentialRecord::Enrolled(enrolment)).is_err() {
+        return Refused::Invalid.response();
+    }
+    let (Some((event_id, id)), Some(objects)) = (
+        derived_for(&gate, &reader.workspace_text, ENROL_OPERATION),
+        app.objects.as_ref(),
+    ) else {
+        return Refused::JournalUnavailable.response();
+    };
+    let Some(draft) = enrolled_draft(
+        &reader,
+        principal,
+        &id,
+        &request.passkey_id,
+        (&public_key, alg_name),
+        &credential,
+        cool_off_ends,
+        gate.now,
+    ) else {
+        return Refused::JournalUnavailable.response();
+    };
+    if objects.put(&key).is_err() {
+        return Refused::JournalUnavailable.response();
+    }
+    let stream = format!("ctl:{}", reader.workspace_text);
+    let head = reader.control.last().map(|row| row.seq);
+    match settle_at(app.journal.as_ref(), &stream, &id, &draft, gate.now, head).await {
+        Settled::Stored(_) => {}
+        Settled::Conflict => {
+            return problem(
+                StatusCode::CONFLICT,
+                problem_body(ProblemCode::IdempotencyConflict),
+            );
+        }
+        Settled::Unknown | Settled::Unavailable => {
+            return Refused::JournalUnavailable.response();
+        }
+    }
+    let Ok(event_id) = encode(&event_id) else {
+        return Refused::JournalUnavailable.response();
+    };
+    let members = vec![
+        (
+            "event_id",
+            mandate_canon::parse(&event_id).unwrap_or(Value::Null),
+        ),
+        ("passkey_id", string(&request.passkey_id)),
+        ("alg", string(alg_name)),
+        ("cool_off_ends", string(&cool_off_ends.to_string())),
+    ];
+    no_store(enveloped(StatusCode::CREATED, gate.now, members))
+}
+
+/// A first passkey's cool-off, in seconds (journal spec §9.31 rule 249).
+pub const COOL_OFF_S: i64 = 86_400;
+
+/// `commands/passkey-enrol-request`, strict: exactly its six members, the registration response's
+/// two byte strings unpadded base64url, and the step-up and its assertion both `null` or both
+/// set, each of its own shape (DEC-2118 item 3).
+struct Enrol {
+    challenge_id: String,
+    passkey_id: String,
+    attestation_object: Vec<u8>,
+    client_data_json: Vec<u8>,
+    /// Whether the request carries step-up and its assertion.
+    stepped_up: bool,
+}
+
+/// The longest passkey id §9.31 admits, in characters.
+const PASSKEY_ID_MAX: usize = 1_364;
+
+/// The shortest passkey id §9.31 admits, in characters.
+const PASSKEY_ID_MIN: usize = 22;
+
+impl Enrol {
+    /// The request `body` holds, or `None` for anything else.
+    fn parse(body: &[u8]) -> Option<Self> {
+        let Ok(Value::Object(members)) = mandate_canon::parse(body) else {
+            return None;
+        };
+        if members.len() != 6 {
+            return None;
+        }
+        let text = |name: &str| members.get(name)?.as_str().map(str::to_owned);
+        let bytes = |name: &str| unpadded(&text(name)?);
+        let passkey_id = text("passkey_id")?;
+        unpadded(&passkey_id)?;
+        if !(PASSKEY_ID_MIN..=PASSKEY_ID_MAX).contains(&passkey_id.len()) {
+            return None;
+        }
+        let step_up = members.get("step_up")?;
+        let assertion = members.get("step_up_assertion")?;
+        let stepped_up = match (step_up, assertion) {
+            (Value::Null, Value::Null) => false,
+            (Value::Null, _) | (_, Value::Null) => return None,
+            (step_up, assertion) => {
+                decode::<StepUpEvidence>(&to_canonical(step_up)).ok()?;
+                decode::<StepUpAssertion>(&to_canonical(assertion)).ok()?;
+                true
+            }
+        };
+        Some(Self {
+            challenge_id: text("challenge_id")?,
+            passkey_id,
+            attestation_object: bytes("attestation_object")?,
+            client_data_json: bytes("client_data_json")?,
+            stepped_up,
+        })
+    }
+}
+
+/// The bytes `text` holds as unpadded base64url, written canonically; `None` for anything else.
+fn unpadded(text: &str) -> Option<Vec<u8>> {
+    let bytes = URL_SAFE_NO_PAD.decode(text).ok()?;
+    (URL_SAFE_NO_PAD.encode(&bytes) == text).then_some(bytes)
+}
+
+/// `key` as a COSE_Key (RFC 9053) in CTAP2's canonical form, the bytes an enrolment stores: an
+/// EC2 P-256 key's `kty`, `alg` ES256, `crv`, `x` and `y`, or an OKP Ed25519 key's `kty`, `alg`
+/// EdDSA, `crv` and `x`.
+fn cose_bytes(key: &PublicKey) -> Vec<u8> {
+    match key {
+        PublicKey::Es256 { x, y } => [
+            &[0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20][..],
+            &x[..],
+            &[0x22, 0x58, 0x20][..],
+            &y[..],
+        ]
+        .concat(),
+        PublicKey::Ed25519 { x } => [
+            &[0xa4, 0x01, 0x01, 0x03, 0x27, 0x20, 0x06, 0x21, 0x58, 0x20][..],
+            &x[..],
+        ]
+        .concat(),
+    }
+}
+
+/// The `CredentialEnrolled` version 2 a first enrolment appends (journal spec §9.31): the member,
+/// the passkey, its key's artifact reference and algorithm, the registration's counter and
+/// backup-eligible flag, its cool-off's end, and no step-up.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is one member of the record, named at the one call"
+)]
+fn enrolled_draft(
+    reader: &OwnReader,
+    principal: PrincipalId,
+    id: &str,
+    passkey_id: &str,
+    (public_key, alg): (&str, &str),
+    credential: &Credential,
+    cool_off_ends: UtcNanos,
+    now: UtcNanos,
+) -> Option<Vec<u8>> {
+    let member = encode_ulid(principal.0);
+    let payload = object(vec![
+        ("member", string(&member)),
+        ("kind", string("passkey")),
+        ("credential", string(passkey_id)),
+        ("public_key", string(public_key)),
+        ("alg", string(alg)),
+        (
+            "sign_count",
+            Value::Int(Int::new(u64::from(credential.sign_count))?),
+        ),
+        ("backup_eligible", Value::Bool(credential.backup_eligible)),
+        ("cool_off_ends", string(&cool_off_ends.to_string())),
+        ("step_up", Value::Null),
+    ]);
+    let event = Event {
+        event_type: "CredentialEnrolled",
+        schema_version: 2,
+        payload,
+        artifact_refs: vec![string(public_key)],
+        config_refs: Vec::new(),
+    };
+    let writer = Writer {
+        workspace: &reader.workspace_text,
+        principal: &member,
+        event_id: id,
+        environment: "paper",
+        now,
+    };
+    envelope(&writer, &event)
+}
+
 /// `principal`'s passkeys on the control stream, from `CredentialFold::passkeys`, or `None` when
 /// the rows do not read or the fold refuses them (DEC-2124 items 1 and 2).
 fn own_passkeys(app: &App, reader: &OwnReader, principal: PrincipalId) -> Option<Vec<Enrolment>> {
@@ -188,6 +499,16 @@ pub(crate) fn later(at: UtcNanos, secs: i64) -> Option<UtcNanos> {
 /// Whether `body` is the empty object the request's schema admits, and nothing else.
 fn empty_object(body: &[u8]) -> bool {
     matches!(mandate_canon::parse(body), Ok(Value::Object(members)) if members.is_empty())
+}
+
+/// `invalid` with its one violation at `/challenge_id`: the registration challenge is not held,
+/// has expired, or names another principal or workspace (DEC-2108 item 5).
+fn challenge_refused() -> Response {
+    invalid(vec![Violation::Schema {
+        path: "/challenge_id".to_owned(),
+        code: "challenge".to_owned(),
+        message: "Ask for a new registration challenge".to_owned(),
+    }])
 }
 
 /// `step_up_stale` with its one violation at `/session` (DEC-2118 item 4).

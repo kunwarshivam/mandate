@@ -371,12 +371,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 return alerts;
             }
         }
-        if self.schedule_reconciliation(now) && !self.flush(now, &mut alerts, 0) {
-            return alerts;
-        }
         if nothing_read && all_read && released && self.owes_nothing() {
             self.lifecycle.observe(now, Lifecycled::Completed);
         }
+        self.reconcile_on_schedule(now, &mut alerts);
         alerts
     }
 
@@ -799,10 +797,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// Asks for a reconciliation once [`SCHEDULED_RECONCILE_S`] have passed since the last one this
     /// asked for, while any order the account stream holds may still work (X1b-3). The broker
     /// reports a fill only on a read, so without it an order accepted and filled later is booked
-    /// only by the next start's reconciliation. It is asked last in a pass that went through, so
-    /// no read goes ahead of what the pass sent, and none while the journal is down; whether it
-    /// asked.
-    fn schedule_reconciliation(&mut self, now: UtcNanos) -> bool {
+    /// only by the next start's reconciliation. It runs last in a pass that went through, so no
+    /// read goes ahead of what the pass sent, and none while the journal is down; a run that does
+    /// not commit has already told the lifecycle, and the next pass picks up what it left.
+    fn reconcile_on_schedule(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) {
         let working = self
             .state
             .orders()
@@ -812,8 +810,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         if working && due {
             self.reconcile = true;
             self.scheduled = now;
+            self.flush(now, alerts, 0);
         }
-        working && due
     }
 
     /// Sends the requests left in the outbox in order, handing each answer to the core, then the

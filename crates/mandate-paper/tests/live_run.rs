@@ -62,6 +62,7 @@ fn journaled(
         causation_id: causation_id.map(str::to_owned),
         record: ControlRecord {
             seq,
+            event_time: None,
             event_type: event_type.to_owned(),
             payload: json(payload),
             origin: Origin {

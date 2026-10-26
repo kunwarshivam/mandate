@@ -125,14 +125,18 @@ pub struct Journaled {
     clock_stream: String,
     account_now: Option<UtcNanos>,
     scheduler_now: Option<UtcNanos>,
-    mandate: Option<String>,
+    deployed: Option<String>,
+    applied: Option<String>,
+    stopped: bool,
     account: Option<AccountFacts>,
     marks: BTreeMap<String, Latest>,
     requested_by: Option<String>,
-    orders: BTreeSet<String>,
+    orders: BTreeMap<String, String>,
+    ended: BTreeSet<String>,
     fills: BTreeSet<String>,
     positions: BTreeMap<String, SignedQty>,
     released: BTreeMap<String, Qty>,
+    models: BTreeMap<(String, String), String>,
     account_positions: BTreeMap<String, SignedQty>,
     unreadable: bool,
 }
@@ -147,14 +151,18 @@ impl Journaled {
             clock_stream: clock_stream.to_owned(),
             account_now: None,
             scheduler_now: None,
-            mandate: None,
+            deployed: None,
+            applied: None,
+            stopped: false,
             account: None,
             marks: BTreeMap::new(),
             requested_by: None,
-            orders: BTreeSet::new(),
+            orders: BTreeMap::new(),
+            ended: BTreeSet::new(),
             fills: BTreeSet::new(),
             positions: BTreeMap::new(),
             released: BTreeMap::new(),
+            models: BTreeMap::new(),
             account_positions: BTreeMap::new(),
             unreadable: false,
         }
@@ -192,6 +200,35 @@ impl Journaled {
             .collect()
     }
 
+    /// The agent's own orders that no terminal state has ended: each `client_order_id` with its
+    /// instrument, which a flatten cancels (DEC-2378 item 7).
+    pub fn working(&self) -> BTreeMap<String, String> {
+        self.orders
+            .iter()
+            .filter(|(order, _)| !self.ended.contains(*order))
+            .map(|(order, instrument)| (order.clone(), instrument.clone()))
+            .collect()
+    }
+
+    /// Each model the workspace registered (`ConfigSnapshotRegistered` of kind `model_version`),
+    /// by its id and version, with the content hash it was registered under, the latest one
+    /// where it was registered again. The builder sizes only outputs of a model listed here
+    /// (DEC-2378 item 10).
+    pub fn models(&self) -> BTreeMap<(String, String), String> {
+        self.models.clone()
+    }
+
+    /// The mandate version in force: the latest one applied on the account stream, else the one
+    /// deployed, and none once the agent is stopped. The streams are folded in any interleaving,
+    /// so the answer is the same whichever stream reaches the fold first: a deployment comes once
+    /// and before every version applied over it, and a stop is final (DEC-1173).
+    fn mandate(&self) -> Option<String> {
+        if self.stopped {
+            return None;
+        }
+        self.applied.clone().or_else(|| self.deployed.clone())
+    }
+
     /// The later of the account stream's latest risk clock and the scheduler's latest tick.
     pub fn now(&self) -> Option<UtcNanos> {
         self.account_now.max(self.scheduler_now)
@@ -206,7 +243,7 @@ impl Journaled {
             return Err(Held::NoClock);
         }
         let now = self.now().ok_or(Held::NoClock)?;
-        let mandate_version = self.mandate.clone().ok_or(Held::NoMandate)?;
+        let mandate_version = self.mandate().ok_or(Held::NoMandate)?;
         let account = self.account.clone().ok_or(Held::NoSnapshot)?;
         if reached(now, account.at, fresh.snapshot_max_age_s) {
             return Err(Held::StaleSnapshot);
@@ -252,11 +289,11 @@ impl Journaled {
         let ours = || payload.text("agent_id").map(|agent| agent == self.agent);
         match (row.event_type, at) {
             ("AgentDeployed", _) if ours()? => {
-                self.mandate = Some(payload.text("mandate_version")?.to_owned());
+                self.deployed = Some(payload.text("mandate_version")?.to_owned());
             }
-            ("AgentStopped", _) if ours()? => self.mandate = None,
+            ("AgentStopped", _) if ours()? => self.stopped = true,
             ("MandateVersionApplied", Some(_)) if ours()? => match payload.text("result")? {
-                "applied" => self.mandate = Some(payload.text("new_version")?.to_owned()),
+                "applied" => self.applied = Some(payload.text("new_version")?.to_owned()),
                 "rejected" => {}
                 _ => return Err(refused("result")),
             },
@@ -285,12 +322,26 @@ impl Journaled {
             }
             ("OrderSubmitted", _) if on_account => {
                 let order = payload.text("client_order_id")?.to_owned();
+                let instrument = payload.text("instrument_id")?.to_owned();
                 if self.requested_by.take().as_deref() == Some(self.agent.as_str()) {
-                    self.orders.insert(order);
+                    self.orders.insert(order, instrument);
                 }
             }
             ("FillApplied" | "LateFillApplied", _) if on_account => self.fill(&payload)?,
+            ("OrderStateChanged", _) if on_account => self.changed(&payload)?,
+            ("OrderAbandoned", _) if on_account => {
+                self.ended
+                    .insert(payload.text("client_order_id")?.to_owned());
+            }
             ("PositionReleased", _) if on_account => self.released(&payload)?,
+            ("ConfigSnapshotRegistered", _) if payload.text("kind")? == "model_version" => {
+                let model = (
+                    payload.text("model_id")?.to_owned(),
+                    payload.text("model_version")?.to_owned(),
+                );
+                let hash = payload.text("content_hash")?.to_owned();
+                self.models.insert(model, hash);
+            }
             ("FeesCharged", _) if on_account => self.fees(&payload)?,
             ("CorporateActionApplied", _) if on_account => {
                 return Err(refused("corporate_action"));
@@ -329,7 +380,7 @@ impl Journaled {
     /// the `OrderRequestRecorded` journaled immediately before its `OrderSubmitted` names the agent
     /// (journal spec rule 45).
     fn fill(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
-        let ours = self.orders.contains(payload.text("client_order_id")?);
+        let ours = self.orders.contains_key(payload.text("client_order_id")?);
         let id = payload.text("fill_id")?.to_owned();
         let qty =
             Qty::parse(payload.text("qty_gross")?).map_err(|_| (payload.refused)("qty_gross"))?;
@@ -345,6 +396,30 @@ impl Journaled {
         add(&mut self.account_positions, &instrument, signed, payload)?;
         if ours {
             add(&mut self.positions, &instrument, signed, payload)?;
+        }
+        Ok(())
+    }
+
+    /// An order's change of state. A terminal state ends the order, and a replacement of one of
+    /// the agent's orders is the agent's too. A change the executor journaled as `ignored`
+    /// changes nothing.
+    fn changed(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
+        let order = payload.text("client_order_id")?.to_owned();
+        let state = payload.text("state")?;
+        let ignored = payload.flag("ignored")?;
+        let successor = match payload.value.get("replaced_by") {
+            None | Some(Value::Null) => None,
+            Some(Value::Str(successor)) => Some(successor.clone()),
+            Some(_) => return Err((payload.refused)("replaced_by")),
+        };
+        let Some(instrument) = self.orders.get(&order).cloned().filter(|_| !ignored) else {
+            return Ok(());
+        };
+        if TERMINAL.contains(&state) {
+            self.ended.insert(order);
+        }
+        if let Some(successor) = successor {
+            self.orders.insert(successor, instrument);
         }
         Ok(())
     }
@@ -410,6 +485,16 @@ impl Journaled {
         Ok(())
     }
 }
+
+/// The order states that end an order (trading-domain spec §5.7), `abandoned` among them.
+const TERMINAL: [&str; 6] = [
+    "filled",
+    "canceled",
+    "rejected",
+    "expired",
+    "replaced",
+    "abandoned",
+];
 
 /// The account-stream types the fold reads at their own `risk_clock`, which each must carry.
 const CLOCKED: [&str; 4] = [

@@ -2,7 +2,9 @@
 //! the deployment manager starting that account's executor, which the drill waits on until its pod
 //! runs and its process answers `livez`. Before it, the scheduler's ticks (E21-29): the run's
 //! workspace is the one the chart names the scheduler, and its clock stream, exported twice a few
-//! seconds apart, must have grown, so the ticks the runtime and the executor read arrive. Paper and
+//! seconds apart, must have grown, so the ticks the runtime and the executor read arrive; and the
+//! data process's daily bars, inspected in the artifact store with no problem and at least
+//! [`BAR_SESSIONS`] sessions, so the bars the runtime's model host reads are there. Paper and
 //! fixtures only: the connect check and the executor reach the in-process fixture broker
 //! (DEC-2007), and no credential is read.
 //!
@@ -41,6 +43,12 @@ const SUBJECT: &str = "mandate.dev/subject";
 const TICK_GAP: Duration = Duration::from_secs(3);
 /// The export's file, in the Job's own `/work`.
 const CLOCK_SEGMENT: &str = "/work/clock.seg";
+/// The demo instrument's daily bars as the data process stores them (`processes.json`'s `data`
+/// args and `mandate-datad`'s layout), in the artifact store the control Job mounts.
+pub const BARS_DIR: &str =
+    "/var/lib/mandate/artifacts/datasets/cell-recorded/alpaca/iex/bars-1Day/SPY";
+/// The sessions the data process stores (`mandate_datad::series::SESSIONS`).
+pub const BAR_SESSIONS: u64 = 30;
 /// The executor's own probe, as its pod's `livez` probe runs it (`processes.json`, DEC-994 item 5).
 const LIVEZ: [&str; 5] = [
     "/mandate-executord",
@@ -128,6 +136,22 @@ pub fn connect_check(run: &str, workspace: &str, account: &str) -> Result<Result
         .filter(|_| done)
         .map(str::to_owned)
         .ok_or(logs))
+}
+
+/// The days an inspection's logs list when the dataset has no problem: `None` without the
+/// report's coverage line, or when the report counts any problem.
+pub fn inspected_days(logs: &str) -> Option<u64> {
+    if !logs
+        .lines()
+        .any(|l| l.ends_with("total: 1 datasets, 0 problems"))
+    {
+        return None;
+    }
+    logs.lines().find_map(|l| {
+        let (_, rest) = l.split_once("coverage: ")?;
+        let (_, listed) = rest.split_once(", ")?;
+        listed.strip_suffix(" days listed")?.trim().parse().ok()
+    })
 }
 
 /// The event id a connect check's logs name as passing.
@@ -381,6 +405,9 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
     if let Some(broken) = ticks(&id, &workspace)? {
         return Ok(Verdict::Broken(broken));
     }
+    if let Some(broken) = bars(&id)? {
+        return Ok(Verdict::Broken(broken));
+    }
     let recorded = recorded
         .as_ref()
         .map(|(checked, code)| (account.as_str(), checked.as_str(), code.as_str()));
@@ -550,6 +577,28 @@ fn ticks(id: &str, workspace: &str) -> Result<Option<String>> {
     Ok(None)
 }
 
+/// The data process's daily bars (E21-29 lane SC): one `mandate inspect` of [`BARS_DIR`] in a
+/// one-off `control` Job; `None` when it lists at least [`BAR_SESSIONS`] days and no problem.
+fn bars(id: &str) -> Result<Option<String>> {
+    let inspect = render(
+        &[
+            format!("run.id=\"{id}b\""),
+            format!("run.args={}", json!(["inspect", BARS_DIR])),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    let (done, logs) = run_job(inspect)?;
+    match inspected_days(&logs).filter(|_| done) {
+        Some(days) if days >= BAR_SESSIONS => {
+            eprintln!("    the data process stores {days} sessions of daily bars, no problem");
+            Ok(None)
+        }
+        _ => Ok(Some(format!(
+            "the data process's daily bars are missing or have problems:\n{logs}"
+        ))),
+    }
+}
+
 /// Runs `all` as one gestures Job of the `control` process, run `{id}{suffix}`.
 pub(super) fn gestures(
     id: &str,
@@ -622,6 +671,26 @@ mod tests {
         let args = clock_export_args("w");
         assert_eq!(args[..3], ["journal", "export", "clock:w"]);
         assert!(args.windows(2).any(|w| w == ["--journal", JOURNAL]));
+    }
+
+    /// The inspection's report is read for its listed days only when it counts no problem.
+    #[test]
+    fn the_bars_inspection_is_read_from_the_logs() {
+        let clean = "[pod/x/run] alpaca iex bars-1Day SPY\n\
+                     [pod/x/run] coverage: 2026-09-14 to 2026-10-23, 30 days listed\n\
+                     [pod/x/run] problems: 0\n\
+                     [pod/x/run] total: 1 datasets, 0 problems";
+        assert_eq!(inspected_days(clean), Some(30));
+        let flawed = clean.replace(
+            "total: 1 datasets, 0 problems",
+            "total: 1 datasets, 2 problems",
+        );
+        assert_eq!(inspected_days(&flawed), None);
+        assert_eq!(
+            inspected_days("Error: inspecting /var/lib/mandate: missing"),
+            None
+        );
+        assert!(BARS_DIR.starts_with("/var/lib/mandate/artifacts/datasets/"));
     }
 
     /// Ticking is a second export strictly past a first that holds a record after the stream's
