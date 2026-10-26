@@ -8,12 +8,12 @@ mod support;
 
 use std::collections::BTreeSet;
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::Value;
-use mandate_executor::{MarketObservation, RiskClock};
+use mandate_executor::{ExitTier, InstrumentSnapshot, MarketObservation, RiskClock};
 use mandate_executord::marks::{self, Marked};
 use mandate_executord::quotes::QuoteFeed;
-use mandate_num::{Price, Qty};
+use mandate_num::{Price, Qty, ShareIncrement};
 use mandate_time::UtcNanos;
 use support::{
     AAPL, ACCOUNT_STREAM, Allowing, Error, Fault, Journal, NOON, OPENED, Paper, TwoPercentStop, at,
@@ -35,6 +35,55 @@ impl Marked for Naming {
 /// A feed that answers a sane quote at 150 by 150.02 for each instrument it names, observed at the
 /// instant asked.
 struct Quoting(Vec<&'static str>);
+
+/// A feed whose every quote is crossed, 150.2 by 150, and judged not sane.
+struct Crossed;
+
+impl QuoteFeed for Crossed {
+    fn observe(
+        &self,
+        instrument: &InstrumentId,
+        now: UtcNanos,
+    ) -> Result<MarketObservation, &'static str> {
+        Ok(MarketObservation {
+            instrument: instrument.clone(),
+            bid: Price::parse("150.2").ok(),
+            bid_size: Qty::parse("2").ok(),
+            ask: Price::parse("150").ok(),
+            last_trade: None,
+            mark: None,
+            sane: false,
+            observed_at: RiskClock::from_secs(now.secs()),
+        })
+    }
+
+    fn feed(&self) -> &'static str {
+        "fixture"
+    }
+}
+
+/// The support snapshot's AAPL, and BTCUSD as a crypto pair.
+struct WithCrypto;
+
+impl InstrumentSnapshot for WithCrypto {
+    fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
+        match instrument.as_str() {
+            AAPL => Some(AssetClass::UsEquity),
+            BTC => Some(AssetClass::Crypto),
+            _ => None,
+        }
+    }
+
+    fn increment(&self, _instrument: &InstrumentId) -> Option<ShareIncrement> {
+        None
+    }
+
+    fn exit_tier(&self, _instrument: &InstrumentId) -> Option<ExitTier> {
+        None
+    }
+}
+
+const BTC: &str = "BTCUSD";
 
 impl QuoteFeed for Quoting {
     fn observe(
@@ -223,5 +272,89 @@ fn a_mark_in_doubt_raises_one_alert_an_outage() -> Result<(), Error> {
             Some("2026-09-21T15:00:45.000000000Z".to_owned()),
         ]
     );
+    Ok(())
+}
+
+/// No tick, no mark: passes whose wall clock moves on past [`marks::MARK_EVERY`] with no new
+/// `ClockAdvanced` write none, and a mark taken at a later tick is stamped with that tick's clock,
+/// not with the wall clock of the pass that read it.
+#[test]
+fn a_pass_without_a_new_tick_marks_nothing() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    let mut wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    wiring.quotes = Box::new(Quoting(vec![AAPL]));
+    wiring.marked = Box::new(Naming(vec![AAPL]));
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    process.step(at(NOON)?);
+    for wall in [
+        "2026-09-21T15:00:20Z",
+        "2026-09-21T15:00:40Z",
+        "2026-09-21T15:01:00Z",
+    ] {
+        process.step(at(wall)?);
+    }
+    assert_eq!(marks_of(&journal).len(), 1, "no tick, no mark");
+    tick(&journal, "t2", "2026-09-21T15:01:15Z")?;
+    process.step(at("2026-09-21T15:01:42Z")?);
+    let clocks: Vec<Option<String>> = marks_of(&journal)
+        .iter()
+        .map(|(_, payload)| member(payload, "risk_clock"))
+        .collect();
+    assert_eq!(
+        clocks,
+        vec![
+            Some("2026-09-21T15:00:00.000000000Z".to_owned()),
+            Some("2026-09-21T15:01:15.000000000Z".to_owned()),
+        ]
+    );
+    Ok(())
+}
+
+/// One pass marks each named instrument once, each with its own session: an equity in the regular
+/// session and a crypto pair in `crypto`.
+#[test]
+fn one_pass_marks_each_instrument_once() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    let mut wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    wiring.quotes = Box::new(Quoting(vec![AAPL, BTC]));
+    wiring.marked = Box::new(Naming(vec![AAPL, BTC]));
+    wiring.instruments = Box::new(WithCrypto);
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    process.step(at(NOON)?);
+    let marked: Vec<(Option<String>, Option<String>)> = marks_of(&journal)
+        .iter()
+        .map(|(_, payload)| (member(payload, "instrument_id"), member(payload, "session")))
+        .collect();
+    assert_eq!(
+        marked,
+        vec![
+            (Some(AAPL.to_owned()), Some("regular".to_owned())),
+            (Some(BTC.to_owned()), Some("crypto".to_owned())),
+        ]
+    );
+    Ok(())
+}
+
+/// A quote the feed judges not sane still marks the instrument, `sane` false at its bid, so a held
+/// position is restricted at once (journal spec §9.30, DEC-2380 item 3).
+#[test]
+fn a_quote_judged_not_sane_marks_the_instrument_not_sane() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    let mut wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    wiring.quotes = Box::new(Crossed);
+    wiring.marked = Box::new(Naming(vec![AAPL]));
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    process.step(at(NOON)?);
+    let marks = marks_of(&journal);
+    assert_eq!(marks.len(), 1, "{marks:?}");
+    let (_, payload) = &marks[0];
+    assert_eq!(member(payload, "sane").as_deref(), Some("false"));
+    assert_eq!(member(payload, "bid").as_deref(), Some("150.2"));
     Ok(())
 }

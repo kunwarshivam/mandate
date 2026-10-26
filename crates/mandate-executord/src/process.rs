@@ -478,6 +478,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             let Ok(observation) = self.wiring.quotes.observe(&instrument, now) else {
                 continue;
             };
+            if !observation.sane {
+                continue;
+            }
             if !self.hand(now, now, Input::Market(observation), alerts, 0) {
                 return Ok(false);
             }
