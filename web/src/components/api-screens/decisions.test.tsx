@@ -29,13 +29,13 @@ function page(stream: string, told: Told[], after: number, limit: number) {
 }
 
 /** Mounts the screen over the mock, `streams` standing in for the journal pages it names, or every page refused. */
-function mount(streams: Record<string, Told[]> | "forbidden" | null = null) {
+function mount(streams: Record<string, Told[]> | "forbidden" | null = null, options: { refuseAccount?: boolean } = {}) {
   const server = createMockServer({ workspaceId: WS, scenario: "normal" });
   const fetch: Fetch = (input, init) => {
     const url = new URL(input);
     const match = decodeURIComponent(url.pathname).match(/\/journal\/streams\/(.+)\/events$/);
     if (!match || streams === null) return server.fetch(input, init);
-    if (streams === "forbidden") return Promise.resolve(new Response(JSON.stringify({ type: "about:blank", status: 403, title: "Forbidden", code: "forbidden", effect: "none", event_id: null, retryable: false }), { status: 403, headers: { "Content-Type": "application/problem+json" } }));
+    if (streams === "forbidden" || (options.refuseAccount && match[1] === ACCOUNT)) return Promise.resolve(new Response(JSON.stringify({ type: "about:blank", status: 403, title: "Forbidden", code: "forbidden", effect: "none", event_id: null, retryable: false }), { status: 403, headers: { "Content-Type": "application/problem+json" } }));
     const told = streams[match[1]];
     if (!told) return server.fetch(input, init);
     return Promise.resolve(new Response(JSON.stringify(page(match[1], told, Number(url.searchParams.get("after_seq")), Number(url.searchParams.get("limit")))), { status: 200, headers: { "Content-Type": "application/json" } }));
@@ -79,7 +79,8 @@ describe("gate decisions over the workspace API, from the journal (journal spec 
       if (!found) throw new Error("not yet");
       return found;
     }, { timeout: 5000 });
-    expect(item).toHaveTextContent("The dry run allowed it; it acted without asking.");
+    expect(item).toHaveTextContent("The dry run allowed it; it was within what the agent may do without asking.");
+    expect(item).toHaveTextContent("Decided by your mandate's default.");
     expect(item).toHaveTextContent("Left to the executor's binding gate, which the dry run could not see: liquidity floor.");
     expect(item).toHaveTextContent("The binding gate denied it");
     expect(item).toHaveTextContent("It ran 2 checks; not passed: liquidity floor (fail).");
@@ -94,7 +95,49 @@ describe("gate decisions over the workspace API, from the journal (journal spec 
       ],
       [ACCOUNT]: [],
     });
-    await waitFor(() => expect(document.querySelector(`[data-agent="${AGENT}"] [data-slot=binding]`)).toHaveTextContent("Sent to the executor; its binding verdict is not among the account's latest records read."), { timeout: 5000 });
+    await waitFor(() => expect(document.querySelector(`[data-agent="${AGENT}"] [data-slot=binding]`)).toHaveTextContent("Sent to the executor; its account's records hold no verdict for it yet."), { timeout: 5000 });
+  });
+
+  it("says the binding verdict was not read, never not found, when the account's records are refused", async () => {
+    const agentStream = `agent:${WS}:${AGENT}`;
+    mount({ [agentStream]: [{ type: "DecisionMade", payload: decision() }, { type: "IntentProposed", payload: {}, causation: `${agentStream}#1` }] }, { refuseAccount: true });
+    await waitFor(() => expect(document.querySelector(`[data-agent="${AGENT}"] [data-slot=binding]`)).toHaveTextContent("Sent to the executor; the binding gate's verdict was not read: its account's records are not available."), { timeout: 5000 });
+    expect(document.querySelector("[data-slot=verdicts-unread]")).toHaveTextContent("The binding gate’s verdicts were not read for");
+  });
+
+  it("says when the account's records read are only its latest, so an older verdict is not found among them", async () => {
+    const agentStream = `agent:${WS}:${AGENT}`;
+    mount({
+      [agentStream]: [{ type: "DecisionMade", payload: decision() }, { type: "IntentProposed", payload: {}, causation: `${agentStream}#1` }],
+      [ACCOUNT]: Array.from({ length: 1001 }, () => ({ type: "MarkUpdated", payload: {}, at: "2026-10-26T10:05:00.000000000Z" })),
+    });
+    await waitFor(() => expect(document.querySelector(`[data-agent="${AGENT}"] [data-slot=binding]`)).toHaveTextContent("Sent to the executor; its verdict is not among the account's latest 1,000 records read."), { timeout: 8000 });
+    expect(document.querySelector("[data-slot=decisions-window]")).toHaveTextContent("account");
+  }, 15_000);
+
+  it("never claims an action or an ask the records do not show", async () => {
+    const agentStream = `agent:${WS}:${AGENT}`;
+    mount({
+      [agentStream]: [
+        { type: "DecisionMade", payload: decision({ autonomy: "ask", ask_suppressed: "budget", decided_by: "rule:r1" }), at: "2026-10-26T10:01:00.000000000Z" },
+        { type: "DecisionMade", payload: decision({ autonomy: "ask" }), at: "2026-10-26T10:02:00.000000000Z" },
+        { type: "DecisionMade", payload: decision({ autonomy: "deny", decided_by: "admission_ceiling" }), at: "2026-10-26T10:03:00.000000000Z" },
+        { type: "DecisionMade", payload: decision({}), at: "2026-10-26T10:04:00.000000000Z" },
+      ],
+      [ACCOUNT]: [],
+    });
+    const list = await screen.findByRole("list", { name: "Gate decisions" }, { timeout: 5000 });
+    const mine = within(list).getAllByRole("listitem").filter((li) => li.getAttribute("data-agent") === AGENT);
+    const said = mine.map((li) => li.textContent ?? "");
+    expect(said).toHaveLength(4);
+    expect(said[0]).toContain("it was within what the agent may do without asking.");
+    expect(said[0]).toContain("No order for it is recorded on the agent's stream.");
+    expect(said[1]).toContain("the agent was not allowed to place it.");
+    expect(said[1]).toContain("Decided by the ceiling on new instruments.");
+    expect(said[2]).toContain("it asked you for approval. If you approved it, the order and the binding gate's verdict are with that approval.");
+    expect(said[3]).toContain("it needed your approval and you were not asked, since the day's limit of approval requests was reached, and no order is placed without it.");
+    expect(said[3]).toContain("Decided by your mandate's rule r1.");
+    for (const li of mine) expect(li.textContent).not.toMatch(/acted without asking|it asked you\.|mandate said no/);
   });
 
   it("counts a decision record that does not match its hash, and shows nothing from it", async () => {

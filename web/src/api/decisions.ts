@@ -10,6 +10,9 @@
 import type { JournalRecord } from "./records";
 
 export type DryRun = "allow" | "deny" | "defer";
+
+/** Journal spec §9.1's `deferred_to_binding` vocabulary (DEC-2378 item 11, DEC-2388 item 8). */
+export const DEFERRED_CHECKS = ["account_exposure", "agent_equity", "agent_mode", "conduct_history", "day_trade_budget", "eligibility", "fee_reservation", "halt", "liquidity_floor", "other_orders", "participation", "quote_ask", "reentry_cooldown", "related_accounts"] as const;
 export type Autonomy = "auto" | "ask" | "deny";
 
 export interface BindingVerdict {
@@ -32,6 +35,8 @@ export interface Decision {
   autonomy: Autonomy | null;
   requested_by: "agent" | "owner" | "client";
   decided_by: string | null;
+  /** Why an `ask` was classified but not asked (mandate spec §6.4), or `null`. */
+  ask_suppressed: "budget" | "skipped_today" | "recent_timeout" | null;
   /** A version 3's checks left to the binding gate; empty for any other. */
   deferred: string[];
   /** The intent it proposed (`IntentProposed`'s event id), or `null` when the stream read holds none. */
@@ -54,13 +59,14 @@ const oneOf = <T extends string>(v: unknown, allowed: readonly T[]): v is T => t
 function decisionOf(r: JournalRecord): Omit<Decision, "intent" | "binding"> | null {
   const p = r.payload;
   if (!r.matches || !p) return null;
-  const { instrument_id, side, qty, limit_price, purpose, dry_run, reason_code, autonomy, requested_by, decided_by } = p;
+  const { instrument_id, side, qty, limit_price, purpose, dry_run, reason_code, autonomy, requested_by, decided_by, ask_suppressed } = p;
   if (!text(instrument_id) || !oneOf(side, ["buy", "sell"] as const) || !text(qty) || !nullableText(limit_price) || !text(purpose)) return null;
   if (!oneOf(dry_run, ["allow", "deny", "defer"] as const) || !nullableText(reason_code) || !(autonomy === null || oneOf(autonomy, ["auto", "ask", "deny"] as const))) return null;
   if (!oneOf(requested_by, ["agent", "owner", "client"] as const) || !nullableText(decided_by)) return null;
+  if (!(ask_suppressed === null || ask_suppressed === undefined || oneOf(ask_suppressed, ["budget", "skipped_today", "recent_timeout"] as const))) return null;
   const deferred = p.deferred_to_binding;
-  if (deferred !== undefined && !(Array.isArray(deferred) && deferred.every(text))) return null;
-  return { event_id: r.event_id, recorded_at: r.recorded_at, instrument_id, side, qty, limit_price, purpose, dry_run, reason_code, autonomy, requested_by, decided_by, deferred: (deferred as string[] | undefined) ?? [] };
+  if (deferred !== undefined && !(Array.isArray(deferred) && deferred.length > 0 && deferred.every((d) => oneOf(d, DEFERRED_CHECKS)))) return null;
+  return { event_id: r.event_id, recorded_at: r.recorded_at, instrument_id, side, qty, limit_price, purpose, dry_run, reason_code, autonomy, requested_by, decided_by, ask_suppressed: ask_suppressed ?? null, deferred: (deferred as string[] | undefined) ?? [] };
 }
 
 function verdictOf(r: JournalRecord): [string, BindingVerdict] | null {

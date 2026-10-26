@@ -66,6 +66,13 @@ describe("gate decisions from the journal (journal spec §9.1, §9.5)", () => {
     expect(view.unreadable).toBe(2);
   });
 
+  it("refuses a deferred check off journal spec §9.1's vocabulary, an empty list, or an unknown ask suppression", () => {
+    for (const over of [{ deferred_to_binding: ["vibes"] }, { deferred_to_binding: [] }, { autonomy: "ask", ask_suppressed: "tired" }]) {
+      expect(decisionsOf([decided(over)], null).unreadable, JSON.stringify(over)).toBe(1);
+    }
+    expect(decisionsOf([decided({ autonomy: "ask", ask_suppressed: "skipped_today" })], null).decisions[0]).toMatchObject({ ask_suppressed: "skipped_today" });
+  });
+
   it("reads no verdict when the account stream was not read, and an unreadable verdict as none", () => {
     const d = decided({});
     const i = proposed(d);

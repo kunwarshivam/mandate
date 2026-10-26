@@ -22,7 +22,39 @@ const POLL_MS = 10_000;
 const NOT_REPORTED = "text-muted-foreground";
 
 const DRY_RUN: Readonly<Record<Decision["dry_run"], string>> = { allow: "The dry run allowed it", deny: "The dry run denied it", defer: "The dry run left it to the binding gate" };
-const AUTONOMY: Readonly<Record<NonNullable<Decision["autonomy"]>, string>> = { auto: "it acted without asking", ask: "it asked you", deny: "its mandate said no" };
+const SUPPRESSED: Readonly<Record<NonNullable<Decision["ask_suppressed"]>, string>> = {
+  budget: "the day's limit of approval requests was reached",
+  skipped_today: "you skipped this instrument today",
+  recent_timeout: "a recent request for it timed out",
+};
+
+/** What autonomy chose (mandate spec §6.2), in words that claim no action the records do not show. */
+function autonomyWords(d: Decision): string {
+  switch (d.autonomy) {
+    case null:
+      return "";
+    case "auto":
+      return "; it was within what the agent may do without asking";
+    case "deny":
+      return "; the agent was not allowed to place it";
+    case "ask":
+      return d.ask_suppressed
+        ? `; it needed your approval and you were not asked, since ${SUPPRESSED[d.ask_suppressed]}, and no order is placed without it`
+        : "; it asked you for approval. If you approved it, the order and the binding gate's verdict are with that approval";
+  }
+}
+
+/** What decided autonomy (journal spec §9.1 `decided_by`), in words. */
+function decidedByWords(code: string): string {
+  if (code === "builtin_risk_reducing") return "the built-in rule that a risk-reducing order needs no approval";
+  if (code === "default") return "your mandate's default";
+  if (code.startsWith("rule:")) return `your mandate's rule ${code.slice(5)}`;
+  if (code.startsWith("delegation:")) return "a delegation you granted";
+  if (code === "admission_ceiling") return "the ceiling on new instruments";
+  if (code === "client_ceiling") return "the ceiling on a connected client's orders";
+  if (code === "review_ceiling") return "the ceiling after your review date passed";
+  return code.replaceAll("_", " ");
+}
 const ASKED_BY: Readonly<Record<Decision["requested_by"], string>> = { agent: "", owner: " You asked for this order.", client: " A connected client asked for this order." };
 const BINDING: Readonly<Record<BindingVerdict["verdict"], string>> = { allow: "The binding gate allowed it", deny: "The binding gate denied it", hold: "The binding gate held it", defer: "The binding gate deferred it" };
 const PURPOSE: Readonly<Record<string, string>> = { open: "open", increase: "add", discretionary_exit: "exit", risk_exit: "risk exit" };
@@ -38,7 +70,10 @@ function reasonWords(code: string): string {
 
 const words = (code: string) => code.replaceAll("_", " ");
 
-function DecisionLine({ d, agent, agentId, now }: { d: Decision; agent: string; agentId: string; now: string }) {
+/** What was read of an agent's account stream: its records' window, or that they were not read. */
+type AccountRead = { read: true; fromStart: boolean } | { read: false };
+
+function DecisionLine({ d, agent, agentId, account, now }: { d: Decision; agent: string; agentId: string; account: AccountRead; now: string }) {
   const failed = d.binding?.checks.filter((c) => c.result !== "pass") ?? [];
   return (
     <li className="grid gap-1 border-b border-border/70 py-3 text-sm last:border-b-0" data-dry-run={d.dry_run} data-binding={d.binding?.verdict ?? "none"} data-event={d.event_id} data-agent={agentId}>
@@ -52,8 +87,9 @@ function DecisionLine({ d, agent, agentId, now }: { d: Decision; agent: string; 
       </span>
       <span>
         {DRY_RUN[d.dry_run]}
-        {d.autonomy ? `; ${AUTONOMY[d.autonomy]}` : ""}.{ASKED_BY[d.requested_by]}
+        {autonomyWords(d)}.{ASKED_BY[d.requested_by]}
       </span>
+      {d.decided_by ? <span className="text-muted-foreground">Decided by {decidedByWords(d.decided_by)}.</span> : null}
       {d.reason_code ? <span className="text-muted-foreground">{reasonWords(d.reason_code)}</span> : null}
       {d.deferred.length > 0 ? <span className="text-muted-foreground">{`Left to the executor's binding gate, which the dry run could not see: ${d.deferred.map(words).join(", ")}.`}</span> : null}
       {d.binding ? (
@@ -64,7 +100,15 @@ function DecisionLine({ d, agent, agentId, now }: { d: Decision; agent: string; 
         </span>
       ) : d.intent ? (
         <span className={NOT_REPORTED} data-slot="binding">
-          {"Sent to the executor; its binding verdict is not among the account's latest records read."}
+          {!account.read
+            ? "Sent to the executor; the binding gate's verdict was not read: its account's records are not available."
+            : account.fromStart
+              ? "Sent to the executor; its account's records hold no verdict for it yet."
+              : `Sent to the executor; its verdict is not among the account's latest ${DECISION_RECORDS.toLocaleString("en-US")} records read.`}
+        </span>
+      ) : d.dry_run === "allow" && d.autonomy === "auto" ? (
+        <span className={NOT_REPORTED} data-slot="binding">
+          {"No order for it is recorded on the agent's stream."}
         </span>
       ) : null}
     </li>
@@ -73,6 +117,7 @@ function DecisionLine({ d, agent, agentId, now }: { d: Decision; agent: string; 
 
 interface AgentRead {
   agent: RecordsAnswer;
+  /** `null` when no account stream could be named for the agent. */
   account: RecordsAnswer | null;
 }
 
@@ -106,9 +151,10 @@ export function ApiDecisions() {
       window.clearInterval(poll);
     };
   }, [streamRecords, holdings, workspaceId, ids]);
-  const lines: Array<{ d: Decision; agent: string; agentId: string }> = [];
+  const lines: Array<{ d: Decision; agent: string; agentId: string; account: AccountRead }> = [];
   const unread: string[] = [];
   const windowed: string[] = [];
+  const verdictsUnread: string[] = [];
   let unreadable = 0;
   let forbidden = 0;
   for (const a of agents) {
@@ -120,11 +166,13 @@ export function ApiDecisions() {
       else if (answer.agent.reason !== "not_found") unread.push(name);
       continue;
     }
-    if (!answer.agent.fromStart) windowed.push(name);
-    const accountItems = answer.account && answer.account.ok ? answer.account.items : null;
-    const found = decisionsOf(answer.agent.items, accountItems);
+    if (!answer.agent.fromStart) windowed.push(`${name}'s stream`);
+    const accountRead: AccountRead = answer.account && answer.account.ok ? { read: true, fromStart: answer.account.fromStart } : { read: false };
+    if (accountRead.read && !accountRead.fromStart) windowed.push(`${name}'s account`);
+    const found = decisionsOf(answer.agent.items, answer.account && answer.account.ok ? answer.account.items : null);
     unreadable += found.unreadable;
-    for (const d of found.decisions) lines.push({ d, agent: name, agentId: a.agent_id });
+    if (!accountRead.read && found.decisions.some((d) => d.intent)) verdictsUnread.push(name);
+    for (const d of found.decisions) lines.push({ d, agent: name, agentId: a.agent_id, account: accountRead });
   }
   lines.sort((x, y) => Date.parse(y.d.recorded_at.slice(0, 23) + "Z") - Date.parse(x.d.recorded_at.slice(0, 23) + "Z"));
   const allForbidden = agents.length > 0 && forbidden === agents.length;
@@ -135,7 +183,7 @@ export function ApiDecisions() {
       {allForbidden ? <p className={NOT_REPORTED}>Not available to your role.</p> : null}
       {windowed.length > 0 ? (
         <p className="text-sm text-muted-foreground" data-slot="decisions-window">
-          Read from the latest {DECISION_RECORDS.toLocaleString("en-US")} records of {windowed.join(", ")}; an earlier decision is not shown.
+          Read from the latest {DECISION_RECORDS.toLocaleString("en-US")} records of {windowed.join(", ")}; an earlier decision or verdict is not shown.
         </p>
       ) : null}
       {unreadable > 0 ? (
@@ -146,13 +194,18 @@ export function ApiDecisions() {
       {lines.length > 0 ? (
         <ol className="grid" aria-label="Gate decisions">
           {lines.map((l) => (
-            <DecisionLine key={l.d.event_id} d={l.d} agent={l.agent} agentId={l.agentId} now={now} />
+            <DecisionLine key={l.d.event_id} d={l.d} agent={l.agent} agentId={l.agentId} account={l.account} now={now} />
           ))}
         </ol>
       ) : read.resolved && !allForbidden && unread.length === 0 && unreadable === 0 ? (
         <p className="text-muted-foreground">No decision recorded yet.</p>
       ) : null}
       {unread.length > 0 ? <p className={NOT_REPORTED}>Not reported: {unread.join(", ")}.</p> : null}
+      {verdictsUnread.length > 0 ? (
+        <p className={NOT_REPORTED} data-slot="verdicts-unread">
+          The binding gate&rsquo;s verdicts were not read for {verdictsUnread.join(", ")}: the account&rsquo;s records are not available.
+        </p>
+      ) : null}
     </Section>
   );
 }
