@@ -2061,6 +2061,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-gate-context"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-num",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-gateway"
 version = "0.0.0"
 dependencies = [
