@@ -9,10 +9,11 @@ use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
+use mandate_accounting::InstrumentId;
 use mandate_canon::{Value, parse};
 use mandate_domain::{AgentMode, AssetClass, Environment};
 use mandate_executor::risk_state::{RiskView, UnreadableCause};
-use mandate_executor::{AgentId, EventId};
+use mandate_executor::{AgentId, EventId, MandateView};
 use mandate_executord::Alert;
 use mandate_executord::establish::ToCopy;
 use mandate_executord::risk::{NOT_OPENED, RiskOpening, RiskOpenings};
@@ -720,6 +721,203 @@ fn a_fenced_retry_of_the_books_batch_appends_nothing_more() -> Result<(), Error>
         !journal
             .types(ACCOUNT_STREAM)
             .contains(&"RiskDayStarted".to_owned())
+    );
+    assert!(!process.ready(), "{:?}", process.lifecycle().state());
+    Ok(())
+}
+
+/// The support snapshot's AAPL as XYZ, by its asset id, which the fold binds, so the agent trades
+/// the instrument its fold follows.
+struct Xyz;
+
+impl mandate_executor::InstrumentSnapshot for Xyz {
+    fn asset_class(&self, instrument: &InstrumentId) -> Option<mandate_accounting::AssetClass> {
+        (instrument.as_str() == XYZ).then_some(mandate_accounting::AssetClass::UsEquity)
+    }
+
+    fn increment(&self, instrument: &InstrumentId) -> Option<mandate_num::ShareIncrement> {
+        (instrument.as_str() == XYZ).then_some(mandate_num::ShareIncrement::Whole)
+    }
+
+    fn exit_tier(&self, instrument: &InstrumentId) -> Option<mandate_executor::ExitTier> {
+        let aapl = InstrumentId::new(support::AAPL).ok()?;
+        mandate_executor::InstrumentSnapshot::exit_tier(&support::Instruments, &aapl)
+            .filter(|_| instrument.as_str() == XYZ)
+    }
+}
+
+impl MandateView for Xyz {
+    fn version(&self, agent: &AgentId) -> Option<mandate_executor::MandateVersion> {
+        support::Mandate.version(agent)
+    }
+
+    fn crypto_stop_limit_offset(&self, agent: &AgentId) -> Option<mandate_num::Fraction> {
+        support::Mandate.crypto_stop_limit_offset(agent)
+    }
+
+    fn covers(&self, _agent: &AgentId, instrument: &InstrumentId) -> bool {
+        instrument.as_str() == XYZ
+    }
+}
+
+/// The wiring of an agent trading XYZ under `openings`, every opening's gate facts read.
+fn trading(openings: Fixed) -> Result<mandate_executord::Wiring, Error> {
+    let mut wiring = wired(Box::new(support::Allowing), Box::new(TwoPercentStop))?;
+    wiring.risk = Box::new(openings);
+    wiring.instruments = Box::new(Xyz);
+    wiring.mandates = Box::new(Xyz);
+    Ok(wiring)
+}
+
+/// The agent proposes buying 10 XYZ at 150 to open, as intent `id`.
+fn open_xyz(journal: &Journal, id: &str) -> Result<(), Error> {
+    let text = |value: &str| Value::Str(value.to_owned());
+    journal.write(
+        &support::agent_stream(AGENT),
+        id,
+        "IntentProposed",
+        1,
+        Some("decision"),
+        support::object(vec![
+            ("instrument_id", text(XYZ)),
+            ("limit_price", text("150")),
+            ("purpose", text("open")),
+            ("qty", text("10")),
+            ("side", text("buy")),
+            ("tif", text("day")),
+            ("type", text("limit")),
+        ])?,
+    )
+}
+
+/// A feed quoting XYZ sane at its bid, a cent under the ask, at the instant asked, and marking XYZ.
+#[derive(Clone)]
+struct QuotingXyz(Rc<std::cell::RefCell<&'static str>>);
+
+impl QuotingXyz {
+    fn at(bid: &'static str) -> Self {
+        Self(Rc::new(std::cell::RefCell::new(bid)))
+    }
+
+    fn quote(&self, bid: &'static str) {
+        *self.0.borrow_mut() = bid;
+    }
+}
+
+impl mandate_executord::quotes::QuoteFeed for QuotingXyz {
+    fn observe(
+        &self,
+        instrument: &InstrumentId,
+        now: mandate_time::UtcNanos,
+    ) -> Result<mandate_executor::MarketObservation, &'static str> {
+        if instrument.as_str() != XYZ {
+            return Err("no_quote");
+        }
+        Ok(mandate_executor::MarketObservation {
+            instrument: instrument.clone(),
+            bid: mandate_num::Price::parse(*self.0.borrow()).ok(),
+            bid_size: mandate_num::Qty::parse("2").ok(),
+            ask: None,
+            last_trade: None,
+            mark: None,
+            sane: true,
+            observed_at: mandate_executor::RiskClock::from_secs(now.secs()),
+        })
+    }
+
+    fn feed(&self) -> &'static str {
+        "fixture"
+    }
+}
+
+impl mandate_executord::marks::Marked for QuotingXyz {
+    fn instruments(&self) -> BTreeSet<InstrumentId> {
+        InstrumentId::new(XYZ).into_iter().collect()
+    }
+}
+
+/// DEC-2829 item 3's process test: the agent's opening in its fold's instrument, marked first,
+/// fills, and the reconciliation that books the fill journals the order's adopted state with its
+/// compensation. The fold reads the whole batch, steps the fill on the mark, and the gate is
+/// still handed the agent's risk, so the agent's next opening is judged on it rather than held.
+#[test]
+fn an_own_fill_booked_by_reconciliation_keeps_the_agents_risk_read() -> Result<(), Error> {
+    let journal = deployed()?;
+    let broker = Paper::new(&journal);
+    let openings = Fixed::new(1);
+    let published = Rc::clone(&openings.published);
+    let process = holding(
+        &journal,
+        &broker,
+        trading(openings)?,
+        &QuotingXyz::at("150"),
+    )?;
+    let types = journal.types(ACCOUNT_STREAM);
+    let mark = types.iter().position(|kind| kind == "MarkUpdated");
+    let fill = types.iter().position(|kind| kind == "FillApplied");
+    assert!(
+        mark.is_some() && mark < fill && types.contains(&"CompensatingEvent".to_owned()),
+        "{types:?}"
+    );
+    let RiskView::Readable { snapshot, .. } = process.risk_view(&agent(AGENT)) else {
+        return Err(format!("{:?}", process.risk_view(&agent(AGENT))).into());
+    };
+    assert_eq!(
+        snapshot.agent_equity,
+        Usd::parse("10000")?,
+        "10000 - 1500 + 10 × 150"
+    );
+    assert_eq!(snapshot.agent_mode, AgentMode::Normal);
+    assert_eq!(*published.borrow(), vec![AGENT.to_owned()]);
+    Ok(())
+}
+
+/// A process whose agent holds the 10 XYZ its opening bought at 150 on a mark at 150, booked by
+/// the reconciliation at 15:05, `quotes` quoting and marking XYZ.
+fn holding(
+    journal: &Journal,
+    broker: &Paper,
+    mut wiring: mandate_executord::Wiring,
+    quotes: &QuotingXyz,
+) -> Result<mandate_executord::ExecutorProcess<Journal, Paper>, Error> {
+    wiring.quotes = Box::new(quotes.clone());
+    wiring.marked = Box::new(quotes.clone());
+    let mut process = start_wired(journal, broker, wiring)?;
+    process.step(at(NOON)?);
+    open_xyz(journal, "01JINTENT0000000000000000Q")?;
+    tick(journal, "t3", "2026-09-21T15:01:00Z")?;
+    process.step(at("2026-09-21T15:01:00Z")?);
+    let submitted = broker.submitted();
+    assert_eq!(submitted.len(), 1, "{:?}", journal.types(ACCOUNT_STREAM));
+    for id in &submitted {
+        broker.fill(id, "150")?;
+    }
+    tick(journal, "t4", "2026-09-21T15:05:00Z")?;
+    process.step(at("2026-09-21T15:05:00Z")?);
+    Ok(process)
+}
+
+/// A fenced process acts on nothing more: when the records a committed mark leaves owed are
+/// fenced, the pass stops at the mark, and nothing after it is journaled, the owed records included.
+#[test]
+fn records_owed_after_a_committed_batch_and_fenced_stop_the_pass() -> Result<(), Error> {
+    let journal = deployed()?;
+    let broker = Paper::new(&journal);
+    let quotes = QuotingXyz::at("150");
+    let mut process = holding(&journal, &broker, trading(Fixed::new(1))?, &quotes)?;
+    quotes.quote("50");
+    journal.fail_next_of("RiskLimitTriggered", &[Fault::Fenced]);
+    tick(&journal, "t5", "2026-09-21T15:06:00Z")?;
+    process.step(at("2026-09-21T15:06:00Z")?);
+    let types = journal.types(ACCOUNT_STREAM);
+    assert_eq!(
+        types.last().map(String::as_str),
+        Some("MarkUpdated"),
+        "{types:?}"
+    );
+    assert!(
+        !types.contains(&"RiskLimitTriggered".to_owned()),
+        "{types:?}"
     );
     assert!(!process.ready(), "{:?}", process.lifecycle().state());
     Ok(())
