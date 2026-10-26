@@ -1,6 +1,6 @@
 //! The core's vocabulary: what goes in, what comes out, and the order states in between.
 
-use mandate_accounting::{AssetClass, InstrumentId, Side};
+use mandate_accounting::{AccountType, AssetClass, InstrumentId, Side};
 use mandate_canon::{Object, Value};
 use mandate_num::{Fraction, Price, Qty, SignedQty, Usd};
 use mandate_time::Date;
@@ -634,12 +634,31 @@ pub struct BrokerAccount {
     pub non_marginable_buying_power: Usd,
     pub accrued_fees: Usd,
     /// The broker's equity at the prior session's close (§7.2's `last_equity`): the prior-close
-    /// equity §9.2's `legacy_pdt` regime compares with its threshold. Read from the broker, never
-    /// journaled: `AccountStateObserved` and `AccountSnapshotRecorded` are closed schemas (DEC-524).
+    /// equity §9.2's `legacy_pdt` regime compares with its threshold. Read from the broker, and
+    /// journaled on `AccountSnapshotRecorded` version 2 as it stands (journal spec §9.35,
+    /// DEC-2398); `AccountStateObserved` does not carry it (DEC-524 item 3).
     pub last_equity: Usd,
     /// The broker's maintenance margin requirement, from which [`BrokerAccount::maintenance_excess`]
-    /// derives the excess §9.2's `intraday_margin` regime checks. Never journaled (DEC-524).
+    /// derives the excess §9.2's `intraday_margin` regime checks. Journaled as `last_equity` is.
     pub maintenance_margin: Usd,
+}
+
+/// The account type and day-trading regime a broker's connector declares from the broker's
+/// published contract (trading-domain spec §7.2, DEC-840 item 1), which `AccountSnapshotRecorded`
+/// version 2 journals beside the broker's figures (journal spec §9.35, DEC-2398). It never depends
+/// on a broker call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AccountDeclaration {
+    pub account_type: AccountType,
+    pub regime: DeclaredRegime,
+}
+
+/// Which of §9.2's day-trading regimes a connector declares. The figures each reads are the
+/// broker's ([`BrokerAccount`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclaredRegime {
+    IntradayMargin,
+    LegacyPdt,
 }
 
 /// A reject the broker answered with, from which §7.3's restriction table is read.
@@ -662,6 +681,9 @@ pub struct BrokerSnapshot {
     pub fills: Vec<BrokerFill>,
     pub cursor: ActivityCursor,
     pub reason: ReconcileReason,
+    /// The connector's declaration, journaled with the snapshot; `None` when the connector
+    /// declares none, which the snapshot journals as `null` and a reader holds on (§9.35).
+    pub declared: Option<AccountDeclaration>,
     /// The stream head the snapshot was taken at. A `ReconciliationRun` is appended with this as
     /// its `expected_head`, so a submission that landed in between makes the append answer
     /// `HeadMismatch` rather than publishing a run that never saw it (interpretation 15).

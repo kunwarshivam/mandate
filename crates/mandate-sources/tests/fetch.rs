@@ -146,6 +146,37 @@ fn the_checked_in_allowlist_lets_no_news_request_out() {
     assert!(f.transport().sent.borrow().is_empty());
 }
 
+/// DEC-2276: the version in use, 3, lets a news request out on the founder's approval, to the
+/// news endpoint only, with its credential.
+#[test]
+fn the_checked_in_version_three_lets_a_news_request_out_to_its_endpoint() {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../config/sources/allowlist-v3.toml");
+    let list =
+        mandate_sources::allowlist::Allowlist::parse(&std::fs::read_to_string(path).unwrap())
+            .unwrap();
+    let mut f = Fetcher::new(list, Recorded::answering(vec![Recorded::ok(b"{}")]));
+    block_on(f.alpaca_news(
+        &news_source(),
+        &auth(),
+        &[symbol("AAPL")],
+        at(NOW),
+        None,
+        at(NOW),
+    ))
+    .unwrap();
+    let sent = f.transport().sent.borrow();
+    assert_eq!(sent.len(), 1);
+    assert!(
+        sent[0]
+            .0
+            .starts_with("https://data.alpaca.markets/v1beta1/news?"),
+        "{:?}",
+        sent[0].0
+    );
+    assert!(sent[0].1, "the request carries the credential");
+}
+
 #[test]
 fn a_request_inside_the_minimum_interval_is_refused_before_sending() {
     let mut f = fetcher(vec![

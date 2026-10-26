@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use mandate_research::AllowlistVersion;
 use mandate_sources::SourceError;
-use mandate_sources::allowlist::{Allowlist, Endpoint, SourceKind};
+use mandate_sources::allowlist::{Allowlist, Approval, Approver, Endpoint, SourceKind};
 use proptest::prelude::*;
 
 use common::{TEST_ALLOWLIST, allowlist, edgar_source, news_source, source};
@@ -54,7 +54,8 @@ fn the_checked_in_file_keeps_alpaca_news_out_until_counsel_confirms() {
     assert_eq!(edgar.min_interval_ms(), 125);
 }
 
-/// DEC-2394: version 2 confirms Alpaca news, the founder's answer to DEC-1130 item 2: the same
+/// DEC-2394: version 2 put Alpaca news in effect, the founder's answer to DEC-1130 item 2. It is
+/// kept as merged, never edited, though its `counsel_confirmed` claim was wrong (DEC-2276): the same
 /// source ids as version 1, each with the same kind, licence, interval, cap, and endpoints, and
 /// Alpaca news now in effect and still licensed, so readers keep withholding its text (DEC-1130
 /// item 6).
@@ -305,4 +306,130 @@ proptest! {
         let permitted = allowlist().permit(&edgar_source(), &url).is_ok();
         prop_assert_eq!(permitted, oracle_allows(&url), "{}", url);
     }
+}
+
+/// DEC-2276: version 3 records the founder's approval of Alpaca news as his, with the decision
+/// that records it, and counsel's confirmation as not given; it is version 2's sources otherwise,
+/// field for field, and Alpaca news is in effect exactly as in version 2, its text still licensed.
+#[test]
+fn version_three_records_the_founder_s_approval_and_no_counsel_confirmation() {
+    let (two, three) = (checked_in(2), checked_in(3));
+    assert_eq!(three.version(), AllowlistVersion(3));
+    for (before, after) in two.entries().zip(three.entries()) {
+        assert_eq!(before.id(), after.id());
+        assert_eq!(before.kind(), after.kind(), "{}", after.id().as_str());
+        assert_eq!(before.licensed(), after.licensed());
+        assert_eq!(before.min_interval_ms(), after.min_interval_ms());
+        assert_eq!(before.max_response_bytes(), after.max_response_bytes());
+        assert_eq!(before.endpoints(), after.endpoints());
+        assert_eq!(before.in_effect(), after.in_effect());
+    }
+    assert_eq!(two.entries().count(), three.entries().count());
+    let news = three.active(&news_source()).unwrap();
+    assert!(!news.counsel_confirmed(), "counsel has not confirmed it");
+    assert_eq!(
+        news.approval(),
+        Some(&Approval {
+            by: Approver::Founder,
+            decision: "DEC-2394".to_owned()
+        })
+    );
+    assert!(news.licensed(), "its text stays withheld");
+    let edgar = three.active(&edgar_source()).unwrap();
+    assert!(edgar.counsel_confirmed());
+    assert_eq!(edgar.approval(), None);
+    assert!(
+        three
+            .permit(
+                &news_source(),
+                "https://data.alpaca.markets/v1beta1/news?symbols=AAPL"
+            )
+            .is_ok()
+    );
+    let research = three.research_allowlist();
+    assert_eq!(research.version, AllowlistVersion(3));
+    assert_eq!(
+        research.sources,
+        BTreeSet::from([edgar_source(), news_source()])
+    );
+}
+
+/// DEC-2276: an approver needs the decision that records it, and a decision needs an approver; the
+/// decision is a `DEC-<n>` id; the founder is the only approver besides counsel. An entry with
+/// neither and no counsel confirmation stays out of effect.
+#[test]
+fn an_approval_is_the_founder_s_with_its_decision_or_nothing() {
+    let entry = |extra: &str| {
+        format!(
+            "version = 4\n\n[[source]]\nid = \"alpaca.news\"\nkind = \"news\"\nlicensed = true\ncounsel_confirmed = false\n{extra}min_interval_ms = 300\nmax_response_bytes = 1048576\nendpoints = [\"https://data.alpaca.markets/v1beta1/news\"]\n"
+        )
+    };
+    let approved = Allowlist::parse(&entry(
+        "approved_by = \"founder\"\napproved_in = \"DEC-2394\"\n",
+    ))
+    .unwrap();
+    assert!(approved.active(&news_source()).is_some());
+    let unapproved = Allowlist::parse(&entry("")).unwrap();
+    assert!(unapproved.active(&news_source()).is_none());
+    assert!(unapproved.research_allowlist().sources.is_empty());
+    assert_eq!(
+        unapproved.permit(
+            &news_source(),
+            "https://data.alpaca.markets/v1beta1/news?symbols=AAPL"
+        ),
+        Err(SourceError::SourceNotAllowlisted)
+    );
+    for refused in [
+        "approved_by = \"founder\"\n",
+        "approved_in = \"DEC-2394\"\n",
+        "approved_by = \"counsel\"\napproved_in = \"DEC-2394\"\n",
+        "approved_by = \"agent\"\napproved_in = \"DEC-2394\"\n",
+        "approved_by = \"founder\"\napproved_in = \"2394\"\n",
+        "approved_by = \"founder\"\napproved_in = \"DEC-\"\n",
+        "approved_by = \"founder\"\napproved_in = \"DEC-02394\"\n",
+        "approved_by = \"founder\"\napproved_in = \"DEC-2394a\"\n",
+        "approved_by = \"founder\"\napproved_in = \"\"\n",
+    ] {
+        assert_eq!(
+            Allowlist::parse(&entry(refused)),
+            Err(SourceError::AllowlistMalformed),
+            "{refused}"
+        );
+    }
+}
+
+/// Every approval the checked-in version in use records names a decision that exists and that the
+/// founder accepted: the record can cite only an approval that happened (DEC-2276).
+#[test]
+fn every_recorded_approval_names_a_decision_the_founder_accepted() {
+    let three = checked_in(3);
+    let mut cited = 0;
+    for entry in three.entries() {
+        let Some(approval) = entry.approval() else {
+            continue;
+        };
+        assert_eq!(approval.by, Approver::Founder);
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../docs/project/decisions/{}.md",
+            approval.decision
+        ));
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+            panic!(
+                "{} cites {}, which has no file",
+                entry.id().as_str(),
+                approval.decision
+            )
+        });
+        let status = text
+            .lines()
+            .find(|line| line.starts_with("| **Status** |"))
+            .unwrap_or_else(|| panic!("{} has no status", approval.decision));
+        assert!(
+            status.starts_with("| **Status** | Accepted (founder"),
+            "{}: {status}",
+            approval.decision
+        );
+        cited += 1;
+    }
+    assert_eq!(cited, 1, "Alpaca news, on DEC-2394");
 }
