@@ -2,7 +2,8 @@
   {
     "label": "step_up null",
     "set": {
-      "/step_up": null
+      "/step_up": null,
+      "/step_up_assertion": null
     }
   },
   {
@@ -14,7 +15,44 @@
   {
     "label": "auto: /step_up null",
     "set": {
-      "/step_up": null
+      "/step_up": null,
+      "/step_up_assertion": null
+    }
+  },
+  {
+    "label": "a limit",
+    "set": {
+      "/subject": "limit"
+    }
+  },
+  {
+    "label": "a restriction",
+    "set": {
+      "/subject": "restriction"
+    }
+  },
+  {
+    "label": "naming the request it answers",
+    "set": {
+      "/request": "01JBH3BTZ8K2M4N6P8R0S2T4V7"
+    }
+  },
+  {
+    "label": "no request member, read as null",
+    "remove": [
+      "/request"
+    ]
+  },
+  {
+    "label": "no assertion member",
+    "remove": [
+      "/step_up_assertion"
+    ]
+  },
+  {
+    "label": "a null assertion",
+    "set": {
+      "/step_up_assertion": null
     }
   }
 ]

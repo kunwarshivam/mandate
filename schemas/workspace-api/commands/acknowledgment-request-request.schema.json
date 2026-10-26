@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/acknowledgment-request-request.schema.json",
+  "type": "object",
+  "required": [
+    "acknowledged",
+    "subject",
+    "record",
+    "step_up"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "acknowledged": {
+      "$ref": "../common.schema.json#/$defs/EventId"
+    },
+    "subject": {
+      "enum": [
+        "limit",
+        "restriction",
+        "reconciliation"
+      ],
+      "description": "What `acknowledged` names (journal spec \u00a79.28 version 2): a `RiskLimitTriggered`, an `AccountRestrictionChanged`, or the `AgentModeApplied` of a reconciliation hold."
+    },
+    "record": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/Record"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "step_up": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "step_up_assertion": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpAssertion"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "if": {
+    "properties": {
+      "step_up_assertion": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "step_up_assertion"
+    ]
+  },
+  "then": {
+    "properties": {
+      "step_up": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "const": "passkey"
+          }
+        }
+      }
+    }
+  },
+  "description": "POST /agents/{agent_id}/acknowledgment-requests (\u00a73.11 item 12, DEC-2144): asks that another user acknowledge the hold (mandate spec \u00a75.8), with passkey step-up and its assertion; refused with nothing recorded unless the port verifies it."
+}

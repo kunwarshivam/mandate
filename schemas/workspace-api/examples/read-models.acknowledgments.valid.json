@@ -1,0 +1,34 @@
+[
+  {
+    "label": "nothing to acknowledge",
+    "set": {
+      "/acknowledgments": []
+    }
+  },
+  {
+    "label": "a restriction",
+    "set": {
+      "/acknowledgments/0/subject": "restriction",
+      "/acknowledgments/0/reason": {
+        "cause": "pattern_day_trader"
+      },
+      "/acknowledgments/0/mode": "paused"
+    }
+  },
+  {
+    "label": "a cash hold of every agent",
+    "set": {
+      "/acknowledgments/0/reason": {
+        "restriction": "reconciliation:cash",
+        "kind": "cash",
+        "instrument": null
+      }
+    }
+  },
+  {
+    "label": "independence not required",
+    "set": {
+      "/acknowledgments/0/independent_required": false
+    }
+  }
+]

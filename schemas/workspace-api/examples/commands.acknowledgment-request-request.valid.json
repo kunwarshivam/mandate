@@ -1,0 +1,27 @@
+[
+  {
+    "label": "a limit",
+    "set": {
+      "/subject": "limit"
+    }
+  },
+  {
+    "label": "a restriction",
+    "set": {
+      "/subject": "restriction"
+    }
+  },
+  {
+    "label": "no assertion member",
+    "remove": [
+      "/step_up_assertion"
+    ]
+  },
+  {
+    "label": "step_up null",
+    "set": {
+      "/step_up": null,
+      "/step_up_assertion": null
+    }
+  }
+]

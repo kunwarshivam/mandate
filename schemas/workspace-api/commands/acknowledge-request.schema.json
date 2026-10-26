@@ -4,6 +4,7 @@
   "type": "object",
   "required": [
     "acknowledged",
+    "subject",
     "record",
     "step_up"
   ],
@@ -11,6 +12,25 @@
   "properties": {
     "acknowledged": {
       "$ref": "../common.schema.json#/$defs/EventId"
+    },
+    "subject": {
+      "enum": [
+        "limit",
+        "restriction",
+        "reconciliation"
+      ],
+      "description": "What `acknowledged` names (journal spec \u00a79.28 version 2): a `RiskLimitTriggered`, an `AccountRestrictionChanged`, or the `AgentModeApplied` of a reconciliation hold."
+    },
+    "request": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/EventId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The `OwnerAcknowledgmentRequested` this answers, or null; absent is null (journal spec rules 239 to 241)."
     },
     "record": {
       "oneOf": [
@@ -31,7 +51,39 @@
           "type": "null"
         }
       ]
+    },
+    "step_up_assertion": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpAssertion"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
-  "description": "POST /agents/{agent_id}/acknowledgments (\u00a74.2): names the event acknowledged; independence is the executor's."
+  "if": {
+    "properties": {
+      "step_up_assertion": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "step_up_assertion"
+    ]
+  },
+  "then": {
+    "properties": {
+      "step_up": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "const": "passkey"
+          }
+        }
+      }
+    }
+  },
+  "description": "POST /agents/{agent_id}/acknowledgments (\u00a73.11 item 12, DEC-2144): the hold acknowledged, its subject, and the request it answers, with passkey step-up and its assertion; refused with nothing recorded unless the port verifies it. The executor judges it again by journal spec \u00a79.28."
 }
