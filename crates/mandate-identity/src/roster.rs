@@ -10,6 +10,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use mandate_canon::encode_ulid;
 use mandate_identity_seal::Seal;
 use mandate_time::UtcNanos;
 
@@ -68,5 +69,29 @@ impl Roster {
             .collect();
         let founder = founding.filter(|member| active.contains_key(member));
         Ok(Self { active, founder })
+    }
+
+    /// The members `references` name among the active members holding the approver role in
+    /// effect, the set admission check 3 and the API's grant check compare a responder with
+    /// (DEC-2384 item 3, DEC-2130): `role:approver` names each, `role:workspace_admin` each also
+    /// holding workspace admin, `role:owner` the founder, and `user:<id>` the one whose canonical
+    /// ULID text is `<id>`. Any other reference names no one.
+    pub fn approvers(&self, references: &[&str]) -> BTreeSet<PrincipalId> {
+        self.active
+            .iter()
+            .filter(|(_, roles)| roles.contains(&Role::Approver))
+            .filter(|(member, roles)| {
+                references
+                    .iter()
+                    .any(|reference| match reference.split_once(':') {
+                        Some(("role", "approver")) => true,
+                        Some(("role", "workspace_admin")) => roles.contains(&Role::WorkspaceAdmin),
+                        Some(("role", "owner")) => self.founder == Some(**member),
+                        Some(("user", user)) => user == encode_ulid(member.0),
+                        Some(_) | None => false,
+                    })
+            })
+            .map(|(member, _)| *member)
+            .collect()
     }
 }

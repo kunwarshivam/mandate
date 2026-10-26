@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 
 use mandate_canon::{Value, encode_ulid};
 use mandate_domain::Environment;
-use mandate_identity::{MEMBERSHIP_TYPES, Role, Roster, membership_record};
+use mandate_identity::{MEMBERSHIP_TYPES, Roster, membership_record};
 use mandate_num::Usd;
 use mandate_runtime::{LiveBroker, LiveScope, OpaqueUser};
 use mandate_spec::Mandate;
@@ -119,28 +119,14 @@ pub fn resolve(references: &[ApproverRef], members: &Members) -> BTreeSet<String
         .collect()
 }
 
-/// The user ids `references` resolve to among `roster`'s active members holding the approver role
-/// in effect (DEC-2384 item 3): `role:approver` names each, `role:workspace_admin` each also holding
-/// workspace admin, `role:owner` the founder, and `user:<id>` the one whose ULID text is `<id>`.
+/// The user ids `references` resolve to among `roster`, by [`Roster::approvers`], the one
+/// resolution the API's grant check shares (DEC-2384 item 3, DEC-2130), each as its ULID text.
 fn folded(references: &[ApproverRef], roster: &Roster) -> BTreeSet<String> {
-    let approvers = roster
-        .active
-        .iter()
-        .filter(|(_, roles)| roles.contains(&Role::Approver));
-    approvers
-        .filter(|(member, roles)| {
-            let id = encode_ulid(member.0);
-            references
-                .iter()
-                .any(|reference| match reference.as_str().split_once(':') {
-                    Some(("role", "approver")) => true,
-                    Some(("role", "workspace_admin")) => roles.contains(&Role::WorkspaceAdmin),
-                    Some(("role", "owner")) => roster.founder == Some(**member),
-                    Some(("user", user)) => user == id,
-                    Some(_) | None => false,
-                })
-        })
-        .map(|(member, _)| encode_ulid(member.0))
+    let texts: Vec<&str> = references.iter().map(ApproverRef::as_str).collect();
+    roster
+        .approvers(&texts)
+        .into_iter()
+        .map(|member| encode_ulid(member.0))
         .collect()
 }
 

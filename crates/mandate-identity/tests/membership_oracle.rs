@@ -19,6 +19,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
 use grammar::{Row, matrix};
+use mandate_canon::encode_ulid;
 use mandate_identity::{
     Authorized, InvitationId, InvitationState, LookupFailed, Membership, MembershipEvent as Event,
     MembershipFold, MembershipLookup, MembershipQuery, MembershipRecord, MembershipState, OrgId,
@@ -827,4 +828,74 @@ fn a_roster_reads_only_the_records_at_or_before_its_instant() {
     let bundle = BTreeSet::from([Role::Approver, Role::Operator, Role::WorkspaceAdmin]);
     assert_eq!(roster.active, BTreeMap::from([(founder, bundle)]));
     assert_eq!(roster.founder, Some(founder));
+}
+
+/// The references the approvers property asks about: every role reference V-024 accepts, each
+/// member's and an outsider's `user:` reference, a role no reference may name, and a lower-case
+/// spelling of the founder's id.
+fn references_asked() -> Vec<String> {
+    let mut asked: Vec<String> = ["role:approver", "role:workspace_admin", "role:owner"]
+        .map(str::to_owned)
+        .into();
+    asked.extend(ASKERS.map(|m| format!("user:{}", encode_ulid(m))));
+    asked.push("role:operator".to_owned());
+    asked.push(format!("user:{}", encode_ulid(FOUNDER).to_lowercase()));
+    asked
+}
+
+/// What the oracle says `reference` names at `at`: the members it reads `active` holding approver
+/// in effect, narrowed by the reference's own text as DEC-2384 item 3 reads it.
+fn oracle_approvers(o: &Oracle, at: i64, reference: &str) -> BTreeSet<u128> {
+    MEMBERS
+        .into_iter()
+        .filter(|m| {
+            let (state, effective, _) = o.reading(*m, at);
+            let approver =
+                state == Some(MembershipState::Active) && effective.contains(&Role::Approver);
+            approver
+                && match reference {
+                    "role:approver" => true,
+                    "role:workspace_admin" => effective.contains(&Role::WorkspaceAdmin),
+                    "role:owner" => *m == FOUNDER,
+                    user => user == format!("user:{}", encode_ulid(*m)),
+                }
+        })
+        .collect()
+}
+
+/// E7-31, DEC-2130: over random histories, at every probe the roster's approvers for each
+/// reference, alone and all together, equal the oracle's.
+#[test]
+fn the_rosters_approvers_equal_the_oracles_over_random_histories() {
+    let config = ProptestConfig {
+        cases: 256,
+        failure_persistence: None,
+        ..Default::default()
+    };
+    let asked = references_asked();
+    let body = |ops: Vec<Op>| -> Result<(), TestCaseError> {
+        let (events, snapshots, probes) = events_of(ops);
+        for p in probes {
+            let o = &snapshots.iter().rev().find(|(at, _)| *at <= p).unwrap().1;
+            let Ok(roster) = Roster::read(records(&events), t(p)) else {
+                prop_assert!(o.broken, "refused at {}", p);
+                continue;
+            };
+            let mut every = BTreeSet::new();
+            for reference in &asked {
+                let got: BTreeSet<u128> =
+                    roster.approvers(&[reference]).iter().map(|m| m.0).collect();
+                let want = oracle_approvers(o, p, reference);
+                prop_assert_eq!(&got, &want, "{} at {}", reference, p);
+                every.extend(want);
+            }
+            let texts: Vec<&str> = asked.iter().map(String::as_str).collect();
+            let all: BTreeSet<u128> = roster.approvers(&texts).iter().map(|m| m.0).collect();
+            prop_assert_eq!(all, every, "all at {}", p);
+        }
+        Ok(())
+    };
+    if let Err(failure) = TestRunner::new(config).run(&ops(), body) {
+        panic!("{failure}");
+    }
 }
