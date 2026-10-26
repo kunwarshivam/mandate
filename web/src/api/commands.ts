@@ -3,14 +3,15 @@
  * Each gesture is prepared once, so a retry sends the same key and body (API-4). Nothing here sizes an
  * order or names a price the owner did not see: the web app only records what the owner chose.
  *
- * `step_up` is always `null` until the browser's step-up ceremony exists (E9-4): the API forwards that
- * for the stream owner to judge (§5.4), or answers `step_up_required` and records nothing (§5.2), and
- * the screen says so. `record` is `null` wherever the schema allows it, since the artifact upload the
+ * `step_up` is `null` except on an approve the owner confirmed on the host (`cli_confirm`, DEC-2104):
+ * the API forwards a `null` for the stream owner to judge (§5.4), or answers `step_up_required` and
+ * records nothing (§5.2), and the screen says so. `record` is `null` wherever the schema allows it, since the artifact upload the
  * spec's record names is not built; where a member must name what was shown (an answer's `record`, a
  * release's warning) it is the SHA-256 of the lines the screen showed, in their order.
  */
 import type { WorkspaceClient } from "./client";
 import type { Classification } from "./confirm";
+import { type StepUpChallenge, cliConfirmEvidence } from "./step-up";
 import type { JsonObject, PreparedCommand } from "./types";
 import type { AgentMode, ContentRef, ShownEnvironment } from "@/fixtures/types";
 import type { ApprovalRecord, CommandKind, CommandRecord, ConfirmRecord } from "@/lib/mock-runtime";
@@ -71,13 +72,27 @@ export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, k
   }
 }
 
-export function prepareApprovalResponse(client: WorkspaceClient, approval: { approval_id: string; content_hash?: ContentRef }, response: "approve" | "skip", record: ApprovalRecord): Prepared {
+/**
+ * An answer to an approval (§5.2). An approve carries the `cli_confirm` evidence of `challenge`, which
+ * must be bound to this approval's content hash; a challenge for anything else is refused here and
+ * nothing is sent. A Skip never carries step-up (API-7), whatever it is given.
+ */
+export function prepareApprovalResponse(
+  client: WorkspaceClient,
+  approval: { approval_id: string; content_hash?: ContentRef },
+  response: "approve" | "skip",
+  record: ApprovalRecord,
+  challenge: StepUpChallenge | null = null,
+): Prepared {
   if (!approval.content_hash) return { ok: false, reason: "no_content_hash" };
+  const bound = challenge !== null && challenge.action.kind === "approve" && challenge.action.digest === approval.content_hash;
+  if (response === "approve" && challenge !== null && !bound) return { ok: false, reason: "step_up_mismatch" };
+  const step_up = response === "approve" && challenge !== null ? { ...cliConfirmEvidence(challenge) } : null;
   return one(
     client.prepare(
       "approval_response",
       { approval: approval.approval_id },
-      { verdict: response === "approve" ? "approved" : "skipped", content_hash: approval.content_hash, record: recordRef(record), step_up: null, delegation: null },
+      { verdict: response === "approve" ? "approved" : "skipped", content_hash: approval.content_hash, record: recordRef(record), step_up, delegation: null },
     ),
   );
 }

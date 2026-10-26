@@ -5,15 +5,17 @@
  * the app makes that `operationFor` matches to no entry. Commands are `client.ts`'s `OPERATIONS`; there
  * is no order ticket (DEC-528).
  */
-import { OPERATIONS } from "./client";
+import { OPERATIONS, SESSION_ROUTE, STEP_UP_CHALLENGE_ROUTE } from "./client";
 import type { Operation } from "./types";
 
 export interface DocumentedOperation {
   /** A read's name, or the command's `Operation`. */
   id: string;
   method: "GET" | "POST";
-  /** The route under `/v1/workspaces/{ws}`, with `{name}` for each path id. */
+  /** The route under `/v1/workspaces/{ws}`, with `{name}` for each path id; or, when `outside`, the whole path. */
   route: `/${string}`;
+  /** A route outside the workspace prefix (§4.10). */
+  outside?: true;
   /** The query members the call may send, all of them documented. */
   query: readonly string[];
   /** Where the workspace API spec documents it. */
@@ -57,8 +59,21 @@ const COMMAND_SECTIONS: Readonly<Record<Operation, string>> = {
   create_version: "§3.11 item 11",
 };
 
+/**
+ * The calls that are neither a read of the workspace nor a command: the step-up challenge, which
+ * records nothing (§3.6, DEC-2103), and one's own session (§4.10, DEC-2113).
+ */
+const OTHERS: readonly DocumentedOperation[] = [
+  { id: "step_up_challenge", method: "POST", route: STEP_UP_CHALLENGE_ROUTE, query: [], section: "§3.6" },
+  { id: "session", method: "GET", route: SESSION_ROUTE, query: [], section: "§4.10", outside: true },
+];
+
+/** The ids of `OTHERS`, which are not commands of `client.ts`'s `OPERATIONS`. */
+export const NOT_COMMANDS: ReadonlySet<string> = new Set(OTHERS.map((op) => op.id));
+
 export const WEB_OPERATIONS: readonly DocumentedOperation[] = [
   ...READS,
+  ...OTHERS,
   ...(Object.keys(OPERATIONS) as Operation[]).map((id) => ({ id, method: "POST" as const, route: OPERATIONS[id], query: [], section: COMMAND_SECTIONS[id] })),
 ];
 
@@ -67,10 +82,12 @@ const MATCHERS = WEB_OPERATIONS.map((op) => ({ op, pattern: new RegExp(`^${op.ro
 
 export function operationFor(method: string, url: string, workspaceId: string): DocumentedOperation | null {
   const parsed = new URL(url, "http://relative.invalid");
+  const whole = MATCHERS.find(({ op }) => op.outside && op.method === method.toUpperCase() && op.route === parsed.pathname);
+  if (whole) return [...parsed.searchParams.keys()].length === 0 ? whole.op : null;
   const prefix = `/v1/workspaces/${workspaceId}`;
   if (!parsed.pathname.startsWith(`${prefix}/`)) return null;
   const route = parsed.pathname.slice(prefix.length);
-  const found = MATCHERS.find(({ op, pattern }) => op.method === method.toUpperCase() && pattern.test(route));
+  const found = MATCHERS.find(({ op, pattern }) => !op.outside && op.method === method.toUpperCase() && pattern.test(route));
   if (!found) return null;
   for (const name of parsed.searchParams.keys()) if (!found.op.query.includes(name)) return null;
   return found.op;

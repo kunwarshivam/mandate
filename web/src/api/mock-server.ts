@@ -7,7 +7,9 @@
  * does not answer, and `result-unknown` as commands recorded whose answer is lost, so a later status
  * poll finds them (spec §5.5). A status is `recorded` when first read and `applied` after; a recorded
  * pause pauses its agent and a recorded Skip skips its request, so a screen can follow a command to its
- * effect. It refuses an approve without step-up as `step_up_required`, as spec §5.2 does. It creates a
+ * effect. It refuses an approve without step-up as `step_up_required`, as spec §5.2 does, and judges
+ * one with `cli_confirm` evidence in DEC-2104 item 6's order against the challenges it issued at
+ * `POST /step-up/challenges`, standing in for the host's confirmation (`hostConfirms`). It creates a
  * mandate version from the document (DEC-2101 item 3), serves that version's confirmation screen as a
  * new mandate's (item 4), with a new `screen_digest` at each read. A confirm that does not carry the
  * digest it last served is `classification_changed`; one that does, without step-up, is
@@ -15,7 +17,7 @@
  * never created is `not_found`. A backtest
  * is the fixture's served `backtest` member under the mock's own envelope (DEC-2400).
  */
-import { CSRF_HEADER, OPERATIONS, isIdempotencyKey, type Fetch } from "./client";
+import { CSRF_HEADER, OPERATIONS, SESSION_ROUTE, STEP_UP_CHALLENGE_ROUTE, isIdempotencyKey, type Fetch } from "./client";
 import type { Watermark } from "./types";
 import { servedBacktestFixture } from "@/fixtures/backtests";
 import { buildWorkspace } from "@/fixtures/workspace";
@@ -27,6 +29,12 @@ import { sha256Hex } from "@/lib/sha256";
 export interface MockServerOptions {
   workspaceId: string;
   scenario?: Scenario;
+  /**
+   * Whether the host has confirmed each challenge the mock issues (DEC-2104): the mock stands in for
+   * `mandate step-up confirm`, which no browser can run. `false` plays an owner who has not run it yet,
+   * so an approve with that challenge's evidence is `step_up_missing`.
+   */
+  hostConfirms?: boolean;
 }
 
 export interface RecordedCommand {
@@ -42,7 +50,23 @@ export interface MockServer {
   recorded(): RecordedCommand[];
   /** Every `screen_digest` the confirmation read has served, in order. */
   servedDigests(): string[];
+  /** Every step-up challenge the mock has issued, in order. */
+  challenges(): IssuedChallenge[];
 }
+
+export interface IssuedChallenge {
+  challenge_id: string;
+  kind: string;
+  digest: string;
+  issued_at: string;
+  expires_at: string;
+  used: boolean;
+}
+
+/** The mock's one principal, as `GET /v1/me/session` serves it. */
+export const MOCK_PRINCIPAL = "01JBR2C4D6E8F0G2H4J6K8M0P3";
+/** A challenge's life (DEC-2103 item 5). */
+const CHALLENGE_SECONDS = 300;
 
 const API_VERSION = "v1";
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -88,7 +112,8 @@ const ROUTES = Object.entries(OPERATIONS).map(([operation, route]) => ({
 }));
 
 export function createMockServer(options: MockServerOptions): MockServer {
-  const { workspaceId, scenario = "normal" } = options;
+  const { workspaceId, scenario = "normal", hostConfirms = true } = options;
+  const issued: IssuedChallenge[] = [];
   const workspace = structuredClone(buildWorkspace(scenario));
   const prefix = `/v1/workspaces/${workspaceId}`;
   const commands: RecordedCommand[] = [];
@@ -228,8 +253,63 @@ export function createMockServer(options: MockServerOptions): MockServer {
     }
   }
 
+  /**
+   * DEC-2104 item 6's order for `cli_confirm` evidence, with the host's confirmation played by
+   * `hostConfirms`; `null` when it verifies, and then the challenge is spent.
+   */
+  function judgeCliConfirm(evidence: unknown, kind: string, digest: unknown): string | null {
+    if (evidence == null) return "step_up_required";
+    if (typeof evidence !== "object" || Array.isArray(evidence)) return "step_up_missing";
+    const { assertion_id, authenticated_at, method } = evidence as Record<string, unknown>;
+    if (method !== "cli_confirm") return "step_up_missing";
+    const challenge = issued.find((c) => c.challenge_id === assertion_id);
+    if (!challenge) return "step_up_missing";
+    if (challenge.kind !== kind || challenge.digest !== digest) return "step_up_mismatch";
+    if (authenticated_at !== challenge.issued_at) return "step_up_stale";
+    if (challenge.used) return "step_up_reused";
+    if (!hostConfirms) return "step_up_missing";
+    challenge.used = true;
+    return null;
+  }
+
+  /** `POST /step-up/challenges` (§3.6): a challenge bound to the action, never journaled; the same key answers the same challenge. */
+  const challengeKeys = new Map<string, { body: string; challenge: IssuedChallenge; bytes: string }>();
+  function challenge(headers: Headers, body: string): Response {
+    const key = headers.get("Idempotency-Key") ?? "";
+    if (!isIdempotencyKey(key)) return problem(422, "invalid", "none");
+    const earlier = challengeKeys.get(key);
+    if (earlier && earlier.body !== body) return problem(409, "idempotency_conflict", "none");
+    let action: { kind?: unknown; digest?: unknown } = {};
+    try {
+      action = ((JSON.parse(body) as { action?: typeof action }).action ?? {}) as typeof action;
+    } catch {
+      return problem(422, "invalid", "none");
+    }
+    if (typeof action.kind !== "string" || typeof action.digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(action.digest)) return problem(422, "invalid", "none");
+    if (workspace.environment === "live") return problem(403, "live_unavailable", "none");
+    const entry = earlier ?? {
+      body,
+      bytes: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"),
+      challenge: {
+        challenge_id: eventId(`${workspaceId}\nstep_up_challenge\n${key}`),
+        kind: action.kind,
+        digest: action.digest,
+        issued_at: servedAt,
+        expires_at: canonical(new Date(Date.parse(workspace.now) + CHALLENGE_SECONDS * 1000).toISOString()),
+        used: false,
+      },
+    };
+    if (!earlier) {
+      challengeKeys.set(key, entry);
+      issued.push(entry.challenge);
+    }
+    const c = entry.challenge;
+    return respond(201, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: [], challenge_id: c.challenge_id, webauthn_challenge: entry.bytes, action: { kind: c.kind, digest: c.digest }, issued_at: c.issued_at, expires_at: c.expires_at });
+  }
+
   function post(route: string, headers: Headers, body: string): Response {
     if (headers.get(CSRF_HEADER) !== "1") return problem(403, "forbidden", "none");
+    if (route === STEP_UP_CHALLENGE_ROUTE) return challenge(headers, body);
     const match = ROUTES.find((r) => r.pattern.test(route));
     if (!match) return problem(404, "not_found", "none");
     const key = headers.get("Idempotency-Key") ?? "";
@@ -241,7 +321,10 @@ export function createMockServer(options: MockServerOptions): MockServer {
       return problem(422, "invalid", "none");
     }
     const members = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
-    if (match.operation === "approval_response" && members.verdict === "approved" && members.step_up == null) return problem(401, "step_up_required", "none");
+    if (match.operation === "approval_response" && members.verdict === "approved") {
+      const refused = judgeCliConfirm(members.step_up, "approve", members.content_hash);
+      if (refused) return problem(401, refused, "none");
+    }
     if (match.operation === "confirm_version") {
       const version = decodeURIComponent(route.split("/")[2] ?? "");
       if (!versions.has(version)) return problem(404, "not_found", "none");
@@ -270,6 +353,10 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const method = (init.method ?? "GET").toUpperCase();
     if (scenario === "unreachable") throw new TypeError("Failed to fetch");
     const url = new URL(input, "http://mock.invalid");
+    if (method === "GET" && url.pathname === SESSION_ROUTE) {
+      const expires = canonical(new Date(Date.parse(workspace.now) + 15 * 60 * 1000).toISOString());
+      return respond(200, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: [], principal_id: MOCK_PRINCIPAL, kind: "full", expires_at: expires });
+    }
     if (!url.pathname.startsWith(`${prefix}/`)) return problem(404, "not_found", "none");
     const route = url.pathname.slice(prefix.length);
     if (method === "GET") return get(route, url.searchParams);
@@ -281,5 +368,5 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return problem(404, "not_found", "none");
   };
 
-  return { fetch, recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests] };
+  return { fetch, recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], challenges: () => issued.map((c) => ({ ...c })) };
 }
