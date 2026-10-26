@@ -8,10 +8,15 @@
 use mandate_api::envelope::{StepUpAssertion, StepUpEvidence};
 use mandate_api::problem::ProblemCode;
 use mandate_api::wire::encode;
-use mandate_canon::{Digest, Value, parse};
+use mandate_canon::{Digest, Int, Value, parse};
 use mandate_identity::{StepUpActionKind, TenantContext};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
+
+use crate::commands::{Event, Writer, caused_envelope};
+use crate::objects::ObjectStore;
+use crate::routes::string;
+use crate::versions::object;
 
 /// The one action a step-up assertion must be bound to (§3.6, API-17).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +81,36 @@ impl Asserted {
     /// The canonical object of the request's `step_up_assertion` (DEC-2108 item 7).
     pub fn assertion(&self) -> &[u8] {
         &self.assertion
+    }
+
+    /// The `StepUpAsserted` (journal spec §9.32) recording this step-up, written by `writer` and
+    /// caused by the event `causation` names (rule 253), with the assertion stored in `objects`
+    /// first; `None` when the store refuses it or the canonical form cannot hold the record.
+    pub(crate) fn drafted(
+        &self,
+        objects: &dyn ObjectStore,
+        writer: &Writer<'_>,
+        causation: &str,
+    ) -> Option<Vec<u8>> {
+        let stored = objects.put(&self.assertion).ok()?;
+        let reference = string(&stored.to_string());
+        let payload = object(vec![
+            ("challenge", string(&self.challenge)),
+            ("credential", string(&self.credential)),
+            (
+                "sign_count",
+                Value::Int(Int::new(u64::from(self.sign_count))?),
+            ),
+            ("assertion", reference.clone()),
+        ])?;
+        let event = Event {
+            event_type: "StepUpAsserted",
+            schema_version: 1,
+            payload,
+            artifact_refs: vec![reference],
+            config_refs: Vec::new(),
+        };
+        caused_envelope(writer, &event, Some(causation))
     }
 }
 

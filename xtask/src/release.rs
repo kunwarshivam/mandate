@@ -87,7 +87,8 @@ const TARGET_CC: &str = "gcc";
 /// `mandate-api-server` is the workspace API server a hosted cell runs as its chart's `api`
 /// process, so its image must be signed and published like the others (DEC-2026).
 /// `mandate-deployd`, `mandate-daemon` and `mandate-executord` are the deployment manager, the agent
-/// runtime and the account executor a hosted cell runs, released the same way. The runtime's image
+/// runtime and the account executor a hosted cell runs, released the same way; the runtime's binary
+/// is built by `mandate-runtime-models`, which links its model composer (DEC-2383). The runtime's image
 /// holds no recorded research bundle, which only the local cell's interim image carries (DEC-2246).
 /// `mandate-provisionerd` is the role provisioner a hosted cell runs, released the same way
 /// (DEC-2350), and `mandate-token-exchange` the OAuth connect's token exchange (DEC-821, DEC-1175),
@@ -98,7 +99,7 @@ pub(crate) const BINARIES: [(&str, &str); 9] = [
     ("mandate-rh-sim", "mandate-rh-sim"),
     ("mandate-api-server", "mandate-api-server"),
     ("mandate-deployd", "mandate-deployd"),
-    ("mandate-daemon", "mandate-daemon"),
+    ("mandate-runtime-models", "mandate-daemon"),
     ("mandate-executord", "mandate-executord"),
     ("mandate-provisionerd", "mandate-provisionerd"),
     ("mandate-token-exchange", "mandate-token-exchange"),
@@ -1448,7 +1449,7 @@ mod tests {
                 ("mandate-rh-sim", "mandate-rh-sim"),
                 ("mandate-api-server", "mandate-api-server"),
                 ("mandate-deployd", "mandate-deployd"),
-                ("mandate-daemon", "mandate-daemon"),
+                ("mandate-runtime-models", "mandate-daemon"),
                 ("mandate-executord", "mandate-executord"),
                 ("mandate-provisionerd", "mandate-provisionerd"),
                 ("mandate-token-exchange", "mandate-token-exchange"),

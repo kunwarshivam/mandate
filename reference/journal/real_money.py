@@ -1,11 +1,11 @@
-"""Journal spec v0.85 §9.35's reference vectors for the customer real-money gate (DEC-2134):
+"""Journal spec v0.88 §9.35's reference vectors for the customer real-money gate (DEC-2134):
 `RealMoneyGateChanged`, a platform operator's setting of whether a workspace may reach an
 environment other than `paper`, and `RealMoneyRefused`, the workspace API's record of a request it
 refused while that setting was off.
 
-The schemas and rules 269 and 270 live in `control.py`, beside §9.2's other control-stream records,
+The schemas and rules 273 and 274 live in `control.py`, beside §9.2's other control-stream records,
 so one validator judges every closed schema. This module builds the `real_money` section: a base
-draft of each record, an invalid draft for every member type and each clause of rules 269 and 270,
+draft of each record, an invalid draft for every member type and each clause of rules 273 and 274,
 valid drafts for the cases a rule might be misread to refuse, and control streams with the setting
 the gate's fold must read from each. Its own oracle reads the drafts' members directly, without the
 validator, and every seeded bug is shown caught.
@@ -31,7 +31,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.85 §9.35 (DEC-2134)"
+SPEC = "docs/specs/journal.md v0.88 §9.35 (DEC-2134)"
 AT = "2026-10-26T09:00:00.000000000Z"
 GATE_EVENT = "01JAA3G4A000000000000000G1"
 REFUSED_EVENT = "01JAA3G4A000000000000000R1"
@@ -142,24 +142,24 @@ def rule_drafts() -> list[dict]:
     user = {**USER, "id": OPERATOR}
     system = {"kind": "system", "id": OPERATOR, "version": "1", "build": "sha256:" + "c" * 64}
     return [
-        invalid(GATE, "set_by_a_user", "rule 269: a platform operator sets the gate", [change("actor", user)], "schema", "actor.kind"),
-        invalid(GATE, "set_by_a_service", "rule 269: no service sets it", [change("actor", system)], "schema", "actor.kind"),
-        invalid(GATE, "set_for_another_operator", "rule 269: the actor's id is the operator", [change("actor.id", OTHER_OPERATOR)], "schema", "actor.id"),
-        invalid(GATE, "on_without_a_decision", "rule 269: on names its decision", [change("payload.enabled", True)], "schema", "payload.decision"),
+        invalid(GATE, "set_by_a_user", "rule 273: a platform operator sets the gate", [change("actor", user)], "schema", "actor.kind"),
+        invalid(GATE, "set_by_a_service", "rule 273: no service sets it", [change("actor", system)], "schema", "actor.kind"),
+        invalid(GATE, "set_for_another_operator", "rule 273: the actor's id is the operator", [change("actor.id", OTHER_OPERATOR)], "schema", "actor.id"),
+        invalid(GATE, "on_without_a_decision", "rule 273: on names its decision", [change("payload.enabled", True)], "schema", "payload.decision"),
         invalid(
             REFUSED,
             "refused_by_an_operator",
-            "rule 270: the refusal is the principal's",
+            "rule 274: the refusal is the principal's",
             [change("actor", dict(OPERATOR_ACTOR, id=PRINCIPAL))],
             "schema",
             "actor.kind",
         ),
-        invalid(REFUSED, "refused_for_another_principal", "rule 270: the actor's id is the principal", [change("actor.id", OTHER_PRINCIPAL)], "schema", "actor.id"),
+        invalid(REFUSED, "refused_for_another_principal", "rule 274: the actor's id is the principal", [change("actor.id", OTHER_PRINCIPAL)], "schema", "actor.id"),
     ]
 
 
 def invalid_drafts() -> list[dict]:
-    """Each draft breaks exactly one rule; together they cover every member type and rules 269 and 270."""
+    """Each draft breaks exactly one rule; together they cover every member type and rules 273 and 274."""
     return [
         *member_drafts(),
         *rule_drafts(),
@@ -171,19 +171,19 @@ def invalid_drafts() -> list[dict]:
 def valid_drafts() -> list[dict]:
     """The cases a rule might be misread to refuse."""
     out = [
-        valid(GATE, "on_with_a_decision", "rule 269: on with its decision", [change("payload.enabled", True), change("payload.decision", DECISION)]),
-        valid(GATE, "off_with_a_decision", "rule 269: off may cite one", [change("payload.decision", "DEC-1")]),
+        valid(GATE, "on_with_a_decision", "rule 273: on with its decision", [change("payload.enabled", True), change("payload.decision", DECISION)]),
+        valid(GATE, "off_with_a_decision", "rule 273: off may cite one", [change("payload.decision", "DEC-1")]),
         valid(GATE, "on_with_the_largest_number", "§9.35 `decision_id`: five digits", [change("payload.enabled", True), change("payload.decision", "DEC-99999")]),
         valid(
             GATE,
             "another_operator_as_itself",
-            "rule 269: any operator, as itself",
+            "rule 273: any operator, as itself",
             [change("payload.operator", OTHER_OPERATOR), change("actor.id", OTHER_OPERATOR)],
         ),
         valid(
             REFUSED,
             "another_principal_as_itself",
-            "rule 270: any principal, as itself",
+            "rule 274: any principal, as itself",
             [change("payload.principal", OTHER_PRINCIPAL), change("actor.id", OTHER_PRINCIPAL)],
         ),
     ]
@@ -298,11 +298,11 @@ VALIDATOR_MUTANTS = (
     "nullable.payload.principal",
     "types.decision_id",
     "types.decision_id_zero",
-    "rule.269.operator",
-    "rule.269.self",
-    "rule.269.decision",
-    "rule.270.user",
-    "rule.270.self",
+    "rule.273.operator",
+    "rule.273.self",
+    "rule.273.decision",
+    "rule.274.user",
+    "rule.274.self",
 )
 FOLD_MUTANTS = ("fold.first", "fold.default_on")
 

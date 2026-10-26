@@ -310,8 +310,43 @@ REGRESSIONS = {
 }
 
 
-def schema_for(event_type: str, skip: frozenset[str]) -> T:
+# Journal spec v0.85 (DEC-2388 item 10): the checks, or parts of checks, the cell's runtime's
+# advisory dry run deferred to the executor's binding gate, in strictly ascending byte order.
+DEFERRED_PARTS = (
+    "account_exposure",
+    "agent_equity",
+    "agent_mode",
+    "conduct_history",
+    "day_trade_budget",
+    "eligibility",
+    "fee_reservation",
+    "halt",
+    "liquidity_floor",
+    "other_orders",
+    "participation",
+    "quote_ask",
+    "reentry_cooldown",
+    "related_accounts",
+)
+assert list(DEFERRED_PARTS) == sorted(DEFERRED_PARTS, key=str.encode), "listed in byte order"
+LIQUIDITY = rec(
+    ("prior_close", DEC),
+    ("median_dollar_volume_20d", DEC),
+    ("adv_20d", DEC),
+    ("trailing_5m_volume", DEC),
+    ("read_at", TS),
+)
+DECISION_MADE_V3 = rec(
+    *SCHEMAS[("agent", "DecisionMade")].fields,
+    ("deferred_to_binding", list_of(one_of(*DEFERRED_PARTS))),
+    ("liquidity", opt(LIQUIDITY)),
+)
+
+
+def schema_for(event_type: str, skip: frozenset[str], schema_version: int = 1) -> T:
     """The closed schema, or for a regression mutant the reviewed head's wider one."""
+    if schema_version == 3 and event_type == "DecisionMade":
+        return DECISION_MADE_V3
     schema = SCHEMAS[("agent", event_type)]
     for name, (key, member, wider) in REGRESSIONS.items():
         if name in skip and key == ("agent", event_type):
@@ -321,6 +356,44 @@ def schema_for(event_type: str, skip: frozenset[str]) -> T:
 
 def strictness(mode: str) -> int:
     return MODES.index(mode)
+
+
+def deferral_violations(p: dict, adds_risk: bool, rule) -> None:
+    """Rules 269 and 270 on a version-3 `DecisionMade` (v0.85, DEC-2388 item 10)."""
+    deferred = p["deferred_to_binding"]
+    rule(
+        "269.ascending",
+        ascending([part.encode() for part in deferred]),
+        "non_canonical",
+        "payload.deferred_to_binding",
+    )
+    allow = p["dry_run"] == "allow"
+    rule(
+        "269.allow",
+        bool(deferred) == (allow and adds_risk),
+        "schema",
+        "payload.deferred_to_binding",
+    )
+    rule(
+        "270.opening",
+        p["liquidity"] is None or adds_risk,
+        "schema",
+        "payload.liquidity",
+    )
+    floor = "liquidity_floor" in deferred
+    if allow and adds_risk:
+        rule(
+            "270.pair",
+            floor == ("participation" in deferred),
+            "schema",
+            "payload.deferred_to_binding",
+        )
+        rule(
+            "270.figures",
+            (p["liquidity"] is None) == floor,
+            "schema",
+            "payload.liquidity",
+        )
 
 
 def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
@@ -415,6 +488,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         rule(9, ascending(keys), "non_canonical", "payload.model_weights")
         order = [CLIPS.index(c) for c in p["clips_applied"]]
         rule(9, ascending(order), "non_canonical", "payload.clips_applied")
+        if draft["schema_version"] == 3:
+            deferral_violations(p, adds_risk, rule)
     if event_type == "IntentProposed":
         rule(10, draft["causation_id"] is not None, "schema", "causation_id")
     if event_type == "AgentModeChanged":
@@ -511,9 +586,11 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
         out += [
             Violation("config_refs.required", "missing_config_ref", f"config_refs.{k}") for k in missing[:1]
         ]
-    if draft["schema_version"] != 1:
+    version = draft["schema_version"]
+    v3 = version == 3 and event_type == "DecisionMade" and "catalogue.decision_v3" not in skip
+    if version != 1 and not v3:
         return [*out, Violation("catalogue", "unknown_schema", "payload")]
-    schema = schema_for(event_type, skip)
+    schema = schema_for(event_type, skip, version)
     payload_types = type_violations(schema, draft["payload"], "payload", skip)
     out += payload_types
     as_read = {
@@ -3568,6 +3645,269 @@ def run_policy_overlay_mutants(section: dict, agent_section: dict) -> list[str]:
     return escaped
 
 
+
+# --------------------------------------------------------------------------- deferred_to_binding
+
+
+DEFERRED_SPEC = "docs/specs/journal.md v0.85 §9.1 rules 269 and 270 (DEC-2388 item 10)"
+DEFERRED_VALIDATOR_MUTANTS = (
+    "catalogue.decision_v3",
+    "rule.269.ascending",
+    "rule.269.allow",
+    "rule.270.opening",
+    "rule.270.pair",
+    "rule.270.figures",
+)
+EVERY_PART = list(DEFERRED_PARTS)
+UNREAD_PARTS = [part for part in DEFERRED_PARTS if part not in ("liquidity_floor", "participation")]
+FIGURES = {
+    "prior_close": "150",
+    "median_dollar_volume_20d": "20000000000",
+    "adv_20d": "80000000",
+    "trailing_5m_volume": "500000",
+    "read_at": "2026-09-21T14:00:00.000000000Z",
+}
+
+
+def build_deferred_section() -> dict:
+    """Journal spec v0.85 (DEC-2388 item 10): `DecisionMade` version 3, the cell's runtime's
+    advisory dry run, which names every check it deferred to the binding gate and the stored bars'
+    figures it read. Each draft is built from `agent_stream`'s chain: the asked opening at `decision`
+    and the deferred goal exit at `goal_exit`. The section is additive."""
+
+    def v3(deferred: list[str], liquidity: dict | None = None) -> list[dict]:
+        return [
+            change("schema_version", 3),
+            change("payload.deferred_to_binding", list(deferred)),
+            change("payload.liquidity", copy.deepcopy(liquidity)),
+        ]
+
+    asked = [change("payload.autonomy", "ask")]
+    denied = [
+        change("payload.dry_run", "deny"),
+        change("payload.reason_code", "below_liquidity_floor"),
+        change("payload.autonomy", None),
+        change("payload.decided_by", None),
+    ]
+    exit_allowed = [
+        change("payload.dry_run", "allow"),
+        change("payload.reason_code", None),
+        change("payload.autonomy", "auto"),
+        change("payload.decided_by", BUILTIN_LABEL),
+    ]
+    section = {
+        "spec": DEFERRED_SPEC,
+        "base": "agent_stream",
+        "parts": EVERY_PART,
+        "invalid_drafts": [
+            invalid(
+                "deferred_out_of_order",
+                "§9.1 rule 269",
+                "decision",
+                [*v3(["participation", "liquidity_floor", *UNREAD_PARTS]), *asked],
+                "non_canonical",
+                "payload.deferred_to_binding",
+            ),
+            invalid(
+                "deferred_part_repeated",
+                "§9.1 rule 269",
+                "decision",
+                [*v3(["halt", "halt"], dict(FIGURES)), *asked],
+                "non_canonical",
+                "payload.deferred_to_binding",
+            ),
+            invalid(
+                "deferred_part_unknown",
+                "§9.1 DecisionMade version 3",
+                "decision",
+                [*v3(["exposure"], dict(FIGURES)), *asked],
+                "non_canonical",
+                "payload.deferred_to_binding[0]",
+            ),
+            invalid(
+                "deferred_nothing_on_an_allowed_opening",
+                "§9.1 rule 269",
+                "decision",
+                [*v3([], dict(FIGURES)), *asked],
+                "schema",
+                "payload.deferred_to_binding",
+            ),
+            invalid(
+                "deferred_on_a_denied_opening",
+                "§9.1 rule 269",
+                "decision",
+                [*v3(UNREAD_PARTS, dict(FIGURES)), *denied],
+                "schema",
+                "payload.deferred_to_binding",
+            ),
+            invalid(
+                "deferred_on_an_allowed_exit",
+                "§9.1 rule 269",
+                "goal_exit",
+                [*v3(["halt"]), *exit_allowed],
+                "schema",
+                "payload.deferred_to_binding",
+            ),
+            invalid(
+                "figures_on_an_exit",
+                "§9.1 rule 270",
+                "goal_exit",
+                v3([], dict(FIGURES)),
+                "schema",
+                "payload.liquidity",
+            ),
+            invalid(
+                "floor_deferred_without_participation",
+                "§9.1 rule 270",
+                "decision",
+                [*v3(sorted(["liquidity_floor", *UNREAD_PARTS], key=str.encode)), *asked],
+                "schema",
+                "payload.deferred_to_binding",
+            ),
+            invalid(
+                "participation_deferred_without_the_floor",
+                "§9.1 rule 270",
+                "decision",
+                [*v3(sorted(["participation", *UNREAD_PARTS], key=str.encode), dict(FIGURES)), *asked],
+                "schema",
+                "payload.deferred_to_binding",
+            ),
+            invalid(
+                "version_3_without_its_mandate_version",
+                "§9 DecisionMade v3: man",
+                "decision",
+                [*v3(EVERY_PART), *asked, delete("config_refs.mandate_version")],
+                "missing_config_ref",
+                "config_refs.mandate_version",
+            ),
+            invalid(
+                "figures_beside_a_deferred_floor",
+                "§9.1 rule 270",
+                "decision",
+                [*v3(EVERY_PART, dict(FIGURES)), *asked],
+                "schema",
+                "payload.liquidity",
+            ),
+            invalid(
+                "no_figures_with_the_floor_evaluated",
+                "§9.1 rule 270",
+                "decision",
+                [*v3(UNREAD_PARTS), *asked],
+                "schema",
+                "payload.liquidity",
+            ),
+            invalid(
+                "figures_untyped",
+                "§9.1 DecisionMade version 3",
+                "decision",
+                [*v3(UNREAD_PARTS, {**FIGURES, "adv_20d": 80000000}), *asked],
+                "schema",
+                "payload.liquidity.adv_20d",
+            ),
+            invalid(
+                "version_1_names_a_deferral",
+                "§9.1 DecisionMade",
+                "decision",
+                [change("payload.deferred_to_binding", EVERY_PART), *asked],
+                "schema",
+                "payload.deferred_to_binding",
+            ),
+            invalid(
+                "version_4_is_unknown",
+                "§9 catalogue",
+                "decision",
+                [*v3(EVERY_PART), *asked, change("schema_version", 4)],
+                "unknown_schema",
+                "payload",
+            ),
+        ],
+        "valid_drafts": [
+            valid(
+                "every_part_deferred_and_asked",
+                DEFERRED_SPEC,
+                "decision",
+                [*v3(EVERY_PART), *asked],
+            ),
+            valid(
+                "the_bars_read_and_asked",
+                DEFERRED_SPEC,
+                "decision",
+                [*v3(UNREAD_PARTS, dict(FIGURES)), *asked],
+            ),
+            valid(
+                "denied_on_the_figures_read",
+                DEFERRED_SPEC,
+                "decision",
+                [*v3([], dict(FIGURES)), *denied],
+            ),
+            valid(
+                "denied_before_any_read",
+                DEFERRED_SPEC,
+                "decision",
+                [*v3([]), *denied],
+            ),
+            valid(
+                "a_deferred_exit_defers_nothing",
+                DEFERRED_SPEC,
+                "goal_exit",
+                v3([]),
+            ),
+        ],
+    }
+    return json.loads(json.dumps(section))
+
+
+def deferred_case_failures(chain: list[dict], section: dict, skip: frozenset[str] = frozenset()) -> list[str]:
+    """Each invalid draft breaks exactly its one rule, with its reason and path; each valid draft
+    breaks none."""
+    problems = []
+    for case in section["invalid_drafts"]:
+        got = violations(apply_changes(chain, case), skip)
+        want = case["expect"]
+        if len(got) != 1 or (got[0].reason, got[0].path) != (want["reason"], want["path"]):
+            problems.append(f"deferred_to_binding invalid {case['name']}: {got}")
+    for case in section["valid_drafts"]:
+        got = violations(apply_changes(chain, case), skip)
+        if got:
+            problems.append(f"deferred_to_binding valid {case['name']}: {got}")
+    return problems
+
+
+def check_deferred(section: dict, agent_section: dict) -> list[str]:
+    problems = deferred_case_failures(agent_section["chain"], section)
+    if section["base"] != "agent_stream":
+        problems.append("deferred_to_binding base: drafts are built from agent_stream's chain")
+    if section["parts"] != EVERY_PART:
+        problems.append("deferred_to_binding parts: the fourteen of DEC-2388 item 8, in byte order")
+    versions = {
+        change_["value"]
+        for case in section["valid_drafts"]
+        for change_ in case["changes"]
+        if change_["path"] == "schema_version"
+    }
+    if versions != {3}:
+        problems.append(f"deferred_to_binding valid drafts must each be version 3: {versions}")
+    return problems
+
+
+def run_deferred_mutants(section: dict, agent_section: dict) -> list[str]:
+    """Every seeded validator bug and vector bug is caught by the section's own cases."""
+    escaped = []
+    chain = agent_section["chain"]
+    for mutant in DEFERRED_VALIDATOR_MUTANTS:
+        if not deferred_case_failures(chain, section, frozenset([mutant])):
+            escaped.append(f"deferred_to_binding validator mutant {mutant}")
+    unsorted = copy.deepcopy(section)
+    unsorted["valid_drafts"][0]["changes"][1]["value"] = list(reversed(EVERY_PART))
+    if not check_deferred(unsorted, agent_section):
+        escaped.append("deferred_to_binding vector mutant: the parts written out of order")
+    version_1 = copy.deepcopy(section)
+    version_1["valid_drafts"][1]["changes"][0]["value"] = 1
+    if not check_deferred(version_1, agent_section):
+        escaped.append("deferred_to_binding vector mutant: a version 3 written as version 1")
+    return escaped
+
+
 # --------------------------------------------------------------------------- broker_profile (v0.19)
 
 PROFILE_MEMBERS = {"kind", "profile_version", "rows", "idempotency"}
@@ -3872,6 +4212,7 @@ def render(
     section: dict,
     production_config_refs: dict,
     policy_overlay: dict,
+    deferred_section: dict,
     control_section: dict,
     risk_section: dict,
     research_section: dict,
@@ -3925,6 +4266,7 @@ def render(
             "agent_stream": section,
             "production_config_refs": production_config_refs,
             "policy_overlay": policy_overlay,
+            "deferred_to_binding": deferred_section,
             "control_stream": control_section,
             "risk_state": risk_section,
             "research": research_section,
@@ -4010,6 +4352,7 @@ def main(argv: list[str] | None = None) -> int:
     control_section = control.build_section(v3)
     production_config_refs = build_production_config_refs_section(control_section)
     policy_overlay = build_policy_overlay_section()
+    deferred_section = build_deferred_section()
     risk_section = risk_state.build_section()
     research_section = research.build_section()
     account_section = account.build_section(v3["genesis_prev_hash"])
@@ -4062,6 +4405,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += run_production_config_ref_mutants(production_config_refs)
     problems += check_policy_overlay(policy_overlay, section)
     problems += run_policy_overlay_mutants(policy_overlay, section)
+    problems += check_deferred(deferred_section, section)
+    problems += run_deferred_mutants(deferred_section, section)
     problems += control.check_section(control_section)
     problems += control.run_mutants(control_section)
     problems += risk_state.check_section(risk_section)
@@ -4164,6 +4509,7 @@ def main(argv: list[str] | None = None) -> int:
         section,
         production_config_refs,
         policy_overlay,
+        deferred_section,
         control_section,
         risk_section,
         research_section,
@@ -4222,6 +4568,7 @@ def main(argv: list[str] | None = None) -> int:
         check_chain(reread["agent_stream"], v3)
         or check_production_config_refs(reread["production_config_refs"])
         or check_policy_overlay(reread["policy_overlay"], reread["agent_stream"])
+        or check_deferred(reread["deferred_to_binding"], reread["agent_stream"])
         or control.check_section(reread["control_stream"])
         or risk_state.check_section(reread["risk_state"])
         or research.check_section(reread["research"])
@@ -4290,6 +4637,8 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(production_config_refs['invalid_drafts'])} invalid, 3 validator and 5 vector mutants caught; "
         f"{len(policy_overlay['invalid_drafts'])} invalid and {len(policy_overlay['valid_drafts'])} valid "
         f"policy-overlay drafts, {len(OVERLAY_VALIDATOR_MUTANTS)} validator and 2 vector mutants caught; "
+        f"{len(deferred_section['invalid_drafts'])} invalid and {len(deferred_section['valid_drafts'])} valid "
+        f"version-3 DecisionMade drafts, {len(DEFERRED_VALIDATOR_MUTANTS)} validator and 2 vector mutants caught; "
         f"{len(control_section['chain'])} control-stream events, {len(control_section['drafts'])} base drafts, "
         f"{len(control_section['journaled_facts'])} journaled facts, {len(control_section['invalid_drafts'])} invalid "
         f"and {len(control_section['valid_drafts'])} valid drafts; {len(control.VALIDATOR_MUTANTS)} validator and "

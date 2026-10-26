@@ -529,7 +529,7 @@ SCHEMAS[("ctl", "StepUpConfirmed")] = rec(
     ("confirmed_at", INT),
 )
 
-# §9.35 v0.85 (DEC-2134): the customer real-money gate's setting, by a platform operator, and the
+# §9.35 v0.88 (DEC-2134): the customer real-money gate's setting, by a platform operator, and the
 # workspace API's refusal of a request that named another environment while it was off.
 SCHEMAS[("ctl", "RealMoneyGateChanged")] = rec(
     ("enabled", BOOL),
@@ -2980,7 +2980,7 @@ def connection_role_violations(event_type: str, draft: dict, skip: frozenset[str
 
 
 def real_money_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.35's rules 269 and 270, on a well-typed payload: the gate is set by a platform operator as
+    """§9.35's rules 273 and 274, on a well-typed payload: the gate is set by a platform operator as
     itself, and turned on only with a decision; a refusal is recorded as the principal refused."""
     if event_type not in ("RealMoneyGateChanged", "RealMoneyRefused"):
         return []
@@ -2995,12 +2995,12 @@ def real_money_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
 
     actor = draft["actor"]
     if event_type == "RealMoneyGateChanged":
-        if rule("269.operator", actor["kind"] == "platform_operator", "actor.kind"):
-            rule("269.self", actor["id"] == p["operator"], "actor.id")
-        rule("269.decision", p["enabled"] is not True or p["decision"] is not None, "payload.decision")
+        if rule("273.operator", actor["kind"] == "platform_operator", "actor.kind"):
+            rule("273.self", actor["id"] == p["operator"], "actor.id")
+        rule("273.decision", p["enabled"] is not True or p["decision"] is not None, "payload.decision")
     else:
-        if rule("270.user", actor["kind"] == "user", "actor.kind"):
-            rule("270.self", actor["id"] == p["principal"], "actor.id")
+        if rule("274.user", actor["kind"] == "user", "actor.kind"):
+            rule("274.self", actor["id"] == p["principal"], "actor.id")
     return out
 
 

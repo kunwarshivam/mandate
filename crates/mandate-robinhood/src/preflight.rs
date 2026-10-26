@@ -8,7 +8,7 @@
 //! decimal text refuses the whole read (`AGENTS.md` rule 3). Nothing here is defaulted.
 
 use mandate_accounting::{InstrumentId, Side};
-use mandate_executor::{BrokerOrder, BrokerPosition};
+use mandate_executor::{BrokerAccount, BrokerOrder, BrokerPosition};
 use mandate_mcp::CallClass;
 use mandate_num::{Price, Qty, SignedQty, Usd};
 use serde_json::{Map, Value};
@@ -369,5 +369,42 @@ fn price_field(record: &Map<String, Value>, field: &'static str) -> Option<Optio
         Value::Null => Some(None),
         Value::String(price) => Price::parse(price).ok().map(Some),
         _ => None,
+    }
+}
+
+/// The agentic account's snapshot as the executor's [`BrokerAccount`] (DEC-933 item 1, the
+/// recommendation of DEC-928's note to the founder, under DEC-929):
+///
+/// - `cash` is `get_portfolio`'s, and `buying_power` and `non_marginable_buying_power` are the
+///   lower of its cash and buying power (DEC-620 item 2), so no figure exceeds cash;
+/// - `status` is `ACTIVE` and no flag is set, because a snapshot exists only when every one of
+///   its reads found the recorded account listed `agentic_allowed` (DEC-875); any other answer
+///   refused the read;
+/// - every figure Robinhood does not publish reads as the value that adds no buying power and
+///   lifts no limit: `crypto_status` `INACTIVE` (no crypto opening), `multiplier` 1 (DEC-529
+///   item 11), `equity` the cash alone (never more than a long-only account's equity),
+///   `last_equity` zero (below every equity threshold, so §9.2's `legacy_pdt` budget would apply
+///   if the account were ever declared a margin account; as a cash account the gate's settled-cash
+///   rule binds instead),
+///   `maintenance_margin` the whole equity (no maintenance excess), and `accrued_fees` zero,
+///   which the gate's buying power, the lower of cash and the broker's figure, never adds to.
+#[must_use]
+pub fn broker_account(snapshot: &AccountSnapshot) -> BrokerAccount {
+    let cash = snapshot.cash;
+    let one_x = cash.min(snapshot.buying_power);
+    BrokerAccount {
+        status: "ACTIVE".to_owned(),
+        crypto_status: "INACTIVE".to_owned(),
+        trading_blocked: false,
+        account_blocked: false,
+        trade_suspended_by_user: false,
+        multiplier: 1,
+        equity: cash,
+        cash,
+        buying_power: one_x,
+        non_marginable_buying_power: one_x,
+        accrued_fees: Usd::ZERO,
+        last_equity: Usd::ZERO,
+        maintenance_margin: cash,
     }
 }

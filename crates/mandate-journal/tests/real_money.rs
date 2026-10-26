@@ -1,5 +1,5 @@
-//! Journal spec v0.85 §9.35 (DEC-2134): the customer real-money gate's `RealMoneyGateChanged` and
-//! `RealMoneyRefused` on the control stream at schema version 1, and rules 269 and 270. Through
+//! Journal spec v0.88 §9.35 (DEC-2134): the customer real-money gate's `RealMoneyGateChanged` and
+//! `RealMoneyRefused` on the control stream at schema version 1, and rules 273 and 274. Through
 //! [`Draft::parse`] against the vectors' `real_money` section: the base and every valid draft parse
 //! as their record, every invalid draft is refused with its reason at its path, and every record of
 //! every setting stream parses and [`check_stream`] refuses none. Before the registration the
@@ -69,7 +69,7 @@ fn the_real_money_section_holds_every_part() {
     let section = section();
     assert_eq!(
         text(&section, "spec"),
-        "docs/specs/journal.md v0.85 §9.35 (DEC-2134)"
+        "docs/specs/journal.md v0.88 §9.35 (DEC-2134)"
     );
     let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
     let names: Vec<&str> = drafts.keys().map(|k| k.as_str()).collect();

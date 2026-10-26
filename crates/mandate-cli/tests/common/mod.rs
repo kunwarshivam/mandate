@@ -115,13 +115,34 @@ fn draft_in(
     causation: Option<&str>,
     payload: Value,
 ) -> Vec<u8> {
+    draft_versioned(
+        environment,
+        stream,
+        event_id,
+        event_type,
+        causation,
+        payload,
+        1,
+    )
+}
+
+/// [`draft_in`] at `schema_version`.
+fn draft_versioned(
+    environment: &str,
+    stream: &str,
+    event_id: &str,
+    event_type: &str,
+    causation: Option<&str>,
+    payload: Value,
+    schema_version: i64,
+) -> Vec<u8> {
     let envelope = object(&[
         ("envelope_version", int(1)),
         ("environment", text(environment)),
         ("event_id", text(event_id)),
         ("stream_id", text(stream)),
         ("event_type", text(event_type)),
-        ("schema_version", int(1)),
+        ("schema_version", int(schema_version)),
         ("event_time", text("2026-09-21T14:00:00.000000000Z")),
         ("clock_source", text("local")),
         ("causation_id", causation.map_or(Value::Null, text)),
@@ -562,6 +583,20 @@ impl Fixture {
         causation: Option<&str>,
         payload: Value,
     ) -> String {
+        self.append_versioned(environment, stream_text, event_type, causation, payload, 1)
+    }
+
+    /// [`Fixture::append_in`] at `schema_version`, set in the body the journal reads its row's
+    /// `schema_version` from.
+    pub fn append_versioned(
+        &mut self,
+        environment: &str,
+        stream_text: &str,
+        event_type: &str,
+        causation: Option<&str>,
+        payload: Value,
+        schema_version: i64,
+    ) -> String {
         self.next += 1;
         let id = runtime_id(self.next);
         let s = stream(stream_text);
@@ -574,13 +609,14 @@ impl Fixture {
             }
         };
         let head = self.journal.head(&s).unwrap().seq;
-        let bytes = draft_in(
+        let bytes = draft_versioned(
             environment,
             stream_text,
             &id,
             event_type,
             causation,
             payload,
+            schema_version,
         );
         let outcome = self
             .journal

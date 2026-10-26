@@ -1,10 +1,10 @@
-//! The customer real-money gate ([DEC-2134]; journal spec v0.85 §9.35): one decision in front of
+//! The customer real-money gate ([DEC-2134]; journal spec v0.88 §9.35): one decision in front of
 //! every workspace API point that can name an environment other than `paper`, creating a mandate
 //! version, deploying, starting a connect, and going live.
 //!
 //! The setting is the `enabled` of the latest `RealMoneyGateChanged` on the workspace's control
 //! stream, by `seq`, and off with none or with one this fold cannot read (`AGENTS.md` rule 3). No
-//! route here writes it: only a platform operator does (rule 269, [DEC-2134] items 3 and 6). While
+//! route here writes it: only a platform operator does (rule 273, [DEC-2134] items 3 and 6). While
 //! it is off, a request that names another environment is refused, and its `RealMoneyRefused` is
 //! appended before the answer ([DEC-2134] item 4). While it is on, the request passes the gate and
 //! meets every check after it unchanged: on is necessary, never sufficient ([DEC-2134] item 5).

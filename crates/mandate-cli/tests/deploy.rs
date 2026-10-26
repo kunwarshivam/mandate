@@ -565,3 +565,58 @@ fn a_store_that_fails_commits_nothing() {
     );
     assert_eq!(world.appends(), before, "nothing appended");
 }
+
+/// The `step_up` member a version 3 `AgentDeployed` or `MandateConfirmed` carries (journal spec
+/// v0.84 §9.9 and §9.24).
+const STEP_UP: &str = r#""step_up":{"assertion_id":"01JAA3P0A000000000000000H1","authenticated_at":"2026-10-08T12:59:57.000000000Z","method":"passkey"}"#;
+
+/// Journal spec v0.84, DEC-2131 item 4: a version 3 `MandateConfirmed` confirms its version as its
+/// version 2 does, so the deployment commits the same event; and a version 3 `AgentDeployed` is
+/// the agent's active deployment as its version 2 is, so a re-run finds it and commits nothing.
+#[test]
+fn a_version_3_deployment_reads_as_its_version_2() {
+    let version = reference(MANDATE);
+    let paths: Vec<String> = PATHS
+        .split_whitespace()
+        .map(|p| format!(r#""/{p}""#))
+        .collect();
+    let confirmed = format!(
+        r#"{{"agent_id":null,"base_version":null,"confirmed_paths":[{}],"mandate_version":"{version}","record_ref":"sha256:{}""#,
+        paths.join(","),
+        "7".repeat(64)
+    );
+    let deployed = format!(
+        r#"{{"agent_id":"{OTHER_AGENT}","mandate_version":"{version}","record_ref":"sha256:{}","connection_id":"conn_alpaca_paper_01""#,
+        "6".repeat(64)
+    );
+    let read = |schema_version: u64, trailing: &str| {
+        let mut world = World::new();
+        world.run(Created("v1")).unwrap();
+        world.seed_at(
+            "MandateConfirmed",
+            &format!("{confirmed}{trailing}}}"),
+            schema_version,
+        );
+        let first = world.run(Deploy(AGENT, "v1", None));
+        world.seed_at(
+            "AgentDeployed",
+            &format!("{deployed}{trailing}}}"),
+            schema_version,
+        );
+        let seeded = world.rows().last().map(|r| (r.event_id.clone(), r.seq));
+        let before = world.appends();
+        let again = world.run(Deploy(OTHER_AGENT, "v1", None));
+        let found = again.map(|s| (s.event_id, s.seq));
+        assert_eq!(found, Ok(seeded.unwrap()), "the seeded deployment, found");
+        assert_eq!(world.appends(), before, "a re-run commits nothing");
+        let rows = world.rows();
+        let versions: Vec<u64> = rows.iter().map(|r| r.schema_version).collect();
+        (first, versions)
+    };
+    let (version_2, versions_2) = read(2, "");
+    let (version_3, versions_3) = read(3, &format!(",{STEP_UP}"));
+    assert!(version_2.is_ok(), "{version_2:?}");
+    assert_eq!(version_3, version_2);
+    assert_eq!(versions_3.iter().filter(|v| **v == 3).count(), 2);
+    assert_eq!(versions_2.iter().filter(|v| **v == 2).count(), 2);
+}

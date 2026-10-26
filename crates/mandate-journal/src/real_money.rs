@@ -1,9 +1,9 @@
-//! The customer real-money gate's records, which journal spec v0.85 §9.35 closes at schema version 1
+//! The customer real-money gate's records, which journal spec v0.88 §9.35 closes at schema version 1
 //! ([DEC-2134](../../../docs/project/decisions/DEC-2134.md)): `RealMoneyGateChanged`, a platform
 //! operator's setting of whether the workspace may reach an environment other than `paper`, and
 //! `RealMoneyRefused`, the workspace API's record of a request it refused while that setting was
-//! off. Rule 269 refuses `schema` at its member: the setting's actor is a `platform_operator` whose
-//! `id` is the record's `operator`, and an on setting names its decision. Rule 270: the refusal's
+//! off. Rule 273 refuses `schema` at its member: the setting's actor is a `platform_operator` whose
+//! `id` is the record's `operator`, and an on setting names its decision. Rule 274: the refusal's
 //! actor is a `user` whose `id` is its `principal`.
 
 use mandate_canon::Value;
@@ -46,7 +46,7 @@ pub(crate) fn schema(
     }
 }
 
-/// Rules 269 and 270 on a payload its schema has normalized, in the spec's order: the first clause
+/// Rules 273 and 274 on a payload its schema has normalized, in the spec's order: the first clause
 /// that fails is reported. `actor` is the envelope's.
 pub(crate) fn rules(
     event_type: &str,

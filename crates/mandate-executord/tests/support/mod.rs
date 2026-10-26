@@ -928,6 +928,36 @@ pub fn deploy(journal: &Journal, id: &str, agent: &str, connection: &str) -> Res
     )
 }
 
+/// A version-3 `AgentDeployed` (journal spec v0.84, DEC-2131): version 2's members, then the
+/// passkey step-up that authorized it.
+pub fn deploy_stepped_up(
+    journal: &Journal,
+    id: &str,
+    agent: &str,
+    connection: &str,
+) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "AgentDeployed",
+        3,
+        None,
+        object(vec![
+            ("agent_id", text(agent)),
+            ("connection_id", text(connection)),
+            ("mandate_version", text(VERSION)),
+            (
+                "step_up",
+                object(vec![
+                    ("assertion_id", text("01JAA3P0A000000000000000H1")),
+                    ("authenticated_at", text("2026-10-17T15:59:50.000000000Z")),
+                    ("method", text("passkey")),
+                ])?,
+            ),
+        ])?,
+    )
+}
+
 pub fn tick(journal: &Journal, id: &str, clock: &str) -> Result<(), Error> {
     journal.write(
         CLOCK_STREAM,

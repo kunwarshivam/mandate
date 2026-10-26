@@ -144,6 +144,7 @@ agent_process = [
     "mandate-mcp",
     "mandate-paper",
     "mandate-robinhood",
+    "mandate-runtime-models",
     "mandate-shell",
 ]
 
@@ -792,11 +793,25 @@ pure = false
 allowed_external = ["tokio"]
 
 # The agent runtime as a long-running process (E21-30, DEC-1012): one deployment's runtime core
-# over mandate-store, with mandate-process's lifecycle and probes; tokio for the SIGTERM listener.
+# over mandate-store, with mandate-process's lifecycle and probes; its binary, with tokio for the
+# SIGTERM listener, is mandate-runtime-models's (DEC-2383 item 7).
 # Its forbidden_internal list is what makes "the runtime has no route to a broker" hold by
 # construction: it can never reach the shell, the executor, a connector, the runner, or the CLI.
 [crates.mandate-daemon]
 layer = 8
+safety_critical = true
+pure = false
+allowed_external = []
+forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-paper", "mandate-cli", "mandate-rh-sim"]
+
+# The runtime's model composer and its process binary (DEC-2383 item 7, DEC-503 item 2; the
+# founder's call, 2026-10-26): mandate-modelhost behind mandate-daemon's Models port, as
+# mandate-paper composes the host, above both so the daemon never runs a model and the host never
+# reaches the journal. The `mandate-daemon` binary lives here because it links the composer, which
+# depends on the daemon's library. It keeps the daemon's forbidden list, so the runtime still has
+# no route to a broker.
+[crates.mandate-runtime-models]
+layer = 9
 safety_critical = true
 pure = false
 allowed_external = ["tokio"]
@@ -813,7 +828,7 @@ layer = 9
 safety_critical = true
 pure = false
 allowed_external = ["secrecy", "tokio"]
-forbidden_internal = ["mandate-daemon", "mandate-agentd", "mandate-shell", "mandate-paper", "mandate-mcp", "mandate-cli", "mandate-rh-sim", "mandate-robinhood"]
+forbidden_internal = ["mandate-daemon", "mandate-runtime-models", "mandate-agentd", "mandate-shell", "mandate-paper", "mandate-mcp", "mandate-cli", "mandate-rh-sim", "mandate-robinhood"]
 
 # The token-exchange process (E10-13 slice 5b, DEC-821 item 2, DEC-2629): the one process with
 # the platform's client secret and the live token endpoint. It sits above mandate-connections, whose

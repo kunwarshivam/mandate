@@ -48,6 +48,12 @@ variable "cap_usd" {
   type        = number
 }
 
+variable "cap_reason" {
+  description = "The decision that sets the cap, which the refusal names."
+  type        = string
+  default     = "DEC-2011 item 2"
+}
+
 data "digitalocean_sizes" "node" {
   filter {
     key    = "slug"
@@ -89,7 +95,7 @@ resource "terraform_data" "cap" {
 
     precondition {
       condition     = local.estimate <= var.cap_usd
-      error_message = "The monthly estimate of ${local.estimate} USD passes this environment's cap of ${var.cap_usd} USD (DEC-2011 item 2)."
+      error_message = "The monthly estimate of ${local.estimate} USD passes this environment's cap of ${var.cap_usd} USD (${var.cap_reason})."
     }
   }
 }

@@ -1,9 +1,0 @@
-file = "crates/mandate-api-server/tests/versions_http.rs"
-test = "a_replayed_passkey_confirm_answers_as_the_first_though_its_challenge_is_gone"
-reason = """
-DEC-2128 items 2 and 3: the server's real passkey binding verifies this confirm's assertion, so the
-port answers `Some` rather than a stub's report, and the confirm route refuses it as
-`journal_unavailable` (503) until it commits `MandateConfirmed` and `StepUpAsserted` in one
-batch. That is the route's own answer, not a stub's. E9-4 S5's confirm implementation deletes this
-file with the test's `#[ignore]` line.
-"""
