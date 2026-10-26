@@ -62,6 +62,9 @@ pub struct ApprovalView {
     pub deadline: i64,
     pub content_hash: String,
     pub content: Value,
+    /// The `ApprovalRequested` version `content` comes from, which says which members it must
+    /// hold: version 3's `deferred_to_binding` among them (DEC-2518).
+    pub schema_version: u64,
     /// The order the approval binds (DEC-1021).
     pub order: Value,
 }
@@ -172,6 +175,7 @@ pub fn approvals(agent_id: &str, agent_rows: &[StoredEvent]) -> Vec<ApprovalView
                     deadline,
                     content_hash: hash.to_owned(),
                     content: content.clone(),
+                    schema_version: row.schema_version,
                     order: bound,
                 });
             }
