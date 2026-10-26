@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Page, expect, test } from "@playwright/test";
+import { deferredCheckLabel } from "../src/lib/deferred-checks";
 
 /**
  * The trade loop from web/, end to end in the local cell (the founder's 2026-10-27 deadline): a
@@ -91,17 +92,14 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     await expect.poll(() => contents.has(approval), { message: "the API's read of the request", timeout: 30_000 }).toBe(true);
     const deferred = contents.get(approval)?.deferred_to_binding;
     const region = page.getByRole("region", { name: "Checks not run yet" });
-    if (deferred === undefined) {
-      await expect(region).toHaveCount(0);
-      step("deferred_checks", "none");
-    } else if (Array.isArray(deferred) && deferred.length > 0 && deferred.every((n) => typeof n === "string")) {
+    if (!Array.isArray(deferred) || deferred.length === 0 || !deferred.every((n) => typeof n === "string")) {
+      refuse(`the API served the cell's ask without the checks its dry run deferred (DEC-2388 item 13): ${JSON.stringify(deferred ?? null)}`);
+    } else {
       await expect(region).toBeVisible({ timeout: 15_000 });
       await expect(region.getByText(APPROVER_SENTENCE, { exact: true })).toBeVisible();
-      await expect(region.getByRole("listitem")).toHaveCount(deferred.length);
+      await expect(region.getByRole("listitem")).toHaveText(deferred.map(deferredCheckLabel));
       await expect(region).not.toContainText(/passed|cleared/i);
       step("deferred_checks", deferred.join(","));
-    } else {
-      refuse(`the API served deferred checks it cannot list: ${JSON.stringify(deferred)}`);
     }
   });
 

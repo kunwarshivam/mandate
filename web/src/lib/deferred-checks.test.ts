@@ -51,12 +51,16 @@ describe("the checks an approval's dry run deferred (DEC-2515 item 5, mandate sp
     }
   });
 
+  it("reads a version 3 request stripped of its list as nothing deferred, the one reading the journal's refusal covers", () => {
+    const stripped = section.invalid_drafts.find((c) => c.name === "v3_without_its_deferrals");
+    expect(stripped, "the vectors' v3_without_its_deferrals case").toBeTruthy();
+    expect(deferredChecks(contentOf(stripped!))).toEqual({ kind: "none" });
+  });
+
   it("never reads a member it cannot read as nothing deferred: null, empty, not a list, or not names", () => {
-    for (const c of section.invalid_drafts) {
-      const content = contentOf(c);
-      if (!("deferred_to_binding" in content)) continue;
-      expect(deferredChecks(content), c.name).not.toEqual({ kind: "none" });
-    }
+    const present = section.invalid_drafts.filter((c) => Object.hasOwn(contentOf(c), "deferred_to_binding"));
+    expect(present.map((c) => c.name)).toContain("v3_with_null_deferrals");
+    for (const c of present) expect(deferredChecks(contentOf(c)), c.name).not.toEqual({ kind: "none" });
     for (const value of [null, [], "halt", { halt: true }, [1], ["halt", null], [""], ["Halt"], ["halt", "halt"]]) {
       expect(deferredChecks({ deferred_to_binding: value }), JSON.stringify(value)).toEqual({ kind: "unreadable" });
     }

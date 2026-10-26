@@ -222,6 +222,21 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
   });
 
+  it("the answer's record covers the deferred checks shown: a different list gives a different record", async () => {
+    const approval = pending[0];
+    const artifacts: unknown[] = [];
+    for (const names of [["halt"], ["eligibility", "halt"]]) {
+      const { posts } = mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", deferring(names));
+      await screen.findByRole("region", { name: "Checks not run yet" });
+      fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+      await waitFor(() => expect(posts).toHaveLength(1));
+      artifacts.push((posts[0].body.record as { artifact: unknown }).artifact);
+      cleanup();
+    }
+    expect(artifacts[0]).toEqual(expect.stringMatching(/^sha256:[0-9a-f]{64}$/));
+    expect(artifacts[1]).not.toEqual(artifacts[0]);
+  });
+
   it("a deferred check the web app has no label for is shown by its name, never dropped", async () => {
     const approval = pending[0];
     mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", deferring(["halt", "new_check"]));

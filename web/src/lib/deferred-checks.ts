@@ -9,30 +9,34 @@
 export const APPROVER_SENTENCE = "These checks have not been run yet. They run when the order is placed, and may still refuse it:";
 
 /**
- * How each name reads to the approver: what the check is, never whether it passed. Every name the
+ * How each name reads to the approver: what the check is (DEC-2388 item 8, DEC-2378 item 11), never
+ * whether it passed. Every name the
  * journal spec allows, and no other; a name the spec adds later is shown as itself until it has one.
  */
 export const DEFERRED_CHECK_LABELS: Readonly<Record<string, string>> = {
   account_exposure: "Account exposure limits",
-  agent_equity: "The agent's equity",
-  agent_mode: "The agent's mode",
-  conduct_history: "Market-conduct history",
+  agent_equity: "Position cap scaled by the agent's equity",
+  agent_mode: "The agent's and the account's trading mode",
+  conduct_history: "Market-conduct checks on today's orders",
   day_trade_budget: "Day-trade budget",
   eligibility: "Instrument eligibility",
   fee_reservation: "Fee reservation",
   halt: "Trading halt",
   liquidity_floor: "Liquidity floor",
-  other_orders: "The agent's other orders",
+  other_orders: "Checks over every working order on the account",
   participation: "Participation cap",
-  quote_ask: "The current ask",
+  quote_ask: "Price collar from the current ask",
   reentry_cooldown: "Re-entry cooldown",
-  related_accounts: "Related accounts",
+  related_accounts: "Related accounts' resting orders",
 };
 
 /**
  * What a request's content says was deferred: nothing (versions 1 and 2 have no member), the names
  * in the order the request gives them, or a member that cannot be read. An unreadable member is
- * never read as nothing deferred: the screen then says it cannot tell, and offers no approve.
+ * never read as nothing deferred: the screen then says it cannot tell, and offers no approve. An
+ * absent member reads as nothing deferred, since the read carries no schema version to tell a
+ * version 3 request without its list from a version 1 or 2 one; the journal refuses the first, and
+ * the cross-batch gap is backlog `E21-30-web-approval-deferral-version`.
  */
 export type DeferredChecks = { kind: "none" } | { kind: "named"; names: string[] } | { kind: "unreadable" };
 
