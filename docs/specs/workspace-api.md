@@ -1223,34 +1223,44 @@ counsel answers compliance question 35, nothing here reaches an owner, an approv
 picker.
 
 `GET /alerts` returns `read-models/alerts` ([DEC-2140](../project/decisions/DEC-2140.md)), the
-web inbox's alerts (notifications spec §1.3, §4.1: the pull channel's list is the journal itself).
-It reads the streams the dispatcher follows (DEC-2516 item 1): the control stream, the agent stream
-of every agent `AgentDeployed` names, and the account stream of every account `ConnectionRequested`
-or `ConnectionEstablished` names, in the deployment's environment; and the notice stream,
-`ntf:{workspace_id}`, which is not found until the dispatcher first writes it. Each
-`OwnerAlertSent` on those streams is one alert, most recent first, at most `limit` of them (1 to
-200, default 50; `truncated` says whether older ones were left out):
+web inbox's alerts about the workspace's agents and accounts (notifications spec §1.3, §4.1: the
+pull channel's list is the journal itself). Users only, until client tokens land (E10-14).
 
-- `alert_id`, the `OwnerAlertSent` event's id; `kind`, as journaled (journal spec §9.15), and its
-  `class` from notifications spec §3.2 (`safety` or `info`; no alert is `action`); `raised_at`, its
-  `recorded_at`.
-- `stream`: the stream it was recorded on, as `type` (`agent`, `account` or `control`) and the
-  `agent_id` or `account_ref` the stream id names (`null` for the other, and both for the control
-  stream).
-- `subject`: the subject event's id and its `event_type` from the same stream (rule 130 puts it in
-  the alert's own batch; `null` if the stream holds no such event); `owner_command`, as journaled
-  (a user's kill switch only).
-- `notice`: `null` until the dispatcher issues one for the alert (`NoticeIssued` whose `cause` is
-  `alert_id`); then its `issued_at` and `delivery`, the asking member's own latest
-  `NoticeAttempted` per push channel, matched by recipient (`p_` and the member's id in lowercase,
-  notifications spec §5.9): `channel`, `status`, `attempt` and `recorded_at`. Another member's
-  attempts, recipients, addresses and provider message ids are never served. `delivery` is empty
-  while no attempt to the member is recorded.
+- **Streams.** It reads every stream the dispatcher follows (DEC-2516 item 1), whether or not it
+  holds an alert: the control stream, the agent stream of every agent `AgentDeployed` names, and
+  the account stream of every account `ConnectionRequested` or `ConnectionEstablished` names; and
+  the notice stream, `ntf:{workspace_id}`. A stream the store holds no row for reads as empty (a
+  deployed agent whose runtime never ran, a notice stream the dispatcher has not yet written); a
+  read the store fails is `journal_unavailable`, never a shorter list. `as_of` names each stream
+  read that holds a row (API-14).
+- **Which alerts.** Each `OwnerAlertSent` on those streams whose kind notifications spec §3.2
+  sends to an agent's or an account's owners (with workspace admins or not): every kind but the
+  nine about members and access, `credential_added`, `new_device`, `notification_address_changed`,
+  `recovery_used`, `role_granted`, `member_deactivated`, `deprovisioned`, `break_glass`, and
+  `client_connected`, which this read never serves, since they go to one member or to admins
+  alone. An `OwnerAlertSent` that does not read, or whose kind is not one §9.15 admits, is
+  `journal_unavailable`, never skipped.
+- **Order and limit.** Most recently raised first, by `raised_at` and then `alert_id`, both
+  descending. `?limit=` takes 1 to 200 (default 50); anything else, or another query member, is
+  `invalid`. `truncated` says whether older alerts were left out.
+- **Each alert.** `alert_id`, the `OwnerAlertSent` event's id; `kind`, as journaled, and its
+  `class` from §3.2 (`safety` or `info`); `raised_at`, its `recorded_at`; `stream`, as `type`
+  (`agent`, `account` or `control`) with the `agent_id` or `account_ref` the stream id names (each
+  `null` where the stream names none); `subject`, the subject event's id and the `event_type` of
+  the event with that id on the alert's own stream (rule 130 puts it in the alert's batch, so a
+  subject the stream does not hold is `journal_unavailable`); `owner_command`, as journaled.
+- **Its notice.** `notice` is the `NoticeIssued` whose `cause` is `alert_id`: its `issued_at`, and
+  `delivery`, the asking member's own latest `NoticeAttempted` per push channel (the highest
+  notice-stream `seq` among that member's attempts on the channel), matched by recipient (`p_` and
+  the member's id in lowercase, notifications spec §5.9), with its `channel`, `status`, `attempt`
+  and `recorded_at`. Another member's attempts, recipients, addresses, provider message ids, and
+  the notice id are never served; `delivery` is empty while no attempt to the member is recorded.
+  `notice` is `null` while no notice names the alert: before the dispatcher reaches it, or for
+  the second of two alerts a user's one kill switch raised, which §3.4 gives one notice.
 
 It needs the view row (§3.8) and serves nothing an alert's own records do not hold: no instrument,
 quantity, price, or text beyond the kind, which the client renders from its own closed table
-(API-10). A read of any of the streams that fails is `journal_unavailable`, never a shorter list;
-`as_of` names every stream read, the notice stream once it exists.
+(API-10).
 
 ### 4.8 Journal and audit (audit explorer backend)
 

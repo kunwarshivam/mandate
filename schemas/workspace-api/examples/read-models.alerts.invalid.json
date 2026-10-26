@@ -50,7 +50,11 @@
   {
     "label": "an agent stream naming an account",
     "set": {
-      "/alerts/0/stream/account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+      "/alerts/0/stream": {
+        "type": "agent",
+        "agent_id": "agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
+        "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+      }
     }
   },
   {
@@ -3617,21 +3621,27 @@
   },
   {
     "label": "a stream with no type",
-    "remove": [
-      "/alerts/0/stream/type"
-    ]
+    "set": {
+      "/alerts/1/stream": {
+        "agent_id": null,
+        "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W40"
+      }
+    }
   },
   {
     "label": "a stream with no agent_id",
     "remove": [
-      "/alerts/0/stream/agent_id"
+      "/alerts/1/stream/agent_id"
     ]
   },
   {
     "label": "a stream with no account_ref",
-    "remove": [
-      "/alerts/0/stream/account_ref"
-    ]
+    "set": {
+      "/alerts/0/stream": {
+        "type": "control",
+        "agent_id": null
+      }
+    }
   },
   {
     "label": "an unknown member on the stream",
@@ -3670,9 +3680,33 @@
     ]
   },
   {
-    "label": "three deliveries",
+    "label": "seven deliveries",
     "set": {
       "/alerts/0/notice/delivery": [
+        {
+          "channel": "email",
+          "status": "delivered",
+          "attempt": 1,
+          "recorded_at": "2026-10-08T14:29:31.000000000Z"
+        },
+        {
+          "channel": "email",
+          "status": "delivered",
+          "attempt": 1,
+          "recorded_at": "2026-10-08T14:29:31.000000000Z"
+        },
+        {
+          "channel": "email",
+          "status": "delivered",
+          "attempt": 1,
+          "recorded_at": "2026-10-08T14:29:31.000000000Z"
+        },
+        {
+          "channel": "email",
+          "status": "delivered",
+          "attempt": 1,
+          "recorded_at": "2026-10-08T14:29:31.000000000Z"
+        },
         {
           "channel": "email",
           "status": "delivered",
@@ -3731,9 +3765,69 @@
     }
   },
   {
-    "label": "attempt 1001",
+    "label": "the credential_added kind, which this read never serves",
     "set": {
-      "/alerts/0/notice/delivery/0/attempt": 1001
+      "/alerts/1/kind": "credential_added"
+    }
+  },
+  {
+    "label": "the new_device kind, which this read never serves",
+    "set": {
+      "/alerts/1/kind": "new_device"
+    }
+  },
+  {
+    "label": "the notification_address_changed kind, which this read never serves",
+    "set": {
+      "/alerts/1/kind": "notification_address_changed"
+    }
+  },
+  {
+    "label": "the recovery_used kind, which this read never serves",
+    "set": {
+      "/alerts/1/kind": "recovery_used"
+    }
+  },
+  {
+    "label": "the role_granted kind, which this read never serves",
+    "set": {
+      "/alerts/1/kind": "role_granted"
+    }
+  },
+  {
+    "label": "the member_deactivated kind, which this read never serves",
+    "set": {
+      "/alerts/1/kind": "member_deactivated"
+    }
+  },
+  {
+    "label": "the deprovisioned kind, which this read never serves",
+    "set": {
+      "/alerts/1/kind": "deprovisioned"
+    }
+  },
+  {
+    "label": "the break_glass kind, which this read never serves",
+    "set": {
+      "/alerts/1/kind": "break_glass"
+    }
+  },
+  {
+    "label": "the client_connected kind, which this read never serves",
+    "set": {
+      "/alerts/1/kind": "client_connected"
+    }
+  },
+  {
+    "label": "a subject with a null event_type",
+    "set": {
+      "/alerts/1/subject/event_type": null
+    }
+  },
+  {
+    "label": "an attempt past the largest integer JSON carries exactly",
+    "set": {
+      "/alerts/0/notice/delivery/0/attempt": 9007199254740992
     }
   }
 ]

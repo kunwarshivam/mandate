@@ -7,7 +7,7 @@
       "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
       "seq": 312,
       "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
-      "recorded_at": "2026-10-08T14:30:00.000000000Z"
+      "recorded_at": "2026-10-08T14:29:00.000000000Z"
     },
     {
       "stream_id": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
@@ -25,7 +25,7 @@
       "stream_id": "ntf:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
       "seq": 9,
       "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
-      "recorded_at": "2026-10-08T14:29:30.000000000Z"
+      "recorded_at": "2026-10-08T14:29:40.000000000Z"
     }
   ],
   "alerts": [
@@ -35,13 +35,13 @@
       "class": "safety",
       "raised_at": "2026-10-08T14:29:00.000000000Z",
       "stream": {
-        "type": "agent",
-        "agent_id": "agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
+        "type": "control",
+        "agent_id": null,
         "account_ref": null
       },
       "subject": {
-        "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V7",
-        "event_type": "KillSwitchActivated"
+        "event_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+        "event_type": "OwnerCommandIssued"
       },
       "owner_command": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
       "notice": {

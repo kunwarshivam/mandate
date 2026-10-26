@@ -13,19 +13,15 @@
     }
   },
   {
-    "label": "a control-stream alert",
+    "label": "an operator's kill switch on an agent stream",
     "set": {
-      "/alerts/1/stream": {
-        "type": "control",
-        "agent_id": null,
+      "/alerts/0/stream": {
+        "type": "agent",
+        "agent_id": "agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
         "account_ref": null
-      }
-    }
-  },
-  {
-    "label": "a subject the stream does not hold",
-    "set": {
-      "/alerts/1/subject/event_type": null
+      },
+      "/alerts/0/subject/event_type": "KillSwitchActivated",
+      "/alerts/0/owner_command": null
     }
   },
   {
@@ -131,62 +127,6 @@
     }
   },
   {
-    "label": "the kind credential_added, safety",
-    "set": {
-      "/alerts/1/kind": "credential_added",
-      "/alerts/1/class": "safety"
-    }
-  },
-  {
-    "label": "the kind new_device, safety",
-    "set": {
-      "/alerts/1/kind": "new_device",
-      "/alerts/1/class": "safety"
-    }
-  },
-  {
-    "label": "the kind notification_address_changed, safety",
-    "set": {
-      "/alerts/1/kind": "notification_address_changed",
-      "/alerts/1/class": "safety"
-    }
-  },
-  {
-    "label": "the kind recovery_used, safety",
-    "set": {
-      "/alerts/1/kind": "recovery_used",
-      "/alerts/1/class": "safety"
-    }
-  },
-  {
-    "label": "the kind role_granted, safety",
-    "set": {
-      "/alerts/1/kind": "role_granted",
-      "/alerts/1/class": "safety"
-    }
-  },
-  {
-    "label": "the kind member_deactivated, safety",
-    "set": {
-      "/alerts/1/kind": "member_deactivated",
-      "/alerts/1/class": "safety"
-    }
-  },
-  {
-    "label": "the kind deprovisioned, safety",
-    "set": {
-      "/alerts/1/kind": "deprovisioned",
-      "/alerts/1/class": "safety"
-    }
-  },
-  {
-    "label": "the kind break_glass, safety",
-    "set": {
-      "/alerts/1/kind": "break_glass",
-      "/alerts/1/class": "safety"
-    }
-  },
-  {
     "label": "the kind version_risk_increasing, safety",
     "set": {
       "/alerts/1/kind": "version_risk_increasing",
@@ -211,13 +151,6 @@
     "label": "the kind went_live, safety",
     "set": {
       "/alerts/1/kind": "went_live",
-      "/alerts/1/class": "safety"
-    }
-  },
-  {
-    "label": "the kind client_connected, safety",
-    "set": {
-      "/alerts/1/kind": "client_connected",
       "/alerts/1/class": "safety"
     }
   },
@@ -288,7 +221,7 @@
     }
   },
   {
-    "label": "a web push delivery beside email",
+    "label": "every channel",
     "set": {
       "/alerts/0/notice/delivery": [
         {
@@ -300,16 +233,40 @@
         {
           "channel": "web_push",
           "status": "delivered",
-          "attempt": 2,
-          "recorded_at": "2026-10-08T14:29:32.000000000Z"
+          "attempt": 1,
+          "recorded_at": "2026-10-08T14:29:31.000000000Z"
+        },
+        {
+          "channel": "sms",
+          "status": "delivered",
+          "attempt": 1,
+          "recorded_at": "2026-10-08T14:29:31.000000000Z"
+        },
+        {
+          "channel": "telegram",
+          "status": "delivered",
+          "attempt": 1,
+          "recorded_at": "2026-10-08T14:29:31.000000000Z"
+        },
+        {
+          "channel": "slack",
+          "status": "delivered",
+          "attempt": 1,
+          "recorded_at": "2026-10-08T14:29:31.000000000Z"
+        },
+        {
+          "channel": "phone",
+          "status": "delivered",
+          "attempt": 1,
+          "recorded_at": "2026-10-08T14:29:31.000000000Z"
         }
       ]
     }
   },
   {
-    "label": "attempt 1000",
+    "label": "a large attempt",
     "set": {
-      "/alerts/0/notice/delivery/0/attempt": 1000
+      "/alerts/0/notice/delivery/0/attempt": 9007199254740991
     }
   },
   {
@@ -3717,6 +3674,17 @@
           "notice": null
         }
       ]
+    }
+  },
+  {
+    "label": "a control-stream risk limit",
+    "set": {
+      "/alerts/1/stream": {
+        "type": "control",
+        "agent_id": null,
+        "account_ref": null
+      },
+      "/alerts/1/kind": "risk_limit"
     }
   }
 ]
