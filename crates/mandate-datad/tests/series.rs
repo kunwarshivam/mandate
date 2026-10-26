@@ -273,7 +273,7 @@ fn the_closes_object_is_stored_for_the_trusted_closes() {
     let written =
         series::publish(&root.join("datasets"), "SPY", &anchor(), &calendar, now).unwrap();
     let artifacts = root.join("artifacts");
-    let asset = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+    let asset = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
     let stored = put_closes(&artifacts, &written.dir, "SPY", asset, now).unwrap();
     let expected: Vec<_> = series::sessions(&calendar, now)
         .unwrap()
@@ -425,7 +425,7 @@ fn the_minute_day_is_the_latest_trading_day() {
 #[test]
 fn the_instruments_are_parsed_strictly() {
     let list = Instrument::parse_list(
-        "SPY:b0b6dd9d-8b9b-48a9-ba46-b9d54906e415:2026-10-23=150,\
+        "SPY:b28f4066-5c6d-479b-a2af-85dc1a8f16fb:2026-10-23=150,\
          QQQ:eb82ffb0-efd6-4f4e-9307-8fead28e04f6:2026-10-23=140",
     )
     .unwrap();
