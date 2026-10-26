@@ -502,9 +502,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
   const response = approval ? responses[approval.approval_id] : undefined;
   const refusedNow = response?.phase === "undelivered" && APPROVE_REFUSED.has(response.reason ?? "");
   const [approveClosed, setApproveClosed] = useState(false);
-  useEffect(() => {
-    if (refusedNow) setApproveClosed(true);
-  }, [refusedNow]);
+  if (refusedNow && !approveClosed) setApproveClosed(true);
   if (!approval) {
     return <WorkspaceGate api>{view ? <h1 className="text-h1">Request not found</h1> : null}</WorkspaceGate>;
   }
