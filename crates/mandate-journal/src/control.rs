@@ -119,6 +119,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || crate::deployment::CONTROL.contains(&event_type)
                 || crate::acknowledgments::RECORDS.contains(&event_type)
                 || crate::confirmations::CONTROL.contains(&event_type)
+                || crate::real_money::CONTROL.contains(&event_type)
                 || crate::credentials::CONTROL.contains(&event_type)
                 || crate::connection_roles::CONTROL.contains(&event_type)
         }
@@ -161,6 +162,7 @@ pub(crate) fn closed_schema(
         .or_else(|| crate::risk_limits::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::acknowledgments::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::confirmations::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::real_money::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::credentials::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::connection_roles::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
@@ -242,6 +244,7 @@ pub(crate) fn payload(
     crate::risk_limits::rules(event_type, &payload, causation_id)?;
     crate::acknowledgments::rules(event_type, &payload)?;
     crate::confirmations::rules(event_type, &payload, environment, actor, event_time)?;
+    crate::real_money::rules(event_type, &payload, actor)?;
     crate::credentials::rules(event_type, &payload, actor, event_time, causation_id)?;
     crate::connection_roles::rules(event_type, actor, causation_id)?;
     let p = Payload(&payload);
