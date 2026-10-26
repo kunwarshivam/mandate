@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document, one page. Updated at the end of every working session |
-| **Last updated** | 2026-10-21, session close: an autonomous coordinator session repaired `main`'s four red gates (DEC-2632), took `cell-demo-web` off the per-PR path so merges could resume at all (DEC-2634), and landed seventeen PRs across lanes LV, X, V2, L1, TW, AH, I2 and D1. DEC-917 and DEC-2635 narrow ES-22's split guard for a crate's `tests/` directory and for J1. The M5, M6 and M8 rows, the Next list and the log were trued |
+| **Last updated** | 2026-10-26 06:00 UTC: the coordinator session that took over from [the handover](handover-2026-10-26.md) landed fourteen PRs (passkey enrolment, the trade loop's browser spec and driver, the fixture fills, the cell's bars, its plan, Alpaca connect, the approvers fold), fixed the cell's API startup on `main` (DEC-2132), and recorded DEC-2131. The handover holds the open PRs and the next builds |
 
 Where the project stands, what is waiting on whom, and what comes next, on one page. How the work
 ran, with every PR number, lives in [11-work-log.md](11-work-log.md). Plans live in
