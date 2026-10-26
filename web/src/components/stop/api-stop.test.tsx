@@ -55,6 +55,7 @@ const agent = (over: Partial<AgentDetail>): AgentDetail => ({
   label: "Agent 1",
   mandate: null,
   account_positions: [],
+  openings_held: null,
   ...over,
 });
 

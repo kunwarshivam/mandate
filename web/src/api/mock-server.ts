@@ -234,7 +234,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
   /** `read-models/agent`: the row with the account's holdings at its last reconciliation (`account_positions`), every agent's, as one account's are. */
   function agentDetail(agent: Agent) {
     const positions = workspace.agents.flatMap((a) => a.positions).map((p) => ({ instrument: p.instrument.symbol, qty: canon(p.qty), broker_qty: canon(p.broker_qty), mismatch: dec(p.qty) !== dec(p.broker_qty), observed_at: canonical(p.mark_as_of) }));
-    return { ...agentRow(agent), account_positions: positions };
+    return { ...agentRow(agent), account_positions: positions, openings_held: null };
   }
 
   /** The API names an approval by its `ApprovalRequested` event id, a bare ULID; the fixtures prefix theirs with `apr_`. */

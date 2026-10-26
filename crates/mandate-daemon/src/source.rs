@@ -29,7 +29,7 @@ use mandate_time::UtcNanos;
 use crate::deployment;
 use crate::meter::CellMeter;
 use crate::recorded::{Bundle, FeedItem};
-use crate::runtime::{ResearchParts, ResearchSource};
+use crate::runtime::{ContextUnread, ResearchParts, ResearchSource};
 
 /// The `event_time` of `agent`'s latest research `MeterReserved` on the workspace's meter stream
 /// `meter` (DEC-2259 item 3), as the risk clock's second; `None` before the first. Other agents' and
@@ -346,40 +346,72 @@ impl CellSource {
 }
 
 impl ResearchSource for CellSource {
-    fn parts(&self, state: &RuntimeState) -> Option<ResearchParts> {
-        let control = StreamId::parse(&format!("ctl:{}", self.who.workspace))?;
-        let stream = StreamId::parse(&format!("agent:{}:{}", self.who.workspace, self.who.agent))?;
-        let meter = StreamId::parse(&format!("meter:{}", self.who.workspace))?;
-        let control = self.rows.rows(&control)?;
-        let agent = self.rows.rows(&stream)?;
-        let last_reservation =
-            last_research_reservation(&self.rows.rows(&meter)?, &self.who.agent).ok()?;
+    fn parts(&self, state: &RuntimeState) -> Result<ResearchParts, ContextUnread> {
+        let named = |text: String| StreamId::parse(&text).ok_or(ContextUnread::StreamName);
+        let control = named(format!("ctl:{}", self.who.workspace))?;
+        let stream = named(format!("agent:{}:{}", self.who.workspace, self.who.agent))?;
+        let meter = named(format!("meter:{}", self.who.workspace))?;
+        let control = self.rows.rows(&control).ok_or(ContextUnread::Control)?;
+        let agent = self.rows.rows(&stream).ok_or(ContextUnread::AgentStream)?;
+        let meter = self.rows.rows(&meter).ok_or(ContextUnread::Meter)?;
+        let last_reservation = last_research_reservation(&meter, &self.who.agent)
+            .map_err(|_| ContextUnread::Reservation)?;
         let (_, document) = deployment::document(
             &control,
             &self.who.agent,
             self.who.environment,
             self.documents.as_ref(),
         )
-        .ok()?;
-        let envelope = envelope(&document).ok()?;
-        let event_triggers = event_triggers(&document).ok()?;
-        if self.others_deployed(&control)? {
-            return None;
+        .map_err(|_| ContextUnread::Deployment)?;
+        let envelope = envelope(&document).map_err(|_| ContextUnread::Envelope)?;
+        let event_triggers = event_triggers(&document).map_err(|_| ContextUnread::EventTriggers)?;
+        if self
+            .others_deployed(&control)
+            .ok_or(ContextUnread::Deployments)?
+        {
+            return Err(ContextUnread::AnotherAgent);
         }
-        let clock = state.risk_clock()?;
-        let spend = self.spend(&agent, clock)?;
+        let clock = state.risk_clock().ok_or(ContextUnread::Clock)?;
+        let spend = self.spend(&agent, clock).ok_or(ContextUnread::Spend)?;
         let asset = |fact: &InstrumentFact| AssetId::new(fact.asset_id.as_str()).ok();
         let pinned = envelope.universe_pinned;
         let fold = fold_research(
             &agent,
-            UtcNanos::from_parts(clock.secs(), 0).ok()?,
+            UtcNanos::from_parts(clock.secs(), 0).map_err(|_| ContextUnread::Clock)?,
             &self.instruments,
         )
-        .ok()?;
+        .map_err(|_| ContextUnread::Theses)?;
         if pinned && (fold.lineages != LineageState::default() || !fold.active.is_empty()) {
-            return None;
+            return Err(ContextUnread::PinnedWithTheses);
         }
-        Some(ResearchParts {
+        let eligibility_failures = self
+            .instruments
+            .iter()
+            .filter(|fact| !fact.eligible)
+            .map(asset)
+            .collect::<Option<_>>()
+            .ok_or(ContextUnread::InstrumentFacts)?;
+        let instrument_groups = self
+            .instruments
+            .iter()
+            .filter_map(|fact| Some((asset(fact), GroupId::new(fact.group.as_ref()?).ok())))
+            .map(|(asset, group)| Some((asset?, group?)))
+            .collect::<Option<_>>()
+            .ok_or(ContextUnread::InstrumentFacts)?;
+        let halted_instruments = self.halted.clone().ok_or(ContextUnread::Halted)?;
+        let data_universe = self
+            .instruments
+            .iter()
+            .map(asset)
+            .collect::<Option<_>>()
+            .ok_or(ContextUnread::InstrumentFacts)?;
+        let events = if event_triggers.is_some() {
+            self.arrived(&control, clock)
+                .ok_or(ContextUnread::Arrivals)?
+        } else {
+            Vec::new()
+        };
+        Ok(ResearchParts {
             preconditions: Preconditions::read(&JournalCatalog::JOURNAL),
             mandate: ValidatedMandate::from_validated_envelope(envelope),
             overlay: PolicyOverlay::internal_research_profile(),
@@ -393,22 +425,12 @@ impl ResearchSource for CellSource {
             },
             facts: AdmissionFacts {
                 allowlist: self.allowlist.clone(),
-                eligibility_failures: self
-                    .instruments
-                    .iter()
-                    .filter(|fact| !fact.eligible)
-                    .map(asset)
-                    .collect::<Option<_>>()?,
-                instrument_groups: self
-                    .instruments
-                    .iter()
-                    .filter_map(|fact| Some((asset(fact), GroupId::new(fact.group.as_ref()?).ok())))
-                    .map(|(asset, group)| Some((asset?, group?)))
-                    .collect::<Option<_>>()?,
+                eligibility_failures,
+                instrument_groups,
                 claimed_by_other_agents: BTreeSet::new(),
-                halted_instruments: self.halted.clone()?,
+                halted_instruments,
                 disclosures_accepted: BTreeSet::new(),
-                data_universe: Some(self.instruments.iter().map(asset).collect::<Option<_>>()?),
+                data_universe: Some(data_universe),
                 research_spend_usd_today: spend,
             },
             lineages: fold.lineages,
@@ -419,11 +441,7 @@ impl ResearchSource for CellSource {
                 .iter()
                 .map(|fact| fact.symbol.clone())
                 .collect::<BTreeSet<Symbol>>(),
-            events: if event_triggers.is_some() {
-                self.arrived(&control, clock)?
-            } else {
-                Vec::new()
-            },
+            events,
             event_triggers,
         })
     }
