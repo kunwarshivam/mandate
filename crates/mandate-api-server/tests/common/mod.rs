@@ -233,16 +233,21 @@ impl TestIssuer {
     }
 }
 
-/// A clock the test moves.
-pub struct ManualClock(pub std::sync::Mutex<i64>);
+/// A clock the test moves: a Unix second, and the nanoseconds into it (0 unless set).
+pub struct ManualClock(pub std::sync::Mutex<i64>, pub std::sync::Mutex<u32>);
 
 impl ManualClock {
     pub fn at(secs: i64) -> std::sync::Arc<Self> {
-        std::sync::Arc::new(Self(std::sync::Mutex::new(secs)))
+        std::sync::Arc::new(Self(std::sync::Mutex::new(secs), std::sync::Mutex::new(0)))
     }
 
     pub fn set(&self, secs: i64) {
         *self.0.lock().expect("unpoisoned") = secs;
+    }
+
+    /// Moves the clock `nanos` into its current second.
+    pub fn set_nanos(&self, nanos: u32) {
+        *self.1.lock().expect("unpoisoned") = nanos;
     }
 
     pub fn secs(&self) -> i64 {
@@ -252,7 +257,7 @@ impl ManualClock {
 
 impl mandate_api_server::clock::Clock for ManualClock {
     fn now(&self) -> Option<mandate_time::UtcNanos> {
-        mandate_time::UtcNanos::from_parts(self.secs(), 0).ok()
+        mandate_time::UtcNanos::from_parts(self.secs(), *self.1.lock().expect("unpoisoned")).ok()
     }
 }
 

@@ -717,6 +717,30 @@ fn a_confirmed_grant_commits_the_clis_answer_once_before_its_202() {
     assert!(!w.held(&issued), "the challenge is spent with the grant");
 }
 
+/// A challenge issued part-way through a second (DEC-2129 item 3): the grant journals its
+/// `authenticated_at`, and its `submitted_at`, as the whole second, truncated and never later than
+/// the instant verified, so the payload is still the CLI's for that second.
+#[test]
+fn a_grant_authenticated_part_way_through_a_second_journals_the_second_it_began() {
+    let w = world();
+    w.clock.set_nanos(999_999_999);
+    let issued = w.challenge();
+    assert!(
+        issued.issued_at.ends_with(".999999999Z"),
+        "the challenge carries the nanoseconds: {}",
+        issued.issued_at
+    );
+    w.confirm(&issued);
+    recorded(&w, &w.respond(ALICE, KEY, &grant(&w, &issued)));
+    let answers = w.answers();
+    assert_eq!(answers.len(), 1, "exactly one response");
+    assert_eq!(
+        answers[0].get("payload"),
+        Some(&clis_grant(&w, &issued.id, T0)),
+        "the whole second, T0, never T0 + 1"
+    );
+}
+
 #[test]
 fn the_grant_is_judged_as_an_approve_bound_to_the_requests_content_hash() {
     let w = world();
