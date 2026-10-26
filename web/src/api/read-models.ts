@@ -52,6 +52,17 @@ export interface AgentDetail extends AgentRow {
    * stream was not found.
    */
   account_positions: ReadPosition[] | null;
+  /**
+   * A standing reason every opening of the agent's is held (DEC-2143), or `null` when none applies,
+   * which is not "openings run". A deployment that does not serve the member reads as `unknown`,
+   * never as `null`.
+   */
+  openings_held: OpeningsHeld | null;
+}
+
+/** `read-models/agent`'s `OpeningsHeld` (DEC-2143). */
+export interface OpeningsHeld {
+  reason: "account_traded" | "research_agent_traded" | "unknown";
 }
 
 export type ApprovalState = "pending" | "acted" | "skipped" | "timed_out" | "canceled";
@@ -159,7 +170,16 @@ const agentMembers = {
 };
 const agentRow = object<AgentRow>(agentMembers);
 export const reconciledHolding = object<ReadPosition>({ instrument, qty: decimal, broker_qty: decimal, mismatch: flag, observed_at: timestamp });
-const agentDetail = object<AgentDetail>({ ...agentMembers, account_positions: nullable(array(reconciledHolding)) });
+const openingsHeld = object<OpeningsHeld>({ reason: closedEnum(["account_traded", "research_agent_traded", "unknown"] as const) });
+/** `openings_held` as served, or `unknown` from a deployment that does not serve it yet: an unjudged hold never reads as none. */
+const servedOpeningsHeld: Decoder<OpeningsHeld | null> = (value, path) => (value === undefined ? { ok: true, value: { reason: "unknown" } } : nullable(openingsHeld)(value, path));
+const agentDetailMembers = object<Omit<AgentDetail, "openings_held">>({ ...agentMembers, account_positions: nullable(array(reconciledHolding)) });
+const agentDetail: Decoder<AgentDetail> = (value, path) => {
+  const read = agentDetailMembers(value, path);
+  if (!read.ok) return read;
+  const held = servedOpeningsHeld((value as Record<string, unknown>).openings_held, `${path}/openings_held`);
+  return held.ok ? { ok: true, value: { ...read.value, openings_held: held.value } } : held;
+};
 
 const boundOrder = object<BoundOrder>({
   instrument,
