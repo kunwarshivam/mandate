@@ -1461,7 +1461,6 @@ fn another_connections_records_leave_the_documents_connection_unrecorded() {
     );
 }
 
-/// `seed_control` at schema version 2.
 /// A version-2 establishment of [`CONNECTION`] on [`ACCOUNT`], as rule 201 reads it.
 fn established_payload() -> String {
     format!(
@@ -1469,6 +1468,7 @@ fn established_payload() -> String {
     )
 }
 
+/// `seed_control` at schema version 2.
 fn seed_control_v2(f: &Fixture, event_type: &str, payload: &str) {
     let mut streams = f.journal.streams.lock().expect("unpoisoned");
     let rows = streams.get_mut(&ctl()).expect("seeded");
@@ -2118,6 +2118,56 @@ fn a_passkey_deploy_on_a_connection_rule_201_refuses_is_refused_and_keeps_its_ch
         "the confirmation's alone"
     );
     assert!(w.held(&issued), "the challenge is kept");
+}
+
+/// DEC-2128 item 1 on a deploy: an assertion beside `cli_confirm` evidence, or beside none, is
+/// `invalid` with one violation at `/step_up_assertion`, before the port is asked, and nothing is
+/// deployed.
+#[test]
+fn an_assertion_beside_cli_confirm_or_no_evidence_on_a_deploy_is_invalid_and_deploys_nothing() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    confirmed(&f, &cookie, "v1");
+    f.asked.0.lock().expect("unpoisoned").clear();
+    let signed = Signer::es256().assert(b"any challenge", 9);
+    let cli = EVIDENCE.replace("\"passkey\"", "\"cli_confirm\"");
+    for evidence in [cli.as_str(), "null"] {
+        let body = with_assertion(
+            &deploy_body("agt_a", "v1", evidence),
+            Some(signed.json(CREDENTIAL)),
+        );
+        invalid_at_the_assertion(&deploy(&f, &cookie, KEY_2, &body));
+    }
+    assert!(f.asked.0.lock().expect("unpoisoned").is_empty());
+    assert!(events(&f, "AgentDeployed").is_empty());
+}
+
+/// A passkey deploy repeated under its key answers as the first though its challenge is spent,
+/// and appends no second batch (§3.4 step 1, DEC-2128 item 3).
+#[test]
+fn a_replayed_passkey_deploy_answers_as_the_first_though_its_challenge_is_gone() {
+    let w = passkeyed_with(true);
+    w.funded();
+    w.confirmed();
+    let issued = w.deploy_challenge();
+    let signed = w.signer.assert(&issued.bytes, 10);
+    let body = w.deploy_body(&issued, Some(signed.json(CREDENTIAL)));
+    let first = deploy(&w.f, &w.cookie, KEY_2, &body);
+    assert_eq!(
+        first.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&first.body)
+    );
+    let committed = control(&w.f);
+    let again = deploy(&w.f, &w.cookie, KEY_2, &body);
+    assert_eq!(
+        again.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(control(&w.f).len(), committed.len(), "no second batch");
 }
 
 #[test]

@@ -22,7 +22,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use mandate_api::envelope::{Record, StepUpAssertion, StepUpEvidence};
 use mandate_api::problem::{CurrentBase, Effect, Problem, ProblemCode, Violation};
-use mandate_api::requests::ConfirmRequest;
+use mandate_api::requests::{ConfirmRequest, assertion_checked};
 use mandate_api::responses::Classification;
 use mandate_api::wire::{EventId, Id, Ref, decode, encode};
 use mandate_authn::Request;
@@ -838,6 +838,10 @@ fn deploy_body(body: &[u8]) -> Result<DeployBody, Answer> {
                 .map_err(|_| non_canonical("step_up_assertion"))?,
         ),
     };
+    assertion_checked(step_up.as_ref(), step_up_assertion.as_ref()).map_err(|refused| {
+        let mandate_api::wire::Refused::Invalid { violations } = refused;
+        Answer::Invalid(violations)
+    })?;
     Ok(DeployBody {
         agent_id,
         mandate_version,
