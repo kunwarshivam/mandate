@@ -349,7 +349,7 @@ changes, acknowledgments, version changes, approval requests and responses, and 
 | MI-31 | **A tripwire only tightens, and only the owner lifts it** ([DEC-187](../project/04-decision-log.md#decisions)). A tripwire fires at the first evaluation at which its metric, counted over the inputs since it was armed, reaches its threshold, and at no other. Once fired it stays fired through every later input, version, risk day, and restart until the owner acknowledges it with valid step-up (§6.1), and, with `independent_approval_required`, as a user other than the requester (§5.8), which re-arms it with nothing counted. While fired it is a latched limit, so no allocation increase applies (MI-7). While any tripwire is fired, no delegation lifts (MI-28); while one whose action, or whose action in the version in effect, is `exits_only` is fired, the effective mode is at least `exits_only`. With or without `autonomy.tripwires`, every other decision is the same, a tripwire never makes the mode `paused`, and no exit is held or denied by it (MI-1). A version classified risk-reducing or neutral never lifts a fired tripwire, softens what it holds, or makes one fire later (checked against an independent oracle that recounts each metric from the fill log) |
 | MI-32 | **Silence ends autonomy** ([DEC-188](../project/04-decision-log.md#decisions)). From 00:00 America/New_York after `autonomy.review_by` in the version in effect, judged on the risk clock, no `open` or `increase` is `auto`: it is `ask`, or `deny` when the decision without the review date denies, whatever the rules, the default, or a delegation say, and an `ask` keeps its own source. The admission ceiling only tightens (MI-17), so it never yields an `auto` of its own: an `auto` admission setting leaves the rules' `auto` standing, and that is what the review ceiling turns into `ask`. Exits stay built-in AUTO (MI-1). Before that instant, and with no review date, every decision, label, and delegation id is what it would be without this rule. With no risk clock to judge by, nothing is `auto` (checked against an independent oracle that builds the instant from the calendar date) |
 | MI-33 | **A corporate action moves the risk state only by its cash, never by its timing or a rounding** ([DEC-2303](../project/decisions/DEC-2303.md)). A split changes E by exactly cash in lieu + Q' × mark' − Q × mark, mark' being mark × old ÷ new rounded toward zero at 12 places: that is cash in lieu − f × mark' (f the residual removed) less Q_raw × (mark × old ÷ new − mark'), a rounding in [0, Q_raw × 10⁻¹²) with Q_raw = Q × new ÷ old. With no residual E never rises, so the split lifts nothing, clears no breach and restarts no wait: it triggers everything a clock tick at the same instant would, and nothing more than that tick or the rounding's fall reaches. A cash dividend changes nothing at application; its receivable round(Q × d, 2), Q the position at application, joins E with the first counted sane mark after it, in that mark's step. Neither changes E₀, C, N or L. Posting either receivable changes no figure, whatever amount is posted. H follows E as after any input (checked against an independent oracle that recomputes each change from the action and the state before it, carries the dividends due itself, and steps a twin of the state with a clock tick at the split's instant, including at a rung's exact boundary) |
-| MI-34 | **A thesis that ends sells its position** (§8.3, §8.6, [DEC-2391](../project/decisions/DEC-2391.md)). At every evaluation at which the agent holds an instrument whose thesis has ended and no fresh thesis for it has been admitted since, the order builder proposes a `discretionary_exit` with `exit_origin` `removed_instrument` of exactly the position less working exits, unless that is zero, and proposes no buy in it, whatever the signals; nothing but mode `paused` or `stopped`, an `Unknown` order in the instrument, or the broker holds that exit (`AGENTS.md` rule 13), and the gate refuses it only as `sell_exceeds_available` |
+| MI-34 | **A thesis that ends sells its position** (§8.3, §8.6, [DEC-2391](../project/decisions/DEC-2391.md)). At every evaluation at which the agent holds an instrument whose thesis has ended and no fresh thesis for it has been admitted since, the order builder proposes a `discretionary_exit` with `exit_origin` `removed_instrument` of exactly the position less working exits, unless that is zero, and proposes no buy in it, whatever the signals, while the version in effect leaves the universe unpinned; nothing but mode `paused` or `stopped`, an `Unknown` order in the instrument, or the broker holds that exit (`AGENTS.md` rule 13), and the gate refuses it only as `sell_exceeds_available` |
 
 ## 2. Lifecycle
 
@@ -944,7 +944,7 @@ exit, typed by its origin. A sell above the position is rejected (no short sales
 | Purpose | Origin | Approval | Market-conduct controls |
 |---|---|---|---|
 | `open`, `increase` | Order builder | Autonomy rules (§6.2) | Apply (trading spec §9.6) |
-| `discretionary_exit` | Order builder (signal exit), goal completion, removed instruments (§2.3, including an expired or invalidated thesis), and a research exit request: the research agent's `propose_exit`, which the order builder honours at its next scheduled evaluation by proposing an exit of the agent's whole position in that instrument ([agent harness spec §6.10](agent-harness.md#610-tools); [DEC-2203](../project/decisions/DEC-2203.md) item 14, the founder's, 2026-10-17). It takes effect only once E19-14 adds its §8.3 builder branch, its record, and its `DecisionMade.exit_origin` | Built-in AUTO; never denied | **Paced, never denied:** price collar and participation caps; in the close window, marketable limit orders only (DEC-70); equities in the regular session only (verdict `defer` outside it) |
+| `discretionary_exit` | Order builder (signal exit), goal completion, removed instruments (§2.3, including an expired or invalidated thesis or a retired lineage, which §8.3 step 2's first branch sells, MI-34), and a research exit request: the research agent's `propose_exit`, which the order builder honours at its next scheduled evaluation by proposing an exit of the agent's whole position in that instrument ([agent harness spec §6.10](agent-harness.md#610-tools); [DEC-2203](../project/decisions/DEC-2203.md) item 14, the founder's, 2026-10-17). It takes effect only once E19-14 adds its §8.3 builder branch, its record, and its `DecisionMade.exit_origin` | Built-in AUTO; never denied | **Paced, never denied:** price collar and participation caps; in the close window, marketable limit orders only (DEC-70); equities in the regular session only (verdict `defer` outside it) |
 | `owner_exit` | The owner closes a position or triggers a kill switch | The owner's instruction, with step-up judged as the owner committed it; never denied (without valid step-up it loses only the owner-exit privilege, below) | Participation caps pace it. Outside the regular session, equities sell through the exit price ladder once the owner has confirmed the displayed bid and bid size and a **floor price** (default: the confirmed bid × (1 − the exit ladder's maximum offset)); the ladder never prices below the floor, any remainder rests at the floor and then waits for the session, and the owner is alerted (DEC-66) |
 | `risk_exit` | Risk engine: limits, flatten, `trim_to_target`, stop watchdog (trading spec §5.4) | Built-in AUTO; never denied | Exempt |
 | `protective` | Executor: placing and re-placing protection | Built-in AUTO; never denied | Exempt |
@@ -1591,15 +1591,22 @@ each evaluation:
    - buy conviction b = round₁₂((F − M) ÷ W): a missing model counts as fully bearish, so an outage
      never enlarges a buy (MI-10);
    - combined score s = round₁₂(Σ fresh wᵢ · confidenceᵢ ÷ W);
-   - no fresh outputs: hold.
+   - no fresh outputs: hold, except step 2's first branch, which reads no output.
 2. **Decide.**
-   - **The instrument's thesis ended** (§8.6) and no fresh thesis for it has been admitted since:
-     discretionary exit of the whole position (minus working exits) at the bid within the collar,
-     with `exit_origin` `removed_instrument`, whatever c and b are; working opening orders in the
-     instrument are canceled first. Hold when the position less working exits is zero. This
-     branch is checked first, so the instrument never reaches the entry branch below (it is
-     exits-only, §2.3) and its exit never waits for a signal. It needs no model output at all. An
-     `accumulate` goal never reaches it, since its universe is pinned (V-003).
+   - **The instrument's thesis ended** (§8.6) and no fresh thesis for it has been admitted since,
+     while the version in effect leaves the universe unpinned (`universe.pinned` false): a
+     discretionary exit of the whole position (minus working exits) at the bid within the
+     collar, with `exit_origin` `removed_instrument`, whatever c and b are; working opening
+     orders in the instrument are canceled first. Hold when the position less working exits is
+     zero. This branch is checked first, so the instrument never reaches the entry branch below
+     (it is exits-only, §2.3) and its exit never waits for a signal. It reads no model output,
+     so its `DecisionMade` carries no c, b, or s and no outputs, weights, or clips (journal spec
+     §9.1 rule 8), and step 5's minimum order value does not apply to it: it closes the whole
+     position (trading spec §5.3 rule 2). It is proposed in every mode that proposes exits.
+     Once proposed it is one working exit, which the next evaluation subtracts, so a proposal
+     the gate defers to the regular session or the executor holds is never stacked; the
+     executor prices it as any exit (trading spec §5.6). An `accumulate` goal never reaches it,
+     since its universe is pinned (V-003).
    - c ≤ −`exit_threshold`: discretionary exit of the whole position (minus working exits) at the
      bid within the collar; working opening orders in the instrument are canceled first. Disabled
      for `accumulate`.
@@ -1773,21 +1780,25 @@ success it replaces that instrument's current thesis without a second entry.
 - **Invalidation.** When an invalidation condition holds, the instrument becomes removed at once
   (`thesis_invalidated`), whatever the horizon.
 - **The position ends with the thesis** ([DEC-2391](../project/decisions/DEC-2391.md)). However a
-  thesis ends (expiry, invalidation, or its lineage retiring), while the agent holds the instrument
-  §8.3 step 2 proposes its discretionary exit at every evaluation until the agent is flat or a fresh
-  thesis for the instrument is admitted (MI-34). The runtime reads the end from its own agent
-  stream, so the exit never waits for the executor's `UniverseChanged`:
+  thesis ends (expiry, invalidation, or its lineage retiring), while the agent holds the
+  instrument §8.3 step 2 proposes its discretionary exit at every evaluation until the agent is
+  flat or a fresh thesis for the instrument is admitted (MI-34). The runtime reads the end from
+  its own agent stream, so the exit never waits for the executor's `UniverseChanged`:
   - a thesis is **current** for its instrument from the latest `ThesisProposed` or `ThesisRevised`
     with `admitted` `true` that names the instrument (journal spec §9.4), which is also what
     journal spec §9.22 rule 187 lets an invalidation name;
   - it **ends** at the first of: a `ThesisInvalidated` naming it (journal spec §9.22); the risk
     clock reaching its `expires_at`; a refused `ThesisProposed` or `ThesisRevised` with reason
-    `lineage_retired` in its lineage (§8.5, item 4 below); or an account-stream `UniverseChanged`
-    (`removed`) naming it, with reason `thesis_expired`, `thesis_invalidated`, or
-    `lineage_retired`. Whichever comes first ends it, because an end only reduces risk;
+    `lineage_retired` in its own lineage (§8.5, item 4 below), so a retired lineage never ends
+    another lineage's thesis; or an account-stream `UniverseChanged` (`removed`) for this agent
+    whose `thesis_id` is the thesis's, with reason `thesis_expired`, `thesis_invalidated`, or
+    `lineage_retired`. Whichever comes first ends it, because an end only reduces risk. A copy
+    that arrives late, naming a thesis a later admission has superseded, ends nothing;
   - a later admitted thesis record for the instrument makes that thesis current, and the exit
     stops being proposed; whether the instrument may be bought again is still the working
-    universe's and the gate's (§2.3, §5.3).
+    universe's and the gate's (§2.3, §5.3);
+  - a version that pins the universe takes the branch away (§8.3 step 2): the owner's pinned
+    list is the universe then, and the research agent is off (V-037).
 - **Expiry of an output without a thesis ending** is the ordinary freshness rule of §8.2: a stale
   research-agent output counts as 0 for exits and fully bearish for buys (§8.3), so an outage never
   enlarges a buy (MI-10).

@@ -2493,11 +2493,11 @@ one thesis the research agent proposed, and the admission's verdict on it.
     `AgentDeployed`'s mandate version. A record whose `model_version` ref is missing is reported by
     §9's required references, not here.
 
-**No mapping to `JournaledFact`.** No risk state folds from these records: the risk-state fold reads
-the account stream's `UniverseChanged` (§9.3), which the executor writes with its `causation_id`
-naming the agent stream's `ThesisProposed` or `ThesisRevised`, or, for a removal by invalidation,
-the `ThesisInvalidated` (§9.22). The agent runtime's fold reads them, with §9.22's records, for each
-instrument's current thesis and when it ended (mandate spec §8.6,
+**No mapping to `JournaledFact`.** No risk state folds from these records: the risk-state fold
+reads the account stream's `UniverseChanged` (§9.3), which the executor writes with its
+`causation_id` naming the agent stream's `ThesisProposed` or `ThesisRevised`, or, for a removal by
+invalidation, the `ThesisInvalidated` (§9.22). The agent runtime's fold reads them, with §9.22's
+records, for each instrument's current thesis and when it ended (mandate spec §8.6,
 [DEC-2391](../project/decisions/DEC-2391.md)), so that the order builder sells a position whose
 thesis ended without waiting for that copy. The lineage fold's reading of these records (mandate
 spec §8.6) follows with its own story.
