@@ -16,7 +16,7 @@ const NOT_REPORTED = "text-muted-foreground";
 const REFUSED: Readonly<Record<AdmissionReason, string>> = {
   direction_not_allowed: "it was not long, the only direction allowed",
   horizon_mismatch: "its expiry did not match its horizon",
-  revision_without_predecessor: "it named a thesis to revise that did not match its revision",
+  revision_without_predecessor: "its revision number and the thesis it revises do not agree",
   research_disabled: "research is off in the mandate",
   universe_pinned: "the mandate pins the instruments",
   admission_denied: "the mandate denies new instruments",
@@ -24,7 +24,7 @@ const REFUSED: Readonly<Record<AdmissionReason, string>> = {
   not_in_data_universe: "the instrument is outside the data universe",
   operator_halt: "the platform halted theses on this instrument",
   not_allowed_asset_class: "the mandate does not allow its asset class",
-  leveraged_etp_not_enabled: "it is a leveraged or inverse ETP, which the mandate does not enable",
+  leveraged_etp_not_enabled: "it is a leveraged or inverse ETP, which the mandate does not enable or whose disclosure is not accepted",
   eligibility_floor: "the instrument is below the eligibility floor",
   instrument_group_claimed: "another agent on the account trades this instrument group",
   source_not_allowlisted: "it cited a source not on the allowlist",
@@ -41,6 +41,10 @@ export function thesisWords(t: Thesis): string {
   switch (t.state) {
     case "current":
       return `Admitted. Current until ${dated(t.expires_at)}.`;
+    case "unconfirmed":
+      return `Admitted, until ${dated(t.expires_at)} at most. Whether it still stands is not confirmed: a later record could not be checked.`;
+    case "ignored":
+      return `Ignored: ${t.reason ? REFUSED[t.reason] : "reason not reported"}.`;
     case "rejected":
       return `Rejected: ${t.reason ? REFUSED[t.reason] : "reason not reported"}.`;
     case "invalidated":
@@ -75,19 +79,24 @@ export function AgentTheses({ agentId }: { agentId: string }) {
   }, [streamRecords, workspaceId, agentId]);
   if (!answer) return null;
   if (!answer.ok)
-    return answer.reason === "forbidden" ? null : (
+    return answer.reason === "forbidden" || answer.reason === "not_found" ? null : (
       <Section title="Theses">
         <p className={NOT_REPORTED}>Theses not reported.</p>
       </Section>
     );
   const view = thesesOf(answer.items, now);
-  if (view.theses.length === 0 && view.unverified === 0) return null;
+  if (view.theses.length === 0 && view.unverified === 0 && answer.fromStart) return null;
   return (
     <Section title="Theses">
-      <p className="text-sm text-muted-foreground">What the research agent proposed and the admission&rsquo;s verdict on each, newest first, from the latest records on its stream.</p>
+      <p className="text-sm text-muted-foreground">What the research agent proposed and the admission&rsquo;s verdict on each, newest first, from the agent&rsquo;s stream.</p>
+      {answer.fromStart ? null : (
+        <p className="text-sm text-muted-foreground" data-slot="theses-window">
+          Read from the latest {THESIS_RECORDS.toLocaleString("en-US")} records on the stream; a thesis recorded before them is not shown.
+        </p>
+      )}
       {view.unverified > 0 ? (
         <p className="text-sm font-medium" data-slot="theses-unverified">
-          {view.unverified === 1 ? "1 thesis record" : `${view.unverified} thesis records`} could not be verified against the journal and {view.unverified === 1 ? "is" : "are"} not shown.
+          {view.unverified === 1 ? "1 thesis record" : `${view.unverified} thesis records`} could not be checked against {view.unverified === 1 ? "its" : "their"} hash and {view.unverified === 1 ? "is" : "are"} not shown.
         </p>
       ) : null}
       {view.theses.length > 0 ? (

@@ -519,7 +519,7 @@ export function ApiRuntimeProvider({
       if (!first.ok) return { ok: false, reason: first.error.code };
       const after = Math.max(0, first.value.head_seq - count);
       const tail = await client.read(`${route}?after_seq=${after}&limit=${count}`, decoder);
-      return tail.ok ? { ok: true, items: tail.value.events } : { ok: false, reason: tail.error.code };
+      return tail.ok ? { ok: true, items: tail.value.events, fromStart: after === 0 } : { ok: false, reason: tail.error.code };
     },
     [client],
   );

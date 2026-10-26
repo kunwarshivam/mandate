@@ -71,7 +71,7 @@ describe("a research agent's theses on its page, from its stream's records (jour
 
   it("shows nothing from a record whose body does not match its hash, and says how many", async () => {
     mount([{ type: "ThesisProposed", at: "2026-10-26T09:00:00.000000000Z", payload: thesisPayload({ thesis_id: "T1" }), tamper: true }]);
-    await waitFor(() => expect(document.querySelector("[data-slot=theses-unverified]")).toHaveTextContent("1 thesis record could not be verified against the journal and is not shown."));
+    await waitFor(() => expect(document.querySelector("[data-slot=theses-unverified]")).toHaveTextContent("1 thesis record could not be checked against its hash and is not shown."));
     expect(screen.queryByRole("list", { name: "Theses" })).toBeNull();
   });
 
@@ -83,6 +83,13 @@ describe("a research agent's theses on its page, from its stream's records (jour
     cleanup();
     mount("forbidden");
     await waitFor(() => expect(screen.getByText("Not available to your role.")).toBeInTheDocument());
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(screen.queryByRole("heading", { name: "Theses" })).toBeNull();
+    expect(screen.queryByText("Theses not reported.")).toBeNull();
+  });
+
+  it("says when it read only the stream's latest records, so an older thesis is not silently missing", async () => {
+    mount(Array.from({ length: 1001 }, (_, i) => ({ type: "DecisionMade", at: "2026-10-26T09:00:00.000000000Z", payload: { n: i } })));
+    await waitFor(() => expect(document.querySelector("[data-slot=theses-window]")).toHaveTextContent("Read from the latest 1,000 records on the stream; a thesis recorded before them is not shown."), { timeout: 5000 });
   });
 });

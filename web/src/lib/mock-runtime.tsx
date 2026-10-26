@@ -283,8 +283,8 @@ export type ExitOutcome = { phase: "applied" | "refused" | "ended" | "recorded" 
 /** The owner alerts the API served (DEC-2141), or why not. */
 export type AlertsAnswer = { ok: true; read: Alerts } | { ok: false; reason: string };
 
-/** A stream's records with their bodies, or why they were not read. */
-export type RecordsAnswer = { ok: true; items: JournalRecord[] } | { ok: false; reason: string };
+/** A stream's records with their bodies, and whether they reach back to the stream's first record; or why they were not read. */
+export type RecordsAnswer = { ok: true; items: JournalRecord[]; fromStart: boolean } | { ok: false; reason: string };
 
 /** An agent's own positions with its account's holdings from the same read (DEC-2111), or why not. */
 export type PositionsAnswer = { ok: true; account_ref: string | null; items: AgentHolding[]; account_positions: ReadPosition[] | null } | { ok: false; reason: string };
