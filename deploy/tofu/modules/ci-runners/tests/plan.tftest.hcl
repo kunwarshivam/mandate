@@ -29,8 +29,6 @@ variables {
   kubectl_sha256             = "3cfeaf80be482b435b0aa214aff6e0b2c312ee23c0ff20810c75517b6004c6eb"
   sysbox_version             = "0.7.1"
   sysbox_sha256              = "9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5"
-  kubectl_version            = "1.35.9"
-  kubectl_sha256             = "3cfeaf80be482b435b0aa214aff6e0b2c312ee23c0ff20810c75517b6004c6eb"
   base_image                 = "ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac"
   toolchain_ref              = "main"
 }
@@ -110,7 +108,7 @@ run "the_image_installs_kubectl_at_its_pin_and_checks_it" {
   command = plan
 
   assert {
-    condition     = strcontains(local.image_build, "release/v1.35.9/bin/linux/amd64/kubectl") && strcontains(local.image_build, "3cfeaf80be482b435b0aa214aff6e0b2c312ee23c0ff20810c75517b6004c6eb  /usr/local/bin/kubectl") && strcontains(local.image_build, "sha256sum --check") && strcontains(local.image_build, "chmod 0755 /usr/local/bin/kubectl")
+    condition     = strcontains(local.image_build, "release/v1.35.9/bin/linux/amd64/kubectl") && strcontains(local.image_build, "3cfeaf80be482b435b0aa214aff6e0b2c312ee23c0ff20810c75517b6004c6eb  /tmp/kubectl") && strcontains(local.image_build, "sha256sum --check") && strcontains(local.image_build, "install -m 0755 /tmp/kubectl /usr/local/bin/kubectl")
     error_message = "The image downloads the pinned kubectl and checks its SHA-256 before using it."
   }
 }

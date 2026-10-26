@@ -115,15 +115,6 @@ variable "runner_sha256" {
   type = string
 }
 
-variable "kubectl_version" {
-  description = "The kubectl the cell jobs need (`cell demo` reads the API through it), as GitHub's ubuntu-24.04 image ships one; pinned with infra.yml's."
-  type        = string
-}
-
-variable "kubectl_sha256" {
-  type = string
-}
-
 variable "sysbox_version" {
   type = string
 }
@@ -133,7 +124,7 @@ variable "sysbox_sha256" {
 }
 
 variable "kubectl_version" {
-  description = "The kubectl the cell jobs use, as infra.yml's KUBECTL_VERSION pins it; GitHub's ubuntu-24.04 image ships one, the job image installs it (E21-64d)."
+  description = "The kubectl the cell jobs need (`cell demo` reads the API through it), as infra.yml's KUBECTL_VERSION pins it; GitHub's ubuntu-24.04 image ships one, the job image installs it (E21-64d)."
   type        = string
 
   validation {
@@ -191,9 +182,6 @@ locals {
     tar xzf runner.tgz
     rm runner.tgz
     ./bin/installdependencies.sh
-    curl -fsSL --retry 5 --retry-all-errors -o /usr/local/bin/kubectl "https://dl.k8s.io/release/v${var.kubectl_version}/bin/linux/amd64/kubectl"
-    echo "${var.kubectl_sha256}  /usr/local/bin/kubectl" | sha256sum --check
-    chmod 0755 /usr/local/bin/kubectl
     chown -R runner:runner /home/runner
     curl -fsSL --retry 5 --retry-all-errors -o /tmp/kubectl "https://dl.k8s.io/release/v${var.kubectl_version}/bin/linux/amd64/kubectl"
     echo "${var.kubectl_sha256}  /tmp/kubectl" | sha256sum --check
