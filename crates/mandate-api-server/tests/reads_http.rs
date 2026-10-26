@@ -1442,6 +1442,41 @@ fn openings_held_is_unknown_never_null_when_it_cannot_be_judged() {
 }
 
 #[test]
+fn openings_held_is_unknown_for_an_empty_account_stream_and_a_body_that_does_not_parse() {
+    let (bytes, version) = document();
+    let f = fixture_with(stored(bytes));
+    seed_documents(&f, &version);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    let acct = format!("acct:{WORKSPACE}:acct_1");
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .insert(acct.clone(), Vec::new());
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_a"),
+        Some(reason("unknown")),
+        "an account stream with no row is not found, as account_positions reads it"
+    );
+    on_account(&f, "StreamOpened", "{}");
+    let mut broken = row(&acct, 2, "StreamOpened", "{}");
+    broken.body = b"not json".to_vec();
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .get_mut(&acct)
+        .expect("seeded")
+        .push(broken);
+    assert_eq!(
+        openings_held(&f, &cookie, "agt_a"),
+        Some(reason("unknown")),
+        "a body that does not parse is a row the fold cannot read"
+    );
+}
+
+#[test]
 fn without_a_store_openings_held_is_unknown() {
     let (_, version) = document();
     let f = fixture();
