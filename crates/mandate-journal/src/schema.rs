@@ -293,7 +293,7 @@ pub(crate) static ORDER_SUBMITTED_V1: Ty = Ty::Record(&[
     ("limit_price", Ty::Nullable(&Ty::Decimal)),
 ]);
 
-static FILL_APPLIED_V1: Ty = Ty::Record(&[
+pub(crate) static FILL_APPLIED_V1: Ty = Ty::Record(&[
     ("fill_id", Ty::Str),
     ("client_order_id", Ty::Str),
     ("instrument_id", Ty::Str),
