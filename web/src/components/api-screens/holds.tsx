@@ -94,7 +94,7 @@ function HoldItem({ hold, now, onLifted }: { hold: Hold; now: string; onLifted: 
       {!mayAcknowledge ? (
         <p className="text-sm">Only the workspace owner or an operator can acknowledge a hold.</p>
       ) : hold.independent_required === true || hold.request !== null ? (
-        <p className="text-sm text-pretty">Your workspace requires a second member to acknowledge it, so it is not offered here yet.</p>
+        <p className="text-sm text-pretty">A second member must acknowledge this hold, or one has been asked to; that is not offered here yet.</p>
       ) : settled ? null : (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <Button type="button" variant="secondary" size="lg" className={cn(KEY, "w-full sm:w-auto")} disabled={busy} onClick={() => void acknowledge()}>
@@ -106,7 +106,7 @@ function HoldItem({ hold, now, onLifted }: { hold: Hold; now: string; onLifted: 
       <div role="status" aria-live="polite">
         {state.kind === "asking" ? <p className="text-sm">Waiting for your passkey. Nothing is sent until your browser&apos;s passkey check is done.</p> : null}
         {state.kind === "recorded" || (state.kind === "done" && state.outcome.phase === "recorded") ? (
-          <p className="text-sm">Recorded in the journal. The hold lifts only once the executor accepts it; this page shows it when it does.</p>
+          <p className="text-sm">Recorded in the journal. The hold lifts only once the executor accepts it; reload this page to see whether it has.</p>
         ) : null}
         {state.kind === "done" ? <OutcomeWords outcome={state.outcome} /> : null}
       </div>
@@ -132,7 +132,7 @@ function OutcomeWords({ outcome }: { outcome: AcknowledgeOutcome }) {
         </p>
       );
     case "unknown":
-      return <p className="text-sm">Whether your acknowledgment was recorded is not known yet. This list is read again; check it before acknowledging again.</p>;
+      return <p className="text-sm">Whether your acknowledgment was recorded is not known yet. Reload this page and check this hold before acknowledging it again.</p>;
     default: {
       const unhandled: never = outcome;
       throw new Error(`unhandled outcome ${JSON.stringify(unhandled)}`);
@@ -187,6 +187,8 @@ function undeliveredWords(reason: string): string {
       return "Not recorded: your role may not acknowledge a hold.";
     case "live_unavailable":
       return "Not recorded: a real-money hold is acknowledged on the host, not here.";
+    case "control_unread":
+      return "Not sent: your deployment did not report its journal's position, so the passkey check could not be bound. Try again.";
     case "unreachable":
       return "Not delivered: your deployment did not answer.";
     default:

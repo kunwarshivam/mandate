@@ -140,6 +140,21 @@ describe("holds to acknowledge on the agent's screen (§3.11 item 12)", () => {
     expect(posts).toHaveLength(0);
   });
 
+  it("sends nothing when the agent's read names no control-stream position to bind the passkey to", async () => {
+    const blind: (send: Fetch) => Fetch = (send) => async (input, init) => {
+      const answer = await send(input, init);
+      if ((init.method ?? "GET") !== "GET" || new URL(input).pathname !== `/v1/workspaces/${WS}/agents/${AGENT}`) return answer;
+      const body = (await answer.json()) as { as_of: Array<{ stream_id: string }> };
+      body.as_of = body.as_of.filter((w) => w.stream_id !== `ctl:${WS}`);
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    const { posts, challenges } = mount({ wrap: blind });
+    fireEvent.click(within(await region()).getByRole("button", { name: "Acknowledge" }));
+    expect(await screen.findByText(/Not sent: your deployment did not report its journal's position/)).toBeVisible();
+    expect(posts).toHaveLength(0);
+    expect(challenges).toHaveLength(0);
+  });
+
   it("offers no Acknowledge to a role that may not acknowledge, and says so", async () => {
     mount({ role: "approver" });
     const held = await region();
@@ -151,7 +166,7 @@ describe("holds to acknowledge on the agent's screen (§3.11 item 12)", () => {
     mount({ holds: [{ ...HOLD, independent_required: true }] });
     const held = await region();
     expect(within(held).queryByRole("button", { name: "Acknowledge" })).toBeNull();
-    expect(held).toHaveTextContent("Your workspace requires a second member to acknowledge it");
+    expect(held).toHaveTextContent("A second member must acknowledge this hold, or one has been asked to");
   });
 
   it("says the holds are not reported when the read fails, and never shows none", async () => {

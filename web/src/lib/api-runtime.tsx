@@ -679,7 +679,9 @@ export function ApiRuntimeProvider({
       acknowledge: async (hold, onRecorded) => {
         const head = async (): Promise<{ ok: true; seq: number } | { ok: false; reason: string }> => {
           const read = await client.read(`/agents/${encodeURIComponent(hold.agent_id)}`, agentRead);
-          return read.ok ? { ok: true, seq: read.as_of.find((w) => w.stream_id === `ctl:${client.workspaceId}`)?.seq ?? 0 } : { ok: false, reason: read.error.code };
+          if (!read.ok) return { ok: false, reason: read.error.code };
+          const control = read.as_of.find((w) => w.stream_id === `ctl:${client.workspaceId}`);
+          return control ? { ok: true, seq: control.seq } : { ok: false, reason: "control_unread" };
         };
         const before = await head();
         if (!before.ok) return { phase: "undelivered", reason: before.reason };
@@ -690,7 +692,12 @@ export function ApiRuntimeProvider({
         if (after.seq !== before.seq) return { phase: "undelivered", reason: "control_moved" };
         const delivered = await deliver(prepareAcknowledge(client, hold, asserted.value));
         if (delivered.phase === "undelivered") return { phase: "undelivered", reason: delivered.reason };
-        if (delivered.phase === "unknown") return { phase: "unknown" };
+        if (delivered.phase === "unknown") {
+          const followed = delivered.eventId ? await settle(delivered.eventId) : null;
+          if (followed?.phase === "applied") return { phase: "applied" };
+          if (followed?.phase === "refused") return { phase: "refused", reason: followed.steps.find((s) => s.reason !== null)?.reason ?? null };
+          return { phase: "unknown" };
+        }
         onRecorded();
         const settled = await settle(delivered.eventId);
         if (settled?.phase === "applied") return { phase: "applied" };
