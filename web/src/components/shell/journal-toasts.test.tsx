@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { Toasty } from "@cloudflare/kumo/components/toast";
 import { describe, expect, it } from "vitest";
 import { type Command, type Runtime, RuntimeContext } from "@/lib/mock-runtime";
@@ -21,14 +21,16 @@ function toasts(commands: Command[]) {
 describe("journal toasts for a command the agent's runtime still answers (DEC-2140, DEC-2102 item 4)", () => {
   const resume = (patch: Partial<Command>): Command => ({ id: "cmd-1", kind: "resume", agentId: "agt_1", phase: "recorded", sentAt: AT, recordedAt: AT, awaitsRuntime: true, ...patch });
 
-  it("raises nothing while a resume waits for the runtime, which may still refuse it", () => {
+  it("raises nothing while a resume waits for the runtime, which may still refuse it", async () => {
     toasts([resume({})]);
+    await act(async () => {});
     expect(screen.queryByText(/as you asked/)).toBeNull();
   });
 
-  it("raises nothing for a resume the runtime refused, ended, or did not confirm", () => {
+  it("raises nothing for a resume the runtime refused, ended, or did not confirm", async () => {
     for (const settled of ["refused", "ended", "unconfirmed"] as const) {
       const view = toasts([resume({ settled })]);
+      await act(async () => {});
       expect(screen.queryByText(/as you asked/), settled).toBeNull();
       view.unmount();
     }
