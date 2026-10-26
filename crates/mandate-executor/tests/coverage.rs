@@ -127,7 +127,7 @@ fn every_uninterpreted_event_names_the_story_that_owns_it() {
     for (kind, story) in [
         ("RelatedAccountsCoordination", "E7-5"),
         ("UniverseChanged", "E17-3"),
-        ("RiskLimitTriggered", "E6-4"),
+        ("MandateVersionApplied", "E6-4"),
         ("SomethingNobodyWrote", "E7-2"),
     ] {
         let mut state = ExecutorState::new(common::scope());
@@ -885,7 +885,7 @@ fn a_replacement_is_a_new_order_under_its_own_id() {
         ran.draft_types().contains(&"ExternalActivityIngested")
             && ran
                 .draft("FillApplied")
-                .is_some_and(|draft| draft.payload.get("client_order_id").is_none()),
+                .is_some_and(|draft| draft.payload.get("client_order_id") == Some(&Value::Null)),
         "ten more shares on the new id would take the pair to 14 of an approved 10, so the fill \
          cannot be the new order's and is ingested as external activity (§7.1): {:?}",
         ran.draft_types()
@@ -1044,7 +1044,7 @@ fn a_fill_that_cannot_be_the_orders_is_applied_unattributed() {
     let id = accepted(&mut shell, &ports, INTENT, common::AGENT, AAPL);
     let unattributed = |ran: &common::Ran| {
         ran.draft("FillApplied")
-            .is_some_and(|draft| draft.payload.get("client_order_id").is_none())
+            .is_some_and(|draft| draft.payload.get("client_order_id") == Some(&Value::Null))
             && ran.draft_types().contains(&"ExternalActivityIngested")
     };
     let other_instrument = mandate_executor::BrokerFill {
@@ -2803,4 +2803,32 @@ fn a_restrictions_alert_is_accepted_by_the_journal_in_its_subjects_batch() {
         Some((2, "payload.subject".to_owned())),
         "two alerts on one subject are refused by rule 130, at the second"
     );
+}
+
+/// The account risk fold's records fold here as records (DEC-2804 item 1): each is read, moves no
+/// state but the stream's head and risk clock, and the mode one causes arrives as its own
+/// `AgentModeApplied`.
+#[test]
+fn the_risk_folds_records_fold_as_records() {
+    for kind in [
+        "RiskDayStarted",
+        "RiskLimitTriggered",
+        "RiskLimitLifted",
+        "HighWaterMarkReset",
+        "InstrumentRestrictionChanged",
+        "GoalCompleted",
+    ] {
+        let mut state = ExecutorState::new(common::scope());
+        fold(&mut state, &stream_opened()).expect("folds");
+        let before = state.clone();
+        fold(
+            &mut state,
+            &event(ACCOUNT_STREAM, 2, kind, with_clock(&[], 7)),
+        )
+        .unwrap_or_else(|e| panic!("{kind} folds as a record: {e}"));
+        assert_eq!(state.head(ACCOUNT_STREAM), Some(Seq(2)), "{kind}");
+        assert_eq!(state.orders(), before.orders(), "{kind}");
+        assert_eq!(state.modes(), before.modes(), "{kind}");
+        assert_eq!(state.positions(), before.positions(), "{kind}");
+    }
 }

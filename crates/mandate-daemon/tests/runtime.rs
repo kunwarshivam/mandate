@@ -1225,7 +1225,7 @@ impl ArtifactSink for Closes {
     }
 }
 
-const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 
 /// The host's daily output for SPY cut off at `as_of`.
 fn daily(as_of: i64) -> Evaluated {
@@ -2142,7 +2142,7 @@ fn a_deferring_opening_is_journaled_at_version_3_and_asked_never_proposed() {
     assert_eq!(asked, named, "rule 292: exactly the decision's");
 }
 
-const RESEARCH_SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+const RESEARCH_SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 
 /// An admitted thesis on SPY (journal spec §9.4) as of `as_of`, expiring an hour later at
 /// `expires_at`, appended to the agent stream through the journal's own append as the research
@@ -2381,4 +2381,171 @@ fn a_held_instrument_whose_thesis_is_current_is_not_sold() {
     assert_eq!(count(&rig, "ThesisProposed"), 1, "{:?}", kinds(&rig));
     assert_eq!(count(&rig, "DecisionMade"), 0, "{:?}", kinds(&rig));
     assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
+}
+
+/// The rule set the gate reads, the tracer's reviewed configuration, as the fold resolves it from
+/// the control stream's registration.
+fn gate_rules() -> mandate_risk::GateConfig {
+    let rules = include_str!("../../mandate-shell/tests/fixtures/tracer/config/rule-set.json");
+    mandate_gate_context::gate_rule_set(&parse(rules.trim().as_bytes()).unwrap()).unwrap()
+}
+
+/// The content hash the demo envelope pins `quant.ma_crossover` 1.0.0 at.
+const DEMO_MODEL_HASH: &str = "cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d";
+
+/// 2026-10-27T15:00:00Z, a Tuesday inside the regular session, with Monday's close behind it: the
+/// window the demo's crossover can decide in (the output of a daily close is fresh for a day, and
+/// an opening trades only in the regular session).
+const IN_SESSION: i64 = 1_793_113_200;
+
+/// The demo's own envelope, wired as the deployed runtime wires it, over the journaled facts an
+/// in-session tick finds.
+fn demo_in_session() -> (Rig, RuntimeProcess<Rig>) {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "AccountSnapshotRecorded",
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":1,"equity":"100000","cash":"100000","buying_power":"100000","non_marginable_buying_power":"100000","risk_clock":"{}"}}"#,
+            at(IN_SESSION)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"{SPY}","price":"580.05","source":"quote","feed":"fixture","bid":"579.95","sane":true,"session":"regular","risk_clock":"{}"}}"#,
+            at(IN_SESSION)
+        ),
+    );
+    let document = parse(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deploy/cell/demo/mandate.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let version = format!("sha256:{}", Digest::of(b"demo mandate").to_hex());
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    rig.control.borrow_mut().push(row(
+        CONTROL,
+        seq,
+        "AgentDeployed",
+        "user",
+        &format!(r#"{{"agent_id":"{AGENT}","mandate_version":"{version}"}}"#),
+    ));
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    rig.control.borrow_mut().push(row(
+        CONTROL,
+        seq,
+        "ConfigSnapshotRegistered",
+        "user",
+        &format!(
+            r#"{{"kind":"model_version","content_hash":"sha256:{DEMO_MODEL_HASH}","model_id":"quant.ma_crossover","model_version":"1.0.0","params":[],"admits_instruments":false}}"#
+        ),
+    ));
+    let mut wiring = mandate_daemon::production::wired(
+        fixture::wiring("user-owner", AGENT_STREAM),
+        &version,
+        &document,
+        (
+            Some(gate_rules()),
+            mandate_daemon::bars::BarsReader::default(),
+        ),
+        CLOCK,
+        AGENT,
+    );
+    wiring.models = Some(ModelsWiring {
+        models: Box::new(Host {
+            answer: Rc::new(RefCell::new(vec![Evaluated {
+                output: ModelOutput {
+                    content_hash: Digest::from_hex(DEMO_MODEL_HASH).unwrap(),
+                    ..daily(IN_SESSION - 60).output
+                },
+                ..daily(IN_SESSION - 60)
+            }])),
+            asked: Rc::new(Cell::new(0)),
+        }),
+        artifacts: Box::new(Closes::default()),
+    });
+    let process = RuntimeProcess::start(rig.clone(), wiring, &config(), at(IN_SESSION));
+    (rig, process)
+}
+
+/// The owner's grant of `approval`, as the workspace services journal it on the control stream: the
+/// members of `mandate-runtime`'s own grant fixture (`tests/common/escalation.rs`, `Answer::grant`),
+/// which the core's approval tests read, so the two stay in step.
+fn granted(rig: &Rig, approval: &str, content_hash: &str) {
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    let payload = format!(
+        r#"{{"agent":"{AGENT}","approval":"{approval}","verdict":"approved","content_hash":"{content_hash}","submitted_at":{IN_SESSION},"step_up":{{"assertion_id":"assertion-1","authenticated_at":{IN_SESSION},"method":"cli_confirm"}},"responder":"user-owner","role":"approver"}}"#
+    );
+    rig.control.borrow_mut().push(row(
+        CONTROL,
+        seq,
+        "ApprovalResponseSubmitted",
+        "user",
+        &payload,
+    ));
+}
+
+/// The demo's whole in-session loop on its own envelope and caps, over the journal's own append:
+/// an in-session tick decides, the gate's dry run allows with its deferrals, the owner is asked,
+/// and the owner's grant proposes the opening to the executor. The window itself is why the loop
+/// cannot run on a Monday (the crossover's output from Friday's close has expired), so this test
+/// is the in-session proof the cell cannot give outside it.
+#[test]
+fn the_demo_envelope_decides_asks_and_proposes_once_granted_in_session() {
+    let (rig, mut process) = demo_in_session();
+    for second in 1..4 {
+        tick(&rig, IN_SESSION + second);
+        process.step(at(IN_SESSION + second));
+    }
+    assert_eq!(count(&rig, "DecisionMade"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "ApprovalRequested"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
+    let rows = agent_rows(&rig);
+    let asked = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalRequested")
+        .unwrap();
+    let body = parse(&asked.body).unwrap();
+    let payload = body.get("payload").unwrap();
+    let hash = payload
+        .get("content_hash")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("the request names its content hash: {payload:?}"));
+    granted(&rig, asked.event_id.as_str(), hash);
+    tick(&rig, IN_SESSION + 4);
+    process.step(at(IN_SESSION + 4));
+    assert_eq!(count(&rig, "ApprovalResponded"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 1, "{:?}", kinds(&rig));
+    let rows = agent_rows(&rig);
+    let intent = rows
+        .iter()
+        .find(|row| row.event_type == "IntentProposed")
+        .unwrap();
+    let body = parse(&intent.body).unwrap();
+    let payload = body.get("payload").unwrap();
+    assert_eq!(
+        payload.get("instrument_id").and_then(Value::as_str),
+        Some(SPY),
+        "the envelope's own instrument: {payload:?}"
+    );
+    assert_eq!(
+        payload.get("side").and_then(Value::as_str),
+        Some("buy"),
+        "{payload:?}"
+    );
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
 }

@@ -14,7 +14,7 @@ use proptest::prelude::*;
 use proptest::test_runner::TestRunner;
 
 const AGENT_STREAM: &str = "agent:ws1:demo-spy";
-const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 const QQQ: &str = "c2a6f2f3-5f1e-4b2b-9f0a-1c2d3e4f5a6b";
 const SOURCE: &str = "data.daily_bars";
 /// 2026-10-23T20:00:00Z, a regular session's close.

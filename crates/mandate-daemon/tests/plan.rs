@@ -22,7 +22,7 @@ const AGENT: &str = "demo-spy";
 const CLOCK: &str = "clock:ws1";
 const CONTROL: &str = "ctl:ws1";
 const ACCOUNT: &str = "acct:ws1:01J8Z3MACCOUNTREF000000001";
-const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 const MODEL: &str = "quant.ma_crossover";
 const HASH: &str = "cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d";
 const FRESH: Freshness = Freshness {
@@ -193,10 +193,13 @@ fn a_flat_agent_with_every_fact_journaled_proposes_an_opening_never_above_the_bi
         "{proposal:?}"
     );
     let cost = proposal.qty.notional(proposal.limit).unwrap();
-    assert!(
-        cost <= mandate_num::Usd::parse("300").unwrap(),
-        "{proposal:?}"
-    );
+    let cap = document()
+        .get("risk")
+        .and_then(|risk| risk.get("max_order_usd"))
+        .and_then(Value::as_str)
+        .map(|cap| mandate_num::Usd::parse(cap).unwrap())
+        .unwrap();
+    assert!(cost <= cap, "{proposal:?} within the envelope's order cap");
     assert!(proposal.qty >= Qty::parse("1").unwrap(), "{proposal:?}");
     let execution = proposal.execution.unwrap();
     assert!(execution.protection_required);

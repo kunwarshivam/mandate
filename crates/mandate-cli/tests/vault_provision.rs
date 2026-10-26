@@ -278,6 +278,7 @@ fn provisioning_writes_each_identitys_files_and_prints_only_their_names() {
         "runtime",
         "secret-import",
         "model-gateway",
+        "news-reader",
         "email-sender",
         "executor-c1",
         "executor-c2",

@@ -238,12 +238,12 @@ fn serve<S: Store>(
     let mut say = |line: &str| eprintln!("{line}");
     let Some(mount) = paper else {
         let run = run::fixture(
-            AlpacaBroker::new(FixturePaper::filling(host_now()))?,
+            AlpacaBroker::new(FixturePaper::filling(host_now()).quoting(host_now))?,
             &config.scope,
         )?;
         let run = match production {
             Some(production) => run.deployed(&config.scope, production),
-            None => run,
+            None => run.undeployed(),
         };
         let edge = Edge {
             now: &host_now,
@@ -274,7 +274,7 @@ fn serve<S: Store>(
     let run = run::paper(broker, TokioPause, &config.scope)?;
     let run = match production {
         Some(production) => run.deployed(&config.scope, production),
-        None => run,
+        None => run.undeployed(),
     };
     let mut tick = |now| lease.pass(now);
     let mut edge = Edge {

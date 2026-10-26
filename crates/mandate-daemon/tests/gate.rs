@@ -32,7 +32,7 @@ const AGENT: &str = "demo-spy";
 const CLOCK: &str = "clock:ws1";
 const CONTROL: &str = "ctl:ws1";
 const ACCOUNT: &str = "acct:ws1:01J8Z3MACCOUNTREF000000001";
-const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 const HASH: &str = "cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d";
 const FRESH: Freshness = Freshness {
     mark_max_age_s: 60,
@@ -128,13 +128,21 @@ fn journaled_with(account: &Account) -> Rows {
     rows
 }
 
+/// The cell's demo envelope with the $300 order cap these cases' arithmetic is written for: the
+/// demo's own cap is one whole share's room, and these cases test the gate's cap, not the demo's.
 fn document() -> Value {
     let bytes = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../deploy/cell/demo/mandate.json"
     ))
     .unwrap();
-    mandate_canon::parse(&bytes).unwrap()
+    let text = String::from_utf8(bytes).unwrap();
+    let capped = text.replace(r#""max_order_usd":"1000""#, r#""max_order_usd":"300""#);
+    assert_ne!(
+        capped, text,
+        "the demo envelope's order cap is where these cases set it"
+    );
+    mandate_canon::parse(capped.as_bytes()).unwrap()
 }
 
 /// The deployed version the demo rows name, and its stored document.
@@ -1167,4 +1175,158 @@ fn a_crypto_opening_never_reads_the_equity_bars() {
     crypto.asset_class = AssetClass::Crypto;
     let _crypto_is_denied_on_the_inactive_crypto_account = gate.check(&crypto);
     assert_eq!(reads.get(), 0);
+}
+
+/// A version 2 snapshot of the rich account, later than [`journaled_with`]'s, declaring
+/// `account_type` and `day_trading_regime` (JSON `null` for none) and the prior-close equity
+/// (journal spec v0.89 §9.35).
+fn declared(rows: &mut Rows, account_type: &str, regime: &str, last_equity: &str) {
+    let quoted = |value: &str| {
+        if value == "null" {
+            value.to_owned()
+        } else {
+            format!("\"{value}\"")
+        }
+    };
+    rows.push(
+        ACCOUNT,
+        "AccountSnapshotRecorded",
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":1,"equity":"100000","cash":"100000","buying_power":"100000","non_marginable_buying_power":"100000","account_type":{},"day_trading_regime":{},"last_equity":"{last_equity}","maintenance_margin":"0","risk_clock":"{REGULAR}"}}"#,
+            quoted(account_type),
+            quoted(regime),
+        ),
+    );
+}
+
+/// DEC-2811 (DEC-2378 item 11 condition 2): the day-trade budget moves from deferred to evaluated
+/// exactly when a version 2 snapshot declares the facts under which trading spec §9.2's check
+/// cannot refuse an opening: an `intraday_margin` regime, a cash account, or `legacy_pdt` with a
+/// prior-close equity at or above the rule set's 25000 threshold. The opening is then asked with
+/// the other eleven parts deferred, and the budget reported evaluated, never deferred.
+#[test]
+fn the_day_trade_budget_is_evaluated_once_a_snapshot_declares_it_cannot_refuse() {
+    for (account_type, regime, last_equity) in [
+        ("margin", "intraday_margin", "100"),
+        ("null", "intraday_margin", "100"),
+        ("cash", "legacy_pdt", "100"),
+        ("cash", "null", "100"),
+        ("margin", "legacy_pdt", "25000"),
+        ("null", "legacy_pdt", "30000"),
+    ] {
+        let mut rows = journaled_with(&RICH);
+        declared(&mut rows, account_type, regime, last_equity);
+        let gate = gate_over(&rows, Some(config()));
+        let case = format!("{account_type} {regime} {last_equity}");
+        let advisory = gate.advisory(&opening("3", "99.95")).unwrap();
+        assert!(
+            !advisory.deferred.contains(&Deferred::DayTradeBudget),
+            "{case}: {advisory:?}"
+        );
+        let mut eleven = twelve();
+        eleven.remove(&Deferral::DayTradeBudget);
+        assert_eq!(
+            gate.check(&opening("3", "99.95")),
+            DryRunVerdict::AllowDeferring {
+                deferred: eleven,
+                liquidity: None
+            },
+            "{case}"
+        );
+    }
+}
+
+/// And it stays deferred, never reported passed, whenever the check could refuse on a fact nothing
+/// journals: a version 1 snapshot, an undeclared regime on a margin account, or `legacy_pdt` below
+/// the threshold on an account not declared cash, where the pattern-day-trader flag and the
+/// trailing day-trade count are unseen (DEC-2398's review).
+#[test]
+fn the_day_trade_budget_stays_deferred_while_it_could_refuse_unseen() {
+    let mut cases: Vec<Rows> = vec![journaled_with(&RICH)];
+    for (account_type, regime, last_equity) in [
+        ("margin", "null", "100"),
+        ("null", "null", "100"),
+        ("margin", "legacy_pdt", "24999.99"),
+        ("null", "legacy_pdt", "100"),
+        ("margin", "legacy_pdt", "-5"),
+    ] {
+        let mut rows = journaled_with(&RICH);
+        declared(&mut rows, account_type, regime, last_equity);
+        cases.push(rows);
+    }
+    for (index, rows) in cases.iter().enumerate() {
+        let gate = gate_over(rows, Some(config()));
+        let advisory = gate.advisory(&opening("3", "99.95")).unwrap();
+        assert!(
+            advisory.deferred.contains(&Deferred::DayTradeBudget),
+            "case {index}: {advisory:?}"
+        );
+        assert_eq!(gate.check(&opening("3", "99.95")), asked(), "case {index}");
+    }
+}
+
+/// A later version 1 snapshot takes the declared facts away again, so the budget is deferred
+/// once more: the latest snapshot wins whatever its version (§9.35).
+#[test]
+fn a_later_version_1_snapshot_defers_the_budget_again() {
+    let mut rows = journaled_with(&RICH);
+    declared(&mut rows, "margin", "intraday_margin", "100");
+    snapshot(&mut rows, "ACTIVE", "INACTIVE", [false; 3]);
+    let gate = gate_over(&rows, Some(config()));
+    assert_eq!(gate.check(&opening("3", "99.95")), asked());
+}
+
+/// The context's account type is the snapshot's declared one, else the multiplier's (DEC-2811):
+/// a cash account's buying-power refusal is the settled one, a margin account's is not, so the type
+/// the dry run reads is the one the reason names.
+#[test]
+fn the_buying_power_refusal_names_the_declared_account_type_else_the_multipliers() {
+    let poor = |multiplier: u32, declared: &str| {
+        let mut rows = journaled_with(&RICH);
+        let members = if declared == "none" {
+            String::new()
+        } else {
+            format!(
+                r#","account_type":{declared},"day_trading_regime":null,"last_equity":"100","maintenance_margin":"0""#
+            )
+        };
+        rows.push(
+            ACCOUNT,
+            "AccountSnapshotRecorded",
+            &format!(
+                r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":{multiplier},"equity":"100","cash":"100","buying_power":"100","non_marginable_buying_power":"100"{members},"risk_clock":"{REGULAR}"}}"#
+            ),
+        );
+        gate_over(&rows, Some(config())).check(&opening("3", "99.95"))
+    };
+    assert_eq!(poor(1, "none"), denied("insufficient_settled_buying_power"));
+    assert_eq!(poor(2, "none"), denied("insufficient_buying_power"));
+    assert_eq!(
+        poor(2, "\"cash\""),
+        denied("insufficient_settled_buying_power")
+    );
+    assert_eq!(poor(1, "\"margin\""), denied("insufficient_buying_power"));
+    assert_eq!(poor(2, "null"), denied("insufficient_buying_power"));
+}
+
+/// Crypto never counts toward the day-trade budget (trading spec §9.2), so a crypto opening's
+/// budget is evaluated even on a version 1 snapshot (DEC-2811).
+#[test]
+fn a_crypto_openings_budget_is_evaluated_without_declared_facts() {
+    let gate = gate_over(&journaled_with(&RICH), Some(config()));
+    let mut crypto = opening("3", "99.95");
+    crypto.asset_class = AssetClass::Crypto;
+    let advisory = gate.advisory(&crypto);
+    if let Ok(advisory) = &advisory {
+        assert!(
+            !advisory.deferred.contains(&Deferred::DayTradeBudget),
+            "{advisory:?}"
+        );
+    }
+    let equity = gate.advisory(&opening("3", "99.95")).unwrap();
+    assert!(equity.deferred.contains(&Deferred::DayTradeBudget));
+    assert!(
+        advisory.is_ok(),
+        "the crypto opening is evaluated: {advisory:?}"
+    );
 }

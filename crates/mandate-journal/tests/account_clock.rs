@@ -110,12 +110,12 @@ fn every_invalid_copy_is_refused_with_its_reason_at_its_path() {
     assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
 
-/// Closed on the account stream at version 1 as on the scheduler stream, and nowhere else.
+/// Closed on the account stream at version 1, and on no other stream but the scheduler's, whose
+/// own schema `tests/scheduler.rs` judges.
 #[test]
 fn the_catalogue_closes_the_copy_on_the_account_stream_at_version_1() {
     assert!(closes("ClockAdvanced", 1, StreamType::Account));
     assert!(!closes("ClockAdvanced", 2, StreamType::Account));
-    assert!(closes("ClockAdvanced", 1, StreamType::Scheduler));
     for stream in [
         StreamType::Agent,
         StreamType::Control,

@@ -218,6 +218,7 @@ pub(super) fn exposed(worker: &RecordedWorker<CompromisedModel>, shelf: &Shelf) 
     texts.extend(
         worker
             .transport()
+            .unwrap()
             .sent()
             .iter()
             .map(|sent| String::from_utf8_lossy(&sent.body).into_owned()),

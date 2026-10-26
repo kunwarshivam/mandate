@@ -165,7 +165,8 @@ const ALLOWED: &[(&str, &str, &str)] = &[
 /// `MANDATE_OPENROUTER_API_KEY`, the model provider's key staging's vault imports (DEC-2630), and
 /// `MANDATE_FOUNDER_OIDC_SUBJECT`, the founder's subject staging's link digests (DEC-2114), and
 /// `MANDATE_ALPACA_OAUTH_CLIENT_SECRET`, the Alpaca OAuth client secret staging's vault imports
-/// (DEC-2636).
+/// (DEC-2636), and `MANDATE_ALPACA_NEWS_KEY_ID` and `MANDATE_ALPACA_NEWS_SECRET`, the news reader's
+/// paper data key staging's vault imports (DEC-2277).
 const SECRET_RUNS: &[SecretRun] = &[
     (
         ".github/workflows/infra.yml",
@@ -182,6 +183,8 @@ const SECRET_RUNS: &[SecretRun] = &[
             "MANDATE_OPENROUTER_API_KEY",
             "MANDATE_FOUNDER_OIDC_SUBJECT",
             "MANDATE_ALPACA_OAUTH_CLIENT_SECRET",
+            "MANDATE_ALPACA_NEWS_KEY_ID",
+            "MANDATE_ALPACA_NEWS_SECRET",
         ],
     ),
     (
