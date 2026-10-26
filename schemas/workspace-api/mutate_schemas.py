@@ -136,6 +136,16 @@ def in_shard(index: int, shard: tuple[int, int]) -> bool:
     return index % n == k
 
 
+def fails(checker: Path) -> bool:
+    """Whether `checker` reports a problem in the tree it sits in."""
+    return (
+        subprocess.run(
+            [sys.executable, "-I", str(checker)], capture_output=True, check=False
+        ).returncode
+        != 0
+    )
+
+
 def survivors(show_all: bool, shard: tuple[int, int] = (0, 1)) -> list[str]:
     found = []
     index = -1
@@ -149,6 +159,12 @@ def survivors(show_all: bool, shard: tuple[int, int] = (0, 1)) -> list[str]:
         if (ROOT / "docs/project/backlog").is_dir():
             shutil.copytree(ROOT / "docs/project/backlog", Path(tmp) / "docs/project/backlog")
         checkers = [tree / f"workspace-api/{c}" for c in CHECKERS]
+        broken = [checker.name for checker in checkers if fails(checker)]
+        if broken:
+            raise SystemExit(
+                f"the checkers {broken} fail on the unmutated copy, so every mutant would count "
+                "as caught; copy what they read into the temporary tree"
+            )
         for name in FILES:
             target = tree / "workspace-api" / name
             original = json.loads((HERE / name).read_text(encoding="utf-8"))
@@ -160,14 +176,7 @@ def survivors(show_all: bool, shard: tuple[int, int] = (0, 1)) -> list[str]:
                 doc = copy.deepcopy(original)
                 mutate(doc)
                 target.write_text(json.dumps(doc), encoding="utf-8")
-                caught = any(
-                    subprocess.run(
-                        [sys.executable, "-I", str(checker)],
-                        capture_output=True,
-                        check=False,
-                    ).returncode
-                    for checker in checkers
-                )
+                caught = any(fails(checker) for checker in checkers)
                 if not caught:
                     found.append(f"{name}{label}")
             target.write_text(json.dumps(original), encoding="utf-8")
