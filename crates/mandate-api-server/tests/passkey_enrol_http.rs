@@ -724,7 +724,11 @@ fn an_enrolment_whose_head_moved_after_its_read_is_journal_unavailable() {
         rows.rows.len(),
         "nothing appended"
     );
-    let head = rows.rows.last().map(|row| row.seq).expect("an opened stream");
+    let head = rows
+        .rows
+        .last()
+        .map(|row| row.seq)
+        .expect("an opened stream");
     assert_eq!(
         f.journal
             .appends
