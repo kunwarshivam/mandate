@@ -12,7 +12,7 @@ use mandate_executord::ExecutorProcess;
 use mandate_executord::health::PROBE_EVERY_S;
 use mandate_process::State;
 use mandate_time::UtcNanos;
-use support::{Error, Journal, Paper, at, deployed, start_allowing};
+use support::{Error, Fault, Journal, Paper, at, deployed, start_allowing};
 
 /// An idle executor: an agent deployed, no order working, ready after its start.
 fn idle() -> Result<(Journal, Paper, ExecutorProcess<Journal, Paper>), Error> {
@@ -151,5 +151,32 @@ fn a_good_probe_between_lost_ones_restricts_nothing() -> Result<(), Error> {
             restriction_causes(&journal)
         );
     }
+    Ok(())
+}
+
+/// A restriction a probe leads to while the journal is down is held like any append (E21-26): it
+/// is journaled once appends succeed, and nothing but the probe's reads reached the broker.
+#[test]
+fn a_probe_s_restriction_waits_out_a_journal_outage() -> Result<(), Error> {
+    let (journal, broker, mut process) = idle()?;
+    let before = broker.seen().len();
+    broker.lose_next_answers(64);
+    journal.fail_next(&[Fault::Unavailable; 64]);
+    for pass in 1..=4 {
+        process.step(after(pass * PROBE_EVERY_S)?);
+        if matches!(process.lifecycle().state(), State::Exited(_)) {
+            return Err(format!("pass {pass}: the outage stopped the process").into());
+        }
+    }
+    assert!(restriction_causes(&journal).is_empty(), "nothing committed");
+    let (probes, only_reads) = reads(&broker, before);
+    assert!(only_reads, "only the probe's reads reached the broker");
+    assert_eq!(
+        probes, 3,
+        "probes stop once the restriction is held in doubt"
+    );
+    journal.clear_faults();
+    process.step(after(5 * PROBE_EVERY_S)?);
+    assert_eq!(restriction_causes(&journal), ["connection_unavailable"]);
     Ok(())
 }
