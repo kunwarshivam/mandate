@@ -904,7 +904,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     }
                     return true;
                 }
-                if !failed_on_broker(&input) {
+                if !held_on_core_error(&input) {
                     self.lifecycle.observe(now, Lifecycled::Failed);
                     return false;
                 }
@@ -1376,7 +1376,7 @@ fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> 
 /// answers, updates and snapshots, the quotes its feed sends, and an agent's thesis records (DEC-2823),
 /// which the restart would read again, so stopping on one would be a crash loop that also stops every exit, protective order and
 /// kill switch. Any other input's error, the hold's own included, stops the process as before.
-fn failed_on_broker(input: &Input) -> bool {
+fn held_on_core_error(input: &Input) -> bool {
     matches!(
         input,
         Input::Broker(_)
@@ -1497,11 +1497,11 @@ mod tests {
     /// DEC-2821: a core error is held for a broker answer, and for no other input, the hold's
     /// own among them.
     #[test]
-    fn a_core_error_is_held_for_a_broker_input_alone() -> Result<(), Error> {
-        assert!(failed_on_broker(&Input::Broker(Ok(
+    fn a_core_error_is_held_for_a_broker_input_or_thesis_records_alone() -> Result<(), Error> {
+        assert!(held_on_core_error(&Input::Broker(Ok(
             mandate_executor::BrokerOutcome::AccountWideAccepted
         ))));
-        assert!(failed_on_broker(&Input::Theses {
+        assert!(held_on_core_error(&Input::Theses {
             agent: AgentId("agenta".to_owned()),
             records: Vec::new(),
         }));
@@ -1512,7 +1512,7 @@ mod tests {
             Input::BatchRefused,
             handoff(Purpose::Open)?,
         ] {
-            assert!(!failed_on_broker(&other), "{other:?}");
+            assert!(!held_on_core_error(&other), "{other:?}");
         }
         Ok(())
     }
