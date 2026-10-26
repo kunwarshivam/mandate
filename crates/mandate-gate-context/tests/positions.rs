@@ -1058,3 +1058,51 @@ fn a_replacement_of_a_protective_order_covers_what_its_original_left() {
         "mdt-e the 6 mdt-b left, none of it filled"
     );
 }
+
+/// A start ends only an open interval of its own instrument: never another instrument's, and
+/// never one already ended, even one that ended uncovered.
+#[test]
+fn a_start_ends_only_an_open_interval_of_its_own_instrument() {
+    let mut read = bought();
+    let in_b = |action: &str, at: i64| protection(action, at).with("instrument_id", text(ASSET_B));
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &in_b("unprotected_start", START + 1),
+    );
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &in_b("unprotected_end", START + 2).with("uncovered", Value::Bool(true)),
+    );
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &protection("unprotected_start", START + 3),
+    );
+    assert_eq!(
+        read.protection(ASSET_B).unprotected_since,
+        Some(instant(START + 1)),
+        "A's start leaves B's interval open"
+    );
+
+    let mut read = bought();
+    for (action, at, uncovered) in [
+        ("unprotected_start", 1, false),
+        ("unprotected_end", 2, true),
+        ("unprotected_start", 3, false),
+        ("unprotected_end", 4, true),
+        ("unprotected_start", 5, false),
+    ] {
+        let mut payload = protection(action, START + at);
+        if uncovered {
+            payload = payload.with("uncovered", Value::Bool(true));
+        }
+        on(&mut read, "ProtectionChanged", &payload);
+    }
+    assert_eq!(
+        read.protection(ASSET).unprotected_since,
+        Some(instant(START + 5)),
+        "the second start ended the first interval, the third the second"
+    );
+}
