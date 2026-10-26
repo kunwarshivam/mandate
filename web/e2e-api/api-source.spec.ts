@@ -138,8 +138,14 @@ test("the audit timeline reads the journal's streams from the API, newest first,
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
 });
 
-test("a screen the API does not serve yet says so, and shows no fixture figures", async ({ page }) => {
+test("the gate decisions are read from the journal, with no fixture tag", async ({ page }) => {
   await page.goto("/audit/decisions?scenario=approvals");
+  await expect(page.getByRole("list", { name: "Gate decisions" }).getByRole("listitem").first()).toBeVisible();
+  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
+});
+
+test("a screen the API does not serve yet says so, and shows no fixture figures", async ({ page }) => {
+  await page.goto("/agents/agt_01JB3K8Y4N7QW2M6R9T5V0XZAC/orders?scenario=approvals");
   await expect(page.getByRole("heading", { name: "Not available from your deployment yet" })).toBeVisible();
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
 });
