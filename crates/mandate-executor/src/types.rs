@@ -1001,6 +1001,10 @@ pub enum Input {
     /// A quote or mark, used for pricing and never for time.
     Market(MarketObservation),
     Command(Command),
+    /// The journal refused the batch the last input drafted, as `Invalid` (DEC-2805). Nothing of
+    /// it committed, so the core forgets it, and holds every agent's openings and alerts the owner
+    /// once, rather than stopping the process and its exits, protection and kill switch.
+    BatchRefused,
 }
 
 /// What one step asks the shell to do, in order. The shell runs the journal appends first and
