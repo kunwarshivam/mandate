@@ -527,10 +527,15 @@ pub(crate) const NEWS_KEY_SECRET: &str = "news-data-key";
 
 /// The one line `mandate vault put news-data-key` writes, `<key id>:<secret>`, from the two
 /// environment secrets: empty when both are, so the vault keeps what it holds. One without the
-/// other, or a part that holds `:` or a line break, fails the step, so a half key is never written
-/// (DEC-2277).
+/// other, or a part that holds `:`, whitespace or a control character, as a paste can leave, fails
+/// the step, so a key the reader would refuse is never written (DEC-2277).
 pub(crate) fn news_data_key(key_id: &str, secret: &str) -> Result<String> {
-    let clean = |part: &str| !part.is_empty() && !part.contains([':', '\n', '\r']);
+    let clean = |part: &str| {
+        !part.is_empty()
+            && part
+                .chars()
+                .all(|c| c != ':' && !c.is_whitespace() && !c.is_control())
+    };
     match (key_id.is_empty(), secret.is_empty()) {
         (true, true) => Ok(String::new()),
         _ if clean(key_id) && clean(secret) => Ok(format!("{key_id}:{secret}")),
@@ -1379,6 +1384,9 @@ mod tests {
             ("PKID", "sec:ret"),
             ("PKID\n", "secret"),
             ("PKID", "secret\r"),
+            ("PKID ", "secret"),
+            ("PKID", " secret"),
+            ("PKID", "sec\tret"),
         ] {
             assert!(news_data_key(id, secret).is_err(), "{id:?} {secret:?}");
         }

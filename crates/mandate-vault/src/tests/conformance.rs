@@ -394,6 +394,7 @@ async fn every_session<H: Harness>(h: &H, now: UtcNanos) -> Vec<H::Source> {
         h.source(Identity::Runtime, now).await,
         h.source(Identity::SecretImport, now).await,
         h.source(Identity::ModelGateway, now).await,
+        h.source(Identity::NewsReader, now).await,
         h.source(Identity::EmailSender, now).await,
     ]
 }
