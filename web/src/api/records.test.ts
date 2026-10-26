@@ -4,8 +4,8 @@ import { recordsRead } from "./records";
 
 const STREAM = "agent:ws_1:agt_1";
 const sha = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
-const record = (seq: number, payload: unknown, overrides: Record<string, unknown> = {}) => {
-  const body = JSON.stringify({ event_type: "DecisionMade", payload });
+const record = (seq: number, payload: unknown, overrides: Record<string, unknown> = {}, causation: string | null = null) => {
+  const body = JSON.stringify({ ...(causation ? { causation_id: causation } : {}), event_type: "DecisionMade", payload });
   return { seq, event_id: `E${seq}`, event_type: "DecisionMade", recorded_at: "2026-10-26T10:00:00.000000000Z", prev_hash: "0".repeat(64), hash: sha(body), body: Buffer.from(body).toString("base64"), ...overrides };
 };
 const page = (events: unknown[]) => ({ stream_id: STREAM, head: { seq: events.length, hash: "0".repeat(64), recorded_at: "2026-10-26T10:00:00.000000000Z" }, events });
@@ -25,6 +25,11 @@ describe("a stream's records, each body checked against its hash (§4.8.1)", () 
       const read = recordsRead(STREAM)(page([e]), "");
       expect(read.ok && read.value.events[0]).toMatchObject({ matches: false, payload: null });
     }
+  });
+
+  it("reads the envelope's causation id, null when it names none", () => {
+    const read = recordsRead(STREAM)(page([record(1, {}, {}, "E0"), record(2, {})]), "");
+    expect(read.ok && read.value.events.map((e) => e.causation_id)).toEqual(["E0", null]);
   });
 
   it("refuses a page for another stream, records out of order, or a hash that is not 64 hex", () => {

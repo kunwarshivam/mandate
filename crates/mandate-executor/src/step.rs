@@ -204,6 +204,7 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
     match input {
         Input::Started(_) => Err(ExecutorError::AlreadyStarted),
         Input::Journal(event) => copied(batch, &event),
+        Input::Acknowledgment(handoff) => crate::acknowledge::copy(batch, &handoff),
         Input::Market(_) => watchdog(batch),
         Input::Tick(_) => {
             lookups_due(batch);
