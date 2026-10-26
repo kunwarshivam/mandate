@@ -853,6 +853,43 @@ pub fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
     gate::evaluate(input)
 }
 
+/// A check the cell's runtime's advisory pass may defer to the executor's binding gate, because
+/// nothing journals its facts yet (DEC-2378 item 11). The binding gate defers none of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Deferred {
+    /// §3.2's instrument items: status, exchange, IPO and PTP, the crypto pair's quote currency,
+    /// and the ETP rule.
+    Eligibility,
+    /// §3.2's price floor and liquidity floors, read from the instrument's bars.
+    LiquidityFloor,
+    /// §9.6's participation caps, read from the trailing and daily volumes.
+    Participation,
+    /// §9.2's day-trade budget, check 8.
+    DayTradeBudget,
+}
+
+/// The advisory pass's answer: the decision over every check not deferred, and the deferred
+/// checks, named, never reported passed (DEC-2378 item 11, condition (i)). An exit defers
+/// nothing, so its decision is the binding gate's (`AGENTS.md` rule 13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Advisory {
+    pub decision: Decision,
+    pub deferred: BTreeSet<Deferred>,
+}
+
+/// The advisory pass of an opening whose `deferred` checks' facts are not journaled: every other
+/// check as [`evaluate`] makes it, which is this with nothing deferred. Only the cell's runtime's
+/// dry run calls it; the executor's binding gate calls [`evaluate`] (`AGENTS.md` rule 1).
+///
+/// # Errors
+/// As [`evaluate`].
+pub fn evaluate_deferring(
+    input: &GateInput<'_>,
+    deferred: &BTreeSet<Deferred>,
+) -> Result<Advisory, GateError> {
+    gate::evaluate_deferring(input, deferred)
+}
+
 /// §9.6's minimum resting time, and §5.3 rule 5's cancels before a risk-reducing order.
 ///
 /// # Errors

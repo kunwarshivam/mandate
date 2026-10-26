@@ -7,12 +7,15 @@
 //! DEC-129 item 29's fail-closed refusal of an opening a missing check might have denied has
 //! nothing left to refuse: the gate decides every proposal itself.
 
+use std::collections::BTreeSet;
+
 use mandate_num::Qty;
 
 use crate::{
-    AccountState, AgentMode, AssetClass, Check, CheckOutcome, Computed, Decision, GateError,
-    GateInput, InstrumentRestriction, Origin, ProposedKind, Purpose, ReasonCode, Session,
-    SessionAt, Side, Verdict, WorkingUniverse, account_rules, conduct, floor, limits, session,
+    AccountState, Advisory, AgentMode, AssetClass, Check, CheckOutcome, Computed, Decision,
+    Deferred, GateError, GateInput, InstrumentRestriction, Origin, ProposedKind, Purpose,
+    ReasonCode, Session, SessionAt, Side, Verdict, WorkingUniverse, account_rules, conduct, floor,
+    limits, session,
 };
 
 /// The eight checks, in §9.1's order.
@@ -41,8 +44,20 @@ fn refuse_nothing() -> Result<Decision, GateError> {
 /// allowed order then carries the [`conduct::pacing`] checks 3 to 6 put on it, or `None` when
 /// nothing did.
 pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
+    Ok(evaluate_deferring(input, &BTreeSet::new())?.decision)
+}
+
+/// [`evaluate`] with `deferred` skipped for an opening and named in the answer (DEC-2378 item 11).
+/// An exit defers nothing.
+pub(crate) fn evaluate_deferring(
+    input: &GateInput<'_>,
+    deferred: &BTreeSet<Deferred>,
+) -> Result<Advisory, GateError> {
     if input.proposed.qty.is_zero() {
-        return refuse_nothing();
+        return Ok(Advisory {
+            decision: refuse_nothing()?,
+            deferred: BTreeSet::new(),
+        });
     }
     let held = input
         .agent
@@ -54,6 +69,11 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
     let purpose = assign_purpose(p.origin, p.side, p.qty, held);
     let opening = matches!(purpose, Purpose::Open | Purpose::Increase);
     let at = session::derive(input.now, input.config, input.instrument.asset_class)?;
+    let skipped = if opening {
+        deferred.clone()
+    } else {
+        BTreeSet::new()
+    };
     let mut computed = Computed::default();
     let mut checks = Vec::with_capacity(ORDER.len());
     let mut stop: Option<Stop> = None;
@@ -62,7 +82,13 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
             checks.push(CheckOutcome::NotReached(check));
             continue;
         }
-        match run(check, input, (purpose, opening, &at), &mut computed)? {
+        match run(
+            check,
+            input,
+            (purpose, opening, &at),
+            &skipped,
+            &mut computed,
+        )? {
             Some((verdict, reason)) => {
                 checks.push(CheckOutcome::Failed(check, reason));
                 stop = Some((verdict, reason));
@@ -79,13 +105,16 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
     } else {
         None
     };
-    Ok(Decision {
-        verdict,
-        reason,
-        purpose,
-        pacing,
-        checks,
-        computed,
+    Ok(Advisory {
+        decision: Decision {
+            verdict,
+            reason,
+            purpose,
+            pacing,
+            checks,
+            computed,
+        },
+        deferred: skipped,
     })
 }
 
@@ -93,12 +122,13 @@ fn run(
     check: Check,
     input: &GateInput<'_>,
     (purpose, opening, at): (Purpose, bool, &SessionAt),
+    skipped: &BTreeSet<Deferred>,
     computed: &mut Computed,
 ) -> Result<Option<Stop>, GateError> {
     match check {
         Check::AccountAndMode => Ok(account_and_mode(input, purpose, opening)),
         Check::UniverseAndLimits if opening => match working_universe(input, computed)? {
-            None => match floor::eligibility(input)? {
+            None => match floor::eligibility(input, skipped)? {
                 None => limits::position_order_and_cooldown(input, computed),
                 stop => Ok(stop),
             },
@@ -109,12 +139,16 @@ fn run(
         }
         Check::OrderConstraints => order_constraints(input, opening),
         Check::MarkAndCollar if opening => conduct::mark_and_collar(input),
-        Check::ConductControls if opening => conduct::conduct_controls(input, at, computed),
+        Check::ConductControls if opening => {
+            conduct::conduct_controls(input, at, skipped, computed)
+        }
         Check::BuyingPowerAndExposure if opening => match account_rules::buying_power(input)? {
             None => limits::gross_exposure(input, computed),
             stop => Ok(stop),
         },
-        Check::DayTradeBudget if opening => account_rules::day_trade_budget(input),
+        Check::DayTradeBudget if opening && !skipped.contains(&Deferred::DayTradeBudget) => {
+            account_rules::day_trade_budget(input)
+        }
         _ => Ok(None),
     }
 }
@@ -1163,12 +1197,13 @@ mod tests {
 
     /// The floor's verdict for a scenario built directly, rather than from a [`FloorRow`].
     fn floor(o: &Owned) -> Result<Option<ReasonCode>, GateError> {
-        o.with_input(floor::eligibility)?.map(|stop| {
-            stop.map(|(verdict, code)| {
-                assert_eq!(verdict, Verdict::Deny, "the floor only ever denies");
-                code
+        o.with_input(|input| floor::eligibility(input, &BTreeSet::new()))?
+            .map(|stop| {
+                stop.map(|(verdict, code)| {
+                    assert_eq!(verdict, Verdict::Deny, "the floor only ever denies");
+                    code
+                })
             })
-        })
     }
 
     fn floor_of(o: &mut Owned, r: FloorRow) -> Result<Option<ReasonCode>, GateError> {
@@ -1234,12 +1269,13 @@ mod tests {
             matches!(r.permission, 0 | 1),
             matches!(r.permission, 0 | 2),
         );
-        o.with_input(floor::eligibility)?.map(|stop| {
-            stop.map(|(verdict, code)| {
-                assert_eq!(verdict, Verdict::Deny, "the floor only ever denies");
-                code
+        o.with_input(|input| floor::eligibility(input, &BTreeSet::new()))?
+            .map(|stop| {
+                stop.map(|(verdict, code)| {
+                    assert_eq!(verdict, Verdict::Deny, "the floor only ever denies");
+                    code
+                })
             })
-        })
     }
 
     /// Every row of §3.2 against [`floor_oracle`]: 2 configs (compliant, and below every platform
