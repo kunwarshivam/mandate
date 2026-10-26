@@ -167,7 +167,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
 
   function asOf(): Watermark[] {
     const seq = commands.length;
-    return [{ stream_id: "control", seq, hash: `sha256:${sha256Hex(`${workspaceId}:control:${seq}`)}`, recorded_at: canonical(workspace.now) }];
+    return [{ stream_id: `ctl:${workspaceId}`, seq, hash: `sha256:${sha256Hex(`${workspaceId}:control:${seq}`)}`, recorded_at: canonical(workspace.now) }];
   }
 
   const servedAt = canonical(workspace.now);

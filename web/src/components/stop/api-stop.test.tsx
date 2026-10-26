@@ -1,9 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { type Fetch } from "@/api/client";
-import { createMockServer } from "@/api/mock-server";
+import { MOCK_PASSKEY_ID, createMockServer } from "@/api/mock-server";
+import type { Authenticator } from "@/api/passkey";
 import type { AgentDetail, ApiView } from "@/api/read-models";
 import { ApiRuntimeProvider } from "@/lib/api-runtime";
+import { type Role, RoleProvider } from "@/lib/roles";
+import { sha256Hex } from "@/lib/sha256";
+import { mockAuthenticator } from "@/test/set-up";
 import { UNREAD_CONNECTION, buildApiRecord } from "./api-record";
 import { recordHref } from "./commands";
 import { recordLines } from "./record";
@@ -18,7 +22,7 @@ const ORIGIN = "https://api.owlhead.ai";
  * build from what the API serves, so the switch is reachable there, and nothing the API does not
  * serve is shown as "none".
  */
-function mount(ui: React.ReactNode, scenario: "normal" | "unreachable" | "silent" = "normal") {
+function mount(ui: React.ReactNode, scenario: "normal" | "unreachable" | "silent" = "normal", options: { authenticator?: Authenticator | null; role?: Role } = {}) {
   const server = createMockServer({ workspaceId: WS, scenario: scenario === "silent" ? "normal" : scenario });
   const posts: Array<{ path: string; body: Record<string, unknown> }> = [];
   const fetch: Fetch = (input, init) => {
@@ -28,12 +32,18 @@ function mount(ui: React.ReactNode, scenario: "normal" | "unreachable" | "silent
     return server.fetch(input, init);
   };
   render(
-    <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={fetch} refreshMs={60_000} statusPollMs={5} retryMs={5}>
-      {ui}
-    </ApiRuntimeProvider>,
+    <RoleProvider initial={options.role ?? "owner"}>
+      <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={fetch} refreshMs={60_000} statusPollMs={5} retryMs={5} {...("authenticator" in options ? { authenticator: options.authenticator } : {})}>
+        {ui}
+      </ApiRuntimeProvider>
+    </RoleProvider>,
   );
   return { posts };
 }
+
+/** DEC-2102 item 1's object for a resume or Stop at the control head, digested its own way (DEC-2140 item 2); the mock's head is the count of commands it recorded. */
+const commandDigest = (confirms: string, agentId: string, head: number) =>
+  `sha256:${sha256Hex(`{"agent":"${agentId}","bid":null,"bid_size":null,"confirms":"${confirms}","control_head":"${head}","event":null,"floor":null,"instrument":null}`)}`;
 
 const agent = (over: Partial<AgentDetail>): AgentDetail => ({
   agent_id: "agt_1",
@@ -145,5 +155,52 @@ describe("the Stop sheet and D10 over the API (rule 13)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Use passkey" }));
     await waitFor(() => expect(posts.filter((p) => p.path.endsWith("/kill-switch"))).toHaveLength(1), { timeout: 5000 });
     expect(posts.find((p) => p.path.endsWith("/kill-switch"))?.body).toMatchObject({ scope: { kind: "connection", id } });
+  });
+});
+
+describe("resume and Stop over the API, with the owner's passkey (DEC-2140)", () => {
+  const AGENT = "agt_01JB3KAQ5R8TV2N4M6P9S1W3XD";
+  const sheet = () => screen.findByRole("dialog", { name: /^Stop/ });
+  const passkey = () => mockAuthenticator(MOCK_PASSKEY_ID);
+
+  it("resumes a paused agent with a passkey bound to resume, the agent and the control head the deployment served", async () => {
+    const authenticator = passkey();
+    const { posts } = mount(<StopSheet open onOpenChange={() => {}} agentId={AGENT} />, "normal", { authenticator: authenticator.get });
+    fireEvent.click(await within(await sheet()).findByRole("button", { name: /^Pause (?!all)/ }));
+    const resume = await within(await sheet()).findByRole("button", { name: /^Resume / }, { timeout: 5000 });
+    fireEvent.click(resume);
+    await waitFor(() => expect(posts.filter((p) => p.path.endsWith(`/agents/${AGENT}/resume`))).toHaveLength(1), { timeout: 5000 });
+    const challenge = posts.find((p) => p.path.endsWith("/step-up/challenges"))!.body as { action: { kind: string; digest: string } };
+    expect(challenge.action).toEqual({ kind: "resume", digest: commandDigest("resume", AGENT, 1) });
+    const body = posts.find((p) => p.path.endsWith("/resume"))!.body;
+    expect(Object.keys(body).sort()).toEqual(["record", "step_up", "step_up_assertion"]);
+    expect(body.step_up).toMatchObject({ method: "passkey" });
+    expect(body.step_up_assertion).toMatchObject({ passkey_id: MOCK_PASSKEY_ID });
+    expect(authenticator.calls).toHaveLength(1);
+  });
+
+  it("stops an agent with a passkey bound to stop, saying a Stop sells nothing and the kill switch does", async () => {
+    const { posts } = mount(<StopSheet open onOpenChange={() => {}} agentId={AGENT} />, "normal", { authenticator: passkey().get });
+    const stop = await within(await sheet()).findByRole("button", { name: /^Stop / });
+    expect(stop).toHaveTextContent("A Stop sells nothing; the kill switch below sells its positions.");
+    fireEvent.click(stop);
+    await waitFor(() => expect(posts.filter((p) => p.path.endsWith(`/agents/${AGENT}/stop`))).toHaveLength(1), { timeout: 5000 });
+    const challenge = posts.find((p) => p.path.endsWith("/step-up/challenges"))!.body as { action: { kind: string; digest: string } };
+    expect(challenge.action).toEqual({ kind: "stop", digest: commandDigest("stop", AGENT, 0) });
+    expect(posts.find((p) => p.path.endsWith("/stop"))!.body).toMatchObject({ release: false, warning_shown: null, step_up: { method: "passkey" } });
+  });
+
+  it("sends nothing when the browser cannot use a passkey, says so in words, and points to the kill switch", async () => {
+    const { posts } = mount(<StopSheet open onOpenChange={() => {}} agentId={AGENT} />, "normal", { authenticator: null });
+    fireEvent.click(await within(await sheet()).findByRole("button", { name: /^Stop / }));
+    await waitFor(() => expect(document.querySelector("[data-phase=undelivered]")).toHaveTextContent("Not sent: this browser can't use a passkey. Nothing changed. The kill switch needs no passkey."), { timeout: 5000 });
+    expect(posts.filter((p) => /\/(stop|resume)$/.test(p.path))).toEqual([]);
+  });
+
+  it("offers neither to a role that cannot stop", async () => {
+    mount(<StopSheet open onOpenChange={() => {}} agentId={AGENT} />, "normal", { role: "approver" });
+    const shown = await sheet();
+    await within(shown).findByRole("button", { name: /^Pause (?!all)/ });
+    expect(within(shown).queryByRole("button", { name: /^(Resume|Stop) / })).toBeNull();
   });
 });

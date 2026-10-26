@@ -45,6 +45,12 @@ export interface Command {
   sentAt: Iso;
   recordedAt?: Iso;
   record?: CommandRecord;
+  /** Over the API, a resume or Stop waits for the owner's passkey before anything is sent (DEC-2140). */
+  awaitingPasskey?: boolean;
+  /** Why it was not sent, as the passkey check or the deployment said; a code, never shown as one. */
+  reason?: string;
+  /** Where the runtime settled it, once its status was read (§5.5). */
+  settled?: "applied" | "refused" | "ended";
 }
 
 /**

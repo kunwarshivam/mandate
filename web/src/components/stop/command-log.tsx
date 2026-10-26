@@ -11,18 +11,30 @@ export function CommandEntry({ command, label }: { command: Command; label: stri
   return (
     <p data-phase={command.phase} className="reveal rounded-xl bg-background px-4 py-3 text-sm">
       <span className="font-semibold">{commandTitle(command.kind, label)}.</span>{" "}
-      <PhaseLine phase={command.phase} at={clock(command.recordedAt ?? now)} recorded={recordedLine(command.kind, label)} />
+      <PhaseLine command={command} at={clock(command.recordedAt ?? now)} recorded={recordedLine(command.kind, label)} />
     </p>
   );
 }
 
-function PhaseLine({ phase, at, recorded }: { phase: Command["phase"]; at: string; recorded: string }) {
+/** Why a resume or Stop was not sent, in words: the passkey check's refusals, never their codes (DEC-2140). */
+const PASSKEY_REFUSED: Readonly<Record<string, string>> = {
+  passkey_unavailable: "this browser can't use a passkey",
+  no_passkey: "you have no passkey on your deployment yet. Add one in Settings",
+  passkey_cooling_off: "your passkey is new, and confirms only once its first 24 hours have passed",
+  passkey_canceled: "the passkey check was canceled or timed out",
+  passkey_failed: "your passkey's answer could not be read",
+};
+
+function PhaseLine({ command, at, recorded }: { command: Command; at: string; recorded: string }) {
+  const { phase } = command;
   switch (phase) {
     case "sent":
-      return "Sent; waiting for the runtime to record it.";
+      return command.awaitingPasskey ? "Waiting for your passkey. Nothing is sent until your browser's passkey check is done." : "Sent; waiting for the runtime to record it.";
     case "recorded":
+      if (command.settled === "refused" || command.settled === "ended") return `Recorded at ${at}, then refused by the runtime: nothing changed from this request. The journal says why.`;
       return `Recorded at ${at}. ${recorded}`;
     case "undelivered":
+      if (command.reason && Object.hasOwn(PASSKEY_REFUSED, command.reason)) return `Not sent: ${PASSKEY_REFUSED[command.reason]}. Nothing changed. The kill switch needs no passkey.`;
       return "Not delivered: your deployment did not answer, so nothing changed from this request. Use the broker directly, as described above.";
     case "unknown":
       return "The result is unknown; we are checking. Nothing on screen changes until the journal answers.";
