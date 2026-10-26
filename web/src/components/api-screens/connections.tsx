@@ -163,6 +163,17 @@ export function ApiConnections({ go = (url: string) => window.location.assign(ur
             {flow?.phase === "leaving" ? <p role="status">Taking you to Alpaca.</p> : null}
           </Section>
         ) : null}
+        <Section title="Robinhood Agentic Trading">
+          <div className="grid gap-2" data-slot="robinhood-real-money">
+            <p className="text-sm">
+              Real money: <strong>off</strong>. Robinhood has no paper environment, so a Robinhood account is always real money. Real money stays off for this workspace until counsel signs off; your
+              agents trade on Alpaca paper.
+            </p>
+            <Link href="/go-live" className="w-fit text-sm underline underline-offset-4">
+              Going live
+            </Link>
+          </div>
+        </Section>
       </div>
     </WorkspaceGate>
   );

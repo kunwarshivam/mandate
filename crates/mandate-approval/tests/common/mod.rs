@@ -96,6 +96,7 @@ pub fn content() -> RequestContent {
             .collect(),
         deadline: RiskClock(DEADLINE),
         execution: None,
+        deferred_to_binding: Vec::new(),
     }
 }
 
