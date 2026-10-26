@@ -623,8 +623,8 @@ fn a_deployed_run_reads_its_ports_from_the_deployment() -> Result<(), Error> {
 
 /// G2b-2: a deployed run's binding gate reads the run's own broker's facts. The fixture run over a
 /// quoting fixture, with the account journaled and the bars read, asks the fixture for SPY's asset
-/// record and the account when an opening is gated, and nothing when an exit is. The run keeps no
-/// facts of its own once deployed.
+/// record and the account when an opening is gated, and nothing when an exit is, and on those
+/// facts the opening is answered. The run keeps no facts of its own once deployed.
 #[test]
 fn a_deployed_runs_gate_reads_the_runs_own_broker_facts() -> Result<(), Error> {
     let (journal, store, _) = deployed()?;
@@ -660,8 +660,12 @@ fn a_deployed_runs_gate_reads_the_runs_own_broker_facts() -> Result<(), Error> {
         Vec::<String>::new(),
         "an exit asks the broker nothing"
     );
-    let _held_until_the_gate_admits_intraday_margin =
-        gate.input(&request(&agent, &spy, Purpose::Open, Side::Buy)?);
+    let opening = gate.input(&request(&agent, &spy, Purpose::Open, Side::Buy)?);
+    assert!(
+        opening.is_some(),
+        "on the fixture's own facts (an active, tradable, unhalted SPY and an intraday_margin \
+         account with no deficit) the opening is answered"
+    );
     assert_eq!(
         paper.served(),
         ["GET /v2/assets/SPY", "GET /v2/account"],
