@@ -1945,6 +1945,43 @@ fn two_surviving_instruments_hold_the_opening() -> Result<(), Error> {
     Ok(())
 }
 
+/// A research instrument is opened only through its own latest snapshot's DEC-523 checks, which the
+/// model composer does not repeat (DEC-2827 item 2): a later SPY snapshot of a leveraged ETP, its
+/// object in the store, holds every opening, so a snapshot that fails can only hold, never open;
+/// exits keep SPY as it last resolved.
+#[test]
+fn a_research_instrument_whose_latest_snapshot_fails_dec_523_only_holds() -> Result<(), Error> {
+    let (journal, mut store) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    let leveraged = DEMO_SNAPSHOT
+        .trim()
+        .replace(r#""etp":"plain""#, r#""etp":"leveraged""#);
+    assert_ne!(
+        leveraged,
+        DEMO_SNAPSHOT.trim(),
+        "the snapshot names its ETP class"
+    );
+    let hash = put(&mut store, &leveraged);
+    let (deployment, _) = self::deployment(&journal, store);
+    assert_eq!(answers(&deployment)?, (true, true, true, true, true, true));
+    journal.write(
+        CONTROL_STREAM,
+        "snap-2",
+        "ConfigSnapshotRegistered",
+        1,
+        None,
+        json(&format!(
+            r#"{{"admits_instruments":null,"content_hash":"{hash}","kind":"instrument_snapshot","model_id":null,"model_version":null,"params":[]}}"#
+        ))?,
+    )?;
+    assert_eq!(
+        answers(&deployment)?,
+        (false, false, false, true, true, true),
+        "the failing snapshot holds openings; exits keep SPY as it last resolved"
+    );
+    Ok(())
+}
+
 /// An instrument that no longer resolves once the control stream grows holds its openings: a
 /// later SPY snapshot registered with no object in the store leaves the version read but SPY
 /// unresolved, so the opening is never answered from the resolution of the shorter stream,

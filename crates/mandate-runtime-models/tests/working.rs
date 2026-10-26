@@ -368,6 +368,49 @@ fn the_latest_snapshot_names_the_dataset_and_an_unreadable_one_gives_none() {
     assert_eq!(evaluate(&models, Some(&rows), &theses), []);
 }
 
+/// Another instrument's latest snapshot naming no symbol takes nothing from this one, and a row of
+/// an environment the executor does not read holds the `Long` and keeps the exit.
+#[test]
+fn another_instrument_s_snapshot_or_an_unread_environment_takes_no_exit() {
+    let unsymbolled = QQQ_SNAPSHOT.replace(r#","symbol":"QQQ""#, "");
+    let theses = [proposed(1, "th-1", SPY, LATER, false)];
+    let (rows, store) = control(Quant::Long, &[SPY_SNAPSHOT, &unsymbolled]);
+    let rising = bars("unsymbolled", &["SPY", "QQQ"], false);
+    let models = composer(&rising, Quant::Long, &rows, store);
+    assert_eq!(
+        evaluate(&models, Some(&rows), &theses),
+        [(SPY.to_owned(), Said::Long)]
+    );
+    let both = [
+        proposed(1, "th-1", SPY, LATER, false),
+        proposed(2, "th-2", QQQ, EARLIER, false),
+    ];
+    assert_eq!(
+        evaluate(&models, Some(&rows), &both),
+        [(SPY.to_owned(), Said::Long)],
+        "an instrument whose latest snapshot names no symbol is not evaluated"
+    );
+
+    let (mut rows, store) = control(Quant::Exit, &[SPY_SNAPSHOT]);
+    rows.push(rule_set(9));
+    let falling = bars("environment", &["SPY"], true);
+    let models = composer(&falling, Quant::Exit, &rows, store.clone());
+    let exit = [(SPY.to_owned(), Said::Exit)];
+    assert_eq!(evaluate(&models, Some(&rows), &theses), exit);
+    if let Some(last) = rows.last_mut() {
+        last.environment = "staging".into();
+    }
+    let models = composer(&falling, Quant::Exit, &rows, store);
+    assert_eq!(evaluate(&models, Some(&rows), &theses), exit);
+    let (mut rows, store) = control(Quant::Long, &[SPY_SNAPSHOT]);
+    rows.push(StoredEvent {
+        environment: "staging".into(),
+        ..rule_set(9)
+    });
+    let models = composer(&rising, Quant::Long, &rows, store);
+    assert_eq!(evaluate(&models, Some(&rows), &theses), []);
+}
+
 /// A pinned mandate is read only as before: the working reading refuses it, and its evaluation
 /// never reads the agent stream's theses.
 #[test]

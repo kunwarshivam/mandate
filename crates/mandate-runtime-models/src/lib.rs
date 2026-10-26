@@ -267,7 +267,7 @@ impl PinnedModels {
         };
         let mut outputs = Vec::new();
         for instrument in ever_admitted(streams.agent) {
-            let (Some(symbol), Ok(instrument_id)) =
+            let (Some(Some(symbol)), Ok(instrument_id)) =
                 (symbols.get(&instrument), InstrumentId::new(&instrument))
             else {
                 continue;
@@ -292,39 +292,50 @@ impl PinnedModels {
     }
 }
 
-/// Whether every control row reads as a record with a payload: one that does not holds the
-/// executor's openings, so it holds every `Long` here too.
+/// Whether every control row reads as the executor reads one: a record with a payload, of the
+/// paper or the live environment (`ControlRecord::of_row`). One that does not holds the executor's
+/// openings, so it holds every `Long` here too.
 fn every_row_reads(control: &[StoredEvent]) -> bool {
     control.iter().all(|row| {
-        parse(&row.body)
-            .ok()
-            .is_some_and(|body| body.get("payload").is_some())
+        matches!(row.environment.as_str(), "paper" | "live")
+            && parse(&row.body)
+                .ok()
+                .is_some_and(|body| body.get("payload").is_some())
     })
 }
 
 /// The symbol of each instrument by asset id, from the latest `instrument_snapshot` registered on
-/// the control rows that names it, its object read from `artifacts` (DEC-523, DEC-2819 item 3).
-/// `None` when a snapshot's registration or object does not read, or names no instrument or
-/// symbol, which is never passed over for an earlier one. The snapshot's other DEC-523 members are
-/// the executor's to check before any opening.
+/// the control rows that names it, its object read from `artifacts` (DEC-523, DEC-2819 item 3):
+/// `None` for an instrument whose latest snapshot names no symbol. `None` overall when a snapshot's
+/// registration or object does not read or names no instrument, as the executor refuses every
+/// instrument then; such a snapshot is never passed over for an earlier one. The snapshot's other
+/// DEC-523 members are the executor's to check before any opening.
 fn symbols(
     control: &[StoredEvent],
     artifacts: &dyn ArtifactSource,
-) -> Option<BTreeMap<String, String>> {
+) -> Option<BTreeMap<String, Option<String>>> {
     let mut symbols = BTreeMap::new();
     for row in control
         .iter()
         .filter(|row| row.event_type == "ConfigSnapshotRegistered")
     {
-        let body = parse(&row.body).ok()?;
-        let payload = body.get("payload")?;
+        let Some(payload) = parse(&row.body)
+            .ok()
+            .and_then(|body| body.get("payload").cloned())
+        else {
+            continue;
+        };
         if payload.get("kind").and_then(Value::as_str) != Some("instrument_snapshot") {
             continue;
         }
         let reference = ArtifactRef::parse(payload.get("content_hash")?.as_str()?)?;
         let object = parse(&get_artifact(artifacts, &reference).ok()?).ok()?;
-        let text = |member: &str| Some(object.get(member)?.as_str()?.to_owned());
-        symbols.insert(text("instrument_id")?, text("symbol")?);
+        let instrument = object.get("instrument_id")?.as_str()?.to_owned();
+        let symbol = object
+            .get("symbol")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        symbols.insert(instrument, symbol);
     }
     Some(symbols)
 }
