@@ -31,6 +31,10 @@ use mandate_canon::Value;
 use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_time::UtcNanos;
 
+mod rule_set;
+
+pub use rule_set::{RuleSetError, gate_rule_set};
+
 /// One journal row, as its store hands it over, in journal order.
 #[derive(Debug, Clone, Copy)]
 pub struct Row<'a> {

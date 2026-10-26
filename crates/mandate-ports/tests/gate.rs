@@ -6,8 +6,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::Value;
 use mandate_num::{Price, Qty};
-use mandate_ports::{AdvisoryGateContext, AdvisoryOrderFacts, PortError, evaluate, proposed_order};
-use mandate_risk::{GateError, GateInput};
+use mandate_ports::{
+    AdvisoryGateContext, AdvisoryOrderFacts, PortError, evaluate, evaluate_deferring,
+    proposed_order,
+};
+use mandate_risk::{Deferred, GateError, GateInput};
 use mandate_runtime::{Proposal, Purpose};
 use mandate_time::UtcNanos;
 use proptest::prelude::*;
@@ -155,6 +158,31 @@ fn context() -> AdvisoryGateContext {
 
 /// The gate called directly over `context`, the oracle the shared port must equal.
 fn direct(proposal: &Proposal, context: &AdvisoryGateContext) -> String {
+    format!(
+        "{:?}",
+        with_input(proposal, context, mandate_risk::evaluate)
+    )
+}
+
+/// The advisory pass called directly over `context`, deferring `deferred`.
+fn direct_deferring(
+    proposal: &Proposal,
+    context: &AdvisoryGateContext,
+    deferred: &BTreeSet<Deferred>,
+) -> String {
+    format!(
+        "{:?}",
+        with_input(proposal, context, |input| mandate_risk::evaluate_deferring(
+            input, deferred
+        ))
+    )
+}
+
+fn with_input<T>(
+    proposal: &Proposal,
+    context: &AdvisoryGateContext,
+    gate: impl FnOnce(&GateInput<'_>) -> T,
+) -> T {
     let proposed = mandate_risk::ProposedOrder {
         instrument: mandate_risk::AssetId::new(proposal.instrument.as_str()).unwrap(),
         side: proposal.side,
@@ -168,23 +196,20 @@ fn direct(proposal: &Proposal, context: &AdvisoryGateContext) -> String {
         client_order_id: context.order.client_order_id,
         fee_reservation: context.order.fee_reservation,
     };
-    format!(
-        "{:?}",
-        mandate_risk::evaluate(&GateInput {
-            now: context.now,
-            pass: context.pass,
-            config: &context.config,
-            mandate: &context.mandate,
-            risk: &context.risk,
-            account: &context.account,
-            agent: &context.agent,
-            instrument: &context.instrument,
-            market: &context.market,
-            conduct: &context.conduct,
-            universe: &context.universe,
-            proposed: &proposed,
-        })
-    )
+    gate(&GateInput {
+        now: context.now,
+        pass: context.pass,
+        config: &context.config,
+        mandate: &context.mandate,
+        risk: &context.risk,
+        account: &context.account,
+        agent: &context.agent,
+        instrument: &context.instrument,
+        market: &context.market,
+        conduct: &context.conduct,
+        universe: &context.universe,
+        proposed: &proposed,
+    })
 }
 
 #[test]
@@ -579,6 +604,35 @@ proptest! {
         let theirs = direct(&proposal, &context);
         match evaluate(&proposal, &context) {
             Ok(decision) => prop_assert_eq!(format!("Ok({decision:?})"), theirs),
+            Err(PortError::Gate(error)) => prop_assert_eq!(format!("Err({error:?})"), theirs),
+            Err(other) => prop_assert!(false, "{other}"),
+        }
+    }
+
+    /// The advisory port never changes the advisory pass's answer: over every input and every
+    /// set of deferred checks, the shared evaluation and `mandate-risk`'s called directly agree.
+    #[test]
+    fn the_port_answers_as_the_advisory_pass_over_every_deferral(
+        varied in varied(),
+        units in 1_u32..12,
+        deferred in proptest::collection::btree_set(
+            prop_oneof![
+                Just(Deferred::Eligibility),
+                Just(Deferred::LiquidityFloor),
+                Just(Deferred::Participation),
+                Just(Deferred::DayTradeBudget),
+            ],
+            0..=4,
+        ),
+    ) {
+        let qty = if varied.fractional { format!("{units}.5") } else { units.to_string() };
+        let mut proposal = proposal(&qty);
+        proposal.side = varied.side;
+        proposal.limit = Price::parse("100").unwrap();
+        let context = varied_context(&varied);
+        let theirs = direct_deferring(&proposal, &context, &deferred);
+        match evaluate_deferring(&proposal, &context, &deferred) {
+            Ok(advisory) => prop_assert_eq!(format!("Ok({advisory:?})"), theirs),
             Err(PortError::Gate(error)) => prop_assert_eq!(format!("Err({error:?})"), theirs),
             Err(other) => prop_assert!(false, "{other}"),
         }

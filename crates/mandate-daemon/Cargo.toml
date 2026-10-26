@@ -24,6 +24,7 @@ mandate-process.workspace = true
 mandate-research.workspace = true
 mandate-research-driver.workspace = true
 mandate-research-run.workspace = true
+mandate-risk.workspace = true
 mandate-runtime.workspace = true
 mandate-spec.workspace = true
 mandate-store.workspace = true
