@@ -30,6 +30,9 @@
     "journal-role-mandate-deploy-manager": {
       "file": "./secrets/journal-role-mandate-deploy-manager.pgpass"
     },
+    "journal-role-mandate-dispatcher": {
+      "file": "./secrets/journal-role-mandate-dispatcher.pgpass"
+    },
     "journal-role-mandate-executor": {
       "file": "./secrets/journal-role-mandate-executor.pgpass"
     },
@@ -339,6 +342,7 @@
         "journal-role-mandate-connect-finish",
         "journal-role-mandate-runtime",
         "journal-role-mandate-scheduler",
+        "journal-role-mandate-dispatcher",
         "journal-role-mandate-gateway",
         "journal-role-mandate-exporter"
       ],

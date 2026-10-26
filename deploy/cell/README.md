@@ -20,6 +20,7 @@ runner that proves it (E21-37), with no cloud account, no broker credential and 
 | `images/deploy-manager.Dockerfile` | The deployment manager's image (`mandate-deployd`, DEC-1172), built beside it the same way |
 | `images/role-provisioner.Dockerfile` | The role provisioner's image (`mandate-provisionerd`, DEC-2350), built beside it the same way |
 | `images/scheduler.Dockerfile` | The workspace scheduler's image (`mandate-scheduler`, E21-29), built beside it the same way: the single writer of the hosted workspace's (`api.workspace`) `clock:` stream, asking no time server, so every measurement is out of tolerance |
+| `images/dispatcher.Dockerfile` | The workspace notification dispatcher's image (`mandate-dispatcher`, DEC-2500, DEC-2516), built beside it the same way: the single writer of the hosted workspace's `ntf:` stream, following every stream its control stream names, mailing only through the recorded transport, which sends nothing, with web push off. Its configuration file is the ConfigMap `dispatcher-config` (`templates/dispatcher.yaml`), and `cell up` sets its binary's digest as `dispatcher.build` |
 | `images/data.Dockerfile` | The workspace data process's image (`mandate-datad`), built beside it the same way: each listed instrument's daily bars and its latest trading day's minute bars from the cell's recorded series (`data.instruments`, each `{symbol, assetId, anchor}`; only the local cell's values list any: SPY and the second agent's QQQ), stored as `mandate-marketdata`'s datasets under the artifact store's `datasets/cell-recorded/`, with each instrument's closes object, which the runtime and the executor read read-only. A recording, never market data; it reaches no host |
 | `../tests/test_cell.py` | The chart's and the Compose file's invariants, each shown failing on a seeded bug |
 | `../tests/test_artifacts.py` | The shared artifact store: each process mounts it as it may, or not at all, each shown failing on a seeded bug |
@@ -140,7 +141,11 @@ On a host that refuses any process a negative `oom_score_adj`, even as root (som
 every pod then fails with `failed to update /proc/self/oom_score_adj: Permission denied`), set
 `MANDATE_CELL_RESTRICT_OOM=1` before the cluster is created (`cargo xtask cell down` first if one
 is running): the node's containerd then keeps each container's score at or above its own
-(`restrict_oom_score_adj`). These are local-cell results, never staging's (DEC-967 item 5).
+(`restrict_oom_score_adj`). In a cloud session whose small disk allowance sits under the kubelet's
+default hard-eviction thresholds (the node takes a `disk-pressure` taint and evicts the cell's pods
+with disk to spare), set `MANDATE_CELL_LOW_EVICTION=1` before the cluster is created: it lowers the
+`nodefs` and `imagefs` thresholds to 1%. It is off by default and never for CI or a laptop. These
+are local-cell results, never staging's (DEC-967 item 5).
 
 ### On a laptop
 

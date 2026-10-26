@@ -51,6 +51,11 @@ export interface MockServerOptions {
   passkeys?: ReadonlyArray<{ passkey_id: string; cool_off_ends: string | null }>;
 }
 
+/** The mock deployment's RP ID, as the server derives it from the app's origin. */
+export const MOCK_RP_ID = "app.owlhead.ai";
+/** The mock member's user handle: 16 bytes as unpadded base64url. */
+export const MOCK_USER_HANDLE = "AAECAwQFBgcICQoLDA0ODw";
+
 /** The mock member's one passkey id: 16 bytes as unpadded base64url. */
 export const MOCK_PASSKEY_ID = "bW9jay1wYXNza2V5LWlkLTE";
 
@@ -138,7 +143,11 @@ const ROUTES = Object.entries(OPERATIONS).map(([operation, route]) => ({
 }));
 
 export function createMockServer(options: MockServerOptions): MockServer {
-  const { workspaceId, scenario = "normal", hostConfirms = true, passkeys = [{ passkey_id: MOCK_PASSKEY_ID, cool_off_ends: null }] } = options;
+  const { workspaceId, scenario = "normal", hostConfirms = true } = options;
+  /** The member's passkeys, which an enrolment here adds to. */
+  const passkeys: Array<{ passkey_id: string; cool_off_ends: string | null }> = [...(options.passkeys ?? [{ passkey_id: MOCK_PASSKEY_ID, cool_off_ends: null }])];
+  /** Registration challenges held, by id (§3.6): each is dropped by the submit that names it. */
+  const registrations = new Map<string, { bytes: string; step_up_needed: boolean }>();
   /** Versions a passkey confirm recorded, and agents a deployment recorded, by id. */
   const confirmedVersions = new Set<string>();
   const deployedAgents = new Map<string, string>();
@@ -238,11 +247,20 @@ export function createMockServer(options: MockServerOptions): MockServer {
    * order submitted and each filled, in time order. Types and times only; the body is a stand-in.
    */
   function agentStream(streamId: string) {
+    if (streamId === `ctl:${workspaceId}`) return controlStream(streamId);
+    if (streamId === `acct:${workspaceId}:${workspace.connection.connection_id}`) return accountStream(streamId);
     const match = streamId.match(/^agent:([^:]+):(.+)$/);
     const agent = match && match[1] === workspaceId ? agentOf(match[2]) : undefined;
     if (!agent) return null;
     const orders = [...agent.past_orders, ...agent.orders].sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at));
     const told = [{ type: "AgentDeployed", at: orders[0]?.submitted_at ?? workspace.now }, ...orders.flatMap((o) => [{ type: "OrderSubmitted", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])])];
+    return told.map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: "0".repeat(64), body: "e30=" }));
+  }
+
+  /** The connection's account stream: every agent's orders requested and filled, in time order. Types and times only. */
+  function accountStream(streamId: string) {
+    const orders = workspace.agents.flatMap((a) => [...a.past_orders, ...a.orders]).sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at));
+    const told = orders.flatMap((o) => [{ type: "OrderRequestRecorded", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])]);
     return told.map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: "0".repeat(64), body: "e30=" }));
   }
 
@@ -263,7 +281,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const oneEvent = route.match(/^\/journal\/events\/([^/]+)$/);
     if (oneEvent) {
       const event = (controlStream(`ctl:${workspaceId}`) ?? []).find((e) => e.event_id === decodeURIComponent(oneEvent[1]));
-      return event ? read({ ...event, stream_id: `ctl:${workspaceId}`, artifact_refs: [], config_refs: {} }) : problem(404, "not_found", "none");
+      return event ? read({ event: { ...event, stream_id: `ctl:${workspaceId}`, artifact_refs: [], config_refs: {} } }) : problem(404, "not_found", "none");
     }
     if (route === "/health") return read(healthBody(workspace.health, servedAt));
     if (route === "/passkeys") return read({ passkeys: passkeys.map((p) => ({ passkey_id: p.passkey_id, alg: "es256", enrolled_at: servedAt, cool_off_ends: p.cool_off_ends })) });
@@ -483,8 +501,57 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return respond(201, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: asOf(), authorization_url: `${MOCK_AUTHORIZATION_ORIGIN}/oauth/authorize?state=${state}`, expires_at: expires, connection_id: entry.connection_id });
   }
 
+  /** `POST /passkeys/registration-challenges` (§3.6): a challenge held for one submit, bound to this member. */
+  function register(headers: Headers): Response {
+    if (!isIdempotencyKey(headers.get("Idempotency-Key") ?? "")) return problem(422, "invalid", "none");
+    if (workspace.environment === "live") return problem(403, "live_unavailable", "none");
+    const id = eventId(`${workspaceId}\nregistration\n${headers.get("Idempotency-Key")}`);
+    const bytes = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+    const held = { bytes, step_up_needed: passkeys.length > 0 };
+    registrations.set(id, held);
+    const expires = canonical(new Date(Date.parse(workspace.now) + CHALLENGE_SECONDS * 1000).toISOString());
+    return respond(201, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: [], challenge_id: id, webauthn_challenge: bytes, rp_id: MOCK_RP_ID, user_handle: MOCK_USER_HANDLE, exclude: passkeys.map((p) => p.passkey_id), step_up_needed: held.step_up_needed, issued_at: servedAt, expires_at: expires });
+  }
+
+  /**
+   * `POST /passkeys` (§3.6): the registration held and dropped, then the step-up a member who holds a
+   * passkey gives (`credential_enrol`), then the client data naming the registration as a
+   * `webauthn.create`. The attestation is not verified, which only the server's `enrol` does. A
+   * first passkey cools off for 24 hours.
+   */
+  function enrol(headers: Headers, body: string): Response {
+    if (!isIdempotencyKey(headers.get("Idempotency-Key") ?? "")) return problem(422, "invalid", "none");
+    let m: Record<string, unknown> = {};
+    try {
+      m = JSON.parse(body) as Record<string, unknown>;
+    } catch {
+      return problem(422, "invalid", "none");
+    }
+    const id = typeof m.challenge_id === "string" ? m.challenge_id : "";
+    const held = registrations.get(id);
+    registrations.delete(id);
+    if (!held) return problem(422, "invalid", "none");
+    if (held.step_up_needed) {
+      const refused = judgePasskey(m.step_up, m.step_up_assertion, "credential_enrol", `sha256:${sha256Hex(JSON.stringify({ op: "enrol", registration: id }))}`);
+      if (refused) return problem(refused.status, refused.code, "none");
+    } else if (m.step_up !== null || m.step_up_assertion !== null) return problem(422, "invalid", "none");
+    let client: { type?: unknown; challenge?: unknown } = {};
+    try {
+      client = JSON.parse(Buffer.from(String(m.client_data_json), "base64url").toString("utf8")) as typeof client;
+    } catch {
+      return problem(422, "invalid", "none");
+    }
+    const passkey = typeof m.passkey_id === "string" ? m.passkey_id : "";
+    if (client.type !== "webauthn.create" || client.challenge !== held.bytes || typeof m.attestation_object !== "string" || passkey.length < 22 || passkeys.some((p) => p.passkey_id === passkey)) return problem(422, "invalid", "none");
+    const cool = passkeys.length === 0 ? canonical(new Date(Date.parse(workspace.now) + 24 * 3600 * 1000).toISOString()) : null;
+    passkeys.push({ passkey_id: passkey, cool_off_ends: cool });
+    return respond(201, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: asOf(), event_id: eventId(`${workspaceId}\nenrol\n${id}`), passkey_id: passkey, alg: "es256", cool_off_ends: cool });
+  }
+
   function post(route: string, headers: Headers, body: string): Response {
     if (headers.get(CSRF_HEADER) !== "1") return problem(403, "forbidden", "none");
+    if (route === "/passkeys/registration-challenges") return register(headers);
+    if (route === "/passkeys") return enrol(headers, body);
     if (route === STEP_UP_CHALLENGE_ROUTE) return challenge(headers, body);
     if (route === CONNECT_START_ROUTE) return startConnect(headers, body);
     if (/^\/agents\/[^/]+\/go-live$/.test(route)) {

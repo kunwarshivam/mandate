@@ -433,3 +433,71 @@ nothing.
    only after the restart. **To stop all model spend at once**, revoke the key in OpenRouter: every
    call then ends `credential_invalid`, the safe default, with no output, so no proposal and no
    order.
+
+## L. Does Alpaca's free data plan carry halts? (trading spec §4.4, [DEC-2380](../docs/project/decisions/DEC-2380.md) item 2)
+
+The executor's binding gate holds every Alpaca paper opening while the instrument's halt status is
+unread (`crates/mandate-executord/src/gate.rs`, `DeployedGate::input`): no halt is ever assumed
+absent (`AGENTS.md` rule 3). The fixture broker is unaffected.
+Alpaca's stock stream has `statuses` and `lulds` channels, but its documentation does not say
+whether the free `iex` feed carries them. One run of a probe tells, and an agent builds the status
+reader only if it does.
+
+1. Close any other Alpaca market-data stream on the key first: the free plan allows one
+   connection.
+2. On your own machine, with your Alpaca **paper** key (never a live one) in the environment, run
+   once from the repository root:
+
+   ```bash
+   APCA_API_KEY_ID=... APCA_API_SECRET_KEY=... \
+     uv run --no-project --with 'websockets==15.0.1' python scripts/alpaca-status-probe.py
+   ```
+
+   It connects only to Alpaca's market-data stream, places no order, and prints only what the stream
+   answered to the sign-in and the subscription, then the message types that arrived in 20 seconds:
+   types, codes and channel names, never the key, the secret, a price or a time. `websockets` is
+   fetched for this run only and added to no project. Its last line is one of:
+   - `result: subscription confirmed for statuses and lulds, delivery observed (...)`;
+   - `result: subscription confirmed for statuses and lulds, delivery not observed`: the plan
+     takes the subscription, but a halt is rare, so no status arrived to prove delivery;
+   - `result: subscription not confirmed for statuses and lulds`;
+   - `result: sign-in refused`, or `result: inconclusive (...)`: run it again later.
+3. Paste the printed lines (they hold no secret) to the coordinator. If the subscription is not
+   confirmed, Alpaca paper openings stay held. A paid feed, or reading §4.4's presumed halt (a
+   dropped status feed bars only market orders, and openings are limit orders, §5.1) as allowing
+   them, are your decisions: the second weakens a safety rule (DEC-79).
+
+## M. The Alpaca news key, for the agent to read news ([DEC-2394](../docs/project/decisions/DEC-2394.md), [DEC-2277](../docs/project/decisions/DEC-2277.md))
+
+The agent reads Alpaca's news feed with a key of its own. It never uses a trading connection's
+token. The news reader reads the key once from the vault, at `platform/news-data-key`, and from
+nowhere else. No agent asks for the key, sees it or handles it. This step is yours alone.
+
+**Not yet runnable.** This step waits on the news reader's code: the vault path, `mandate vault put
+news-data-key`, and `infra`'s apply line. None has merged yet, and the PR that merges them will say
+so here. Until then, steps 3 and 4 below write nothing. Once it merges, and until you do this step,
+the reader refuses `no_key`, reads no news, and the agent works on without it.
+
+1. **A paper account for news alone.** In Alpaca's dashboard, open a new **paper** account for
+   this purpose only, with no strategy and no connection to the platform. Alpaca's API keys carry
+   no scopes, so this account is what the key can reach. Never use a live account (AGENTS.md
+   rule 8), and never the key of a paper account a trading connection uses. The reader refuses a
+   key whose id does not begin `PK`, Alpaca's paper prefix.
+2. **Its API key.** In that paper account, generate an API key. Alpaca shows a **key id** and a
+   **secret**. The secret is shown only once.
+3. **Both go in one place:** GitHub, repository **Settings → Environments → `infra-staging` →
+   Environment secrets → Add secret**, as `ALPACA_NEWS_KEY_ID` and `ALPACA_NEWS_SECRET`. Paste
+   them there only, never into a terminal, a chat, an issue or a file.
+   - The next staging `apply` reads them, masked at once.
+   - It writes them to the staging vault at `platform/news-data-key`, on the standard input of
+     `mandate vault put news-data-key`, through the secret-import identity.
+   - Only the news reader can read it there.
+   - The run prints `news data key: written`. Until you add both, it prints `not set` and changes
+     nothing.
+4. Dispatch `infra` with `apply` on `staging`.
+5. **To rotate it:** generate a new key in that paper account, replace both environment secrets,
+   run `apply` again, then restart the news reader so it reads the new key (its PR adds the
+   command here). Revoke the old key in
+   Alpaca only after the restart. **To stop all news reads at once**, revoke the key in Alpaca:
+   every fetch then fails with no item, so research goes on without news, and no order depends on
+   it.

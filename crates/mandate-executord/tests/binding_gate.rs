@@ -350,7 +350,7 @@ fn an_account_not_flat_or_not_active_holds_the_opening() -> Result<(), Error> {
 }
 
 #[test]
-fn a_regime_whose_day_trades_could_bind_holds_the_opening() -> Result<(), Error> {
+fn a_legacy_regime_whose_day_trades_could_bind_holds_the_opening() -> Result<(), Error> {
     let base = facts()?;
     let mut at_threshold = base.clone();
     if let Some(rules) = at_threshold.rules.as_mut() {
@@ -365,13 +365,28 @@ fn a_regime_whose_day_trades_could_bind_holds_the_opening() -> Result<(), Error>
         rules.prior_close_equity = usd("24999.99")?;
     }
     assert!(opening(&below)?.is_none(), "below the threshold");
-    let mut intraday = base;
-    if let Some(rules) = intraday.rules.as_mut() {
-        rules.regime = DayTradeRegime::IntradayMargin {
-            maintenance_excess: usd("50000")?,
-        };
+    Ok(())
+}
+
+/// Trading spec §9.2's `intraday_margin` counts no day trade, so it is answered whatever the prior
+/// close's equity, and the gate allows the opening; a broker-reported maintenance deficit, which
+/// puts the account's agents in exits only, holds it. No excess at all is no deficit.
+#[test]
+fn intraday_margin_is_answered_unless_the_broker_reports_a_deficit() -> Result<(), Error> {
+    for (excess, answered) in [("50000", true), ("0", true), ("-0.01", false)] {
+        let mut facts = facts()?;
+        if let Some(rules) = facts.rules.as_mut() {
+            rules.regime = DayTradeRegime::IntradayMargin {
+                maintenance_excess: usd(excess)?,
+            };
+            rules.prior_close_equity = usd("1000")?;
+        }
+        let input = opening(&facts)?;
+        assert_eq!(input.is_some(), answered, "{excess}");
+        if let Some(snapshot) = input {
+            assert_eq!(verdict(&snapshot)?, (Verdict::Allow, None), "{excess}");
+        }
     }
-    assert!(opening(&intraday)?.is_none(), "intraday margin");
     Ok(())
 }
 

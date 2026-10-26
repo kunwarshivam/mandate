@@ -75,8 +75,14 @@ fn stopped(fx: &mut Fixture, agent: &str) {
     fx.append_in("paper", CONTROL, "AgentStopped", None, payload);
 }
 
+/// The control stream's events but the owner alerts a kill switch commits beside its command
+/// (E8-9k), which `a_kill_switch_commits_its_owner_alert_in_its_batch` checks.
 fn control(fx: &Fixture) -> Vec<Value> {
-    fx.rows(CONTROL).iter().map(body).collect()
+    fx.rows(CONTROL)
+        .iter()
+        .filter(|row| row.event_type != "OwnerAlertSent")
+        .map(body)
+        .collect()
 }
 
 /// The owner's commands committed after the first `before` control-stream events.
@@ -348,6 +354,59 @@ fn a_kill_switch_is_one_owner_command_of_its_scope_with_no_step_up() {
                 submitted.event_id, submitted.seq
             )
         );
+    }
+}
+
+/// E8-9k (notifications spec §3.4): a kill switch from the CLI is one notice, as from the API. Its
+/// `OwnerCommandIssued` commits in one append with the `OwnerAlertSent` that names it as subject,
+/// cause, and `owner_command`, and the journal's own checks accept that batch, so the executor
+/// alerting no user's switch leaves none silent.
+#[test]
+fn a_kill_switch_commits_its_owner_alert_in_its_batch() {
+    for scope in [
+        Scope::Agent(AGENT.to_owned()),
+        Scope::Connection(CONN.to_owned()),
+        Scope::Workspace,
+    ] {
+        let mut fx = seeded();
+        let before = control(&fx).len();
+        let mut ids = FixedIds::default();
+        let submitted = answer(
+            "kill",
+            brake::kill(&mut fx.journal, &mut ids, &owner(), &scope, at(ASKED_AT)),
+        );
+        let rows = fx.rows(CONTROL);
+        let batch = &rows[before..];
+        let types: Vec<&str> = batch.iter().map(|r| r.event_type.as_str()).collect();
+        assert_eq!(
+            types,
+            ["OwnerCommandIssued", "OwnerAlertSent"],
+            "{scope:?}: the command and its alert"
+        );
+        assert_eq!(
+            fx.journal.attempts.last().map(Vec::len),
+            Some(2),
+            "{scope:?}: one append holds both"
+        );
+        let alert = body(&batch[1]);
+        let command = Some(submitted.event_id.as_str());
+        assert_eq!(member_text(&alert, "causation_id"), command, "{scope:?}");
+        assert_eq!(member_text(&alert, "payload.subject"), command, "{scope:?}");
+        assert_eq!(
+            member_text(&alert, "payload.owner_command"),
+            command,
+            "{scope:?}"
+        );
+        assert_eq!(member_text(&alert, "payload.kind"), Some("kill_switch"));
+        assert_eq!(member_text(&alert, "actor.id"), Some(OWNER));
+        let parsed: Vec<mandate_journal::Draft> = batch
+            .iter()
+            .map(|row| {
+                mandate_journal::Draft::parse(&row.body)
+                    .unwrap_or_else(|e| panic!("{scope:?}: the journal refuses {e:?}"))
+            })
+            .collect();
+        assert_eq!(mandate_journal::check_batch(&parsed), Ok(()), "{scope:?}");
     }
 }
 

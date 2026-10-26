@@ -538,6 +538,17 @@ fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Err
         "{snapshots:?}"
     );
     assert!(
+        !snapshots.is_empty()
+            && snapshots.iter().all(|s| {
+                s.get("account_type") == Some(&Value::Str("margin".to_owned()))
+                    && s.get("day_trading_regime")
+                        == Some(&Value::Str("intraday_margin".to_owned()))
+                    && s.get("last_equity").is_some()
+            }),
+        "the process journals its broker's declaration and figures on every snapshot (§9.35): \
+         {snapshots:?}"
+    );
+    assert!(
         journal
             .payloads("AgentModeApplied")
             .iter()

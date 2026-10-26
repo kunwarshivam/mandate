@@ -23,7 +23,8 @@ use mandate_canon::{Digest, Value};
 use crate::approvals;
 use crate::control::{
     Confirmation, ControlError, ControlJournal, Decision, Ids, Now, Owner, Repeat, Submitted,
-    account_stream, agent_stream, code_of, commit, control_stream, decide, envelopes, object, text,
+    account_stream, agent_stream, code_of, commit, commit_kill_switch, control_stream, decide,
+    envelopes, object, text,
 };
 
 /// An owner command addressed to one agent.
@@ -393,7 +394,9 @@ pub fn kill(
         Repeat::AlwaysCommits,
     )? {
         Decision::Committed(submitted) => Ok(submitted),
-        Decision::Fresh(decided) => commit(journal, ids, owner, decided, &["submitted_at"], now),
+        Decision::Fresh(decided) => {
+            commit_kill_switch(journal, ids, owner, decided, &["submitted_at"], now)
+        }
     }
 }
 
