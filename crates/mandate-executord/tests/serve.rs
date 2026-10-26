@@ -328,6 +328,49 @@ fn member(payload: &Value, name: &str) -> String {
         .to_owned()
 }
 
+/// An input still in doubt when the lease is lost is handed again first, and the restriction
+/// follows it once it commits: with the journal down from the first pass and back at the lapse,
+/// the start's records commit and the account is restricted (DEC-2839 item 2).
+#[test]
+fn a_lost_credential_hands_an_input_in_doubt_first() -> Result<(), Error> {
+    let journal = connecting()?;
+    establish(&journal)?;
+    let broker = Paper::new(&journal);
+    let wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    let each = |pass: usize| {
+        if pass == 1 {
+            journal.fail_next(&[support::Fault::Unavailable; 64]);
+        }
+        if pass == 3 {
+            journal.clear_faults();
+        }
+        Ok(())
+    };
+    let before = journal.types(ACCOUNT_STREAM).len();
+    let exit = with_edge_stopping(3, Some((3, "credential_lost")), &each, |edge, _| {
+        serve(
+            journal.clone(),
+            broker.clone(),
+            wiring,
+            &process_config(Environment::Paper),
+            &starting_status(),
+            edge,
+        )
+    })?;
+    assert_eq!(exit, Ok(0));
+    let types = journal.types(ACCOUNT_STREAM);
+    let restricted = types
+        .iter()
+        .position(|kind| kind == "AccountRestrictionChanged")
+        .ok_or("no restriction")?;
+    assert!(
+        restricted > before,
+        "what was in doubt committed ahead of the restriction: {types:?}"
+    );
+    assert_eq!(restriction_causes(&journal), ["connection_unavailable"]);
+    Ok(())
+}
+
 /// An input in doubt when the lease is lost is handed again first and never replaced: with the
 /// journal down for one more append, the restriction is held in doubt and the drain commits it
 /// (DEC-2839).
@@ -393,9 +436,12 @@ fn a_lost_credential_restricts_the_account_before_the_drain() -> Result<(), Erro
         if restricted {
             let types = journal.types(ACCOUNT_STREAM);
             let at = |kind: &str| types.iter().position(|t| t == kind);
+            let (restricted_at, changed_at) = (
+                at("AccountRestrictionChanged"),
+                at("ConnectionStateChanged"),
+            );
             assert!(
-                at("AccountRestrictionChanged") < at("ConnectionStateChanged")
-                    && at("ConnectionStateChanged").is_some(),
+                restricted_at.is_some() && changed_at.is_some() && restricted_at < changed_at,
                 "the restriction, then the state change: {types:?}"
             );
             let change = journal.payloads("ConnectionStateChanged");
