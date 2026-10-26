@@ -13,7 +13,8 @@ use std::path::Path;
 use common::{FixedInstruments, FixedMandate, Shell, TestIds, agent, config, ports, price, qty};
 use mandate_canon::{Value, to_canonical};
 use mandate_executor::{
-    AccountRef, Command, EventDraft, Initiator, Input, KillScope, OwnerConfirmation,
+    AccountRef, BrokerAccount, BrokerUpdate, Command, EventDraft, Initiator, Input, KillScope,
+    OwnerConfirmation,
 };
 use mandate_journal::{Draft, StreamType, check_batch, stream_event_types};
 
@@ -237,4 +238,86 @@ fn every_event_type_the_executor_drafts_is_registered_but_the_pending_ones() {
         PENDING.into_iter().collect(),
         "drafted on the account stream: {named:?}"
     );
+}
+
+/// E7-2u (journal spec §9.5, DEC-2137): a blocked account's batch names its restriction's cause,
+/// a broker notice (trading spec §7.3 row 1), and the journal accepts the whole batch, restriction,
+/// modes and alert. Before the executor wrote `cause` the journal refused the batch at
+/// `payload.cause`, so a blocked account stopped the process and the owner was never told.
+#[test]
+fn a_blocked_accounts_batch_names_its_cause_and_is_accepted_by_the_journal() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FixedInstruments::LIQUID_EQUITY]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = opened(&ports);
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Account(BrokerAccount {
+            trading_blocked: true,
+            ..common::broker_account()
+        })),
+        &ports,
+    );
+    let restricted = ran
+        .draft("AccountRestrictionChanged")
+        .expect("the restriction is journaled");
+    assert_eq!(
+        restricted.payload.get("cause").and_then(Value::as_str),
+        Some("broker_notice")
+    );
+    let ulids = ulids(&ran.drafts);
+    let bytes: Vec<Vec<u8>> = ran
+        .drafts
+        .iter()
+        .map(|draft| enveloped_as(draft, &ulids))
+        .collect();
+    let parsed: Result<Vec<Draft>, _> = bytes.iter().map(|b| Draft::parse(b)).collect();
+    let judged = parsed.map(|drafts| check_batch(&drafts).map_err(|(_, e)| e));
+    assert!(
+        matches!(judged, Ok(Ok(()))),
+        "{:?}: {judged:?}",
+        ran.draft_types()
+    );
+}
+
+/// E7-2u (trading spec §7.3 rows 2 and 3, DEC-143): a reject that restricts the account to closing
+/// only, by its message or by the run of 403s, names a broker reject as its cause, and its record
+/// is one the journal accepts. The reject's own `RejectObserved` is still pending its registration
+/// (`PENDING` above), so the restriction is judged alone here.
+#[test]
+fn a_restricting_reject_names_a_broker_reject_and_is_accepted_by_the_journal() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FixedInstruments::LIQUID_EQUITY]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let reject = |message: &str| {
+        Input::BrokerUpdate(BrokerUpdate::Reject(common::broker_reject(
+            None, 403, message,
+        )))
+    };
+    for (case, rejects) in [
+        (
+            "a closing message",
+            vec!["account is closing transactions only"],
+        ),
+        ("three 403s", vec!["forbidden"; 3]),
+    ] {
+        let mut shell = opened(&ports);
+        let mut restricted = None;
+        for message in rejects {
+            let ran = shell.run(reject(message), &ports);
+            restricted = restricted.or_else(|| ran.draft("AccountRestrictionChanged").cloned());
+        }
+        let restricted = restricted.unwrap_or_else(|| panic!("{case}: the account is restricted"));
+        assert_eq!(
+            restricted.payload.get("cause").and_then(Value::as_str),
+            Some("broker_reject"),
+            "{case}"
+        );
+        let ulids = ulids(std::slice::from_ref(&restricted));
+        let judged = Draft::parse(&enveloped_as(&restricted, &ulids));
+        assert!(judged.is_ok(), "{case}: {judged:?}");
+    }
 }
