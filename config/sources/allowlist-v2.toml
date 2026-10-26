@@ -3,7 +3,8 @@
 # file is never edited after it reaches main. E17-7 holds its contents (E2-19).
 #
 # Version 2 (DEC-2394): the founder confirmed Alpaca news on 2026-10-26, answering DEC-1130 item 2,
-# which made that confirmation his (DEC-79: legal). It is read-only and paper-keyed, each item is
+# which made that confirmation his (DEC-79: legal). Counsel has not separately confirmed its terms
+# on keeping cited items; DEC-433 item 20's retention question stays open. It is read-only and paper-keyed, each item is
 # journaled before use, and research may read it; it gives opinions only, never orders. Its text
 # stays licensed, so readers withhold it until the founder and counsel decide inference spec §13
 # question 6 (DEC-1130 item 6).
