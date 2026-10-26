@@ -1076,9 +1076,10 @@ pub fn plan(
                               executor reads each deployment's mandate, gate and protection \
                               (#2547, #2605) and its broker by asset id, so a deployed opening is \
                               gated, filled, booked and protected in process (#2624, DEC-2813); \
-                              the cell's daemon asks on a deferring opening (#2538), and the \
-                              deployed runtime's production wiring decides, asks and proposes \
-                              the opening once granted, on the demo envelope (#2637)",
+                              the cell's daemon asks on a deferring opening (#2538), and, in \
+                              process, the runtime's production wiring decides, asks and \
+                              proposes the opening once granted, on the demo envelope (#2637); \
+                              the cell's runtime is wired by the gap above",
                     waits: vec![wait(
                         "E2E",
                         "E21-54",
