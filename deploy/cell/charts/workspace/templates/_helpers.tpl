@@ -205,6 +205,10 @@ start without them (AGENTS.md rule 3).
   value: /tmp
 - name: MANDATE_DEPLOYMENT_TIER
   value: {{ .root.Values.deploymentTier | quote }}
+{{- if include "mandate.publicTls" . }}
+- name: SSL_CERT_FILE
+  value: /run/ca-bundle/ca-certificates.crt
+{{- end }}
 {{- if has .p.name (list "api" "token-exchange") }}
 {{- with .root.Values.alpacaOAuth.clientId }}
 - name: MANDATE_ALPACA_CLIENT_ID
@@ -257,6 +261,11 @@ start without them (AGENTS.md rule 3).
 {{- if include "mandate.vaultCa" . }}
 - name: vault-ca
   mountPath: /run/mandate/vault
+  readOnly: true
+{{- end }}
+{{- if include "mandate.publicTls" . }}
+- name: ca-bundle
+  mountPath: /run/ca-bundle
   readOnly: true
 {{- end }}
 {{- end -}}
@@ -385,6 +394,20 @@ spec:
     {{- if include "mandate.artifactsAccess" . }}
     {{- include "mandate.artifactsLayout" . | nindent 4 }}
     {{- end }}
+    {{- if include "mandate.publicTls" . }}
+    - name: ca-bundle
+      image: {{ $root.Values.images.postgres | quote }}
+      imagePullPolicy: IfNotPresent
+      command: ["cp", "/etc/ssl/certs/ca-certificates.crt", "/run/ca-bundle/ca-certificates.crt"]
+      securityContext:
+        {{- include "mandate.containerSecurity" . | nindent 8 }}
+      resources:
+        limits: {cpu: "50m", memory: "32Mi"}
+        requests: {cpu: "50m", memory: "32Mi"}
+      volumeMounts:
+        - name: ca-bundle
+          mountPath: /run/ca-bundle
+    {{- end }}
     {{- with .initContainers }}
     {{- . | nindent 4 }}
     {{- end }}
@@ -398,6 +421,11 @@ spec:
     - name: work
       emptyDir:
         sizeLimit: 64Mi
+    {{- if include "mandate.publicTls" . }}
+    - name: ca-bundle
+      emptyDir:
+        sizeLimit: 1Mi
+    {{- end }}
     {{- if $p.db_role }}
     - name: pg
       emptyDir:
@@ -675,6 +703,19 @@ true
 {{- /* The executor's broker flags (DEC-2306 item 1), as JSON: none for the fixture broker, and for
 `alpaca-paper` the paper host's, the vault's address, and the directory the vault's CA is mounted
 in. */ -}}
+{{- /* Whether process `p` needs the public CA bundle (DEC-2371): its egress names a host
+reached over public TLS, an identity provider, a broker, market data, the OAuth token host, a model
+provider, object storage or a timestamping service. Its image is a bare binary with no roots, so
+its HTTP client could not even be built. The API gets its own bundle in its own pod (`api.yaml`).
+*/ -}}
+{{- define "mandate.publicTls" -}}
+{{- if ne .p.name "api" -}}
+{{- range (.p.egress | default list) -}}
+{{- if has . (list "identity-provider" "broker" "market-data" "token-host" "model-providers" "object-storage" "timestamping") -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- /* Whether process `p` trusts the vault: the vault chart's CA certificate alone, the
 ConfigMap `vault-ca`, read-only at /run/mandate/vault (DEC-2332 item 5): a `vault_ca` process's,
 the executor's only when its broker reaches the vault. */ -}}
