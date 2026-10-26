@@ -119,7 +119,21 @@ function undeliveredWords(reason: string | undefined): string {
     case "unreachable":
       return "Not delivered: your deployment did not answer.";
     case "step_up_required":
-      return "Not recorded: your deployment needs a passkey check this browser can't send yet.";
+      return "Not recorded: your deployment asked for a passkey check that was not sent.";
+    case "step_up_missing":
+    case "step_up_stale":
+    case "step_up_method":
+      return "Not recorded: your deployment did not accept the passkey check.";
+    case "passkey_unavailable":
+      return "Not sent: this browser can't use a passkey.";
+    case "no_passkey":
+      return "Not sent: you have no passkey on your deployment yet. Add one, then try again.";
+    case "passkey_cooling_off":
+      return "Not sent: your passkey is new, and confirms only once its first 24 hours have passed.";
+    case "passkey_canceled":
+      return "Not sent: the passkey check was canceled or timed out.";
+    case "passkey_failed":
+      return "Not sent: your passkey's answer could not be read.";
     case "not_created":
       return "Not sent: version 1 was not created, so there is nothing to confirm.";
     case "not_confirmed":
@@ -151,9 +165,43 @@ function stepOf(which: StepKey, setUp: SetUp): SetUpStep | null {
   return which === "version" ? setUp.created : which === "confirm" ? setUp.confirmed : setUp.deployed;
 }
 
+/**
+ * Over the API, the deployment once the journal records it: the agent's id and its owl. The
+ * deployment manager starts its runtime from that record, so nothing here says it runs before its
+ * own screen does.
+ */
+function DeployedOverApi({ setUp }: { setUp: SetUp }) {
+  const { now } = useRuntime();
+  const at = (iso: string) => `${clock(iso)} ${zoneLabel(iso)}`;
+  return (
+    <div className="grid gap-4">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        <HatchingOwl seed={setUp.agentId} className="size-16" />
+        <div className="grid min-w-0 gap-0.5">
+          <p className="font-semibold">Deployed to paper.</p>
+          <p className="text-sm text-pretty text-muted-foreground">
+            Recorded in the journal at {at(setUp.deployed?.recordedAt ?? now)}, as version 1, for agent{" "}
+            <span className="font-mono wrap-anywhere" translate="no" data-slot="deployed-agent">
+              {setUp.agentId}
+            </span>
+            . Its screen shows when it starts and what it does.
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-3">
+        <Link href={`/agents/${setUp.agentId}`} className={cn("w-full sm:w-auto", KEY)}>
+          Open the agent
+          <ArrowRight className="size-6" aria-hidden />
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 /** The deployment, once recorded: the new agent, its owl, and its first check. */
 function Deployed({ setUp }: { setUp: SetUp }) {
-  const { ws, now } = useRuntime();
+  const { ws, now, source } = useRuntime();
+  if (source === "api") return <DeployedOverApi setUp={setUp} />;
   const agent = ws.agents.find((a) => a.agent_id === setUp.agentId);
   const firstAsk = ws.approvals.find((a) => a.agent_id === setUp.agentId);
   const at = (iso: string) => `${clock(iso)} ${zoneLabel(iso)}`;
@@ -199,6 +247,12 @@ export function StepStatus({ which, setUp }: { which: StepKey; setUp: SetUp }) {
   const at = (iso: string) => `${clock(iso)} ${zoneLabel(iso)}`;
   switch (step.phase) {
     case "sent":
+      if (step.awaitingPasskey)
+        return (
+          <p data-slot="awaiting-passkey">
+            Waiting for your passkey. Nothing is sent until your browser&apos;s passkey check is done.
+          </p>
+        );
       return (
         <p>
           {SENDING[which]} Sent at {at(step.sentAt)}. {UNTIL[which]}
@@ -317,8 +371,9 @@ export function SetUpSteps({
 }) {
   const { source, ws, createVersion, confirmVersion, deployVersion, backtestFor } = useRuntime();
   /**
-   * Only the fixtures' in-memory journal takes a step-up today; over the API a confirm or deployment is
-   * not sent (DEC-2401 item 4), so no passkey is asked for a step that will not be sent, and none is recorded.
+   * Over the fixtures the step-up dialog stands in for the passkey. Over the API the browser's own
+   * WebAuthn prompt is the check (DEC-2128), raised by the runtime once the server has issued the
+   * challenge, so no stand-in dialog opens.
    */
   const passkey = source === "fixtures";
   const mayDeploy = useCan("agents.deploy");
@@ -334,7 +389,8 @@ export function SetUpSteps({
   const [notice, setNotice] = useState<string | null>(null);
   /** The step just sent, whose heading takes focus once it is on the page. */
   const focusNext = useRef<StepKey | null>(null);
-  const independence = independentDeployRefusal(ws);
+  /** Over the API the server judges V-047 with every other rule at deployment, from the policy it holds. */
+  const independence = source === "api" ? null : independentDeployRefusal(ws);
   const offer = current ? nextStep(setUp) : null;
   const backtestId = setUp ? backtestFor(setUp.version) : null;
 
@@ -372,7 +428,7 @@ export function SetUpSteps({
     deployVersion(setUp.id, { screen: "B3", environment: "paper", shown: deployLines(setUp.version, backtestId), backtestId });
   };
 
-  const stepHint = passkey ? "Uses your passkey." : "Your deployment does not take this step from here yet, so no passkey is asked.";
+  const stepHint = passkey ? "Uses your passkey." : "Your browser asks for your passkey.";
   const action = (which: StepKey): ReactNode => {
     if (offer !== which) return null;
     if (!mayDeploy) return <p className="text-sm">Only the workspace owner can create an agent.</p>;

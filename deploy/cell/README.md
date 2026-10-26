@@ -126,6 +126,10 @@ cargo xtask ci cell-executor      # and beside it: up, then executor, plain and 
 cargo xtask ci cell-vault         # and beside it: up, then vault, plain and seeded (DEC-2616, DEC-2022)
 ```
 
+Each of these drill jobs runs both variants locally. In CI each runs once per variant, on a runner
+of its own (`MANDATE_CELL_VARIANT=plain` or `seeded`, from the job's matrix), so the cell's own
+bring-up and one variant fit DEC-464's ten minutes; set the variable to run one variant here too.
+
 `cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one
 in the k3s node: `docker exec k3d-mandate-cell-server-0 kubectl get pods -n ws-ws1`. Behind a
 TLS-inspecting proxy, set `MANDATE_CELL_CA_BUNDLE` to the proxy's CA bundle so the node can pull.

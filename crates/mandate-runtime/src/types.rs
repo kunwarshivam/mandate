@@ -6,7 +6,8 @@ use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_approval::{ActorKind, LiveScope, Notification};
 use mandate_canon::{Digest, Value};
 use mandate_journal::Environment;
-use mandate_num::{Conviction, Price, Qty, Unit};
+use mandate_num::{Conviction, Price, Qty, Unit, Usd};
+use mandate_time::UtcNanos;
 
 /// The scheduler's whole-second risk clock (mandate spec §5.2). The only time the core knows:
 /// `event_time` and `recorded_at` are never read for timing, and nothing reads a wall clock.
@@ -452,12 +453,98 @@ pub struct Proposal {
     pub execution: Option<OrderExecution>,
 }
 
-/// The dry run's answer. `Allow` authorises nothing: the binding gate runs on the account stream
+/// The dry run's answer. No allow authorises anything: the binding gate runs on the account stream
 /// (`AGENTS.md` rules 1 and 12), so this can only narrow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DryRunVerdict {
     Allow,
-    Deny { reason_code: String },
+    /// An opening or an increase allowed with `deferred` left to the binding gate, never reported
+    /// passed (DEC-2378 item 11), and the liquidity floor and participation evaluated on
+    /// `liquidity`, or deferred as well when it is `None` (journal spec v0.85 rules 269 and 270).
+    /// It is journaled as `DecisionMade` version 3, and it never proposes without asking.
+    AllowDeferring {
+        deferred: BTreeSet<Deferral>,
+        liquidity: Option<LiquidityRead>,
+    },
+    Deny {
+        reason_code: String,
+    },
+    /// An opening or an increase denied after its stored bars' figures were read, which version 3
+    /// records (journal spec v0.85).
+    DenyOnFigures {
+        reason_code: String,
+        liquidity: LiquidityRead,
+    },
+}
+
+/// A check, or a part of one, that the dry run leaves to the executor's binding gate, by the name
+/// `DecisionMade` version 3's `deferred_to_binding` gives it (journal spec v0.85; DEC-2378 item
+/// 11's skips and DEC-2388 item 8's unseen parts). The liquidity floor and participation are not
+/// here: they are deferred exactly when no [`LiquidityRead`] was evaluated, so rule 270 holds by
+/// construction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Deferral {
+    AccountExposure,
+    AgentEquity,
+    AgentMode,
+    ConductHistory,
+    DayTradeBudget,
+    Eligibility,
+    FeeReservation,
+    Halt,
+    OtherOrders,
+    QuoteAsk,
+    ReentryCooldown,
+    RelatedAccounts,
+}
+
+impl Deferral {
+    /// Every deferral, so a caller mapping its own set can be checked against this one.
+    pub const ALL: [Self; 12] = [
+        Self::AccountExposure,
+        Self::AgentEquity,
+        Self::AgentMode,
+        Self::ConductHistory,
+        Self::DayTradeBudget,
+        Self::Eligibility,
+        Self::FeeReservation,
+        Self::Halt,
+        Self::OtherOrders,
+        Self::QuoteAsk,
+        Self::ReentryCooldown,
+        Self::RelatedAccounts,
+    ];
+
+    /// Its `deferred_to_binding` name.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::AccountExposure => "account_exposure",
+            Self::AgentEquity => "agent_equity",
+            Self::AgentMode => "agent_mode",
+            Self::ConductHistory => "conduct_history",
+            Self::DayTradeBudget => "day_trade_budget",
+            Self::Eligibility => "eligibility",
+            Self::FeeReservation => "fee_reservation",
+            Self::Halt => "halt",
+            Self::OtherOrders => "other_orders",
+            Self::QuoteAsk => "quote_ask",
+            Self::ReentryCooldown => "reentry_cooldown",
+            Self::RelatedAccounts => "related_accounts",
+        }
+    }
+}
+
+/// The stored bars' four figures an opening's dry run evaluated the liquidity floor and
+/// participation on, and the risk clock it read them at (DEC-2274 item 3): version 3's
+/// `liquidity`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiquidityRead {
+    pub prior_close: Price,
+    pub median_dollar_volume_20d: Usd,
+    pub adv_20d: Qty,
+    pub trailing_5m_volume: Qty,
+    pub read_at: UtcNanos,
 }
 
 /// How the mandate's autonomy rules classified a proposal (mandate spec §6).

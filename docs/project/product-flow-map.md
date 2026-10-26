@@ -28,13 +28,13 @@ It stopped in **step 4**: the trade loop "stopped before approval", because no a
 | # | Blocker | Evidence on main | Steps | Lane | Size |
 |---|---|---|---|---|---|
 | X1 | ~~No risk clock~~ **Closed.** The scheduler runs in the cell (#2439) | deploy/cell/charts/journal-db/files/processes.json:189-197 `built: true`; deploy/cell/images/scheduler.Dockerfile; xtask/src/cell.rs:884-891, :982-984. Locally the `scheduler` pod runs. The executor takes the first tick, then `Input::Started` (executord/src/process.rs:322-334); the runtime hands it in `clock_pass` (daemon/src/runtime.rs:415) | — | SC | — |
-| X2 | **No model outputs in the deployed runtime** | The daemon's models pass is wired: it queues `Observation` and `ModelOutput` ahead of each tick (daemon/src/runtime.rs:448-512, `ModelsWiring` at :54; #2448, DEC-2383). Deployed, `Wiring::models` is `None` (daemon/src/fixture.rs:106), and nothing outside tests implements `Models` (daemon/tests/runtime.rs:1140) | 3, 6 | DR (S3, the composer) | M, after the founder's DEC-503 item 2 layer call |
+| X2 | ~~No model outputs in the deployed runtime~~ **Closed by DEC-2383 item 7 (lane MC)** | The daemon's models pass queues `Observation` and `ModelOutput` ahead of each tick (daemon/src/runtime.rs:448-512). `mandate-runtime-models`, the thin layer-9 composer the founder chose, implements `Models` over `mandate_modelhost::evaluate` with the deployed document's pins, the folded `model_version` registrations, the calendar and the closes `mandate_bars::trusted_daily_closes` admits under `MANDATE_BARS`, and the `mandate-daemon` binary, now in that crate, wires it for a resolved deployment (runtime-models/src/main.rs). Only the cell's recording names a source; the closes object must already be in the read-only store (DEC-2385 item 5) | 3, 6 | — | — |
 | X3 | **Bars yes, marks no** | `data` is built and deployed with SPY and QQQ (processes.json:236-243; values/k3d.yaml:22-30; #2467, #2487), but it appends to no stream (processes.json:237). The executor's `MarkUpdated` v2 writer landed (#2449), but executord's fixture wiring marks nothing (`marked: NoMarks`, executord/src/fixture.rs:102), and its quotes are `NoQuotes` (executord/src/quotes.rs:44) | 3, 4, 6, 7 | X | M |
-| X4 | **The gate's dry run denies every opening** | The deployed runtime uses `production::wired` (daemon/src/main.rs:212-218). It has a real plan (production/plan.rs), flatten, references and view, and a real gate dry run: `Gate` over `evaluate_deferring` with the registered rule set's gate config (production.rs:43-68; production/gate.rs:69-91; #2489, DEC-2388). That gate defers `UNJOURNALED`, which is eligibility, the liquidity floor, participation and the day-trade budget (gate.rs:26-30), on every opening, and denies any opening with a deferred check. `Plan::classify` never answers auto (plan.rs:90-133), so an opening that passed would ask | 3, 6 | D1 (DEC-2378 item 11: journal those four facts, then the `DecisionMade` v2 spec) | L |
+| X4 | **The gate's dry run denies every opening** | The deployed runtime uses `production::wired` (runtime-models/src/main.rs). It has a real plan (production/plan.rs), flatten, references and view, and a real gate dry run: `Gate` over `evaluate_deferring` with the registered rule set's gate config (production.rs:43-68; production/gate.rs:69-91; #2489, DEC-2388). That gate defers `UNJOURNALED`, which is eligibility, the liquidity floor, participation and the day-trade budget (gate.rs:26-30), on every opening, and denies any opening with a deferred check. `Plan::classify` never answers auto (plan.rs:90-133), so an opening that passed would ask | 3, 6 | D1 (DEC-2378 item 11: journal those four facts, then the `DecisionMade` v2 spec) | L |
 | X5 | **The executor knows nothing** | The fixture broker fills (`FixturePaper::filling`, executord/src/main.rs:218; paper.rs:201-206; #2468), and executord reads `IntentProposed` (follow.rs:463-499, process.rs:582). But its wiring is still NoMandate, NoInstruments, NoFacts, NoProtection, NoQuotes and NoMarks (executord/src/fixture.rs:29-102), and NoFacts holds every opening at the binding gate (:63-70) | 3, 4, 6 | X (G1b to G2b: #2458, #2463, #2470, #2478) + LV | L |
 | X6 | **The approve is refused** | Passkey enrolment and assertion are implemented (api-server/src/passkeys.rs:187; methods.rs:117), and confirm, deploy and connect judge step-up (version_routes.rs:302-314; connect.rs:352). The responses route still answers 401 to every `Approved` grant, `StepUpMissing` with evidence and `StepUpRequired` without (api-server/src/writes.rs:414-419). Web's cli_confirm approve (#2435) is real, but only the mock API accepts it | 1, 4, 7 | L1 (#2469/#2474, DEC-2129) | M |
 | X7 | ~~Exits never reach the executor~~ **Closed by DEC-2387** | Only the owner's exit of one instrument was unwired (see "X7 by path" below). The runtime now journals one `IntentProposed` per sell leg, caused by the `OwnerExitRequested` copy, which executord reads (follow.rs `proposals`, `confirmed`); `fixtures/contracts/owner-exit-agent-stream.json` pins the rows both processes read. Kill switches, discretionary and builder risk exits already reached it | — | EX | — |
-| X8 | **Alerts are dropped** | The daemon prints each alert to stderr (daemon/src/main.rs:266-267); executord discards them (serve.rs:205). `mandate-dispatcher` has no binary and no process | 4, 7 | EX | S/M |
+| X8 | **Alerts are dropped** | The daemon prints each alert to stderr (runtime-models/src/main.rs); executord discards them (serve.rs:205). `mandate-dispatcher` has no binary and no process | 4, 7 | EX | S/M |
 | X9 | **NEW: deployed event ids are not unique across streams** | executord's `fixture::Ids` is `1`, epoch, head, ordinal (executord/src/fixture.rs:18-26); the daemon's is `0`, epoch, head, ordinal (daemon/src/fixture.rs:20-24). The journal requires a globally unique `event_id` (journal spec, envelope table: "ULID; globally unique"). Every account stream's first batch therefore has the same ids, and so does every agent stream's. In one cell journal only the first agent's runtime can open its stream, and only the first account's connect check commits. Reproduced: a second demo run on one cell, connect check `append_refused`. The trade loop's agent is the second | 4, 7 | unowned (X and D1 crates) | S |
 
 ## X7 by path (lane EX, main at 4e98608)
@@ -72,7 +72,7 @@ Today: no real model is called anywhere on main. In the cell, the research agent
 | Item | Wired? | Evidence | Lane | Size |
 |---|---|---|---|---|
 | Research loop, judge, theses | library yes | runtime/src/research.rs; research/agentic.rs; judge.rs | AH / I2 | — |
-| Daemon `--research` on the recorded bundle | yes (fake) | daemon/src/main.rs:174-187, :218-236; worker.rs RecordedTransport | I2 | — |
+| Daemon `--research` on the recorded bundle | yes (fake) | runtime-models/src/main.rs; worker.rs RecordedTransport | I2 | — |
 | A real model call; model-gateway service | no | gateway-http "not wired … `NoKeys`"; `mandate-gatewayd` has no bin | unowned | L |
 | Research agent's runtime in the cell | no | CI step 3: deployed, but at version 1, with no connection of its own, so the manager starts nothing | DR | S |
 | Event-triggered research (E19-12) | no | `RunStarted.trigger` is always `schedule` | unowned | L |
@@ -83,7 +83,7 @@ Today: in the cell, the runtime decides on every tick, but nothing can propose (
 
 | Item | Wired? | Evidence | Lane | Size |
 |---|---|---|---|---|
-| Model outputs into the runtime | port yes, deployed no | X2 | DR | M |
+| Model outputs into the runtime | deployed yes, in the cell | X2, DEC-2383 item 7 | MC | — |
 | Plan and sizing over the journaled fold | deployed yes | production/plan.rs:75-108 (#2471) | D1 | — |
 | Gate dry run | deployed, denies openings | X4 | D1 | L |
 | Autonomy: ask, `ApprovalRequested` | library yes | `Plan::classify` never auto (plan.rs:90-133); escalation.rs:288 | D1 | — |
@@ -135,7 +135,6 @@ A second demo run on one cell fails its connect check until X9 is fixed, so dele
 
 ## Founder calls on the path
 
-- DEC-503 item 2: the layer change for the model composer (X2).
 - DEC-2382: Robinhood's three open questions.
 - The staging Alpaca OAuth app (DEC-2636).
 - Alpaca news (DEC-1130 item 2).
