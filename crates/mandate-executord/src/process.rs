@@ -22,7 +22,7 @@ use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::{ExchangeCalendar, UtcNanos};
 
 use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches, theses};
-use crate::health::Health;
+use crate::health::{Health, PROBE_EVERY_S};
 use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
 use crate::robinhood::AccountReads;
@@ -230,6 +230,9 @@ pub struct ExecutorProcess<S, B> {
     /// The connection's health as this process's broker answers show it (DEC-2832): each pass
     /// tells the core of every trouble it holds, which restricts the account first (DEC-2826).
     health: Health,
+    /// When the connection's health was last probed (DEC-2837): the start counts as the first, and
+    /// a probe is due every [`PROBE_EVERY_S`] after it.
+    probed: UtcNanos,
 }
 
 /// What one pass reads from the agents' streams: the kill switches this stream has not applied,
@@ -283,6 +286,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             max_chain: config.max_chain,
             written_at: now,
             health: Health::default(),
+            probed: now,
             polled: QuotePoll::new(Duration::from_secs(
                 u64::try_from(wiring_step).unwrap_or_default(),
             )),
@@ -449,6 +453,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         }
         if nothing_read && all_read && released && self.owes_nothing() {
             self.lifecycle.observe(now, Lifecycled::Completed);
+        }
+        self.probe(now);
+        if !self.report_troubles(now, &mut alerts) {
+            return alerts;
         }
         self.reconcile_on_schedule(now, &mut alerts);
         alerts
@@ -1218,6 +1226,28 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             .troubles()
             .into_iter()
             .all(|trouble| self.hand(now, now, Input::Connection(trouble), alerts, 0))
+    }
+
+    /// The scheduled health probe (connections spec §8.2, DEC-2837): once every [`PROBE_EVERY_S`],
+    /// a read of the broker's account that only feeds the health counts, so an executor with
+    /// nothing working still notices a connection it cannot use. It runs last in a pass that went
+    /// through, as the scheduled reconciliation does, so no read goes ahead of what the pass sent,
+    /// and the troubles it finds are reported at once. Its answer is never handed to the
+    /// core and never stops the process: a probe places and alters nothing, and a failed one is
+    /// counted, never read as healthy. A pass that finds the journal down returns before it, so
+    /// while an append is in doubt nothing reaches the broker (E21-26); a restriction a probe leads
+    /// to is an append like any other, held in doubt and retried first.
+    /// A process that has exited, or is exiting this pass, probes nothing. A one-read broker is
+    /// probed through its account reads, since it offers no single account read.
+    fn probe(&mut self, now: UtcNanos) {
+        let due = now.secs().saturating_sub(self.probed.secs()) >= PROBE_EVERY_S;
+        if !due || self.exited() {
+            return;
+        }
+        self.probed = now;
+        if self.account_reads().is_none() {
+            let _counted = self.call(&BrokerRequest::GetAccount);
+        }
     }
 
     /// A one-read broker's account reads, counted as one answer (DEC-2832).

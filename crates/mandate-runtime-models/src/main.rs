@@ -34,7 +34,9 @@
 //! one, another flag in its place, or written `--research=`, which the process does not read,
 //! refuses `research_bundle_missing`, so asking for research is never read as not asking.
 //! `--gateway <host:port>` beside it calls models through the model-gateway service there, whose
-//! meter stream the runtime then only reads (DEC-2397); without it, the in-process recorded fake.
+//! meter stream the runtime then only reads (DEC-2397), and which stores the research artifacts in
+//! the research store, read back from `MANDATE_RESEARCH_ARTIFACTS` (DEC-2279); without it, the
+//! in-process recorded fake.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -45,7 +47,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_daemon::bars::{BARS_ENV, BarsReader};
-use mandate_daemon::cell::{self, CellDeployment};
+use mandate_daemon::cell::{self, CellDeployment, RESEARCH_ARTIFACTS_ENV, ViaGateway};
 use mandate_daemon::remote::GatewayAddress;
 use mandate_daemon::wake::Sleep;
 use mandate_daemon::{Config, RuntimeProcess, Wake, deployment, fixture, launch, production};
@@ -261,7 +263,12 @@ fn run(
                     &workspace,
                     Path::new(&root),
                     host_now,
-                    gateway,
+                    gateway.map(|address| ViaGateway {
+                        address,
+                        research: std::env::var(RESEARCH_ARTIFACTS_ENV)
+                            .map(PathBuf::from)
+                            .unwrap_or_default(),
+                    }),
                 )
                 .map_err(|error| error.code())?;
                 wiring.research = Some(wired.wiring);

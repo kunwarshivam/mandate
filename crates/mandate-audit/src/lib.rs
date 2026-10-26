@@ -120,6 +120,9 @@ pub enum StreamType {
     /// `meter:{ws}`, the model gateway's meter (journal spec v0.46 §9.19, DEC-998 item 3), listed so
     /// an auditor reads and verifies spend as any other stream.
     Meter,
+    /// `news:{ws}`, the news reader's stored items (journal spec v0.97 §9.37, DEC-2278), listed so an
+    /// auditor reads and verifies what the agent could read as any other stream.
+    News,
 }
 
 /// A stream's head: its last `seq`, that event's hash (bare, §4.8.1 "Hash forms") and its
@@ -265,6 +268,7 @@ fn stream_type(stream: &StreamId) -> Option<StreamType> {
         mandate_journal::StreamType::Notice => Some(StreamType::Notice),
         mandate_journal::StreamType::Meter => Some(StreamType::Meter),
         mandate_journal::StreamType::DeploymentMeter => None,
+        mandate_journal::StreamType::News => Some(StreamType::News),
     }
 }
 
