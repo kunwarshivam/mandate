@@ -38,12 +38,13 @@ use mandate_executor::{
 };
 use mandate_gate_context::{Freshness, Journaled, Row};
 use mandate_gate_inputs::control::{
-    ConfirmedVersion, ControlRecord, LiveAdmission, Pinned, RunFacts, configuration,
-    confirmed_version,
+    Admitted, ConfirmedVersion, ControlRecord, LiveAdmission, Pinned, RunFacts,
+    admitted_configuration, configuration, confirmed_version,
 };
 use mandate_gate_inputs::{DeployedView, Reviewed};
 use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price, Ratio, ShareIncrement, Usd};
+use mandate_research::{ReplayError, Replayed, ThesisRecord, replay_theses};
 use mandate_risk::{AgentMode, ConductState, DayTradeLedger, RiskSnapshot, SaneQuote};
 use mandate_spec::ValidatedMandate;
 use mandate_spec::context::Membership;
@@ -192,6 +193,10 @@ struct Resolved {
 /// every control row: a read that failed is read again at the next ask. `last` is each agent's
 /// last deployment that read, from the control rows that parse, kept across later failures for
 /// what an exit, a fill or a mark of an agent still `followed` reads.
+///
+/// A research agent's deployment names no instrument (DEC-2819 item 2): `research` holds what its
+/// confirmed version reads now, `research_last` what it last read, and `admitted` each instrument
+/// its admission admitted, resolved, with the control length and trade date it was resolved at.
 #[derive(Default)]
 struct Cache {
     control: Option<usize>,
@@ -200,6 +205,27 @@ struct Cache {
     followed: BTreeSet<AgentId>,
     current: BTreeMap<AgentId, Rc<Resolved>>,
     last: BTreeMap<AgentId, Rc<Resolved>>,
+    research: BTreeMap<AgentId, Rc<Research>>,
+    research_last: BTreeMap<AgentId, Rc<Research>>,
+    admitted: BTreeMap<(AgentId, InstrumentId), (usize, Date, Rc<Resolved>)>,
+}
+
+/// A research agent's confirmed version as read from the control `records` on `day`, and the
+/// registered triple of its model that admits instruments.
+struct Research {
+    confirmed: ConfirmedVersion,
+    records: Vec<ControlRecord>,
+    day: Date,
+    model_id: String,
+    model_version: String,
+    content_hash: mandate_canon::Digest,
+}
+
+/// One agent's deployment as the control stream reads it: pinned to its one instrument, or a
+/// research agent's, whose instruments its admission admits.
+enum Read {
+    Pinned(Box<Resolved>),
+    Research(Box<Research>),
 }
 
 struct Inner {
@@ -302,21 +328,48 @@ impl Deployment {
     /// `date`, or for a port that names none on the date of the latest read (the latest tick's at
     /// the first). The deployments are read again when the control stream has grown, when `date`
     /// is another, or when the last read failed for any agent; each one that reads is kept as
-    /// that agent's last.
+    /// that agent's last. A research agent's deployment is its version read so, and the
+    /// instrument its surviving thesis holds at the scheduler's latest tick, replayed at every ask
+    /// so a thesis that ends ends the agent's openings at once (DEC-2819 item 2).
     fn deployments(&self, date: Option<Date>) -> BTreeMap<AgentId, Rc<Resolved>> {
+        let (mut current, research) = self.read_control(date);
+        if research.is_empty() {
+            return current;
+        }
+        let Some(now) = self.now() else {
+            return current;
+        };
+        for (agent, research) in research {
+            if let Some(resolved) = self.openable(&agent, &research, now) {
+                current.insert(agent, resolved);
+            }
+        }
+        current
+    }
+
+    /// The pinned deployments and the research agents' versions that read now, read as
+    /// [`Self::deployments`] says.
+    fn read_control(
+        &self,
+        date: Option<Date>,
+    ) -> (
+        BTreeMap<AgentId, Rc<Resolved>>,
+        BTreeMap<AgentId, Rc<Research>>,
+    ) {
+        let none = || (BTreeMap::new(), BTreeMap::new());
         let Some(control) = self.rows(self.0.control.as_ref()) else {
-            return BTreeMap::new();
+            return none();
         };
         let Ok(mut cache) = self.0.cache.try_borrow_mut() else {
-            return BTreeMap::new();
+            return none();
         };
         let same_control = cache.control == Some(control.len());
         let same_date = date.is_none_or(|day| cache.date == Some(day));
         if cache.read && same_control && same_date {
-            return cache.current.clone();
+            return (cache.current.clone(), cache.research.clone());
         }
         let Some(day) = date.or(cache.date).or_else(|| self.today()) else {
-            return BTreeMap::new();
+            return none();
         };
         let agents = agents_of(&control, &self.0.scope, Environment::Paper)
             .map(|following| following.agents);
@@ -324,32 +377,73 @@ impl Deployment {
             control.iter().filter_map(ControlRecord::of_row).collect();
         let every_row = records.len() == control.len();
         let mut current = BTreeMap::new();
+        let mut research = BTreeMap::new();
         let mut read = every_row && agents.is_ok();
         if let Ok(agents) = &agents {
             cache.followed = agents.keys().cloned().collect();
         }
         for agent in agents.unwrap_or_default().into_keys() {
-            let Some(resolved) = self.resolve(&records, &agent, day) else {
-                read = false;
-                continue;
-            };
-            let resolved = Rc::new(resolved);
-            cache.last.insert(agent.clone(), Rc::clone(&resolved));
-            if every_row {
-                current.insert(agent, resolved);
+            match self.read_agent(&records, &agent, day) {
+                Some(Read::Pinned(resolved)) => {
+                    let resolved = Rc::new(*resolved);
+                    cache.last.insert(agent.clone(), Rc::clone(&resolved));
+                    if every_row {
+                        current.insert(agent, resolved);
+                    }
+                }
+                Some(Read::Research(read_now)) => {
+                    let read_now = Rc::new(*read_now);
+                    cache
+                        .research_last
+                        .insert(agent.clone(), Rc::clone(&read_now));
+                    if every_row {
+                        research.insert(agent, read_now);
+                    }
+                }
+                None => read = false,
             }
         }
         cache.control = Some(control.len());
         cache.date = Some(day);
         cache.read = read;
         cache.current.clone_from(&current);
-        current
+        cache.research.clone_from(&research);
+        (current, research)
     }
 
-    /// `agent`'s deployment from the control `records` and the artifact store on `day`, as the
-    /// paper shell reads it: one user and one approver (DEC-505 item 3), no live admission.
-    fn resolve(&self, records: &[ControlRecord], agent: &AgentId, day: Date) -> Option<Resolved> {
-        let store = self.0.sources.artifacts.as_ref();
+    /// `agent`'s deployment from the control `records` on `day`: its one pinned instrument's, or,
+    /// for a research agent, its confirmed version and the model that admits its instruments.
+    fn read_agent(&self, records: &[ControlRecord], agent: &AgentId, day: Date) -> Option<Read> {
+        let confirmed = self.confirm(records, agent, day)?;
+        if confirmed.mandate().universe.pinned {
+            return self
+                .resolve_pinned(records, agent, day, &confirmed)
+                .map(|resolved| Read::Pinned(Box::new(resolved)));
+        }
+        let model = confirmed
+            .mandate()
+            .behavior
+            .signal_models
+            .iter()
+            .find(|model| model.admits_instruments)?;
+        Some(Read::Research(Box::new(Research {
+            model_id: model.id.as_str().to_owned(),
+            model_version: model.version.clone(),
+            content_hash: model.content_hash,
+            confirmed,
+            records: records.to_vec(),
+            day,
+        })))
+    }
+
+    /// `agent`'s confirmed version from the control `records` on `day`, as the paper shell reads
+    /// it: one user and one approver (DEC-505 item 3), no live admission.
+    fn confirm(
+        &self,
+        records: &[ControlRecord],
+        agent: &AgentId,
+        day: Date,
+    ) -> Option<ConfirmedVersion> {
         let run = RunFacts {
             agent: mandate_spec::context::AgentId::new(&agent.0),
             validation_date: day,
@@ -359,7 +453,207 @@ impl Deployment {
             },
             live: LiveAdmission::refusing(),
         };
-        let confirmed = confirmed_version(records, store, &run).ok()?;
+        confirmed_version(records, self.0.sources.artifacts.as_ref(), &run).ok()
+    }
+
+    /// The scheduler's latest tick, the instant a research agent's theses are replayed at.
+    fn now(&self) -> Option<UtcNanos> {
+        let mut journaled = Journaled::new("", self.0.clock.as_ref()?.as_str(), "");
+        for row in self.rows(self.0.clock.as_ref())? {
+            fold(&mut journaled, &row);
+        }
+        journaled.now()
+    }
+
+    /// `agent`'s thesis records replayed at `at` ([`replay_theses`]); `None` when its stream or a
+    /// record cannot be read.
+    fn replayed(&self, agent: &AgentId, at: UtcNanos) -> Option<Replayed> {
+        let workspace = self.0.scope.workspace.0.as_str();
+        let stream = StreamId::parse(&format!("agent:{workspace}:{}", agent.0));
+        let rows = self.rows(stream.as_ref())?;
+        let records = rows
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.event_type.as_str(),
+                    "ThesisProposed" | "ThesisRevised" | "ThesisInvalidated"
+                )
+            })
+            .map(|row| {
+                let payload = parse(&row.body)
+                    .ok()
+                    .and_then(|body| body.get("payload").cloned())
+                    .ok_or(ReplayError::Unreadable { member: "payload" })?;
+                Ok(ThesisRecord {
+                    event_type: row.event_type.as_str(),
+                    payload,
+                })
+            });
+        replay_theses(records, at).ok()
+    }
+
+    /// The instrument `agent` may open in at `at`: the one its surviving thesis holds, resolved
+    /// from the version that reads now. More than one surviving instrument, none, or an agent
+    /// stream that cannot be read, answers none, so its openings are held.
+    fn openable(&self, agent: &AgentId, research: &Research, at: UtcNanos) -> Option<Rc<Resolved>> {
+        let replayed = self.replayed(agent, at)?;
+        let [entry] = replayed.active.as_slice() else {
+            return None;
+        };
+        let instrument = InstrumentId::new(entry.instrument.as_str()).ok()?;
+        self.admitted(agent, research, &instrument, true)
+    }
+
+    /// Whether `agent` may open in `instrument` at the binding instant `at`: always for a pinned
+    /// agent, whose deployment names it; for a research agent, only while the thesis holding it
+    /// survives at `at`, so a thesis that ends between the scheduler's tick and the binding
+    /// instant holds the opening.
+    fn openable_at(&self, agent: &AgentId, instrument: &InstrumentId, at: UtcNanos) -> bool {
+        let researching = match self.0.cache.try_borrow() {
+            Ok(cache) => cache.research.contains_key(agent),
+            Err(_) => return false,
+        };
+        if !researching {
+            return true;
+        }
+        self.replayed(agent, at).is_some_and(|replayed| {
+            matches!(replayed.active.as_slice(), [entry] if entry.instrument.as_str() == instrument.as_str())
+        })
+    }
+
+    /// `instrument` as `agent`'s admission admitted it, resolved from `research`'s version: the
+    /// resolution at that version's control length and trade date, read once and kept; with
+    /// `fresh` false, else the last one that read, which an exit, a fill or a mark reads.
+    fn admitted(
+        &self,
+        agent: &AgentId,
+        research: &Research,
+        instrument: &InstrumentId,
+        fresh: bool,
+    ) -> Option<Rc<Resolved>> {
+        let key = (agent.clone(), instrument.clone());
+        let at = (research.records.len(), research.day);
+        let kept = self
+            .0
+            .cache
+            .try_borrow()
+            .ok()?
+            .admitted
+            .get(&key)
+            .map(|(length, day, resolved)| ((*length, *day), Rc::clone(resolved)));
+        if let Some((read_at, resolved)) = &kept
+            && *read_at == at
+        {
+            return Some(Rc::clone(resolved));
+        }
+        let Some(resolved) = self.resolve_admitted(agent, research, instrument) else {
+            return kept.filter(|_| !fresh).map(|(_, resolved)| resolved);
+        };
+        let resolved = Rc::new(resolved);
+        self.0
+            .cache
+            .try_borrow_mut()
+            .ok()?
+            .admitted
+            .insert(key, (at.0, at.1, Rc::clone(&resolved)));
+        Some(resolved)
+    }
+
+    /// `instrument` resolved from `research`'s version, its own registered snapshot and the
+    /// admitting model's registration (DEC-2819 item 3).
+    fn resolve_admitted(
+        &self,
+        agent: &AgentId,
+        research: &Research,
+        instrument: &InstrumentId,
+    ) -> Option<Resolved> {
+        let admitted = Admitted {
+            asset_id: instrument.as_str().to_owned(),
+            model_id: research.model_id.clone(),
+            model_version: research.model_version.clone(),
+            content_hash: research.content_hash,
+        };
+        let store = self.0.sources.artifacts.as_ref();
+        let configured =
+            admitted_configuration(&research.records, store, &admitted, research.day).ok()?;
+        let reviewed = Reviewed::from_admitted(&research.confirmed, &configured).ok()?;
+        self.resolved(agent, &research.confirmed, &reviewed)
+    }
+
+    /// Every instrument a followed research agent's admission admitted, resolved for what an exit,
+    /// a fill or a mark reads: from the version that reads now, else the last that read, and each
+    /// one that cannot be resolved now as it last was.
+    fn held(&self) -> Vec<Rc<Resolved>> {
+        let researching: Vec<(AgentId, Rc<Research>)> = match self.0.cache.try_borrow() {
+            Ok(cache) => cache
+                .research_last
+                .iter()
+                .filter(|(agent, _)| cache.followed.contains(*agent))
+                .map(|(agent, research)| (agent.clone(), Rc::clone(research)))
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        for (agent, research) in researching {
+            for instrument in self.ever_admitted(&agent) {
+                self.admitted(&agent, &research, &instrument, false);
+            }
+        }
+        self.kept_admitted()
+    }
+
+    /// Every instrument a thesis record on `agent`'s stream admitted, for what an exit, a fill or a
+    /// mark reads only: each `ThesisProposed` or `ThesisRevised` with `admitted` true and an
+    /// instrument that reads, whatever any other record says. A record that cannot be read, which
+    /// holds every opening, never takes from a held position the instrument an earlier or later
+    /// record admitted, on a cold start too (`AGENTS.md` rule 13); naming one more instrument for
+    /// exits adds no risk.
+    fn ever_admitted(&self, agent: &AgentId) -> BTreeSet<InstrumentId> {
+        let workspace = self.0.scope.workspace.0.as_str();
+        let stream = StreamId::parse(&format!("agent:{workspace}:{}", agent.0));
+        let Some(rows) = self.rows(stream.as_ref()) else {
+            return BTreeSet::new();
+        };
+        rows.iter()
+            .filter(|row| matches!(row.event_type.as_str(), "ThesisProposed" | "ThesisRevised"))
+            .filter_map(|row| {
+                let body = parse(&row.body).ok()?;
+                let payload = body.get("payload")?;
+                if payload.get("admitted") != Some(&Value::Bool(true)) {
+                    return None;
+                }
+                InstrumentId::new(payload.get("instrument_id")?.as_str()?).ok()
+            })
+            .collect()
+    }
+
+    /// Every followed research agent's admitted instrument as it last resolved.
+    fn kept_admitted(&self) -> Vec<Rc<Resolved>> {
+        self.0
+            .cache
+            .try_borrow()
+            .map(|cache| {
+                cache
+                    .admitted
+                    .iter()
+                    .filter(|((agent, _), _)| cache.followed.contains(agent))
+                    .map(|(_, (_, _, resolved))| Rc::clone(resolved))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// `agent`'s pinned deployment from the control `records` and the artifact store on `day`, of
+    /// the version `confirmed` already read, as the paper shell reads it; `None` for a version
+    /// that pins no one instrument and one model, so a research agent's version never reads as
+    /// one instrument's here.
+    fn resolve_pinned(
+        &self,
+        records: &[ControlRecord],
+        agent: &AgentId,
+        day: Date,
+        confirmed: &ConfirmedVersion,
+    ) -> Option<Resolved> {
+        let store = self.0.sources.artifacts.as_ref();
         let mandate = confirmed.mandate();
         let ([instrument], [model]) = (
             mandate.universe.pinned_instruments.as_slice(),
@@ -375,10 +669,20 @@ impl Deployment {
             content_hash: model.content_hash,
         };
         let configured = configuration(records, store, &pinned, day).ok()?;
-        let reviewed = Reviewed::from_registered(&confirmed, &configured).ok()?;
+        let reviewed = Reviewed::from_registered(confirmed, &configured).ok()?;
+        self.resolved(agent, confirmed, &reviewed)
+    }
+
+    /// The ports' reading of `reviewed`, `agent`'s deployment of `confirmed`.
+    fn resolved(
+        &self,
+        agent: &AgentId,
+        confirmed: &ConfirmedVersion,
+        reviewed: &Reviewed,
+    ) -> Option<Resolved> {
         Some(Resolved {
-            view: DeployedView::new(&agent.0, &reviewed).ok()?,
-            gate: DeployedGate::new(&agent.0, &reviewed, self.0.sources.quotes.feed()).ok()?,
+            view: DeployedView::new(&agent.0, reviewed).ok()?,
+            gate: DeployedGate::new(&agent.0, reviewed, self.0.sources.quotes.feed()).ok()?,
             version: reviewed.config_refs.mandate_version.clone()?,
             allocation: Usd::parse(reviewed.mandate.capital.allocation_usd.as_str()).ok()?,
             loss_carry: confirmed.connection_loss_carry(),
@@ -386,7 +690,7 @@ impl Deployment {
             instrument: InstrumentId::new(reviewed.instrument.asset_id.as_str()).ok()?,
             asset_class: reviewed.instrument.asset_class,
             quote_max_age: reviewed.quote_max_age,
-            confirmed,
+            confirmed: confirmed.clone(),
         })
     }
 
@@ -397,7 +701,13 @@ impl Deployment {
 
     /// `agent`'s deployment as it reads now, else its last that read: what an exit reads.
     fn lasting(&self, agent: &AgentId) -> Option<Rc<Resolved>> {
-        self.current(agent).or_else(|| self.last().remove(agent))
+        self.current(agent)
+            .or_else(|| self.last().remove(agent))
+            .or_else(|| {
+                let own = self.held();
+                own.into_iter()
+                    .find(|resolved| resolved.view.version(agent).is_some())
+            })
     }
 
     /// Each followed agent's last deployment that read.
@@ -427,7 +737,11 @@ impl Deployment {
             .filter(|(agent, _)| !current.contains_key(agent))
             .map(|(_, resolved)| resolved)
             .collect();
-        current.into_values().chain(last).collect()
+        current
+            .into_values()
+            .chain(last)
+            .chain(self.held())
+            .collect()
     }
 
     /// `answer` of the deployment whose instrument is `instrument`. Validation refuses a second
@@ -657,6 +971,7 @@ impl BindingGateSource for Deployment {
         if facts.mandate_version != resolved.version
             || !resolved.view.covers(request.agent, request.instrument)
             || !journaled.untraded()
+            || !self.openable_at(request.agent, request.instrument, facts.now)
         {
             return None;
         }
@@ -703,7 +1018,8 @@ impl RiskOpenings for Deployment {
         if records.len() != control.len() {
             return None;
         }
-        let resolved = self.resolve(&records, agent, date)?;
+        let confirmed = self.confirm(&records, agent, date)?;
+        let resolved = self.resolve_pinned(&records, agent, date, &confirmed)?;
         let input = resolved.confirmed.clone().with_equity(equity).ok()?;
         Some(RiskOpening {
             mandate: ValidatedMandate::new(input.mandate().clone(), input.context(), &[]).ok()?,

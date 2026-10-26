@@ -170,7 +170,8 @@
         }
       ],
       "required": [
-        "account_positions"
+        "account_positions",
+        "openings_held"
       ],
       "properties": {
         "account_positions": {
@@ -183,6 +184,17 @@
             },
             {
               "type": "null"
+            }
+          ]
+        },
+        "openings_held": {
+          "description": "A standing reason every opening of the agent's is held whatever the order, from the one function the binding gate's source binds on (DEC-2143). null means none of the reasons applies, not that openings run: a hold until a fact arrives or ages in, or for one order, is the gate's verdict on that order, and the owner's hold and a paused or stopped agent show as mode. No exit, protective order or kill switch is held by it (AGENTS.md rule 13).",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/OpeningsHeld"
             }
           ]
         }
@@ -226,6 +238,23 @@
         },
         "observed_at": {
           "$ref": "../common.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
+    "OpeningsHeld": {
+      "description": "A standing reason every opening of the agent's is held (DEC-2143). account_traded: the account has traded and the account risk view, which must read every later opening, does not yet. research_agent_traded: the account has traded and the mandate is unpinned, so it binds no instrument for the account risk view (DEC-2819 item 4). unknown: no account stream, the deployed document unread, or a row the fold reads unreadable, so openings may be held.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason"
+      ],
+      "properties": {
+        "reason": {
+          "enum": [
+            "account_traded",
+            "research_agent_traded",
+            "unknown"
+          ]
         }
       }
     }
