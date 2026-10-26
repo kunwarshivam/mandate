@@ -76,9 +76,12 @@ fn the_fold_keeps_the_latest_period_of_a_held_retirement() {
     assert_eq!(state.effective_mode(), mode, "it steps no mode or hold");
 }
 
+/// A way to break a held record.
+type Broken = Box<dyn Fn() -> mandate_runtime::FoldedEvent>;
+
 #[test]
 fn a_held_record_that_does_not_read_is_refused_and_folds_nothing() {
-    let cases: [(&str, Box<dyn Fn() -> mandate_runtime::FoldedEvent>); 4] = [
+    let cases: [(&str, Broken); 4] = [
         (
             "no cause",
             Box::new(|| mandate_runtime::FoldedEvent {
