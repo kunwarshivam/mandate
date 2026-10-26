@@ -292,7 +292,9 @@ fn check_config_refs(
             return Err(Invalid::new(InvalidReason::NonCanonical, path));
         }
     }
-    if schema_version == 1
+    let historical_refs =
+        schema_version == 1 || (schema_version == 3 && event_type == "DecisionMade");
+    if historical_refs
         && matches!(event_type, "ModelOutputRecorded" | "DecisionMade")
         && [catalogue::POL, catalogue::REG]
             .iter()
