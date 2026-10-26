@@ -798,7 +798,7 @@ pub(crate) mod tests {
         }
     }
 
-    struct SchemaIds;
+    pub(crate) struct SchemaIds;
 
     impl IdGen for SchemaIds {
         fn event_id(&self, epoch: WriterEpoch, head: Seq, ordinal: u32) -> EventId {
@@ -2453,7 +2453,7 @@ pub(crate) mod tests {
 
     /// `draft` through the journal's own `Draft::parse`, with its own `config_refs`, so a fill
     /// drafted without the references its schema requires is refused here as the journal refuses it.
-    fn journal_accepts_with_refs(draft: &EventDraft) -> Result<(), ExecutorError> {
+    pub(crate) fn journal_accepts_with_refs(draft: &EventDraft) -> Result<(), ExecutorError> {
         let causation = draft
             .causation_id
             .as_ref()

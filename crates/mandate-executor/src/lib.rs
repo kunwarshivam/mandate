@@ -102,6 +102,7 @@ mod step;
 mod symbols;
 pub mod tripwire;
 mod types;
+mod universe;
 
 pub use error::{ExecutorError, JsonError};
 pub use fees::{
@@ -137,5 +138,6 @@ pub use types::{
     MandateVersion, MarketObservation, Mode, NotificationRef, OcoLegs, Order, OrderListing,
     OrderOrigin, OrderState, OrderType, OwnerConfirmation, Protection, ProtectionPrices, Purpose,
     ReconcileReason, Reconciliation, ReconciliationVerdict, RiskClock, Seq, StatusMapping,
-    SubmitOrder, TimeInForce, TimerId, TimerRequest, UnprotectedInterval, WorkspaceId, WriterEpoch,
+    SubmitOrder, ThesisRow, TimeInForce, TimerId, TimerRequest, UnprotectedInterval, WorkspaceId,
+    WriterEpoch,
 };
