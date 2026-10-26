@@ -150,3 +150,76 @@ fn the_section_names_the_fourteen_parts_in_byte_order() {
     sorted.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
     assert_eq!(parts, sorted);
 }
+
+/// The valid draft every other probe below starts from: every part deferred, and asked.
+fn every_part_deferred(fixture: &Value) -> Object {
+    let case = list(section(fixture), "valid_drafts")
+        .iter()
+        .find(|case| text(case, "name") == "every_part_deferred_and_asked")
+        .unwrap();
+    match parse(&draft(fixture, case)).unwrap() {
+        Value::Object(body) => body,
+        other => panic!("a draft is an object: {other:?}"),
+    }
+}
+
+fn parsed(body: Object) -> Result<u64, (String, String)> {
+    Draft::parse(&to_canonical(&Value::Object(body)))
+        .map(|draft| draft.schema_version())
+        .map_err(|e| (e.reason.code().to_owned(), e.path.clone()))
+}
+
+/// Version 3's references are version 1's: a policy set or a model registry, version 2's stricter
+/// references, refuses it as an unknown schema, exactly as it refuses a version 1, so neither is
+/// ever accepted unchecked (DEC-2388 item 10).
+#[test]
+fn version_3_refuses_version_2_s_references() {
+    let fixture = fixture();
+    assert_eq!(parsed(every_part_deferred(&fixture)), Ok(3));
+    for kind in ["policy_set", "model_registry"] {
+        let mut body = every_part_deferred(&fixture);
+        if let Some(Value::Object(refs)) = body.get_mut("config_refs") {
+            refs.insert(
+                Key::new(kind).unwrap(),
+                Value::Str(format!("sha256:{}", "a".repeat(64))),
+            );
+        }
+        assert_eq!(
+            parsed(body),
+            Err(("unknown_schema".to_owned(), "payload".to_owned())),
+            "{kind}"
+        );
+    }
+}
+
+/// The journal names exactly the section's fourteen parts: each alone is a well-typed name, and a
+/// fifteenth after them is refused at its index.
+#[test]
+fn the_journal_admits_exactly_the_fourteen_parts() {
+    let fixture = fixture();
+    let parts: Vec<Value> = list(section(&fixture), "parts").to_vec();
+    let mut extended = parts.clone();
+    extended.push(Value::Str("unseen_fact".to_owned()));
+    let mut body = every_part_deferred(&fixture);
+    if let Some(Value::Object(payload)) = body.get_mut("payload") {
+        payload.insert(
+            Key::new("deferred_to_binding").unwrap(),
+            Value::Array(extended),
+        );
+    }
+    assert_eq!(
+        parsed(body),
+        Err((
+            "non_canonical".to_owned(),
+            "payload.deferred_to_binding[14]".to_owned()
+        ))
+    );
+    let mut body = every_part_deferred(&fixture);
+    if let Some(Value::Object(payload)) = body.get_mut("payload") {
+        payload.insert(
+            Key::new("deferred_to_binding").unwrap(),
+            Value::Array(parts),
+        );
+    }
+    assert_eq!(parsed(body), Ok(3), "the fourteen, in the section's order");
+}
