@@ -1849,7 +1849,8 @@ passes these checks, and is reported at the first `IntentProposed` in the batch 
 Paths are dotted from the envelope (`payload.step_up.authenticated_at`).
 
 **`StreamOpened`** on the agent stream. The schema of `StreamOpened` and of `KillSwitchActivated` is
-chosen by the stream type of `stream_id`; the account stream's are unchanged.
+chosen by the stream type of `stream_id`; the account stream's `StreamOpened` is unchanged, and its
+`KillSwitchActivated` is §9.5's (v0.90).
 
 | Member | Type | Meaning |
 |---|---|---|
