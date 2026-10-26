@@ -287,6 +287,7 @@ Errors are RFC 9457 problem documents with these members:
 | `step_up_method` | 401 | The method is not allowed in this environment: `cli_confirm` in `live` (identity spec §7.3) |
 | `step_up_mismatch` | 401 | The challenge names another principal, workspace, action kind, or action digest |
 | `live_unavailable` | 409 | A live environment operation before counsel signs off (rule 8, B5) |
+| `deferral_mismatch` | 409 | A grant (§5.2) of an approval whose request's deferred checks are not exactly those of the `DecisionMade` it names, or whose decision is not on the agent stream: the request may hide or invent a check that has not been run (mandate spec §6.4, [DEC-2521](../project/decisions/DEC-2521.md)). `effect: none`, `retryable: false`; title "Request does not match its decision". A Skip of it is never refused for this |
 | `control_stream_frozen` | 503 | Journal spec §11 froze mandate and deployment changes; never sent for a risk-reducing call (API-7) |
 | `journal_unavailable` | 503 | Postgres cannot take the append; `effect: none`, `retryable: true` |
 | `rate_limited` | 429 | Over the principal's limit; never for an API-7 operation |
@@ -2081,7 +2082,11 @@ The API refuses only: an unauthenticated or non-user principal, a user who is no
 mandate, a Skip is recorded for the approving role alone and the runtime refuses a non-approver's,
 [DEC-1007](../project/decisions/DEC-1007.md) item 10, Proposed), an unknown approval, and, for
 `approved` only, missing or unbound step-up: bound to the content hash, or with a delegation to the
-preview's `step_up_digest` (§5.3), else 401 with the step-up code §3.5 names. It does not judge the deadline, the quorum,
+preview's `step_up_digest` (§5.3), else 401 with the step-up code §3.5 names; and, for `approved`
+only, after the role and before the step-up is read, a request whose deferred checks are not exactly
+those of the `DecisionMade` it names (version 3's list, or none for versions 1 and 2), or whose
+decision is not on the agent stream: `409` `deferral_mismatch`, nothing committed and the challenge
+unspent ([DEC-2521](../project/decisions/DEC-2521.md)). It does not judge the deadline, the quorum,
 independence, or re-validation: the runtime does (checks 1 to 12). A `skipped` is never refused for
 anything else (API-7).
 

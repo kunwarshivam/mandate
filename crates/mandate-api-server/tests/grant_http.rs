@@ -64,6 +64,8 @@ const CAROL_INVITATION: &str = "01JB3K6F0C9R2V7N4M8Q1T5W52";
 const DAVE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W43";
 const DAVE_INVITATION: &str = "01JB3K6F0C9R2V7N4M8Q1T5W53";
 const APPROVAL: &str = "01JBH3BTZ8K2M4N6P8R0S2T7AA";
+/// The `DecisionMade` the approval names as its cause, as the runtime writes the two (DEC-2519).
+const DECISION: &str = "01JBH3BTZ8K2M4N6P8R0S2T7A9";
 const AGENT: &str = "agt_a";
 /// A challenge id the server never issued.
 const UNISSUED: &str = "01J9ZQ4B7Y8K3M5N6P7Q8R9S0V";
@@ -392,18 +394,47 @@ impl World {
                 )
             })
             .collect();
+        let mut streams = self.journal.streams.lock().expect("unpoisoned");
+        streams.insert(ctl(), rows);
+        drop(streams);
+        self.decided(environment, content, Some((1, json!({"dry_run": "allow"}))));
+    }
+
+    /// `agt_a`'s stream: the decision, at `version` with `payload`, or none when `None`, then the
+    /// approval naming it as its cause, at version 1 with `content`.
+    fn decided(
+        &self,
+        environment: &str,
+        content: &serde_json::Value,
+        decision: Option<(u64, serde_json::Value)>,
+    ) {
+        let mut rows = Vec::new();
+        if let Some((version, payload)) = decision {
+            let mut decided = envelope(
+                &agent_stream(),
+                1,
+                environment,
+                "DecisionMade",
+                T0 - 61,
+                payload,
+            );
+            decided["event_id"] = json!(DECISION);
+            decided["schema_version"] = json!(version);
+            rows.push(stored(1, &decided));
+        }
         let mut requested = envelope(
             &agent_stream(),
-            1,
+            2,
             environment,
             "ApprovalRequested",
             T0 - 60,
             json!({"content": content, "content_hash": self.hash, "deadline": DEADLINE}),
         );
         requested["event_id"] = json!(APPROVAL);
+        requested["causation_id"] = json!(DECISION);
+        rows.push(stored(2, &requested));
         let mut streams = self.journal.streams.lock().expect("unpoisoned");
-        streams.insert(ctl(), rows);
-        streams.insert(agent_stream(), vec![stored(1, &requested)]);
+        streams.insert(agent_stream(), rows);
     }
 
     fn cookie(&self, who: &str) -> String {
@@ -1006,6 +1037,69 @@ fn a_repeat_under_the_key_answers_the_same_though_the_challenge_is_spent() {
     );
     let skip = w.respond(ALICE, KEY, &skipped(&w));
     assert_eq!(code(&skip), (409, ProblemCode::IdempotencyConflict));
+    assert_eq!(w.answers().len(), 1);
+}
+
+/// A grant of a request whose deferred checks are not exactly its decision's, or whose decision is
+/// not on the stream, is refused `deferral_mismatch` before the port is asked: nothing is
+/// committed and the challenge stays unspent. The role is judged first, and a Skip of the same
+/// request is recorded, since skipping adds no risk (DEC-2521).
+#[test]
+fn a_grant_of_a_request_that_disagrees_with_its_decision_is_refused_and_a_skip_is_not() {
+    let content = content(Some(&reference(&document(&["role:approver"]))));
+    let cases: [(&str, Option<(u64, serde_json::Value)>); 4] = [
+        (
+            "its decision deferred checks it does not name",
+            Some((3, json!({"deferred_to_binding": ["halt"]}))),
+        ),
+        ("its decision is not on the stream", None),
+        (
+            "its decision is version 3 without the list",
+            Some((3, json!({"dry_run": "allow"}))),
+        ),
+        (
+            "its decision deferred the liquidity checks it does not name",
+            Some((
+                3,
+                json!({"deferred_to_binding": ["liquidity_floor", "participation"]}),
+            )),
+        ),
+    ];
+    for (case, decision) in cases {
+        let w = world();
+        w.decided("paper", &content, decision);
+        let issued = w.challenge();
+        w.confirm(&issued);
+        let viewer = w.respond(CAROL, "k1Z-9_grant00009", &grant(&w, &issued));
+        assert_eq!(
+            code(&viewer),
+            (403, ProblemCode::Forbidden),
+            "{case}: the row first"
+        );
+        let reply = w.respond(ALICE, KEY, &grant(&w, &issued));
+        assert_eq!(
+            code(&reply),
+            (409, ProblemCode::DeferralMismatch),
+            "{case}: {}",
+            w.said()
+        );
+        assert!(w.answers().is_empty(), "{case}: nothing is committed");
+        assert!(w.asked().is_empty(), "{case}: the port is never asked");
+        assert!(w.held(&issued), "{case}: the challenge stays unspent");
+        let skip = w.respond(ALICE, "k1Z-9_grant00002", &skipped(&w));
+        recorded(&w, &skip);
+        assert_eq!(w.answers().len(), 1, "{case}: the Skip is recorded");
+    }
+}
+
+/// The world's own request names its decision, which deferred nothing, as the runtime writes a
+/// version 1 request: a grant of it is not refused for its deferrals (DEC-2521).
+#[test]
+fn a_grant_of_a_request_that_agrees_with_its_decision_is_judged_as_before() {
+    let w = world();
+    let issued = w.challenge();
+    w.confirm(&issued);
+    recorded(&w, &w.respond(ALICE, KEY, &grant(&w, &issued)));
     assert_eq!(w.answers().len(), 1);
 }
 
