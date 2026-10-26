@@ -7,6 +7,8 @@
   executor alerting a user's and an operator's switch, or a user's switch gets two notices.
   *Accepted when:* the API's kill switch batch holds the alert, the journal accepts it, the
   executor alerts only an automated switch, and a test pins one notice per command.
-  *Done:* the API commits the alert in the command's batch, and the executor alerts a risk limit's
-  and an operator's switch but never a user's (`kill_switch_alerts`). The operator's switch keeps
-  the executor's alert until its own cause is written (E8-9l).
+  *Done:* the API and `mandate agent kill` commit the alert in the command's batch, and
+  `kill_switch_writers` lists every writer with the test that pins its alert (DEC-2517). The
+  executor alerts a risk limit's and an operator's switch but never a user's
+  (`kill_switch_alerts`). The operator's switch keeps the executor's alert until its own cause is
+  written (E8-9l).
