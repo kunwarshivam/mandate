@@ -223,15 +223,16 @@ Crypto uses the broker's `price_increment`.
   normalized at the connector (`BTC/USD` and `BTCUSD` are one instrument).
 - **Intent ID:** the `event_id` of the agent stream's `IntentProposed` ([journal spec](journal.md)
   §2), a ULID. **`client_order_id`:** `"md-{intent}"` (≤ 128 characters;
-  [DEC-449](../project/decisions/DEC-449.md), [DEC-860](../project/decisions/DEC-860.md)), a
-  function of the intent ID alone ([DEC-506](../project/decisions/DEC-506.md),
-  [DEC-521](../project/decisions/DEC-521.md)), so every restart and every writer derives the same
-  one. The `md-` prefix is how reconciliation tells an order of ours from external activity (§7.1):
-  an ID without it is never ours. The attempt number is not part of the ID. `OrderSubmitted`
-  journals it, and it increments only when `Unknown → Intent` resubmits after a confirmed absence,
-  which carries the **same** ID (§5.7). `Rejected` is terminal, so a rejected intent is never
-  submitted again. An intent ID is alphanumeric, so an intent's ID has no hyphen after `md-`; every
-  other form below adds one, and none meets an intent's.
+  [DEC-860](../project/decisions/DEC-860.md), and the `md-` ids of
+  [DEC-449](../project/decisions/DEC-449.md)), a function of the intent ID alone
+  ([DEC-506](../project/decisions/DEC-506.md), [DEC-521](../project/decisions/DEC-521.md)), so every
+  restart and every writer derives the same one, and a retry of an unconfirmed submission reuses it.
+  The `md-` prefix is how reconciliation tells an order of ours from external activity (§7.1): an ID
+  without it is never ours. The attempt number is not part of the ID. `OrderSubmitted` journals it,
+  and it increments only when `Unknown → Intent` resubmits after a confirmed absence, which carries
+  the **same** ID (§5.7). `Rejected` is terminal, so a rejected intent is never submitted again. An
+  intent ID is alphanumeric, so an intent's ID has no hyphen after `md-`; every other form below
+  adds one, and none meets an intent's.
 - **A replacement the broker made** (§5.7's `replaced` row): the successor is
   `"md-r-{origin}"`, `{origin}` the ID of the `OrderStateChanged` event that records the
   replacement ([DEC-876](../project/decisions/DEC-876.md)), so it replaces exactly one order.
