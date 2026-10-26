@@ -139576,7 +139576,7 @@
    },
    {
     "name": "acknowledged_v2.subject_unknown",
-    "clause": "§9.28 v2: `subject` is `limit` or `restriction`",
+    "clause": "§9.28 v2: `subject` is `limit`, `restriction` or `reconciliation`",
     "base_draft": "acknowledged_v2",
     "changes": [
      {
@@ -139640,7 +139640,7 @@
    },
    {
     "name": "acknowledged_v2_copy.subject_unknown",
-    "clause": "§9.28 v2: `subject` is `limit` or `restriction`",
+    "clause": "§9.28 v2: `subject` is `limit`, `restriction` or `reconciliation`",
     "base_draft": "acknowledged_v2_copy",
     "changes": [
      {
@@ -139704,7 +139704,7 @@
    },
    {
     "name": "requested_v2.subject_unknown",
-    "clause": "§9.28 v2: `subject` is `limit` or `restriction`",
+    "clause": "§9.28 v2: `subject` is `limit`, `restriction` or `reconciliation`",
     "base_draft": "requested_v2",
     "changes": [
      {
@@ -139934,6 +139934,34 @@
      {
       "path": "payload.subject",
       "value": "limit"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "acknowledged_v2.reconciliation",
+    "clause": "§9.28 v0.104: a reconciliation hold's subject",
+    "base_draft": "acknowledged_v2",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": "reconciliation"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "requested_v2.reconciliation",
+    "clause": "§9.28 v0.104: a request for a hold",
+    "base_draft": "requested_v2",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": "reconciliation"
      }
     ],
     "expect": {
@@ -147315,6 +147343,2659 @@
      "reason": "schema",
      "path": "payload.evidence"
     }
+   }
+  ]
+ },
+ "reconciliation_acknowledgments": {
+  "spec": "docs/specs/journal.md v0.104 §9.28, an acknowledgment of a reconciliation hold (DEC-2830)",
+  "executor": [
+   {
+    "name": "the_incomplete_hold_lifts",
+    "clause": "§9.28 v0.104: all four checks pass",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "lift",
+      "agent": "*",
+      "restriction": "reconciliation:incomplete"
+     }
+    ]
+   },
+   {
+    "name": "an_agents_mismatch_hold_lifts",
+    "clause": "the hold of one agent's instrument mismatch",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "to": "paused",
+       "restriction": "reconciliation:AAPL",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "lift",
+      "agent": "agent_a",
+      "restriction": "reconciliation:AAPL"
+     }
+    ]
+   },
+   {
+    "name": "one_hold_of_two_lifts",
+    "clause": "it lifts the hold it names and no other",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00002000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00002000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:external_activity",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00002000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 2,
+      "outcome": "lift",
+      "agent": "*",
+      "restriction": "reconciliation:external_activity"
+     }
+    ]
+   },
+   {
+    "name": "an_unknown_hold",
+    "clause": "check 1: no record has the id",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00009000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00009000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "trigger_unknown"
+     }
+    ]
+   },
+   {
+    "name": "a_removal_is_not_a_hold",
+    "clause": "check 1: the record named moved the agents to normal",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00002000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00002000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "normal",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00002000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 2,
+      "outcome": "trigger_unknown"
+     }
+    ]
+   },
+   {
+    "name": "a_hold_of_another_kind",
+    "clause": "check 1: the record named holds no reconciliation restriction",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "account_restricted",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "trigger_unknown"
+     }
+    ]
+   },
+   {
+    "name": "a_hold_after_the_copy",
+    "clause": "check 1: the hold comes before the copy",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:02:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T16:02:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 0,
+      "outcome": "trigger_unknown"
+     }
+    ]
+   },
+   {
+    "name": "a_stop_is_not_a_hold",
+    "clause": "check 1: a Stop under the prefix is never lifted",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "to": "stopped",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "trigger_unknown"
+     }
+    ]
+   },
+   {
+    "name": "a_copied_mode_is_not_a_hold",
+    "clause": "check 1: only the executor's own hold",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": false,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "trigger_unknown"
+     }
+    ]
+   },
+   {
+    "name": "held_again_after_a_lift",
+    "clause": "check 2: a hold applied again after a lift needs its own acknowledgment",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00002000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:30.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339290,
+       "risk_clock": "2026-10-18T16:01:30.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00002",
+        "authenticated_at": 1792339280,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00003000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:02:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00002000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339320,
+       "risk_clock": "2026-10-18T16:02:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00003",
+        "authenticated_at": 1792339310,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00002000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:10.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T16:01:10.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00002000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:30.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00002000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339290,
+       "risk_clock": "2026-10-18T16:01:30.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00002",
+        "authenticated_at": 1792339280,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00003000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:02:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00003000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00002000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339320,
+       "risk_clock": "2026-10-18T16:02:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00003",
+        "authenticated_at": 1792339310,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "lift",
+      "agent": "*",
+      "restriction": "reconciliation:incomplete"
+     },
+     {
+      "index": 3,
+      "outcome": "trigger_superseded"
+     },
+     {
+      "index": 4,
+      "outcome": "lift",
+      "agent": "*",
+      "restriction": "reconciliation:incomplete"
+     }
+    ]
+   },
+   {
+    "name": "a_limit_subject_names_the_hold",
+    "clause": "the subject decides the record: a `limit` names no hold",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "limit"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "limit"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "trigger_unknown"
+     }
+    ]
+   },
+   {
+    "name": "removed_before_the_copy",
+    "clause": "check 2: the hold was removed before the acknowledgment",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00002000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:55:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "normal",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:55:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 2,
+      "outcome": "trigger_superseded"
+     }
+    ]
+   },
+   {
+    "name": "applied_again_before_the_copy",
+    "clause": "check 2: the hold applied again needs its own acknowledgment",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00002000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:55:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:55:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 2,
+      "outcome": "trigger_superseded"
+     }
+    ]
+   },
+   {
+    "name": "another_agents_removal_leaves_it",
+    "clause": "check 2: the same restriction of another agent supersedes nothing",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00002000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:55:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_b",
+       "to": "normal",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:55:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 2,
+      "outcome": "lift",
+      "agent": "*",
+      "restriction": "reconciliation:incomplete"
+     }
+    ]
+   },
+   {
+    "name": "lifted_once",
+    "clause": "check 2: the executor's own lift supersedes it for the next acknowledgment",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00002000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:30.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339290,
+       "risk_clock": "2026-10-18T16:01:30.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00002",
+        "authenticated_at": 1792339280,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00002000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:30.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00002000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339290,
+       "risk_clock": "2026-10-18T16:01:30.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00002",
+        "authenticated_at": 1792339280,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "lift",
+      "agent": "*",
+      "restriction": "reconciliation:incomplete"
+     },
+     {
+      "index": 2,
+      "outcome": "trigger_superseded"
+     }
+    ]
+   },
+   {
+    "name": "a_refused_one_lifts_nothing",
+    "clause": "a refused acknowledgment leaves the hold for the next",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": null,
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00002000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:30.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339290,
+       "risk_clock": "2026-10-18T16:01:30.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00002",
+        "authenticated_at": 1792339280,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": null,
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00002000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:30.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00002000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339290,
+       "risk_clock": "2026-10-18T16:01:30.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00002",
+        "authenticated_at": 1792339280,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "step_up_missing"
+     },
+     {
+      "index": 2,
+      "outcome": "lift",
+      "agent": "*",
+      "restriction": "reconciliation:incomplete"
+     }
+    ]
+   },
+   {
+    "name": "processed_late",
+    "clause": "check 3: judged when processed",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:05:51.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "step_up_stale"
+     }
+    ]
+   },
+   {
+    "name": "independence_under_the_overlay",
+    "clause": "check 4: the overlay requires an independent user",
+    "overlay_independent": true,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBHD00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AgentModeApplied",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "*",
+       "to": "exits_only",
+       "restriction": "reconciliation:incomplete",
+       "originated": true,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBHD00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "reconciliation"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "not_independent"
+     }
+    ]
    }
   ]
  },
