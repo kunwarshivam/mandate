@@ -233,30 +233,34 @@ function Figure({ text }: { text: string | null }) {
   return text === null ? <td className={`py-2.5 ${NOT_REPORTED}`}>Not reported</td> : <td className="py-2.5 font-mono tabular">{text}</td>;
 }
 
+/** A journaled time with its date, so a mark or an interval from another day never reads as today's. */
+const dated = (at: string) => `${at.slice(0, 10)} ${clock(at)} UTC`;
+
 /** The latest counted risk mark; one that is not sane shows no price at all (DEC-2138 item 2). */
 function MarkCell({ mark }: { mark: RiskMark | null }) {
   if (mark === null) return <Figure text={null} />;
   if (!mark.sane || mark.bid === null) return <td className={`py-2.5 ${NOT_REPORTED}`}>No sane mark</td>;
   return (
     <td className="py-2.5">
-      <span className="font-mono tabular">{price(mark.bid)}</span> bid, {clock(mark.marked_at)} UTC
+      <span className="font-mono tabular">{price(mark.bid)}</span> bid, {dated(mark.marked_at)}
     </td>
   );
 }
 
-/** The account's protection in the instrument as the executor folds it (trading spec §5.4, DEC-2138 item 4). */
-function ProtectionCell({ protection }: { protection: Protection | null }) {
-  if (protection === null) return <Figure text={null} />;
+/**
+ * The account's protection in the instrument as the executor folds it (trading spec §5.4, DEC-2138
+ * item 4): its resting orders and what they cover, and an open unprotected interval whenever there
+ * is one, beside any cover, so a partial cover never reads as protected.
+ */
+function ProtectionCell({ protection }: { protection: Protection }) {
+  const parts: string[] = [];
   if (protection.orders.length > 0) {
-    const parts = [protection.stop === null ? null : `stop ${price(protection.stop)}`, protection.take_profit === null ? null : `take-profit ${price(protection.take_profit)}`].filter((p): p is string => p !== null);
-    return (
-      <td className="py-2.5">
-        {parts.length > 0 ? `${parts.join(", ")}; ` : ""}covers {quantity(protection.covered_qty)}
-      </td>
-    );
+    const legs = [protection.stop === null ? null : `stop ${price(protection.stop)}`, protection.take_profit === null ? null : `take-profit ${price(protection.take_profit)}`].filter((p): p is string => p !== null);
+    parts.push(`${legs.length > 0 ? `${legs.join(", ")}; ` : ""}covers ${quantity(protection.covered_qty)}`);
   }
-  if (protection.unprotected_since !== null) return <td className="py-2.5 font-medium">Unprotected since {clock(protection.unprotected_since)} UTC</td>;
-  return <td className="py-2.5 text-muted-foreground">No protective order recorded</td>;
+  if (protection.unprotected_since !== null) parts.push(`Unprotected since ${dated(protection.unprotected_since)}`);
+  if (parts.length === 0) return <td className="py-2.5 text-muted-foreground">No protective order recorded</td>;
+  return <td className={protection.unprotected_since === null ? "py-2.5" : "py-2.5 font-medium"}>{parts.join(". ")}</td>;
 }
 
 /** One agent's own positions, with what its deployment reports of each and "not reported" where it does not. */

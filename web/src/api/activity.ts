@@ -2,9 +2,9 @@
  * An agent's activity over the workspace API (§4.7 D3, DEC-2111): its orders as the account stream
  * journals them, and the net quantity its own fills left per instrument. Read only, and nothing
  * computed in a missing member's place: a state or filled quantity the journal has not given is
- * `null` ("not reported"), never assumed, and `unknown` is shown as unknown (trading spec §5.7). The
- * cost basis, risk mark and protection are always `null` until their folds are served (DEC-2111 item
- * 5), so the screen shows none of them.
+ * `null` ("not reported"), never assumed, and `unknown` is shown as unknown (trading spec §5.7). Each
+ * position's cost basis, risk mark, market value, unrealized P&L and protection are DEC-2138's,
+ * required as the schema requires them: `null` where the journal does not say, never a zero.
  */
 import { array, closedEnum, decimal, integer, isRecord, nullable, object, string, timestamp } from "./decode";
 import { type ReadPosition, reconciledHolding } from "./read-models";
@@ -55,11 +55,7 @@ export interface Protection {
   unprotected_since: Timestamp | null;
 }
 
-/**
- * One instrument the agent's own fills hold (`read-models/positions`). DEC-2138's members are `null`
- * where the journal does not say, and where a deployment that predates them serves nothing: both
- * read as "not reported", never as zero.
- */
+/** One instrument the agent's own fills hold (`read-models/positions`); DEC-2138's figures are `null` where the journal does not say, read as "not reported", never as zero. */
 export interface AgentHolding {
   instrument_id: string;
   filled_qty: Decimal;
@@ -67,7 +63,7 @@ export interface AgentHolding {
   risk_mark: RiskMark | null;
   market_value: Decimal | null;
   unrealized_pnl: Decimal | null;
-  protection: Protection | null;
+  protection: Protection;
 }
 
 export interface Activity {
@@ -99,12 +95,6 @@ const order = object<AgentOrder>({
   updated_at: timestamp,
 });
 
-/** A member a deployment before DEC-2138 does not serve reads as `null`; one it serves must decode. */
-const unservedAsNull =
-  <T,>(decode: Decoder<T>): Decoder<T | null> =>
-  (value, path) =>
-    value === undefined ? { ok: true, value: null } : nullable(decode)(value, path);
-
 const flag: Decoder<boolean> = (value, path) => (typeof value === "boolean" ? { ok: true, value } : fail(path, value === undefined ? "missing" : "wrong_type"));
 
 const riskMark: Decoder<RiskMark> = (value, path) => {
@@ -112,26 +102,16 @@ const riskMark: Decoder<RiskMark> = (value, path) => {
   return read.ok && read.value.sane && read.value.bid === null ? fail(`${path}/bid`, "wrong_type") : read;
 };
 
-const held = object<Pick<AgentHolding, "instrument_id" | "filled_qty">>({ instrument_id: bounded(200), filled_qty: decimal });
-const figures = {
-  cost_basis: unservedAsNull(object<CostBasis>({ qty: decimal, basis: decimal })),
-  risk_mark: unservedAsNull(riskMark),
-  market_value: unservedAsNull(decimal),
-  unrealized_pnl: unservedAsNull(decimal),
-  protection: unservedAsNull(object<Protection>({ orders: array(bounded(200)), covered_qty: decimal, stop: nullable(decimal), take_profit: nullable(decimal), unprotected_since: nullable(timestamp) })),
-} as const;
-
-const holding: Decoder<AgentHolding> = (value, path) => {
-  const base = held(value, path);
-  if (!base.ok) return base;
-  const out: Record<string, unknown> = { ...base.value };
-  for (const [name, decode] of Object.entries(figures) as Array<[string, Decoder<unknown>]>) {
-    const read = decode((value as Record<string, unknown>)[name], `${path}/${name}`);
-    if (!read.ok) return read;
-    out[name] = read.value;
-  }
-  return { ok: true, value: out as unknown as AgentHolding };
-};
+/** `read-models/positions`' `Position`: every member required, each figure `null` where the journal does not say, and protection always served (DEC-2138). */
+const holding = object<AgentHolding>({
+  instrument_id: bounded(200),
+  filled_qty: decimal,
+  cost_basis: nullable(object<CostBasis>({ qty: decimal, basis: decimal })),
+  risk_mark: nullable(riskMark),
+  market_value: nullable(decimal),
+  unrealized_pnl: nullable(decimal),
+  protection: object<Protection>({ orders: array(bounded(200)), covered_qty: decimal, stop: nullable(decimal), take_profit: nullable(decimal), unprotected_since: nullable(timestamp) }),
+});
 
 /** `read-models/orders` and `read-models/positions`, each with the agent it names; an answer for another agent is refused. */
 export function activityRead(agentId: string) {

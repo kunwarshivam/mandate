@@ -149,7 +149,7 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     step("journal", String(await journal.getByRole("listitem").count()));
   });
 
-  await test.step("the positions screen shows the agent's own position from the API, with each figure as served or not reported", async () => {
+  await test.step("the positions screen shows the agent's own position from the API, in its columns", async () => {
     const own = page.locator(`[data-slot=agent-positions][data-agent="${AGENT}"]`);
     const shown = await until(page, "/positions", 30_000, async () => (await own.getByRole("row").count()) > 1);
     if (!shown) refuse("the positions screen showed no row of the agent's own position within 30 s");
