@@ -593,11 +593,28 @@ fn derived(operation: &str, principal: &str, key: &str) -> String {
         .expect("a JSON string")
 }
 
-fn code(reply: &Reply) -> (u16, ProblemCode) {
-    let problem = decode::<Problem>(&reply.body)
-        .unwrap_or_else(|_| panic!("a problem, not {} {}", reply.status, lossy(reply)));
-    assert_eq!(problem.status, reply.status);
-    (reply.status, problem.code)
+/// A reply's status and problem code, compared with `(status, code)`; its `Debug` carries the
+/// whole body, so a failed comparison shows what the server answered.
+struct Coded(u16, Option<ProblemCode>, String);
+
+impl std::fmt::Debug for Coded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {:?}: {}", self.0, self.1, self.2)
+    }
+}
+
+impl PartialEq<(u16, ProblemCode)> for Coded {
+    fn eq(&self, other: &(u16, ProblemCode)) -> bool {
+        self.0 == other.0 && self.1 == Some(other.1)
+    }
+}
+
+fn code(reply: &Reply) -> Coded {
+    let problem = decode::<Problem>(&reply.body).ok();
+    if let Some(problem) = &problem {
+        assert_eq!(problem.status, reply.status);
+    }
+    Coded(reply.status, problem.map(|p| p.code), lossy(reply))
 }
 
 /// The payload `mandate approvals approve` commits for Alice's grant of the approval with
@@ -1023,6 +1040,17 @@ fn a_grant_naming_a_delegation_is_invalid_and_asks_no_port() {
         (422, ProblemCode::Invalid),
         "§5.3's batch is not served: {}",
         w.said()
+    );
+    let at: Vec<String> = decode::<Problem>(&reply.body)
+        .expect("a problem")
+        .violations
+        .iter()
+        .map(|violation| format!("{violation:?}"))
+        .collect();
+    assert!(
+        at.len() == 1 && at[0].contains("\"/delegation\""),
+        "one violation, at /delegation: {}",
+        lossy(&reply)
     );
     assert!(w.asked().is_empty(), "the port is never asked");
     assert!(w.answers().is_empty());
