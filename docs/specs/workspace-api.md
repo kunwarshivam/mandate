@@ -871,7 +871,7 @@ per workspace deployment (item 6).
         pattern) is omitted, as an unpinnable instrument is ([DEC-2142](../project/decisions/DEC-2142.md)).
         A model withdrawn by `PlatformOperatorAction` `model_withdrawn` leaves the
         registry, and so the list, once the fold maps that action (E10-11w); until then the create
-        admits it and the list shows it, the two never differing. Each listed model has that
+        admits a withdrawn model and the list shows it, the two never differing for it. Each listed model has that
         registration's `model_id`, `model_version`, `content_hash`, `params` (in the order V-007
         compares a document's, ascending as registered) and `admits_instruments`, its row's
         `recorded_at` as `registered_at`, and `content`, sorted by id. V-007 reads only the row,
