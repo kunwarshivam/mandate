@@ -630,7 +630,7 @@ fn nothing_working_is_never_reconciled_on_schedule() -> Result<(), Error> {
     Ok(())
 }
 
-/// DEC-2812: the fixture takes one of its assets' ids as an order's `symbol`, as Alpaca does, and
+/// DEC-2813: the fixture takes one of its assets' ids as an order's `symbol`, as Alpaca does, and
 /// names that asset by its ticker in the answer, the order read back, the position and the fill;
 /// a symbol that is no asset's id stays as sent.
 #[test]

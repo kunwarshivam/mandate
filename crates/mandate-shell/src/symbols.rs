@@ -1,6 +1,6 @@
 //! The shell's connector that reads its broker's answers through [`BrokerSymbols`], so each
 //! instrument the run registered is named by the asset id the executor sent (DEC-938 item 1,
-//! DEC-2812).
+//! DEC-2813).
 
 use mandate_domain::{CapabilityProfile, ProfileError};
 pub use mandate_executor::BrokerSymbols;

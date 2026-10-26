@@ -18,7 +18,7 @@
 //! takes from a held position what its exit and its fills need (rule 13). The binding gate's
 //! input is never answered for an exit, which reads nothing here. The broker's answers are read
 //! through [`Named`], which names each deployed instrument by its asset id, as the executor sent it,
-//! wherever the broker names it by its ticker (DEC-938 item 1, [DEC-2812](../../../docs/project/decisions/DEC-2812.md)).
+//! wherever the broker names it by its ticker (DEC-938 item 1, [DEC-2813](../../../docs/project/decisions/DEC-2813.md)).
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -256,9 +256,10 @@ impl Deployment {
     /// The broker's ticker of each instrument an exit, a fill or a mark reads, mapped to the
     /// asset id the deployment names it by: each followed agent's current deployment, else its
     /// last that read, so a held position's own orders and fills keep their asset id through a
-    /// store outage (`AGENTS.md` rule 13).
+    /// store outage (`AGENTS.md` rule 13). A ticker a current deployment names is that
+    /// deployment's, over a stopped agent's last: the current ones are registered last.
     pub fn symbols(&self) -> BrokerSymbols {
-        BrokerSymbols::registered(self.lasting_all().into_iter().filter_map(|resolved| {
+        BrokerSymbols::registered(self.lasting_all().into_iter().rev().filter_map(|resolved| {
             Some((
                 InstrumentId::new(&resolved.symbol).ok()?,
                 resolved.instrument.clone(),
@@ -637,7 +638,7 @@ impl BindingGateSource for Deployment {
 /// it by its ticker, as the shell's paper run reads Alpaca's (DEC-938 item 1): the executor sends
 /// the asset id, and Alpaca answers an order read back, a position and a `FILL` by the ticker, so
 /// read as they come, the run's own fill would be another instrument's. A ticker no deployment
-/// names stays as the broker spelled it ([DEC-2812](../../../docs/project/decisions/DEC-2812.md)).
+/// names stays as the broker spelled it ([DEC-2813](../../../docs/project/decisions/DEC-2813.md)).
 pub struct Named<B> {
     broker: B,
     deployment: Option<Deployment>,

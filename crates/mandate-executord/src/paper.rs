@@ -55,7 +55,7 @@ pub const CASH: &str = "100000";
 
 /// The fixture's assets: symbol, asset id, listing exchange as Alpaca writes it, and the latest
 /// quote's bid and ask. The cell's deployments trade SPY and QQQ, each named by the asset id its
-/// instrument snapshot registers ([DEC-2812](../../../docs/project/decisions/DEC-2812.md)).
+/// instrument snapshot registers ([DEC-2813](../../../docs/project/decisions/DEC-2813.md)).
 pub const ASSETS: [FixtureAsset; 2] = [
     FixtureAsset {
         symbol: "SPY",

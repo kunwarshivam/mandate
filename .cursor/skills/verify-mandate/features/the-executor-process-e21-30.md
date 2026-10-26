@@ -95,6 +95,6 @@
   carry inherited, the crypto stop-limit offset, the mounted store and the stored bars
   (DEC-2802); the cell's trade loop end to end, a deployed opening gated on the executor's own mark,
   sent under its asset id, filled on the fixture, booked by asset id, its stop resting and every
-  later reconciliation clean, and a deployed run's broker answering by asset id (DEC-2812).
+  later reconciliation clean, and a deployed run's broker answering by asset id (DEC-2813).
   `tests/fixture_fills.rs` also shows the fixture answering an asset-id symbol by its ticker.
 - **Run:** `cargo nextest run -p mandate-executord` (with `MANDATE_PG_URL` for `tests/pg.rs`).

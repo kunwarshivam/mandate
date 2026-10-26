@@ -9,7 +9,7 @@
 //! asset id back on every instrument an answer names by a ticker the run registered, before the
 //! executor reads it; a ticker the run did not register stays as the broker spelled it, so an
 //! instrument the run does not trade is never taken for one it does. The shell's paper run and the
-//! executor process both read their broker's answers through it (DEC-2812).
+//! executor process both read their broker's answers through it (DEC-2813).
 
 use std::collections::BTreeMap;
 
@@ -23,7 +23,8 @@ pub struct BrokerSymbols(BTreeMap<InstrumentId, InstrumentId>);
 
 impl BrokerSymbols {
     /// The run's registered instruments, each as `(ticker, asset id)`. A ticker spelled as its own
-    /// asset id maps nothing, so the empty map and that one read alike.
+    /// asset id maps nothing, so the empty map and that one read alike; a ticker given twice maps
+    /// to its last pair's asset id.
     pub fn registered(pairs: impl IntoIterator<Item = (InstrumentId, InstrumentId)>) -> Self {
         Self(
             pairs

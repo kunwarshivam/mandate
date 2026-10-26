@@ -27,7 +27,7 @@ use mandate_executord::{Broker, Protections};
 use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, StreamId};
 use mandate_marketdata::dataset::Store as Datasets;
 use mandate_marketdata::model::{AssetClass as Class, Bar, DatasetId, Feed, Kind, Records, Symbol};
-use mandate_num::{Price, Qty, Usd};
+use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_risk::{
     DayTradeRegime, GateInput, GatePass, Origin, ProposedKind, ProposedOrder, ReasonCode,
     TimeInForce as GateTimeInForce, Verdict, evaluate,
@@ -1183,7 +1183,7 @@ fn a_deployment_not_read_in_full_is_read_again() -> Result<(), Error> {
     Ok(())
 }
 
-/// The cell's trade loop on the fixture broker, every port but the broker real (DEC-2812): a
+/// The cell's trade loop on the fixture broker, every port but the broker real (DEC-2813): a
 /// deployed SPY agent's opening, proposed on a journaled, untraded account, passes the binding gate
 /// on the deployment's reviewed artifacts, the executor's own fresh mark and the fixture's own
 /// facts, the scheduler ticking every five seconds (the cell's ticks every second); it is
@@ -1329,7 +1329,7 @@ fn trade_loop() -> Result<(Journal, LoopProcess, FixturePaper), Error> {
     Ok((journal, process, paper))
 }
 
-/// DEC-2812: a deployed run's broker names each deployed instrument by its asset id wherever the
+/// DEC-2813: a deployed run's broker names each deployed instrument by its asset id wherever the
 /// broker named it by its ticker, so the fill the fixture reports as `SPY`'s is SPY's asset id's,
 /// and a ticker no deployment names stays as the broker spelled it; its profile and its
 /// declaration are the broker's own. Undeployed, the run's broker maps nothing.
@@ -1399,6 +1399,57 @@ fn a_deployed_runs_broker_answers_by_asset_id() -> Result<(), Error> {
         named,
         BTreeSet::from(["SPY", "QQQ"]),
         "undeployed, the broker's tickers stand"
+    );
+    Ok(())
+}
+
+/// A position the broker names by its ticker, as Alpaca does.
+fn named_position(named: &str) -> Result<BrokerOutcome, Error> {
+    Ok(BrokerOutcome::Positions(vec![
+        mandate_executor::BrokerPosition {
+            instrument: InstrumentId::new(named)?,
+            qty: SignedQty::parse("1")?,
+            avg_entry_price: Price::parse("580.13")?,
+        },
+    ]))
+}
+
+/// DEC-2813: a store outage after the deployment read keeps its ticker map, so a held position's
+/// own position and fills still read by SPY's asset id while the store is down (`AGENTS.md` rule
+/// 13); a run that never read its deployment maps nothing, so its broker's tickers stand.
+#[test]
+fn a_store_outage_keeps_the_ticker_map_a_cold_start_maps_nothing() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    let (deployment, _, down) = counted(&journal, store.clone());
+    assert_eq!(
+        deployment.symbols().outcome(named_position("SPY")?),
+        named_position(SPY)?
+    );
+    down.set(true);
+    journal.write(
+        CONTROL_STREAM,
+        "x1",
+        "ConnectionEstablished",
+        2,
+        None,
+        json(r#"{"account_ref":"acct9","broker":"alpaca","connection_id":"conn9","environment":"paper","scopes":["trading"],"user":"user_other"}"#)?,
+    )?;
+    assert!(
+        !deployment.covers(&agent(), &spy()?),
+        "the case builds an outage the deployment reads"
+    );
+    assert_eq!(
+        deployment.symbols().outcome(named_position("SPY")?),
+        named_position(SPY)?,
+        "the last deployment that read still names SPY by its asset id"
+    );
+    let (cold, _, cold_down) = counted(&journal, store);
+    cold_down.set(true);
+    assert_eq!(
+        cold.symbols().outcome(named_position("SPY")?),
+        named_position("SPY")?,
+        "nothing read, nothing mapped"
     );
     Ok(())
 }
