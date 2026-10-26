@@ -401,3 +401,31 @@ The log names the confirmation it appended, or the one it had already appended i
 again. A Job that fails leaves the challenge unconfirmed and adds nothing; the challenge expires on
 its own. The code is short-lived, but it is still not for chat or an
 issue.
+
+## K. The OpenRouter key, for research with a real model ([DEC-997](../docs/project/decisions/DEC-997.md), [DEC-2116](../docs/project/decisions/DEC-2116.md), [DEC-2396](../docs/project/decisions/DEC-2396.md))
+
+Research calls a real model only through staging's model-gateway service, which reads the
+OpenRouter key once from the vault, at `platform/model-provider-key`, and from nowhere else
+(DEC-2020, DEC-2257). No agent asks for the key, sees it or handles it. This step is yours alone.
+
+Do it once DEC-2396 records which model you chose. Until then the gateway serves only the
+recorded bundle and refuses any live start (`live_not_built`), so a key in the vault spends
+nothing.
+
+1. In OpenRouter, create an API key for this purpose alone. In its settings, set the key's own
+   credit limit to the monthly cap you accepted ($50, DEC-997), so the provider refuses past it
+   even if the platform's meter were wrong. In your account's privacy settings, turn on **Zero
+   Data Retention** only, and turn off training on your prompts.
+2. **The key** goes in one place: GitHub, repository **Settings → Environments → `infra-staging`
+   → Environment secrets → Add secret**, name `OPENROUTER_API_KEY`. Paste it there only, never
+   into a terminal, a chat, an issue or a file.
+   - The next staging `apply` reads it, masked at once.
+   - It writes it to the staging vault at `platform/model-provider-key`, on the standard input of
+     `mandate vault put model-provider-key`, through the secret-import identity.
+   - Only the model-gateway service can read it there.
+   - The run prints `model provider key: written`. Until you add it, it prints `not set` and
+     changes nothing.
+3. Dispatch `infra` with `apply` on `staging`.
+4. **To rotate it**, replace the environment secret and run `apply` again. **To stop all model
+   spend at once**, revoke the key in OpenRouter: every call then ends `credential_invalid`, the
+   safe default, with no output, so no proposal and no order.
