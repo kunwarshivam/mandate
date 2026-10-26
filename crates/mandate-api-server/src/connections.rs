@@ -55,7 +55,8 @@ pub struct ConnectionView {
     /// Version 2's `reason` when `state` is [`ConnectionState::Revoked`]; `None` otherwise, and
     /// for a version-1 revocation, which names none.
     pub revoked_reason: Option<String>,
-    /// The agents whose latest `AgentDeployed` is version 2, names this connection, and is not
+    /// The agents whose latest `AgentDeployed` is version 2 or 3 (version 3 read as version 2,
+    /// DEC-2131 item 4), names this connection, and is not
     /// stopped, in first-deployment order.
     pub agents: Vec<String>,
 }
@@ -94,7 +95,7 @@ pub fn connections(control: &[StoredEvent]) -> Vec<ConnectionView> {
                 let Some(agent) = text(&event, "payload.agent_id") else {
                     continue;
                 };
-                let named = (row.schema_version == 2)
+                let named = matches!(row.schema_version, 2 | 3)
                     .then(|| text(&event, "payload.connection_id").map(str::to_owned))
                     .flatten();
                 match deployments.iter_mut().find(|known| known.0 == agent) {
