@@ -22,9 +22,28 @@
     {
       "instrument_id": "8ccae427-5dd0-45b3-b5fe-7c0c3a8ee5c4",
       "filled_qty": "10",
-      "cost_basis": null,
-      "risk_mark": null,
-      "protection": null
+      "cost_basis": {
+        "qty": "10",
+        "basis": "5122.5"
+      },
+      "risk_mark": {
+        "bid": "515.12",
+        "sane": true,
+        "session": "regular",
+        "marked_at": "2026-10-19T14:29:45.000000000Z"
+      },
+      "market_value": "5151.2",
+      "unrealized_pnl": "28.7",
+      "protection": {
+        "orders": [
+          "cl_01JB3K7Q2W9X4Y5Z6A7B8C9D0E",
+          "cl_01JB3K7Q2W9X4Y5Z6A7B8C9D0F"
+        ],
+        "covered_qty": "10",
+        "stop": "497",
+        "take_profit": "538",
+        "unprotected_since": null
+      }
     }
   ],
   "account_positions": [
