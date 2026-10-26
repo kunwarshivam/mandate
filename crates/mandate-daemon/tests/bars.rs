@@ -103,6 +103,24 @@ fn an_opening_reads_the_shared_figures_at_its_own_clock() {
             assert_eq!(liquidity_deferred(facts.as_ref()), BTreeSet::new());
         }
     }
+    let facts = reader(&root)
+        .opening(Purpose::Open, "QQQ", at(NOW))
+        .unwrap();
+    assert_eq!(
+        (
+            facts.prior_close.to_string(),
+            facts.median_dollar_volume_20d.to_string(),
+            facts.adv_20d.to_string(),
+            facts.trailing_5m_volume.to_string(),
+        ),
+        (
+            "140".to_owned(),
+            "280000000".to_owned(),
+            "2000000".to_owned(),
+            "25000".to_owned(),
+        ),
+        "every session closes 140 on 2,000,000 shares, and five minutes of 5,000 are in the window"
+    );
     let early = reader(&root).opening(Purpose::Open, "QQQ", at("2026-10-26T13:33:00Z"));
     let later = reader(&root).opening(Purpose::Open, "QQQ", at(NOW));
     assert_ne!(
@@ -148,8 +166,10 @@ fn without_trusted_bars_both_checks_stay_deferred() {
     fs::remove_dir_all(&root).ok();
 }
 
-/// (d) An exit, a protective order or a flatten never reads the bars, even where an opening
-/// would: risk reduction never waits on a figure.
+/// (d), the reader's half: for an exit, a protective order or a flatten's risk exit it answers
+/// nothing, even where an opening would, so risk reduction never waits on a figure. That no exit
+/// path calls it at all is the call sites' test, which lanes D1 and X add as they wire it
+/// (DEC-2274 items 3 and 4).
 #[test]
 fn no_exit_reads_the_bars() {
     let root = stored("exits");

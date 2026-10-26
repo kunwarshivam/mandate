@@ -56,8 +56,12 @@ fn dataset(symbol: &str, timeframe: &str) -> DatasetId {
 
 /// The 30 trading days ending on [`LAST`], oldest first.
 fn sessions() -> Vec<Date> {
+    sessions_to(Date::new(LAST.0, LAST.1, LAST.2).unwrap())
+}
+
+/// The 30 trading days ending on `last`, oldest first.
+fn sessions_to(last: Date) -> Vec<Date> {
     let calendar = ExchangeCalendar::us_equities().unwrap();
-    let last = Date::new(LAST.0, LAST.1, LAST.2).unwrap();
     let mut day = Date::new(2026, 8, 1).unwrap();
     let mut days = Vec::new();
     while day <= last {
@@ -79,9 +83,14 @@ fn session(n: usize) -> (String, String) {
 
 /// Stores `symbol`'s 30 daily sessions under `root`.
 fn daily(root: &Path, symbol: &str) {
+    daily_to(root, symbol, sessions());
+}
+
+/// Stores `symbol`'s daily sessions `days` under `root`, session `n` as [`session`] says.
+fn daily_to(root: &Path, symbol: &str, days: Vec<Date>) {
     let store = Store::new(root);
     let id = dataset(symbol, "1Day");
-    for (n, day) in sessions().into_iter().enumerate() {
+    for (n, day) in days.into_iter().enumerate() {
         let (close, volume) = session(n);
         let bars = vec![bar(new_york_midnight(day).unwrap(), &close, &volume)];
         store.put_day(&id, day, &Records::Bars(bars)).unwrap();
@@ -248,19 +257,45 @@ fn an_untrusted_input_is_refused_never_a_figure() {
 }
 
 /// (b) The figures rest on the partitions and the clock alone: the same partitions copied to
-/// another root, read at the same clock, give the same figures, and a later read changes nothing
-/// stored.
+/// another root, read at the same clock, give the same figures, and a read writes nothing. The
+/// clock is a week before the host's, so a figure that read the host clock instead would differ.
 #[test]
 fn the_same_partitions_at_the_same_clock_give_the_same_figures() {
-    let root = stored("replay");
-    let first = liquidity(&root, "QQQ", at(NOW)).unwrap();
+    let root = scratch("replay");
+    daily_to(&root, "QQQ", sessions_to(Date::new(2026, 10, 15).unwrap()));
+    minutes_on(&root, "QQQ", "2026-10-16");
+    let clock = at("2026-10-16T19:00:00Z");
+    let before = tree(&root);
+    let first = liquidity(&root, "QQQ", clock).unwrap();
+    assert_eq!(tree(&root), before, "a read writes nothing");
+    assert_eq!(
+        first.trailing_5m_volume,
+        Qty::parse(&(325..330).map(|n| 100 + n).sum::<i64>().to_string()).unwrap(),
+        "the five minutes before 19:00Z are minutes 325 to 329 of the session"
+    );
     let copy = scratch("replay-copy");
     copy_tree(&root, &copy);
-    assert_eq!(liquidity(&copy, "QQQ", at(NOW)).unwrap(), first);
-    assert_eq!(liquidity(&root, "QQQ", at(NOW)).unwrap(), first);
+    assert_eq!(liquidity(&copy, "QQQ", clock).unwrap(), first);
+    assert_eq!(liquidity(&root, "QQQ", clock).unwrap(), first);
+    assert_eq!(tree(&root), before, "nor does a second read");
     for dir in [root, copy] {
         fs::remove_dir_all(&dir).ok();
     }
+}
+
+/// Every file under `dir`, by its path, with its bytes.
+fn tree(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut all = Vec::new();
+    let mut entries: Vec<_> = fs::read_dir(dir).unwrap().map(|e| e.unwrap()).collect();
+    entries.sort_by_key(|e| e.path());
+    for entry in entries {
+        if entry.file_type().unwrap().is_dir() {
+            all.extend(tree(&entry.path()));
+        } else {
+            all.push((entry.path(), fs::read(entry.path()).unwrap()));
+        }
+    }
+    all
 }
 
 /// (c) Each reader's clock is its own: the trailing volume read at the binding clock is that
