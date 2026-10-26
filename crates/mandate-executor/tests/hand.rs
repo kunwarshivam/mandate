@@ -2439,8 +2439,11 @@ fn the_executor_never_lifts_a_reconciliation_pause_itself() {
     );
 }
 
+/// DEC-2828: §9.28's closed acknowledgment names a triggered limit, never a reconciliation
+/// mismatch, so the mismatch the seven unexplained shares record outlasts it, and resuming waits for
+/// a spec that names how the owner acknowledges a mismatch (backlog E7-4b).
 #[test]
-fn only_an_acknowledged_owner_ack_clears_a_mismatch_pause() {
+fn a_mismatch_outlasts_an_owner_acknowledgment() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
@@ -2461,9 +2464,21 @@ fn only_an_acknowledged_owner_ack_clears_a_mismatch_pause() {
         "OwnerAcknowledged",
         with_clock(
             &[
-                ("subject", text(AAPL)),
+                ("agent", text(common::AGENT)),
+                ("event", text(AAPL)),
                 ("user", text("user-1")),
-                ("step_up", text("assertion-1")),
+                ("requested_by", text("user-1")),
+                ("independent_required", mandate_canon::Value::Bool(false)),
+                ("request", mandate_canon::Value::Null),
+                ("submitted_at", int(20_000)),
+                (
+                    "step_up",
+                    object(&[
+                        ("assertion_id", text("assertion-1")),
+                        ("authenticated_at", int(20_000)),
+                        ("method", text("cli_confirm")),
+                    ]),
+                ),
             ],
             20_000,
         ),
@@ -2474,8 +2489,8 @@ fn only_an_acknowledged_owner_ack_clears_a_mismatch_pause() {
         .expect("the copied acknowledgment folds");
 
     assert!(
-        !shell.state.mismatched().contains(&instrument(AAPL)),
-        "resuming needs an owner acknowledgment with step-up evidence, and only that (§11)"
+        shell.state.mismatched().contains(&instrument(AAPL)),
+        "no acknowledgment clears a mismatch until a spec names how (E7-4b)"
     );
 }
 

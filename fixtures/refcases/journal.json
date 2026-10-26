@@ -4570,7 +4570,7 @@
   ]
  },
  "approval_deferrals": {
-  "spec": "docs/specs/journal.md v0.92 §9.6 rules 291 and 292 (DEC-2515)",
+  "spec": "docs/specs/journal.md v0.92 §9.6 rules 291 and 292 (DEC-2515), and v0.105 §11's approval_deferral_mismatch (DEC-2522)",
   "approver_sentence": "These checks have not been run yet. They run when the order is placed, and may still refuse it:",
   "decisions": {
    "plain": {
@@ -5529,6 +5529,528 @@
     "expect": {
      "outcome": "Valid"
     }
+   }
+  ],
+  "ranges": [
+   {
+    "name": "a_deferring_decision_then_its_request",
+    "from_seq": 1,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000D1",
+      "event_type": "DecisionMade",
+      "schema_version": 3,
+      "causation_id": null,
+      "payload": {
+       "deferred_to_binding": [
+        "halt",
+        "liquidity_floor",
+        "participation"
+       ]
+      }
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000E1",
+      "event_type": "AgentModeChanged",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {}
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 3,
+      "causation_id": "01J8Z3R0A000000000000000D1",
+      "payload": {
+       "content": {
+        "deferred_to_binding": [
+         "halt",
+         "liquidity_floor",
+         "participation"
+        ]
+       }
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "a_plain_decision_then_its_version_2_request",
+    "from_seq": 1,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000D2",
+      "event_type": "DecisionMade",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {}
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 2,
+      "causation_id": "01J8Z3R0A000000000000000D2",
+      "payload": {
+       "content": {}
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "a_version_2_request_hides_its_decisions_deferrals",
+    "from_seq": 1,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000D1",
+      "event_type": "DecisionMade",
+      "schema_version": 3,
+      "causation_id": null,
+      "payload": {
+       "deferred_to_binding": [
+        "halt",
+        "liquidity_floor",
+        "participation"
+       ]
+      }
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 2,
+      "causation_id": "01J8Z3R0A000000000000000D1",
+      "payload": {
+       "content": {}
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   },
+   {
+    "name": "a_version_1_request_hides_its_decisions_deferrals",
+    "from_seq": 1,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000D1",
+      "event_type": "DecisionMade",
+      "schema_version": 3,
+      "causation_id": null,
+      "payload": {
+       "deferred_to_binding": [
+        "halt",
+        "liquidity_floor",
+        "participation"
+       ]
+      }
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 1,
+      "causation_id": "01J8Z3R0A000000000000000D1",
+      "payload": {
+       "content": {}
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   },
+   {
+    "name": "a_request_names_another_deferral",
+    "from_seq": 1,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000D1",
+      "event_type": "DecisionMade",
+      "schema_version": 3,
+      "causation_id": null,
+      "payload": {
+       "deferred_to_binding": [
+        "halt",
+        "liquidity_floor",
+        "participation"
+       ]
+      }
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 3,
+      "causation_id": "01J8Z3R0A000000000000000D1",
+      "payload": {
+       "content": {
+        "deferred_to_binding": [
+         "agent_mode",
+         "liquidity_floor",
+         "participation"
+        ]
+       }
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   },
+   {
+    "name": "a_request_names_deferrals_its_plain_decision_did_not",
+    "from_seq": 1,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000D2",
+      "event_type": "DecisionMade",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {}
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 3,
+      "causation_id": "01J8Z3R0A000000000000000D2",
+      "payload": {
+       "content": {
+        "deferred_to_binding": [
+         "halt",
+         "liquidity_floor",
+         "participation"
+        ]
+       }
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   },
+   {
+    "name": "a_request_names_no_cause",
+    "from_seq": 1,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000D1",
+      "event_type": "DecisionMade",
+      "schema_version": 3,
+      "causation_id": null,
+      "payload": {
+       "deferred_to_binding": [
+        "halt",
+        "liquidity_floor",
+        "participation"
+       ]
+      }
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 3,
+      "causation_id": null,
+      "payload": {
+       "content": {
+        "deferred_to_binding": [
+         "halt",
+         "liquidity_floor",
+         "participation"
+        ]
+       }
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   },
+   {
+    "name": "a_request_names_an_event_that_is_not_a_decision",
+    "from_seq": 1,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000E1",
+      "event_type": "AgentModeChanged",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {}
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 2,
+      "causation_id": "01J8Z3R0A000000000000000E1",
+      "payload": {
+       "content": {}
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   },
+   {
+    "name": "a_request_before_its_decision_on_a_full_chain",
+    "from_seq": 1,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 3,
+      "causation_id": "01J8Z3R0A000000000000000D1",
+      "payload": {
+       "content": {
+        "deferred_to_binding": [
+         "halt",
+         "liquidity_floor",
+         "participation"
+        ]
+       }
+      }
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000D1",
+      "event_type": "DecisionMade",
+      "schema_version": 3,
+      "causation_id": null,
+      "payload": {
+       "deferred_to_binding": [
+        "halt",
+        "liquidity_floor",
+        "participation"
+       ]
+      }
+     }
+    ],
+    "expect": [
+     0
+    ]
+   },
+   {
+    "name": "a_full_chain_request_names_no_event_in_it",
+    "from_seq": 1,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 2,
+      "causation_id": "01J8Z3R0A000000000000000Z9",
+      "payload": {
+       "content": {}
+      }
+     }
+    ],
+    "expect": [
+     0
+    ]
+   },
+   {
+    "name": "a_later_range_request_whose_decision_is_before_it",
+    "from_seq": 40,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 2,
+      "causation_id": "01J8Z3R0A000000000000000Z9",
+      "payload": {
+       "content": {}
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "a_later_range_holds_its_decision_and_disagrees",
+    "from_seq": 40,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000D1",
+      "event_type": "DecisionMade",
+      "schema_version": 3,
+      "causation_id": null,
+      "payload": {
+       "deferred_to_binding": [
+        "halt",
+        "liquidity_floor",
+        "participation"
+       ]
+      }
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 2,
+      "causation_id": "01J8Z3R0A000000000000000D1",
+      "payload": {
+       "content": {}
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   },
+   {
+    "name": "a_later_range_request_before_its_decision_is_unchecked",
+    "from_seq": 40,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 2,
+      "causation_id": "01J8Z3R0A000000000000000D1",
+      "payload": {
+       "content": {}
+      }
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000D1",
+      "event_type": "DecisionMade",
+      "schema_version": 3,
+      "causation_id": null,
+      "payload": {
+       "deferred_to_binding": [
+        "halt",
+        "liquidity_floor",
+        "participation"
+       ]
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "an_empty_list_reads_as_an_absent_one",
+    "from_seq": 1,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000D2",
+      "event_type": "DecisionMade",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {}
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 2,
+      "causation_id": "01J8Z3R0A000000000000000D2",
+      "payload": {
+       "content": {
+        "deferred_to_binding": []
+       }
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "a_decision_with_an_empty_list_reads_as_one_with_none",
+    "from_seq": 1,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000D2",
+      "event_type": "DecisionMade",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "deferred_to_binding": []
+      }
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 2,
+      "causation_id": "01J8Z3R0A000000000000000D2",
+      "payload": {
+       "content": {}
+      }
+     }
+    ],
+    "expect": []
+   },
+   {
+    "name": "the_same_names_in_another_order_disagree",
+    "from_seq": 1,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000D1",
+      "event_type": "DecisionMade",
+      "schema_version": 3,
+      "causation_id": null,
+      "payload": {
+       "deferred_to_binding": [
+        "halt",
+        "liquidity_floor",
+        "participation"
+       ]
+      }
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 3,
+      "causation_id": "01J8Z3R0A000000000000000D1",
+      "payload": {
+       "content": {
+        "deferred_to_binding": [
+         "participation",
+         "liquidity_floor",
+         "halt"
+        ]
+       }
+      }
+     }
+    ],
+    "expect": [
+     1
+    ]
+   },
+   {
+    "name": "two_requests_both_reported",
+    "from_seq": 1,
+    "events": [
+     {
+      "event_id": "01J8Z3R0A000000000000000D1",
+      "event_type": "DecisionMade",
+      "schema_version": 3,
+      "causation_id": null,
+      "payload": {
+       "deferred_to_binding": [
+        "halt",
+        "liquidity_floor",
+        "participation"
+       ]
+      }
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 2,
+      "causation_id": "01J8Z3R0A000000000000000D1",
+      "payload": {
+       "content": {}
+      }
+     },
+     {
+      "event_id": "01J8Z3R0A000000000000000Q1",
+      "event_type": "ApprovalRequested",
+      "schema_version": 3,
+      "causation_id": "01J8Z3R0A000000000000000D1",
+      "payload": {
+       "content": {
+        "deferred_to_binding": [
+         "halt"
+        ]
+       }
+      }
+     }
+    ],
+    "expect": [
+     1,
+     2
+    ]
    }
   ]
  },
