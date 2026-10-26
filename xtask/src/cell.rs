@@ -150,6 +150,15 @@ const LIVE_TRADING_HOSTS: [&str; 3] = [
 ];
 /// An extra CA bundle the k3s node trusts, for a developer machine behind a TLS-inspecting proxy.
 const EXTRA_CA_ENV: &str = "MANDATE_CELL_CA_BUNDLE";
+/// Set on a host that refuses a process a negative `oom_score_adj`, even as root, as some
+/// sandboxed VMs do: kubelet asks one for every pod sandbox, so without this no pod starts there
+/// (`failed to update /proc/self/oom_score_adj: Permission denied`). The node's containerd then
+/// keeps each container's score at or above its own instead of lowering it.
+const RESTRICT_OOM_ENV: &str = "MANDATE_CELL_RESTRICT_OOM";
+/// The k3s containerd drop-in [`RESTRICT_OOM_ENV`] mounts, and where k3s imports it from.
+const RESTRICT_OOM_DROPIN: &str =
+    "[plugins.'io.containerd.cri.v1.runtime']\n  restrict_oom_score_adj = true\n";
+const CONTAINERD_DROPINS: &str = "/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d";
 /// Set by CI: a missing docker, k3d or helm fails the cell job instead of skipping it.
 pub const CELL_REQUIRED_ENV: &str = "MANDATE_CELL_REQUIRED";
 /// Polls of a Job, a pod or the journal cluster, two seconds apart.
@@ -1509,6 +1518,18 @@ fn create_cluster() -> Result<()> {
         args.push(format!(
             "{}:/etc/ssl/certs/ca-certificates.crt@server:0",
             bundle.display()
+        ));
+    }
+    if env::var_os(RESTRICT_OOM_ENV).is_some() {
+        let written = state()?.join("containerd-restrict-oom.toml");
+        fs::write(&written, RESTRICT_OOM_DROPIN)
+            .with_context(|| format!("writing {}", written.display()))?;
+        let dropin = fs::canonicalize(&written)
+            .with_context(|| format!("resolving {}", written.display()))?;
+        args.push("--volume".into());
+        args.push(format!(
+            "{}:{CONTAINERD_DROPINS}/restrict-oom.toml@server:0",
+            dropin.display()
         ));
     }
     let args: Vec<&str> = args.iter().map(String::as_str).collect();

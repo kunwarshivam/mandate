@@ -1541,6 +1541,300 @@ fn a_kill_switch_with_an_unplanned_holding_raises_the_operator_alert_once() {
     );
 }
 
+/// The owner's exit of `spy`, as the workspace services journal it: unconfirmed, or with a
+/// confirmed bid and CLI step-up `assertion` authenticated ten seconds before it was committed.
+fn owner_exit(rig: &Rig, assertion: Option<&str>) {
+    owner_exit_at(rig, assertion.map(|assertion| (assertion, NOW - 10)));
+}
+
+/// The owner's exit of `spy` committed at `NOW`, with a confirmed bid of 99 for 100 and floor 95
+/// and CLI step-up `(assertion, authenticated_at)` when given, and no bid otherwise.
+fn owner_exit_at(rig: &Rig, step_up: Option<(&str, i64)>) {
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    let (bid, step_up) = match step_up {
+        Some((assertion, authenticated_at)) => (
+            r#""bid":"99","bid_size":"100","floor":"95""#.to_owned(),
+            format!(
+                r#"{{"assertion_id":"{assertion}","authenticated_at":{authenticated_at},"method":"cli_confirm"}}"#
+            ),
+        ),
+        None => (
+            r#""bid":null,"bid_size":null,"floor":null"#.to_owned(),
+            "null".to_owned(),
+        ),
+    };
+    let payload = format!(
+        r#"{{"agent":"{AGENT}","command":"owner_exit","scope":"instrument","subject":"spy",{bid},"submitted_at":{NOW},"step_up":{step_up},"user":"user-owner"}}"#
+    );
+    rig.control
+        .borrow_mut()
+        .push(row(CONTROL, seq, "OwnerCommandIssued", "user", &payload));
+}
+
+/// The runtime over the production flatten, with the agent's fill of 3 `spy` on its account and
+/// `spy` a US equity in its universe.
+fn holding_spy(rig: &Rig, now: i64) -> RuntimeProcess<Rig> {
+    let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+    if rig.accounts.borrow().is_empty() {
+        established(rig, CONNECTION, ACCOUNT_REF, 2);
+        let stamp = at(NOW).to_string();
+        on_account(
+            rig,
+            ACCOUNT,
+            "OrderRequestRecorded",
+            &format!(r#"{{"agent_id":"{AGENT}","purpose":"open","risk_clock":"{stamp}"}}"#),
+        );
+        on_account(
+            rig,
+            ACCOUNT,
+            "OrderSubmitted",
+            r#"{"client_order_id":"o1","instrument_id":"spy","side":"buy"}"#,
+        );
+        on_account(
+            rig,
+            ACCOUNT,
+            "FillApplied",
+            &format!(
+                r#"{{"fill_id":"f1","client_order_id":"o1","instrument_id":"spy","side":"buy","qty_gross":"3","price":"100","risk_clock":"{stamp}"}}"#
+            ),
+        );
+    }
+    let classes = [("spy".to_owned(), mandate_domain::AssetClass::UsEquity)].into();
+    let flatten = mandate_daemon::production::Flatten::new(facts.clone(), classes);
+    RuntimeProcess::start(
+        rig.clone(),
+        Wiring {
+            facts: Some(facts),
+            flatten: Box::new(flatten),
+            ..wiring()
+        },
+        &config(),
+        at(now),
+    )
+}
+
+fn payload_of(row: &StoredEvent) -> Value {
+    parse(&row.body)
+        .ok()
+        .and_then(|body| body.get("payload").cloned())
+        .unwrap_or(Value::Null)
+}
+
+fn causation_of(row: &StoredEvent) -> Option<String> {
+    parse(&row.body)
+        .ok()?
+        .get("causation_id")?
+        .as_str()
+        .map(str::to_owned)
+}
+
+/// X7, DEC-2387: in the cell, where the journal is the only channel to the executor, the owner's
+/// exit of one instrument is journaled on the real journal as its copy and one market sell of the
+/// agent's whole sub-ledger caused by it, the record the executor reads (journal spec §9.1). With
+/// valid step-up the copy's evidence carries `authenticated_at` as the timestamp the journal types
+/// and the executor reads to bound the confirmation (DEC-2040 item 7).
+#[test]
+fn the_owner_s_exit_of_one_instrument_is_journaled_as_its_market_sell() {
+    for assertion in [None, Some("assertion-exit")] {
+        let rig = Rig::default();
+        let mut process = holding_spy(&rig, NOW);
+        process.step(at(NOW + 1));
+        owner_exit(&rig, assertion);
+        process.step(at(NOW + 2));
+        assert_eq!(
+            process.lifecycle().state(),
+            State::Ready,
+            "{:?}",
+            kinds(&rig)
+        );
+        let rows = agent_rows(&rig);
+        let copy = rows
+            .iter()
+            .find(|r| r.event_type == "OwnerExitRequested")
+            .expect("the copy is journaled");
+        let legs: Vec<&StoredEvent> = rows
+            .iter()
+            .filter(|r| r.event_type == "IntentProposed")
+            .collect();
+        assert_eq!(legs.len(), 1, "{:?}", kinds(&rig));
+        assert_eq!(causation_of(legs[0]), Some(copy.event_id.clone()));
+        let leg = payload_of(legs[0]);
+        for (member, want) in [
+            ("instrument_id", "spy"),
+            ("side", "sell"),
+            ("type", "market"),
+            ("tif", "day"),
+            ("qty", "3"),
+            ("purpose", "owner_exit"),
+        ] {
+            assert_eq!(
+                leg.get(member).and_then(Value::as_str),
+                Some(want),
+                "{member}"
+            );
+        }
+        assert_eq!(leg.get("limit_price"), Some(&Value::Null));
+        let stamped = payload_of(copy)
+            .get("step_up")
+            .and_then(|step_up| step_up.get("authenticated_at"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        assert_eq!(
+            stamped,
+            assertion.map(|_| at(NOW - 10).to_string()),
+            "{assertion:?}"
+        );
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ExitOp {
+    OwnerExit,
+    Tick,
+    LoseAnswer,
+    Step,
+    Restart,
+}
+
+fn exit_op() -> impl Strategy<Value = ExitOp> {
+    prop_oneof![
+        Just(ExitOp::OwnerExit),
+        Just(ExitOp::Tick),
+        Just(ExitOp::LoseAnswer),
+        Just(ExitOp::Step),
+        Just(ExitOp::Restart),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+
+    /// Whatever the interleaving of the owner's exits, ticks, lost append answers and restarts,
+    /// once a pass runs with nothing lost: every owner exit the control stream holds is copied
+    /// exactly once, and each copy has exactly one market sell of the agent's 3 `spy` caused by it,
+    /// so none is sold twice and none is never proposed (`AGENTS.md` rule 13). The oracle reads
+    /// the control rows the test laid down and the agent stream's rows, not the process's state.
+    #[test]
+    fn every_owner_exit_is_proposed_once_whatever_the_interleaving(
+        ops in proptest::collection::vec(exit_op(), 1..20),
+    ) {
+        let rig = Rig::default();
+        let mut second = NOW;
+        let mut process = holding_spy(&rig, second);
+        for op in ops {
+            second += 1;
+            match op {
+                ExitOp::OwnerExit => owner_exit(&rig, None),
+                ExitOp::Tick => tick(&rig, second),
+                ExitOp::LoseAnswer => rig.lose_answers.set(1),
+                ExitOp::Step => {
+                    process.step(at(second));
+                }
+                ExitOp::Restart => process = holding_spy(&rig, second),
+            }
+        }
+        rig.lose_answers.set(0);
+        for _ in 0..2 {
+            second += 1;
+            process.step(at(second));
+        }
+        prop_assert_eq!(process.lifecycle().state(), State::Ready, "{:?}", kinds(&rig));
+        let commands: Vec<String> = rig
+            .control
+            .borrow()
+            .iter()
+            .filter(|r| r.event_type == "OwnerCommandIssued")
+            .map(|r| r.event_id.clone())
+            .collect();
+        let rows = agent_rows(&rig);
+        let copies: Vec<&StoredEvent> =
+            rows.iter().filter(|r| r.event_type == "OwnerExitRequested").collect();
+        let copied: Vec<String> = copies.iter().filter_map(|r| causation_of(r)).collect();
+        prop_assert_eq!(&copied, &commands);
+        for copy in copies {
+            let legs: Vec<&StoredEvent> = rows
+                .iter()
+                .filter(|r| r.event_type == "IntentProposed")
+                .filter(|r| causation_of(r).as_ref() == Some(&copy.event_id))
+                .collect();
+            prop_assert_eq!(legs.len(), 1, "{:?}", kinds(&rig));
+            let leg = payload_of(legs[0]);
+            prop_assert_eq!(leg.get("qty").and_then(Value::as_str), Some("3"));
+        }
+    }
+}
+
+/// Where the agent-stream rows the runtime writes for an owner's exit are kept, so the executor
+/// process's own test reads exactly them (DEC-2387): the two processes may not link each other
+/// (`xtask/layers.toml`), so this file is their contract.
+const OWNER_EXIT_CONTRACT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/contracts/owner-exit-agent-stream.json"
+);
+
+/// The runtime's agent-stream rows for three owner exits of `spy` (unconfirmed, confirmed with
+/// valid step-up, and confirmed with step-up already stale at commit) are byte for byte the
+/// contract file `mandate-executord`'s test reads. `MANDATE_WRITE_CONTRACTS=1` rewrites it.
+#[test]
+fn the_owner_exit_rows_are_the_executors_contract() {
+    let cases: [(&str, Option<(&str, i64)>); 3] = [
+        ("unconfirmed", None),
+        ("stepped_up", Some(("assertion-valid", NOW - 10))),
+        ("stale", Some(("assertion-stale", NOW - 1_000))),
+    ];
+    let mut listed = Vec::new();
+    for (name, step_up) in cases {
+        let rig = Rig::default();
+        let mut process = holding_spy(&rig, NOW);
+        process.step(at(NOW + 1));
+        owner_exit_at(&rig, step_up);
+        process.step(at(NOW + 2));
+        assert_eq!(process.lifecycle().state(), State::Ready, "{name}");
+        let rows: Vec<Value> = agent_rows(&rig)
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.event_type.as_str(),
+                    "OwnerExitRequested" | "IntentProposed"
+                )
+            })
+            .map(|r| {
+                let mut members = Object::new();
+                let put = |members: &mut Object, key: &str, value: Value| {
+                    members.insert(Key::new(key).unwrap(), value);
+                };
+                put(&mut members, "event_id", Value::Str(r.event_id.clone()));
+                put(&mut members, "event_type", Value::Str(r.event_type.clone()));
+                put(
+                    &mut members,
+                    "causation_id",
+                    causation_of(r).map_or(Value::Null, Value::Str),
+                );
+                put(&mut members, "payload", payload_of(r));
+                Value::Object(members)
+            })
+            .collect();
+        assert_eq!(rows.len(), 2, "{name}: the copy and its one leg");
+        let mut case = Object::new();
+        case.insert(Key::new("name").unwrap(), Value::Str(name.to_owned()));
+        case.insert(Key::new("rows").unwrap(), Value::Array(rows));
+        listed.push(Value::Object(case));
+    }
+    let mut document = Object::new();
+    document.insert(Key::new("cases").unwrap(), Value::Array(listed));
+    let mut bytes = mandate_canon::to_canonical(&Value::Object(document));
+    bytes.push(b'\n');
+    if std::env::var_os("MANDATE_WRITE_CONTRACTS").is_some() {
+        std::fs::write(OWNER_EXIT_CONTRACT, &bytes).unwrap();
+    }
+    let kept = std::fs::read(OWNER_EXIT_CONTRACT).unwrap_or_default();
+    assert!(
+        kept == bytes,
+        "{OWNER_EXIT_CONTRACT} differs from what the runtime writes; rerun with \
+         MANDATE_WRITE_CONTRACTS=1 and re-check mandate-executord's owner_exit_contract test"
+    );
+}
+
 /// #2448's re-review (rule 13): an evaluation the core would refuse (an empty source, a negative
 /// horizon, an `as_of` past what a stamp can write) stores no closes and hands nothing, so it
 /// never stops the process; an evaluation beside it is still recorded and the tick still runs.

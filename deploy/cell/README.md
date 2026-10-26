@@ -129,7 +129,11 @@ cargo xtask ci cell-vault         # and beside it: up, then vault, plain and see
 `cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one
 in the k3s node: `docker exec k3d-mandate-cell-server-0 kubectl get pods -n ws-ws1`. Behind a
 TLS-inspecting proxy, set `MANDATE_CELL_CA_BUNDLE` to the proxy's CA bundle so the node can pull.
-These are local-cell results, never staging's (DEC-967 item 5).
+On a host that refuses any process a negative `oom_score_adj`, even as root (some sandboxed VMs;
+every pod then fails with `failed to update /proc/self/oom_score_adj: Permission denied`), set
+`MANDATE_CELL_RESTRICT_OOM=1` before the cluster is created (`cargo xtask cell down` first if one
+is running): the node's containerd then keeps each container's score at or above its own
+(`restrict_oom_score_adj`). These are local-cell results, never staging's (DEC-967 item 5).
 
 ### On a laptop
 

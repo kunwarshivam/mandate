@@ -165,6 +165,29 @@ def test_no_store_for_a_reader_without_its_writer():
     assert rendered_with_store(docs) == set()
 
 
+BARS = f"{MOUNT}/datasets/cell-recorded"
+
+
+def bars_roots(docs: list[dict]) -> dict[str, str]:
+    """Each process's `MANDATE_BARS`, for the processes that are handed one."""
+    roots = {}
+    for doc in workloads(docs):
+        for c in pod_spec(doc)["containers"]:
+            for e in c.get("env", []):
+                if e["name"] == "MANDATE_BARS":
+                    roots[process_of(doc)] = e["value"]
+    return roots
+
+
+def test_only_the_gates_read_the_bars_and_only_where_they_are_stored():
+    """The runtime's dry run and the executor's binding gate are handed the data process's bars
+    root, which they mount read-only, and no other process is (DEC-2274). Without the data process
+    nothing names one, so both checks stay deferred and the binding gate refuses an opening."""
+    assert bars_roots(render_all()) == {"runtime": BARS, "executor": BARS}
+    assert bars_roots(render_all("--set", "images.data=")) == {}
+    assert bars_roots(render_all("--set", "images.api=")) == {}
+
+
 # The pod templates of the deployment manager's ConfigMap a seeded change has read, by `id(docs)`:
 # they are JSON text in the ConfigMap, so `seeded` writes each back after the change.
 EDITED: dict[int, dict[str, dict]] = {}

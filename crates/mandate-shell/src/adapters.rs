@@ -26,8 +26,9 @@
 //! | [`AlpacaConnector`] | `mandate_alpaca::TradingClient` over a `TradingTransport` (stream K) |
 //! | [`ExecutorReconciler`] | `mandate_executor::reconcile` on the connector's snapshot (E7-3) |
 //!
-//! The stored daily bars and typed closes the run trusts are read by [`crate::paper`] through
-//! `trusted_daily_bars` and `trusted_daily_closes`, `mandate_bars`'s one trust rule (DEC-2385)
+//! The stored daily figures and typed closes the run trusts are read by [`crate::paper`] through
+//! `trusted_daily_liquidity` and `trusted_daily_closes`, `mandate_bars`'s one trust rule (DEC-2385,
+//! DEC-2274)
 //! over `mandate_marketdata`'s datasets (E2-1, E2-2), not by a stage: the model host owns every signal, and the
 //! shell computes none (DEC-475 items 1 and 6, DEC-503).
 
@@ -53,7 +54,7 @@ use mandate_journal::{
     AppendOutcome, ArtifactRef, ArtifactSource, ArtifactStore, MemoryJournal, StoredEvent, StreamId,
 };
 use mandate_journal_pg::PgJournal;
-use mandate_marketdata::model::Bar;
+use mandate_liquidity::DailyLiquidity;
 use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
 use mandate_risk::{Decision, FlattenInitiator, FlattenInput, agent_flatten};
 use mandate_robinhood::Tools;
@@ -892,14 +893,15 @@ impl MandateSource for SpecMandate {
     }
 }
 
-/// The daily bars the run trusts: `mandate_bars`'s trust check (DEC-2385), so the paper assembly's
-/// liquidity facts read the same span as the model host's closes.
-pub(crate) fn trusted_daily_bars(
+/// The daily liquidity figures the run trusts: `mandate_bars`'s one reading (DEC-2274) over its
+/// trust check (DEC-2385), so the paper assembly's liquidity facts read the same span as the model
+/// host's closes, and the same figures the runtime and the executor read.
+pub(crate) fn trusted_daily_liquidity(
     dir: &Path,
     symbol: &str,
     now: UtcNanos,
-) -> Result<Vec<Bar>, Cause> {
-    Ok(mandate_bars::trusted_daily_bars(dir, symbol, now)?)
+) -> Result<DailyLiquidity, Cause> {
+    Ok(mandate_bars::trusted_daily_liquidity(dir, symbol, now)?)
 }
 
 /// The pinned symbol's closes, each with its session, as `mandate_bars`'s trust check admits them
@@ -1217,7 +1219,7 @@ impl Sink for ExecutorSink {
                     instrument: instrument.clone(),
                     side: *side,
                     qty: *qty,
-                    limit: Some(*limit),
+                    limit: *limit,
                     purpose: executor_purpose(*purpose),
                     protection: execution.protection.map(|prices| {
                         mandate_executor::ProtectionPrices {
@@ -2449,7 +2451,7 @@ mod tests {
                     instrument: instrument.clone(),
                     side: mandate_accounting::Side::Buy,
                     qty: Qty::parse("1").map_err(|e| e.to_string())?,
-                    limit: Price::parse("255.2").map_err(|e| e.to_string())?,
+                    limit: Some(Price::parse("255.2").map_err(|e| e.to_string())?),
                     purpose: RuntimePurpose::Open,
                 },
                 execution: Some(OrderExecution {
@@ -2501,7 +2503,7 @@ mod tests {
                     instrument: instrument.clone(),
                     side,
                     qty: Qty::parse("1").map_err(|e| e.to_string())?,
-                    limit: Price::parse("255.2").map_err(|e| e.to_string())?,
+                    limit: Some(Price::parse("255.2").map_err(|e| e.to_string())?),
                     purpose,
                 },
                 execution,

@@ -1918,6 +1918,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-accounting",
  "mandate-artifacts-fs",
+ "mandate-bars",
  "mandate-builder",
  "mandate-canon",
  "mandate-domain",
@@ -1925,6 +1926,7 @@ dependencies = [
  "mandate-gateway",
  "mandate-journal",
  "mandate-journal-pg",
+ "mandate-marketdata",
  "mandate-num",
  "mandate-ports",
  "mandate-process",
