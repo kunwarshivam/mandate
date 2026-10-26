@@ -662,3 +662,19 @@ fn the_production_view_hands_the_runtime_the_founder_of_a_founded_workspace() {
     founded.record("ConnectionEstablished", &payload);
     assert_eq!(admitted_approvers(&founded), users(&[ULID_FOUNDER]));
 }
+
+/// The run reads a stored envelope's `event_time` only in the journal's canonical form; an
+/// envelope with none, or with any other text, carries none, so its stream folds no one.
+#[test]
+fn a_record_carries_its_envelopes_canonical_event_time_only() {
+    let canonical = json(r#"{"event_time":"2026-10-01T00:00:00.000000000Z","payload":{}}"#);
+    assert_eq!(ControlRecord::event_time_of(&canonical), Some(at(0)));
+    for body in [
+        r#"{"payload":{}}"#,
+        r#"{"event_time":null}"#,
+        r#"{"event_time":7}"#,
+        r#"{"event_time":"2026-10-01T00:00:00Z"}"#,
+    ] {
+        assert_eq!(ControlRecord::event_time_of(&json(body)), None, "{body}");
+    }
+}
