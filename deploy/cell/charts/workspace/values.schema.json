@@ -57,6 +57,7 @@
         "executor",
         "token-exchange",
         "scheduler",
+        "dispatcher",
         "model-gateway",
         "exporter",
         "data",
@@ -94,6 +95,10 @@
           "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
         },
         "scheduler": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        },
+        "dispatcher": {
           "type": "string",
           "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
         },
@@ -380,6 +385,33 @@
         "deploymentMonthlyUsd": {
           "type": "string",
           "pattern": "^$|^[0-9]{1,6}(\\.[0-9]{1,6})?$"
+        }
+      }
+    },
+    "dispatcher": {
+      "description": "The notification dispatcher's configuration file (DEC-2500 item 7, DEC-2516 item 2), rendered into the ConfigMap `dispatcher-config` once images.dispatcher is named: the one recipient its email channel mails, in DEC-710 item 4's form, the build digest of its binary, and the subject streams beside those the control stream names (a floor). No member is a secret or an address; the workspace, the environment and the app origin come from `api.workspace`, `environment` and `api.appOrigin`",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recipient",
+        "build",
+        "subjects"
+      ],
+      "properties": {
+        "recipient": {
+          "type": "string",
+          "pattern": "^$|^[a-z][a-z0-9_]{0,63}$"
+        },
+        "build": {
+          "type": "string",
+          "pattern": "^$|^sha256:[0-9a-f]{64}$"
+        },
+        "subjects": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
