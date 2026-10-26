@@ -6643,7 +6643,8 @@ the gate was off.
 
 **What the gate does not do.** It moves no money and turns nothing on by itself: an on setting
 admits a request only to the checks after it. A refusal changes no state: the request leaves no
-other record, and a retry is refused and recorded again. A `RealMoneyRefused` grants nothing and
+other record. Its `event_id` is derived from the request's idempotency key (workspace API spec
+§3.4), so a retry under the same key finds it recorded, and one under a new key is recorded again. A `RealMoneyRefused` grants nothing and
 no reader but the gate's audit view reads it. No record here is step-up evidence.
 
 **No `JournaledFact`.** Neither record feeds a `ValidationContext`. **Vectors**:
