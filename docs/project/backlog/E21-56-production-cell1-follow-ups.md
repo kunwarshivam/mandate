@@ -5,7 +5,7 @@
     the runbook's `infra-production-cell1` rows; it sets `approved_monthly_usd`, retires the small
     `production` root, and moves the `cloudflare` module's archive onto `modules/archive`.
   - GO adds the cell's GitOps overlay, with one HelmRelease per workspace, and cloudflared as a
-    Deployment. It adds the three-instance journal with a database per workspace, OpenBao HA and
+    Deployment, and workspace pods' `nodeSelector` on `mandate.dev/pool`. It adds the three-instance journal with a database per workspace, OpenBao HA and
     its snapshot job, and the monitoring stack, plus `promote production-cell1`.
   - W shows each workspace's API host in the web app.
 

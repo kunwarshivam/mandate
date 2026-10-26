@@ -37,7 +37,8 @@ Each is enforced by a validation, a precondition or a test in the code, or discl
    its own host and its own Access policy naming only its own people, and the tunnel routes each
    host to that workspace's namespace alone. Every other host name gets a 404.
 3. A workspace's processes run only in its own namespace, on nodes no other cell service runs on,
-   and a business workspace's only on its own pool.
+   and a business workspace's only on its own pool. The taints keep other pods off those nodes; the
+   chart's `nodeSelector` on `mandate.dev/pool` (lane GO, §9) keeps workspace pods on them.
 4. Every count is fixed, with no autoscaling, so the estimate is the bill.
 5. No credential for a broker or exchange ever enters OpenTofu's state. Those live only in the vault.
    The state holds the tunnel token, the two archive writer tokens and the people's email
@@ -98,7 +99,9 @@ and 0.2, the CloudNativePG operator 0.1 and 0.25, cloudflared 0.2 and 0.25, moni
 1.5, the vault 0.75 and 0.75, the journal 3 × 0.5 vCPU and 1 GiB. That is about 3.85 vCPU and
 6.6 GiB of roughly 5.7 and 8.4 allocatable. At first customers the journal is 3 × 1 vCPU and 2 GiB
 and monitoring 1 vCPU and 3 GiB: about 5.6 vCPU and 11 GiB of roughly 10.5 and 18. The allocatable
-figures are estimates: DOKS reserves part of every node for itself.
+figures are estimates: DOKS reserves part of every node for itself. At demo scale, a lost
+system node leaves about 3.8 vCPU for 3.85 requested: the vault and the journal keep their quorum,
+and what does not fit (Prometheus first) stays Pending until the node returns.
 
 ### 3.3 Storage (DigitalOcean block storage)
 
@@ -174,9 +177,9 @@ The two loads:
 | Workspace pool | $96.00 (2 × $48) | $288.00 (6 × $48) | P2 |
 | Block storage | $10.50 (105 GB) | $26.50 (265 GB) | P3 |
 | Spaces (OpenTofu state; per account) | $5.00 | $5.00 | P4 |
-| R2: journal archive and vault snapshots | $0.47 (25 GB, 20,000 writes) | $2.85 (160 GB, 100,000 writes) | P5 |
+| R2: journal archive and vault snapshots | $0.47 (25 GB, 20,000 Class A operations) | $2.85 (160 GB, 100,000 Class A operations) | P5 |
 | Cloudflare Access | $0.00 (4 people) | $0.00 (21 people) | P6 |
-| Uptime checks, one per API host | $1.00 (2 checks) | $9.00 (10 checks) | P7 |
+| Uptime checks, one per API host | $1.00 (2 checks) | $9.00 (10 checks; the page shows 10 a team on the free plan, so an 11th may need a higher limit) | P7 |
 | Node and uptime alerts | $0.00 | $0.00 | P8 |
 | Tunnel, DNS, Universal SSL | $0.00 | $0.00 | Cloudflare's free plan, as staging |
 | Outbound transfer | $0.00 (well under 10,000 GiB pooled over 5 nodes) | $0.00 (well under 18,000 GiB pooled over 9 nodes) | P1 |
@@ -262,6 +265,18 @@ holds the passphrase and a Spaces key can read the state, as for production.
 - R2's lock is governance-equivalent: the Cloudflare infra token can lift it (DEC-973 item 5).
 - One region is one failure domain (DEC-995 item 6). The synchronous standby protects against
   node loss, not region loss.
+- One tunnel token serves every workspace, so a compromised cloudflared pod reaches whatever
+  workspace API its NetworkPolicy admits; and the API does not yet verify Access's JWT itself, so
+  isolation at the origin rests on the tunnel's per-host routing and the NetworkPolicies.
+- The uptime checks probe hosts behind Access, which answers an unauthenticated probe with a
+  redirect or a 403. Whether DigitalOcean counts that as up is to be confirmed on staging before
+  the alerts are trusted; if not, the probe gets an Access service token.
+- The approval gate is a precondition on one resource, so a targeted plan or a hand-set
+  `approved_monthly_usd` would pass it. That cannot happen while no workflow dispatches this root;
+  the follow-up that wires `infra.yml` takes the amount from committed code only and runs no
+  `-target`.
+- Port 80 is closed outbound on the nodes, which is untested against DOKS's own bootstrap; the
+  first apply confirms it.
 - An infra run that dies outright can leave its Spaces key until the next run deletes it
   (DEC-2030 item 4).
 
@@ -294,5 +309,6 @@ Unchanged in principle (DEC-2015, DEC-2016, DEC-2048):
   - CloudNativePG at three instances, with a database per workspace;
   - OpenBao HA and its snapshot job;
   - the monitoring stack;
-  - tolerations, and `promote production-cell1`.
+  - tolerations with a `nodeSelector` on `mandate.dev/pool`, and `promote production-cell1`;
+  - the API verifying Access's JWT for its own host.
 - **Lane W:** each workspace's API host in the web app.

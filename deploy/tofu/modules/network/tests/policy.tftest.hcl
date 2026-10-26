@@ -96,3 +96,13 @@ run "refuses_an_egress_range" {
 
   expect_failures = [var.egress]
 }
+
+run "refuses_a_port_past_65535" {
+  command = plan
+
+  variables {
+    egress = [{ protocol = "tcp", port_range = "99999" }]
+  }
+
+  expect_failures = [var.egress]
+}

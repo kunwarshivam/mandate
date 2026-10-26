@@ -77,7 +77,7 @@ variable "egress" {
   ]
 
   validation {
-    condition     = alltrue([for rule in var.egress : contains(["tcp", "udp"], rule.protocol) && can(regex("^[0-9]{1,5}$", rule.port_range))])
+    condition     = alltrue([for rule in var.egress : contains(["tcp", "udp"], rule.protocol) && can(regex("^[1-9][0-9]{0,4}$", rule.port_range)) && tonumber(rule.port_range) <= 65535])
     error_message = "Each outbound rule is one TCP or UDP port, never a range."
   }
 }
