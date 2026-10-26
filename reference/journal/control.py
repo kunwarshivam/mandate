@@ -125,6 +125,37 @@ RULE_21_REORDERINGS = {
 }
 RULE_21_PARAMS_FIRST = "order.rule_21_params_first"
 
+
+# §9.2's `AccountSnapshotRecorded`: the broker's account members, then the cash comparison. Version 2
+# (§9.35, DEC-2398) adds the connector's declared account type and day-trading regime, `null` when it
+# declares none, and the broker's prior-close equity and maintenance margin between the two.
+SNAPSHOT_ACCOUNT_MEMBERS = (
+    ("status", STR),
+    ("crypto_status", STR),
+    ("trading_blocked", BOOL),
+    ("account_blocked", BOOL),
+    ("trade_suspended_by_user", BOOL),
+    ("multiplier", INT),
+    ("equity", DEC),
+    ("cash", DEC),
+    ("buying_power", DEC),
+    ("non_marginable_buying_power", DEC),
+    ("accrued_fees", DEC),
+)
+SNAPSHOT_CASH_MEMBERS = (
+    ("model_cash", opt(DEC)),
+    ("cash_band", opt(DEC)),
+    ("cash_in_band", opt(BOOL)),
+)
+SNAPSHOT_ACCOUNT_TYPES = ("cash", "margin")
+SNAPSHOT_REGIMES = ("intraday_margin", "legacy_pdt")
+SNAPSHOT_MARGIN_MEMBERS = (
+    ("account_type", opt(one_of(*SNAPSHOT_ACCOUNT_TYPES))),
+    ("day_trading_regime", opt(one_of(*SNAPSHOT_REGIMES))),
+    ("last_equity", DEC),
+    ("maintenance_margin", DEC),
+)
+
 SCHEMAS: dict[tuple[str, str], T] = {
     ("ctl", "StreamOpened"): rec(("stream_type", one_of("control")), ("workspace_id", IDENT_T)),
     ("ctl", "ConnectionEstablished"): rec(
@@ -162,21 +193,7 @@ SCHEMAS: dict[tuple[str, str], T] = {
         ("loss_added", DEC),
     ),
     ("acct", "AccountSnapshotRecorded"): rec(
-        ("status", STR),
-        ("crypto_status", STR),
-        ("trading_blocked", BOOL),
-        ("account_blocked", BOOL),
-        ("trade_suspended_by_user", BOOL),
-        ("multiplier", INT),
-        ("equity", DEC),
-        ("cash", DEC),
-        ("buying_power", DEC),
-        ("non_marginable_buying_power", DEC),
-        ("accrued_fees", DEC),
-        ("model_cash", opt(DEC)),
-        ("cash_band", opt(DEC)),
-        ("cash_in_band", opt(BOOL)),
-        ("risk_clock", RISK_CLOCK),
+        *SNAPSHOT_ACCOUNT_MEMBERS, *SNAPSHOT_CASH_MEMBERS, ("risk_clock", RISK_CLOCK)
     ),
 }
 REFUSAL = rec(
@@ -1308,6 +1325,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("ctl", "AgentDeployed"): (1, 2, 3),
     ("acct", "MarkUpdated"): (1, 2),
     ("ctl", "ConnectionRequested"): (1, 2),
+    ("acct", "AccountSnapshotRecorded"): (1, 2),
 }
 # §9.30 (DEC-2305): `MarkUpdated` version 2 adds the risk mark's bid, its sanity verdict, and its
 # session to version 1's members, with `risk_clock` last; version 1 stays registered.
@@ -1326,6 +1344,12 @@ MARK_UPDATED_V2 = rec(
     ("risk_clock", RISK_CLOCK),
 )
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
+    ("acct", "AccountSnapshotRecorded", 2): rec(
+        *SNAPSHOT_ACCOUNT_MEMBERS,
+        *SNAPSHOT_MARGIN_MEMBERS,
+        *SNAPSHOT_CASH_MEMBERS,
+        ("risk_clock", RISK_CLOCK),
+    ),
     ("acct", "MarkUpdated", 1): rec(*MARK_UPDATED_V1_MEMBERS, ("risk_clock", RISK_CLOCK)),
     ("acct", "MarkUpdated", 2): MARK_UPDATED_V2,
     ("acct", "StreamOpened", 1): rec(
@@ -3499,6 +3523,8 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     if event_type in ("MandateConfirmed", "AgentDeployed") and "versions.v3" in skip:
         versions = tuple(v for v in versions if v != 3)
     if event_type == "CredentialEnrolled" and "versions.credential_enrolled_v2" in skip:
+        versions = (1,)
+    if event_type == "AccountSnapshotRecorded" and "versions.snapshot_v2" in skip:
         versions = (1,)
     if event_type == "MarkUpdated" and "versions.mark_updated_v1" in skip:
         versions = (2,)
