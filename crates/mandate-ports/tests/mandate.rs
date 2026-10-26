@@ -1,4 +1,4 @@
-//! The mandate's limits as the gate reads them (DEC-2387 item 1), moved with `gate_mandate` from
+//! The mandate's limits as the gate reads them (DEC-2388 item 1), moved with `gate_mandate` from
 //! `mandate-gate-inputs`.
 
 use mandate_canon::Digest;

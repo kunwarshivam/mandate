@@ -313,7 +313,7 @@ fn reviewed() -> Vec<u8> {
     mandate_canon::to_canonical(&parse(RULES.trim().as_bytes()).unwrap())
 }
 
-/// DEC-2387 item 3: the latest registered rule set of the environment configures the gate.
+/// DEC-2388 item 3: the latest registered rule set of the environment configures the gate.
 #[test]
 fn the_latest_registered_rule_set_configures_the_gate() {
     let mut world = World::default();

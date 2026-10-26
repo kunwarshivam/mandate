@@ -1,6 +1,6 @@
 //! `mandate-accounting`'s fee reservation for one order, moved here from the paper shell unchanged
 //! (DEC-2380 item 5). The mandate's limits as the gate reads them are `mandate-ports`'s
-//! `gate_mandate`, which the cell's runtime reads too (DEC-2387 item 1).
+//! `gate_mandate`, which the cell's runtime reads too (DEC-2388 item 1).
 
 use mandate_accounting::{
     AccountingError, AssetClass, InstrumentId, ProspectiveOrder, Side, fee_reservation,

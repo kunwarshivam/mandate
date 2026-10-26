@@ -41,7 +41,7 @@ pub const FRESH: Freshness = Freshness {
 /// `base` with the deployment's production ports (DEC-2378 S3): the shared fold for `agent`,
 /// ticked by the scheduler's `clock` stream; the flatten over it with the asset classes of
 /// `document`'s pinned universe; the order plan and the gate's dry run over the stored mandate,
-/// the dry run with the registered rule set's gate configuration `rules` (DEC-2387), which still
+/// the dry run with the registered rule set's gate configuration `rules` (DEC-2388), which still
 /// denies every opening while any check is deferred; the view and every draft's references naming
 /// the deployed `version`. A document that does not parse, which `deployment::document` has
 /// already refused, keeps `base`'s plan, gate and view.

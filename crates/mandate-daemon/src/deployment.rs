@@ -109,7 +109,7 @@ pub fn document(
     Ok((version, document))
 }
 
-/// The gate configuration of the latest rule set registered in `environment` (DEC-2387 item 3):
+/// The gate configuration of the latest rule set registered in `environment` (DEC-2388 item 3):
 /// the newest `ConfigSnapshotRegistered` of kind `rule_set` names its artifact in `store`, whose
 /// canonical bytes must read as the reviewed gate rule set. A newest one that is unreadable, not
 /// stored, or not a gate's rule set is never skipped for an older one.

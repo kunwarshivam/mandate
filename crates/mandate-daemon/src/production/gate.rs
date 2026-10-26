@@ -1,4 +1,4 @@
-//! The deployment's gate dry run over the journaled fold (DEC-2387): `mandate-ports`'s advisory
+//! The deployment's gate dry run over the journaled fold (DEC-2388): `mandate-ports`'s advisory
 //! pass over a context built from [`Facts`], with DEC-2378 item 11's four checks deferred to the
 //! executor's binding gate. It can only narrow: every opening it allows is still judged by the
 //! binding gate on the account stream (`AGENTS.md` rules 1 and 12), and while any check is
@@ -36,7 +36,7 @@ const RULE_SET_UNAVAILABLE: &str = "rule_set_unavailable";
 const WORKING_ORDERS_UNSEEN: &str = "working_orders_unseen";
 
 /// The dry run for one deployment: the shared fold, the stored mandate, the registered rule set's
-/// gate configuration (`None` when none could be read, DEC-2387 item 3) and how fresh a mark and a
+/// gate configuration (`None` when none could be read, DEC-2388 item 3) and how fresh a mark and a
 /// snapshot must be.
 pub struct Gate {
     facts: Facts,
@@ -233,7 +233,7 @@ impl Gate {
 }
 
 /// The dry run's answer to an advisory pass: an allow only when the gate allows and nothing was
-/// deferred; any deferral denies `deferred_to_binding` until `DecisionMade` can name it (DEC-2387
+/// deferred; any deferral denies `deferred_to_binding` until `DecisionMade` can name it (DEC-2388
 /// item 6); a gate denial or hold carries the gate's reason code; anything else is denied with the
 /// code the pass gave.
 #[must_use]

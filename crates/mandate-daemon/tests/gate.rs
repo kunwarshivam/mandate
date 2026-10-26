@@ -1,4 +1,4 @@
-//! The deployment's gate dry run over the journaled fold (DEC-2387), on the cell's demo mandate:
+//! The deployment's gate dry run over the journaled fold (DEC-2388), on the cell's demo mandate:
 //! the gate's own checks run over the journaled facts with DEC-2378 item 11's four checks deferred,
 //! every opening is still denied while any is deferred, and an exit is never denied.
 

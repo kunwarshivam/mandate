@@ -1,6 +1,6 @@
 //! The mandate's risk limits and drawdown ladder as the gate reads them, moved here unchanged from
 //! `mandate-gate-inputs` so the paper shell's binding gate and the cell's runtime's advisory pass
-//! read one copy (DEC-2387 item 1).
+//! read one copy (DEC-2388 item 1).
 
 use mandate_num::{Fraction, Usd};
 use mandate_risk::ValidatedMandate as GateMandate;

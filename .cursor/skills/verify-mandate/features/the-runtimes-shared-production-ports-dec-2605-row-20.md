@@ -8,7 +8,7 @@
   `src/gate.rs` (`proposed_order`, the runtime proposal mapped to the gate's order; `evaluate`,
   `mandate_risk::evaluate` over the trusted context; `evaluate_deferring`, the advisory pass with
   DEC-2378 item 11's deferrals), `src/mandate.rs` (`gate_mandate`, the mandate's limits as the gate
-  reads them, DEC-2387 item 1), `src/view.rs` (`runtime_view` over
+  reads them, DEC-2388 item 1), `src/view.rs` (`runtime_view` over
   `ViewFacts`, the runtime's view of an admitted mandate), `src/plan.rs` (`size`, the builder's
   `conviction_linear` sizing as the runtime's proposal; `classify`, §6 classification with the
   §6.2 step 5c overlay; `validate_order_execution`), `src/error.rs` (`PortError`). The shell's

@@ -1,6 +1,6 @@
 //! The reviewed rule set's gate configuration (E7-7, DEC-505), read once for every process whose
 //! gate judges an order: the executor's binding gate through `mandate-gate-inputs`, and the cell's
-//! runtime's advisory pass, which may not reach the executor (DEC-2387 item 2). One reading, so the
+//! runtime's advisory pass, which may not reach the executor (DEC-2388 item 2). One reading, so the
 //! two gates can never judge one rule set two ways.
 
 use mandate_canon::{Key, Value};

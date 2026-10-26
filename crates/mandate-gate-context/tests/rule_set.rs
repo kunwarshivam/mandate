@@ -1,4 +1,4 @@
-//! The reviewed rule set's gate configuration, the one reading both gates take (DEC-2387 item 2).
+//! The reviewed rule set's gate configuration, the one reading both gates take (DEC-2388 item 2).
 
 use mandate_gate_context::{RuleSetError, gate_rule_set};
 use mandate_num::{Fraction, Usd};

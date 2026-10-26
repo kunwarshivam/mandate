@@ -154,7 +154,7 @@ pub fn fees(fee: &Artifact, calendar: &Artifact) -> Result<mandate_accounting::C
 }
 
 /// The reviewed rule set's quote age bound and its gate and executor configurations; the gate's is
-/// `mandate-gate-context`'s one reading (DEC-2387 item 2).
+/// `mandate-gate-context`'s one reading (DEC-2388 item 2).
 pub fn rule_set(rules: &Artifact) -> Result<(Duration, GateConfig, ExecutorConfig), InputError> {
     let gate_config = gate_rule_set(&rules.value)?;
     let quote_max_age_s = rules
