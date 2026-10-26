@@ -2462,3 +2462,84 @@ fn burst(rows: &[StoredEvent]) -> (usize, usize) {
     }
     best
 }
+
+/// Another writer's mode record moves nothing in the fold: one that would loosen it, to `normal`
+/// while the ladder holds the agent `paused`, neither lifts a latched rung nor changes the fold's
+/// mode, which only the risk state's own steps move (DEC-2399 item 4).
+#[test]
+fn another_writers_mode_record_never_loosens_the_fold() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (mut fold, rows) = mc_r01_journaled(&mandate, &calendar);
+    let RiskView::Readable {
+        snapshot: before, ..
+    } = fold.view().clone()
+    else {
+        panic!("readable");
+    };
+    assert_eq!(before.agent_mode, AgentMode::Paused);
+    assert!(!before.latched.is_empty());
+    let seq = rows.last().unwrap().seq + 1;
+    for (offset, cause) in [(0_u64, None), (1, Some("01J8Z4C0000000000000000000"))] {
+        let loosen = caused(
+            seq + offset,
+            "AgentModeApplied",
+            1,
+            cause,
+            &format!(
+                r#"{{"agent":"{AGENT}","to":"normal","restriction":"owner","originated":false}}"#
+            ),
+        );
+        fold.fold(&loosen).unwrap();
+    }
+    let RiskView::Readable { snapshot, head } = fold.view() else {
+        panic!("readable: {:?}", fold.view());
+    };
+    assert_eq!((snapshot.as_ref(), *head), (before.as_ref(), seq + 1));
+    assert!(fold.view().holds(OrderPath::Opening));
+}
+
+/// A mode record naming the cause of any record owed is the fold's own, so it must be the record
+/// owed next: one naming a later owed record's cause, arriving first, is `not_reproduced`.
+#[test]
+fn a_mode_record_naming_a_later_owed_cause_is_not_reproduced() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    let batch = [
+        tick(5, "2026-09-23T04:00:00.000000000Z"),
+        fill(
+            6,
+            "o-1",
+            XYZ,
+            ("buy", "12", "100"),
+            "2026-09-23T04:00:00.000000000Z",
+            "[]",
+        ),
+        mark(
+            7,
+            XYZ,
+            "2026-09-23T04:00:01.000000000Z",
+            "50",
+            true,
+            "regular",
+        ),
+    ];
+    let mut returned = Vec::new();
+    for row in &batch {
+        returned.extend(fold.fold(row).unwrap());
+    }
+    let later = returned
+        .iter()
+        .rfind(|append| append.causation_id.as_deref() == Some(batch[2].event_id.as_str()))
+        .expect("the crash's records");
+    assert_ne!(returned[0].causation_id, later.causation_id);
+    let early = caused(
+        8,
+        "AgentModeApplied",
+        1,
+        later.causation_id.as_deref(),
+        &format!(r#"{{"agent":"{AGENT}","to":"paused","restriction":"x","originated":true}}"#),
+    );
+    fold.fold(&early).unwrap();
+    assert_eq!(unreadable(fold.view()), (UnreadableCause::NotReproduced, 7));
+}
