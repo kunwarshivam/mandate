@@ -124,5 +124,33 @@
     "set": {
       "/models/0/content": "methodology"
     }
+  },
+  {
+    "label": "an input declaration in the content",
+    "set": {
+      "/models/0/content/inputs": {
+        "bars": "daily_close"
+      }
+    }
+  },
+  {
+    "label": "an output declaration in the content",
+    "set": {
+      "/models/0/content/output": {
+        "long": {}
+      }
+    }
+  },
+  {
+    "label": "an unprojected member of params_schema",
+    "set": {
+      "/models/0/content/params_schema/properties": {}
+    }
+  },
+  {
+    "label": "an unprojected member of a parameter",
+    "set": {
+      "/models/0/content/params_schema/params/0/default": 5
+    }
   }
 ]

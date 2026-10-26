@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/signal-models.schema.json",
-  "description": "GET /signal-models (§4.1, §3.11 item 11, DEC-2136): the registry V-007 reads: the latest ConfigSnapshotRegistered of kind model_version per model_id, whatever its version, less every id a later PlatformOperatorAction model_withdrawn withdrew, with a fixed projection of the content object stored under its content_hash. Sorted by model_id. Platform-authored descriptions only: no prompt, model identity, source path, performance, scorecard or recommendation (DEC-126, DEC-99). as_of names the control stream.",
+  "description": "GET /signal-models (§4.1, §3.11 item 11, DEC-2136): the registry V-007 reads: the latest ConfigSnapshotRegistered of kind model_version per model_id, whatever its version, from the facts the create folds (a withdrawal leaves both once the fold maps it, E10-11w), with a fixed projection of the content object stored under its content_hash. Sorted by model_id. Platform-authored descriptions only: no prompt, model identity, source path, performance, scorecard or recommendation (DEC-126, DEC-99). as_of names the control stream.",
   "type": "object",
   "allOf": [
     {
@@ -51,7 +51,7 @@
           "$ref": "../common.schema.json#/$defs/ContentRef"
         },
         "params": {
-          "description": "The registration's declared parameter names (V-007), as registered.",
+          "description": "The registration's declared parameter names (V-007), in the order V-007 compares a document's: ascending, as registered.",
           "type": "array",
           "items": {
             "type": "string",
@@ -64,7 +64,7 @@
           "type": "boolean"
         },
         "content": {
-          "description": "A fixed projection of the object stored under content_hash (DEC-2136 item 4): its authorship, methodology, params_schema, inputs and output, each only when the object has it; null when the store cannot give or parse the object. Nothing else of the object is served. The client renders it as platform-authored text, never as advice.",
+          "description": "A fixed projection of the object stored under content_hash (DEC-2136 item 4): authorship and methodology, and of params_schema only constraints and each parameter's name, type, min and max, each only when present; null when the store cannot give or parse the object. Nothing else of the object is served. The client renders it as platform-authored text, never as advice.",
           "oneOf": [
             {
               "type": "null"
@@ -83,12 +83,14 @@
                 },
                 "params_schema": {
                   "type": "object",
+                  "additionalProperties": false,
                   "properties": {
                     "params": {
                       "type": "array",
                       "maxItems": 32,
                       "items": {
                         "type": "object",
+                        "additionalProperties": false,
                         "required": [
                           "name"
                         ],
@@ -96,24 +98,29 @@
                           "name": {
                             "type": "string",
                             "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                          },
+                          "type": {
+                            "type": "string",
+                            "maxLength": 32
+                          },
+                          "min": {
+                            "type": "integer"
+                          },
+                          "max": {
+                            "type": "integer"
                           }
                         }
                       }
                     },
                     "constraints": {
                       "type": "array",
+                      "maxItems": 32,
                       "items": {
                         "type": "string",
                         "maxLength": 200
                       }
                     }
                   }
-                },
-                "inputs": {
-                  "type": "object"
-                },
-                "output": {
-                  "type": "object"
                 }
               }
             }

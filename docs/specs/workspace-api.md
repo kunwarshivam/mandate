@@ -823,7 +823,10 @@ per workspace deployment (item 6).
       row, users only: a client's "propose only" cell is not served, a role without the row gets
       that row's refusal, and a non-member the one 404), writes nothing, and is served in a `live`
       workspace too, since a read adds no risk. An empty or absent control stream answers empty
-      lists, not an error. **(planned: E10-11)**
+      lists, not an error. Both fold the control stream as the create does (`versions.rs`,
+      `facts`): a control-stream row that fold cannot read (a malformed `model_version`
+      registration among them) makes either read `journal_unavailable`, as it makes the create
+      refuse, never a list the create would then refuse. **(planned: E10-11)**
       - `GET /instruments` returns `read-models/instruments`: the fold the create's instrument
         check reads (`versions.rs`, `instruments`), every `ConfigSnapshotRegistered` of kind
         `instrument_snapshot` in stream order, the latest per stored `instrument_id`. Each listed
@@ -837,20 +840,22 @@ per workspace deployment (item 6).
         it (the mandate schema's `instrument_ref`); one with no string id or symbol is skipped, as
         the check skips it. So every listed pair is one the check admits, and every pair a valid
         document can pin and the check admits is listed.
-      - `GET /signal-models` returns `read-models/signal-models`: the registry V-007 reads, the
-        control stream's `ModelRegistered` and `ModelWithdrawn` facts folded in stream order
-        (`mandate-spec`'s validation context): the latest `ConfigSnapshotRegistered` of kind
-        `model_version` per `model_id`, whatever its version, less every id a later
-        `PlatformOperatorAction` `model_withdrawn` withdrew. Each listed model has that
-        registration's `model_id`, `model_version`, `content_hash`, `params` and
-        `admits_instruments`, its row's `recorded_at` as `registered_at`, and `content`, sorted by
-        id. V-007 reads only the row, so the listing never depends on the store; `content` does:
-        it is a fixed projection of the object stored under `content_hash`, its `authorship`,
-        `methodology`, `params_schema` (each parameter's name, type and bounds, and its
-        constraints; DEC-518 item 3), `inputs` and `output`, each only when the object has it,
-        and `null` when the store cannot give or parse the object. Nothing else of the object is
-        served: no prompt template, model identity, retrieval plan, tool declaration or source
-        path. It serves nothing about how a model performed (no scorecard, backtest figure or
+      - `GET /signal-models` returns `read-models/signal-models`: the registry the create's V-007
+        reads, from the same facts folded in stream order (`mandate-spec`'s validation context):
+        the latest `ConfigSnapshotRegistered` of kind `model_version` per `model_id`, whatever its
+        version. A model withdrawn by `PlatformOperatorAction` `model_withdrawn` leaves the
+        registry, and so the list, once the fold maps that action (E10-11w); until then the create
+        admits it and the list shows it, the two never differing. Each listed model has that
+        registration's `model_id`, `model_version`, `content_hash`, `params` (in the order V-007
+        compares a document's, ascending as registered) and `admits_instruments`, its row's
+        `recorded_at` as `registered_at`, and `content`, sorted by id. V-007 reads only the row,
+        so the listing never depends on the store; `content` does: it is a fixed projection of the
+        object stored under `content_hash`, its `authorship` and `methodology` when they are
+        strings, and of its `params_schema` only `constraints` (strings) and each parameter's
+        `name`, `type`, `min` and `max` (DEC-518 item 3), member by member, each only when
+        present; `null` when the store cannot give or parse the object. Nothing else of the object
+        is served: no prompt template, model identity, retrieval plan, tool declaration, input or
+        output declaration, or source path. It serves nothing about how a model performed (no scorecard, backtest figure or
         ranking; DEC-99, DEC-126), so the list never reads as a recommendation.
       - Both read the control stream, and `as_of` names it; the instrument snapshots and the
         model content come from the content-addressed store (item 2).

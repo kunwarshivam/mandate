@@ -41,21 +41,6 @@
               "type": "integer"
             }
           ]
-        },
-        "inputs": {
-          "bars": "daily_close",
-          "instrument": "pinned",
-          "minimum_count": "slow_periods",
-          "trading_day": "us_equity_regular_session"
-        },
-        "output": {
-          "flat": "none",
-          "long": {
-            "confidence": "1",
-            "conviction": "1",
-            "direction": "long"
-          },
-          "undecided": "none"
         }
       },
       "registered_at": "2026-10-26T14:00:00.000000000Z"
