@@ -1,4 +1,4 @@
-- **E7-4b (Proposed; unassigned)** As an owner, I want to acknowledge a reconciliation hold (a
+- **E7-4b (In progress; L1; [DEC-2830](../decisions/DEC-2830.md), journal v0.104, before the 2026-10-27 demo)** As an owner, I want to acknowledge a reconciliation hold (a
   mismatched instrument's pause, held external activity, a batch the journal refused) through an
   acknowledgment the journal admits, so that an agent held for one trades again once I have seen
   why. Today none can be lifted. The executor's fold used to clear these holds by a pre-§9.28

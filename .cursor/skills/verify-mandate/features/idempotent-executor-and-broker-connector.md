@@ -51,7 +51,7 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   reject mappings). It calls `mandate-risk` directly as the binding gate and reads
   `mandate-accounting` and `mandate-journal` unchanged. The shell that binds runtime, executor, and
   connector is not here.
-- **Tests:** `crates/mandate-executor/tests/binding_gate.rs`, `crates/mandate-executor/tests/connection_checked.rs` (the executor folds its own `ConnectionChecked` as a record, DEC-969),
+- **Tests:** `crates/mandate-executor/tests/binding_gate.rs`, `crates/mandate-executor/tests/connection_checked.rs` (the executor folds its own `ConnectionChecked` as a record, DEC-969), `crates/mandate-executor/tests/connection_established.rs` and `crates/mandate-executor/tests/connection_restriction.rs` (an unusable connection restricts the account first, then its state change is journaled and folded, DEC-2826),
   `crates/mandate-executor/tests/hand.rs`,
   `crates/mandate-executor/tests/properties.rs`, `crates/mandate-executor/tests/fault.rs`,
   `crates/mandate-executor/tests/cancel_recovery.rs` (a kill switch's cancel the broker never

@@ -21,7 +21,8 @@
 //!
 //! A deployment resolved from the journal evaluates its confirmed mandate's pinned quant models on
 //! each tick, over the daily closes stored under `MANDATE_BARS`, through
-//! [`mandate_runtime_models::wiring`] (DEC-2383 item 7); with no bars root it evaluates none.
+//! [`mandate_runtime_models::wiring`] (DEC-2383 item 7), or, for a research mandate, its quant
+//! models on its working universe (DEC-2827); with no bars root it evaluates none.
 //!
 //! A pod the deployment manager starts runs `mandate-daemon run --probe <socket>` and names its
 //! workspace and agent by variables instead ([`launch`], DEC-1015). Until the connection and the
