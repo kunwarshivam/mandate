@@ -170,7 +170,8 @@
         }
       ],
       "required": [
-        "account_positions"
+        "account_positions",
+        "openings_held"
       ],
       "properties": {
         "account_positions": {
@@ -183,6 +184,17 @@
             },
             {
               "type": "null"
+            }
+          ]
+        },
+        "openings_held": {
+          "description": "Why every opening of the agent's is held whatever the order, as the binding gate's source reads it (DEC-2143): null exactly when no such hold applies, never when it could not be judged. Exits, protective orders and kill switches are never held by it (AGENTS.md rule 13).",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/OpeningsHeld"
             }
           ]
         }
@@ -226,6 +238,23 @@
         },
         "observed_at": {
           "$ref": "../common.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
+    "OpeningsHeld": {
+      "description": "account_traded: the account has traded and the account risk view, which must read every later opening, does not yet. research_agent_traded: the account has traded and the agent's mandate is unpinned, so it binds no instrument for the account risk view (DEC-2819 item 4). unknown: the read could not judge it, so openings may be held.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason"
+      ],
+      "properties": {
+        "reason": {
+          "enum": [
+            "account_traded",
+            "research_agent_traded",
+            "unknown"
+          ]
         }
       }
     }
