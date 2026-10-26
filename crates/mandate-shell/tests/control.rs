@@ -662,3 +662,46 @@ fn before_credentials_the_fold_refuses_every_v_rule_and_the_walk() {
     assert_eq!(paper.checked(before), Ok(()));
     assert_eq!(paper.checked(LiveAdmission::refusing()), Ok(()));
 }
+
+/// The `step_up` member a version 3 `AgentDeployed` or `MandateConfirmed` carries (journal spec
+/// v0.84 §9.9 and §9.24).
+const STEP_UP: &str = r#""step_up":{"assertion_id":"01JAA3P0A000000000000000H1","authenticated_at":"2026-10-06T23:59:57.000000000Z","method":"passkey"}"#;
+
+impl Stream {
+    /// The stream with `members` appended to record `index`'s payload.
+    fn with_members(self, index: usize, members: &str) -> Self {
+        let text = self.text(index);
+        let open = text.strip_suffix('}').unwrap().to_owned();
+        let to = format!("{open},{members}}}");
+        self.edit(index, &text, &to)
+    }
+}
+
+/// Journal spec v0.84, DEC-2131 item 4: a version 3 `MandateConfirmed` and `AgentDeployed`, each
+/// its version 2's payload with a trailing `step_up`, read as their version 2: the fold gives the
+/// same confirmed version.
+#[test]
+fn a_version_3_deployment_reads_as_its_version_2() {
+    let version_2 = Stream::deployed()
+        .with_members(2, r#""agent_id":null,"base_version":null,"record_ref":"sha256:5555555555555555555555555555555555555555555555555555555555555555""#)
+        .with_members(3, &format!(r#""connection_id":"{CONNECTION}""#));
+    let version_3 = Stream::deployed()
+        .with_members(2, r#""agent_id":null,"base_version":null,"record_ref":"sha256:5555555555555555555555555555555555555555555555555555555555555555""#)
+        .with_members(3, &format!(r#""connection_id":"{CONNECTION}""#))
+        .with_members(2, STEP_UP)
+        .with_members(3, STEP_UP);
+    assert!(
+        version_3.text(3).contains("step_up"),
+        "the version 3 deployment"
+    );
+    assert!(
+        version_3.text(2).contains("step_up"),
+        "the version 3 confirmation"
+    );
+    let read = version_2.read();
+    assert_eq!(
+        read.as_ref().map(ConfirmedVersion::version),
+        Ok(version_2.version)
+    );
+    assert_eq!(version_3.read(), read);
+}

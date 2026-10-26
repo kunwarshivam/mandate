@@ -453,3 +453,66 @@ fn a_control_record_carries_its_rows_stream_and_environment() {
         assert!(matches!(refused, Err(PaperError::Control)), "{environment}");
     }
 }
+
+/// Journal spec v0.84, DEC-2131 item 4: an `AgentDeployed` version 3, its version 2's payload
+/// with a trailing `step_up`, read from its stored row as the run's control read reads it, is
+/// read by the door's deployment fold as its version 2: the door engages on the deployed
+/// document and refuses the revoked connection exactly as it does for the earlier version.
+#[test]
+fn a_version_3_deployment_reads_as_its_version_2() -> Result<(), String> {
+    let connection = || -> Result<Vec<ControlRecord>, String> {
+        Ok(vec![
+            record(
+                2,
+                "ConnectionEstablished",
+                &format!(
+                    r#"{{"account_ref":"{ACCOUNT}","broker":"alpaca","connection_id":"conn_alpaca_paper_01","environment":"paper"}}"#
+                ),
+            )?,
+            record(
+                3,
+                "ConnectionRevoked",
+                r#"{"connection_id":"conn_alpaca_paper_01"}"#,
+            )?,
+        ])
+    };
+    let (args, mut earlier) = scene("version-2", MANDATE, WORKSPACE, connection()?)?;
+    let (stepped_args, mut stepped) = scene("version-3", MANDATE, WORKSPACE, connection()?)?;
+    let deployed = String::from_utf8(to_canonical(&stepped.records[0].payload))
+        .map_err(|refused| refused.to_string())?;
+    let open = deployed
+        .strip_suffix('}')
+        .ok_or_else(|| "a payload is an object".to_owned())?;
+    let payload = format!(
+        r#"{open},"connection_id":"conn_alpaca_paper_01","step_up":{{"assertion_id":"01JAA3P0A000000000000000H1","authenticated_at":"2026-10-10T15:04:57.000000000Z","method":"passkey"}}}}"#
+    );
+    let body = format!(
+        r#"{{"event_time":"2026-10-10T15:05:00.000000000Z","event_type":"AgentDeployed","payload":{payload},"schema_version":3}}"#
+    );
+    let row = mandate_journal::StoredEvent {
+        event_type: "AgentDeployed".to_owned(),
+        schema_version: 3,
+        seq: 1,
+        body: body.into_bytes(),
+        ..stored_row("ctl:ws_paper", "paper")
+    };
+    stepped.records[0] = crate::control_record(&row).map_err(|refused| refused.to_string())?;
+    assert!(stepped.records[0].payload.get("step_up").is_some());
+    let expected = run(&args, &[], &mut earlier)
+        .err()
+        .ok_or_else(|| "the revocation must refuse the earlier version's run".to_owned())?;
+    let refused = run(&stepped_args, &[], &mut stepped)
+        .err()
+        .ok_or_else(|| "the revocation must refuse the version 3 run".to_owned())?;
+    assert!(
+        matches!(refused, PaperError::Connection(ConnectionRefusal::Revoked)),
+        "{refused:?}"
+    );
+    assert_eq!(refused.to_string(), expected.to_string());
+    assert_eq!(
+        stepped.connects.get(),
+        0,
+        "no credential read before the door"
+    );
+    Ok(())
+}

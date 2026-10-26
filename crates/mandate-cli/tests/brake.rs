@@ -605,3 +605,58 @@ proptest! {
         prop_assert_eq!(reported, expected);
     }
 }
+
+/// Journal spec v0.84, DEC-2131 item 4: an `AgentDeployed` version 3, its version 2's payload with
+/// a trailing `step_up`, is the agent's active deployment as its version 2 is: a pause of its
+/// connection, of another and of the workspace reaches the same agents.
+#[test]
+fn a_version_3_deployment_reads_as_its_version_2() {
+    let reach = |schema_version: i64| {
+        let mut fx = seeded();
+        let on_conn = stored_on(&mut fx, CONN);
+        let mut members = vec![
+            ("agent_id", common::text("agent-stepped")),
+            ("mandate_version", common::text(&on_conn)),
+            (
+                "record_ref",
+                common::text(&format!("sha256:{}", "6".repeat(64))),
+            ),
+            ("connection_id", common::text(CONN)),
+        ];
+        if schema_version == 3 {
+            let step_up = common::object(&[
+                ("assertion_id", common::text("01JAA3P0A000000000000000H1")),
+                (
+                    "authenticated_at",
+                    common::text("2026-09-21T13:59:57.000000000Z"),
+                ),
+                ("method", common::text("passkey")),
+            ]);
+            members.push(("step_up", step_up));
+        }
+        let payload = common::object(&members);
+        fx.append_versioned(
+            "paper",
+            CONTROL,
+            "AgentDeployed",
+            None,
+            payload,
+            schema_version,
+        );
+        let stored = fx.rows(CONTROL);
+        assert_eq!(
+            stored.last().map(|r| r.schema_version),
+            u64::try_from(schema_version).ok()
+        );
+        [
+            Scope::Connection(CONN.to_owned()),
+            Scope::Connection(OTHER_CONN.to_owned()),
+            Scope::Workspace,
+        ]
+        .map(|scope| answer("reached", reached(&fx.journal, &fx.store, &owner(), &scope)))
+    };
+    let version_2 = reach(2);
+    assert!(version_2[0].contains("agent-stepped"), "{version_2:?}");
+    assert!(!version_2[1].contains("agent-stepped"), "{version_2:?}");
+    assert_eq!(reach(3), version_2);
+}

@@ -86,6 +86,29 @@ impl World {
         ));
     }
 
+    /// A version-3 deployment (journal spec v0.84, DEC-2131): version 2's connection, then the
+    /// passkey step-up that authorized it.
+    fn deployed_v3(&mut self, agent: &str, version: &str, environment: &str) {
+        let payload = format!(
+            r#"{{"agent_id":"{agent}","mandate_version":"{version}","record_ref":"{version}","connection_id":"conn_alpaca_paper_01","step_up":{{"assertion_id":"01JAA3P0A000000000000000H1","authenticated_at":"2026-10-16T12:59:50.000000000Z","method":"passkey"}}}}"#
+        );
+        let seq = self.next();
+        let mut stored = row(
+            seq,
+            "AgentDeployed",
+            environment,
+            ("user", "user-owner"),
+            &payload,
+        );
+        let body = String::from_utf8(stored.body)
+            .unwrap()
+            .replace(r#""schema_version":1"#, r#""schema_version":3"#);
+        stored.hash = Digest::of(body.as_bytes());
+        stored.body = body.into_bytes();
+        stored.schema_version = 3;
+        self.control.push(stored);
+    }
+
     fn stopped(&mut self, agent: &str) {
         let payload = format!(
             r#"{{"agent_id":"{agent}","connection_id":"conn_alpaca_paper_01","reason":"owner_stop","retired_on":"2026-10-16","loss_added":"0"}}"#
@@ -141,6 +164,25 @@ fn only_named_users_are_taken_as_approvers() {
     let version = world.version(("user", "user-author"), approvers(&["role:owner"]));
     world.deployed(AGENT, &version, "paper");
     assert_eq!(world.resolved().unwrap().approvers, Vec::<String>::new());
+}
+
+/// A version-3 deployment is read as its version 2 (DEC-2131 item 4): the agent resolves from the
+/// version it names, and a stop still stops it.
+#[test]
+fn a_version_3_deployment_resolves_as_its_version_2() {
+    let mut world = World::default();
+    let version = world.version(("user", "user-author"), approvers(&["user:u-1"]));
+    world.deployed_v3(AGENT, &version, "paper");
+    assert_eq!(
+        world.resolved(),
+        Ok(Resolved {
+            connection: "conn_alpaca_paper_01".into(),
+            approvers: vec!["u-1".into()],
+            author: "user-author".into(),
+        })
+    );
+    world.stopped(AGENT);
+    assert!(world.resolved().is_err(), "stopped");
 }
 
 #[test]
