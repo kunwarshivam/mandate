@@ -8,15 +8,16 @@
 
 use std::cell::RefCell;
 
+use mandate_accounting::AssetClass;
 use mandate_canon::{Digest, Value};
 use mandate_runtime::{
-    ActorKind, ApprovalSettings, EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest,
-    FoldedEvent, Input, MandateView, Ports, Seq,
+    ActorKind, ApprovalSettings, EventDraft, EventId, FlattenLeg, FlattenPlan, FlattenPlanner,
+    FlattenRequest, FoldedEvent, Input, MandateView, Ports, Seq,
 };
 
 use super::{
     ACCOUNT_STREAM, AGENT, AUTHOR, CONTROL_STREAM, OWNER, Ran, Shell, clock, event, fresh_output,
-    int, key, object, text, universe, with_clock,
+    int, key, object, qty, text, universe, with_clock,
 };
 
 /// When the fixture asks, and the deadline its 300 s `timeout_s` gives.
@@ -454,12 +455,23 @@ impl RecordingFlatten {
     }
 }
 
+/// Records every request and plans one sell of ten shares of an owner's exit's instrument, the
+/// sub-ledger an exit of one instrument would sell, and nothing for a whole-agent flatten.
 impl FlattenPlanner for RecordingFlatten {
     fn plan(&self, request: &FlattenRequest) -> FlattenPlan {
         self.asked.borrow_mut().push(request.clone());
         FlattenPlan {
             cancel_client_order_ids: request.working_orders.clone(),
-            sells: Vec::new(),
+            sells: request
+                .instrument
+                .iter()
+                .map(|instrument| FlattenLeg {
+                    instrument: instrument.clone(),
+                    asset_class: AssetClass::UsEquity,
+                    qty: qty("10"),
+                    deferred_to_regular_session: false,
+                })
+                .collect(),
             purpose: request.initiator.sell_purpose(),
             confirmation: request.confirmation.clone(),
         }

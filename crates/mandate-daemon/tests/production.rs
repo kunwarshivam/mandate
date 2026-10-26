@@ -418,3 +418,29 @@ fn a_held_instrument_the_flatten_cannot_plan_is_recorded() {
     assert_eq!(facts.take_unplanned(), 1);
     assert_eq!(facts.take_unplanned(), 0);
 }
+
+/// DEC-2387 item 1: a plan asked before the process follows its account reads nothing, and is
+/// counted for `flatten_unplanned` rather than passed as "nothing held", since for an owner's exit
+/// of one instrument the plan is the only seller.
+#[test]
+fn a_plan_asked_before_the_account_is_followed_is_counted_unplanned() {
+    let unfollowed = Facts::new(CLOCK, AGENT);
+    let request = FlattenRequest {
+        initiator: Initiator::Owner,
+        instrument: Some(InstrumentId::new(SPY).unwrap()),
+        confirmation: None,
+        working_orders: Vec::new(),
+    };
+    let plan = Flatten::new(unfollowed.clone(), classes()).plan(&request);
+    assert!(plan.sells.is_empty() && plan.cancel_client_order_ids.is_empty());
+    assert_eq!(plan.purpose, Purpose::OwnerExit);
+    assert_eq!(unfollowed.take_unplanned(), 1);
+    let followed = facts();
+    let plan = Flatten::new(followed.clone(), classes()).plan(&request);
+    assert!(plan.sells.is_empty());
+    assert_eq!(
+        followed.take_unplanned(),
+        0,
+        "a followed account holding none is nothing held"
+    );
+}

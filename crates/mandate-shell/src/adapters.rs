@@ -1219,7 +1219,7 @@ impl Sink for ExecutorSink {
                     instrument: instrument.clone(),
                     side: *side,
                     qty: *qty,
-                    limit: Some(*limit),
+                    limit: *limit,
                     purpose: executor_purpose(*purpose),
                     protection: execution.protection.map(|prices| {
                         mandate_executor::ProtectionPrices {
@@ -2451,7 +2451,7 @@ mod tests {
                     instrument: instrument.clone(),
                     side: mandate_accounting::Side::Buy,
                     qty: Qty::parse("1").map_err(|e| e.to_string())?,
-                    limit: Price::parse("255.2").map_err(|e| e.to_string())?,
+                    limit: Some(Price::parse("255.2").map_err(|e| e.to_string())?),
                     purpose: RuntimePurpose::Open,
                 },
                 execution: Some(OrderExecution {
@@ -2503,7 +2503,7 @@ mod tests {
                     instrument: instrument.clone(),
                     side,
                     qty: Qty::parse("1").map_err(|e| e.to_string())?,
-                    limit: Price::parse("255.2").map_err(|e| e.to_string())?,
+                    limit: Some(Price::parse("255.2").map_err(|e| e.to_string())?),
                     purpose,
                 },
                 execution,

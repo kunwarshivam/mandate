@@ -147,7 +147,7 @@ fn acted(ran: &Ran, asked: &Asked, source: &EventId) {
             instrument: common::instrument("AAPL"),
             side: Side::Buy,
             qty: common::qty("10"),
-            limit: common::price(BOUND_LIMIT),
+            limit: Some(common::price(BOUND_LIMIT)),
             purpose: Purpose::Open,
         },
         "the handoff is the bound order, never re-priced or re-sized (EI-4)"
@@ -969,8 +969,9 @@ fn owner_exit_copy<'a>(ran: &'a Ran, source: &EventId) -> &'a EventDraft {
     copy
 }
 
-/// The handoff an owner exit makes: one flatten of `AAPL` alone, journaled before it is handed and
-/// identified by the `OwnerExitRequested` that records it.
+/// The handoff an owner exit makes (DEC-2387): one `IntentProposed` of `AAPL` at the market, caused
+/// by the `OwnerExitRequested` copy and journaled before it is handed as an order with no limit.
+/// What the planner was asked says whether the confirmation reached it.
 fn exit_handed(ran: &Ran, copy: &EventDraft, flatten: &RecordingFlatten) -> FlattenRequestSeen {
     assert_eq!(
         ran.handed.len(),
@@ -978,15 +979,28 @@ fn exit_handed(ran: &Ran, copy: &EventDraft, flatten: &RecordingFlatten) -> Flat
         "the exit reaches the executor: {:?}",
         ran.handed
     );
-    assert_eq!(ran.handed[0].intent_id, copy.event_id);
-    let IntentBody::Flatten(plan) = &ran.handed[0].body else {
-        panic!("an owner exit is handed as a flatten: {:?}", ran.handed[0]);
-    };
-    assert_eq!(plan.purpose, Purpose::OwnerExit);
+    let leg = only(ran, "IntentProposed");
+    assert_eq!(leg.causation_id.as_ref(), Some(&copy.event_id));
+    assert_eq!(member(leg, "purpose"), Some("owner_exit"));
+    assert_eq!(member(leg, "type"), Some("market"));
+    assert_eq!(ran.handed[0].intent_id, leg.event_id);
+    assert!(
+        matches!(
+            ran.handed[0].body,
+            IntentBody::Order {
+                limit: None,
+                purpose: Purpose::OwnerExit,
+                side: Side::Sell,
+                ..
+            }
+        ),
+        "an owner exit is handed as its market sell: {:?}",
+        ran.handed[0]
+    );
     let drafted = ran
         .effects
         .iter()
-        .position(|e| matches!(e, Effect::Journal(d) if d.event_id == copy.event_id));
+        .position(|e| matches!(e, Effect::Journal(d) if d.event_id == leg.event_id));
     let handed = ran
         .effects
         .iter()
@@ -998,14 +1012,12 @@ fn exit_handed(ran: &Ran, copy: &EventDraft, flatten: &RecordingFlatten) -> Flat
     assert_eq!(request.instrument, Some(common::instrument("AAPL")));
     FlattenRequestSeen {
         confirmed: request.confirmation.is_some(),
-        plan_confirmed: plan.confirmation.is_some(),
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 struct FlattenRequestSeen {
     confirmed: bool,
-    plan_confirmed: bool,
 }
 
 /// The #281 obligation, rule 13, mandate spec §6.1 ("Owner controls and step-up", DEC-173 item 5):
@@ -1037,10 +1049,7 @@ fn a_refused_owner_exit_step_up_still_routes_the_exit() {
     );
     assert_eq!(
         exit_handed(&ran, copy, &flatten),
-        FlattenRequestSeen {
-            confirmed: false,
-            plan_confirmed: false
-        },
+        FlattenRequestSeen { confirmed: false },
         "the refusal withdraws only the out-of-session privilege; the exit is never dropped"
     );
 
@@ -1057,10 +1066,7 @@ fn a_refused_owner_exit_step_up_still_routes_the_exit() {
     assert_ne!(copy.payload.get("step_up"), Some(&Value::Null));
     assert_eq!(
         exit_handed(&ran, copy, &flatten),
-        FlattenRequestSeen {
-            confirmed: true,
-            plan_confirmed: true
-        }
+        FlattenRequestSeen { confirmed: true }
     );
 }
 
@@ -1084,10 +1090,7 @@ fn an_owner_exit_is_judged_at_commit_and_never_dropped() {
     assert_eq!(member(copy, "step_up_status"), Some("absent"));
     assert_eq!(
         exit_handed(&ran, copy, &flatten),
-        FlattenRequestSeen {
-            confirmed: false,
-            plan_confirmed: false
-        }
+        FlattenRequestSeen { confirmed: false }
     );
 
     let (mut shell, _) = started(&ports);
@@ -1102,10 +1105,7 @@ fn an_owner_exit_is_judged_at_commit_and_never_dropped() {
     assert_eq!(member(copy, "step_up_status"), Some("valid"));
     assert_eq!(
         exit_handed(&ran, copy, &flatten),
-        FlattenRequestSeen {
-            confirmed: true,
-            plan_confirmed: true
-        }
+        FlattenRequestSeen { confirmed: true }
     );
 }
 

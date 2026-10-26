@@ -33,9 +33,23 @@ It stopped in **step 4**: the trade loop "stopped before approval", because no a
 | X4 | **The gate's dry run denies every opening** | The deployed runtime uses `production::wired` (daemon/src/main.rs:212-218). It has a real plan (production/plan.rs), flatten, references and view, and a real gate dry run: `Gate` over `evaluate_deferring` with the registered rule set's gate config (production.rs:43-68; production/gate.rs:69-91; #2489, DEC-2388). That gate defers `UNJOURNALED`, which is eligibility, the liquidity floor, participation and the day-trade budget (gate.rs:26-30), on every opening, and denies any opening with a deferred check. `Plan::classify` never answers auto (plan.rs:90-133), so an opening that passed would ask | 3, 6 | D1 (DEC-2378 item 11: journal those four facts, then the `DecisionMade` v2 spec) | L |
 | X5 | **The executor knows nothing** | The fixture broker fills (`FixturePaper::filling`, executord/src/main.rs:218; paper.rs:201-206; #2468), and executord reads `IntentProposed` (follow.rs:463-499, process.rs:582). But its wiring is still NoMandate, NoInstruments, NoFacts, NoProtection, NoQuotes and NoMarks (executord/src/fixture.rs:29-102), and NoFacts holds every opening at the binding gate (:63-70) | 3, 4, 6 | X (G1b to G2b: #2458, #2463, #2470, #2478) + LV | L |
 | X6 | **The approve is refused** | Passkey enrolment and assertion are implemented (api-server/src/passkeys.rs:187; methods.rs:117), and confirm, deploy and connect judge step-up (version_routes.rs:302-314; connect.rs:352). The responses route still answers 401 to every `Approved` grant, `StepUpMissing` with evidence and `StepUpRequired` without (api-server/src/writes.rs:414-419). Web's cli_confirm approve (#2435) is real, but only the mock API accepts it | 1, 4, 7 | L1 (#2469/#2474, DEC-2129) | M |
-| X7 | **Exits never reach the executor** | The daemon drops `Effect::Intent` (daemon/src/runtime.rs:564). The core journals `IntentProposed` only for builder proposals and approvals (runtime/src/step.rs:607; escalation.rs:722). Flatten and owner-exit legs are only `Effect::Intent` (step.rs:121, :942), and an owner exit only `OwnerExitRequested` (escalation.rs:978) | 6, 7 | EX (session started 06:26) | M |
+| X7 | ~~Exits never reach the executor~~ **Closed by DEC-2387** | Only the owner's exit of one instrument was unwired (see "X7 by path" below). The runtime now journals one `IntentProposed` per sell leg, caused by the `OwnerExitRequested` copy, which executord reads (follow.rs `proposals`, `confirmed`); `fixtures/contracts/owner-exit-agent-stream.json` pins the rows both processes read. Kill switches, discretionary and builder risk exits already reached it | — | EX | — |
 | X8 | **Alerts are dropped** | The daemon prints each alert to stderr (daemon/src/main.rs:266-267); executord discards them (serve.rs:205). `mandate-dispatcher` has no binary and no process | 4, 7 | EX | S/M |
 | X9 | **NEW: deployed event ids are not unique across streams** | executord's `fixture::Ids` is `1`, epoch, head, ordinal (executord/src/fixture.rs:18-26); the daemon's is `0`, epoch, head, ordinal (daemon/src/fixture.rs:20-24). The journal requires a globally unique `event_id` (journal spec, envelope table: "ULID; globally unique"). Every account stream's first batch therefore has the same ids, and so does every agent stream's. In one cell journal only the first agent's runtime can open its stream, and only the first account's connect check commits. Reproduced: a second demo run on one cell, connect check `append_refused`. The trade loop's agent is the second | 4, 7 | unowned (X and D1 crates) | S |
+
+## X7 by path (lane EX, main at 4e98608)
+
+The journal is the only channel from the runtime to the executor in the cell (design §3.1); the daemon drops every `Effect::Intent` (daemon/src/runtime.rs:564) by design. Each exit therefore reaches the executor only through a record executord reads (follow.rs).
+
+| Exit | Runtime writes | Executor reads | Reaches the executor? |
+|---|---|---|---|
+| Owner's exit of one instrument | `OwnerExitRequested` (escalation.rs:978), plus a `Flatten` handoff the daemon drops | `IntentProposed` only (follow.rs:`proposals`); it never reads an instrument-scope `OwnerExitRequested` as an order | **no**: fixed by DEC-2387, one `IntentProposed` per sell leg caused by the copy |
+| Kill switch (any scope reaching the agent) | `KillSwitchActivated` (step.rs:`switched`) | `switches` (follow.rs:359), applied as the core's own agent-scoped switch (process.rs:`apply`, kill.rs:37): cancel by id, confirm, sell the sub-ledger | yes, once the executor has started (X1) |
+| Discretionary exit (signal, goal, removed instrument) | `DecisionMade` and `IntentProposed` (step.rs:607) | `proposals`, handed whenever a risk exit is permitted (process.rs:362-371) | yes, once the plan proposes (X2, X4) |
+| Builder risk exit (`trim_to_target`) and an approved exit | `IntentProposed` (step.rs:607, escalation.rs:722) | `proposals` | yes, as above |
+| Executor-originated risk exits (watchdog, unprotected bound, drawdown flatten) | none: the executor originates them | its own state | in the executor already; the drawdown ladder is not yet called (risk_state.rs:7-9, lane TW) |
+
+Once handed, the core runs trading spec §5.4's marketable exit sequence (cancel protection, confirm, re-gate, submit, priced by §5.6), and cancels the agent's resting opening buys first (§5.3 rule 5). The in-process path (mandate-paper) had the same hole: the core refuses every `Flatten` handoff, so DEC-2387 hands the legs as orders there too.
 
 ## Step 1: the owner creates an agent in web (envelope, confirm, deploy)
 
@@ -95,10 +109,10 @@ Unchanged since 517ee19: news tools exist on the recorded plane only, live news 
 
 | Item | Wired? | Evidence | Lane | Size |
 |---|---|---|---|---|
-| Agent flatten over the journaled fold | deployed yes | production.rs `Flatten` over the agent's own fills (#2447); its legs never reach the executor (X7) | EX | M |
+| Agent flatten over the journaled fold | deployed yes | production.rs `Flatten` over the agent's own fills (#2447); an owner exit's legs are journaled as `IntentProposed` (DEC-2387); a kill switch's flatten is planned by the executor itself | — | — |
 | Signal and goal exits | library yes | X2, X4 | D1 + DR | — |
 | Thesis exit | no | the runtime fold ignores `ThesisInvalidated` (state.rs:758) | unowned | L |
-| Owner exit | journaled, never sold | X7 | EX | M |
+| Owner exit | journaled as its market sells | DEC-2387; sold once the executor holds the position (X5) | — | — |
 
 ## Step 7: the owner sees everything in web, and approves, intervenes or kills
 

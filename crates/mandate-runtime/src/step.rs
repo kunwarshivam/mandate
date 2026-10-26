@@ -87,22 +87,10 @@ fn retried(
             "IntentProposed" => Some(payload::order_of(&draft.payload)?),
             "OwnerExitRequested" => {
                 let confirmation = payload::honoured_confirmation(&draft.payload)?;
-                match payload::str_of(&draft.payload, "scope") {
-                    Some("instrument") => {
-                        let subject = payload::str_of(&draft.payload, "subject")
-                            .ok_or_else(|| payload::non_canonical("subject"))?;
-                        Some(IntentBody::Flatten(escalation::exit_plan(
-                            state,
-                            payload::instrument_of(subject)?,
-                            confirmation,
-                            ports,
-                        )))
-                    }
-                    _ => {
-                        shown = confirmation;
-                        None
-                    }
+                if payload::str_of(&draft.payload, "scope") != Some("instrument") {
+                    shown = confirmation;
                 }
+                None
             }
             "KillSwitchActivated" => {
                 let initiator = payload::str_of(&draft.payload, "initiator")
@@ -239,20 +227,6 @@ fn started(
             )),
             execution: None,
         });
-    }
-    for (exit, owner) in state.untaken_owner_exits() {
-        if state.permits_rehand(Purpose::Flatten) {
-            batch.hand(IntentHandoff {
-                intent_id: exit.clone(),
-                body: IntentBody::Flatten(escalation::exit_plan(
-                    state,
-                    owner.instrument.clone(),
-                    owner.confirmation.clone(),
-                    ports,
-                )),
-                execution: None,
-            });
-        }
     }
     for (approval, pending) in state.pending_approvals() {
         batch.timer(TimerRequest::Arm {
@@ -611,7 +585,7 @@ fn allowed(
                     instrument: proposal.instrument.clone(),
                     side: proposal.side,
                     qty: proposal.qty,
-                    limit: proposal.limit,
+                    limit: Some(proposal.limit),
                     purpose: proposal.purpose,
                 },
                 execution: proposal.execution,
@@ -754,7 +728,7 @@ fn tif_of(proposal: &Proposal) -> TimeInForce {
     )
 }
 
-fn tif_name(tif: TimeInForce) -> &'static str {
+pub(crate) fn tif_name(tif: TimeInForce) -> &'static str {
     match tif {
         TimeInForce::Day => "day",
         TimeInForce::Gtc => "gtc",
