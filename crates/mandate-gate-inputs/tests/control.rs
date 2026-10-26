@@ -8,12 +8,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value, to_canonical};
 use mandate_domain::Environment;
-use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource};
-use mandate_num::Usd;
 use mandate_gate_inputs::control::{
     Build, Confirmation, ConfirmedVersion, ControlRecord, DeploymentRefusal as Refusal, DoorChecks,
     LiveAdmission, McpHost, Origin, RunFacts, checked_before_credentials, confirmed_version,
 };
+use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource};
+use mandate_num::Usd;
 use mandate_spec::context::{AgentId, Membership};
 use mandate_spec::{Mandate, Violation};
 use mandate_time::Date;
