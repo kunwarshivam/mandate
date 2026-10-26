@@ -515,6 +515,61 @@ fn a_notice_or_attempt_that_cannot_be_served_whole_fails_the_read() {
     assert_eq!(alerts(&streams, &[], &recipient(ME)), Err(Unreadable));
 }
 
+/// An approval's request and its reminder are two notices for one cause, which is no alert: the
+/// read is unaffected. Two notices for one alert fail it (notifications spec §3.4).
+#[test]
+fn two_notices_fail_the_read_only_for_an_alert() {
+    let mut j = Journal::default();
+    let ctl = format!("ctl:{WS}");
+    let subject = j.row(&ctl, 1, "OwnerCommandIssued", "{}");
+    let alert = j.row(
+        &ctl,
+        2,
+        "OwnerAlertSent",
+        &alert_payload("risk_limit", &subject.event_id, None),
+    );
+    let approval = "01JBH3BTZ8K2M4N6P8R0APRVLQ";
+    let reminders = vec![
+        j.row(
+            &ntf(),
+            1,
+            "NoticeIssued",
+            &issued(N1, "approval_requested", approval, &ctl),
+        ),
+        j.row(
+            &ntf(),
+            2,
+            "NoticeIssued",
+            &issued(N2, "approval_reminder", approval, &ctl),
+        ),
+    ];
+    let streams = [Stream {
+        followed: Followed::Control,
+        rows: &[subject, alert.clone()],
+    }];
+    let read = alerts(&streams, &reminders, &recipient(ME));
+    assert_eq!(
+        read.map(|views| views.len()),
+        Ok(1),
+        "the approval's notices are not the alert's"
+    );
+    let twice = vec![
+        j.row(
+            &ntf(),
+            1,
+            "NoticeIssued",
+            &issued(N1, "risk_limit", &alert.event_id, &ctl),
+        ),
+        j.row(
+            &ntf(),
+            2,
+            "NoticeIssued",
+            &issued(N2, "risk_limit", &alert.event_id, &ctl),
+        ),
+    ];
+    assert_eq!(alerts(&streams, &twice, &recipient(ME)), Err(Unreadable));
+}
+
 /// Two alerts raised at the same instant on two streams are listed by `alert_id`, descending.
 #[test]
 fn alerts_raised_at_one_instant_are_ordered_by_id_descending() -> Result<(), Unreadable> {

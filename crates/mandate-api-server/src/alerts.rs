@@ -169,8 +169,9 @@ pub fn followed(control: &[StoredEvent]) -> (Vec<String>, Vec<String>) {
     (agents, accounts)
 }
 
-/// The member's own deliveries, keyed by notice id and then channel, from the notice stream's rows,
-/// which the store reads in `seq` order: on each channel the last attempt read is the latest. An
+/// The member's own deliveries, keyed by notice id and then channel, from the notice stream's rows.
+/// It relies on the store reading a stream in `seq` order, as `Journal::rows` does: on each channel
+/// the last attempt read is the one with the highest `seq`, the latest. An
 /// attempt to the member naming a channel, status, or attempt number the journal does not admit
 /// fails the read, rather than serving a value the schema does not.
 fn deliveries(
@@ -210,10 +211,11 @@ fn deliveries(
     Ok(latest)
 }
 
-/// Each issued notice by its cause: its id and `issued_at`. One cause has one notice (notifications
-/// spec §3.4), so a second `NoticeIssued` for a cause fails the read.
-fn issued(notices: &[StoredEvent]) -> Result<BTreeMap<String, (String, String)>, Unreadable> {
-    let mut by_cause = BTreeMap::new();
+/// Each cause's issued notices, each with its id and `issued_at`, in the order the stream records
+/// them. An approval's request and its reminder share a cause (notifications spec §3.2), so only an
+/// alert with more than one notice fails the read ([`alerts`]): §3.4 gives an alert one.
+fn issued(notices: &[StoredEvent]) -> Result<BTreeMap<String, Vec<(String, String)>>, Unreadable> {
+    let mut by_cause: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     for row in notices
         .iter()
         .filter(|row| row.event_type == "NoticeIssued")
@@ -222,12 +224,10 @@ fn issued(notices: &[StoredEvent]) -> Result<BTreeMap<String, (String, String)>,
         let (Some(cause), Some(id)) = (member(&notice, "cause"), member(&notice, "notice")) else {
             return Err(Unreadable);
         };
-        if by_cause
-            .insert(cause.to_owned(), (id.to_owned(), row.recorded_at.clone()))
-            .is_some()
-        {
-            return Err(Unreadable);
-        }
+        by_cause
+            .entry(cause.to_owned())
+            .or_default()
+            .push((id.to_owned(), row.recorded_at.clone()));
     }
     Ok(by_cause)
 }
@@ -287,15 +287,17 @@ pub fn alerts(
             let Some(mut view) = alert(stream, row)? else {
                 continue;
             };
-            view.notice = issued
-                .get(&view.alert_id)
-                .map(|(id, issued_at)| NoticeView {
+            view.notice = match issued.get(&view.alert_id).map(Vec::as_slice) {
+                None | Some([]) => None,
+                Some([(id, issued_at)]) => Some(NoticeView {
                     issued_at: issued_at.clone(),
                     delivery: delivered
                         .remove(id)
                         .map(|channels| channels.into_values().collect())
                         .unwrap_or_default(),
-                });
+                }),
+                Some(_) => return Err(Unreadable),
+            };
             views.push(view);
         }
     }
