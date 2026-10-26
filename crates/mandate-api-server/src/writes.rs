@@ -507,7 +507,6 @@ async fn granted(app: &App, gate: &Gate, reader: &Reader, asked: &Asked<'_>) -> 
         Ok(Some(_)) | Err(Unverified::Code(ProblemCode::JournalUnavailable)) => {
             Refused::JournalUnavailable.response()
         }
-        Err(Unverified::Unimplemented { .. }) => Refused::JournalUnavailable.response(),
         Err(Unverified::Code(code)) => problem(StatusCode::UNAUTHORIZED, problem_body(code)),
     }
 }
