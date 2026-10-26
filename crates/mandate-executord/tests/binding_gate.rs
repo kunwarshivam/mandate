@@ -155,6 +155,7 @@ fn facts() -> Result<OrderFacts, Error> {
                 cash: usd("100000")?,
                 buying_power: usd("200000")?,
                 non_marginable_buying_power: usd("90000")?,
+                figures: None,
                 at: now,
             },
             mark: Mark {

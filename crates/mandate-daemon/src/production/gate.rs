@@ -9,7 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::AssetClass;
 use mandate_bars::LiquidityFacts;
-use mandate_gate_context::{Freshness, Journaled};
+use mandate_gate_context::{
+    DeclaredAccount, DeclaredRegime, Freshness, Journaled, SnapshotFigures,
+};
 use mandate_num::{Qty, Ratio, Usd};
 use mandate_ports::{AdvisoryGateContext, AdvisoryOrderFacts, evaluate_deferring, gate_mandate};
 use mandate_risk::{
@@ -128,15 +130,18 @@ impl Gate {
     ) -> Result<(Advisory, Option<LiquidityRead>), &'static str> {
         let config = self.config.clone().ok_or(RULE_SET_UNAVAILABLE)?;
         let mandate = self.gate_mandate.clone().ok_or(GATE_REFUSED)?;
-        let (context, figures) = self
+        let threshold = config.legacy_pdt_equity_threshold;
+        let (context, figures, declared) = self
             .facts
             .read(|journaled| self.context(journaled, proposal, config, mandate))
             .ok_or(FACTS_HELD)??;
+        let budget_seen = budget_cannot_refuse(declared.as_ref(), proposal.asset_class, threshold);
         let deferred: BTreeSet<Deferred> = UNJOURNALED
             .into_iter()
             .filter(|deferred| {
                 !matches!(deferred, Deferred::LiquidityFloor | Deferred::Participation)
             })
+            .filter(|deferred| !(budget_seen && *deferred == Deferred::DayTradeBudget))
             .chain(liquidity_deferred(figures.as_ref()))
             .chain(UNSEEN)
             .collect();
@@ -162,7 +167,14 @@ impl Gate {
         proposal: &Proposal,
         config: GateConfig,
         mandate: ValidatedMandate,
-    ) -> Result<(AdvisoryGateContext, Option<LiquidityFacts>), &'static str> {
+    ) -> Result<
+        (
+            AdvisoryGateContext,
+            Option<LiquidityFacts>,
+            Option<SnapshotFigures>,
+        ),
+        &'static str,
+    > {
         let instrument = proposal.instrument.as_str();
         let facts = journaled
             .facts(instrument, self.fresh)
@@ -171,6 +183,7 @@ impl Gate {
             return Err(FACTS_HELD);
         }
         let figures = self.figures(proposal, facts.now);
+        let declared = facts.account.figures.clone();
         if !journaled.working().is_empty() {
             return Err(WORKING_ORDERS_UNSEEN);
         }
@@ -222,10 +235,11 @@ impl Gate {
                 agent_mode: AgentMode::Normal,
             },
             account: AccountSnapshot {
-                account_type: if account.multiplier == 1 {
-                    AccountType::Cash
-                } else {
-                    AccountType::Margin
+                account_type: match declared.as_ref().and_then(|f| f.account_type) {
+                    Some(DeclaredAccount::Cash) => AccountType::Cash,
+                    Some(DeclaredAccount::Margin) => AccountType::Margin,
+                    None if account.multiplier == 1 => AccountType::Cash,
+                    None => AccountType::Margin,
                 },
                 state: if blocked {
                     AccountState::Blocked
@@ -308,7 +322,7 @@ impl Gate {
                 fee_reservation: Usd::ZERO,
             },
         };
-        Ok((context, figures))
+        Ok((context, figures, declared))
     }
 
     /// The liquidity figures of `proposal`'s instrument at `now`, the fold's risk clock, read only
@@ -332,6 +346,30 @@ impl Gate {
             .find(|pinned| pinned.asset_id.as_str() == proposal.instrument.as_str())?;
         self.liquidity.opening(purpose, &pinned.symbol, now)
     }
+}
+
+/// Whether trading spec §9.2's day-trade budget provably cannot refuse an opening in `class` on
+/// the facts the latest snapshot declares (DEC-2811): crypto never counts; an `intraday_margin`
+/// regime denies nothing per order (DEC-129 item 7); a cash account is never `legacy_pdt`'s; and
+/// `legacy_pdt` at or above `threshold` is unlimited. Otherwise the check reads the
+/// pattern-day-trader flag and the trailing day-trade count, which nothing journals, so it stays
+/// deferred: a version 1 snapshot, an undeclared regime or account type, or a prior-close equity
+/// below the threshold never lets it report a pass.
+fn budget_cannot_refuse(
+    declared: Option<&SnapshotFigures>,
+    class: AssetClass,
+    threshold: Usd,
+) -> bool {
+    if class == AssetClass::Crypto {
+        return true;
+    }
+    let Some(figures) = declared else {
+        return false;
+    };
+    figures.day_trading_regime == Some(DeclaredRegime::IntradayMargin)
+        || figures.account_type == Some(DeclaredAccount::Cash)
+        || (figures.day_trading_regime == Some(DeclaredRegime::LegacyPdt)
+            && figures.last_equity >= threshold)
 }
 
 /// Where an opening's dry run reads the liquidity floor's and participation's inputs: the stored
