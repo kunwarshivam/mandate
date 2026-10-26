@@ -719,10 +719,18 @@ jobs:
     if: needs.select.outputs.cell == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      # DEC-464: the plain and the seeded drills on a runner each, so each fits the ten
+      # minutes beside the cell's own bring-up (DR, 2026-10-26: the executor drills' two
+      # variants in series ran past 600 s).
+      matrix:
+        variant: [plain, seeded]
     permissions:
       contents: read
     env:
       MANDATE_CELL_REQUIRED: "1"
+      MANDATE_CELL_VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -761,10 +769,18 @@ jobs:
     if: needs.select.outputs.cell == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      # DEC-464: the plain and the seeded drills on a runner each, so each fits the ten
+      # minutes beside the cell's own bring-up (DR, 2026-10-26: the executor drills' two
+      # variants in series ran past 600 s).
+      matrix:
+        variant: [plain, seeded]
     permissions:
       contents: read
     env:
       MANDATE_CELL_REQUIRED: "1"
+      MANDATE_CELL_VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -803,10 +819,18 @@ jobs:
     if: needs.select.outputs.cell == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      # DEC-464: the plain and the seeded drills on a runner each, so each fits the ten
+      # minutes beside the cell's own bring-up (DR, 2026-10-26: the executor drills' two
+      # variants in series ran past 600 s).
+      matrix:
+        variant: [plain, seeded]
     permissions:
       contents: read
     env:
       MANDATE_CELL_REQUIRED: "1"
+      MANDATE_CELL_VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -845,10 +869,18 @@ jobs:
     if: needs.select.outputs.cell == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      # DEC-464: the plain and the seeded drills on a runner each, so each fits the ten
+      # minutes beside the cell's own bring-up (DR, 2026-10-26: the executor drills' two
+      # variants in series ran past 600 s).
+      matrix:
+        variant: [plain, seeded]
     permissions:
       contents: read
     env:
       MANDATE_CELL_REQUIRED: "1"
+      MANDATE_CELL_VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -887,10 +919,18 @@ jobs:
     if: needs.select.outputs.cell == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      # DEC-464: the plain and the seeded drills on a runner each, so each fits the ten
+      # minutes beside the cell's own bring-up (DR, 2026-10-26: the executor drills' two
+      # variants in series ran past 600 s).
+      matrix:
+        variant: [plain, seeded]
     permissions:
       contents: read
     env:
       MANDATE_CELL_REQUIRED: "1"
+      MANDATE_CELL_VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -929,10 +969,18 @@ jobs:
     if: needs.select.outputs.cell == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      # DEC-464: the plain and the seeded drills on a runner each, so each fits the ten
+      # minutes beside the cell's own bring-up (DR, 2026-10-26: the executor drills' two
+      # variants in series ran past 600 s).
+      matrix:
+        variant: [plain, seeded]
     permissions:
       contents: read
     env:
       MANDATE_CELL_REQUIRED: "1"
+      MANDATE_CELL_VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
