@@ -25,6 +25,9 @@ const WORKSPACE = process.env.OWLHEAD_WORKSPACE_ID ?? "";
 const AGENT = process.env.OWLHEAD_CELL_AGENT ?? "";
 const API = process.env.OWLHEAD_API_ORIGIN ?? "";
 const PENDING_COUNSEL = "Pending counsel — not for real-money use";
+/** The whole test's bound, and one page's: `next dev` compiles each route on its first visit. */
+const JOURNEY_MS = Number(process.env.OWLHEAD_CELL_JOURNEY_MS ?? 240_000);
+const PAGE_MS = 90_000;
 
 const reached: Record<string, string> = {};
 const write = (extra: Record<string, string> = {}) => writeFileSync(RESULT, JSON.stringify({ ...reached, ...extra }));
@@ -36,6 +39,25 @@ const refuse = (error: string): never => {
   write({ error });
   throw new Error(error);
 };
+
+/**
+ * Opens `path` until its read of `apiPath` is not the one 401: `web/` opens the API session through
+ * the stub issuer on its first load, so the first reads may run before the cookie is set. Every pass
+ * shares one `PAGE_MS` budget, so the retries cannot eat the rest of the journey's; answers the last
+ * response, so a failure names what the API said.
+ */
+async function signedInRead(page: Page, path: string, apiPath: string) {
+  const deadline = Date.now() + PAGE_MS;
+  for (;;) {
+    const left = Math.max(deadline - Date.now(), 1_000);
+    const read = page.waitForResponse((r) => r.request().method() === "GET" && new URL(r.url()).pathname === apiPath, { timeout: left }).catch(() => null);
+    await page.goto(path, { timeout: left });
+    const answer = await read;
+    if (!answer) return refuse(`web/ never read ${apiPath}`);
+    if (answer.status() !== 401 || deadline - Date.now() < 5_000) return answer;
+    await page.waitForTimeout(2_000);
+  }
+}
 
 /** The control stream's events of `type`, read through the API's audit read with the page's session. */
 async function controlEvents(page: Page, type: string): Promise<Array<{ event_id: string; payload: Record<string, unknown> }>> {
@@ -64,21 +86,25 @@ async function controlEvents(page: Page, type: string): Promise<Array<{ event_id
 }
 
 test("the customer's journey on Alpaca paper: connections, going live, and real money refused and journaled", async ({ page }) => {
+  test.setTimeout(JOURNEY_MS);
   for (const [name, value] of Object.entries({ RESULT, WORKSPACE, AGENT, API })) expect(value, `the driver names ${name}`).not.toBe("");
 
   await test.step("the workspace is on paper, with Alpaca paper connected and Robinhood off", async () => {
-    await page.goto("/connections");
+    const answer = await signedInRead(page, "/connections", `/v1/workspaces/${WORKSPACE}/connections`);
+    const body = (await answer.text().catch(() => "")).slice(0, 600);
+    if (!answer.ok()) refuse(`the API answered ${answer.status()} for the connections: ${body}`);
     const accounts = page.getByRole("list", { name: "Broker accounts" });
-    await expect(accounts).toBeVisible({ timeout: 30_000 });
+    const shown = await accounts.waitFor({ state: "visible", timeout: 30_000 }).then(() => true, () => false);
+    if (!shown) refuse(`web/ did not list the connections the API answered: ${body}`);
     if ((await accounts.getByRole("link", { name: "Alpaca" }).count()) === 0) refuse("no Alpaca connection is listed");
     await expect(page.locator("[data-slot=robinhood-real-money]")).toContainText("Real money: off.");
     step("connections");
   });
 
   await test.step("the go-live screen marks every disclosure and limit pending counsel", async () => {
-    await page.goto("/go-live");
+    await page.goto("/go-live", { timeout: PAGE_MS });
     const disclosures = page.getByRole("region", { name: "Risks of an automated agent" });
-    await expect(disclosures).toBeVisible({ timeout: 30_000 });
+    await expect(disclosures).toBeVisible({ timeout: PAGE_MS });
     await expect(disclosures.getByText(PENDING_COUNSEL)).toBeVisible();
     await expect(page.getByRole("region", { name: "Platform limits" }).getByText(PENDING_COUNSEL)).toBeVisible();
     step("disclosures", String(await disclosures.getByRole("article").count()));
@@ -88,7 +114,7 @@ test("the customer's journey on Alpaca paper: connections, going live, and real 
       const response = await fetch(`${api}/v1/me/session`, { credentials: "include", headers: { Accept: "application/json" } });
       return response.ok ? ((await response.json()) as { principal_id?: string }).principal_id ?? "" : "";
     }, API);
-    const accepted = (await controlEvents(page, "DisclosureAccepted")).filter((e) => e.payload.document === "go_live_risk" && e.payload.user === principal);
+    const accepted = (await controlEvents(page, "DisclosureAccepted")).filter((e) => e.payload.document === "go_live_risk" && String(e.payload.user).toUpperCase() === principal.toUpperCase());
     const last = accepted.at(-1);
     const method = (last?.payload.step_up as { method?: string } | null | undefined)?.method;
     if (!last || method !== "cli_confirm") refuse(`no DisclosureAccepted of go_live_risk by ${principal || "the owner"} with cli_confirm step-up`);

@@ -272,7 +272,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const oneEvent = route.match(/^\/journal\/events\/([^/]+)$/);
     if (oneEvent) {
       const event = (controlStream(`ctl:${workspaceId}`) ?? []).find((e) => e.event_id === decodeURIComponent(oneEvent[1]));
-      return event ? read({ ...event, stream_id: `ctl:${workspaceId}`, artifact_refs: [], config_refs: {} }) : problem(404, "not_found", "none");
+      return event ? read({ event: { ...event, stream_id: `ctl:${workspaceId}`, artifact_refs: [], config_refs: {} } }) : problem(404, "not_found", "none");
     }
     if (route === "/health") return read(healthBody(workspace.health, servedAt));
     if (route === "/passkeys") return read({ passkeys: passkeys.map((p) => ({ passkey_id: p.passkey_id, alg: "es256", enrolled_at: servedAt, cool_off_ends: p.cool_off_ends })) });
