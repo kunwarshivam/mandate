@@ -3,6 +3,10 @@
 //! `OwnerAcknowledged`, on the workspace control stream and as the executor's account-stream copies,
 //! each the original's payload unchanged, with consistency rule 239. `append` sees one record, so
 //! stream rules 240 and 241 are the writers' and the executor's, not this module's.
+//!
+//! Version 2 (v0.102, DEC-2824; v0.104, DEC-2830) is version 1's members and `subject`, after
+//! `event`: `limit`, `restriction` or `reconciliation`, what `event` names. Rule 239 reads it as it
+//! reads version 1.
 
 use mandate_canon::Value;
 
@@ -22,12 +26,14 @@ pub(crate) fn schema(
     schema_version: u64,
     stream: StreamType,
 ) -> Option<&'static Ty> {
-    if schema_version != 1 || !matches!(stream, StreamType::Control | StreamType::Account) {
+    if !matches!(stream, StreamType::Control | StreamType::Account) {
         return None;
     }
-    match event_type {
-        REQUESTED => Some(&OWNER_ACKNOWLEDGMENT_REQUESTED),
-        ACKNOWLEDGED => Some(&OWNER_ACKNOWLEDGED),
+    match (event_type, schema_version) {
+        (REQUESTED, 1) => Some(&OWNER_ACKNOWLEDGMENT_REQUESTED),
+        (ACKNOWLEDGED, 1) => Some(&OWNER_ACKNOWLEDGED),
+        (REQUESTED, 2) => Some(&OWNER_ACKNOWLEDGMENT_REQUESTED_V2),
+        (ACKNOWLEDGED, 2) => Some(&OWNER_ACKNOWLEDGED_V2),
         _ => None,
     }
 }
@@ -74,6 +80,33 @@ static OWNER_ACKNOWLEDGMENT_REQUESTED: Ty = Ty::Record(&[
 static OWNER_ACKNOWLEDGED: Ty = Ty::Record(&[
     ("agent", Ty::Ident),
     ("event", Ty::Ulid),
+    ("user", Ty::Ident),
+    ("requested_by", Ty::Ident),
+    ("independent_required", Ty::Bool),
+    ("request", Ty::Nullable(&Ty::Ulid)),
+    ("submitted_at", Ty::Int),
+    ("risk_clock", Ty::RiskClock),
+    ("step_up", Ty::Nullable(&crate::control::ANSWER_STEP_UP)),
+]);
+
+/// What a version-2 acknowledgment or request names by its `event` (v0.102, v0.104).
+const SUBJECTS: &[&str] = &["limit", "restriction", "reconciliation"];
+
+static OWNER_ACKNOWLEDGMENT_REQUESTED_V2: Ty = Ty::Record(&[
+    ("agent", Ty::Ident),
+    ("event", Ty::Ulid),
+    ("subject", Ty::OneOf(SUBJECTS)),
+    ("requested_by", Ty::Ident),
+    ("independent_required", Ty::Bool),
+    ("submitted_at", Ty::Int),
+    ("risk_clock", Ty::RiskClock),
+    ("step_up", Ty::Nullable(&crate::control::ANSWER_STEP_UP)),
+]);
+
+static OWNER_ACKNOWLEDGED_V2: Ty = Ty::Record(&[
+    ("agent", Ty::Ident),
+    ("event", Ty::Ulid),
+    ("subject", Ty::OneOf(SUBJECTS)),
     ("user", Ty::Ident),
     ("requested_by", Ty::Ident),
     ("independent_required", Ty::Bool),
