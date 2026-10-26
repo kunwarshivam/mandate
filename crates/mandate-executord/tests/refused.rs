@@ -7,6 +7,7 @@
 mod support;
 
 use mandate_canon::Value;
+use mandate_executord::Alert;
 use mandate_process::State;
 use support::{
     ACCOUNT_STREAM, AGENT, Error, Fault, NOON, OPENED, OPENING, Paper, at, deployed, kill, propose,
@@ -26,13 +27,22 @@ fn held(journal: &support::Journal) -> Vec<Value> {
         .collect()
 }
 
+/// The operator's alerts of a pass that a refusal raised (DEC-2805 item 1).
+fn refusals(alerts: &[Alert]) -> usize {
+    alerts
+        .iter()
+        .filter(|alert| alert.key == "journal_refused" && alert.subject.is_none())
+        .count()
+}
+
 #[test]
 fn a_refused_batch_holds_the_openings_and_the_kill_switch_still_applies() -> Result<(), Error> {
     let journal = deployed()?;
     let broker = Paper::new(&journal);
     let mut process = start(&journal, &broker)?;
     journal.fail_next(&[Fault::Invalid]);
-    process.step(at(NOON)?);
+    let first = process.step(at(NOON)?);
+    assert_eq!(refusals(&first), 1, "the operator is alerted");
     assert!(
         !matches!(process.lifecycle().state(), State::Exited(_)),
         "a refused batch never stops the process: {:?}",
@@ -62,7 +72,12 @@ fn a_refused_batch_holds_the_openings_and_the_kill_switch_still_applies() -> Res
     assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
 
     journal.fail_next(&[Fault::Invalid]);
-    process.step(at(NOON)?);
+    let again = process.step(at(NOON)?);
+    assert_eq!(
+        refusals(&again),
+        0,
+        "the operator is alerted once a process"
+    );
     process.step(at(NOON)?);
     assert_eq!(
         held(&journal).len(),

@@ -171,8 +171,18 @@ fn a_refused_mark_is_dropped_and_the_next_interval_marks_again() -> Result<(), E
     wiring.quotes = Box::new(Quoting(vec![AAPL]));
     wiring.marked = Box::new(Naming(vec![AAPL]));
     let mut process = start_wired(&journal, &broker, wiring)?;
-    journal.fail_next_of("MarkUpdated", &[Fault::Invalid]);
-    process.step(at(NOON)?);
+    journal.fail_next_of("MarkUpdated", &[Fault::Invalid, Fault::Invalid]);
+    let refused = |alerts: &[mandate_executord::Alert]| {
+        alerts
+            .iter()
+            .filter(|alert| alert.key == "journal_refused" && alert.subject.is_none())
+            .count()
+    };
+    assert_eq!(
+        refused(&process.step(at(NOON)?)),
+        1,
+        "the operator is alerted"
+    );
     assert!(
         !matches!(process.lifecycle().state(), State::Exited(_)),
         "{:?}",
@@ -183,7 +193,14 @@ fn a_refused_mark_is_dropped_and_the_next_interval_marks_again() -> Result<(), E
         "the refused mark is not written"
     );
     tick(&journal, "t2", "2026-09-21T15:00:15Z")?;
-    process.step(at("2026-09-21T15:00:15Z")?);
+    assert_eq!(
+        refused(&process.step(at("2026-09-21T15:00:15Z")?)),
+        0,
+        "once a process"
+    );
+    assert!(marks_of(&journal).is_empty(), "the second is refused too");
+    tick(&journal, "t3", "2026-09-21T15:00:30Z")?;
+    process.step(at("2026-09-21T15:00:30Z")?);
     assert_eq!(marks_of(&journal).len(), 1, "the next interval marks again");
     Ok(())
 }
