@@ -189,7 +189,7 @@ stale (the connect check is on `main`, and founding is `mandate workspace found`
 | Sign-in as the demo owner, through the local stub issuer | Lane SI's stub issuer (E21-52) and the server's key-set tier check (E21-53) are both on `main` |
 | A paper agent on rh-sim and recorded Alpaca fixtures | `runtime` and `executor` are built (the executor's interim image runs its fixture paper broker, DEC-2031), the runtime proposes orders once the post-R0 hook wires its ports (DEC-1013), and the executor takes them (#1736) and fills, books and protects them on the fixture (slice X1b-3 of E21-30, #2624); until a gesture shows the fill in the cell (E21-54) the part stays a named gap |
 | Research's model gateway, the recorded fake | The post-R0 hook wires its ports; until then always skipped |
-| The founding membership | Lane ID1's `mandate membership` gesture is in the CLI; founding is `mandate workspace found`, which `--scenario demo` runs, so this part always reads skipped |
+| The founding membership | There is no `mandate membership` command (founding is `mandate workspace found`, which `--scenario demo` runs), so this part always reads skipped |
 | `web/` against the cell's API | The API server is ready; until then `web/` runs on its own fixtures |
 
 The API server listens only on its pod's loopback, so nothing in the cluster reaches it until the
