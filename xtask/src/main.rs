@@ -666,6 +666,10 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
                 args.push("--no-fail-fast".to_owned());
             }
             if let Ok(filter) = env::var(NEXTEST_FILTER_ENV) {
+                eprintln!(
+                    "    test-nextest: {NEXTEST_FILTER_ENV} narrows this run to `{filter}` \
+                     (DEC-2644); unset it to run every selected test"
+                );
                 filtered(&mut args, &filter);
             }
             sh(
@@ -3545,27 +3549,31 @@ fn land_check_cmd(root: &Path, base: &str) -> Result<()> {
                 &scratch.display().to_string(),
             ],
         )?;
-        let mut passed = Vec::new();
-        for (binary, test) in &failed {
-            eprintln!(
-                "==> land-check: {binary} {test} failed as root; once more as uid {UNPRIVILEGED_ID}"
-            );
-            let status = unprivileged_rerun(
-                land_check_job(dir, base_sha, &target, job),
-                host,
-                &scratch,
-                binary,
-                test,
-            )
-            .status()
-            .context("starting `cargo xtask`")?;
-            if !status.success() {
-                bail!("{binary} {test} failed as root and again as uid {UNPRIVILEGED_ID}");
+        let rerun = || -> Result<Vec<String>> {
+            let mut passed = Vec::new();
+            for (binary, test) in &failed {
+                eprintln!(
+                    "==> land-check: {binary} {test} failed as root; once more as uid {UNPRIVILEGED_ID}"
+                );
+                let status = unprivileged_rerun(
+                    land_check_job(dir, base_sha, &target, job),
+                    host,
+                    &scratch,
+                    binary,
+                    test,
+                )
+                .status()
+                .context("starting `cargo xtask`")?;
+                if !status.success() {
+                    bail!("{binary} {test} failed as root and again as uid {UNPRIVILEGED_ID}");
+                }
+                passed.push(format!("{binary}:{test}"));
             }
-            passed.push(format!("{binary}:{test}"));
-        }
+            Ok(passed)
+        };
+        let outcome = rerun();
         fs::remove_dir_all(&scratch).ok();
-        Ok(passed)
+        outcome
     });
     println!("{line}");
     verdict
