@@ -610,15 +610,70 @@ fn a_deployed_run_reads_its_ports_from_the_deployment() -> Result<(), Error> {
         Ok(Some(_))
     ));
     assert_eq!(wiring.marked.instruments(), BTreeSet::from([spy.clone()]));
-    assert_eq!(wiring.quotes.feed(), "none", "the fixture broker's feed");
+    assert_eq!(wiring.quotes.feed(), "iex", "the fixture broker's feed");
     assert!(
         wiring
             .gate
             .input(&request(&agent, &spy, Purpose::Open, Side::Buy)?)
             .is_none(),
-        "the broker's facts are unread, so the opening is held"
+        "the fixture quotes nothing and the bars are unread, so the opening is held"
     );
     Ok(())
+}
+
+/// G2b-2: a deployed run's binding gate reads the run's own broker's facts. The fixture run over a
+/// quoting fixture, with the account journaled and the bars read, asks the fixture for SPY's asset
+/// record and the account when an opening is gated, and nothing when an exit is. The run keeps no
+/// facts of its own once deployed.
+#[test]
+fn a_deployed_runs_gate_reads_the_runs_own_broker_facts() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    let paper = mandate_executord::paper::FixturePaper::new(at(MONDAY)?).quoting(wall_clock);
+    let broker = mandate_executord::alpaca::AlpacaBroker::new(paper.clone())?;
+    let run = mandate_executord::run::fixture(broker, &scope())?;
+    assert!(run.facts().is_some(), "the fixture run carries the fixture's facts");
+    let rows = journal.clone();
+    let run = run.deployed(
+        &scope(),
+        mandate_executord::deployment::Production {
+            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            artifacts: Box::new(store),
+            liquidity: Box::new(Bars(Rc::new(Cell::new(0)))),
+        },
+    );
+    assert!(run.facts().is_none(), "the run's facts went to its deployment");
+    let (agent, spy) = (agent(), spy()?);
+    let gate = &run.wiring().gate;
+    assert!(
+        gate.input(&request(&agent, &spy, Purpose::RiskExit, Side::Sell)?)
+            .is_none()
+    );
+    assert_eq!(paper.served(), Vec::<String>::new(), "an exit asks the broker nothing");
+    let _held_until_the_gate_admits_intraday_margin =
+        gate.input(&request(&agent, &spy, Purpose::Open, Side::Buy)?);
+    assert_eq!(
+        paper.served(),
+        ["GET /v2/assets/SPY", "GET /v2/account"],
+        "the opening's gate asks the run's own broker for the asset record and the account"
+    );
+    Ok(())
+}
+
+/// The host's clock, which the fixture run's quote feed judges a quote's age on.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the fixture run's feed judges a quote's age on the host clock, so the fixture stamps by it"
+)]
+fn wall_clock() -> UtcNanos {
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    UtcNanos::from_parts(
+        i64::try_from(since.as_secs()).unwrap_or(i64::MAX),
+        since.subsec_nanos(),
+    )
+    .unwrap_or(UtcNanos::EPOCH)
 }
 
 /// An artifact store that counts its reads and can be taken down.
