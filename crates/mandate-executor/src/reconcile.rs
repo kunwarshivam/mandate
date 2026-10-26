@@ -2495,8 +2495,9 @@ pub(crate) mod tests {
 
     /// The two cases DEC-2812 and DEC-2817 leave to DEC-2805: an external fill in an instrument with
     /// no instrument snapshot on an account whose own fill configuration is not known either, so it
-    /// has no fill configuration to journal, and one whose fill id the broker sent empty. The journal refuses the batch at its `FillApplied` alone, every other
-    /// draft is one it would accept, and DEC-2805 item 1's hold keeps the executor running.
+    /// has no fill configuration to journal, and one whose fill id the broker sent empty. The
+    /// journal refuses the batch at its `FillApplied` alone, every other draft is one it would
+    /// accept, and DEC-2805 item 1's hold keeps the executor running.
     #[test]
     fn an_external_fill_without_its_config_or_its_id_is_refused_at_its_fill_alone()
     -> Result<(), ExecutorError> {
@@ -2656,6 +2657,17 @@ pub(crate) mod tests {
                 if draft.event_type == "FillApplied" {
                     assert_eq!(draft.schema_version, 2);
                     assert_eq!(draft.payload.get("client_order_id"), Some(&Value::Null));
+                    let named: Vec<&str> = draft.config_refs.keys().map(|k| k.as_str()).collect();
+                    assert_eq!(
+                        named,
+                        [
+                            "fee_config",
+                            "instrument_snapshot",
+                            "settlement_calendar",
+                            "trading_calendar"
+                        ],
+                        "a registered instrument's fill names its snapshot too (DEC-2817)"
+                    );
                 }
             }
         }
