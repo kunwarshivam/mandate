@@ -998,18 +998,22 @@ impl Cause {
     }
 }
 
-/// Stores a detected restriction as account state and applies its agent effect to every agent
-/// (§7.3), alerting the owner. A restriction already in force is not journaled again, and the
-/// answer says whether this one was new.
+/// Journals a detected restriction's cause when it is not already in force at that restriction or
+/// a stricter one (journal spec v0.96 rule 309, DEC-2816), alerting the owner. Only a restriction
+/// that makes the account state stricter applies its agent effect to every agent (§7.3); one
+/// beside a stricter cause moves no agent, which already holds the stricter mode. The answer says
+/// whether a cause was journaled.
 fn restrict(
     batch: &mut Batch<'_, '_>,
     restriction: Restriction,
     cause: Cause,
     reason: &'static str,
 ) -> Result<bool, ExecutorError> {
-    if batch.view.account_state >= restriction.state() {
+    let held = batch.view.causes.get(cause.name()).copied();
+    if held.is_some_and(|held| held >= restriction.state()) {
         return Ok(false);
     }
+    let tightens = batch.view.account_state < restriction.state();
     let changed = batch.journal(
         "AccountRestrictionChanged",
         None,
@@ -1019,13 +1023,17 @@ fn restrict(
             ("reason_code", text(reason)),
         ],
     )?;
-    every_agent_alerted(
-        batch,
-        restriction.mode(),
-        reason,
-        changed,
-        OwnerAlertKind::AccountRestriction,
-    )?;
+    if tightens {
+        every_agent_alerted(
+            batch,
+            restriction.mode(),
+            reason,
+            changed,
+            OwnerAlertKind::AccountRestriction,
+        )?;
+    } else {
+        batch.notify(changed, OwnerAlertKind::AccountRestriction);
+    }
     Ok(true)
 }
 
