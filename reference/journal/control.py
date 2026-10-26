@@ -1389,7 +1389,7 @@ def fill_applied(client_order_id: T) -> T:
 
 FILL_APPLIED_V1 = fill_applied(STR)
 FILL_APPLIED_V2 = fill_applied(opt(STR))
-# v0.96 §9.5 (DEC-2817): `FillApplied` version 2 requires the instrument snapshot only of a fill
+# v0.98 §9.5 (DEC-2817): `FillApplied` version 2 requires the instrument snapshot only of a fill
 # that names an order of ours, which rule 300 checks; an unattributed fill may be in an instrument
 # the platform holds no snapshot of.
 FILL_V2_REQUIRED_REFS = ("fee_config", "trading_calendar", "settlement_calendar")
