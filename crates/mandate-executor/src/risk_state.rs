@@ -747,6 +747,10 @@ impl<'c> AccountRiskFold<'c> {
             .get("instrument_id")
             .and_then(Value::as_str)
             .ok_or(UnreadableCause::Undecodable)?;
+        let clock = whole_second(payload, "risk_clock")?;
+        if clock < self.opened_at {
+            return Ok(Vec::new());
+        }
         self.bind(instrument)?;
         let sane = match payload.get("sane") {
             Some(Value::Bool(sane)) => *sane,
@@ -772,10 +776,6 @@ impl<'c> AccountRiskFold<'c> {
                     .find(|session| session.as_str() == name)
             })
             .ok_or(UnreadableCause::Undecodable)?;
-        let clock = whole_second(payload, "risk_clock")?;
-        if clock < self.opened_at {
-            return Ok(Vec::new());
-        }
         let outcome = self.step(clock, session, Input::Mark { bid, sane })?;
         self.records(row, clock, &outcome)
     }
