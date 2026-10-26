@@ -8,6 +8,7 @@
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::num::NonZeroU64;
 use std::time::Duration;
 
 use mandate_gateway::frame;
@@ -69,8 +70,8 @@ impl ModelCalls for RemoteGateway {
 /// `deadline - now`, `None` when nothing is left.
 fn remaining(now: UtcNanos, deadline: UtcNanos) -> Option<Duration> {
     let left = total_nanos(deadline).checked_sub(total_nanos(now))?;
-    let left = u64::try_from(left).ok().filter(|left| *left > 0)?;
-    Some(Duration::from_nanos(left))
+    let left = NonZeroU64::new(u64::try_from(left).ok()?)?;
+    Some(Duration::from_nanos(left.get()))
 }
 
 fn total_nanos(at: UtcNanos) -> i128 {
