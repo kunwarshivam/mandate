@@ -261,7 +261,7 @@ fn stored(seq: u64, event: &Value) -> StoredEvent {
 fn every_range_reports_its_first_request_that_breaks_rule_292_across_batches() {
     let fixture = fixture();
     let ranges = list(section(&fixture), "ranges");
-    assert!(ranges.len() >= 13, "{} ranges; never fewer", ranges.len());
+    assert!(ranges.len() >= 17, "{} ranges; never fewer", ranges.len());
     let mut failed = Vec::new();
     for case in ranges {
         let from = case.get("from_seq").and_then(Value::as_int).unwrap();
