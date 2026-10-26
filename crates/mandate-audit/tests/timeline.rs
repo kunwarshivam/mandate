@@ -12,7 +12,7 @@ use common::{ctl, workspaces};
 use mandate_audit::{AuditError, MAX_CONSUMED_PER_STREAM, MemoryRead, StreamCursor, Timeline};
 use mandate_audit::{TimelineQuery, TimelineRead};
 use mandate_canon::Digest;
-use mandate_journal::{AppendOutcome, InvalidReason, StreamId};
+use mandate_journal::{AppendOutcome, StreamId};
 use mandate_time::UtcNanos;
 use proptest::prelude::*;
 use proptest::test_runner::{TestCaseError, TestRunner};
@@ -814,21 +814,66 @@ fn order_links_are_version_two_and_read_every_timeline_stream() {
     assert_eq!(served(&j), (expected, j.heads()));
 }
 
-/// DEC-779's tripwire. DEC-764 item 2 makes `AccountRestrictionChanged` and a connection- or
-/// workspace-scope `KillSwitchActivated` on an account stream the agent's, but the journal registers
-/// neither payload at schema version 1 or 2, so `append` refuses both and the timeline leaves that
-/// clause out. The day either becomes recordable this test fails, and DEC-779 lapses: that change's
-/// tests PR adds those timeline cases, and the clause follows them (DEC-77).
+/// An `AccountRestrictionChanged` at `restriction`, as the executor journals it (journal spec §9.5,
+/// rules 279 and 280).
+fn restricted(restriction: &str) -> String {
+    let (cause, code) = match restriction {
+        "blocked" => ("broker_notice", "account_trading_blocked"),
+        _ => ("broker_reject", "account_restricted"),
+    };
+    format!(
+        r#"{{"restriction":"{restriction}","cause":"{cause}","reason_code":"{code}","risk_clock":"2026-09-21T14:00:00.000000000Z"}}"#
+    )
+}
+
+/// DEC-764 item 2's account-wide clause, now that the journal records `AccountRestrictionChanged`
+/// (journal spec v0.88; DEC-779 lapsed for it): a restriction on an account the agent was deployed
+/// on is the agent's, whatever it names, since it changes what every agent there may do. One on
+/// ACCT3, an account the agent never ran on, is on no stream the timeline merges.
 #[test]
-fn the_account_wide_records_the_timeline_omits_are_not_yet_recordable() {
+fn an_account_restriction_on_the_agents_account_is_the_agents() {
+    let mut j = Journal::new();
+    let [a, _, _] = workspaces();
+    let s3 = acct(&a, "ACCT3");
+    let opened = format!(
+        r#"{{"stream_type":"account","workspace_id":"{a}","broker":"alpaca","account_ref":"ACCT3"}}"#
+    );
+    j.fx.open(&s3, &opened);
+    j.one(
+        &s3,
+        1,
+        ("AccountRestrictionChanged", 1, None, &restricted("blocked")),
+    );
+    let mut expected = vec![j.opened(&stream(None))];
+    for (to, restriction) in [("ACCT1", "closing_only"), ("ACCT2", "blocked")] {
+        let id = j.one(
+            &stream(Some(to)),
+            2,
+            (
+                "AccountRestrictionChanged",
+                1,
+                None,
+                &restricted(restriction),
+            ),
+        );
+        expected.push(id);
+    }
+    j.one(&stream(Some("ACCT1")), 3, ("MarkUpdated", 1, None, MARK));
+    assert_eq!(served(&j), (expected, j.heads()));
+}
+
+/// DEC-779's tripwire, narrowed to what is still unrecorded. DEC-764 item 2 makes a connection- or
+/// workspace-scope `KillSwitchActivated` on an account stream the agent's, but the account stream
+/// registers the executor's switch only at its agent and account scopes (journal spec v0.90 §9.5,
+/// DEC-2139), so `append` refuses both scopes at every version and the timeline leaves that clause
+/// out. The day either becomes recordable this test fails, and DEC-779 lapses for it too: that
+/// change adds those timeline cases, and the clause follows them (DEC-77).
+#[test]
+fn the_account_wide_kill_switches_the_timeline_omits_are_not_yet_recordable() {
     let mut j = Journal::new();
     let to = stream(Some("ACCT1"));
     let a = text(WS_A);
     let offers = [
-        (
-            "AccountRestrictionChanged",
-            r#"{"restriction":"closing_only","reason":"broker"}"#.to_owned(),
-        ),
         (
             "KillSwitchActivated",
             r#"{"scope":"connection","subject":"ACCT1","reason":"owner"}"#.to_owned(),
@@ -836,10 +881,6 @@ fn the_account_wide_records_the_timeline_omits_are_not_yet_recordable() {
         (
             "KillSwitchActivated",
             format!(r#"{{"scope":"workspace","subject":"{a}","reason":"owner"}}"#),
-        ),
-        (
-            "KillSwitchActivated",
-            format!(r#"{{"scope":"agent","subject":"{ME}","reason":"owner"}}"#),
         ),
     ];
     for ((typed, payload), version) in offers.iter().flat_map(|o| [(o, 1), (o, 2)]) {
@@ -853,12 +894,7 @@ fn the_account_wide_records_the_timeline_omits_are_not_yet_recordable() {
             actor()
         );
         let outcome = j.fx.try_append_at(&to, T, &[(id, body.as_bytes())]);
-        let refused = match &outcome {
-            AppendOutcome::Invalid { error, .. } => {
-                error.reason == InvalidReason::UnknownSchema && error.path == "payload"
-            }
-            _ => false,
-        };
+        let refused = matches!(&outcome, AppendOutcome::Invalid { .. });
         assert!(refused, "{typed} v{version} {payload}: {outcome:?}");
     }
 }
