@@ -18,7 +18,7 @@ use mandate_api::problem::{ProblemCode, Violation};
 use mandate_api::requests::{Environment as Wire, OauthStartRequest};
 use mandate_api::wire::decode;
 use mandate_authn::Request;
-use mandate_canon::{Digest, Value, parse};
+use mandate_canon::{Digest, Int, Value, parse};
 use mandate_connections::ConnectError;
 use mandate_connections::manager::{
     AccountRefFold, IdFold, StartFacts, StartPlan, StartRefusal, StartRequest, StepUpCheck,
@@ -36,16 +36,16 @@ use secrecy::SecretString;
 use tokio::task::JoinError;
 
 use crate::backtests::paper;
-use crate::commands::{Event, Settled, Writer, envelope};
+use crate::commands::{Event, Settled, Writer, caused_envelope, envelope};
 use crate::http::{App, invalid, problem, problem_body};
 use crate::routes::{
     self, Reader, Refused, Unreadable, authorized, enveloped, path_refused, string,
 };
 use crate::session::{Authenticated, Random};
-use crate::stepup::{Action, Judged, Unverified, journaled};
+use crate::stepup::{Action, Asserted, Judged, Unverified, journaled};
 use crate::versions::object;
 use crate::writes::{
-    Gate, appended_at, derived_for, id_text, principal_text, repeated, strictly, unknown,
+    Gate, appended_batch_at, derived_for, id_text, principal_text, repeated, strictly, unknown,
 };
 
 /// The token-breadth disclosure's document (DEC-2621 item 5) and its current version; a start
@@ -62,6 +62,9 @@ pub const CONNECTION_OPERATION: &str = "connect_connection";
 
 /// The operation the pending connection's `account_ref` ULID is derived under.
 pub const ACCOUNT_OPERATION: &str = "connect_account";
+
+/// The operation a passkey start's `StepUpAsserted` event id is derived under (DEC-2126 item 3).
+pub const ASSERTED_OPERATION: &str = "connect_step_up_asserted";
 
 /// How many bytes the `state` and the PKCE verifier each draw (DEC-2623 item 7).
 pub const RANDOM_BYTES: usize = 32;
@@ -352,17 +355,22 @@ async fn started(
             &action,
             &judged,
         )
-        .map_err(|unverified| match unverified {
-            Unverified::Code(ProblemCode::JournalUnavailable)
-            | Unverified::Unimplemented { .. } => unavailable(),
-            Unverified::Code(code) => coded(StatusCode::UNAUTHORIZED, code),
+        .map_err(|Unverified::Code(code)| match code {
+            ProblemCode::JournalUnavailable => unavailable(),
+            code => coded(StatusCode::UNAUTHORIZED, code),
         })?;
-    if let Some(_refused_until_the_route_commits_its_batch) = asserted {
-        return Err(unavailable());
-    }
     planned(&reader, &ids, &request, evidence)?;
+    let assertion = match &asserted {
+        Some(asserted) => {
+            Some(assertion_drafted(app, &gate, &reader, &ids, asserted).ok_or_else(unavailable)?)
+        }
+        None => None,
+    };
+    let batch: Vec<&[u8]> = std::iter::once(draft.as_slice())
+        .chain(assertion.as_deref())
+        .collect();
     let judged_head = reader.control.last().map(|row| row.seq);
-    match appended_at(app, &reader, (&ids.event, &draft), gate.now, judged_head).await {
+    match appended_batch_at(app, &reader, (&ids.event, &batch), gate.now, judged_head).await {
         Settled::Stored(_) => {}
         Settled::Conflict => {
             return Err(coded(
@@ -407,6 +415,46 @@ fn coded(status: StatusCode, code: ProblemCode) -> Box<Response> {
 
 fn unavailable() -> Box<Response> {
     Box::new(Refused::JournalUnavailable.response())
+}
+
+/// The `StepUpAsserted` a passkey start appends after its request (journal spec §9.32, DEC-2126
+/// item 3), its raw assertion first stored as an artifact: caused by the request, by the same
+/// user, under an id derived from the key. `None` when the store is absent or refuses the bytes,
+/// or for a value the canonical form cannot hold.
+fn assertion_drafted(
+    app: &App,
+    gate: &Gate,
+    reader: &Reader,
+    ids: &Ids,
+    asserted: &Asserted,
+) -> Option<Vec<u8>> {
+    let stored = app.objects.as_ref()?.put(asserted.assertion()).ok()?;
+    let reference = string(&stored.to_string());
+    let payload = object(vec![
+        ("challenge", string(asserted.challenge())),
+        ("credential", string(asserted.credential())),
+        (
+            "sign_count",
+            Value::Int(Int::new(u64::from(asserted.sign_count()))?),
+        ),
+        ("assertion", reference.clone()),
+    ])?;
+    let (_, event_id) = derived_for(gate, &reader.workspace, ASSERTED_OPERATION)?;
+    let event = Event {
+        event_type: "StepUpAsserted",
+        schema_version: 1,
+        payload,
+        artifact_refs: vec![reference],
+        config_refs: Vec::new(),
+    };
+    let writer = Writer {
+        workspace: &reader.workspace,
+        principal: &ids.principal,
+        event_id: &event_id,
+        environment: "paper",
+        now: gate.now,
+    };
+    caused_envelope(&writer, &event, Some(&ids.event))
 }
 
 /// The `ConnectionRequested` version 2 this start appends (DEC-2621 item 1).
