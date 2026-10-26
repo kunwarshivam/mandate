@@ -177,7 +177,7 @@ test("set up, deploy, approve, fill, read, and stop a new agent", async ({ page 
     await expect(page).toHaveURL(`${agentHref}/kill-switch`);
     await expect(page.locator("[data-slot=record]")).toContainText("MSFT");
     await page.getByRole("button", { name: /Activate the kill switch/ }).click();
-    await page.getByRole("dialog", { name: "Confirm it is you" }).getByRole("button", { name: "Use passkey" }).click();
+    await page.getByRole("dialog", { name: "Confirm the kill switch" }).getByRole("button", { name: "Activate" }).click();
     const after = page.locator("[data-slot=after-confirm]");
     await expect(after.locator("[data-phase=recorded]")).toBeVisible();
     await expect(after).toContainText("Stopped");
