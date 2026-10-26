@@ -384,12 +384,16 @@ fn reconcile_absent(result: &Result<(), PaperError>) -> Option<&'static str> {
     }
 }
 
-/// DEC-933 item 3: the lapse counts the agentic account's own snapshot — every position record,
-/// a zero quantity included, and every working order — so an account that is not flat refuses
-/// with those counts, before the journal is read.
+/// DEC-933 item 3: the lapse counts the agentic account's own snapshot — every position record of
+/// a non-zero quantity, long or short, and every working order — so an account that is not flat
+/// refuses with those counts, before the journal is read. A row of quantity exactly zero is a
+/// sold-out position and is not counted (DEC-2390 item 1, the founder's).
 #[test]
 fn the_lapse_counts_the_agentic_accounts_own_snapshot() {
-    let held = snapshot(vec![position("1"), position("0")], vec![working()]);
+    let held = snapshot(
+        vec![position("1"), position("0"), position("-2")],
+        vec![working()],
+    );
     let refused = lapse_read(&live_connection(), None, &the_stream(), Some(&held));
     assert!(
         matches!(
@@ -401,7 +405,7 @@ fn the_lapse_counts_the_agentic_accounts_own_snapshot() {
         ),
         "{refused:?}"
     );
-    let ordered = snapshot(Vec::new(), vec![working()]);
+    let ordered = snapshot(vec![position("0")], vec![working()]);
     let refused = lapse_read(&live_connection(), None, &the_stream(), Some(&ordered));
     assert!(
         matches!(
@@ -413,6 +417,27 @@ fn the_lapse_counts_the_agentic_accounts_own_snapshot() {
         ),
         "{refused:?}"
     );
+    let short = snapshot(vec![position("-1")], Vec::new());
+    let refused = lapse_read(&live_connection(), None, &the_stream(), Some(&short));
+    assert!(
+        matches!(
+            refused,
+            Err(PaperError::Lapse(LapseRefusal::NotFlat {
+                positions: 1,
+                open_orders: 0
+            }))
+        ),
+        "a short row is a holding: {refused:?}"
+    );
+}
+
+/// DEC-2390 item 1: an account whose only row is a sold-out position of quantity exactly zero is
+/// flat, so a journalless run on it starts, as an account listing nothing does.
+#[test]
+fn a_sold_out_row_of_zero_is_flat() {
+    let sold_out = snapshot(vec![position("0")], Vec::new());
+    let started = lapse_read(&live_connection(), None, &the_stream(), Some(&sold_out));
+    assert!(matches!(started, Ok(())), "{started:?}");
 }
 
 /// DEC-933 item 3 and DEC-918 item 2: a flat account of a run that kept no journal has no account

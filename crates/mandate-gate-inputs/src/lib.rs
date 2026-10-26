@@ -27,6 +27,7 @@ mod error;
 mod mandate;
 mod reviewed;
 mod rules;
+mod view;
 
 pub use error::InputError;
 pub use mandate::reservation;
@@ -35,3 +36,4 @@ pub use rules::{
     Artifact, CALENDAR_MEMBERS, RULE_MEMBERS, artifact_from, environment_text, fee_artifact, fees,
     reference, required_positive_u64, required_text, rule_set,
 };
+pub use view::{DeployedView, fill_refs, protection_prices, stop_limit_offset};
