@@ -11,7 +11,9 @@
 //! one (`AGENTS.md` rules 3 and 8).
 
 use mandate_canon::{Value, parse};
+use mandate_gate_context::gate_rule_set;
 use mandate_journal::{ArtifactRef, ArtifactSource, Environment, StoredEvent, get_artifact};
+use mandate_risk::GateConfig;
 use mandate_spec::document::Mandate;
 
 /// What a deployment resolves to.
@@ -105,6 +107,33 @@ pub fn document(
         return Err("mandate_environment_mismatch");
     }
     Ok((version, document))
+}
+
+/// The gate configuration of the latest rule set registered in `environment` (DEC-2387 item 3):
+/// the newest `ConfigSnapshotRegistered` of kind `rule_set` names its artifact in `store`, whose
+/// canonical bytes must read as the reviewed gate rule set. A newest one that is unreadable, not
+/// stored, or not a gate's rule set is never skipped for an older one.
+///
+/// # Errors
+/// `rule_set_unavailable`.
+pub fn rule_set(
+    control: &[StoredEvent],
+    environment: Environment,
+    store: &dyn ArtifactSource,
+) -> Result<GateConfig, &'static str> {
+    control
+        .iter()
+        .rev()
+        .filter(|row| {
+            row.environment == environment.as_str() && row.event_type == "ConfigSnapshotRegistered"
+        })
+        .filter_map(body)
+        .find(|body| text(body, &["payload", "kind"]) == Some("rule_set"))
+        .and_then(|body| text(&body, &["payload", "content_hash"]).and_then(ArtifactRef::parse))
+        .and_then(|reference| get_artifact(store, &reference).ok())
+        .and_then(|bytes| parse(&bytes).ok())
+        .and_then(|rules| gate_rule_set(&rules).ok())
+        .ok_or("rule_set_unavailable")
 }
 
 fn body(row: &StoredEvent) -> Option<Value> {

@@ -283,3 +283,90 @@ fn a_version_with_no_user_who_created_it_is_refused() {
     unrecorded.deployed(AGENT, &version, "paper");
     assert_eq!(unrecorded.resolved(), Err("mandate_author_unknown"));
 }
+
+const RULES: &str = include_str!("../../mandate-shell/tests/fixtures/tracer/config/rule-set.json");
+const BACKTEST_SETTINGS: &str =
+    include_str!("../../mandate-backtest-runner/tests/fixtures/demo/settings.json");
+
+impl World {
+    /// Stores `bytes` and journals their registration as a `kind` snapshot in `environment`.
+    fn registered(&mut self, kind: &str, bytes: &[u8], environment: &str) {
+        let reference = ArtifactRef::of(bytes);
+        self.store.insert(reference.digest(), bytes.to_vec());
+        let payload = format!(r#"{{"kind":"{kind}","content_hash":"{reference}"}}"#);
+        let seq = self.next();
+        self.control.push(row(
+            seq,
+            "ConfigSnapshotRegistered",
+            environment,
+            ("user", "user-owner"),
+            &payload,
+        ));
+    }
+
+    fn rule_set(&self) -> Result<mandate_risk::GateConfig, &'static str> {
+        mandate_daemon::deployment::rule_set(&self.control, Environment::Paper, &self.store)
+    }
+}
+
+fn reviewed() -> Vec<u8> {
+    mandate_canon::to_canonical(&parse(RULES.trim().as_bytes()).unwrap())
+}
+
+/// DEC-2387 item 3: the latest registered rule set of the environment configures the gate.
+#[test]
+fn the_latest_registered_rule_set_configures_the_gate() {
+    let mut world = World::default();
+    assert_eq!(
+        world.rule_set(),
+        Err("rule_set_unavailable"),
+        "none registered"
+    );
+    world.registered("rule_set", &reviewed(), "paper");
+    let expected = mandate_gate_context::gate_rule_set(&parse(&reviewed()).unwrap()).unwrap();
+    assert_eq!(world.rule_set(), Ok(expected.clone()));
+    world.registered("fee_config", b"{}", "paper");
+    world.registered("rule_set", b"{}", "live");
+    assert_eq!(
+        world.rule_set(),
+        Ok(expected),
+        "another kind, or another environment's rule set, changes nothing"
+    );
+}
+
+/// A later rule set that is not a gate's, such as the cell's backtest settings registered under
+/// the same kind, or one whose artifact is missing or unreadable, is never skipped for an older one.
+#[test]
+fn a_latest_rule_set_the_gate_cannot_read_is_never_skipped() {
+    for latest in [
+        mandate_canon::to_canonical(&parse(BACKTEST_SETTINGS.as_bytes()).unwrap()),
+        b"not json".to_vec(),
+        mandate_canon::to_canonical(
+            &parse(RULES.trim().replace("E7-7", "E7-8").as_bytes()).unwrap(),
+        ),
+    ] {
+        let mut world = World::default();
+        world.registered("rule_set", &reviewed(), "paper");
+        world.registered("rule_set", &latest, "paper");
+        assert_eq!(world.rule_set(), Err("rule_set_unavailable"));
+    }
+    let mut world = World::default();
+    world.registered("rule_set", &reviewed(), "paper");
+    world.store.clear();
+    assert_eq!(world.rule_set(), Err("rule_set_unavailable"), "not stored");
+    let mut world = World::default();
+    world.registered("rule_set", &reviewed(), "paper");
+    let seq = world.next();
+    world.control.push(row(
+        seq,
+        "ConfigSnapshotRegistered",
+        "paper",
+        ("user", "user-owner"),
+        r#"{"kind":"rule_set","content_hash":"not-a-reference"}"#,
+    ));
+    assert_eq!(
+        world.rule_set(),
+        Err("rule_set_unavailable"),
+        "no reference"
+    );
+}

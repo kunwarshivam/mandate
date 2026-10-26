@@ -7,7 +7,7 @@ use std::time::Duration;
 use mandate_canon::{Digest, Key, Value};
 use mandate_domain::Environment;
 use mandate_executor::ExecutorConfig;
-use mandate_num::{Fraction, Usd};
+use mandate_gate_context::gate_rule_set;
 use mandate_risk::GateConfig;
 use mandate_time::{Date, TradingCalendar};
 
@@ -21,58 +21,6 @@ const MAX_QUOTE_AGE_S: u64 = 60;
 pub struct Artifact {
     pub bytes: Vec<u8>,
     pub value: Value,
-}
-
-fn usd(text: &str) -> Result<Usd, InputError> {
-    Usd::parse(text).map_err(InputError::Num)
-}
-
-fn gate_configuration(rule_set: &Value) -> Result<GateConfig, InputError> {
-    let value = required_exact_object(
-        rule_set,
-        "gate_config",
-        &[
-            "close_window_minutes",
-            "collar_crypto_x",
-            "collar_liquid_threshold_usd",
-            "collar_liquid_x",
-            "collar_other_x",
-            "collar_passive_band",
-            "crypto_liquidity_floor_usd",
-            "daily_participation",
-            "etp_classification_max_age_s",
-            "legacy_pdt_equity_threshold",
-            "liquidity_floor_usd",
-            "min_resting_time_s",
-            "opposite_fill_interval_s",
-            "order_size_participation",
-            "order_to_fill_max",
-            "order_to_fill_min_orders",
-            "price_floor",
-        ],
-    )?;
-    Ok(GateConfig {
-        price_floor: usd(required_text(value, "price_floor")?)?,
-        liquidity_floor_usd: usd(required_text(value, "liquidity_floor_usd")?)?,
-        crypto_liquidity_floor_usd: usd(required_text(value, "crypto_liquidity_floor_usd")?)?,
-        collar_liquid_threshold_usd: usd(required_text(value, "collar_liquid_threshold_usd")?)?,
-        collar_liquid_x: Fraction::parse(required_text(value, "collar_liquid_x")?)?,
-        collar_other_x: Fraction::parse(required_text(value, "collar_other_x")?)?,
-        collar_crypto_x: Fraction::parse(required_text(value, "collar_crypto_x")?)?,
-        collar_passive_band: Fraction::parse(required_text(value, "collar_passive_band")?)?,
-        opposite_fill_interval_s: required_positive_u32(value, "opposite_fill_interval_s")?,
-        min_resting_time_s: required_positive_u32(value, "min_resting_time_s")?,
-        order_to_fill_max: required_positive_u32(value, "order_to_fill_max")?,
-        order_to_fill_min_orders: required_positive_u32(value, "order_to_fill_min_orders")?,
-        order_size_participation: Fraction::parse(required_text(
-            value,
-            "order_size_participation",
-        )?)?,
-        daily_participation: Fraction::parse(required_text(value, "daily_participation")?)?,
-        close_window_minutes: required_positive_u32(value, "close_window_minutes")?,
-        legacy_pdt_equity_threshold: usd(required_text(value, "legacy_pdt_equity_threshold")?)?,
-        etp_classification_max_age_s: required_positive_u32(value, "etp_classification_max_age_s")?,
-    })
 }
 
 fn executor_configuration(rule_set: &Value) -> Result<ExecutorConfig, InputError> {
@@ -205,11 +153,10 @@ pub fn fees(fee: &Artifact, calendar: &Artifact) -> Result<mandate_accounting::C
     .map_err(InputError::Executor)
 }
 
-/// The reviewed rule set's quote age bound and its gate and executor configurations.
+/// The reviewed rule set's quote age bound and its gate and executor configurations; the gate's is
+/// `mandate-gate-context`'s one reading (DEC-2387 item 2).
 pub fn rule_set(rules: &Artifact) -> Result<(Duration, GateConfig, ExecutorConfig), InputError> {
-    require_text(&rules.value, "gate", "trading-domain-9.1")?;
-    require_text(&rules.value, "ruleset_version", "v1")?;
-    require_text(&rules.value, "story", "E7-7")?;
+    let gate_config = gate_rule_set(&rules.value)?;
     let quote_max_age_s = rules
         .value
         .get("iex_quote_max_age_s")
@@ -218,7 +165,7 @@ pub fn rule_set(rules: &Artifact) -> Result<(Duration, GateConfig, ExecutorConfi
         .ok_or_else(|| missing("a reviewed IEX quote age of 1 to 60 seconds"))?;
     Ok((
         Duration::from_secs(quote_max_age_s),
-        gate_configuration(&rules.value)?,
+        gate_config,
         executor_configuration(&rules.value)?,
     ))
 }
@@ -245,14 +192,6 @@ pub fn required_text<'a>(value: &'a Value, name: &'static str) -> Result<&'a str
         .get(name)
         .and_then(Value::as_str)
         .ok_or_else(|| missing(name))
-}
-
-fn require_text(value: &Value, name: &'static str, expected: &str) -> Result<(), InputError> {
-    if required_text(value, name)? == expected {
-        Ok(())
-    } else {
-        Err(missing(name))
-    }
 }
 
 /// An environment as the fee schedule's `environment` member names it.

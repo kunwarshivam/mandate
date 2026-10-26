@@ -23,7 +23,8 @@ use super::{absent, usd};
 use crate::adapters::{AdvisoryGateContext, AdvisoryOrderFacts};
 use crate::error::Cause;
 
-pub(super) use mandate_gate_inputs::{gate_mandate, reservation};
+pub(super) use mandate_gate_inputs::reservation;
+pub(super) use mandate_ports::gate_mandate;
 
 /// The binding gate's input, the same for every request the reviewed agent makes on the reviewed
 /// instrument: the gate itself judges the proposal against it.
