@@ -1,7 +1,6 @@
 //! The passkey routes (workspace API spec §3.6, [DEC-2108] items 4 and 5, [DEC-2115],
-//! [DEC-2118], [DEC-2124]): `POST /v1/workspaces/{ws}/passkeys/registration-challenges` and
-//! `GET /v1/workspaces/{ws}/passkeys`. The enrolment, `POST /v1/workspaces/{ws}/passkeys`, lands
-//! with its own slice.
+//! [DEC-2118], [DEC-2124]): `POST /v1/workspaces/{ws}/passkeys/registration-challenges`,
+//! `POST /v1/workspaces/{ws}/passkeys`, and `GET /v1/workspaces/{ws}/passkeys`.
 //!
 //! Both serve §3.7's row "Enrol or remove one's own passkey", its `own` cell, and read the
 //! member's passkeys from one fold of the control stream, `CredentialFold::passkeys`; a member
@@ -168,6 +167,28 @@ pub async fn list(
         ("as_of", as_of(&reader.control)),
     ];
     no_store(enveloped(StatusCode::OK, now, members))
+}
+
+/// The enrolment route's operation name (DEC-2108 item 5).
+pub const ENROL_OPERATION: &str = "passkey_enrol";
+
+/// `POST /v1/workspaces/{ws}/passkeys` (DEC-2108 items 4 and 5, DEC-2118 items 3 and 5, DEC-2122,
+/// DEC-2124): the session, the CSRF mark, the key, the strict body, the row, then `live`; then the
+/// registration challenge, taken whatever follows, the member's passkeys, the step-up a first or a
+/// later enrolment needs, the registration response, and a passkey id the stream never enrolled;
+/// then the key's artifact and `CredentialEnrolled` version 2, and the `201`.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub async fn enrol(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<String>, PathRejection>,
+    body: Body,
+) -> Response {
+    let _ = (app, headers, path, body);
+    todo!()
 }
 
 /// `principal`'s passkeys on the control stream, from `CredentialFold::passkeys`, or `None` when

@@ -229,7 +229,9 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         )
         .route(
             "/v1/workspaces/{workspace}/passkeys",
-            get(passkeys::list).fallback(otherwise.clone()),
+            get(passkeys::list)
+                .post(passkeys::enrol)
+                .fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/connections",
