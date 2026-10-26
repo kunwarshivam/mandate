@@ -145,12 +145,13 @@ Unchanged since 517ee19: news tools exist on the recorded plane only, live news 
 
 ## Running the cell from a cloud session
 
-Three things this sandbox needs, which CI does not:
+Four things this sandbox needs, which CI does not:
 1. `MANDATE_CELL_CA_BUNDLE=/root/.ccr/ca-bundle.crt`, because the egress proxy inspects TLS.
 2. `MANDATE_CELL_RESTRICT_OOM=1`, because the VM refuses a negative `oom_score_adj`, so no pod sandbox starts without it (#2497).
-3. A host `kubectl`. Without one, the scenario never points the API and the manager at the run's workspace, and the manager starts no executor. One way to get it: `docker cp k3d-mandate-cell-server-0:/bin/k3s /usr/local/bin/k3s && ln -s k3s /usr/local/bin/kubectl`.
+3. `MANDATE_CELL_LOW_EVICTION=1`, because the session's disk allowance sits under the kubelet's default hard-eviction thresholds, so the node takes a disk-pressure taint and evicts the cell's pods while the disk still has room. It lowers `nodefs` and `imagefs` eviction to 1% on the cluster `cell up` creates (`cargo xtask cell down` first if one is running). Default off; cloud sessions only.
+4. A host `kubectl`. Without one, the scenario never points the API and the manager at the run's workspace, and the manager starts no executor. One way to get it: `docker cp k3d-mandate-cell-server-0:/bin/k3s /usr/local/bin/k3s && ln -s k3s /usr/local/bin/kubectl`.
 
-A second demo run on one cell now passes its connect check (X9 closed), and the runtimes no longer exhaust the journal's connections (X12 closed). Keep ample disk free: the kubelet evicted this sandbox's pods at about 13.5 GB free. `cargo xtask ci pending` over a journal crate selects most of the workspace and does not fit beside a running cell here.
+A second demo run on one cell now passes its connect check (X9 closed), and the runtimes no longer exhaust the journal's connections (X12 closed). Keep ample disk free: without item 3, the kubelet evicted this sandbox's pods at about 13.5 GB free. `cargo xtask ci pending` over a journal crate selects most of the workspace and does not fit beside a running cell here.
 
 ## Founder calls on the path
 
