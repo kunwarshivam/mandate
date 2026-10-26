@@ -24,6 +24,7 @@ use mandate_identity::{
     WorkspaceId, authorize,
 };
 use mandate_identity_seal::Seal;
+use mandate_gate_context::{Journaled, Row};
 use mandate_journal::{ArtifactRef, StoredEvent};
 use mandate_time::UtcNanos;
 
@@ -543,9 +544,55 @@ pub async fn one_agent(
             .filter(|rows| !rows.is_empty())
             .map_or(Value::Null, |rows| Value::Array(account_positions(rows))),
     ));
+    members.push((
+        "openings_held",
+        openings_held(
+            account.as_deref(),
+            &format!("clock:{workspace}"),
+            &deployment.0,
+            found.as_ref().map(|document| document.pinned),
+        ),
+    ));
     let mut streams: Vec<&[StoredEvent]> = vec![rows.as_slice()];
     streams.extend(account.as_deref());
     served(&reader, &streams, vec![("agent", object(members))])
+}
+
+/// `read-models/agent`'s `openings_held` (DEC-2143): the binding gate's source's own answer,
+/// [`Journaled::opening_hold`], folded from the account stream `account` and whether the deployed
+/// document pins its universe, as `{"reason": <code>}`, or `null` exactly when no such hold
+/// applies. When the account stream is not found, the document cannot be read, or a row the fold
+/// reads cannot be read, it is `{"reason": "unknown"}`, never `null`: openings may be held.
+fn openings_held(
+    account: Option<&[StoredEvent]>,
+    clock_stream: &str,
+    agent_id: &str,
+    pinned: Option<bool>,
+) -> Value {
+    let reason = |code: &str| object(vec![("reason", string(code))]);
+    let (Some(rows), Some(pinned)) = (account, pinned) else {
+        return reason("unknown");
+    };
+    let stream = rows.first().map_or("", |row| row.stream_id.as_str());
+    let mut fold = Journaled::new(stream, clock_stream, agent_id);
+    for row in rows {
+        let Some(payload) = mandate_canon::parse(&row.body)
+            .ok()
+            .and_then(|event| event.get("payload").cloned())
+        else {
+            return reason("unknown");
+        };
+        let read = fold.fold(Row {
+            stream: &row.stream_id,
+            event_type: &row.event_type,
+            payload: &payload,
+        });
+        if read.is_err() {
+            return reason("unknown");
+        }
+    }
+    fold.opening_hold(pinned)
+        .map_or(Value::Null, |hold| reason(hold.code()))
 }
 
 /// Every approval of every deployed agent, with the streams read.
