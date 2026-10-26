@@ -60,8 +60,13 @@ removed {
   }
 }
 
-locals {
-  egress = [
+variable "egress" {
+  description = "The node firewall's outbound ports to the internet. Staging and production keep the default; a customer production cell drops plain-web port 80 (DEC-2064 item 7)."
+  type = list(object({
+    protocol   = string
+    port_range = string
+  }))
+  default = [
     { protocol = "tcp", port_range = "443" },
     { protocol = "tcp", port_range = "80" },
     { protocol = "tcp", port_range = "53" },
@@ -70,6 +75,11 @@ locals {
     { protocol = "tcp", port_range = "7844" },
     { protocol = "udp", port_range = "7844" },
   ]
+
+  validation {
+    condition     = alltrue([for rule in var.egress : contains(["tcp", "udp"], rule.protocol) && can(regex("^[0-9]{1,5}$", rule.port_range))])
+    error_message = "Each outbound rule is one TCP or UDP port, never a range."
+  }
 }
 
 resource "digitalocean_firewall" "nodes" {
@@ -94,7 +104,7 @@ resource "digitalocean_firewall" "nodes" {
   }
 
   dynamic "outbound_rule" {
-    for_each = local.egress
+    for_each = var.egress
     content {
       protocol              = outbound_rule.value.protocol
       port_range            = outbound_rule.value.port_range
