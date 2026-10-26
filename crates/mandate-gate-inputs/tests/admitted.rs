@@ -18,7 +18,7 @@ use mandate_spec::context::{AgentId, Membership};
 use mandate_time::Date;
 
 const RESEARCH: &str = include_str!("../../../deploy/cell/demo/research-mandate.json");
-const LLM_HASH: &str = "40f446f7858575d2c66a223f747348b3a91ef83e844e13815e527f4d181e5283";
+const LLM_HASH: &str = "bff754a2e669add9a7928a4b8c71c764cfe61455e361621ae6f6c262af0824cd";
 const QUANT_HASH: &str = "cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d";
 const LLM: &str =
     r#"{"kind":"research_model_content","model_id":"llm.research_agent","model_version":"0.1.0"}"#;
@@ -33,6 +33,13 @@ fn day() -> Result<Date, String> {
 /// The demo's research version deployed, each of its models registered under the tests' content,
 /// with `snapshots` registered.
 fn research(snapshots: &[&str]) -> Result<(Vec<ControlRecord>, Store), String> {
+    for pinned in [LLM_HASH, QUANT_HASH] {
+        if !RESEARCH.contains(pinned) {
+            return Err(format!(
+                "research-mandate.json no longer pins {pinned}: update the pin here to the hash it pins"
+            ));
+        }
+    }
     let mandate = RESEARCH
         .replace(LLM_HASH, &Digest::of(LLM.as_bytes()).to_hex())
         .replace(QUANT_HASH, &Digest::of(QUANT.as_bytes()).to_hex());
