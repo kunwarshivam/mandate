@@ -1220,20 +1220,21 @@ agent yet. The account stream's watermark joins `as_of`.
 The single read also serves `openings_held` ([DEC-2143](../project/decisions/DEC-2143.md)): a
 standing reason every opening of the agent's is held whatever the order, as the binding gate's
 source decides it, computed by the one function the executor process binds on
-(`mandate-gate-context`'s `Journaled::opening_hold`), from the account stream's fold and whether the
-deployed mandate pins its universe. `{"reason": "account_traded"}` while the account has traded
+(`mandate-gate-context`'s `Journaled::opening_hold`), from the fold of the streams the executor
+folds for it, in its order (the control stream, the account stream, and the scheduler's clock
+stream), and whether the deployed mandate pins its universe. `{"reason": "account_traded"}` while the account has traded
 and the account risk view, which must then read every opening, does not yet;
 `{"reason": "research_agent_traded"}` while the account has traded and the mandate is unpinned
 (its working universe is research's, mandate spec §8), since that view binds an instrument at
 deployment and such an agent has none ([DEC-2819](../project/decisions/DEC-2819.md) item 4);
-`{"reason": "unknown"}` when the agent has no account stream, the deployed document cannot be
-read, or any row the fold reads cannot be read (the fold then holds every opening), so openings
-may be held; and `null` when none of these applies. `null` is not "openings run": a hold that lasts
+`{"reason": "unknown"}` when the agent's account stream is not found or holds no row, the clock
+stream cannot be read, the deployed document cannot be read, or any row the fold reads cannot be
+read (the fold then holds every opening), so openings may be held; and `null` when none of these applies. `null` is not "openings run": a hold that lasts
 only until a fact arrives or ages in (no risk clock, account snapshot, or mark yet, or a stale
 one) and a hold for one order (its quote, the session, a limit) are the gate's verdict on each
 order, and the owner's hold and a paused or stopped agent show as `mode`. No exit, protective
-order, or kill switch is held by any of them (`AGENTS.md` rule 13). The read is served once the
-executor binds on the same function (DEC-2819's executor slice), so the two never differ.
+order, or kill switch is held by any of them (`AGENTS.md` rule 13). The executor binds on the
+same function (DEC-2819's executor slice), so the read and the gate never differ.
 
 `GET /agents/{id}/orders` and `GET /agents/{id}/positions` return `read-models/orders` and
 `read-models/positions` ([DEC-2111](../project/decisions/DEC-2111.md)), from the account stream of
