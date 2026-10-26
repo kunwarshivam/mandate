@@ -107,3 +107,32 @@ fn count(failures: &mut u32, reading: Reading) {
         Reading::Silent => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use mandate_executor::{BrokerUnknown, ConnectionTrouble, ConnectorError, SuspendReason};
+
+    use super::Health;
+
+    /// A one-read broker's account reads count as one answer each (DEC-2832): two refused
+    /// credentials in a row suspend, and an answered read between them resets the count.
+    #[test]
+    fn a_one_read_brokers_reads_count_and_an_answered_one_resets() {
+        let refused = ConnectorError::Unknown(BrokerUnknown::Unauthorized);
+        let suspended = vec![ConnectionTrouble::Suspended(
+            SuspendReason::AuthorizationFailed,
+        )];
+        let mut health = Health::default();
+        health.observe_error(&refused);
+        health.observe_answered();
+        health.observe_error(&refused);
+        assert!(
+            health.troubles().is_empty(),
+            "the answered read reset the count"
+        );
+        health.observe_error(&refused);
+        assert_eq!(health.troubles(), suspended);
+        health.observe_answered();
+        assert!(health.troubles().is_empty());
+    }
+}

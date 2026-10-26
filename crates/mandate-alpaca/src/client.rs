@@ -1030,6 +1030,62 @@ mod tests {
             answered.ok_or(TransportError::Timeout)
         }
     }
+    /// A refused credential on any step of a cancel, its `DELETE` or its read-back, is an unknown
+    /// outcome that says so (connections spec §5.4, DEC-2832): never a read-back of the order
+    /// taken as the cancel's answer, and never the ambiguity of a failing broker, which counts
+    /// toward `degraded` rather than `suspended`.
+    #[tokio::test]
+    async fn a_refused_credential_on_a_cancel_step_is_unauthorized() -> Result<(), String> {
+        let handle = "md-daea915c1fc0042bcc19a4caed-p1";
+        let named = "md-01JINTENT0000000000000000A";
+        let stop = "30ab5fda-7d66-4263-82cf-2a1d40bf404f";
+        let order = |id: &str, client: &str, status: &str| {
+            format!(
+                r#"{{"id":"{id}","client_order_id":"{client}","symbol":"AAPL","asset_class":"us_equity","side":"sell","order_type":"limit","time_in_force":"gtc","qty":"1","filled_qty":"0","limit_price":null,"stop_price":null,"status":"{status}","created_at":"2026-09-26T23:20:11.63400562Z","replaced_by":null,"legs":null}}"#
+            )
+        };
+        let refused = (401, "{\"message\":\"unauthorized\"}".to_owned());
+        let bracket = entry_with(&resting_legs("1", "0.8", "1", "999"));
+        let cases: Vec<(&str, &str, String, Vec<(u16, String)>)> = vec![
+            (
+                "a resolved leg's DELETE refused",
+                handle,
+                bracket.clone(),
+                vec![refused.clone(), (200, order(stop, "own", "canceled"))],
+            ),
+            (
+                "a resolved leg's read-back refused",
+                handle,
+                bracket,
+                vec![(204, String::new()), refused.clone()],
+            ),
+            (
+                "a named order's DELETE refused",
+                named,
+                "[]".to_owned(),
+                vec![
+                    (200, order("b-1", named, "accepted")),
+                    refused,
+                    (200, order("b-1", named, "accepted")),
+                ],
+            ),
+        ];
+        for (case, id, page, answers) in cases {
+            let client = Scripted::answering(&page, &answers);
+            let answer = client
+                .call_one(&BrokerRequest::Cancel {
+                    client_order_id: ClientOrderId::parse(id).map_err(|e| format!("{e:?}"))?,
+                })
+                .await;
+            assert_eq!(
+                answer.map_err(|error| error.to_connector()),
+                Err(ConnectorError::Unknown(BrokerUnknown::Unauthorized)),
+                "{case}"
+            );
+        }
+        Ok(())
+    }
+
     /// What one leg's resolved path is expected to answer: the leg's own status, a failed
     /// read-back's unknown outcome, or the confirmation both legs' read-backs give the
     /// placement.

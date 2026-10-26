@@ -22,7 +22,7 @@ use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::{ExchangeCalendar, UtcNanos};
 
 use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches};
-use crate::health::{Health, UNAUTHORIZED};
+use crate::health::Health;
 use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
 use crate::robinhood::AccountReads;
@@ -1178,17 +1178,12 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         Ok(handed)
     }
 
-    /// A read of the broker. One the broker refused with `401` changed nothing there and is read
-    /// again on a later pass, like a lost one, so a credential the broker no longer accepts is
-    /// counted until the connection is `suspended` and the account restricted (DEC-2832), never a
-    /// stop that a restart would repeat with its count lost.
+    /// A read of the broker. One whose credential the broker refused is an unknown outcome
+    /// (`Unauthorized`, connections spec §5.4), so it is read again on a later pass like a lost
+    /// one, and counted until the connection is `suspended` and the account restricted
+    /// (DEC-2832), never a stop that a restart would repeat with its count lost.
     fn read(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, Read> {
-        match self.call(request) {
-            Ok(BrokerOutcome::Rejected(reject)) if reject.http_status == UNAUTHORIZED => {
-                Err(Read::Lost)
-            }
-            answer => answer.map_err(read_error),
-        }
+        self.call(request).map_err(read_error)
     }
 
     /// Every request to the broker, its answer counted toward the connection's health (DEC-2832).
