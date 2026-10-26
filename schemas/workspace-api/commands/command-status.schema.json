@@ -21,9 +21,13 @@
         "recorded",
         "taken",
         "applied",
+        "accepted",
         "refused",
         "ended"
-      ]
+      ],
+      "x-planned": {
+        "accepted": "E10-12"
+      }
     },
     "steps": {
       "type": "array",

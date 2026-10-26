@@ -18,4 +18,7 @@
   keeps only the causes journaled in the current state: a degrading cause held while `suspended`
   is never journaled, and those before `degraded` to `suspended` are dropped, so the
   acknowledgment guard needs DEC-687's outstanding set tracked across that change.
+  A `connection_unavailable` cause can also be in force while the connection reads `active`: a lost
+  credential whose state change the journal did not take before the drain (DEC-2839 item 2), so the
+  lift must not require a `condition_cleared` out of `degraded` or `suspended` in that case.
 <!-- section: E7 Alpaca connector and recovery -->

@@ -629,6 +629,39 @@ fn a_traded_account_holds_the_opening() -> Result<(), Error> {
     Ok(())
 }
 
+/// A traded account that is flat again, its counters read, is still held until the account risk
+/// view's snapshot is wired into the gate: the allocation is no longer the agent's equity
+/// (DEC-2833 item 2).
+#[test]
+fn a_traded_flat_account_is_held_until_its_risk_is_read() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    let text = |value: &str| Value::Str(value.to_owned());
+    for (id, fill, side) in [("a4", "f1", "buy"), ("a5", "f2", "sell")] {
+        journal.write(
+            ACCOUNT_STREAM,
+            id,
+            "FillApplied",
+            2,
+            None,
+            object(vec![
+                ("client_order_id", Value::Null),
+                ("fees", Value::Array(Vec::new())),
+                ("fill_id", text(fill)),
+                ("instrument_id", text(SPY)),
+                ("price", text("500")),
+                ("qty_gross", text("1")),
+                ("risk_clock", text("2026-09-21T16:00:00.000000000Z")),
+                ("side", text(side)),
+                ("trade_date", text("2026-09-21")),
+            ])?,
+        )?;
+    }
+    let (deployment, _) = deployment(&journal, store);
+    assert!(opening(&deployment)?.is_none());
+    Ok(())
+}
+
 /// The opening is held while the clock has not ticked, the account has no snapshot, or the
 /// facts the journal does not hold are unread.
 #[test]

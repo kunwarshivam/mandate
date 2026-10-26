@@ -5,25 +5,29 @@ use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
 use mandate_canon::{Digest, Key, Object, Value, parse};
+use mandate_connections::checks::{AccountRead, CheckReport, Occasion, Outcome};
+use mandate_connections::record::{AccountPiiRef, ConnectionId};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::risk_state::{RiskAppend, RiskView};
 use mandate_executor::{
-    AccountDeclaration, AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOrder,
-    BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect,
-    EventDraft, EventId, ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input,
-    InstrumentSnapshot, IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion,
-    MandateView, OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, ThesisRow,
-    WriterEpoch, fold, handle, limit_fills, recorded_fills,
+    AccountDeclaration, AccountScope, AcknowledgmentHandoff, ActivityCursor, AgentId,
+    BindingGateSource, BrokerOrder, BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate,
+    Command, ConnectionTrouble, ConnectorError, Effect, EventDraft, EventId, ExecutorConfig,
+    ExecutorError, ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot, IntentBody,
+    IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, OrderState, Ports,
+    ProtectionPrices, ReconcileReason, RiskClock, Seq, SuspendReason, ThesisRow, WriterEpoch, fold,
+    handle, limit_fills, recorded_fills,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
 use mandate_process::{Action, Input as Lifecycled, Kind, Lifecycle, State};
 use mandate_store::Store;
-use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
-use mandate_time::{ExchangeCalendar, UtcNanos};
+use mandate_store::envelope::{Envelope, Fields, draft_bytes_with_pii, object, text};
+use mandate_time::{Date, ExchangeCalendar, UtcNanos, new_york_date_and_hour};
 
 use crate::follow::{
-    Following, Proposal, Switch, agents_of, bounded, folded, proposals, switches, theses,
+    Following, Proposal, Switch, Unreadable, agents_of, bounded, folded, proposals, switches,
+    theses,
 };
 use crate::health::{Health, PROBE_EVERY_S};
 use crate::marks::{MARK_EVERY, Marked, mark_draft};
@@ -48,6 +52,24 @@ pub trait Broker {
     /// DEC-933 item 1, DEC-2386 item 4); `None` for a broker that answers the four reads a
     /// reconciliation asks for, as Alpaca does.
     fn account_reads(&mut self) -> Option<Result<AccountReads, ConnectorError>> {
+        None
+    }
+
+    /// Whether the broker runs connections spec §8.1's later checks (DEC-2840). The default,
+    /// `false`, is a broker whose later checks are not built yet: the process then never reads the
+    /// account for one.
+    fn has_later_checks(&self) -> bool {
+        false
+    }
+
+    /// Connections spec §8.1's later checks over `account`, the broker's answer to an account read
+    /// (DEC-2840), or `None` for a broker whose later checks are not built yet.
+    fn later_check(
+        &self,
+        _connection: ConnectionId,
+        _occasion: Occasion,
+        _account: AccountRead,
+    ) -> Option<Result<CheckReport, &'static str>> {
         None
     }
 
@@ -193,10 +215,10 @@ pub struct ExecutorProcess<S, B> {
     /// core takes no other input until it is handed again, and the retry offers the journal the
     /// same bytes (journal spec §5.1). Nothing it asks of the broker leaves before it commits.
     pending: Option<(Input, UtcNanos)>,
-    /// The mark whose append is in doubt, with the time it was first written at: offered to the
-    /// journal again, the same bytes, before any other append, so a mark that committed with its
-    /// answer lost is found already committed rather than conflicting with the next (DEC-2380
-    /// item 3, journal spec §5.1).
+    /// The process's own record whose append is in doubt, a mark or a permission check (DEC-2840),
+    /// with the time it was first written at: offered to the journal again, the same bytes, before
+    /// any other append, so a record that committed with its answer lost is found already
+    /// committed rather than conflicting with the next (DEC-2380 item 3, journal spec §5.1).
     pending_mark: Option<(EventDraft, UtcNanos)>,
     /// Requests whose drafts committed and which have not been sent, in order: what an answer
     /// whose own batch went in doubt left behind (DEC-2003 item 7).
@@ -253,6 +275,13 @@ pub struct ExecutorProcess<S, B> {
     /// When the connection's health was last probed (DEC-2837): the start counts as the first, and
     /// a probe is due every [`PROBE_EVERY_S`] after it.
     probed: UtcNanos,
+    /// Whether this process has journaled its start's permission check (DEC-2840).
+    start_checked: bool,
+    /// The New York date of the latest permission check this process journaled (DEC-2840).
+    checked_on: Option<Date>,
+    /// When a due permission check last could not run, so it is tried again at most once every
+    /// [`PROBE_EVERY_S`], as the probe reads (DEC-2840).
+    check_tried: Option<UtcNanos>,
 }
 
 /// The most batches the risk book can owe in a row: each owed batch is reproduced by its folds or
@@ -274,6 +303,9 @@ struct Followed {
     /// Whether every followed agent's stream parsed and read: one that did not may hold a switch,
     /// so it holds the exit (DEC-2347 item 3.3).
     all_read: bool,
+    /// The owner's acknowledgments and requests the account stream holds no copy of yet, in the
+    /// control stream's order (journal spec §9.28, DEC-2828, DEC-2830).
+    acknowledgments: Vec<AcknowledgmentHandoff>,
 }
 
 impl<S: Store, B: Broker> ExecutorProcess<S, B> {
@@ -312,6 +344,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             written_at: now,
             health: Health::default(),
             probed: now,
+            start_checked: false,
+            checked_on: None,
+            check_tried: None,
             polled: QuotePoll::new(Duration::from_secs(
                 u64::try_from(wiring_step).unwrap_or_default(),
             )),
@@ -461,6 +496,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             unreadable,
             released,
             all_read,
+            acknowledgments,
         }) = self.switches(now, &mut alerts)
         else {
             return alerts;
@@ -486,6 +522,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 || !self.copy_tick(now, &mut alerts))
         {
             return alerts;
+        }
+        for handoff in acknowledgments {
+            if !self.hand(now, now, Input::Acknowledgment(handoff), &mut alerts, 0) {
+                return alerts;
+            }
         }
         for (agent, proposal) in proposed {
             let action = if proposal.purpose.adds_risk() {
@@ -514,6 +555,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             self.lifecycle.observe(now, Lifecycled::Completed);
         }
         self.probe(now);
+        self.later_check(now, &mut alerts);
         if !self.report_troubles(now, &mut alerts) {
             return alerts;
         }
@@ -802,7 +844,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// read. An unreadable control stream yields nothing this pass, and so does an agent stream
     /// that cannot be read. A control record that does not read stops the process at once, since
     /// the agents it names are unknown; a row on one agent's stream that does not read stops it only
-    /// after the other agents' switches are applied (DEC-85, `AGENTS.md` rule 13).
+    /// after the other agents' switches are applied (DEC-85, `AGENTS.md` rule 13). An owner's
+    /// acknowledgment, its request, or a record that spends a step-up that does not read holds
+    /// every opening and hands no acknowledgment, and every exit still goes (journal spec §9.28,
+    /// DEC-2830).
     fn switches(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> Option<Followed> {
         let control = self.control.clone()?;
         let rows = self.follow(&control, alerts)?;
@@ -891,6 +936,19 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     .map(|switch| (agent.clone(), switch)),
             );
         }
+        let agents: BTreeSet<AgentId> = following.agents.keys().cloned().collect();
+        let processed_at = RiskClock::from_secs(now.secs());
+        let acknowledgments = crate::acknowledgments::acknowledgments(
+            &rows,
+            &agents,
+            self.environment,
+            processed_at,
+            |original| self.state.copied_acknowledgment(original),
+        )
+        .unwrap_or_else(|Unreadable| {
+            proposed.retain(|(_, proposal)| !proposal.purpose.adds_risk());
+            Vec::new()
+        });
         Some(Followed {
             switches: pending,
             proposals: proposed,
@@ -898,6 +956,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             unreadable,
             released: following.released(),
             all_read,
+            acknowledgments,
         })
     }
 
@@ -1309,6 +1368,33 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         answer
     }
 
+    /// Tells the core the run's credential is lost (DEC-2839). Connections spec §9.2 treats a lease
+    /// that expired as `suspended` for openings (reason `lease_expired`, DEC-800), so before the
+    /// run drains, the account is restricted to closing with cause `connection_unavailable`. The
+    /// connection's state change follows in a later batch (DEC-2826), so both are on the stream
+    /// when the supervisor restarts the process.
+    ///
+    /// An input already in doubt is handed again first, as a pass does, so it is never replaced.
+    /// While it stays in doubt nothing more is handed, and the drain retries it. A process that has
+    /// exited hands nothing. A core error on the trouble is held, never a stop (DEC-2821).
+    pub fn credential_lost(&mut self, now: UtcNanos) {
+        if self.exited() {
+            return;
+        }
+        let mut alerts = Vec::new();
+        if let Some((input, at)) = self.pending.take()
+            && !self.hand(now, at, input, &mut alerts, 0)
+        {
+            return;
+        }
+        for _batch in ["restriction", "state change"] {
+            let lost = Input::Connection(ConnectionTrouble::Suspended(SuspendReason::LeaseExpired));
+            if !self.hand(now, now, lost, &mut alerts, 0) {
+                return;
+            }
+        }
+    }
+
     /// Tells the core of every trouble the connection's health holds (DEC-2832): after the pass's
     /// kill switches, so none waits on it, and again before each proposal, so a count that crossed
     /// its threshold earlier in the pass restricts the account before the next opening is taken.
@@ -1341,6 +1427,114 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         if self.account_reads().is_none() {
             let _counted = self.call(&BrokerRequest::GetAccount);
         }
+    }
+
+    /// Connections spec §8.1's checks at the process's start and once each New York day after
+    /// (DEC-2840), once the stream holds its copy of the establishment (journal spec rule 68), for
+    /// a broker that runs them. It reads the broker's account, counted toward the connection's
+    /// health, then runs the venue's checks over it, journaled as `ConnectionChecked` with occasion
+    /// `executor_start` or `daily`.
+    ///
+    /// - **Could not run.** A read lost on the way back, refused for its credential, never sent,
+    ///   or whose answer could not be read, means the check could not run. Nothing is journaled,
+    ///   and it is tried again at most once every [`PROBE_EVERY_S`].
+    /// - **Unreachable account.** A broker that answered and refused the account read says the
+    ///   credential no longer reaches the account, which fails check 3.
+    /// - **Journaling.** The record goes through the mark writer's path, so a refused batch is
+    ///   alerted once and never stops the process (DEC-2805), and one in doubt is offered again,
+    ///   the same bytes, first.
+    /// - **A failed check** suspends the connection (`check_failed`).
+    ///
+    /// It runs last in a pass that went through, as the probe does, and places nothing.
+    fn later_check(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) {
+        if !self.broker.has_later_checks() || self.exited() {
+            return;
+        }
+        let Ok((today, _)) = new_york_date_and_hour(now) else {
+            return;
+        };
+        let occasion = if !self.start_checked {
+            Occasion::ExecutorStart
+        } else if self.checked_on != Some(today) {
+            Occasion::Daily
+        } else {
+            return;
+        };
+        let retry_due = self
+            .check_tried
+            .is_none_or(|tried| now.secs().saturating_sub(tried.secs()) >= PROBE_EVERY_S);
+        let Some(connection) = self
+            .state
+            .connection_id()
+            .and_then(|id| ConnectionId::new(id).ok())
+        else {
+            return;
+        };
+        if !retry_due {
+            return;
+        }
+        let account = match self.call(&BrokerRequest::GetAccount) {
+            Ok(BrokerOutcome::Account(_)) => match self.account_pii_ref() {
+                Some(pii_ref) => AccountRead::Read {
+                    pii_ref,
+                    dedicated: None,
+                },
+                None => AccountRead::Unreadable,
+            },
+            Ok(BrokerOutcome::Rejected(_)) => AccountRead::Unreadable,
+            _ => {
+                self.check_tried = Some(now);
+                return;
+            }
+        };
+        let Some(Ok(report)) = self.broker.later_check(connection, occasion, account) else {
+            self.check_tried = Some(now);
+            return;
+        };
+        let Ok(payload) = crate::connect::checked(&report, now) else {
+            self.check_tried = Some(now);
+            return;
+        };
+        let id = self
+            .wiring
+            .ids
+            .event_id(WriterEpoch(self.epoch), Seq(self.account_head()), 0);
+        let draft = EventDraft {
+            event_id: id,
+            event_type: "ConnectionChecked".to_owned(),
+            schema_version: 1,
+            config_refs: Object::new(),
+            causation_id: None,
+            payload,
+        };
+        self.append_mark(now, now, draft, alerts);
+        if self.exited() {
+            return;
+        }
+        self.start_checked = true;
+        self.checked_on = Some(today);
+        self.check_tried = None;
+        if !report
+            .results
+            .iter()
+            .all(|(_, outcome)| matches!(outcome, Outcome::Passed))
+        {
+            self.health.check_failed();
+        }
+    }
+
+    /// The account reference of the account stream's latest connect-time check that read the
+    /// account (journal spec rule 62), which a later check names the same account by.
+    fn account_pii_ref(&self) -> Option<AccountPiiRef> {
+        let rows = self.store.rows(self.account.as_ref()?)?;
+        rows.iter()
+            .rev()
+            .filter(|row| row.event_type == "ConnectionChecked")
+            .find_map(|row| {
+                let body = parse(&row.body).ok()?;
+                let pii = body.get("payload")?.get("account_pii_ref")?.as_str()?;
+                AccountPiiRef::new(pii).ok()
+            })
     }
 
     /// A one-read broker's account reads, counted as one answer (DEC-2832).
@@ -1645,7 +1839,13 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         drafts
             .iter()
             .map(|draft| {
-                draft_bytes(
+                let pii: Vec<&str> = draft
+                    .payload
+                    .get("account_pii_ref")
+                    .and_then(Value::as_str)
+                    .into_iter()
+                    .collect();
+                draft_bytes_with_pii(
                     &envelope,
                     &Fields {
                         event_id: &draft.event_id.0,
@@ -1656,6 +1856,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                         config_refs: &draft.config_refs,
                         payload: &draft.payload,
                     },
+                    &pii,
                 )
             })
             .collect()

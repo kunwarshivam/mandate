@@ -784,6 +784,12 @@ impl ExecutorState {
         self.epoch
     }
 
+    /// Whether this stream holds a copy of the control stream's acknowledgment or request
+    /// `original` (journal spec §9.28, DEC-2828): the shell hands only those it does not.
+    pub fn copied_acknowledgment(&self, original: &EventId) -> bool {
+        self.acknowledgments.copied(&original.0)
+    }
+
     /// Whether a switch this stream journaled copied `source`, another stream's record
     /// (`copied_from`, DEC-2003 item 4): read from this stream's own `KillSwitchActivated`
     /// records alone, so no mode another restriction set can make a switch count as applied.
@@ -859,6 +865,12 @@ impl ExecutorState {
             detail.broker_ids.clear();
         }
         state
+    }
+
+    /// The connection the stream's copy of `ConnectionEstablished` names, once it holds one
+    /// (journal spec rule 68).
+    pub fn connection_id(&self) -> Option<&str> {
+        self.connection.as_ref().map(|view| view.id.as_str())
     }
 
     pub fn started(&self) -> bool {

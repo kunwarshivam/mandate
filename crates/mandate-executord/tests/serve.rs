@@ -48,8 +48,16 @@ fn connecting() -> Result<Journal, Error> {
     Ok(journal)
 }
 
+/// The opaque reference the connect check names the account by (journal spec rule 62).
+const PII: &str = "pii_01J0000000000000000000000A";
+
 /// The account stream's `connect` check of the connection, every result passed.
 fn checked(journal: &Journal) -> Result<(), Error> {
+    checked_naming(journal, Some(PII))
+}
+
+/// That check, naming the account by `reference`.
+fn checked_naming(journal: &Journal, reference: Option<&str>) -> Result<(), Error> {
     let row = |check: &str| {
         object(vec![
             ("check", text(check)),
@@ -64,7 +72,7 @@ fn checked(journal: &Journal) -> Result<(), Error> {
         1,
         None,
         object(vec![
-            ("account_pii_ref", Value::Null),
+            ("account_pii_ref", reference.map_or(Value::Null, text)),
             ("connection_id", text(CONNECTION)),
             ("occasion", text("connect")),
             (
@@ -144,6 +152,22 @@ fn with_edge<T>(
     each: &dyn Fn(usize) -> Result<(), Error>,
     body: impl FnOnce(Edge<'_>, &Seen) -> T,
 ) -> Result<T, Error> {
+    with_edge_stopping(
+        stop,
+        lapse.map(|after| (after, "credential_lost")),
+        each,
+        body,
+    )
+}
+
+/// [`with_edge`] with the lease's stop code chosen: `lapse` is the pass and the code its tick
+/// answers from then on.
+fn with_edge_stopping<T>(
+    stop: usize,
+    lapse: Option<(usize, &'static str)>,
+    each: &dyn Fn(usize) -> Result<(), Error>,
+    body: impl FnOnce(Edge<'_>, &Seen) -> T,
+) -> Result<T, Error> {
     let noon = at(NOON)?;
     let seen = Seen::default();
     let failed = RefCell::new(None);
@@ -158,8 +182,8 @@ fn with_edge<T>(
             return Some(UNDRAINED);
         }
         lapse
-            .filter(|after| pass >= *after)
-            .map(|_| "credential_lost")
+            .filter(|(after, _)| pass >= *after)
+            .map(|(_, code)| code)
     };
     let terminated = || seen.passes.get() >= stop.min(PASS_BOUND);
     let mut say = |line: &str| seen.said.borrow_mut().push(line.to_owned());
@@ -286,6 +310,366 @@ fn a_lapsed_lease_drains_the_run() -> Result<(), Error> {
             3,
             vec!["credential_lost".to_owned(), "drained".to_owned()]
         )
+    );
+    Ok(())
+}
+
+/// The causes of the restrictions the account stream holds, in order.
+fn restriction_causes(journal: &Journal) -> Vec<String> {
+    journal
+        .payloads("AccountRestrictionChanged")
+        .iter()
+        .filter_map(|payload| {
+            payload
+                .get("cause")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+fn member(payload: &Value, name: &str) -> String {
+    payload
+        .get(name)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// An input still in doubt when the lease is lost is handed again first, and the restriction
+/// follows it once it commits: with the journal down from the first pass and back at the lapse,
+/// the start's records commit and the account is restricted (DEC-2839 item 2).
+#[test]
+fn a_lost_credential_hands_an_input_in_doubt_first() -> Result<(), Error> {
+    let journal = connecting()?;
+    establish(&journal)?;
+    let broker = Paper::new(&journal);
+    let wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    let each = |pass: usize| {
+        if pass == 1 {
+            journal.fail_next(&[support::Fault::Unavailable; 64]);
+        }
+        if pass == 3 {
+            journal.clear_faults();
+        }
+        Ok(())
+    };
+    let before = journal.types(ACCOUNT_STREAM).len();
+    let exit = with_edge_stopping(3, Some((3, "credential_lost")), &each, |edge, _| {
+        serve(
+            journal.clone(),
+            broker.clone(),
+            wiring,
+            &process_config(Environment::Paper),
+            &starting_status(),
+            edge,
+        )
+    })?;
+    assert_eq!(exit, Ok(0));
+    let types = journal.types(ACCOUNT_STREAM);
+    let restricted = types
+        .iter()
+        .position(|kind| kind == "AccountRestrictionChanged")
+        .ok_or("no restriction")?;
+    assert!(
+        restricted > before,
+        "what was in doubt committed ahead of the restriction: {types:?}"
+    );
+    assert_eq!(restriction_causes(&journal), ["connection_unavailable"]);
+    Ok(())
+}
+
+/// An input in doubt when the lease is lost is handed again first and never replaced: with the
+/// journal down for one more append, the restriction is held in doubt and the drain commits it
+/// (DEC-2839).
+#[test]
+fn a_lost_credential_with_the_journal_down_restricts_through_the_drain() -> Result<(), Error> {
+    let journal = connecting()?;
+    establish(&journal)?;
+    let broker = Paper::new(&journal);
+    let wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    let each = |pass: usize| {
+        if pass == 3 {
+            journal.fail_next(&[support::Fault::Unavailable]);
+        }
+        Ok(())
+    };
+    let exit = with_edge_stopping(3, Some((3, "credential_lost")), &each, |edge, _| {
+        serve(
+            journal.clone(),
+            broker.clone(),
+            wiring,
+            &process_config(Environment::Paper),
+            &starting_status(),
+            edge,
+        )
+    })?;
+    assert_eq!(exit, Ok(0), "the drain committed what was in doubt");
+    assert_eq!(restriction_causes(&journal), ["connection_unavailable"]);
+    Ok(())
+}
+
+/// DEC-2839: a credential the lease lost restricts the account to closing, cause
+/// `connection_unavailable`, before the run drains (connections spec §9.2: at lease expiry the
+/// connection is treated as `suspended` for openings), so the restart finds it in force. A
+/// rotation, or SIGTERM, drains with no restriction: neither is a trouble of the connection.
+#[test]
+fn a_lost_credential_restricts_the_account_before_the_drain() -> Result<(), Error> {
+    for (lapse, restricted) in [
+        (Some((3, "credential_lost")), true),
+        (Some((3, "credential_rotated")), false),
+        (None, false),
+    ] {
+        let journal = connecting()?;
+        establish(&journal)?;
+        let broker = Paper::new(&journal);
+        let wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+        let exit = with_edge_stopping(3, lapse, &|_| Ok(()), |edge, _| {
+            serve(
+                journal.clone(),
+                broker.clone(),
+                wiring,
+                &process_config(Environment::Paper),
+                &starting_status(),
+                edge,
+            )
+        })?;
+        assert_eq!(exit, Ok(0), "{lapse:?}");
+        let expected: &[&str] = if restricted {
+            &["connection_unavailable"]
+        } else {
+            &[]
+        };
+        assert_eq!(restriction_causes(&journal), expected, "{lapse:?}");
+        if restricted {
+            let types = journal.types(ACCOUNT_STREAM);
+            let at = |kind: &str| types.iter().position(|t| t == kind);
+            let (restricted_at, changed_at) = (
+                at("AccountRestrictionChanged"),
+                at("ConnectionStateChanged"),
+            );
+            assert!(
+                restricted_at.is_some() && changed_at.is_some() && restricted_at < changed_at,
+                "the restriction, then the state change: {types:?}"
+            );
+            let change = journal.payloads("ConnectionStateChanged");
+            assert_eq!(
+                change
+                    .iter()
+                    .map(|p| (member(p, "from"), member(p, "to"), member(p, "reason")))
+                    .collect::<Vec<_>>(),
+                [(
+                    "active".to_owned(),
+                    "suspended".to_owned(),
+                    "lease_expired".to_owned()
+                )]
+            );
+            let alerts = journal.payloads("OwnerAlertSent");
+            assert!(
+                alerts
+                    .iter()
+                    .any(|p| member(p, "kind") == "connection_unavailable"),
+                "the owner's alert is journaled for the dispatcher: {alerts:?}"
+            );
+            let modes = journal.payloads("AgentModeApplied");
+            assert!(
+                modes.iter().any(|payload| {
+                    payload.get("to").and_then(Value::as_str) == Some("exits_only")
+                }),
+                "every agent exits only: {modes:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Runs `journal`'s connection over `broker` at `offsets` (seconds after 15:00 UTC on 2026-09-21),
+/// then SIGTERM. The lease's tick at each offset runs `before` with that offset's index, and the
+/// pass that follows it steps at the next offset. The stream's copy of the establishment folds
+/// after the first step, so a later check is first due at the second step.
+fn run_at(
+    journal: &Journal,
+    broker: &Paper,
+    offsets: &[i64],
+    before: &dyn Fn(usize),
+) -> Result<Result<u8, &'static str>, Error> {
+    let noon = at(NOON)?.secs();
+    let pass = Cell::new(0usize);
+    let instants: Vec<UtcNanos> = offsets
+        .iter()
+        .map(|offset| UtcNanos::from_parts(noon + offset, 0))
+        .collect::<Result<_, _>>()?;
+    let last = instants.last().copied().ok_or("no pass")?;
+    let now = || instants.get(pass.get()).copied().unwrap_or(last);
+    let mut tick = |_: UtcNanos| {
+        before(pass.get());
+        None
+    };
+    let terminated = || {
+        let next = pass.get().saturating_add(1);
+        pass.set(next);
+        next > offsets.len()
+    };
+    let mut say = |_: &str| {};
+    let wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    Ok(serve(
+        journal.clone(),
+        broker.clone(),
+        wiring,
+        &process_config(Environment::Paper),
+        &starting_status(),
+        Edge {
+            now: &now,
+            tick: &mut tick,
+            terminated: &terminated,
+            say: &mut say,
+            interval: Duration::ZERO,
+        },
+    ))
+}
+
+/// The occasions of the account stream's `ConnectionChecked` records, in order.
+fn check_occasions(journal: &Journal) -> Vec<String> {
+    journal
+        .payloads("ConnectionChecked")
+        .iter()
+        .map(|payload| member(payload, "occasion"))
+        .collect()
+}
+
+/// DEC-2840: an established run checks the connection's permissions once at its start and once
+/// each later New York day (connections spec §8.1), naming the account by the connect check's
+/// reference; a passed check restricts nothing.
+#[test]
+fn an_established_run_checks_its_permissions_at_start_and_daily() -> Result<(), Error> {
+    let journal = connecting()?;
+    establish(&journal)?;
+    let broker = Paper::new(&journal);
+    let day = 86_400;
+    let exit = run_at(
+        &journal,
+        &broker,
+        &[0, 60, 120, day, day + 60, 2 * day],
+        &|_| {},
+    )?;
+    assert_eq!(exit, Ok(0));
+    assert_eq!(
+        check_occasions(&journal),
+        ["connect", "executor_start", "daily", "daily"]
+    );
+    let later = journal.payloads("ConnectionChecked");
+    assert!(
+        later
+            .iter()
+            .skip(1)
+            .all(|payload| member(payload, "account_pii_ref") == PII),
+        "{later:?}"
+    );
+    assert!(restriction_causes(&journal).is_empty());
+    Ok(())
+}
+
+/// The account stream's connection, checked and established, with nothing proposed: an idle
+/// account, which no scheduled reconciliation reads.
+fn idle_established() -> Result<Journal, Error> {
+    let journal = deployed()?;
+    opened(&journal)?;
+    checked(&journal)?;
+    establish(&journal)?;
+    Ok(journal)
+}
+
+/// DEC-2840: a broker that refuses the account read on a later day says the credential no longer
+/// reaches the account, so the daily check fails, and the connection is suspended (journal spec
+/// §9.8: a failed `account` check suspends with `check_failed`): the restriction first, then the
+/// state change. The failed check names no account (rule 62).
+#[test]
+fn a_failed_later_check_suspends_the_connection() -> Result<(), Error> {
+    let journal = idle_established()?;
+    let broker = Paper::new(&journal);
+    let day = 86_400;
+    let exit = run_at(
+        &journal,
+        &broker,
+        &[0, 60, 120, day, day + 60, day + 120],
+        &|pass| {
+            if pass == 2 {
+                broker.refuse_account_with(403);
+            }
+        },
+    )?;
+    assert_eq!(exit, Ok(0));
+    assert_eq!(
+        check_occasions(&journal),
+        ["connect", "executor_start", "daily"]
+    );
+    let daily = journal.payloads("ConnectionChecked");
+    assert_eq!(
+        daily
+            .get(2)
+            .map(|payload| member(payload, "account_pii_ref")),
+        Some(String::new()),
+        "an unread account names no reference (rule 62)"
+    );
+    assert_eq!(restriction_causes(&journal), ["connection_unavailable"]);
+    let changes: Vec<(String, String)> = journal
+        .payloads("ConnectionStateChanged")
+        .iter()
+        .map(|payload| (member(payload, "to"), member(payload, "reason")))
+        .collect();
+    assert_eq!(
+        changes,
+        [("suspended".to_owned(), "check_failed".to_owned())]
+    );
+    Ok(())
+}
+
+/// DEC-2840: a broker that runs no later checks is never checked: nothing is journaled for one,
+/// although the broker would answer one if asked.
+#[test]
+fn a_broker_without_later_checks_is_never_checked() -> Result<(), Error> {
+    let journal = idle_established()?;
+    let broker = Paper::new(&journal);
+    broker.without_later_checks();
+    let day = 86_400;
+    let exit = run_at(&journal, &broker, &[0, 60, 120, day, day + 60], &|_| {})?;
+    assert_eq!(exit, Ok(0));
+    assert_eq!(check_occasions(&journal), ["connect"]);
+    Ok(())
+}
+
+/// DEC-2840: a check whose account read is lost cannot run, so nothing is journaled for it and it
+/// stays due, tried again once a probe's interval later; it counts toward the connection's
+/// network failures, never as a pass or a failure.
+#[test]
+fn a_check_whose_read_is_lost_runs_on_a_later_pass() -> Result<(), Error> {
+    let journal = idle_established()?;
+    let broker = Paper::new(&journal);
+    let exit = run_at(&journal, &broker, &[0, 30, 60, 90, 120, 180], &|pass| {
+        if pass == 0 {
+            broker.lose_next_answers(1_000);
+        }
+        if pass == 2 {
+            broker.lose_next_answers(0);
+        }
+    })?;
+    assert_eq!(exit, Ok(0));
+    assert_eq!(check_occasions(&journal), ["connect", "executor_start"]);
+    let started = journal.payloads("ConnectionChecked");
+    let clock = started.get(1).map(|payload| member(payload, "risk_clock"));
+    assert_eq!(
+        clock.as_deref(),
+        Some("2026-09-21T15:02:00.000000000Z"),
+        "the read at 15:01 was lost, so the check ran a probe's interval later"
+    );
+    let reasons: Vec<String> = journal
+        .payloads("ConnectionStateChanged")
+        .iter()
+        .map(|payload| member(payload, "reason"))
+        .collect();
+    assert!(
+        !reasons.iter().any(|reason| reason == "check_failed"),
+        "lost reads count as network failures, never as a failed check: {reasons:?}"
     );
     Ok(())
 }
