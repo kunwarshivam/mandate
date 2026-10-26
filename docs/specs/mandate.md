@@ -737,9 +737,10 @@ stream** fold (journal spec §2). It belongs to the agent and survives restarts 
   `MandateVersionApplied`, `UniverseChanged` (§2.3), `RiskDayStarted`, copied `ClockAdvanced`, and
   owner acknowledgments.
 - **Fills and fees are the agent's own** ([DEC-2393](../project/decisions/DEC-2393.md)): a fill of
-  an order whose request names the agent moves Q and cash, and a fee charged to such an order (a
-  fill's own `USD` fees, and a `FeesCharged` naming the order, at its `charged`) lowers cash, and so
-  E, at its instant. Another agent's fills and fees on the same account never move E.
+  an order whose request names the agent moves Q and cash, and a fee of such an order (a fill's own
+  `USD` fees, and the paper executor's simulated `FeesCharged` naming the order, at its `accrued`)
+  lowers cash, and so E, when it accrues. Another agent's fills and fees on the same account never
+  move E.
 - **Corporate actions** ([DEC-2303](../project/decisions/DEC-2303.md)) are folded at application,
   trading spec §8.5's instant (20:00 New York time on the last trading day before the ex-date). A
   **split** replaces Q, B and realized by §8.5's rule: Q' and the removed residual basis R, and cash
