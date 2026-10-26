@@ -48,6 +48,8 @@
         "step_up_method",
         "step_up_mismatch",
         "live_unavailable",
+        "acknowledgment_unavailable",
+        "acknowledgment_request_invalid",
         "deferral_mismatch",
         "control_stream_frozen",
         "journal_unavailable",
@@ -70,7 +72,9 @@
         "busy": "E8-14",
         "fold_unavailable": "E10-13",
         "positions_held": "E10-13",
-        "agents_not_stopped": "E10-13"
+        "agents_not_stopped": "E10-13",
+        "acknowledgment_unavailable": "E10-12",
+        "acknowledgment_request_invalid": "E10-12"
       }
     },
     "Effect": {
@@ -1165,6 +1169,62 @@
               },
               "type": {
                 "const": "https://mandate.dev/problems/deferral_mismatch"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "acknowledgment_unavailable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Nothing to acknowledge"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/acknowledgment_unavailable"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "acknowledgment_request_invalid"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Request cannot be answered"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/acknowledgment_request_invalid"
               }
             }
           }
