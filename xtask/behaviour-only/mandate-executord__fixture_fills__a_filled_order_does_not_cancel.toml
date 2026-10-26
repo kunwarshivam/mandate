@@ -1,0 +1,7 @@
+file = "crates/mandate-executord/tests/fixture_fills.rs"
+test = "a_filled_order_does_not_cancel"
+reason = """
+`FixturePaper::filling` is a stub that rests every order as `FixturePaper::new` does: its opening
+rests, so it cancels. The test fails on that behaviour, not at a stub's report. X1b-3's
+implementation fills a limit order at its limit, and deletes this row.
+"""

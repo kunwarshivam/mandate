@@ -60,6 +60,13 @@ impl FixturePaper {
         }
     }
 
+    /// A broker with an empty book whose records are stamped `at`, and that fills: the cell's
+    /// fixture once its orders fill (X1b-3). Until that slice lands it rests every order, as
+    /// [`FixturePaper::new`] does, which is what its pending tests fail on.
+    pub fn filling(at: UtcNanos) -> Self {
+        Self::new(at)
+    }
+
     fn answer(&self, request: &HttpRequest) -> Response {
         let path = request.path_and_query();
         let (route, query) = path.split_once('?').unwrap_or((path, ""));

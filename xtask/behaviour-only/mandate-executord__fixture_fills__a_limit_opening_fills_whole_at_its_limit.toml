@@ -1,0 +1,7 @@
+file = "crates/mandate-executord/tests/fixture_fills.rs"
+test = "a_limit_opening_fills_whole_at_its_limit"
+reason = """
+`FixturePaper::filling` is a stub that rests every order as `FixturePaper::new` does: its limit
+opening rests `new`, unfilled. The test fails on that behaviour, not at a stub's report. X1b-3's
+implementation fills a limit order at its limit, and deletes this row.
+"""
