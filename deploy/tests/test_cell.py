@@ -109,6 +109,7 @@ def every_image() -> list[str]:
         for image in dict.fromkeys(p["image"] for p in PROCESSES)
         if image != "postgres"
     ]
+    sets += ["data.symbol=SPY", "data.anchor=2026-10-23=150"]
     return [arg for s in sets for arg in ("--set", s)]
 
 
@@ -649,6 +650,8 @@ the processes it starts render as Deployments of their own; its pod templates ar
         assert c["args"][: len(p["args"])] == [
             x.replace("{workspace}", "ws1")
             .replace("{hosted_workspace}", HOSTED)
+            .replace("{data_symbol}", "SPY")
+            .replace("{data_anchor}", "2026-10-23=150")
             .replace("{agent}", "demo-agent")
             .replace("{connection}", "demo-paper")
             .replace("{owner}", "demo-owner")
@@ -694,6 +697,54 @@ def test_the_scheduler_never_renders_for_no_hosted_workspace():
     done = helm(CHART, *SCHEDULER, "--set", "api.workspace=")
     assert done.returncode != 0
     assert "api.workspace" in done.stderr and "scheduler" in done.stderr
+
+
+DATA = ("--set", f"images.data={PLACEHOLDER.format('data')}")
+
+
+def test_the_data_process_stores_the_recorded_series_where_the_runtime_reads_it():
+    """The data process writes the deployed instrument's daily bars from the cell's recorded series
+    into the artifact store, which it alone besides control and the API mounts writable and the
+    runtime mounts read-only; it holds no journal role and no vault token, and reaches no host in
+    the cell (`egress.market-data` is empty)."""
+    docs = render_all(*DATA)
+    by_name = {w["metadata"]["name"]: w for w in workloads(docs)}
+    data = by_name["data"]
+    c = first_container(data)
+    assert c["image"] == PLACEHOLDER.format("data")
+    assert c["args"] == [
+        "run",
+        "--store",
+        "/var/lib/mandate/artifacts/datasets",
+        "--symbol",
+        "SPY",
+        "--anchor",
+        "2026-10-23=150",
+        "--probe",
+        "/tmp/process.sock",
+    ]
+    assert not [e for e in c["env"] if e["name"] in ("MANDATE_JOURNAL_DSN", "PGPASSFILE")]
+    mounts = {m["mountPath"]: m.get("readOnly", False) for m in c["volumeMounts"]}
+    assert mounts.get("/var/lib/mandate/artifacts") is False, mounts
+    volumes = {v["name"] for v in pod_spec(data).get("volumes", [])}
+    assert not [v for v in volumes if "vault" in v or "journal" in v or v.startswith("pg")], volumes
+    for k, asked in (("readinessProbe", "readyz"), ("livenessProbe", "livez")):
+        assert c[k]["exec"]["command"] == ["/mandate-datad", "probe", asked, "--probe", "/tmp/process.sock"]
+    for check in (hardened, gated, default_deny, colocated, egress_exact):
+        assert check(docs) == [], check.__name__
+
+
+def test_the_data_process_never_renders_without_its_series_or_outside_the_cell():
+    """Naming the data image without the series fails the render, and only the local cell's values
+    name one: the series is a recording, never market data."""
+    for unset, said in (("data.symbol=", "data.symbol"), ("data.anchor=", "data.anchor")):
+        done = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *DATA, "--set", unset)
+        assert done.returncode != 0 and said in done.stderr, done.stderr
+    for values in ("k3s.yaml", "managed.yaml"):
+        done = helm(CHART, "-f", str(CELL / "values" / values), *DATA)
+        assert done.returncode != 0 and "data.symbol" in done.stderr, f"{values}: only the local cell names a series"
+    done = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *DATA, "--set", "data.anchor=150")
+    assert done.returncode != 0, "an anchor without its date"
 
 
 def test_the_runtime_never_renders_for_no_deployment():

@@ -1928,6 +1928,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-datad"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-marketdata",
+ "mandate-num",
+ "mandate-process",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-dataservice"
 version = "0.0.0"
 dependencies = [
