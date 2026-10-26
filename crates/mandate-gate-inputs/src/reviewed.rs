@@ -100,11 +100,11 @@ impl Reviewed {
         Self::assemble(mandate, configuration, &model, instrument)
     }
 
-    /// A research deployment's artifacts for one admitted instrument (DEC-2819 item 3): the
-    /// confirmed version's model is its one signal model that admits instruments, which only an
-    /// unpinned version has (the confirmed version passed V-036, at most one such model, and
-    /// V-037, none in a pinned version), and
-    /// that admits instruments, whose registration `configuration` read under its own hash. The
+    /// A research deployment's artifacts for one admitted instrument (DEC-2819 item 3). The
+    /// deployment's model is the confirmed version's one signal model that admits instruments,
+    /// which only an unpinned version has (the version passed V-036, at most one such model, and
+    /// V-037, none in a pinned version); `configuration` read its registration under its own
+    /// hash. The
     /// instrument is the registered snapshot's, a US equity the mandate's asset classes allow. The
     /// fee schedule, calendar and rule set are read as [`Self::from_registered`] reads them, every
     /// binding on the deployment's own stream.
