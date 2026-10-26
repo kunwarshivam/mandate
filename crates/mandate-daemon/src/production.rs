@@ -9,7 +9,7 @@
 //! hold and cancels every order of the agent's that no terminal state has ended (rule 13).
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use mandate_accounting::InstrumentId;
@@ -17,6 +17,7 @@ use mandate_canon::{Key, Object, Value, parse};
 use mandate_domain::AssetClass;
 use mandate_gate_context::{Freshness, Journaled, Row};
 use mandate_journal::StoredEvent;
+use mandate_research::{ReplayError, Replayed, ThesisRecord, replay_theses};
 use mandate_risk::GateConfig;
 use mandate_runtime::{EventDraft, FlattenLeg, FlattenPlan, FlattenPlanner, FlattenRequest};
 use mandate_spec::document::Mandate;
@@ -66,6 +67,9 @@ pub fn wired(
             .filter_map(|pinned| InstrumentId::new(pinned.asset_id.as_str()).ok())
             .collect();
         base.view.approval.timeout_s = i64::from(mandate.autonomy.approval.timeout_s);
+        if !mandate.universe.pinned {
+            facts.read_working_universe();
+        }
         base.plan = Box::new(Plan::new(facts.clone(), mandate.clone(), FRESH));
         base.gate = Box::new(
             Gate::new(facts.clone(), (version, mandate), rules, FRESH).reading(Box::new(bars)),
@@ -116,9 +120,21 @@ struct Fed {
     unplanned: u32,
     clock: String,
     agent: String,
+    /// The agent stream (`agent:{workspace}:{agent}`, the workspace the clock stream names), whose
+    /// thesis records give an unpinned mandate its working universe (DEC-2841).
+    agent_stream: Option<String>,
     journaled: Option<Journaled>,
+    /// Whether the deployed mandate is unpinned, so its working universe is read from the agent
+    /// stream's thesis records at every pass (DEC-2841).
+    working: bool,
+    /// The agent stream's thesis records in stream order, each with its payload, or `None` for a
+    /// row whose body does not parse, which the replay refuses.
+    theses: Vec<(String, Option<Value>)>,
     heads: BTreeMap<String, u64>,
 }
+
+/// The agent stream's records [`replay_theses`] reads.
+const THESIS_RECORDS: [&str; 3] = ["ThesisProposed", "ThesisRevised", "ThesisInvalidated"];
 
 impl Facts {
     /// The fold for `agent`, ticked by the scheduler's `clock` stream, before its account is known.
@@ -127,7 +143,12 @@ impl Facts {
             unplanned: 0,
             clock: clock.to_owned(),
             agent: agent.to_owned(),
+            agent_stream: clock
+                .strip_prefix("clock:")
+                .map(|workspace| format!("agent:{workspace}:{agent}")),
             journaled: None,
+            working: false,
+            theses: Vec::new(),
             heads: BTreeMap::new(),
         })))
     }
@@ -145,19 +166,25 @@ impl Facts {
         }
         let journaled = Journaled::new(account, &fed.clock, &fed.agent);
         fed.journaled = Some(journaled);
+        fed.theses.clear();
         fed.heads.clear();
     }
 
     /// Folds the rows past the fold's head for their stream, in order. Nothing is folded before
     /// the account is followed. A row whose body does not parse is folded with no payload, so one
     /// of a type the fold reads holds every later opening, and one of any other type changes
-    /// nothing.
+    /// nothing. The agent stream's rows are not folded: its thesis records are kept, in order, for
+    /// [`Facts::replayed`], one whose body does not parse kept as unreadable.
     pub fn feed(&self, rows: &[StoredEvent]) {
         let Ok(mut fed) = self.0.try_borrow_mut() else {
             return;
         };
         let Fed {
-            journaled, heads, ..
+            journaled,
+            heads,
+            theses,
+            agent_stream,
+            ..
         } = &mut *fed;
         let Some(journaled) = journaled.as_mut() else {
             return;
@@ -168,10 +195,16 @@ impl Facts {
                 continue;
             }
             *head = stored.seq;
-            let payload = parse(&stored.body)
+            let parsed = parse(&stored.body)
                 .ok()
-                .and_then(|body| body.get("payload").cloned())
-                .unwrap_or(Value::Null);
+                .and_then(|body| body.get("payload").cloned());
+            if agent_stream.as_deref() == Some(stored.stream_id.as_str()) {
+                if THESIS_RECORDS.contains(&stored.event_type.as_str()) {
+                    theses.push((stored.event_type.clone(), parsed));
+                }
+                continue;
+            }
+            let payload = parsed.unwrap_or(Value::Null);
             let row = Row {
                 stream: &stored.stream_id,
                 event_type: &stored.event_type,
@@ -196,6 +229,102 @@ impl Facts {
         }
     }
 
+    /// Marks the fold as an unpinned mandate's, whose working universe [`Facts::working_universe`]
+    /// reads from the agent stream (DEC-2841).
+    pub fn read_working_universe(&self) {
+        if let Ok(mut fed) = self.0.try_borrow_mut() {
+            fed.working = true;
+        }
+    }
+
+    /// The instrument an unpinned mandate may open in now: the one its single surviving thesis
+    /// holds, replayed as the executor replays it (DEC-2819). More than one, none, a record that
+    /// does not read, or no clock yet, answers none, so every opening is held.
+    pub fn working_instrument(&self) -> Option<String> {
+        let replayed = self.replayed()?.ok()?;
+        let [entry] = replayed.active.as_slice() else {
+            return None;
+        };
+        Some(entry.instrument.as_str().to_owned())
+    }
+
+    /// An unpinned mandate's working universe for the view, which an approval's revalidation reads
+    /// (`in_working_universe`): [`Facts::working_instrument`] alone, or empty. `None` for a pinned
+    /// mandate, whose view keeps its pins.
+    pub fn working_universe(&self) -> Option<BTreeSet<InstrumentId>> {
+        if !self.0.try_borrow().ok()?.working {
+            return None;
+        }
+        Some(
+            self.working_instrument()
+                .and_then(|asset| InstrumentId::new(&asset).ok())
+                .into_iter()
+                .collect(),
+        )
+    }
+
+    /// The agent stream's thesis records replayed at the fold's risk clock, as the executor and the
+    /// models replay them (DEC-2819, DEC-2827), with that clock: `None` before the account is
+    /// followed or while the fold has no clock, and an `Err` when a record does not read.
+    pub fn replayed(&self) -> Option<Result<Replayed, ReplayError>> {
+        let fed = self.0.try_borrow().ok()?;
+        let now = fed.journaled.as_ref()?.now()?;
+        let records = fed.theses.iter().map(|(event_type, payload)| {
+            Ok(ThesisRecord {
+                event_type: event_type.as_str(),
+                payload: payload
+                    .clone()
+                    .ok_or(ReplayError::Unreadable { member: "payload" })?,
+            })
+        });
+        Some(replay_theses(records, now))
+    }
+
+    /// The asset class the latest admitted thesis record on `instrument` states (journal spec
+    /// §9.4), or `None` when no admitted record names it or its class does not read.
+    pub fn thesis_class(&self, instrument: &str) -> Option<AssetClass> {
+        let fed = self.0.try_borrow().ok()?;
+        let admitted = fed.theses.iter().rev().find_map(|(event_type, payload)| {
+            let payload = payload.as_ref()?;
+            (event_type != "ThesisInvalidated"
+                && payload.get("admitted") == Some(&Value::Bool(true))
+                && payload.get("instrument_id").and_then(Value::as_str) == Some(instrument))
+            .then_some(payload)
+        })?;
+        match admitted.get("asset_class").and_then(Value::as_str)? {
+            "us_equity" => Some(AssetClass::UsEquity),
+            "crypto" => Some(AssetClass::Crypto),
+            _ => None,
+        }
+    }
+
+    /// Every instrument an admitted thesis record names, with the class it states: what a held
+    /// position may be in, so what a flatten maps (DEC-2819 item 2). A record that does not read
+    /// takes nothing from another.
+    pub fn ever_admitted(&self) -> BTreeMap<String, AssetClass> {
+        let Ok(fed) = self.0.try_borrow() else {
+            return BTreeMap::new();
+        };
+        let instruments: BTreeSet<String> = fed
+            .theses
+            .iter()
+            .filter(|(event_type, _)| event_type != "ThesisInvalidated")
+            .filter_map(|(_, payload)| {
+                let payload = payload.as_ref()?;
+                (payload.get("admitted") == Some(&Value::Bool(true)))
+                    .then(|| payload.get("instrument_id")?.as_str().map(str::to_owned))?
+            })
+            .collect();
+        drop(fed);
+        instruments
+            .into_iter()
+            .filter_map(|instrument| {
+                let class = self.thesis_class(&instrument)?;
+                Some((instrument, class))
+            })
+            .collect()
+    }
+
     /// `read` over the fold, or `None` before the account is followed.
     pub fn read<T>(&self, read: impl FnOnce(&Journaled) -> T) -> Option<T> {
         let fed = self.0.try_borrow().ok()?;
@@ -210,8 +339,9 @@ impl Facts {
 /// and the broker holds what it will not take (`AGENTS.md` rule 13). A held instrument it cannot
 /// plan, one with no asset class in the universe or an id that does not parse, is counted for the
 /// process's `flatten_unplanned` alert rather than dropped silently; the executor still flattens
-/// its own sub-ledger of it. A plan asked before the account is followed, when nothing can be read,
-/// is counted the same way, never taken as "nothing held": for an owner's exit of one instrument
+/// its own sub-ledger of it. An instrument the mandate does not pin takes the class its admitted
+/// thesis record states, so a research agent's position is sold too (DEC-2841). A plan asked
+/// before the account is followed, when nothing can be read, is counted the same way, never taken as "nothing held": for an owner's exit of one instrument
 /// the plan is the only seller (DEC-2387 item 1).
 pub struct Flatten {
     facts: Facts,
@@ -251,11 +381,15 @@ impl FlattenPlanner for Flatten {
             .filter(|(instrument, _)| scoped(instrument))
             .collect();
         let wanted = scoped_held.len();
+        let admitted = self.facts.ever_admitted();
         let sells: Vec<FlattenLeg> = scoped_held
             .into_iter()
             .filter_map(|(instrument, qty)| {
                 Some(FlattenLeg {
-                    asset_class: *self.classes.get(&instrument)?,
+                    asset_class: *self
+                        .classes
+                        .get(&instrument)
+                        .or_else(|| admitted.get(&instrument))?,
                     instrument: InstrumentId::new(&instrument).ok()?,
                     qty,
                     deferred_to_regular_session: false,

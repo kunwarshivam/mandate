@@ -1,9 +1,0 @@
-file = "crates/mandate-daemon/tests/runtime.rs"
-test = "a_research_deployments_kill_switch_sells_its_held_instrument"
-reason = """
-`production::wired` gives the flatten the asset classes of the pinned universe alone
-(`production::classes`), so a research deployment's held instrument is never planned: the kill
-switch raises `flatten_unplanned`. The test fails on that behaviour, not at a stub, since no
-opening is asked and the plan's stubs are never reached. D1's E21-2 implementation maps every
-instrument a thesis record admitted, with its record's class (DEC-2819), and deletes this row.
-"""

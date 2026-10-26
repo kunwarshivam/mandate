@@ -302,16 +302,7 @@ impl Gate {
                 adv_20d: figures.as_ref().map(|f| f.adv_20d),
             },
             conduct: ConductState::default(),
-            universe: WorkingUniverse::Known {
-                instruments: self
-                    .mandate
-                    .universe
-                    .pinned_instruments
-                    .iter()
-                    .filter_map(|pinned| AssetId::new(pinned.asset_id.as_str()).ok())
-                    .collect(),
-                pinned: true,
-            },
+            universe: self.universe(),
             order: AdvisoryOrderFacts {
                 kind: ProposedKind::Plain,
                 tif: TimeInForce::Day,
@@ -325,10 +316,39 @@ impl Gate {
         Ok((context, figures, declared))
     }
 
+    /// The working universe check 2 reads (DEC-2841): a pinned mandate's pins, or an unpinned
+    /// mandate's working instrument alone, the one its single surviving thesis holds, as the plan
+    /// and the executor read it; none while that cannot be read, so every opening is denied
+    /// `not_in_working_universe`. Only an opening reaches the check, so no exit waits on it
+    /// (`AGENTS.md` rule 13).
+    fn universe(&self) -> WorkingUniverse {
+        let universe = &self.mandate.universe;
+        if universe.pinned {
+            return WorkingUniverse::Known {
+                instruments: universe
+                    .pinned_instruments
+                    .iter()
+                    .filter_map(|pinned| AssetId::new(pinned.asset_id.as_str()).ok())
+                    .collect(),
+                pinned: true,
+            };
+        }
+        WorkingUniverse::Known {
+            instruments: self
+                .facts
+                .working_instrument()
+                .and_then(|working| AssetId::new(&working).ok())
+                .into_iter()
+                .collect(),
+            pinned: false,
+        }
+    }
+
     /// The liquidity figures of `proposal`'s instrument at `now`, the fold's risk clock, read only
     /// for a proposal labelled an opening or an increase in a pinned US equity, by its symbol: the
-    /// stored bars are US equities' alone. An exit never reads them (`AGENTS.md` rule 13,
-    /// DEC-2274 item 3).
+    /// stored bars are US equities' alone. An unpinned mandate's working instrument names no symbol
+    /// here, so its figures are deferred to the binding gate, which reads its own (DEC-2841). An
+    /// exit never reads them (`AGENTS.md` rule 13, DEC-2274 item 3).
     fn figures(&self, proposal: &Proposal, now: UtcNanos) -> Option<LiquidityFacts> {
         if proposal.asset_class != AssetClass::UsEquity {
             return None;
