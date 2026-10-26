@@ -43,7 +43,7 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
   v0.85: a deferring allow names its deferrals in byte order with its figures or the two liquidity
   checks, an `auto` opening with a deferral is asked under `policy_overlay` and never proposed, an
   exit defers nothing at version 1, a denial on figures records them, a granted ask still deferring
-  acts, a deferring opening without a plan asking no one, and a property whose oracles are
+  acts, a deferring opening without a plan denied `plan_required` and notified (DEC-2810), and a property whose oracles are
   `mandate-journal`'s own parse at the version computed from the verdict and its `check_batch` over
   every batch the runtime writes, the request naming exactly the decision's deferrals at version 3;
   [DEC-2388](../../../../docs/project/decisions/DEC-2388.md) item 12,

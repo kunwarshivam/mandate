@@ -76,6 +76,9 @@ pub enum PutSecret {
     ModelProviderKey,
     #[value(name = "email-credential")]
     EmailCredential,
+    /// The Alpaca news reader's paper data key, one line `<key id>:<secret>` (DEC-2277).
+    #[value(name = "news-data-key")]
+    NewsDataKey,
     #[value(name = "alpaca-oauth-client-secret")]
     AlpacaOauthClientSecret,
 }
@@ -92,6 +95,10 @@ pub fn put_path(secret: PutSecret) -> Result<(SecretPath, &'static str), SourceE
         PutSecret::EmailCredential => (
             SecretPath::Platform(PlatformSecret::EmailCredential),
             "email credential",
+        ),
+        PutSecret::NewsDataKey => (
+            SecretPath::Platform(PlatformSecret::NewsDataKey),
+            "news data key",
         ),
         PutSecret::AlpacaOauthClientSecret => {
             (SecretPath::ClientSecret, "Alpaca OAuth client secret")

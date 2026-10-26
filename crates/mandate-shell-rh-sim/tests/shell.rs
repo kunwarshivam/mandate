@@ -426,6 +426,7 @@ fn startup(open_orders: Vec<BrokerOrder>, positions: Vec<BrokerPosition>) -> Bro
         fills: Vec::new(),
         cursor: ActivityCursor(String::new()),
         reason: ReconcileReason::Startup,
+        declared: None,
         taken_at_head: Seq(0),
     }
 }

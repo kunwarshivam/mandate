@@ -331,21 +331,99 @@ fn an_opening_denied_on_its_figures_records_them_and_defers_nothing() {
     assert!(ran.notifications.contains(&"decision_skipped"));
 }
 
-/// DEC-2515 item 1: a deferring opening the builder produced no plan for has no request version,
-/// so nobody is asked and nothing is proposed; the same opening with nothing deferred is asked at
-/// version 1.
+/// DEC-2810: a deferring opening the builder produced no plan for has no request version, so it
+/// is denied `plan_required` by the runtime itself, journaled at version 1 and notified as any
+/// skipped decision, and nothing is asked, proposed, or left pending to repeat unseen; the same
+/// opening with nothing deferred is asked at version 1.
 #[test]
-fn a_deferring_opening_without_a_plan_asks_no_one_and_places_nothing() {
-    let mut plan = FixedPlan::opening(Autonomy::Ask);
+fn a_deferring_opening_without_a_plan_is_denied_plan_required_and_notified() {
+    let mut plan = FixedPlan::opening(Autonomy::Auto);
     if let Some(proposal) = plan.proposal.as_mut() {
         proposal.execution = None;
     }
     let ran = evaluated(&FixedGate(deferring(&[Deferral::Halt], None)), &plan);
+    let made = decision(&ran);
+    assert_eq!(
+        member(made, "dry_run").and_then(Value::as_str),
+        Some("deny")
+    );
+    assert_eq!(
+        member(made, "reason_code").and_then(Value::as_str),
+        Some("plan_required")
+    );
+    assert_eq!(
+        made.schema_version(),
+        1,
+        "a denial before any figures defers nothing"
+    );
     assert!(!asked(&ran) && !proposed(&ran), "{:?}", ran.draft_types());
+    assert!(
+        ran.notifications.contains(&"decision_skipped"),
+        "{:?}",
+        ran.notifications
+    );
     assert_eq!(committed(&ran), Ok(()));
-    let ran = evaluated(&AllowGate, &plan);
+    let ran = evaluated(&FixedGate(deferring(&[], Some(read()))), &plan);
+    assert!(
+        proposed(&ran),
+        "nothing deferred, the plan is not needed: {:?}",
+        ran.draft_types()
+    );
+    let ask = FixedPlan {
+        autonomy: Autonomy::Ask,
+        ..plan
+    };
+    let ran = evaluated(&AllowGate, &ask);
     assert_eq!(request(&ran).map(EventDraft::schema_version), Some(1));
     assert_eq!(committed(&ran), Ok(()));
+}
+
+/// A dry run that allows until told to defer: the gate's answer at the ask, then at re-validation.
+struct TurningGate(std::cell::Cell<bool>);
+
+impl GateDryRun for TurningGate {
+    fn check(&self, _proposal: &Proposal) -> DryRunVerdict {
+        if self.0.get() {
+            deferring(&[Deferral::Halt], None)
+        } else {
+            DryRunVerdict::Allow
+        }
+    }
+}
+
+/// DEC-2810 item 3: a version 1 request, which binds no plan, granted while the dry run now defers
+/// a check, is skipped `plan_required` and hands nothing; a version 2 request granted under the
+/// same answer acts, its plan bound.
+#[test]
+fn a_grant_without_a_plan_that_now_defers_is_skipped_plan_required() {
+    for (planned, acts) in [(false, false), (true, true)] {
+        let (ids, view) = (TestIds, universe(&["AAPL"]));
+        let gate = TurningGate(std::cell::Cell::new(false));
+        let mut plan = FixedPlan::opening(Autonomy::Ask);
+        if !planned && let Some(proposal) = plan.proposal.as_mut() {
+            proposal.execution = None;
+        }
+        let ports: Ports<'_> = ports(&ids, &gate, &plan, &view);
+        let (mut shell, asked) = asking_shell(&ports, Some("155"));
+        assert_eq!(asked.request.schema_version(), if planned { 2 } else { 1 });
+        gate.0.set(true);
+        let grant = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 20).event();
+        let ran = tail(&mut shell, &grant, &ports);
+        let revalidated = ran
+            .drafts
+            .iter()
+            .find(|draft| draft.event_type == "ApprovalRevalidated")
+            .unwrap_or_else(|| panic!("the grant is re-validated: {:?}", ran.draft_types()));
+        let field = |key: &str| member(revalidated, key).and_then(Value::as_str);
+        if acts {
+            assert_eq!(field("result"), Some("act"), "planned");
+            assert_eq!(ran.handed.len(), 1);
+        } else {
+            assert_eq!(field("result"), Some("skip"), "unplanned");
+            assert_eq!(field("dry_run_reason"), Some("plan_required"));
+            assert!(ran.handed.is_empty(), "{:?}", ran.draft_types());
+        }
+    }
 }
 
 /// A granted ask whose dry run still defers at re-validation acts: the executor's binding gate
@@ -441,11 +519,23 @@ proptest! {
         verdict in verdicts(),
         autonomy in autonomies(),
         opening in any::<bool>(),
+        planned in any::<bool>(),
     ) {
-        let plan = if opening { FixedPlan::opening(autonomy) } else { exiting(Autonomy::Auto) };
+        let mut plan = if opening { FixedPlan::opening(autonomy) } else { exiting(Autonomy::Auto) };
+        if !planned && let Some(proposal) = plan.proposal.as_mut() {
+            proposal.execution = None;
+        }
         let ran = evaluated(&FixedGate(verdict.clone()), &plan);
         let made = decision(&ran);
-        let want = expected(&verdict, opening);
+        let deferring_allow = matches!(verdict, DryRunVerdict::AllowDeferring { .. })
+            && expected(&verdict, opening).is_some_and(|names| !names.is_empty());
+        let refused = deferring_allow && !planned;
+        prop_assert_eq!(
+            member(made, "reason_code").and_then(Value::as_str) == Some("plan_required"),
+            refused,
+            "DEC-2810: exactly a deferring allow without a plan is refused plan_required"
+        );
+        let want = if refused { None } else { expected(&verdict, opening) };
         let version = if want.is_some() { 3 } else { 1 };
         prop_assert_eq!(parsed(made, version), Ok(version));
         prop_assert_eq!(made.schema_version(), version, "the draft names the version it parses at");
@@ -464,7 +554,7 @@ proptest! {
                 .and_then(Value::as_array)
                 .map(|names| names.iter().filter_map(Value::as_str).map(str::to_owned).collect::<Vec<_>>());
             prop_assert_eq!(&named, &want.clone().filter(|names| !names.is_empty()), "the request names the decision's deferrals");
-            prop_assert_eq!(asked.schema_version(), if deferring { 3 } else { 2 });
+            prop_assert_eq!(asked.schema_version(), if deferring { 3 } else if planned { 2 } else { 1 });
         }
         prop_assert_eq!(committed(&ran), Ok(()), "the journal accepts the batch the runtime writes");
         let overlay = deferring && matches!(verdict, DryRunVerdict::AllowDeferring { .. }) && autonomy == Autonomy::Auto;

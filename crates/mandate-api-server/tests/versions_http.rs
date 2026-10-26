@@ -2402,3 +2402,275 @@ fn no_role_set_passes_a_live_request_and_none_sets_the_gate() {
         }
     }
 }
+
+const KEY_3: &str = "k4Z-9_dddddddddd";
+
+impl Passkeyed {
+    /// `agt_a` deployed on `v1` under passkey step-up, so an owner command may name it.
+    fn deployed(&self) {
+        self.funded();
+        self.confirmed();
+        let issued = self.deploy_challenge();
+        let signed = self.signer.assert(&issued.bytes, 10);
+        let reply = deploy(
+            &self.f,
+            &self.cookie,
+            KEY_2,
+            &self.deploy_body(&issued, Some(signed.json(CREDENTIAL))),
+        );
+        assert_eq!(
+            reply.status,
+            202,
+            "{}",
+            String::from_utf8_lossy(&reply.body)
+        );
+    }
+
+    /// Alice's challenge of `kind` for `agt_a`'s command that `confirms`, bound to §3.5's object at
+    /// the control stream's head now (DEC-2102 item 4).
+    fn command_challenge(&self, kind: &str, confirms: &str) -> Issued {
+        let head = control(&self.f).last().expect("rows").seq;
+        let bound = Digest::of(&to_canonical(&json(&format!(
+            r#"{{"agent":"agt_a","bid":null,"bid_size":null,"confirms":"{confirms}","control_head":"{head}","event":null,"floor":null,"instrument":null}}"#
+        ))));
+        self.challenge_for(kind, bound, "k5Z-9_eeeeeeeeee")
+    }
+
+    /// `method` evidence for `issued`.
+    fn evidence(issued: &Issued, method: &str) -> String {
+        format!(
+            r#"{{"assertion_id":"{}","authenticated_at":"{}","method":"{method}"}}"#,
+            issued.id, issued.issued_at
+        )
+    }
+}
+
+/// A resume's body under `evidence`, with `assertion` beside it.
+fn resume_body(evidence: &str, assertion: Option<serde_json::Value>) -> String {
+    with_assertion(
+        &format!(r#"{{"record":null,"step_up":{evidence}}}"#),
+        assertion,
+    )
+}
+
+/// A Stop with release's body under `evidence`, naming the platform's warning, with `assertion`.
+fn stop_body(evidence: &str, assertion: Option<serde_json::Value>) -> String {
+    let warning = format!(
+        "sha256:{}",
+        Digest::of(mandate_api_server::commands::RELEASE_WARNING.as_bytes()).to_hex()
+    );
+    with_assertion(
+        &format!(
+            r#"{{"release":true,"warning_shown":"{warning}","record":null,"step_up":{evidence}}}"#
+        ),
+        assertion,
+    )
+}
+
+/// The last two control rows, which a command under passkey step-up appends together: its
+/// `OwnerCommandIssued`, then its `StepUpAsserted`, in one batch the journal's batch rules (rule
+/// 253) admit, the assertion caused by the command and naming the challenge (DEC-2128 item 3).
+fn asserted_command(w: &Passkeyed, issued: &Issued, command: &str) -> Value {
+    let rows = control(&w.f);
+    let (issued_row, assertion) = (&rows[rows.len() - 2], &rows[rows.len() - 1]);
+    assert_eq!(
+        (
+            issued_row.event_type.as_str(),
+            assertion.event_type.as_str()
+        ),
+        ("OwnerCommandIssued", "StepUpAsserted")
+    );
+    assert_eq!(issued_row.event_id, derived(command, KEY_3));
+    assert_eq!(
+        assertion.event_id,
+        derived(&format!("{command}_step_up_asserted"), KEY_3),
+        "the assertion's id is §3.4's under its own operation"
+    );
+    let record = parse(&assertion.body).expect("JSON");
+    assert_eq!(
+        record.get("causation_id").and_then(Value::as_str),
+        Some(issued_row.event_id.as_str())
+    );
+    assert_eq!(text(&payload(assertion), &["challenge"]), issued.id);
+    let drafts: Vec<Draft> = [issued_row, assertion]
+        .into_iter()
+        .map(|row| Draft::parse(&row.body).unwrap_or_else(|e| panic!("{}: {e:?}", row.event_type)))
+        .collect();
+    assert_eq!(check_batch(&drafts), Ok(()));
+    assert!(!w.held(issued), "the challenge is taken");
+    payload(issued_row)
+}
+
+/// A resume under passkey step-up records its evidence, which the runtime then judges, and commits
+/// its `StepUpAsserted` beside it (DEC-2128 items 1 to 3 applied to resume, DEC-2102 item 4).
+#[test]
+fn a_passkey_resume_records_its_evidence_then_its_assertion() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let issued = w.command_challenge("resume", "resume");
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let evidence = Passkeyed::evidence(&issued, "passkey");
+    let reply = post(
+        &w.f,
+        &ws("/agents/agt_a/resume"),
+        &w.cookie,
+        Some(KEY_3),
+        resume_body(&evidence, Some(signed.json(CREDENTIAL))).as_bytes(),
+    );
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let command = asserted_command(&w, &issued, "resume");
+    assert_eq!(text(&command, &["command"]), "resume");
+    assert_eq!(
+        command.get("step_up").map(to_canonical),
+        Some(to_canonical(&json(&evidence)))
+    );
+}
+
+/// A Stop with release under passkey step-up, bound to what it confirms, as the resume.
+#[test]
+fn a_passkey_stop_with_release_records_its_evidence_then_its_assertion() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let issued = w.command_challenge("stop", "stop_release");
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let evidence = Passkeyed::evidence(&issued, "passkey");
+    let reply = post(
+        &w.f,
+        &ws("/agents/agt_a/stop"),
+        &w.cookie,
+        Some(KEY_3),
+        stop_body(&evidence, Some(signed.json(CREDENTIAL))).as_bytes(),
+    );
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let command = asserted_command(&w, &issued, "stop");
+    assert_eq!(text(&command, &["command"]), "stop");
+    assert_eq!(command.get("release"), Some(&Value::Bool(true)));
+    assert_eq!(
+        command.get("step_up").map(to_canonical),
+        Some(to_canonical(&json(&evidence)))
+    );
+}
+
+/// An assertion beside evidence that is not a passkey's is `invalid` at `/step_up_assertion`, and
+/// nothing is recorded (DEC-2128 item 1).
+#[test]
+fn an_assertion_beside_cli_confirm_evidence_on_a_resume_or_stop_is_invalid() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let before = control(&w.f).len();
+    let issued = w.command_challenge("resume", "resume");
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let cli = Passkeyed::evidence(&issued, "cli_confirm");
+    for (path, body) in [
+        (
+            "/agents/agt_a/resume",
+            resume_body(&cli, Some(signed.json(CREDENTIAL))),
+        ),
+        (
+            "/agents/agt_a/stop",
+            stop_body(&cli, Some(signed.json(CREDENTIAL))),
+        ),
+        (
+            "/agents/agt_a/resume",
+            resume_body("null", Some(signed.json(CREDENTIAL))),
+        ),
+    ] {
+        let reply = post(&w.f, &ws(path), &w.cookie, Some(KEY_3), body.as_bytes());
+        invalid_at_the_assertion(&reply);
+    }
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+    assert!(w.held(&issued), "nothing is taken");
+}
+
+/// A passkey resume whose assertion the port refuses, here one signed over another challenge, or
+/// that carries none, is still recorded, with `null` evidence that the runtime refuses, and commits
+/// no `StepUpAsserted` (DEC-2102 item 4): the brake's record is never lost to its step-up.
+#[test]
+fn an_unverified_passkey_resume_is_recorded_with_null_evidence_and_no_assertion() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let issued = w.command_challenge("resume", "resume");
+    let evidence = Passkeyed::evidence(&issued, "passkey");
+    let forged = w.signer.assert(b"another challenge", 11);
+    for (key, assertion) in [
+        (KEY_3, Some(forged.json(CREDENTIAL))),
+        ("k6Z-9_ffffffffff", None),
+    ] {
+        let reply = post(
+            &w.f,
+            &ws("/agents/agt_a/resume"),
+            &w.cookie,
+            Some(key),
+            resume_body(&evidence, assertion).as_bytes(),
+        );
+        assert_eq!(
+            reply.status,
+            202,
+            "{}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        let rows = control(&w.f);
+        let last = rows.last().expect("rows");
+        assert_eq!(last.event_type, "OwnerCommandIssued");
+        assert_eq!(payload(last).get("step_up"), Some(&Value::Null));
+    }
+    assert!(
+        events(&w.f, "StepUpAsserted").len() == 2,
+        "only the confirm's and the deploy's"
+    );
+    assert!(w.held(&issued), "the challenge is kept");
+}
+
+/// A passkey resume sent again under its key answers as the first did, though its challenge is
+/// gone, and appends nothing: no second command and no second `StepUpAsserted` (§3.4 step 1,
+/// DEC-2140 item 3).
+#[test]
+fn a_replayed_passkey_resume_answers_as_the_first_and_appends_nothing() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let issued = w.command_challenge("resume", "resume");
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = resume_body(
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let send = || {
+        post(
+            &w.f,
+            &ws("/agents/agt_a/resume"),
+            &w.cookie,
+            Some(KEY_3),
+            body.as_bytes(),
+        )
+    };
+    let first = send();
+    assert_eq!(
+        first.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&first.body)
+    );
+    let after = control(&w.f).len();
+    let again = send();
+    assert_eq!(
+        again.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(
+        text(&self::body(&again), &["command_id"]),
+        text(&self::body(&first), &["command_id"])
+    );
+    assert_eq!(control(&w.f).len(), after, "nothing more is appended");
+}

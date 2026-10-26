@@ -1337,6 +1337,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "ExternalActivityIngested"): (1,),
     ("acct", "RejectObserved"): (1,),
     ("acct", "OrderAbandoned"): (1,),
+    ("acct", "ClockAdvanced"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2, 3),
@@ -1447,6 +1448,13 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("client_order_id", STR),
         ("intent_id", IDENT_T),
         ("reason", one_of("intent_too_old", "gate_recheck", "released_to_owner", "unprotected_interval_limit")),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # v0.94 §9.5 (DEC-2808): the executor's copy of the scheduler's tick, journaled when the tick
+    # returns a risk record or crosses New York midnight. It carries the tick as `clock` and, like
+    # every account-stream row the executor's fold reads, as `risk_clock`: rules 301 and 302.
+    ("acct", "ClockAdvanced", 1): rec(
+        ("clock", RISK_CLOCK),
         ("risk_clock", RISK_CLOCK),
     ),
     # v0.75 §9.5 (DEC-2337): one instrument's close-position under an account kill switch,
@@ -2012,6 +2020,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("279", coded, "schema", "payload.reason_code")
         else:
             rule("280", not blocked or noticed, "schema", "payload.cause")
+    if event_type == "ClockAdvanced":
+        account_clock_rules(draft, skip, rule)
     if event_type == "ExternalActivityIngested":
         fill = p["source"] == "fill"
         if fill:
@@ -2761,6 +2771,25 @@ def account_switch_rules(draft: dict, skip: frozenset[str], rule) -> None:
         ("295", draft["causation_id"] is not None, "causation_id"),
         ("296", not overlap, "payload.deferred"),
     ]
+    for name, holds, path in clauses:
+        if not holds and f"rule.{name}" not in skip:
+            rule(name, False, "schema", path)
+            return
+
+
+def account_clock_rules(draft: dict, skip: frozenset[str], rule) -> None:
+    """Rules 301 and 302 (DEC-2808) on the account stream's `ClockAdvanced` copy, in that order, the
+    first that fails reported."""
+    p = draft["payload"]
+    same = p["risk_clock"] == p["clock"]
+    if "loose.301.later" in skip:
+        same = p["risk_clock"] <= p["clock"]
+    clauses = [
+        ("301", same, "payload.risk_clock"),
+        ("302", draft["causation_id"] is not None, "causation_id"),
+    ]
+    if "order.rule_302_first" in skip:
+        clauses.reverse()
     for name, holds, path in clauses:
         if not holds and f"rule.{name}" not in skip:
             rule(name, False, "schema", path)

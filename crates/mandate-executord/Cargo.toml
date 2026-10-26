@@ -40,4 +40,4 @@ mandate-journal-pg.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["io-util", "net", "rt-multi-thread", "time"] }

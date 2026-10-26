@@ -483,6 +483,10 @@ pub(crate) const ACCOUNT_RESTRICTED: &str = "account_restricted";
 /// The dry run's reason code for an opening in an instrument where another still works: trading
 /// spec §5.3 rule 6's, one working non-protective order per instrument (DEC-1150 item 5).
 pub(crate) const WORKING_ORDER_LIMIT: &str = "working_order_limit";
+/// An opening the dry run allowed with checks deferred, for which the builder produced no plan: no
+/// request version can both bind no plan and name a deferral, so the runtime refuses it itself
+/// rather than ask no one unseen (DEC-2810, DEC-2515 item 1).
+pub(crate) const PLAN_REQUIRED: &str = "plan_required";
 pub(crate) const REASON_STARTUP_HOLD: &str = "awaiting_reconciliation";
 pub(crate) const REASON_OWNER_PAUSE: &str = "owner_pause";
 pub(crate) const REASON_OWNER_RESUME: &str = "owner_resume";

@@ -7,11 +7,12 @@ use mandate_accounting::InstrumentId;
 use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
-    BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, EventId,
-    ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot,
-    IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, Ports,
-    ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle,
+    AccountDeclaration, AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOrder,
+    BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect,
+    EventDraft, EventId, ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input,
+    InstrumentSnapshot, IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion,
+    MandateView, OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch,
+    fold, handle, limit_fills, recorded_fills,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
@@ -23,6 +24,7 @@ use mandate_time::{ExchangeCalendar, UtcNanos};
 use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches};
 use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
+use crate::robinhood::AccountReads;
 
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -37,6 +39,20 @@ pub trait Broker {
     /// The broker's capability profile, set on the state before `Input::Started` (DEC-838 item 5).
     fn profile(&self) -> Result<CapabilityProfile, ProfileError>;
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError>;
+    /// The account in one read, for a broker that publishes no account activity (Robinhood,
+    /// DEC-933 item 1, DEC-2386 item 4); `None` for a broker that answers the four reads a
+    /// reconciliation asks for, as Alpaca does.
+    fn account_reads(&mut self) -> Option<Result<AccountReads, ConnectorError>> {
+        None
+    }
+
+    /// The account type and day-trading regime the broker's connector declares (trading spec
+    /// §7.2, DEC-840), which each `AccountSnapshotRecorded` journals (journal spec §9.35,
+    /// DEC-2398). `None`, the default, declares none: the snapshot journals `null`, and a reader
+    /// holds what depends on it.
+    fn declared(&self) -> Option<AccountDeclaration> {
+        None
+    }
 }
 
 /// The protections port could not answer. The process stops rather than hand an opening without
@@ -137,12 +153,16 @@ enum Read {
     /// The broker answered something that is not the read's answer, or the request could not be
     /// sent.
     Unusable,
+    /// An answer handed before the snapshot did not commit; the pass stops as a handoff does.
+    Halted,
 }
 
 /// How one input's effects ended.
 enum Ran {
     Committed,
     InDoubt,
+    /// The journal refused the batch as invalid: nothing of it committed (DEC-2805).
+    Refused,
     Stopped,
 }
 
@@ -187,6 +207,8 @@ pub struct ExecutorProcess<S, B> {
     /// never floods (E21-26, design §2.1 and §8.2, RB-07). Cleared by the next commit, so the
     /// following outage raises it again.
     journal_down: bool,
+    /// Whether a refused batch was already alerted to the operator in this process (DEC-2805).
+    journal_refused: bool,
     /// Each followed agent's deployed mandate version, from its `AgentDeployed`, which the core's
     /// mandate port answers with (DEC-2034 item 1).
     deployed: BTreeMap<AgentId, MandateVersion>,
@@ -245,6 +267,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             unreadable: BTreeSet::new(),
             held: BTreeSet::new(),
             journal_down: false,
+            journal_refused: false,
             deployed: BTreeMap::new(),
             max_chain: config.max_chain,
             written_at: now,
@@ -457,7 +480,13 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// one of the fold's orders): every status it reports is final. A read that fails, or a status
     /// it does not name, keeps the executor running (DEC-2347 item 3.5).
     fn broker_quiet(&mut self) -> bool {
-        match self.read(&BrokerRequest::ListOpenOrders) {
+        let listed = match self.broker.account_reads() {
+            Some(read) => read
+                .map(|reads| BrokerOutcome::OpenOrders(reads.open_orders))
+                .map_err(read_error),
+            None => self.read(&BrokerRequest::ListOpenOrders),
+        };
+        match listed {
             Ok(BrokerOutcome::OpenOrders(orders)) => orders.iter().all(|order| {
                 matches!(
                     order.status.as_str(),
@@ -541,9 +570,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         true
     }
 
-    /// Journals the mark `draft` with the event time `at`; whether it committed. An append in
+    /// Journals the mark `draft` with the event time `at`; whether the pass may go on. An append in
     /// doubt keeps the draft, unchanged, to be offered again first on the next pass, and raises the
-    /// journal's one opaque alert for the outage.
+    /// journal's one opaque alert for the outage. A mark the journal refuses is dropped, alerted to
+    /// the operator once, and the pass goes on (DEC-2805 item 3): a missing mark only leaves the
+    /// risk mark stale, which holds openings at the gate, and never stops an exit.
     fn append_mark(
         &mut self,
         now: UtcNanos,
@@ -552,9 +583,19 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         alerts: &mut Vec<Alert>,
     ) -> bool {
         self.written_at = at;
-        match self.journal(now, std::slice::from_ref(&draft)) {
+        match self.journal_refusable(now, std::slice::from_ref(&draft)) {
             Ran::Committed => {
                 self.journal_down = false;
+                true
+            }
+            Ran::Refused => {
+                if !self.journal_refused {
+                    self.journal_refused = true;
+                    alerts.push(Alert {
+                        key: "journal_refused",
+                        subject: None,
+                    });
+                }
                 true
             }
             Ran::InDoubt => {
@@ -863,10 +904,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             }
         }
         if !drafts.is_empty() {
-            match self.journal(now, &drafts) {
+            match self.journal_refusable(now, &drafts) {
                 Ran::Committed => {
                     self.journal_down = false;
                 }
+                Ran::Refused => return self.refused(now, at, input, alerts, depth),
                 Ran::InDoubt => {
                     if !self.journal_down {
                         self.journal_down = true;
@@ -941,23 +983,32 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         true
     }
 
-    /// The reconciliation the core asked for (trading spec §11): the broker's four reads as one
-    /// snapshot, its account reported first, as the shell's start does. The snapshot keeps the
+    /// The reconciliation the core asked for (trading spec §11): the broker's reads as one
+    /// snapshot (its four reads, or a one-read broker's account read after its unlisted orders
+    /// are listed, [`Self::snapshot`]), its account reported first, as the shell's start does. The snapshot keeps the
     /// head it was taken at, before its own report, so the reconciliation reads that report as
     /// the snapshot's own and counts every fill since the base it replaced once (DEC-948 item 5);
     /// a fill the broker already booked in the reported cash is never subtracted twice. A read
     /// whose answer is lost leaves it due for the next pass, since a read changes nothing at the broker, and the pass goes on, so a kill switch
     /// never waits on it (`AGENTS.md` rule 13). It stays due until its snapshot is handed.
     fn reconciliation(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>, depth: usize) -> bool {
-        let snapshot = match self.snapshot() {
+        self.reconcile = false;
+        let snapshot = match self.snapshot(now, alerts, depth) {
             Ok(snapshot) => snapshot,
-            Err(Read::Lost) => return true,
+            Err(Read::Lost) => {
+                self.reconcile = true;
+                return true;
+            }
+            Err(Read::Halted) => {
+                self.reconcile = true;
+                return false;
+            }
             Err(Read::Unusable) => {
+                self.reconcile = true;
                 self.lifecycle.observe(now, Lifecycled::Failed);
                 return false;
             }
         };
-        self.reconcile = false;
         let reported = Input::BrokerUpdate(BrokerUpdate::Account(snapshot.account.clone()));
         if !self.hand(now, self.written_at, reported, alerts, depth) {
             self.reconcile = true;
@@ -972,13 +1023,44 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         )
     }
 
-    /// The broker's open orders, positions, account and activity since the executor's cursor.
-    fn snapshot(&mut self) -> Result<BrokerSnapshot, Read> {
+    /// The broker's open orders, positions, account and activity since the executor's cursor. A
+    /// broker that publishes no activity is read once instead, and its fills are the ones its
+    /// order records and positions imply, an entry's (`recorded_fills`, DEC-1151) and a
+    /// risk-reducing sell's at its limit (`limit_fills`, DEC-2300), with the cursor left where it
+    /// was (DEC-2386 item 4), as the shell's reconciler takes them.
+    fn snapshot(
+        &mut self,
+        now: UtcNanos,
+        alerts: &mut Vec<Alert>,
+        depth: usize,
+    ) -> Result<BrokerSnapshot, Read> {
         let since = self
             .state
             .checkpoint()
             .cloned()
             .unwrap_or_else(|| ActivityCursor(String::new()));
+        if let Some(read) = self.broker.account_reads() {
+            let mut reads = read.map_err(read_error)?;
+            if self.list_unlisted(&reads.open_orders, now, alerts, depth)? {
+                reads = self
+                    .broker
+                    .account_reads()
+                    .ok_or(Read::Unusable)?
+                    .map_err(read_error)?;
+            }
+            let mut fills = recorded_fills(&self.state, &reads.positions);
+            fills.extend(limit_fills(&self.state, &reads.positions).map_err(|_| Read::Unusable)?);
+            return Ok(BrokerSnapshot {
+                open_orders: reads.open_orders,
+                positions: reads.positions,
+                account: reads.account,
+                fills,
+                cursor: since,
+                reason: ReconcileReason::Startup,
+                declared: self.broker.declared(),
+                taken_at_head: Seq(self.account_head()),
+            });
+        }
         let BrokerOutcome::OpenOrders(open_orders) = self.read(&BrokerRequest::ListOpenOrders)?
         else {
             return Err(Read::Unusable);
@@ -1001,16 +1083,75 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             fills,
             cursor,
             reason: ReconcileReason::Startup,
+            declared: self.broker.declared(),
             taken_at_head: Seq(self.account_head()),
         })
     }
 
-    fn read(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, Read> {
-        match self.broker.call(request) {
-            Ok(outcome) => Ok(outcome),
-            Err(ConnectorError::Unknown(_)) => Err(Read::Lost),
-            Err(_) => Err(Read::Unusable),
+    /// Before a one-read broker's snapshot is reconciled, each of our sent orders that may still
+    /// work but that the read no longer lists as working is listed, and the answer handed to the
+    /// core, which adopts the one record naming it at our prices (DEC-862, DEC-1150 item 2,
+    /// DEC-2395 item 2). Robinhood reports a fill only on the order's record, so this is what
+    /// books an order that filled between two reads before its position is compared: without it,
+    /// every fill would read as an unexplained position and pause the agent (DEC-2800).
+    ///
+    /// Whether an order may still work is read as each is reached, so one an earlier answer's
+    /// effects settled (a nested reconciliation that booked it) is skipped, and a terminal order
+    /// is never listed.
+    ///
+    /// Returns whether any answer was handed: its effects may have journaled and sent more (a
+    /// protective order placed on the fill), so the snapshot then reads the account again, and its
+    /// reads are never older than the head it is taken at.
+    ///
+    /// # Errors
+    /// [`Read::Lost`] for a listing whose answer was lost, [`Read::Unusable`] for one that could
+    /// not be sent, and [`Read::Halted`] when a handed answer did not commit.
+    fn list_unlisted(
+        &mut self,
+        working: &[BrokerOrder],
+        now: UtcNanos,
+        alerts: &mut Vec<Alert>,
+        depth: usize,
+    ) -> Result<bool, Read> {
+        let listed: BTreeSet<&str> = working
+            .iter()
+            .filter_map(|order| order.client_order_id.as_deref())
+            .collect();
+        let unlisted: Vec<_> = self
+            .state
+            .orders()
+            .values()
+            .filter(|order| order.state != OrderState::Intent)
+            .filter(|order| !listed.contains(order.client_order_id.as_str()))
+            .map(|order| order.client_order_id.clone())
+            .collect();
+        let mut handed = false;
+        for id in unlisted {
+            let open = self
+                .state
+                .orders()
+                .get(&id)
+                .is_some_and(|order| !order.state.is_terminal());
+            let Some(listing) = open.then(|| self.state.listing(&id)).flatten() else {
+                continue;
+            };
+            let answer = self.read(&BrokerRequest::ListOrders(listing))?;
+            if !self.hand(
+                now,
+                self.written_at,
+                Input::Broker(Ok(answer)),
+                alerts,
+                depth,
+            ) {
+                return Err(Read::Halted);
+            }
+            handed = true;
         }
+        Ok(handed)
+    }
+
+    fn read(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, Read> {
+        self.broker.call(request).map_err(read_error)
     }
 
     fn account_head(&self) -> u64 {
@@ -1020,8 +1161,59 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             .map_or(0, |seq| seq.0)
     }
 
-    /// Journals `drafts` as one batch on the account stream and folds what committed.
+    /// DEC-2805: the journal refused the batch `input` drafted. Nothing of it committed and none of
+    /// its requests is sent; the core forgets it and holds every agent's openings, alerting the
+    /// owner once, and the pass goes on, so exits, protection and the kill switch never stop on a
+    /// record the journal cannot take (`AGENTS.md` rule 13). The operator is alerted once per
+    /// process. A refused reconciliation is one that did not pass. Where [`held_on_refusal`] says
+    /// the refusal cannot be held, the process stops.
+    fn refused(
+        &mut self,
+        now: UtcNanos,
+        at: UtcNanos,
+        input: Input,
+        alerts: &mut Vec<Alert>,
+        depth: usize,
+    ) -> bool {
+        if !held_on_refusal(&input) {
+            self.lifecycle.observe(now, Lifecycled::Failed);
+            return false;
+        }
+        if !self.journal_refused {
+            self.journal_refused = true;
+            alerts.push(Alert {
+                key: "journal_refused",
+                subject: None,
+            });
+        }
+        if matches!(input, Input::BrokerSnapshot(_)) {
+            self.lifecycle
+                .observe(now, Lifecycled::Reconciled { passed: false });
+        }
+        self.hand(
+            now,
+            at,
+            Input::BatchRefused,
+            alerts,
+            depth.saturating_add(1),
+        )
+    }
+
+    /// Journals `drafts` as one batch on the account stream and folds what committed; a refused
+    /// batch stops the process.
     fn journal(&mut self, now: UtcNanos, drafts: &[EventDraft]) -> Ran {
+        match self.journal_refusable(now, drafts) {
+            Ran::Refused => {
+                self.lifecycle.observe(now, Lifecycled::Failed);
+                Ran::Stopped
+            }
+            ran => ran,
+        }
+    }
+
+    /// Journals `drafts` as one batch on the account stream and folds what committed, answering
+    /// [`Ran::Refused`] for a batch the journal refused as invalid.
+    fn journal_refusable(&mut self, now: UtcNanos, drafts: &[EventDraft]) -> Ran {
         let Some(account) = self.account.clone() else {
             return Ran::Stopped;
         };
@@ -1070,9 +1262,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 self.lifecycle.observe(now, Lifecycled::Fenced);
                 Ran::Stopped
             }
-            AppendOutcome::HeadMismatch { .. }
-            | AppendOutcome::IdempotencyConflict { .. }
-            | AppendOutcome::Invalid { .. } => {
+            AppendOutcome::Invalid { .. } => Ran::Refused,
+            AppendOutcome::HeadMismatch { .. } | AppendOutcome::IdempotencyConflict { .. } => {
                 self.lifecycle.observe(now, Lifecycled::Failed);
                 Ran::Stopped
             }
@@ -1090,6 +1281,14 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             fold(&mut self.state, &event).ok()?;
         }
         Some(self.account_head())
+    }
+}
+
+/// A broker read that did not answer: a lost answer may be retried, anything else is unusable.
+fn read_error(error: ConnectorError) -> Read {
+    match error {
+        ConnectorError::Unknown(_) => Read::Lost,
+        _ => Read::Unusable,
     }
 }
 
@@ -1138,6 +1337,15 @@ fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> 
     };
     let key = if opens { "opening_held" } else { "exit_held" };
     Some((key, handoff.intent_id.0.0.clone()))
+}
+
+/// Whether a refusal of the batch `input` drafted is held and the process goes on (DEC-2805 item
+/// 1), or stops it (item 4). A refused hold leaves nothing safe to record. A refused start has
+/// already marked the core started and lost its recovery, the lookups of orders in doubt, the
+/// resent cancels and the startup reconciliation, which `Input::Started` cannot be handed again
+/// to redo; the restart redoes them, before any trading.
+fn held_on_refusal(input: &Input) -> bool {
+    !matches!(input, Input::BatchRefused | Input::Started(_))
 }
 
 #[cfg(test)]
@@ -1235,6 +1443,17 @@ mod tests {
         );
         assert!(port.covers(&agent("agenta"), &InstrumentId::new("MSFT")?));
         assert!(!port.covers(&agent("agenta"), &InstrumentId::new("AAPL")?));
+        Ok(())
+    }
+
+    /// DEC-2805: a refusal is held for every input but a refused hold and a refused start, which
+    /// stop the process (item 4).
+    #[test]
+    fn a_refusal_is_held_unless_it_is_of_the_hold_or_the_start() -> Result<(), Error> {
+        assert!(!held_on_refusal(&Input::BatchRefused));
+        assert!(!held_on_refusal(&Input::Started(WriterEpoch(1))));
+        assert!(held_on_refusal(&Input::Tick(RiskClock::from_secs(0))));
+        assert!(held_on_refusal(&handoff(Purpose::Open)?));
         Ok(())
     }
 }
