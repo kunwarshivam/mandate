@@ -567,11 +567,12 @@ fn an_unknown_order_with_no_match_stays_unknown_and_blocks_a_new_opening() {
             )
         })
         .collect();
-    assert_eq!(
-        decided.last(),
-        Some(&("deny".to_owned(), "working_order_limit".to_owned())),
-        "the restart's opening is held while the Unknown one works, by the runtime's dry run \
-         (trading spec §5.3 rule 6, DEC-1150 item 5): {decided:?}"
+    assert!(
+        decided
+            .iter()
+            .all(|(_, reason)| reason != "working_order_limit"),
+        "the restart's opening is held while the Unknown one works, before any decision \
+         (trading spec §5.3 rule 6, DEC-2843): {decided:?}"
     );
     assert_eq!(
         gates.len(),
