@@ -10,6 +10,7 @@
 //! pin; the models are [`registry`], the registry V-007 reads, each with a fixed projection of its
 //! stored content object. Nothing about how a model performed is served (DEC-99, DEC-126).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::extract::rejection::PathRejection;
@@ -37,6 +38,23 @@ const SYMBOL_MAX_CHARS: usize = 32;
 
 /// The groups of an asset id: the mandate schema's lowercase `uuid`.
 const ASSET_ID_GROUPS: [usize; 5] = [8, 4, 4, 4, 12];
+
+/// The read model's bounds on a model's members (`read-models/signal-models`): a list of
+/// parameters or constraints holds at most 32 items.
+const LIST_MAX_ITEMS: usize = 32;
+
+/// The longest parameter name, in characters (`^[a-z][a-z0-9_]{0,63}$`).
+const NAME_MAX_CHARS: usize = 64;
+
+/// A model version's parts, and the most digits each may have.
+const VERSION_PARTS: usize = 3;
+const VERSION_PART_MAX_DIGITS: usize = 6;
+
+/// The content projection's text bounds, in characters.
+const AUTHORSHIP_MAX_CHARS: usize = 64;
+const METHODOLOGY_MAX_CHARS: usize = 4000;
+const CONSTRAINT_MAX_CHARS: usize = 200;
+const TYPE_MAX_CHARS: usize = 32;
 
 /// `GET /v1/workspaces/{ws}/instruments`: `read-models/instruments`.
 pub async fn instruments(
@@ -160,16 +178,31 @@ fn instrument_value(snapshot: &Snapshot) -> Value {
 
 /// The registry V-007 reads, folded from the create's own facts, sorted by id, each model with its
 /// registration row's `recorded_at` and its content's projection; `None` when the fold cannot
-/// read the control stream.
+/// read the control stream. A model whose registration the read model's schema cannot state (a
+/// version off the mandate schema's pattern, or a parameter name off its pattern or more than 32 of
+/// them) is omitted, as an unpinnable instrument is: no mandate document can name it.
 fn listed_models(control: &[StoredEvent], store: &dyn ArtifactSource) -> Option<Vec<Value>> {
     let facts = control_facts(control, store).ok()?;
+    let mut registered_at: BTreeMap<String, &str> = BTreeMap::new();
+    for row in control {
+        let payload = payload(row);
+        let text = |name| payload.get(name).and_then(Value::as_str);
+        if row.event_type == "ConfigSnapshotRegistered"
+            && text("kind") == Some("model_version")
+            && let Some(id) = text("model_id")
+        {
+            registered_at.insert(id.to_owned(), row.recorded_at.as_str());
+        }
+    }
     let mut listed = Vec::new();
     for (id, model) in registry(&facts) {
-        let registration = control.iter().rev().find(|row| {
-            row.event_type == "ConfigSnapshotRegistered"
-                && text_member(row, "kind").as_deref() == Some("model_version")
-                && text_member(row, "model_id").as_deref() == Some(id.as_str())
-        })?;
+        let at = registered_at.get(id.as_str())?;
+        let nameable = version(&model.version)
+            && model.params.len() <= LIST_MAX_ITEMS
+            && model.params.iter().all(|p| param_name(p));
+        if !nameable {
+            continue;
+        }
         let params = model.params.iter().map(|p| string(p)).collect();
         listed.push(object(vec![
             ("model_id", string(id.as_str())),
@@ -178,17 +211,37 @@ fn listed_models(control: &[StoredEvent], store: &dyn ArtifactSource) -> Option<
             ("params", Value::Array(params)),
             ("admits_instruments", Value::Bool(model.admits_instruments)),
             ("content", content(store, model.content_hash)),
-            ("registered_at", string(&registration.recorded_at)),
+            ("registered_at", string(at)),
         ]));
     }
     Some(listed)
 }
 
-fn text_member(row: &StoredEvent, name: &str) -> Option<String> {
-    payload(row)
-        .get(name)
-        .and_then(Value::as_str)
-        .map(str::to_owned)
+/// The mandate schema's signal model version: three dot-separated parts, each `0` or one to six
+/// digits with no leading zero.
+fn version(text: &str) -> bool {
+    let parts: Vec<&str> = text.split('.').collect();
+    parts.len() == VERSION_PARTS
+        && parts.iter().all(|part| {
+            let digits = part.bytes().all(|b| b.is_ascii_digit());
+            let unpadded = *part == "0" || !part.starts_with('0');
+            digits && unpadded && (1..=VERSION_PART_MAX_DIGITS).contains(&part.len())
+        })
+}
+
+/// A parameter name: `^[a-z][a-z0-9_]{0,63}$`.
+fn param_name(text: &str) -> bool {
+    let mut chars = text.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        && text.len() <= NAME_MAX_CHARS
+}
+
+/// Whether `value` is text of at most `max` characters.
+fn text_within(value: &Value, max: usize) -> bool {
+    value
+        .as_str()
+        .is_some_and(|text| text.chars().count() <= max)
 }
 
 fn content_ref(digest: Digest) -> String {
@@ -196,9 +249,10 @@ fn content_ref(digest: Digest) -> String {
 }
 
 /// The fixed projection of the object stored under `digest` (DEC-2136 item 4): `authorship` and
-/// `methodology` when they are text, and of `params_schema` only its text `constraints` and each
-/// parameter's text `name` and `type` and integer `min` and `max`, member by member, each only when
-/// present; `null` when the store cannot give or parse the object.
+/// `methodology` when they are text within their bounds, and of `params_schema` only its
+/// `constraints` and `params`, each list kept only when it and every item are within the schema's
+/// bounds; `null` when the store cannot give or parse the object. A member off its type or bound is
+/// absent.
 fn content(store: &dyn ArtifactSource, digest: Digest) -> Value {
     let Some(stored) = get_artifact(store, &ArtifactRef::from_digest(digest))
         .ok()
@@ -208,8 +262,11 @@ fn content(store: &dyn ArtifactSource, digest: Digest) -> Value {
         return Value::Null;
     };
     let mut members = Vec::new();
-    for name in ["authorship", "methodology"] {
-        if let Some(text) = stored.get(name).filter(|v| v.as_str().is_some()) {
+    for (name, max) in [
+        ("authorship", AUTHORSHIP_MAX_CHARS),
+        ("methodology", METHODOLOGY_MAX_CHARS),
+    ] {
+        if let Some(text) = stored.get(name).filter(|v| text_within(v, max)) {
             members.push((name, text.clone()));
         }
     }
@@ -222,21 +279,24 @@ fn content(store: &dyn ArtifactSource, digest: Digest) -> Value {
     object(members)
 }
 
-/// `params_schema`'s projection: its `constraints` when every one is text, and its `params` when
-/// every one is an object with a text `name`, each with only its `name`, text `type`, and integer
+/// `params_schema`'s projection: its `constraints` when there are at most 32, each text of at most
+/// 200 characters, and its `params` when there are at most 32, each an object with a valid
+/// `name`, each with only its `name`, its `type` (text of at most 32 characters), and its integer
 /// `min` and `max`.
 fn params_schema(schema: &Value) -> Value {
     let mut members = Vec::new();
     let constraints = schema
         .get("constraints")
         .and_then(Value::as_array)
-        .filter(|items| items.iter().all(|item| item.as_str().is_some()));
+        .filter(|items| items.len() <= LIST_MAX_ITEMS)
+        .filter(|items| items.iter().all(|i| text_within(i, CONSTRAINT_MAX_CHARS)));
     if let Some(items) = constraints {
         members.push(("constraints", Value::Array(items.to_vec())));
     }
     let params = schema
         .get("params")
         .and_then(Value::as_array)
+        .filter(|items| items.len() <= LIST_MAX_ITEMS)
         .and_then(|items| items.iter().map(param).collect::<Option<Vec<Value>>>());
     if let Some(items) = params {
         members.push(("params", Value::Array(items)));
@@ -244,11 +304,13 @@ fn params_schema(schema: &Value) -> Value {
     object(members)
 }
 
-/// One parameter's projection, or `None` for one that is not an object with a text `name`.
+/// One parameter's projection, or `None` for one that is not an object with a valid `name`.
 fn param(item: &Value) -> Option<Value> {
-    let name = item.get("name").filter(|v| v.as_str().is_some())?;
+    let name = item
+        .get("name")
+        .filter(|v| v.as_str().is_some_and(param_name))?;
     let mut members = vec![("name", name.clone())];
-    if let Some(kind) = item.get("type").filter(|v| v.as_str().is_some()) {
+    if let Some(kind) = item.get("type").filter(|v| text_within(v, TYPE_MAX_CHARS)) {
         members.push(("type", kind.clone()));
     }
     for bound in ["min", "max"] {
