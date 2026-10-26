@@ -11,12 +11,10 @@
 //! and never asks the port (INF-10); exits, protective orders, kill switches and reconciliation
 //! never ask it (INF-13).
 
-use mandate_canon::Digest;
+use mandate_canon::{Digest, Value, parse};
 use mandate_journal::StoredEvent;
-use mandate_runtime::{Input, ModelOutput, RiskClock};
-
-/// The story the stubs below report (DEC-77, DEC-137).
-pub const STORY: &str = "E15-14";
+use mandate_runtime::{Input, ModelOutput, Observation, RiskClock};
+use mandate_time::UtcNanos;
 
 /// One pinned model's evaluation at a tick: the host's output, the canonical bytes of the closes
 /// it read, and the source those closes came from.
@@ -36,8 +34,6 @@ pub trait Models {
 /// Why the models' inputs could not be made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelsError {
-    /// The body of every stub in the tests PR (DEC-77, DEC-83).
-    Unimplemented { story: &'static str },
     /// The agent stream holds a `ModelOutputRecorded` whose payload does not read.
     Unreadable,
 }
@@ -52,8 +48,56 @@ pub fn fresh(
     agent: &[StoredEvent],
     evaluated: Vec<Evaluated>,
 ) -> Result<Vec<Evaluated>, ModelsError> {
-    let _ = (agent, evaluated);
-    Err(ModelsError::Unimplemented { story: STORY })
+    let journaled = agent
+        .iter()
+        .filter(|row| row.event_type == "ModelOutputRecorded")
+        .map(journaled_key)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(evaluated
+        .into_iter()
+        .filter(|e| {
+            let key = key_of(&e.output);
+            !journaled.iter().any(|j| *j == key)
+        })
+        .collect())
+}
+
+/// What makes two outputs the same record: model, version, instrument, and `as_of` as the
+/// payload writes it.
+type OutputKey = (String, String, String, Option<String>);
+
+fn key_of(output: &ModelOutput) -> OutputKey {
+    (
+        output.model_id.clone(),
+        output.model_version.clone(),
+        output.instrument_id.as_str().to_owned(),
+        stamp(output.as_of),
+    )
+}
+
+/// `at` as journal spec §4.7 writes a whole second, the form `ModelOutputRecorded`'s `as_of` takes.
+fn stamp(at: RiskClock) -> Option<String> {
+    UtcNanos::from_parts(at.secs(), 0)
+        .ok()
+        .map(|t| t.to_string())
+}
+
+fn journaled_key(row: &StoredEvent) -> Result<OutputKey, ModelsError> {
+    let body = parse(&row.body).map_err(|_| ModelsError::Unreadable)?;
+    let payload = body.get("payload").ok_or(ModelsError::Unreadable)?;
+    let text = |name: &str| {
+        payload
+            .get(name)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or(ModelsError::Unreadable)
+    };
+    Ok((
+        text("model_id")?,
+        text("model_version")?,
+        text("instrument_id")?,
+        Some(text("as_of")?),
+    ))
 }
 
 /// The core's inputs for `evaluated`, whose closes are stored under `data_ref`: its
@@ -61,8 +105,16 @@ pub fn fresh(
 /// `Input::ModelOutput`.
 ///
 /// # Errors
-/// None yet beyond the stub's.
+/// None: the result is a `Result` so a later check of the evaluation can refuse it.
 pub fn inputs(evaluated: &Evaluated, data_ref: Digest) -> Result<[Input; 2], ModelsError> {
-    let _ = (evaluated, data_ref);
-    Err(ModelsError::Unimplemented { story: STORY })
+    let output = &evaluated.output;
+    Ok([
+        Input::Observation(Observation {
+            source: evaluated.source.clone(),
+            instrument_id: Some(output.instrument_id.clone()),
+            as_of: output.as_of,
+            data_ref,
+        }),
+        Input::ModelOutput(output.clone()),
+    ])
 }

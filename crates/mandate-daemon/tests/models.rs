@@ -1,6 +1,5 @@
 //! The deployed runtime's pinned quant models (DEC-2383): which of the host's evaluations at a tick
-//! are new to the agent stream, and the core inputs one evaluation makes. Pending E15-14 on the
-//! stubs of `mandate_daemon::models`.
+//! are new to the agent stream, and the core inputs one evaluation makes.
 
 use std::collections::BTreeSet;
 
@@ -101,7 +100,6 @@ fn key(e: &Evaluated) -> (String, String, String, i64) {
 }
 
 #[test]
-#[ignore = "pending E15-14"]
 fn nothing_journaled_keeps_every_evaluation_in_order() {
     let all = vec![
         evaluated("quant.ma_crossover", "1.0.0", SPY, CLOSE),
@@ -112,7 +110,6 @@ fn nothing_journaled_keeps_every_evaluation_in_order() {
 }
 
 #[test]
-#[ignore = "pending E15-14"]
 fn an_output_already_journaled_is_not_handed_again() {
     let today = evaluated("quant.ma_crossover", "1.0.0", SPY, CLOSE);
     let agent = vec![recorded(4, &today)];
@@ -130,7 +127,6 @@ fn an_output_already_journaled_is_not_handed_again() {
 }
 
 #[test]
-#[ignore = "pending E15-14"]
 fn another_version_or_instrument_is_a_new_output() {
     let journaled = evaluated("quant.ma_crossover", "1.0.0", SPY, CLOSE);
     let agent = vec![recorded(4, &journaled)];
@@ -142,7 +138,6 @@ fn another_version_or_instrument_is_a_new_output() {
 }
 
 #[test]
-#[ignore = "pending E15-14"]
 fn only_a_model_output_record_counts_as_journaled() {
     let today = evaluated("quant.ma_crossover", "1.0.0", SPY, CLOSE);
     let observation = format!(
@@ -159,7 +154,6 @@ fn only_a_model_output_record_counts_as_journaled() {
 }
 
 #[test]
-#[ignore = "pending E15-14"]
 fn an_unreadable_model_output_record_refuses_rather_than_hands_twice() {
     let today = evaluated("quant.ma_crossover", "1.0.0", SPY, CLOSE);
     let broken = row(
@@ -175,7 +169,6 @@ fn an_unreadable_model_output_record_refuses_rather_than_hands_twice() {
 }
 
 #[test]
-#[ignore = "pending E15-14"]
 fn an_evaluation_is_its_observation_then_its_output() {
     let today = evaluated("quant.ma_crossover", "1.0.0", SPY, CLOSE);
     let data_ref = Digest::of(&today.closes);
@@ -201,7 +194,6 @@ fn an_evaluation_is_its_observation_then_its_output() {
 /// no `ModelOutputRecorded` names, in the order given. A plain test over proptest's runner, so the
 /// pending gate sees one function (DEC-77).
 #[test]
-#[ignore = "pending E15-14"]
 fn fresh_keeps_exactly_the_unjournaled_keys() {
     let models = ["quant.ma_crossover", "quant.momentum"];
     let versions = ["1.0.0", "1.1.0"];
