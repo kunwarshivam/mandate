@@ -482,9 +482,11 @@ fn expire(state: &RuntimeState, now: RiskClock, batch: &mut Batch<'_>) -> Result
     Ok(())
 }
 
-/// One evaluation (tick step 5). The order builder proposes, the mode and the mandate's instrument
-/// restrictions may narrow the proposal away, the gate's **dry run** may narrow it away again, and
-/// only then is a decision journaled and either proposed, asked, or refused. A dry-run allow
+/// One evaluation (tick step 5). The order builder proposes, the mode, the mandate's instrument
+/// restrictions and an opening of this runtime's still working in the instrument (trading spec
+/// §5.3 rule 6, DEC-2843) may narrow the proposal away with nothing journaled, the gate's **dry
+/// run** may narrow it away again, and only then is a decision journaled and either proposed,
+/// asked, or refused. A dry-run allow
 /// authorises nothing: the binding gate runs on the account stream (`AGENTS.md` rules 1 and 12).
 fn decide(
     state: &RuntimeState,
@@ -508,6 +510,9 @@ fn decide(
             .restricted_instruments
             .contains(&proposal.instrument)
     {
+        return Ok(());
+    }
+    if proposal.purpose.adds_risk() && state.opening_works_in(&proposal.instrument) {
         return Ok(());
     }
     let verdict = dry_run(state, ports, &proposal, now);
@@ -618,7 +623,8 @@ fn liquidity_value(read: &LiquidityRead) -> Result<Value, RuntimeError> {
 /// cover is denied `account_restricted` before the gate is asked, as trading spec §7.3 row 5
 /// denies one on a connection that is not usable, and one in an instrument where an opening this
 /// runtime proposed still works is denied `working_order_limit` (trading spec §5.3 rule 6,
-/// DEC-1150 item 5); every other proposal, and every exit whatever either says, is the gate's to
+/// DEC-1150 item 5), which only a grant's re-validation reaches, since an evaluation is not
+/// taken then (DEC-2843); every other proposal, and every exit whatever either says, is the gate's to
 /// judge (`AGENTS.md` rule 13, DEC-969 item 4). An opening the gate allows with checks deferred but
 /// for which the builder produced no plan is denied `plan_required`: no approval request can both
 /// bind no plan and name the deferrals, so it is refused, journaled and notified rather than left
