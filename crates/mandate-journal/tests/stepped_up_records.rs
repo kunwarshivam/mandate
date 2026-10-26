@@ -149,10 +149,7 @@ fn every_version_3_base_and_valid_draft_parses_at_its_version() {
         );
         let parsed = Draft::parse(&to_canonical(body))
             .map(|d| (d.event_type().to_owned(), d.schema_version()));
-        let got = parsed
-            .as_ref()
-            .ok()
-            .map(|(t, v)| (t.as_str(), Some(*v)));
+        let got = parsed.as_ref().ok().map(|(t, v)| (t.as_str(), Some(*v)));
         if got != Some(want) {
             failed.push(format!("base {}: {parsed:?}", name.as_str()));
         }
