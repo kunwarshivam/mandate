@@ -897,3 +897,164 @@ fn a_legacy_submission_without_a_bracket_is_a_plain_entry() {
         "a plain entry's start ends no other interval, not even an uncovered one"
     );
 }
+
+/// Whether an entry is plain is its request's: a start naming a bracket entry ends an uncovered
+/// interval, as any other start does; a start naming a plain entry ends none (DEC-966 item 2).
+#[test]
+fn only_a_start_naming_a_bracket_entry_ends_an_uncovered_interval() {
+    for (order_class, ended) in [(Value::Null, false), (text("bracket"), true)] {
+        let mut read = Positions::new(ACCOUNT, AGENT);
+        on(
+            &mut read,
+            "OrderRequestRecorded",
+            &request(AGENT, "open").with("order_class", order_class.clone()),
+        );
+        on(
+            &mut read,
+            "OrderSubmitted",
+            &submitted("mdt-1", ASSET, "buy", "10"),
+        );
+        on(
+            &mut read,
+            "ProtectionChanged",
+            &protection("unprotected_start", START + 1),
+        );
+        on(
+            &mut read,
+            "ProtectionChanged",
+            &protection("unprotected_end", START + 2).with("uncovered", Value::Bool(true)),
+        );
+        on(
+            &mut read,
+            "ProtectionChanged",
+            &protection("unprotected_start", START + 3).with("bracket", text("mdt-1")),
+        );
+        let since = if ended { START + 3 } else { START + 1 };
+        assert_eq!(
+            read.protection(ASSET).unprotected_since,
+            Some(instant(since)),
+            "order_class {order_class:?}"
+        );
+    }
+}
+
+/// An acknowledged end ends the interval of the entry whose stop it awaited, though it names no
+/// bracket and still awaits that cancel itself.
+#[test]
+fn an_acknowledged_end_ends_the_interval_of_the_entry_it_awaited() {
+    let mut read = bought();
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &protection("unprotected_start", START + 1).with("bracket", text("mdt-1")),
+    );
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &protection("unprotected_end", START + 2)
+            .with("awaiting", list(&["mdt-1-p1"]))
+            .with("bracket", text("mdt-1")),
+    );
+    assert_eq!(
+        read.protection(ASSET).unprotected_since,
+        Some(instant(START + 1))
+    );
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &protection("unprotected_end", START + 3)
+            .with("awaiting", list(&["mdt-1-p1"]))
+            .with("acknowledged", Value::Bool(true)),
+    );
+    assert_eq!(read.protection(ASSET).unprotected_since, None);
+}
+
+/// The actions that move neither the resting orders nor an interval are read and change nothing.
+#[test]
+fn an_action_that_moves_no_protection_changes_nothing() {
+    let mut read = bought();
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &placed(&["mdt-1-p1"], "10", "497", None),
+    );
+    let before = read.protection(ASSET);
+    for action in [
+        "intended",
+        "watchdog",
+        "exit_unpriced",
+        "ladder_floor",
+        "expiry_unreplaceable",
+        "rung_short",
+    ] {
+        on(
+            &mut read,
+            "ProtectionChanged",
+            &protection(action, START + 5),
+        );
+        assert_eq!(read.protection(ASSET), before, "{action}");
+    }
+}
+
+/// A replacement is a new order of the old one's kind for what the old one left unfilled, and so
+/// is a replacement of it: what each covers leaves the protection with it.
+#[test]
+fn a_replacement_of_a_protective_order_covers_what_its_original_left() {
+    let mut read = bought();
+    on(
+        &mut read,
+        "OrderRequestRecorded",
+        &request(AGENT, "protective"),
+    );
+    on(
+        &mut read,
+        "OrderSubmitted",
+        &submitted("mdt-a", ASSET, "sell", "10"),
+    );
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &placed(&["mdt-c", "mdt-a"], "15", "497", None),
+    );
+    on(
+        &mut read,
+        "FillApplied",
+        &fill("f-a", "mdt-a", ASSET, "sell", "4", "497"),
+    );
+    on(
+        &mut read,
+        "OrderStateChanged",
+        &state_changed("mdt-b", "accepted").with("replaces", text("mdt-a")),
+    );
+    on(
+        &mut read,
+        "OrderStateChanged",
+        &state_changed("mdt-e", "accepted").with("replaces", text("mdt-b")),
+    );
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &placed(&["mdt-b", "mdt-e"], "12", "497", None),
+    );
+    assert_eq!(read.protection(ASSET).covered_qty, qty("27"));
+    on(
+        &mut read,
+        "OrderStateChanged",
+        &state_changed("mdt-b", "canceled"),
+    );
+    assert_eq!(
+        read.protection(ASSET).covered_qty,
+        qty("21"),
+        "mdt-b covered the 6 mdt-a left"
+    );
+    on(
+        &mut read,
+        "OrderStateChanged",
+        &state_changed("mdt-e", "canceled"),
+    );
+    assert_eq!(
+        read.protection(ASSET).covered_qty,
+        qty("15"),
+        "mdt-e the 6 mdt-b left, none of it filled"
+    );
+}
