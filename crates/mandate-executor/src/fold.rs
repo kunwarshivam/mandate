@@ -18,8 +18,8 @@ use crate::payload::{
 use crate::protection::climbs;
 use crate::state::{
     AccountSwitch, Adoption, Confirmed, ConnectionView, EVERY_AGENT, ExecutorState, ExitSequence,
-    IntentOutcome, IntentRecord, Ladder, LoneLadder, ObservedAccount, OrderDetail, PendingRequest,
-    PriorBase, Replacement, Switch,
+    Holding, IntentOutcome, IntentRecord, Ladder, LoneLadder, ObservedAccount, OrderDetail,
+    PendingRequest, PriorBase, Replacement, Switch,
 };
 use crate::types::{
     AccountRef, AccountState, ActivityCursor, AgentId, BracketLegs, ConnectionHealth, EventId,
@@ -154,6 +154,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             Ok(())
         }
         "OrderAbandoned" => order_abandoned(state, payload),
+        "UniverseChanged" => universe_changed(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "KillSwitchActivated" => kill_switch_activated(state, event, at),
         "AccountCloseRequested" => account_close_requested(state, event),
@@ -249,6 +250,32 @@ fn risk_record() -> Result<(), ExecutorError> {
 /// (DEC-2341 item 2): it ends rule 68's `connecting` at the executor, which reads it from the
 /// journal, and holds no account state; E7-3's later slice interprets it if one ever needs to.
 fn connection_checked() -> Result<(), ExecutorError> {
+    Ok(())
+}
+
+/// One change of an agent's working universe (journal spec §9.3, DEC-2823): an admission holds the
+/// instrument under the thesis and lineage it names, replacing any it was held by; a removal takes
+/// it out. The account stream's own fold, so the executor's universe replays without the agent's
+/// stream.
+fn universe_changed(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let agent = AgentId(required_text(payload, "agent_id")?.to_owned());
+    let instrument = InstrumentId::new(required_text(payload, "instrument")?)?;
+    let held = state.universes.entry(agent).or_default();
+    match required_text(payload, "change")? {
+        "admitted" => {
+            held.insert(
+                instrument,
+                Holding {
+                    thesis_id: optional_text(payload, "thesis_id").map(str::to_owned),
+                    lineage_id: optional_text(payload, "lineage_id").map(str::to_owned),
+                },
+            );
+        }
+        "removed" => {
+            held.remove(&instrument);
+        }
+        _ => return Err(refused("change")),
+    }
     Ok(())
 }
 
@@ -378,7 +405,7 @@ fn owner_elsewhere(kind: &str) -> Option<&'static str> {
         | "GoalCompleted" => None,
         "RelatedAccountsCoordination" => Some("E7-5"),
         "MandateVersionApplied" => Some("E6-4"),
-        "UniverseChanged" => Some("E17-3"),
+        "UniverseChanged" => None,
         _ => Some("E7-2"),
     }
 }
