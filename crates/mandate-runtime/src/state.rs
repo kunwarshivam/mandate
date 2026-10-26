@@ -598,7 +598,8 @@ pub fn fold(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtime
 /// copy of `ConnectionEstablished` (journal spec §9.8; the runtime reads its connection from the
 /// control stream), `AccountCloseRequested` (an account kill switch's close, which the runtime
 /// reads as `KillSwitchActivated`) and `OwnerConfirmationReceived` (an owner exit's confirmed bid,
-/// whose hand-off it reads as `IntentReceived`). Every type the journal admits on the account and
+/// whose hand-off it reads as `IntentReceived`), and the executor's record of an agent-scope
+/// `KillSwitchActivated` on another agent of the same account. Every type the journal admits on the account and
 /// agent streams has an arm but four, which no writer emits there yet and which stay refused until
 /// a story decides what they mean to the runtime (tests/account_copies.rs names them).
 fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), RuntimeError> {
@@ -613,6 +614,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 .and_then(payload::mode_from)
                 .ok_or_else(|| payload::non_canonical("lifecycle"))?;
         }
+        "KillSwitchActivated" if another_agents_switch(state, &event.payload) => {}
         "KillSwitchActivated" => {
             copy_of(state, event);
             let initiator = payload::str_of(&event.payload, "initiator")
@@ -923,6 +925,16 @@ fn retired(
 /// connection, so a sibling's `normal` must not lift this agent's restriction (`AGENTS.md` rules 1
 /// and 3). A payload with no agent field is this agent's by construction: the runtime follows only
 /// its own account stream, and the frozen fixtures carry none.
+/// Whether a `KillSwitchActivated` is an agent-scope switch on another agent: the executor's
+/// account-stream record of a switch it applied to one agent reaches every runtime following that
+/// account, and is that agent's alone. A switch on the account, or one naming no subject, is never
+/// spared, so the check only ever leaves another agent's stop to that agent.
+fn another_agents_switch(state: &RuntimeState, payload: &mandate_canon::Value) -> bool {
+    payload::str_of(payload, "scope") == Some("agent")
+        && payload::str_of(payload, "subject")
+            .is_some_and(|subject| subject != state.deployment.agent.0)
+}
+
 fn addressed_here(state: &RuntimeState, payload: &mandate_canon::Value) -> bool {
     payload::str_of(payload, "agent").is_none_or(|agent| agent == state.deployment.agent.0)
 }

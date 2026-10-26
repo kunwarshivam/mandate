@@ -142,3 +142,44 @@ fn every_type_the_runtime_folds_a_stream_of_has_an_arm() {
         "the runtime's fold refuses exactly the named account types"
     );
 }
+
+/// The executor's account-stream record of a kill switch it applied (journal spec §9.5): `scope`,
+/// `subject`, and the members the executor writes, with `initiator` an owner's.
+fn executor_switch(scope: &str, subject: &str) -> Value {
+    object(&[
+        ("bid", Value::Null),
+        ("bid_size", Value::Null),
+        ("cancels", Value::Array(Vec::new())),
+        ("closes", Value::Array(Vec::new())),
+        ("copied_from", Value::Null),
+        ("deferred", Value::Array(Vec::new())),
+        ("floor", Value::Null),
+        ("initiator", text("owner")),
+        ("purpose", text("owner_exit")),
+        ("scope", text(scope)),
+        ("subject", text(subject)),
+    ])
+}
+
+/// An agent-scope switch the executor applied to another agent on the same account is that agent's,
+/// and folds here as inert: before, it stopped every runtime following the account, so killing one
+/// agent stopped the others (lane DR's cell run on 2026-10-26, once the executor could journal it).
+#[test]
+fn another_agents_switch_on_the_account_stream_folds_as_inert() {
+    let other = folded("KillSwitchActivated", executor_switch("agent", "agent-b"));
+    assert_eq!(other, inert());
+    assert_ne!(other.effective_mode(), mandate_runtime::Mode::Stopped);
+}
+
+/// The executor's record of a switch on this agent, or on the whole account, still stops it, as it
+/// did before: the addressee check only ever spares another agent's.
+#[test]
+fn a_switch_on_this_agent_or_the_account_still_stops_it() {
+    for (scope, subject) in [
+        ("agent", common::AGENT),
+        ("account", "01J8Z3MACCOUNTREF000000001"),
+    ] {
+        let state = folded("KillSwitchActivated", executor_switch(scope, subject));
+        assert_ne!(state, inert(), "{scope} {subject}");
+    }
+}
