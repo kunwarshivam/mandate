@@ -9,4 +9,4 @@
   either the registration path (or V-007) refuses such a registration, with a reference vector, or
   the read model's bounds are widened to V-007's in a spec change of their own; and a property test
   shows the listed models and the admitted ones equal for every registration.
-<!-- section: E10 Workspace services -->
+<!-- section: E10 Mandate authoring -->
