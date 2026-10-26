@@ -57,7 +57,7 @@ pub fn fresh(
         .into_iter()
         .filter(|e| {
             let key = key_of(&e.output);
-            !journaled.iter().any(|j| *j == key)
+            !journaled.contains(&key)
         })
         .collect())
 }
