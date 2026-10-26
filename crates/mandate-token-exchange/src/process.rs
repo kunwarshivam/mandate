@@ -4,9 +4,10 @@
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use mandate_connections::ConnectError;
-use mandate_connections::exchange::ExchangedGrant;
+use mandate_connections::exchange::{CodeWait, ExchangedGrant};
 use mandate_connections::record::ConnectionId;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
@@ -70,11 +71,12 @@ fn address_in_form(address: &str) -> bool {
     })
 }
 
-/// The wall clock, read once at the process's edge for the vault session's expiry; `None` when
-/// it cannot be read, which ends the run as the vault would.
+/// The wall clock, read at the process's edge: for the vault session's expiry and the request's
+/// deadline at the start, and by [`HostWait`] before each take; `None` when it cannot be read,
+/// which ends the run as the vault would.
 #[allow(
     clippy::disallowed_methods,
-    reason = "the process's edge reads the wall clock once, for the vault session's expiry; the exchange itself reads none"
+    reason = "the process's edge reads the wall clock, for the vault session's expiry and the wait's deadline; the exchange core reads none"
 )]
 pub fn now() -> Option<UtcNanos> {
     let since = std::time::SystemTime::now()
@@ -82,6 +84,28 @@ pub fn now() -> Option<UtcNanos> {
         .ok()?;
     let secs = i64::try_from(since.as_secs()).ok()?;
     UtcNanos::from_parts(secs, since.subsec_nanos()).ok()
+}
+
+/// The wait's reading of the host clock (DEC-2363 item 3): the clock's `read` while it can be read,
+/// and `deadline` when it cannot, so an unreadable clock reads as the deadline reached and the wait
+/// ends `code_missing` rather than runs on.
+pub fn read_or(deadline: UtcNanos, read: Option<UtcNanos>) -> UtcNanos {
+    read.unwrap_or(deadline)
+}
+
+/// The wait's clock and sleep, the host's (DEC-2363 item 3), the clock read through [`read_or`].
+pub struct HostWait {
+    pub deadline: UtcNanos,
+}
+
+impl CodeWait for HostWait {
+    fn now(&mut self) -> UtcNanos {
+        read_or(self.deadline, now())
+    }
+
+    fn pause(&mut self, pause: Duration) {
+        std::thread::sleep(pause);
+    }
 }
 
 /// Why the exchange did not complete.
@@ -133,7 +157,7 @@ pub async fn log_in(
 }
 
 /// The whole exchange for `settings`' connection: the login at `now`, then `run` through the vault
-/// adapter and the HTTP adapter of `settings`' endpoint.
+/// adapter and the HTTP adapter of `settings`' endpoint, waiting for the code until `deadline`.
 ///
 /// # Errors
 /// [`Failed::Vault`] when the login or the adapter cannot be had; [`Failed::Exchange`] with
@@ -143,6 +167,7 @@ pub fn exchange(
     args: &VaultArgs,
     token_dir: &Path,
     now: UtcNanos,
+    deadline: UtcNanos,
 ) -> Result<ExchangedGrant, Failed> {
     let session = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -158,5 +183,13 @@ pub fn exchange(
         Endpoint::Cell(url) => HttpTokenEndpoint::for_cell(url.clone()),
     }
     .map_err(Failed::Exchange)?;
-    run(settings, &mut &vault, &mut &vault, &mut endpoint).map_err(Failed::Exchange)
+    run(
+        settings,
+        &mut &vault,
+        &mut &vault,
+        &mut endpoint,
+        &mut HostWait { deadline },
+        deadline,
+    )
+    .map_err(Failed::Exchange)
 }

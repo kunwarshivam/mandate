@@ -12,10 +12,13 @@ use mandate_connections::start::{ClientId, OAuthClient, RedirectUri};
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 
+use super::deadline;
 use crate::process::{
-    ARGUMENTS_REFUSED, Failed, VAULT_REFUSED, VaultArgs, exchange, log_in, now, vault_args,
+    ARGUMENTS_REFUSED, Failed, HostWait, VAULT_REFUSED, VaultArgs, exchange, log_in, now, read_or,
+    vault_args,
 };
 use crate::startup::{Endpoint, Settings};
+use mandate_connections::exchange::CodeWait;
 
 const CONNECTION: &str = "conn_01JB3K6F0C9R2V7N4M8Q1T5W50";
 const NO_VAULT: &str = "https://127.0.0.1:1";
@@ -158,7 +161,7 @@ fn without_a_login_nothing_is_exchanged() {
     let token_dir = dir("exchange-token", false);
     let now = UtcNanos::from_parts(1_791_000_000, 0).unwrap();
     assert_eq!(
-        exchange(&settings, &vault, &token_dir, now).map(|_| ()),
+        exchange(&settings, &vault, &token_dir, now, deadline()).map(|_| ()),
         Err(Failed::Vault)
     );
 }
@@ -172,4 +175,56 @@ fn the_wall_clock_is_read() {
         read > UtcNanos::from_parts(1_767_225_600, 0).unwrap(),
         "{read:?}"
     );
+}
+
+/// The host's pause sleeps (DEC-2363 item 3): a pause of 300 ms has not ended 100 ms in, and has
+/// ended well within 5 s, so the wait never spins.
+#[test]
+fn the_host_s_pause_sleeps() {
+    let (done, ended) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        HostWait {
+            deadline: deadline(),
+        }
+        .pause(std::time::Duration::from_millis(300));
+        let _ = done.send(());
+    });
+    assert!(
+        ended
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err(),
+        "the pause returned at once"
+    );
+    assert!(
+        ended
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .is_ok()
+    );
+}
+
+/// The host's clock reads the wall clock while it can (DEC-2363 item 3): against a deadline long
+/// past, its reading is no earlier than the wall clock read just before, never the deadline.
+#[test]
+fn the_host_s_clock_reads_the_wall_clock() {
+    let before = now().expect("a time");
+    let long_past = UtcNanos::from_parts(1, 0).unwrap();
+    let read = HostWait {
+        deadline: long_past,
+    }
+    .now();
+    assert!(read >= before, "{read:?} before {before:?}");
+}
+
+/// An unreadable clock reads as the deadline (DEC-2363 item 3), so the wait ends rather than runs
+/// on; a readable one reads as itself, before the deadline or after it.
+#[test]
+fn an_unreadable_clock_reads_as_the_deadline() {
+    let deadline = UtcNanos::from_parts(1_790_000_600, 0).unwrap();
+    assert_eq!(read_or(deadline, None), deadline);
+    for read in [
+        UtcNanos::from_parts(1_790_000_000, 0).unwrap(),
+        UtcNanos::from_parts(1_790_001_200, 7).unwrap(),
+    ] {
+        assert_eq!(read_or(deadline, Some(read)), read);
+    }
 }

@@ -18,7 +18,7 @@ use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
-use crate::kill::{confirmed_bid, flatten_closes, floor_of, is_flatten, mode_holds};
+use crate::kill::{confirmed_bid, flatten_closes, flatten_room, floor_of, is_flatten, mode_holds};
 use crate::listing::query_unknown;
 use crate::orders::{StateEvidence, legal, transition};
 use crate::payload::{int, text};
@@ -545,7 +545,8 @@ fn unsent(state: &ExecutorState, intent: &IntentId, ladder: Ladder) -> Result<Qt
 }
 
 /// DEC-410 item 4: what `intent`'s next rung sends, of the `left` its stepped rung left unsold:
-/// what its remainder counts now ([`remainders`]). A shorter rung is journaled `ProtectionChanged
+/// what its remainder counts now ([`remainders`]), and for a switch's flatten no more than the
+/// agent's sub-ledger now (DEC-2360 item 1). A shorter rung is journaled `ProtectionChanged
 /// rung_short`, with what it does not send and why; with nothing to send, that record ends the
 /// ladder, so it never sends later into a position bought afresh.
 fn sendable(
@@ -554,10 +555,11 @@ fn sendable(
     intent: &IntentId,
     left: Qty,
 ) -> Result<Qty, ExecutorError> {
-    let sends = remainders(&batch.view, instrument)?
+    let counts = remainders(&batch.view, instrument)?
         .into_iter()
         .find(|(owner, _)| owner == intent)
         .map_or(Qty::ZERO, |(_, counts)| counts);
+    let sends = flatten_room(&batch.view, intent, counts)?;
     if sends < left {
         let pairs = vec![
             ("intent_id", text(intent.0.0.clone())),
@@ -1145,7 +1147,7 @@ pub(crate) fn changed(
 }
 
 /// [`changed`], naming `cause` as the record's `causation_id`.
-fn changed_by(
+pub(crate) fn changed_by(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
     action: &str,
