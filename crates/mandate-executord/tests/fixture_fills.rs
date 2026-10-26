@@ -15,6 +15,7 @@ use mandate_executor::{
     FillConfigRefs, InstrumentSnapshot, OcoLegs, OrderType, Purpose, SubmitOrder, TimeInForce,
 };
 use mandate_executord::alpaca::AlpacaBroker;
+use mandate_executord::marks::NoMarks;
 use mandate_executord::paper::{CASH, FixturePaper};
 use mandate_executord::quotes::NoQuotes;
 use mandate_executord::{Broker, ExecutorProcess, Wiring};
@@ -425,6 +426,7 @@ fn wiring() -> Result<Wiring, Error> {
         gate: Box::new(Allowing),
         protections: Box::new(TwoPercentStop),
         quotes: Box::new(NoQuotes),
+        marked: Box::new(NoMarks),
     })
 }
 
