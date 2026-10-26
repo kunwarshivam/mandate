@@ -1013,6 +1013,82 @@ pub enum Command {
     },
 }
 
+/// Why the connector's signals put the connection in `degraded` (connections spec §8.2): journal
+/// spec §9.8's degrading reasons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DegradeReason {
+    NetworkErrors,
+    RateHeadroom,
+    ContractDrift,
+}
+
+/// Why the credential no longer works, putting the connection in `suspended` (connections spec
+/// §9.1, §9.2): journal spec §9.8's suspending reasons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SuspendReason {
+    AuthorizationFailed,
+    CredentialExpired,
+    RefreshFailed,
+    CheckFailed,
+    LeaseExpired,
+}
+
+/// A connection the platform cannot reach or use, as the shell's signals found it: the state it is
+/// in and why (connections spec §9.1, DEC-2826). Reported at every step while it holds, so the core
+/// can restrict the account in one batch and record the state change in a later one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ConnectionTrouble {
+    Degraded(DegradeReason),
+    Suspended(SuspendReason),
+}
+
+impl ConnectionTrouble {
+    /// The state it puts the connection in, as `ConnectionStateChanged.to` journals it.
+    #[must_use]
+    pub fn state(self) -> ConnectionHealth {
+        match self {
+            Self::Degraded(_) => ConnectionHealth::Degraded,
+            Self::Suspended(_) => ConnectionHealth::Suspended,
+        }
+    }
+
+    /// The reason `ConnectionStateChanged.reason` journals (journal spec §9.8, rule 59).
+    #[must_use]
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Degraded(DegradeReason::NetworkErrors) => "network_errors",
+            Self::Degraded(DegradeReason::RateHeadroom) => "rate_headroom",
+            Self::Degraded(DegradeReason::ContractDrift) => "contract_drift",
+            Self::Suspended(SuspendReason::AuthorizationFailed) => "authorization_failed",
+            Self::Suspended(SuspendReason::CredentialExpired) => "credential_expired",
+            Self::Suspended(SuspendReason::RefreshFailed) => "refresh_failed",
+            Self::Suspended(SuspendReason::CheckFailed) => "check_failed",
+            Self::Suspended(SuspendReason::LeaseExpired) => "lease_expired",
+        }
+    }
+}
+
+/// The connection's state on the executor's side (journal spec §9.8 `ConnectionStateChanged`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum ConnectionHealth {
+    #[default]
+    Active,
+    Degraded,
+    Suspended,
+}
+
+impl ConnectionHealth {
+    /// The wire name.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Degraded => "degraded",
+            Self::Suspended => "suspended",
+        }
+    }
+}
+
 /// Everything that can reach the core.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Input {
@@ -1040,6 +1116,10 @@ pub enum Input {
     /// A quote or mark, used for pricing and never for time.
     Market(MarketObservation),
     Command(Command),
+    /// The connection is `degraded` or `suspended` (connections spec §9.1, CN-6): reported at every
+    /// step while it holds. The core restricts the account first, and records the state change in a
+    /// later batch (journal spec §9.8, DEC-2826).
+    Connection(ConnectionTrouble),
     /// The journal refused the batch the last input drafted, as `Invalid` (DEC-2805). Nothing of
     /// it committed, so the core forgets it, and holds every agent's openings and alerts the owner
     /// once, rather than stopping the process and its exits, protection and kill switch.
