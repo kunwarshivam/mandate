@@ -6,6 +6,7 @@ import { type Fetch, createWorkspaceClient } from "@/api/client";
 import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand } from "@/api/commands";
 import { confirmAccepted, confirmStepUpDigest } from "@/api/confirm";
 import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPasskey, browserAuthenticator, deployStepUpDigest, passkeysRead, usablePasskeys } from "@/api/passkey";
+import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDigest, passkeyList } from "@/api/enrol";
 import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
@@ -30,6 +31,7 @@ import {
   type CommandKind,
   type CommandRecord,
   type MandateChangeRequest,
+  type PasskeyPort,
   type PositionsAnswer,
   type Runtime,
   RuntimeContext,
@@ -44,10 +46,13 @@ const DISCLOSURE_PAGES = 50;
 /** What an acceptance names: the document, its version, the user who accepted, and the step-up method; `null` for a body that names any of them wrongly. */
 type Accepted = { document: string; version: string; user: string; method: string };
 
-/** One served event's acceptance, decoded from its base64 body (journal spec §9.2 `DisclosureAccepted`). */
+/** A member of a JSON object, or `undefined`. */
+const member = (value: unknown, name: string): unknown => (typeof value === "object" && value !== null ? (value as Record<string, unknown>)[name] : undefined);
+
+/** `GET /journal/events/{id}`'s `event`, its acceptance decoded from its base64 body (journal spec §9.2 `DisclosureAccepted`). */
 const acceptedRead: Decoder<Accepted | null> = (value, path) => {
-  const body = typeof value === "object" && value !== null ? (value as Record<string, unknown>).body : undefined;
-  if (typeof body !== "string") return { ok: false, issue: { path: `${path}/body`, problem: "wrong_type", value: null, allowed: null } };
+  const body = member(member(value, "event"), "body");
+  if (typeof body !== "string") return { ok: false, issue: { path: `${path}/event/body`, problem: "wrong_type", value: null, allowed: null } };
   try {
     const bytes = Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
     const payload = (JSON.parse(new TextDecoder().decode(bytes)) as { payload?: Record<string, unknown> }).payload;
@@ -56,11 +61,11 @@ const acceptedRead: Decoder<Accepted | null> = (value, path) => {
     const named = typeof document === "string" && typeof version === "string" && typeof user === "string" && typeof method === "string";
     return { ok: true, value: named ? { document, version, user, method } : null };
   } catch {
-    return { ok: false, issue: { path: `${path}/body`, problem: "not_canonical", value: null, allowed: null } };
+    return { ok: false, issue: { path: `${path}/event/body`, problem: "not_canonical", value: null, allowed: null } };
   }
 };
 
-/** The step-up methods an acceptance counts with (V-005: never one without step-up). */
+/** The step-up methods an acceptance counts with (users are ULIDs, which compare without case: the host writes `--user` as typed) (V-005: never one without step-up). */
 const STEP_UP_METHODS: ReadonlySet<string> = new Set(["passkey", "cli_confirm"]);
 
 /** How many times an unanswered command is sent again, with the same key and body (API-4), before it is called unknown. */
@@ -91,6 +96,7 @@ export function ApiRuntimeProvider({
   session,
   keepAliveMs = REFRESH_EVERY_MS,
   authenticator,
+  creator,
 }: {
   source: Pick<ApiSource, "origin" | "workspaceId">;
   children: ReactNode;
@@ -103,6 +109,8 @@ export function ApiRuntimeProvider({
   keepAliveMs?: number;
   /** The WebAuthn call a passkey step-up makes; the browser's own when not given, `null` for a page with none. */
   authenticator?: Authenticator | null;
+  /** The WebAuthn create call a passkey enrolment makes; the browser's own when not given. */
+  creator?: Creator | null;
 }) {
   /** Reads wait while a refresh rotates the cookie; commands never wait (API-7). */
   const client = useMemo(() => {
@@ -348,7 +356,7 @@ export function ApiRuntimeProvider({
           const one = await client.read(`/journal/events/${encodeURIComponent(eventId)}`, acceptedRead);
           if (!one.ok) return "unknown";
           const a = one.value;
-          if (a && a.document === document && a.version === version && a.user === principal && STEP_UP_METHODS.has(a.method)) return "accepted";
+          if (a && a.document === document && a.version === version && a.user.toUpperCase() === principal.toUpperCase() && STEP_UP_METHODS.has(a.method)) return "accepted";
         }
         return "not_accepted";
       },
@@ -406,17 +414,17 @@ export function ApiRuntimeProvider({
   );
 
   /**
-   * The last `JOURNAL_TAIL` events of a stream (§4.8.1): one page of one event finds the head, a second
+   * The last `count` events of a stream (§4.8.1), `JOURNAL_TAIL` unless asked: one page of one event finds the head, a second
    * reads the tail up to it. An append between the two only adds to the next read.
    */
   const journalTail = useCallback(
-    async (streamId: string): Promise<ActivityAnswer["journal"]> => {
+    async (streamId: string, count: number = JOURNAL_TAIL): Promise<ActivityAnswer["journal"]> => {
       const route = `/journal/streams/${encodeURIComponent(streamId)}/events` as const;
       const decoder = journalPageRead(streamId);
       const first = await client.read(`${route}?after_seq=0&limit=1`, decoder);
       if (!first.ok) return { ok: false, reason: first.error.code };
-      const after = Math.max(0, first.value.head_seq - JOURNAL_TAIL);
-      const tail = await client.read(`${route}?after_seq=${after}&limit=${JOURNAL_TAIL}`, decoder);
+      const after = Math.max(0, first.value.head_seq - count);
+      const tail = await client.read(`${route}?after_seq=${after}&limit=${count}`, decoder);
       return tail.ok ? { ok: true, items: tail.value.events } : { ok: false, reason: tail.error.code };
     },
     [client],
@@ -520,6 +528,38 @@ export function ApiRuntimeProvider({
   );
 
   /**
+   * The member's workspace passkeys (§3.6, DEC-2108). Adding one asks a registration challenge;
+   * when the member already holds a passkey, one of them confirms the enrolment first (a
+   * `credential_enrol` step-up bound to the registration); then the authenticator makes the new
+   * credential, and `POST /passkeys` sends it once. A lost answer is `unknown`: the screen reads
+   * the list again rather than enrol twice.
+   */
+  const passkeys = useMemo<PasskeyPort>(
+    () => ({
+      list: async () => {
+        const read = await client.read("/passkeys", passkeyList);
+        return read.ok ? { ok: true, passkeys: read.value.passkeys } : { ok: false, reason: read.error.code };
+      },
+      enrol: async () => {
+        const [issued, session] = await Promise.all([client.askRegistration(), client.readSession()]);
+        if (!issued.ok) return { ok: false, reason: issued.error.code, effect: "none" };
+        if (!session.ok) return { ok: false, reason: session.error.code, effect: "none" };
+        let stepUp: PasskeyStepUp | null = null;
+        if (issued.value.step_up_needed) {
+          const asserted = await passkeyStepUp("credential_enrol", enrolStepUpDigest(issued.value.challenge_id));
+          if (!asserted.ok) return { ok: false, reason: asserted.reason, effect: "none" };
+          stepUp = asserted.value;
+        }
+        const made = await createPasskey(issued.value, session.value.principal_id, creator === undefined ? browserCreator() : creator);
+        if (!made.ok) return { ok: false, reason: made.reason, effect: "none" };
+        const sent = await client.enrolPasskey(enrolBody(issued.value, made.value, stepUp));
+        return sent.ok ? { ok: true, enrolled: sent.value } : { ok: false, reason: sent.error.code, effect: sent.error.effect === "unknown" ? "unknown" : "none" };
+      },
+    }),
+    [client, passkeyStepUp, creator],
+  );
+
+  /**
    * Step 2, `POST /mandate-versions/{hash}/confirm` (§5.1, DEC-2101 item 5), bound to the
    * confirmation the server serves now: it is read again first, since its digest can move. When the
    * server says the confirm needs step-up (a first version is risk-increasing), the owner's passkey
@@ -600,8 +640,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, streamTail: journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

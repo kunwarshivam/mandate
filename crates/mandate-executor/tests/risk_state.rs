@@ -827,10 +827,54 @@ fn walk_from(
         let appends = fold.fold(&row).unwrap();
         check_records(&appends, &row, instrument, step);
         check_snapshot(fold.view(), seq, &step["expect"]);
+        seq = journal(fold, &appends, seq + 1);
         records.push(appends);
-        seq += 1;
     }
     records
+}
+
+/// The records a step returned, appended from seq `first` as the executor appends them, in one
+/// batch right after their cause, and folded back, each the record the fold owes and stepping
+/// nothing (DEC-2301 item 2). Returns the seq after them.
+fn journal(fold: &mut AccountRiskFold<'_>, appends: &[RiskAppend], first: u64) -> u64 {
+    let before = fold.view().clone();
+    let mut seq = first;
+    for append in appends {
+        let row = appended(seq, append);
+        assert_eq!(
+            fold.fold(&row).unwrap(),
+            Vec::new(),
+            "seq {seq}: a record steps nothing"
+        );
+        seq += 1;
+    }
+    assert_eq!(fold.owed().count(), 0, "every owed record came back");
+    if let (RiskView::Readable { snapshot: was, .. }, RiskView::Readable { snapshot, .. }) =
+        (&before, fold.view())
+    {
+        assert_eq!(was, snapshot, "the records move nothing");
+    }
+    seq
+}
+
+/// `append` as the row the journal stores it as at `seq`.
+fn appended(seq: u64, append: &RiskAppend) -> StoredEvent {
+    let cause = append.causation_id.clone().map_or(Value::Null, Value::Str);
+    let mut body = mandate_canon::Object::new();
+    for (key, value) in [
+        ("causation_id", cause),
+        ("event_type", Value::Str(append.event_type.to_owned())),
+        ("payload", append.payload.clone()),
+        ("stream_id", Value::Str(ACCOUNT.to_owned())),
+    ] {
+        body.insert(Key::new(key).unwrap(), value);
+    }
+    stored(
+        seq,
+        append.event_type,
+        append.schema_version,
+        to_canonical(&Value::Object(body)),
+    )
 }
 
 /// A row on the account stream with its own `causation_id`.
@@ -1228,7 +1272,8 @@ fn mc_r13_session_and_insane_marks_fold_as_the_reference_case() {
         text("day_start_equity"),
         steps[1]["expect"]["agent_equity"].as_str()
     );
-    walk_from(&mut fold, XYZ, 5, &steps[2..]);
+    let next = journal(&mut fold, &midnight, 5);
+    walk_from(&mut fold, XYZ, next, &steps[2..]);
 }
 
 /// MC-R01's ladder reaches `paused`, and a row the fold cannot read after it keeps `paused`, which
@@ -1854,4 +1899,647 @@ fn only_a_terminal_applied_change_makes_its_successor_the_agents() {
             .unwrap();
         assert_eq!(equity(fold.view()), "10000", "{state}, ignored {ignored}");
     }
+}
+
+/// MC-R01 to its `paused`, through rows, with every record it returned journaled back: the fold
+/// it leaves, and its view.
+fn mc_r01_journaled<'c>(
+    mandate: &ValidatedMandate,
+    calendar: &'c Nyse,
+) -> (AccountRiskFold<'c>, Vec<StoredEvent>) {
+    let case = case("MC-R01");
+    let mut fold = open_case(&case, mandate, calendar);
+    let mut rows = Vec::new();
+    let mut seq = 2;
+    for step in case["steps"].as_array().unwrap() {
+        let text = |key: &str| step[key].as_str().unwrap();
+        let row = mark(seq, XYZ, text("at"), text("bid"), true, "regular");
+        let appends = fold.fold(&row).unwrap();
+        rows.push(row);
+        seq += 1;
+        for append in &appends {
+            let record = appended(seq, append);
+            fold.fold(&record).unwrap();
+            rows.push(record);
+            seq += 1;
+        }
+    }
+    (fold, rows)
+}
+
+/// A replay of the journal from seq 1 re-derives every record the live fold appended, from its
+/// cause, finds each on the stream as it owed it, and ends at the same view owing nothing, so the
+/// executor appends nothing twice (DEC-2301 item 2, DEC-2304; R3).
+#[test]
+fn a_replay_of_the_journal_reproduces_the_live_view() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (live, rows) = mc_r01_journaled(&mandate, &calendar);
+    assert!(
+        rows.iter()
+            .any(|row| row.event_type == "RiskLimitTriggered"),
+        "the walk journals records"
+    );
+    let mut replayed = open_case(&case, &mandate, &calendar);
+    let mut returned = 0;
+    for row in &rows {
+        returned += replayed.fold(row).unwrap().len();
+    }
+    let journaled = rows
+        .iter()
+        .filter(|row| row.event_type.starts_with("Risk") || row.event_type == "AgentModeApplied")
+        .count();
+    assert_eq!(
+        returned, journaled,
+        "each journaled record re-derived once, from its cause"
+    );
+    assert_eq!(replayed.view(), live.view());
+    assert_eq!(replayed.owed().count(), 0);
+}
+
+/// Every way a journaled record can differ from the one the fold owes makes the view unreadable
+/// (`not_reproduced`): its payload, its cause, its type, its version, its order, and a record the
+/// fold never returned.
+#[test]
+fn a_record_the_fold_would_not_have_produced_makes_the_view_unreadable() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (_, rows) = mc_r01_journaled(&mandate, &calendar);
+    let first = rows
+        .iter()
+        .position(|row| row.event_type == "RiskLimitTriggered")
+        .unwrap();
+    let tampered = |change: &dyn Fn(&mut StoredEvent)| {
+        let mut rows = rows.clone();
+        change(&mut rows[first]);
+        let mut fold = open_case(&case, &mandate, &calendar);
+        for row in &rows[..=first] {
+            fold.fold(row).unwrap();
+        }
+        unreadable(fold.view())
+    };
+    let edit = |from: &'static str, to: &'static str| {
+        move |row: &mut StoredEvent| {
+            let body = String::from_utf8(row.body.clone()).unwrap();
+            assert!(body.contains(from), "{from} in {body}");
+            row.body = body.replacen(from, to, 1).into_bytes();
+        }
+    };
+    let head = u64::try_from(first).unwrap() + 1;
+    let wanted = (UnreadableCause::NotReproduced, head);
+    assert_eq!(
+        tampered(&edit(r#""agent_equity":""#, r#""agent_equity":"1"#)),
+        wanted
+    );
+    assert_eq!(
+        tampered(&edit(r#""causation_id":""#, r#""causation_id":"0"#)),
+        wanted
+    );
+    assert_eq!(tampered(&|row| row.schema_version = 2), wanted);
+    assert_eq!(
+        tampered(&|row| row.event_type = "RiskLimitLifted".to_owned()),
+        wanted
+    );
+    let swapped = {
+        let mut rows = rows.clone();
+        let (first, len) = burst(&rows);
+        assert!(len >= 2, "two records in a row");
+        let (a, b) = (rows[first].clone(), rows[first + 1].clone());
+        rows[first] = StoredEvent { seq: a.seq, ..b };
+        rows[first + 1] = StoredEvent {
+            seq: a.seq + 1,
+            ..a
+        };
+        let mut fold = open_case(&case, &mandate, &calendar);
+        for row in &rows[..=first] {
+            fold.fold(row).unwrap();
+        }
+        (unreadable(fold.view()), first)
+    };
+    let head = u64::try_from(swapped.1).unwrap() + 1;
+    assert_eq!(
+        swapped.0,
+        (UnreadableCause::NotReproduced, head),
+        "records out of the order owed"
+    );
+
+    let mut forged = open_case(&case, &mandate, &calendar);
+    let mut record = rows[first].clone();
+    record.seq = 2;
+    forged.fold(&record).unwrap();
+    assert_eq!(
+        unreadable(forged.view()),
+        (UnreadableCause::NotReproduced, 1),
+        "a record the fold never returned"
+    );
+}
+
+/// A crash between a cause and its records leaves them owed at the head: the restarted fold reads
+/// the stream to its end and names exactly the records to append next (R3).
+#[test]
+fn records_a_crash_kept_from_the_journal_are_owed_at_the_head() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (live, rows) = mc_r01_journaled(&mandate, &calendar);
+    let first = rows
+        .iter()
+        .position(|row| row.event_type == "RiskLimitTriggered")
+        .unwrap();
+    let cause = &rows[first - 1];
+    let mut restarted = open_case(&case, &mandate, &calendar);
+    for row in &rows[..first] {
+        restarted.fold(row).unwrap();
+    }
+    let owed: Vec<RiskAppend> = restarted.owed().cloned().collect();
+    assert!(!owed.is_empty());
+    assert!(
+        owed.iter()
+            .all(|append| append.causation_id.as_deref() == Some(cause.event_id.as_str()))
+    );
+    let mut seq = cause.seq + 1;
+    for append in &owed {
+        let row = appended(seq, append);
+        assert_eq!(
+            row.body,
+            rows[usize::try_from(seq - 2).unwrap()].body,
+            "seq {seq}"
+        );
+        restarted.fold(&row).unwrap();
+        seq += 1;
+    }
+    for row in &rows[usize::try_from(seq - 2).unwrap()..] {
+        restarted.fold(row).unwrap();
+    }
+    assert_eq!(restarted.view(), live.view());
+}
+
+/// An `AgentModeApplied` the fold does not owe is another writer's, an owner's pause or a kill
+/// switch, and moves nothing in the fold.
+#[test]
+fn a_mode_record_the_fold_does_not_owe_is_another_writers() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    let before = fold.view().clone();
+    let paused = caused(
+        2,
+        "AgentModeApplied",
+        1,
+        None,
+        &format!(r#"{{"agent":"{AGENT}","to":"paused","restriction":"owner","originated":false}}"#),
+    );
+    fold.fold(&paused).unwrap();
+    let RiskView::Readable { snapshot, head } = fold.view() else {
+        panic!("readable");
+    };
+    let RiskView::Readable { snapshot: was, .. } = &before else {
+        panic!("readable");
+    };
+    assert_eq!((snapshot, *head), (was, 2));
+}
+
+/// One generated input: a sane or insane regular mark at a bid, a tick, or an own buy or sell.
+#[derive(Debug, Clone)]
+enum Generated {
+    Mark(u16, bool),
+    Tick,
+    Buy(u8),
+    Sell(u8),
+}
+
+fn generated() -> impl proptest::strategy::Strategy<Value = Generated> {
+    use proptest::prelude::*;
+    prop_oneof![
+        (80_u16..=120, any::<bool>()).prop_map(|(bid, sane)| Generated::Mark(bid, sane)),
+        Just(Generated::Tick),
+        (1_u8..=5).prop_map(Generated::Buy),
+        (1_u8..=5).prop_map(Generated::Sell),
+    ]
+}
+
+/// The rows of `inputs` folded live on MC-R01's mandate, one minute apart from 14:01, each input
+/// journaled as the executor journals it, one batch (a fill with its `FeesCharged` and its order's
+/// state, a tick with a `TradingDayStarted`), and the records the fold returned for the batch
+/// journaled right after it; a sale beyond what the generated buys hold is left out, so every
+/// stream is one the executor could write.
+fn live_rows(
+    inputs: &[Generated],
+    mandate: &ValidatedMandate,
+    calendar: &Nyse,
+) -> (Vec<StoredEvent>, RiskView) {
+    let case = case("MC-R01");
+    let mut fold = open_case(&case, mandate, calendar);
+    let (mut rows, mut seq, mut held) = (Vec::new(), 2_u64, 100_u32);
+    for (minute, input) in (1_u32..).zip(inputs) {
+        let clock = format!(
+            "2026-09-21T{:02}:{:02}:00.000000000Z",
+            14 + minute / 60,
+            minute % 60
+        );
+        let mut cause = Vec::new();
+        match input {
+            Generated::Mark(bid, sane) => {
+                cause.push(mark(seq, XYZ, &clock, &bid.to_string(), *sane, "regular"));
+            }
+            Generated::Tick => cause.push(tick(seq, &clock)),
+            Generated::Buy(qty) | Generated::Sell(qty) => {
+                let side = if matches!(input, Generated::Buy(_)) {
+                    "buy"
+                } else {
+                    "sell"
+                };
+                if side == "sell" && u32::from(*qty) > held {
+                    continue;
+                }
+                held = if side == "buy" {
+                    held + u32::from(*qty)
+                } else {
+                    held - u32::from(*qty)
+                };
+                let order = format!("o-{seq}");
+                cause.extend(own_order(seq, AGENT, &order, XYZ, side, &qty.to_string()));
+                cause.push(fill(
+                    seq + 2,
+                    &order,
+                    XYZ,
+                    (side, &qty.to_string(), "100"),
+                    &clock,
+                    "[]",
+                ));
+                cause.push(fees_charged(seq + 3, &order, "0.01", &clock));
+                cause.push(row(
+                    seq + 4,
+                    "OrderStateChanged",
+                    2,
+                    &format!(r#"{{"client_order_id":"{order}","state":"filled","ignored":false}}"#),
+                ));
+            }
+        }
+        if matches!(input, Generated::Tick) {
+            cause.push(trading_day(seq + 1, &clock));
+        }
+        let mut returned = Vec::new();
+        for row in cause {
+            returned.extend(fold.fold(&row).unwrap());
+            seq = row.seq + 1;
+            rows.push(row);
+        }
+        for append in &returned {
+            let record = appended(seq, append);
+            fold.fold(&record).unwrap();
+            rows.push(record);
+            seq += 1;
+        }
+    }
+    (rows, fold.view().clone())
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+    /// Any journal the executor writes replays from seq 1 to the live view, owing nothing; and cut
+    /// at any row, the restarted fold owes exactly the journaled records the cut dropped whose
+    /// cause it kept, in their order (DEC-2399). A crash cuts only between batches, since an append
+    /// is atomic; cutting inside a batch too is the stricter check.
+    #[test]
+    fn a_replay_ends_where_the_live_fold_did_and_a_crash_owes_what_it_dropped(
+        inputs in proptest::collection::vec(generated(), 1..40),
+        cut in 0_usize..1000,
+    ) {
+        let case = case("MC-R01");
+        let (mandate, calendar) = (case_mandate(&case), nyse());
+        let (rows, live) = live_rows(&inputs, &mandate, &calendar);
+        proptest::prop_assert!(
+            matches!(live, RiskView::Readable { .. }),
+            "a stream the executor writes stays readable: {:?}",
+            live
+        );
+        let mut replayed = open_case(&case, &mandate, &calendar);
+        for row in &rows {
+            replayed.fold(row).unwrap();
+        }
+        proptest::prop_assert_eq!(replayed.view(), &live);
+        proptest::prop_assert_eq!(replayed.owed().count(), 0);
+
+        let kept = rows.len().saturating_sub(1) * cut / 1000;
+        let mut restarted = open_case(&case, &mandate, &calendar);
+        for row in &rows[..kept] {
+            restarted.fold(row).unwrap();
+        }
+        let kept_ids: BTreeSet<&str> = rows[..kept].iter().map(|row| row.event_id.as_str()).collect();
+        let dropped: Vec<&StoredEvent> = rows[kept..]
+            .iter()
+            .filter(|row| FOLD_TYPES.contains(&row.event_type.as_str()))
+            .filter(|row| {
+                let body = parse(&row.body).unwrap();
+                body.get("causation_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|cause| kept_ids.contains(cause))
+            })
+            .collect();
+        let owed: Vec<RiskAppend> = restarted.owed().cloned().collect();
+        proptest::prop_assert_eq!(owed.len(), dropped.len());
+        for (append, row) in owed.iter().zip(&dropped) {
+            proptest::prop_assert_eq!(&appended(row.seq, append).body, &row.body);
+        }
+    }
+}
+
+/// The record types the fold returns, written here apart from the crate's list.
+const FOLD_TYPES: [&str; 8] = [
+    "RiskDayStarted",
+    "RiskLimitTriggered",
+    "RiskLimitLifted",
+    "HighWaterMarkReset",
+    "PositionReleased",
+    "InstrumentRestrictionChanged",
+    "GoalCompleted",
+    "AgentModeApplied",
+];
+
+/// The scheduler's `TradingDayStarted` copy, which the executor journals in the batch right after
+/// the tick that crosses midnight (journal spec §9.13).
+fn trading_day(seq: u64, clock: &str) -> StoredEvent {
+    row(
+        seq,
+        "TradingDayStarted",
+        1,
+        &format!(r#"{{"day":"2026-09-23","clock":"{clock}"}}"#),
+    )
+}
+
+/// The executor journals a whole batch before the fold reads it, so the rest of the cause's batch
+/// comes between the cause and its records: a fill's `FeesCharged` and its order's state, and a
+/// midnight tick's `TradingDayStarted`. They pass, and the records are found after them (DEC-2399
+/// item 2).
+#[test]
+fn the_rest_of_a_causes_batch_comes_before_its_records() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    let filled = row(
+        7,
+        "OrderStateChanged",
+        2,
+        r#"{"client_order_id":"o-1","state":"filled","ignored":false}"#,
+    );
+    let batch = [
+        fill(5, "o-1", XYZ, ("buy", "12", "100"), AT_2, "[]"),
+        fees_charged(6, "o-1", "0.01", AT_2),
+        filled,
+        tick(8, "2026-09-23T04:00:00.000000000Z"),
+        trading_day(9, "2026-09-23T04:00:00.000000000Z"),
+    ];
+    let checked = row(10, "ConnectionChecked", 1, r#"{"result":"ok"}"#);
+    let mut returned = Vec::new();
+    for row in &batch {
+        returned.extend(fold.fold(row).unwrap());
+    }
+    assert_eq!(
+        returned.first().map(|append| append.event_type),
+        Some("RiskDayStarted"),
+        "the midnight tick's records, owed after the batch"
+    );
+    assert_eq!(fold.owed().count(), returned.len());
+    fold.fold(&checked).unwrap();
+    assert_eq!(
+        fold.owed().count(),
+        returned.len(),
+        "a connection check passes too"
+    );
+    let next = journal(&mut fold, &returned, 11);
+    assert_eq!(readable_head(fold.view()), next - 1);
+}
+
+/// An `AgentModeApplied` is the fold's only when it names the cause of the record owed next, and
+/// then it must be that record. One naming no cause (a kill switch, an unmapped broker status) or
+/// another cause (the copy of an agent stream's `AgentModeChanged`, journal spec §9.6) is another
+/// writer's, whether or not records are owed (DEC-2399 items 1 and 4).
+#[test]
+fn a_mode_record_not_naming_the_owed_cause_is_another_writers_even_while_records_are_owed() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (_, rows) = mc_r01_journaled(&mandate, &calendar);
+    let first = rows
+        .iter()
+        .position(|row| row.event_type == "RiskLimitTriggered")
+        .unwrap();
+    let others = |seq: u64, cause: Option<&str>| {
+        caused(
+            seq,
+            "AgentModeApplied",
+            1,
+            cause,
+            &format!(
+                r#"{{"agent":"{AGENT}","to":"paused","restriction":"kill_switch","originated":true}}"#
+            ),
+        )
+    };
+    let replay = |extra: StoredEvent| {
+        let mut fold = open_case(&case, &mandate, &calendar);
+        for row in &rows[..first] {
+            fold.fold(row).unwrap();
+        }
+        fold.fold(&extra).unwrap();
+        for row in &rows[first..] {
+            let moved = StoredEvent {
+                seq: row.seq + 1,
+                ..row.clone()
+            };
+            fold.fold(&moved).unwrap();
+        }
+        fold
+    };
+    let copied = caused(
+        rows[first].seq,
+        "AgentModeApplied",
+        1,
+        Some("01J8Z4C0000000000000000000"),
+        &format!(r#"{{"agent":"{AGENT}","to":"paused","restriction":"owner","originated":false}}"#),
+    );
+    let passed = replay(copied);
+    assert!(
+        matches!(passed.view(), RiskView::Readable { .. }),
+        "a copy naming another cause: {:?}",
+        passed.view()
+    );
+    let passed = replay(others(rows[first].seq, None));
+    assert!(
+        matches!(passed.view(), RiskView::Readable { .. }),
+        "{:?}",
+        passed.view()
+    );
+    let cause = rows[first - 1].event_id.clone();
+    let refused = replay(others(rows[first].seq, Some(&cause)));
+    assert_eq!(
+        unreadable(refused.view()).0,
+        UnreadableCause::NotReproduced,
+        "a caused mode record that is not the one owed"
+    );
+}
+
+/// An unreadable view owes nothing, after a failed append or after any other cause, so the
+/// executor never appends what is no longer the journal's (DEC-2399 item 3).
+#[test]
+fn an_unreadable_view_owes_nothing() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (_, rows) = mc_r01_journaled(&mandate, &calendar);
+    let first = rows
+        .iter()
+        .position(|row| row.event_type == "RiskLimitTriggered")
+        .unwrap();
+    let owing = || {
+        let mut fold = open_case(&case, &mandate, &calendar);
+        for row in &rows[..first] {
+            fold.fold(row).unwrap();
+        }
+        assert!(fold.owed().count() > 0);
+        fold
+    };
+    let mut failed = owing();
+    failed.append_failed();
+    assert_eq!(failed.owed().count(), 0);
+    let mut gap = owing();
+    let skipped = StoredEvent {
+        seq: rows[first].seq + 1,
+        ..rows[first].clone()
+    };
+    gap.fold(&skipped).unwrap();
+    assert_eq!(unreadable(gap.view()).0, UnreadableCause::SeqGap);
+    assert_eq!(gap.owed().count(), 0);
+}
+
+/// The executor's restart, end to end: the journal is cut after a cause's batch, part or none of
+/// its records appended; the restarted fold reads to the head, the owed records are appended
+/// there, and a second replay of the whole repaired journal, from seq 1, reaches the live view
+/// owing nothing. The oracle is the live run's own journal, whose records came from what the
+/// fold returned, not from `owed()`.
+#[test]
+fn a_journal_repaired_at_the_head_replays_to_the_live_view() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (live, rows) = mc_r01_journaled(&mandate, &calendar);
+    let (first, records) = burst(&rows);
+    assert!(records >= 2, "the cut can fall inside the batch of records");
+    for appended_before_crash in 0..records {
+        let cut = first + appended_before_crash;
+        let mut restarted = open_case(&case, &mandate, &calendar);
+        for row in &rows[..cut] {
+            restarted.fold(row).unwrap();
+        }
+        let owed: Vec<RiskAppend> = restarted.owed().cloned().collect();
+        assert_eq!(owed.len(), records - appended_before_crash);
+        let mut repaired: Vec<StoredEvent> = rows[..cut].to_vec();
+        for (seq, append) in (rows[cut].seq..).zip(&owed) {
+            let row = appended(seq, append);
+            assert_eq!(row.body, rows[usize::try_from(seq - 2).unwrap()].body);
+            restarted.fold(&row).unwrap();
+            repaired.push(row);
+        }
+        repaired.extend(rows[first + records..].iter().cloned());
+        let mut again = open_case(&case, &mandate, &calendar);
+        for row in &repaired {
+            again.fold(row).unwrap();
+        }
+        assert_eq!(
+            again.view(),
+            live.view(),
+            "cut after {appended_before_crash} records"
+        );
+        assert_eq!(again.owed().count(), 0);
+    }
+}
+
+/// The longest run of consecutive risk records in `rows`: where it starts, and how long it is.
+fn burst(rows: &[StoredEvent]) -> (usize, usize) {
+    let mut best = (0, 0);
+    let mut start = 0;
+    for (index, row) in rows.iter().enumerate() {
+        if !FOLD_TYPES.contains(&row.event_type.as_str()) {
+            start = index + 1;
+        } else if index + 1 - start > best.1 {
+            best = (start, index + 1 - start);
+        }
+    }
+    best
+}
+
+/// Another writer's mode record moves nothing in the fold: one that would loosen it, to `normal`
+/// while the ladder holds the agent `paused`, neither lifts a latched rung nor changes the fold's
+/// mode, which only the risk state's own steps move (DEC-2399 item 4).
+#[test]
+fn another_writers_mode_record_never_loosens_the_fold() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (mut fold, rows) = mc_r01_journaled(&mandate, &calendar);
+    let RiskView::Readable {
+        snapshot: before, ..
+    } = fold.view().clone()
+    else {
+        panic!("readable");
+    };
+    assert_eq!(before.agent_mode, AgentMode::Paused);
+    assert!(!before.latched.is_empty());
+    let seq = rows.last().unwrap().seq + 1;
+    for (offset, cause) in [(0_u64, None), (1, Some("01J8Z4C0000000000000000000"))] {
+        let loosen = caused(
+            seq + offset,
+            "AgentModeApplied",
+            1,
+            cause,
+            &format!(
+                r#"{{"agent":"{AGENT}","to":"normal","restriction":"owner","originated":false}}"#
+            ),
+        );
+        fold.fold(&loosen).unwrap();
+    }
+    let RiskView::Readable { snapshot, head } = fold.view() else {
+        panic!("readable: {:?}", fold.view());
+    };
+    assert_eq!((snapshot.as_ref(), *head), (before.as_ref(), seq + 1));
+    assert!(fold.view().holds(OrderPath::Opening));
+}
+
+/// A mode record naming the cause of any record owed is the fold's own, so it must be the record
+/// owed next: one naming a later owed record's cause, arriving first, is `not_reproduced`.
+#[test]
+fn a_mode_record_naming_a_later_owed_cause_is_not_reproduced() {
+    let mandate = mandate();
+    let mut fold = marked_with_an_order(&mandate, &Wall);
+    let batch = [
+        tick(5, "2026-09-23T04:00:00.000000000Z"),
+        fill(
+            6,
+            "o-1",
+            XYZ,
+            ("buy", "12", "100"),
+            "2026-09-23T04:00:00.000000000Z",
+            "[]",
+        ),
+        mark(
+            7,
+            XYZ,
+            "2026-09-23T04:00:01.000000000Z",
+            "50",
+            true,
+            "regular",
+        ),
+    ];
+    let mut returned = Vec::new();
+    for row in &batch {
+        returned.extend(fold.fold(row).unwrap());
+    }
+    let later = returned
+        .iter()
+        .rfind(|append| append.causation_id.as_deref() == Some(batch[2].event_id.as_str()))
+        .expect("the crash's records");
+    assert_ne!(returned[0].causation_id, later.causation_id);
+    let early = caused(
+        8,
+        "AgentModeApplied",
+        1,
+        later.causation_id.as_deref(),
+        &format!(r#"{{"agent":"{AGENT}","to":"paused","restriction":"x","originated":true}}"#),
+    );
+    fold.fold(&early).unwrap();
+    assert_eq!(unreadable(fold.view()), (UnreadableCause::NotReproduced, 7));
 }

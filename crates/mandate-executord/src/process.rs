@@ -7,9 +7,9 @@ use mandate_accounting::InstrumentId;
 use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOrder, BrokerOutcome,
-    BrokerRequest, BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft,
-    EventId, ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input,
+    AccountDeclaration, AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOrder,
+    BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect,
+    EventDraft, EventId, ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input,
     InstrumentSnapshot, IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion,
     MandateView, OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch,
     fold, handle, limit_fills, recorded_fills,
@@ -43,6 +43,14 @@ pub trait Broker {
     /// DEC-933 item 1, DEC-2386 item 4); `None` for a broker that answers the four reads a
     /// reconciliation asks for, as Alpaca does.
     fn account_reads(&mut self) -> Option<Result<AccountReads, ConnectorError>> {
+        None
+    }
+
+    /// The account type and day-trading regime the broker's connector declares (trading spec
+    /// §7.2, DEC-840), which each `AccountSnapshotRecorded` journals (journal spec §9.35,
+    /// DEC-2398). `None`, the default, declares none: the snapshot journals `null`, and a reader
+    /// holds what depends on it.
+    fn declared(&self) -> Option<AccountDeclaration> {
         None
     }
 }
@@ -1031,6 +1039,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 fills,
                 cursor: since,
                 reason: ReconcileReason::Startup,
+                declared: self.broker.declared(),
                 taken_at_head: Seq(self.account_head()),
             });
         }
@@ -1056,6 +1065,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             fills,
             cursor,
             reason: ReconcileReason::Startup,
+            declared: self.broker.declared(),
             taken_at_head: Seq(self.account_head()),
         })
     }

@@ -1,6 +1,7 @@
 import { act } from "@testing-library/react";
 import { vi } from "vitest";
 import { confirmStepUpDigest } from "@/api/confirm";
+import type { Creator } from "@/api/enrol";
 import type { Authenticator } from "@/api/passkey";
 import type { NewAgent } from "@/lib/fixture-journey";
 import type { ConfirmRecord, DeployToPaperRecord } from "@/lib/mock-runtime";
@@ -54,4 +55,20 @@ export function mockAuthenticator(passkeyId: string) {
     return { type: "public-key", id: passkeyId, rawId: Uint8Array.from(Buffer.from(passkeyId, "base64url")).buffer, response: { authenticatorData: Uint8Array.of(1).buffer, clientDataJSON: client.buffer, signature: Uint8Array.of(2).buffer } } as unknown as Credential;
   };
   return { get, calls };
+}
+
+/**
+ * A stand-in authenticator that makes a credential (DEC-2108 item 4): client data naming exactly the
+ * challenge it was asked to sign, as a `webauthn.create`, and a fixed 16-byte id. It attests nothing,
+ * which the mock does not check. `calls` lists each creation's options.
+ */
+export function mockCreator(rawId: Uint8Array = Uint8Array.from({ length: 16 }, (_, i) => 50 + i)) {
+  const calls: CredentialCreationOptions[] = [];
+  const create: Creator = async (options) => {
+    calls.push(options);
+    const challenge = Buffer.from(new Uint8Array(options.publicKey?.challenge as ArrayBuffer)).toString("base64url");
+    const client = new TextEncoder().encode(JSON.stringify({ type: "webauthn.create", challenge, origin: "https://app.owlhead.ai" }));
+    return { type: "public-key", id: Buffer.from(rawId).toString("base64url"), rawId: rawId.slice().buffer, response: { attestationObject: Uint8Array.of(0xa3, 1, 2).buffer, clientDataJSON: client.buffer } } as unknown as Credential;
+  };
+  return { create, calls, passkeyId: Buffer.from(rawId).toString("base64url") };
 }

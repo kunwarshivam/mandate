@@ -314,19 +314,43 @@ pub enum Answer {
     Refused(RequestError),
 }
 
-/// The worker's call (§6.2 step 3): builds the call for `plan` over `retrieval` at the gateway's
+/// What a worker calls a model through (DEC-2397 item 1): the gateway in its own process, or the
+/// model-gateway service across the network. Either renders, guards, reserves, calls and validates;
+/// the caller only builds the request at [`ModelCalls::now`] and hands the answer to the core.
+pub trait ModelCalls {
+    /// The instant a call is built at, so its deadline counts from it.
+    fn now(&mut self) -> UtcNanos;
+
+    /// The call's record, or the refusal of a call that could not be made at all.
+    ///
+    /// # Errors
+    /// [`RequestError`], [`RequestError::GatewayUnreachable`] among them for a remote caller.
+    fn call(&mut self, request: &CallRequest) -> Result<CallRecord, RequestError>;
+}
+
+impl<T: Transport, S: MeterStore, C: Clock> ModelCalls for Gateway<T, S, C> {
+    fn now(&mut self) -> UtcNanos {
+        self.clock_mut().now()
+    }
+
+    fn call(&mut self, request: &CallRequest) -> Result<CallRecord, RequestError> {
+        Gateway::call(self, request)
+    }
+}
+
+/// The worker's call (§6.2 step 3): builds the call for `plan` over `retrieval` at the models'
 /// own clock, so the deadline is the dispatch instant plus `deadline_ms` (DEC-431 item 24), and
-/// sends it through the gateway, which renders, guards, reserves, calls, and validates.
+/// sends it through `gateway`, which renders, guards, reserves, calls, and validates.
 ///
 /// # Errors
 /// [`ResearchRunError`] when the call cannot be built; nothing is then sent.
-pub fn call<T: Transport, S: MeterStore, C: Clock>(
-    gateway: &mut Gateway<T, S, C>,
+pub fn call<M: ModelCalls + ?Sized>(
+    gateway: &mut M,
     plan: &CallPlan,
     retrieval: &Retrieval,
     context: CallContext,
 ) -> Result<(ResearchCall, Answer), ResearchRunError> {
-    let dispatched_at = gateway.clock_mut().now();
+    let dispatched_at = gateway.now();
     let built = ResearchCall::build(plan, retrieval, context, dispatched_at)?;
     let request = built.request()?;
     let answer = match gateway.call(&request) {

@@ -1,0 +1,40 @@
+{{- /* The notification dispatcher's configuration file (DEC-2500 item 7, DEC-2516 item 2), once
+images.dispatcher is named: the ConfigMap `dispatcher-config`, which its Deployment mounts read-only
+at /etc/mandate/dispatcher. It holds no secret and no address. The workspace is the hosted one
+(`api.workspace`), whose control stream names the streams it follows; the one recipient goes on the
+email channel, which mails only through the recorded transport; web push stays off (DEC-2504). The
+build is `dispatcher.build`, the binary's digest the local cell sets, or else the digest the image is
+pinned by, which fixes the binary it holds; an image with neither fails the render. A
+backtest release has no notices to send, so the render fails rather than start a dispatcher for it. */ -}}
+{{- define "mandate.dispatcherConfig" -}}
+{{- $v := .Values }}
+{{- if ne $v.environment "paper" }}{{ fail "images.dispatcher needs environment paper: the dispatcher's configuration names paper or live, and this chart deploys no live connection" }}{{ end }}
+{{- $build := $v.dispatcher.build }}
+{{- if and (not $build) (contains "@sha256:" $v.images.dispatcher) }}{{ $build = printf "sha256:%s" (last (splitList "@sha256:" $v.images.dispatcher)) }}{{ end }}
+{{- $config := dict
+  "workspace" (required "api.workspace, the hosted workspace whose notices the dispatcher writes, is required with images.dispatcher" $v.api.workspace)
+  "subjects" ($v.dispatcher.subjects | default list)
+  "audience" (list (dict "recipient" (required "dispatcher.recipient, the one recipient the dispatcher's email channel mails, is required with images.dispatcher" $v.dispatcher.recipient) "channel" "email"))
+  "app_origin" (required "api.appOrigin, the origin the dispatcher's notices link to, is required with images.dispatcher" $v.api.appOrigin)
+  "environment" "paper"
+  "build" (required "dispatcher.build, the dispatcher binary's digest, is required with an images.dispatcher not pinned by digest" $build)
+  "web_push" false
+  "push_allowlist" list
+  "vapid_subject" nil
+}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dispatcher-config
+  labels:
+    app.kubernetes.io/name: mandate-workspace
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    app.kubernetes.io/component: dispatcher
+    mandate.dev/workspace: {{ $v.workspace | quote }}
+data:
+  config.json: {{ toJson $config | quote }}
+{{- end -}}
+{{- if .Values.images.dispatcher }}
+---
+{{ include "mandate.emit" (include "mandate.dispatcherConfig" .) }}
+{{- end }}
