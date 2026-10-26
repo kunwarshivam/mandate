@@ -60,6 +60,9 @@ const BOB: &str = "01JB3K6F0C9R2V7N4M8Q1T5W41";
 const CAROL: &str = "01JB3K6F0C9R2V7N4M8Q1T5W42";
 const BOB_INVITATION: &str = "01JB3K6F0C9R2V7N4M8Q1T5W51";
 const CAROL_INVITATION: &str = "01JB3K6F0C9R2V7N4M8Q1T5W52";
+/// An approver invited and activated whose enrolment cool-off has not ended: `cooling_off`.
+const DAVE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W43";
+const DAVE_INVITATION: &str = "01JB3K6F0C9R2V7N4M8Q1T5W53";
 const APPROVAL: &str = "01JBH3BTZ8K2M4N6P8R0S2T7AA";
 const AGENT: &str = "agt_a";
 /// A challenge id the server never issued.
@@ -332,7 +335,7 @@ struct Issued {
 impl World {
     /// The control stream as `mandate workspace found` and two invitations leave it: Alice's
     /// founding `MemberActivated` with `setup.alice`'s roles, then Bob invited and activated as an
-    /// approver and Carol as a viewer (journal spec §9.12), then `agt_a` deployed; and the approval
+    /// approver, Carol as a viewer, and Dave as an approver still cooling off (journal spec §9.12), then `agt_a` deployed; and the approval
     /// on `agt_a`'s stream.
     fn seed(&self, setup: &Setup<'_>, content: &serde_json::Value) {
         let codes = |roles: &[Role]| -> Vec<&'static str> {
@@ -350,6 +353,8 @@ impl World {
                    "roles": codes(roles), "independent_approval_required": false,
                    "cool_off_ends_at": since, "session_ref": null})
         };
+        let mut cooling = accepted(DAVE, DAVE_INVITATION, &[Role::Approver]);
+        cooling["cool_off_ends_at"] = json!(at(T0 + 86_400).to_string());
         let control = [
             ("StreamOpened", json!({"stream_type": "control"})),
             (
@@ -368,6 +373,8 @@ impl World {
                 "MemberActivated",
                 accepted(CAROL, CAROL_INVITATION, &[Role::Viewer]),
             ),
+            ("MemberInvited", invited(DAVE_INVITATION, &[Role::Approver])),
+            ("MemberActivated", cooling),
             (
                 "AgentDeployed",
                 json!({"agent_id": AGENT, "mandate_version": "sha256:01"}),
@@ -1049,6 +1056,22 @@ fn a_principal_the_mandate_does_not_list_is_forbidden_and_appends_nothing() {
     assert!(w.asked().is_empty(), "no evidence is read");
     assert!(w.answers().is_empty());
     assert!(w.held(&bobs));
+
+    let listed = format!("user:{DAVE}");
+    let w = world_with(&Setup {
+        approvers: &[listed.as_str()],
+        ..PAPER
+    });
+    let body = grant(&w, &placeholder());
+    let cooling = w.respond(DAVE, KEY, &body);
+    assert_eq!(
+        cooling.status,
+        403,
+        "a member still cooling off is not an active approver: {} {}",
+        lossy(&cooling),
+        w.said()
+    );
+    assert!(w.answers().is_empty());
 }
 
 #[test]
@@ -1147,6 +1170,18 @@ fn the_first_failing_check_in_dec_2129_item_1s_order_answers() {
         code(&unknown),
         (404, ProblemCode::NotFound),
         "404 before the approvers: {}",
+        w.said()
+    );
+    let unknown = w.post(
+        &responses("01JBH3BTZ8K2M4N6P8R0S2T7AB"),
+        ALICE,
+        KEY,
+        &delegated(&body),
+    );
+    assert_eq!(
+        code(&unknown),
+        (404, ProblemCode::NotFound),
+        "404 before /delegation: {}",
         w.said()
     );
     let both = w.respond(BOB, KEY, &delegated(&body));
