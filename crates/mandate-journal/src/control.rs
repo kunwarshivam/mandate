@@ -1189,7 +1189,10 @@ static ACCOUNT_SNAPSHOT_RECORDED_V2: Ty = Ty::Record(&[
     ("buying_power", Ty::Decimal),
     ("non_marginable_buying_power", Ty::Decimal),
     ("accrued_fees", Ty::Decimal),
-    ("account_type", Ty::Nullable(&Ty::OneOf(&["cash", "margin"]))),
+    (
+        "account_type",
+        Ty::Nullable(&Ty::OneOf(&["cash", "margin"])),
+    ),
     (
         "day_trading_regime",
         Ty::Nullable(&Ty::OneOf(&["intraday_margin", "legacy_pdt"])),

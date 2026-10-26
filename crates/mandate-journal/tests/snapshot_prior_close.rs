@@ -5,15 +5,23 @@
 //! latest-wins stream parses. A property test fuzzes the four new members.
 
 use std::path::Path;
+use std::sync::OnceLock;
 
 use mandate_canon::{Key, Object, Value, parse, to_canonical};
 use mandate_journal::Draft;
 use proptest::prelude::*;
 
+/// The section, read and parsed once for every test and property case in this binary.
 fn section() -> Value {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
-    let fixture = parse(&std::fs::read(path).unwrap()).unwrap();
-    fixture.get("snapshot_prior_close").cloned().unwrap()
+    static SECTION: OnceLock<Value> = OnceLock::new();
+    SECTION
+        .get_or_init(|| {
+            let path =
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
+            let fixture = parse(&std::fs::read(path).unwrap()).unwrap();
+            fixture.get("snapshot_prior_close").cloned().unwrap()
+        })
+        .clone()
 }
 
 fn list<'a>(value: &'a Value, name: &str) -> &'a [Value] {
@@ -137,7 +145,10 @@ fn every_latest_wins_stream_step_parses() {
         }
     }
     assert!(streams.len() >= 5, "{} streams", streams.len());
-    assert!(versions.contains(&1) && versions.contains(&2), "{versions:?}");
+    assert!(
+        versions.contains(&1) && versions.contains(&2),
+        "{versions:?}"
+    );
 }
 
 /// A figure as journal decimal text: `cents` hundredths, signed.
@@ -167,7 +178,9 @@ fn with(mut body: Object, member: &str, value: Value) -> Object {
 }
 
 fn declared(options: &[&str], pick: Option<usize>) -> Value {
-    pick.map_or(Value::Null, |i| Value::Str(options[i % options.len()].to_owned()))
+    pick.map_or(Value::Null, |i| {
+        Value::Str(options[i % options.len()].to_owned())
+    })
 }
 
 proptest! {
@@ -194,6 +207,12 @@ proptest! {
         for (member, cents) in [("last_equity", last_equity), ("maintenance_margin", margin)] {
             prop_assert_eq!(text(&payload, member), canonical(cents), "{}", member);
         }
+        for (member, options, pick) in [
+            ("account_type", &["cash", "margin"][..], account_type),
+            ("day_trading_regime", &["intraday_margin", "legacy_pdt"][..], regime),
+        ] {
+            prop_assert_eq!(payload.get(member), Some(&declared(options, pick)), "{}", member);
+        }
     }
 
     /// A declaration outside its list is refused at its own member, whatever the figures.
@@ -215,5 +234,48 @@ proptest! {
         let refused = Draft::parse(&to_canonical(&Value::Object(body))).err();
         let refused = refused.map(|e| (e.reason.code().to_owned(), e.path));
         prop_assert_eq!(refused, Some(("non_canonical".to_owned(), format!("payload.{member}"))));
+    }
+}
+
+/// §9.2's report order at version 2: with two new members wrong, the journal reports the first in
+/// §9.35's table, so the declaration comes before the figures and `last_equity` before
+/// `maintenance_margin`, and `account_type` before `day_trading_regime`.
+#[test]
+fn version_2_reports_the_first_wrong_member_in_the_tables_order() {
+    let section = section();
+    let cases: [(&[(&str, Value)], &str); 3] = [
+        (
+            &[
+                ("maintenance_margin", Value::Null),
+                ("last_equity", Value::Null),
+            ],
+            "payload.last_equity",
+        ),
+        (
+            &[
+                ("day_trading_regime", Value::Str("pdt".to_owned())),
+                ("account_type", Value::Str("cashless".to_owned())),
+            ],
+            "payload.account_type",
+        ),
+        (
+            &[
+                ("last_equity", Value::Null),
+                ("day_trading_regime", Value::Str("pdt".to_owned())),
+            ],
+            "payload.day_trading_regime",
+        ),
+    ];
+    for (changes, path) in cases {
+        let mut body = base(&section, "snapshot_v2");
+        for (member, value) in changes {
+            body = with(body, member, value.clone());
+        }
+        let refused = Draft::parse(&to_canonical(&Value::Object(body))).err();
+        assert_eq!(
+            refused.map(|e| e.path),
+            Some(path.to_owned()),
+            "{changes:?}"
+        );
     }
 }
