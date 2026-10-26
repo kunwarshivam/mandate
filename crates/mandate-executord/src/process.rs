@@ -320,9 +320,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// One pass of the loop at the injected time `now`: an input in doubt first, then a mark in
     /// doubt, then requests left unsent and a due reconciliation, then (once started) every kill
     /// switch the account's agents' streams hold that the fold has not applied, then the latest
-    /// tick, then the marks due at it, so a mark never holds the tick's exit ladder, then every order
-    /// they propose that the fold has not taken, an opening or an increase only while ready
-    /// (DEC-2033 item 1). Before the start,
+    /// tick, then every order they propose that the fold has not taken, an opening or an increase
+    /// only while ready (DEC-2033 item 1), then the marks due at the tick, so a mark never holds
+    /// the tick's exit ladder or an exit. Before the start,
     /// the pass hands the first tick it reads and `Input::Started`. Returns the alerts whose drafts
     /// committed.
     pub fn step(&mut self, now: UtcNanos) -> Vec<Alert> {
@@ -385,11 +385,6 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         {
             return alerts;
         }
-        if let Some(tick) = tick
-            && !self.write_marks(now, tick, &mut alerts)
-        {
-            return alerts;
-        }
         for (agent, proposal) in proposed {
             let action = if proposal.purpose.adds_risk() {
                 Action::Open
@@ -399,6 +394,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             if self.lifecycle.permits(action) && !self.take(now, agent, proposal, &mut alerts) {
                 return alerts;
             }
+        }
+        if let Some(tick) = tick
+            && !self.write_marks(now, tick, &mut alerts)
+        {
+            return alerts;
         }
         if nothing_read && all_read && released && self.owes_nothing() {
             self.lifecycle.observe(now, Lifecycled::Completed);
@@ -502,7 +502,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// that is due one (DEC-2380 item 3): at most once per [`MARK_EVERY`] of the risk clock, from
     /// the quote the feed hands at `now`. An instrument the feed has no quote for, the snapshot no
     /// asset class for, or no session names, is not marked. `false` when the journal stopped the
-    /// pass; an append in doubt raises the journal's one opaque alert.
+    /// pass; an append in doubt raises the journal's one opaque alert, and the instruments after
+    /// it stay due.
     fn write_marks(&mut self, now: UtcNanos, at: RiskClock, alerts: &mut Vec<Alert>) -> bool {
         let Some(calendar) = self.calendar.clone() else {
             return true;
@@ -514,7 +515,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let Ok(due) = self.marked_at.due(&wanted, instant) else {
             return true;
         };
-        for instrument in due {
+        let mut due = due.into_iter();
+        while let Some(instrument) = due.next() {
             let Some(class) = self.wiring.instruments.asset_class(&instrument) else {
                 continue;
             };
@@ -530,6 +532,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 continue;
             };
             if !self.append_mark(now, now, draft, alerts) {
+                for unmarked in due {
+                    self.marked_at.forget(&unmarked);
+                }
                 return false;
             }
         }

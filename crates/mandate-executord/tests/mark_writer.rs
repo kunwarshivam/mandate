@@ -17,8 +17,8 @@ use mandate_num::{Price, Qty, ShareIncrement};
 use mandate_process::State;
 use mandate_time::UtcNanos;
 use support::{
-    AAPL, ACCOUNT_STREAM, Allowing, Error, Fault, Journal, NOON, OPENED, Paper, TwoPercentStop, at,
-    deployed, start_wired, tick, wired,
+    AAPL, ACCOUNT_STREAM, AGENT, Allowing, Error, Fault, Journal, NOON, OPENED, Paper,
+    TwoPercentStop, at, deployed, propose_market_exit, start_wired, tick, wired,
 };
 
 /// The instruments a test marks.
@@ -85,6 +85,9 @@ impl InstrumentSnapshot for WithCrypto {
 }
 
 const BTC: &str = "BTCUSD";
+
+/// The agent's risk exit.
+const EXIT: &str = "01JINTENT0000000000000000C";
 
 impl QuoteFeed for Quoting {
     fn observe(
@@ -426,5 +429,80 @@ fn a_quote_judged_not_sane_marks_the_instrument_not_sane() -> Result<(), Error> 
     let (_, payload) = &marks[0];
     assert_eq!(member(payload, "sane").as_deref(), Some("false"));
     assert_eq!(member(payload, "bid").as_deref(), Some("150.2"));
+    Ok(())
+}
+
+/// A mark whose append goes in doubt never holds the pass's proposals: the agent's risk exit,
+/// proposed before a tick whose mark goes in doubt, is received in that same pass
+/// (`AGENTS.md` rule 13).
+#[test]
+fn a_mark_in_doubt_never_holds_the_passs_exit() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    let mut wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    wiring.quotes = Box::new(Quoting(vec![AAPL]));
+    wiring.marked = Box::new(Naming(vec![AAPL]));
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    process.step(at(NOON)?);
+    let received = |journal: &Journal| journal.received().iter().any(|intent| intent == EXIT);
+    assert!(!received(&journal));
+    propose_market_exit(&journal, AGENT, EXIT, "risk_exit", "decision")?;
+    journal.fail_next_of("MarkUpdated", &[Fault::Unavailable]);
+    let later = "2026-09-21T15:00:15Z";
+    tick(&journal, "e1", later)?;
+    let alerts = process.step(at(later)?);
+    assert!(
+        alerts
+            .iter()
+            .any(|alert| alert.key == "journal_unavailable"),
+        "the case builds a mark in doubt: {alerts:?}"
+    );
+    assert!(received(&journal), "the exit was taken in the same pass");
+    Ok(())
+}
+
+/// The instruments after one whose mark went in doubt were not marked, and are due again at
+/// once: with AAPL's mark in doubt at 15:00:15, BTCUSD is marked at the next tick, a second later,
+/// not a full interval after.
+#[test]
+fn instruments_left_unmarked_by_a_stopped_pass_stay_due() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    let mut wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    wiring.quotes = Box::new(Quoting(vec![AAPL, BTC]));
+    wiring.marked = Box::new(Naming(vec![AAPL, BTC]));
+    wiring.instruments = Box::new(WithCrypto);
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    process.step(at(NOON)?);
+    journal.fail_next_of("MarkUpdated", &[Fault::Unavailable]);
+    for (id, clock) in [
+        ("u1", "2026-09-21T15:00:15Z"),
+        ("u2", "2026-09-21T15:00:16Z"),
+    ] {
+        tick(&journal, id, clock)?;
+        process.step(at(clock)?);
+    }
+    let marked: Vec<(Option<String>, Option<String>)> = marks_of(&journal)
+        .iter()
+        .map(|(_, payload)| {
+            (
+                member(payload, "instrument_id"),
+                member(payload, "risk_clock"),
+            )
+        })
+        .collect();
+    let mark =
+        |instrument: &str, clock: &str| (Some(instrument.to_owned()), Some(clock.to_owned()));
+    assert_eq!(
+        marked,
+        vec![
+            mark(AAPL, "2026-09-21T15:00:00.000000000Z"),
+            mark(BTC, "2026-09-21T15:00:00.000000000Z"),
+            mark(AAPL, "2026-09-21T15:00:15.000000000Z"),
+            mark(BTC, "2026-09-21T15:00:16.000000000Z"),
+        ]
+    );
     Ok(())
 }

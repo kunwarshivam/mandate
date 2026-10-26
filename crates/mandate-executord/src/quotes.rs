@@ -112,4 +112,10 @@ impl QuotePoll {
         }
         Ok(due)
     }
+
+    /// Forgets that `instrument` was read, so it is due again at once: for one a pass recorded as
+    /// read and then stopped before reading.
+    pub fn forget(&mut self, instrument: &InstrumentId) {
+        self.read_at.remove(instrument);
+    }
 }
