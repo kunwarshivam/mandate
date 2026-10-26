@@ -1,4 +1,4 @@
-"""Journal spec §9.5's reference vectors for `AccountRestrictionChanged` (DEC-2395): an account
+"""Journal spec §9.5's reference vectors for `AccountRestrictionChanged` (DEC-2134): an account
 restriction the executor detected (trading spec §7.3), with its closed `cause` (DEC-441 item 23),
 journaled before the modes it applies.
 
@@ -30,7 +30,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2395)"
+SPEC = "docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2134)"
 ACCOUNT = f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}"
 AT = "2026-10-26T15:00:00.250000000Z"
 RISK_CLOCK = "2026-10-26T15:00:01.000000000Z"

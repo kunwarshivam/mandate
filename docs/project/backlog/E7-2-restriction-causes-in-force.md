@@ -1,7 +1,7 @@
 - **E7-2v (Proposed, M7; X)** As an owner, I want every cause of an account restriction that is in
   force journaled and lifted on its own, so that a broker's acknowledgment never lifts a restriction
   the connection still imposes, and the owner is told which cause it is (trading spec §7.3, DEC-441
-  item 23, [DEC-2395](../decisions/DEC-2395.md)). Today the executor's `restrict()` journals an
+  item 23, [DEC-2134](../decisions/DEC-2134.md)). Today the executor's `restrict()` journals an
   `AccountRestrictionChanged` only when the account state it sets is stricter than the one in force,
   and the fold keeps the state alone, so a `connection_unavailable` restriction raised while a
   broker's is in force is never recorded. The notifications spec's one `account_restriction` type
