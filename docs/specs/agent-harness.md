@@ -1201,6 +1201,7 @@ pinned bound that every run reaches is a research-entry defect for a new version
 | `model_withdrawn` | Missing; research is disabled for this version |
 | `deadline_exceeded`, `provider_unavailable`, `rate_limited_provider` | Missing. The gateway has already retried what it may; the harness does not retry within the run, and in an agentic run sends no further turn. Three runs in a row ending `deadline_exceeded` alert the operator with opaque text, since they may still cost money (inference spec §3.3) |
 | `content_refused`, `schema_invalid`, `identity_mismatch` | Missing. Never retried within the run, because sampling again until something parses would select outputs (DEC-432 item 3) |
+| `gateway_unreachable` | Missing. The run ends with no output and is not retried within it, nor its call under its `call_id`; research stays on schedule, so the next run calls afresh, and the pin is not withdrawn. Each one alerts the operator with opaque text, since it may have cost up to its reservation (inference spec §3.3, DEC-2397) |
 
 ## 8. Evaluation and change control
 
