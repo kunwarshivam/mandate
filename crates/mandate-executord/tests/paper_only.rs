@@ -56,26 +56,35 @@ fn the_executor_carries_no_transport_but_the_paper_hosts() -> Result<(), Error> 
     Ok(())
 }
 
-/// The manifest's `[dependencies]` lines, up to the next table.
-fn dependencies() -> Result<Vec<String>, Error> {
+/// Every line of the manifest that names `mandate-mcp`, with the table it sits in: a dependency
+/// table's own header (`[dependencies.mandate-mcp]`, `[target.'cfg(unix)'.dependencies]`) or the
+/// header of the table holding its line.
+fn mcp_tables() -> Result<Vec<(String, String)>, Error> {
     let manifest = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))?;
-    Ok(manifest
-        .lines()
-        .skip_while(|line| line.trim() != "[dependencies]")
-        .skip(1)
-        .take_while(|line| !line.starts_with('['))
-        .map(str::to_owned)
-        .collect())
+    let mut table = String::new();
+    let mut found = Vec::new();
+    for line in manifest.lines().map(str::trim) {
+        if line.starts_with('[') {
+            table = line.to_owned();
+        }
+        if line.contains("mandate-mcp") || line.contains("mandate_mcp") {
+            found.push((table.clone(), line.to_owned()));
+        }
+    }
+    Ok(found)
 }
 
 #[test]
 fn the_process_never_depends_on_the_mcp_transport() -> Result<(), Error> {
-    let dependencies = dependencies()?;
-    assert!(!dependencies.is_empty(), "no [dependencies] table");
-    for line in &dependencies {
-        assert!(
-            !line.trim_start().starts_with("mandate-mcp"),
-            "the process depends on the MCP transport: {line}"
+    let tables = mcp_tables()?;
+    assert!(
+        !tables.is_empty(),
+        "the tests' seam takes mandate-mcp as a dev-dependency"
+    );
+    for (table, line) in &tables {
+        assert_eq!(
+            table, "[dev-dependencies]",
+            "mandate-mcp outside the dev-dependencies: {line}"
         );
     }
     Ok(())
