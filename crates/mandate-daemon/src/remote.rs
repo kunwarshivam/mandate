@@ -6,9 +6,11 @@
 //! time still ends. Any exchange that does not bring back the whole reply, for this call, by then is
 //! [`RequestError::GatewayUnreachable`], and it is never sent again.
 
-use std::net::SocketAddr;
+use std::io::{self, Read, Write};
+use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
+use mandate_gateway::frame;
 use mandate_gateway::{CallRecord, CallRequest, RequestError};
 use mandate_research_run::ModelCalls;
 use mandate_time::UtcNanos;
@@ -30,20 +32,105 @@ impl RemoteGateway {
     pub fn new(address: SocketAddr, clock: fn() -> UtcNanos) -> Self {
         Self { address, clock }
     }
+
+    /// The time left from now to `deadline`, `None` once it has passed.
+    fn left(&self, deadline: UtcNanos) -> Option<Duration> {
+        remaining((self.clock)(), deadline)
+    }
 }
 
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 impl ModelCalls for RemoteGateway {
     fn now(&mut self) -> UtcNanos {
-        let _ = (self.address, self.clock);
-        todo!()
+        (self.clock)()
     }
 
     fn call(&mut self, request: &CallRequest) -> Result<CallRecord, RequestError> {
-        let _ = request;
-        todo!()
+        let left = self
+            .left(request.deadline)
+            .ok_or(RequestError::GatewayUnreachable)?;
+        let stream = TcpStream::connect_timeout(&self.address, left)
+            .map_err(|_| RequestError::GatewayUnreachable)?;
+        let mut bounded = Bounded {
+            stream,
+            gateway: *self,
+            deadline: request.deadline,
+            grace: GRACE,
+        };
+        let reply =
+            frame::call(&mut bounded, request).map_err(|_| RequestError::GatewayUnreachable)?;
+        match reply {
+            Ok(record) if record.call_id == request.call_id => Ok(record),
+            Ok(_) => Err(RequestError::GatewayUnreachable),
+            Err(refusal) => Err(refusal),
+        }
+    }
+}
+
+/// `deadline - now`, `None` when nothing is left.
+fn remaining(now: UtcNanos, deadline: UtcNanos) -> Option<Duration> {
+    let left = total_nanos(deadline).checked_sub(total_nanos(now))?;
+    let left = u64::try_from(left).ok().filter(|left| *left > 0)?;
+    Some(Duration::from_nanos(left))
+}
+
+fn total_nanos(at: UtcNanos) -> i128 {
+    i128::from(at.secs())
+        .saturating_mul(1_000_000_000)
+        .saturating_add(i128::from(at.nanos()))
+}
+
+/// A connection whose every write may take only the time left to `deadline`, and every read the
+/// time left to `deadline` plus `grace`.
+struct Bounded {
+    stream: TcpStream,
+    gateway: RemoteGateway,
+    deadline: UtcNanos,
+    grace: Duration,
+}
+
+impl Bounded {
+    fn write_bound(&self) -> io::Result<()> {
+        let left = self.gateway.left(self.deadline).ok_or_else(timed_out)?;
+        self.stream.set_write_timeout(Some(left))
+    }
+
+    fn read_bound(&self) -> io::Result<()> {
+        let now = (self.gateway.clock)();
+        let left = match remaining(now, self.deadline) {
+            Some(left) => left.checked_add(self.grace),
+            None => remaining_past(now, self.deadline, self.grace),
+        }
+        .ok_or_else(timed_out)?;
+        self.stream.set_read_timeout(Some(left))
+    }
+}
+
+fn timed_out() -> io::Error {
+    io::Error::from(io::ErrorKind::TimedOut)
+}
+
+/// What is left of `grace` at `now`, already past `deadline`, `None` once it is spent.
+fn remaining_past(now: UtcNanos, deadline: UtcNanos, grace: Duration) -> Option<Duration> {
+    let late = total_nanos(now).checked_sub(total_nanos(deadline))?;
+    let late = Duration::from_nanos(u64::try_from(late).ok()?);
+    grace.checked_sub(late).filter(|left| !left.is_zero())
+}
+
+impl Read for Bounded {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.read_bound()?;
+        self.stream.read(buf)
+    }
+}
+
+impl Write for Bounded {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.write_bound()?;
+        self.stream.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.write_bound()?;
+        self.stream.flush()
     }
 }
