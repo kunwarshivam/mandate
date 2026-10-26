@@ -431,11 +431,13 @@ fn listed(refusal: RequestError) -> usize {
         RequestError::RunKind => 6,
         RequestError::Tools => 7,
         RequestError::Transcript => 8,
+        RequestError::GatewayUnreachable => 9,
     }
 }
 
-/// DEC-2265 items 5 and 9: every refusal is in `ALL` once, has its own snake_case code, the code the
-/// spec's errors name, and crosses the wire as itself under it.
+/// DEC-2265 items 5 and 9, DEC-2397 item 2: every refusal is in `ALL` once, the caller's own
+/// `gateway_unreachable` last, has its own snake_case code, the code the spec's errors name, and
+/// crosses the wire as itself under it.
 #[test]
 fn every_refusal_has_its_own_code_and_crosses_the_wire_as_itself() {
     let expected = [
@@ -448,6 +450,7 @@ fn every_refusal_has_its_own_code_and_crosses_the_wire_as_itself() {
         "run_kind",
         "tools",
         "transcript",
+        "gateway_unreachable",
     ];
     assert_eq!(RequestError::ALL.len(), expected.len());
     for (position, refusal) in RequestError::ALL.into_iter().enumerate() {
