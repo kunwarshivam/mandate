@@ -7,6 +7,9 @@
 //! is what fences an earlier process (DEC-1012). A flag never overrides a variable the manager set,
 //! and one that disagrees with it is refused rather than guessed between (`AGENTS.md` rule 3). The
 //! connection and the owner may be left unnamed, to be read from the agent's deployment.
+//! [`gateway`] reads the model-gateway service's address a researching runtime calls (DEC-2397).
+
+use std::net::SocketAddr;
 
 /// The deployment a launch names; the connection and the owner are `None` when it leaves them to
 /// be resolved.
@@ -77,4 +80,21 @@ pub fn fixture_permitted(
         return Err("fixture_under_manager");
     }
     Ok(())
+}
+
+/// The model-gateway service's address `run` was given with `--gateway <host:port>` (DEC-2397 item
+/// 6), resolved once, or `None` when the flag is absent, so the runtime keeps its in-process recorded
+/// fake (DEC-2257 item 6). The flag is read only beside `--research`, since only research calls a
+/// model.
+///
+/// # Errors
+/// `gateway_address_invalid` for the flag written `--gateway=`, with no value, with a value that is
+/// another flag or names no address, or without `--research`.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn gateway(args: &[String], research: bool) -> Result<Option<SocketAddr>, &'static str> {
+    let _ = (args, research);
+    todo!()
 }

@@ -35,6 +35,7 @@ use mandate_time::UtcNanos;
 
 use crate::meter::CellMeter;
 use crate::recorded::{Bundle, BundleError, RecordedPlane, RecordedReply, ScriptedTurn};
+use crate::remote::RemoteGateway;
 use crate::runtime::{ArtifactSink, ResearchParts, ResearchWorker};
 use crate::source::SourceFor;
 
@@ -197,6 +198,25 @@ impl RecordedWorker {
     ) -> Result<Self, WorkerError> {
         let caps = Caps::new(bundle.workspace_cap);
         Self::built(bundle, who, sink, now, meter, caps, recorded())
+    }
+
+    /// The worker over `bundle`, storing through `sink` and stamping at `now()`, that calls models
+    /// through the model-gateway service at `remote` (DEC-2397 items 1 and 6). It builds no gateway
+    /// and holds no meter: the service reserves and settles every call on its own journaled stream,
+    /// and holds each research call to its agent's deployed cap.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn remote(
+        bundle: &Bundle,
+        who: WorkerFor,
+        sink: Box<dyn ArtifactSink>,
+        now: Box<dyn FnMut() -> UtcNanos>,
+        remote: RemoteGateway,
+    ) -> Self {
+        let _ = (bundle, who, sink, now, remote);
+        todo!()
     }
 
     /// As [`RecordedWorker::metered`], with the gateway refusing `budget_exhausted` any research call

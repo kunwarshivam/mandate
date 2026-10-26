@@ -98,6 +98,44 @@ impl<S: Store> JournalMeter<S> {
     }
 }
 
+/// A workspace's meter stream `meter:{workspace_id}` read through a [`Store`] without its writer
+/// epoch (DEC-2397 item 4): the runtime that calls models through the model-gateway service reads
+/// the service's stream for its own checks, and must never fence the service, the stream's one
+/// writer. It takes no epoch, so every append is refused `Unavailable` and writes nothing.
+pub struct ReadMeter<S: Store> {
+    store: S,
+    stream: Option<StreamId>,
+}
+
+impl<S: Store> ReadMeter<S> {
+    /// The meter stream of `workspace` through `store`. A workspace that names no stream gives a
+    /// meter whose every read fails `Unavailable`.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn open(store: S, workspace: &str) -> Self {
+        let _ = (store, workspace);
+        todo!()
+    }
+}
+
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+impl<S: Store> MeterStore for ReadMeter<S> {
+    fn read(&self) -> Result<Vec<MeterRecord>, StoreError> {
+        let _ = (&self.store, &self.stream);
+        todo!()
+    }
+
+    fn append(&mut self, record: MeterRecord) -> Result<(), StoreError> {
+        let _ = record;
+        todo!()
+    }
+}
+
 /// What a meter stream is named for and opens with: its prefix, its `StreamOpened`'s
 /// `stream_type`, and the member naming whose stream it is.
 struct Opened {
