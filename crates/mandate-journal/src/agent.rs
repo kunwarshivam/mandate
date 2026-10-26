@@ -2012,8 +2012,11 @@ mod tests {
         let v1 = member_names(&DECISION_MADE);
         let v3 = member_names(&DECISION_MADE_V3);
         assert!(!v1.is_empty());
-        assert_eq!(&v3[..v1.len()], v1.as_slice());
-        assert_eq!(&v3[v1.len()..], ["deferred_to_binding", "liquidity"]);
+        assert_eq!(v3.get(..v1.len()), Some(v1.as_slice()));
+        assert_eq!(
+            v3.get(v1.len()..),
+            Some(["deferred_to_binding", "liquidity"].as_slice())
+        );
         let mut sorted = DEFERRED_PARTS;
         sorted.sort_by_key(|part| part.as_bytes());
         assert_eq!(DEFERRED_PARTS, sorted);
