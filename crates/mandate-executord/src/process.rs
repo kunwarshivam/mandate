@@ -243,7 +243,8 @@ pub struct ExecutorProcess<S, B> {
 }
 
 /// The most batches the risk book can owe in a row: each owed batch is reproduced by its folds or
-/// makes them unreadable, so a further one is a defect, and the process stops rather than loop.
+/// makes them unreadable, so a further one is a defect, and the folds are made unreadable rather
+/// than loop; the process goes on.
 const MAX_OWED_BATCHES: usize = 8;
 
 /// What one pass reads from the agents' streams: the kill switches this stream has not applied,
@@ -1337,8 +1338,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     }
 
     /// Appends the risk book's batch in doubt, then each batch it owes, until it owes none
-    /// (DEC-2804 item 4). A batch the journal refuses as invalid makes every fold unreadable, which
-    /// holds openings and never exits, and the process goes on (DEC-2399, DEC-2805). Each owed batch takes its ids from the head it is written at and keeps
+    /// (DEC-2804 item 4). A batch the journal refuses as invalid, owed records whose drafts cannot
+    /// be made, and folds still owing after [`MAX_OWED_BATCHES`] each make every fold unreadable,
+    /// which holds openings and never exits, and the process goes on (DEC-2399, DEC-2805,
+    /// `AGENTS.md` rule 13): only the journal itself stopping stops it. Each owed batch takes its ids from the head it is written at and keeps
     /// them, with its bytes, when it goes in doubt.
     fn owed_batches(&mut self, now: UtcNanos) -> Ran {
         for _ in 0..MAX_OWED_BATCHES {
@@ -1350,8 +1353,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                         return Ran::Committed;
                     }
                     let Some(drafts) = self.owed_drafts(&owed) else {
-                        self.lifecycle.observe(now, Lifecycled::Failed);
-                        return Ran::Stopped;
+                        self.risk.append_failed();
+                        return Ran::Committed;
                     };
                     (drafts, self.written_at)
                 }
@@ -1367,8 +1370,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 Ran::Stopped => return Ran::Stopped,
             }
         }
-        self.lifecycle.observe(now, Lifecycled::Failed);
-        Ran::Stopped
+        self.risk.append_failed();
+        Ran::Committed
     }
 
     /// The drafts of the records `owed`, at the account stream's head: each with the next event id,

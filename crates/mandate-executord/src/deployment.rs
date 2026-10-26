@@ -707,6 +707,9 @@ impl RiskOpenings for Deployment {
         })
     }
 
+    /// Keeps `risks` for [`Self::risk`]. The map is borrowed only here and there, and never across
+    /// a call that could re-enter, so the borrow never fails; if it did, the last map would stand
+    /// until the next commit replaces it.
     fn read(&self, risks: BTreeMap<AgentId, GateRisk>) {
         if let Ok(mut held) = self.0.risk.try_borrow_mut() {
             *held = risks;

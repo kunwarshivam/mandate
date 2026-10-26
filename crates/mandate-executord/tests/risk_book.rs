@@ -425,3 +425,29 @@ fn an_unopened_agent_is_asked_again_only_when_a_stream_grew() -> Result<(), Erro
     assert_eq!(opened.get(), asked + 1, "the control stream grew");
     Ok(())
 }
+
+/// DEC-2399, DEC-2805, `AGENTS.md` rule 13: a batch of owed records the journal refuses as invalid
+/// makes the fold unreadable, `append_failed`, so openings hold, and the process stays ready, so
+/// exits, protection and the kill switch go on.
+#[test]
+fn a_refused_owed_batch_holds_openings_and_keeps_the_process() -> Result<(), Error> {
+    let journal = deployed()?;
+    let mut process = process(&journal, Fixed::new(1))?;
+    process.step(at(NOON)?);
+    tick(&journal, "t3", TUESDAY)?;
+    journal.fail_next_of("RiskDayStarted", &[support::Fault::Invalid]);
+    process.step(at(TUESDAY)?);
+    assert!(process.ready(), "{:?}", process.lifecycle().state());
+    assert!(
+        matches!(
+            process.risk_view(&agent(AGENT)),
+            RiskView::Unreadable {
+                cause: UnreadableCause::AppendFailed,
+                ..
+            }
+        ),
+        "{:?}",
+        process.risk_view(&agent(AGENT))
+    );
+    Ok(())
+}
