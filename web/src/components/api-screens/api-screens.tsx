@@ -16,6 +16,7 @@ import { clock, percent, price, quantity, usd } from "@/lib/format";
 import { type ActivityAnswer, type ApprovalRecord, type ApprovalResponse, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { cn } from "@/lib/utils";
+import { AgentTheses } from "./theses";
 
 /**
  * The screens over the workspace API's read models (DEC-1096): Home, the agents, one agent, the
@@ -241,6 +242,7 @@ export function ApiAgent({ agentId }: { agentId: string }) {
             <p className="text-sm text-muted-foreground">What the account held at its last reconciliation, whichever agent bought it.</p>
             <Positions agent={agent} />
           </Section>
+          <AgentTheses agentId={agent.agent_id} />
           <AgentActivity agentId={agent.agent_id} />
           <Section title="Limit usage">
             <p className={NOT_REPORTED}>Not reported by your deployment yet.</p>
@@ -496,7 +498,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
     ["Protection", o.protection ? `Stop at ${price(o.protection.stop)}${o.protection.take_profit ? `, take profit at ${price(o.protection.take_profit)}` : ""}` : "Not reported"],
     ["Deadline", clock(deadlineIso(approval.deadline))],
   ];
-  const deferred = deferredChecks(approval.content, approval.schema_version);
+  const deferred = deferredChecks(approval.content, approval.schema_version, approval.decision_deferred_to_binding);
   const shown = [nameOf(agent) ?? "Name not reported", line, ...facts.map(([term, value]) => `${term}: ${value}`), ...deferredLines(deferred)];
   const environment = agent?.environment ?? "unknown";
   const record: ApprovalRecord = { screen: "D6", environment, shown, modelOutputExpanded: false };

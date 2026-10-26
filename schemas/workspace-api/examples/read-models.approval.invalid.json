@@ -371,5 +371,33 @@
     "set": {
       "/approval/schema_version": "mutant_value"
     }
+  },
+  {
+    "label": "a missing decision_deferred_to_binding",
+    "remove": [
+      "/approval/decision_deferred_to_binding"
+    ]
+  },
+  {
+    "label": "decision_deferred_to_binding as text",
+    "set": {
+      "/approval/decision_deferred_to_binding": "halt"
+    }
+  },
+  {
+    "label": "a decision naming an empty check",
+    "set": {
+      "/approval/decision_deferred_to_binding": [
+        ""
+      ]
+    }
+  },
+  {
+    "label": "a decision naming a number",
+    "set": {
+      "/approval/decision_deferred_to_binding": [
+        1
+      ]
+    }
   }
 ]
