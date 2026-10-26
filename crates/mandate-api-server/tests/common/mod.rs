@@ -527,6 +527,44 @@ fn edited(
     mandate_canon::to_canonical(&value)
 }
 
+/// The checks a real `append` runs on a batch before it reads the stream (journal spec §5.1, as
+/// `mandate-journal`'s `MemoryJournal` and `mandate-journal-pg` run them): every draft parses,
+/// names `stream`, and has its own event id, then the batch rules ([`mandate_journal::check_batch`],
+/// rule 253 among them). `None` when the batch passes, so a route whose batch the real journal
+/// refuses is refused here too ([DEC-2131] item 5.3).
+///
+/// [DEC-2131]: ../../../../docs/project/decisions/DEC-2131.md
+fn checked(stream: &str, drafts: &[&[u8]]) -> Option<mandate_journal::AppendOutcome> {
+    use mandate_journal::{AppendOutcome, Draft, Invalid, InvalidReason};
+    let invalid = |draft: usize, reason: InvalidReason, path: &str| AppendOutcome::Invalid {
+        draft,
+        error: Invalid {
+            reason,
+            path: path.to_owned(),
+        },
+    };
+    if drafts.is_empty() {
+        return Some(invalid(0, InvalidReason::EmptyBatch, ""));
+    }
+    let mut batch: Vec<Draft> = Vec::with_capacity(drafts.len());
+    for (i, bytes) in drafts.iter().enumerate() {
+        let draft = match Draft::parse(bytes) {
+            Ok(draft) => draft,
+            Err(error) => return Some(AppendOutcome::Invalid { draft: i, error }),
+        };
+        if draft.stream_id().as_str() != stream {
+            return Some(invalid(i, InvalidReason::StreamMismatch, "stream_id"));
+        }
+        if batch.iter().any(|d| d.event_id() == draft.event_id()) {
+            return Some(invalid(i, InvalidReason::DuplicateEventId, "event_id"));
+        }
+        batch.push(draft);
+    }
+    mandate_journal::check_batch(&batch)
+        .err()
+        .map(|(draft, error)| AppendOutcome::Invalid { draft, error })
+}
+
 impl MemJournal {
     /// Journal spec §5.1's order: idempotency by event id, then the epoch, then the head.
     fn protocol(
@@ -538,6 +576,9 @@ impl MemJournal {
         drafts: &[&[u8]],
     ) -> mandate_journal::AppendOutcome {
         use mandate_journal::AppendOutcome;
+        if let Some(refused) = checked(stream, drafts) {
+            return refused;
+        }
         let draft = drafts.first().copied().expect("a draft");
         let value = mandate_canon::parse(draft).expect("a JSON draft");
         let id = value

@@ -1,0 +1,156 @@
+[
+  {
+    "label": "no models member",
+    "remove": [
+      "/models"
+    ]
+  },
+  {
+    "label": "a model without its id",
+    "remove": [
+      "/models/0/model_id"
+    ]
+  },
+  {
+    "label": "a model id outside the mandate's families",
+    "set": {
+      "/models/0/model_id": "custom.thing"
+    }
+  },
+  {
+    "label": "a model version that is not semantic",
+    "set": {
+      "/models/0/model_version": "v1"
+    }
+  },
+  {
+    "label": "a model without its content hash",
+    "remove": [
+      "/models/0/content_hash"
+    ]
+  },
+  {
+    "label": "a content hash that is not a content reference",
+    "set": {
+      "/models/0/content_hash": "cf"
+    }
+  },
+  {
+    "label": "a model without its parameters",
+    "remove": [
+      "/models/0/params"
+    ]
+  },
+  {
+    "label": "a parameter named twice",
+    "set": {
+      "/models/0/params": [
+        "fast_periods",
+        "fast_periods"
+      ]
+    }
+  },
+  {
+    "label": "a parameter with a default value",
+    "set": {
+      "/models/0/params": [
+        {
+          "name": "fast_periods",
+          "default": 5
+        }
+      ]
+    }
+  },
+  {
+    "label": "admits_instruments as text",
+    "set": {
+      "/models/0/admits_instruments": "no"
+    }
+  },
+  {
+    "label": "a model without its content",
+    "remove": [
+      "/models/0/content"
+    ]
+  },
+  {
+    "label": "a model without registered_at",
+    "remove": [
+      "/models/0/registered_at"
+    ]
+  },
+  {
+    "label": "a scorecard beside a model",
+    "set": {
+      "/models/0/scorecard": {
+        "hit_rate": "0.6"
+      }
+    }
+  },
+  {
+    "label": "an unlisted member",
+    "set": {
+      "/owner": "01JBH3BTZ8K2M4N6P8R0S2T4V0"
+    }
+  },
+  {
+    "label": "a prompt template in the content",
+    "set": {
+      "/models/0/content/system_template": "You are a research agent."
+    }
+  },
+  {
+    "label": "a model identity in the content",
+    "set": {
+      "/models/0/content/identity": {
+        "provider": "x",
+        "model": "y"
+      }
+    }
+  },
+  {
+    "label": "source paths in the content",
+    "set": {
+      "/models/0/content/code": [
+        {
+          "path": "crates/x.rs",
+          "sha256": "00"
+        }
+      ]
+    }
+  },
+  {
+    "label": "content as text",
+    "set": {
+      "/models/0/content": "methodology"
+    }
+  },
+  {
+    "label": "an input declaration in the content",
+    "set": {
+      "/models/0/content/inputs": {
+        "bars": "daily_close"
+      }
+    }
+  },
+  {
+    "label": "an output declaration in the content",
+    "set": {
+      "/models/0/content/output": {
+        "long": {}
+      }
+    }
+  },
+  {
+    "label": "an unprojected member of params_schema",
+    "set": {
+      "/models/0/content/params_schema/properties": {}
+    }
+  },
+  {
+    "label": "an unprojected member of a parameter",
+    "set": {
+      "/models/0/content/params_schema/params/0/default": 5
+    }
+  }
+]

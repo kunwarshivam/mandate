@@ -54,6 +54,53 @@ fn the_checked_in_file_keeps_alpaca_news_out_until_counsel_confirms() {
     assert_eq!(edgar.min_interval_ms(), 125);
 }
 
+/// DEC-2394: version 2 confirms Alpaca news, the founder's answer to DEC-1130 item 2: the same
+/// source ids as version 1, each with the same kind, licence, interval, cap, and endpoints, and
+/// Alpaca news now in effect and still licensed, so readers keep withholding its text (DEC-1130
+/// item 6).
+#[test]
+fn version_two_admits_alpaca_news_and_keeps_its_text_licensed() {
+    let (one, two) = (checked_in(1), checked_in(2));
+    assert_eq!(two.version(), AllowlistVersion(2));
+    let ids = |list: &Allowlist| -> Vec<String> {
+        list.entries().map(|e| e.id().as_str().to_owned()).collect()
+    };
+    assert_eq!(ids(&one), ids(&two));
+    for (before, after) in one.entries().zip(two.entries()) {
+        assert_eq!(before.kind(), after.kind(), "{}", after.id().as_str());
+        assert_eq!(
+            before.licensed(),
+            after.licensed(),
+            "{}",
+            after.id().as_str()
+        );
+        assert_eq!(before.min_interval_ms(), after.min_interval_ms());
+        assert_eq!(before.max_response_bytes(), after.max_response_bytes());
+        assert_eq!(before.endpoints(), after.endpoints());
+    }
+    let news = two.active(&news_source()).unwrap();
+    assert_eq!(news.kind(), SourceKind::News);
+    assert!(news.licensed(), "its text stays withheld");
+    assert!(
+        two.permit(
+            &news_source(),
+            "https://data.alpaca.markets/v1beta1/news?symbols=AAPL"
+        )
+        .is_ok()
+    );
+    assert_eq!(
+        two.permit(&news_source(), "https://data.alpaca.markets/v2/stocks"),
+        Err(SourceError::EndpointNotAllowlisted),
+        "only the news endpoint"
+    );
+    let research = two.research_allowlist();
+    assert_eq!(research.version, AllowlistVersion(2));
+    assert_eq!(
+        research.sources,
+        BTreeSet::from([edgar_source(), news_source()])
+    );
+}
+
 #[test]
 fn the_research_allowlist_holds_exactly_the_confirmed_sources() {
     let research = allowlist().research_allowlist();

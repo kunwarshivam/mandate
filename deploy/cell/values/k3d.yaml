@@ -15,6 +15,16 @@ runtime:
   # The recorded research bundle the interim runtime image carries (DEC-2246). Every runtime pod the
   # manager starts is handed it; only an agent whose confirmed envelope researches uses it.
   research: /usr/local/share/mandate/research
+# The model-gateway service, when `cargo xtask cell up` names its image (E21-62): it serves the
+# hosted workspace until the demo points it at the research agent's own (`cargo xtask cell demo`),
+# over the recorded bundle its image carries. Its budgets are the recorded bundle's own caps
+# (`deploy/cell/demo/research/research.json`), over a recording that reaches no provider and spends
+# nothing (DEC-2326 item 3).
+modelGateway:
+  workspace: 01KDEM0000000000000000000W
+  deployment: cell-local
+  workspaceMonthlyUsd: "50"
+  deploymentMonthlyUsd: "20"
 # The data process's recorded series, when `cargo xtask cell up` names its image: the demo's SPY,
 # closing 150 on 2026-10-23, and the second agent's QQQ (`demo/web-instrument.json`), closing 140,
 # each 0.1 higher each session after, so a share of either fits the demo mandates' 300 USD order

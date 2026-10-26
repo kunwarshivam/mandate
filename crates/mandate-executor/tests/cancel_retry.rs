@@ -32,7 +32,7 @@ const OCO: &str = "md-oco-1";
 const INTENT: &str = "01JABCDEFGHJKMNPQRSTVWXYZ0";
 const OTHER_INTENT: &str = "01JABCDEFGHJKMNPQRSTVWXYZ1";
 const SWITCHED_AT: i64 = 100;
-const RETRIES_EXHAUSTED: &str = "kill_switch_cancel_retries_exhausted";
+const RETRIES_EXHAUSTED: &str = "exit_stalled";
 
 /// A stream opened and a process started on it, ready to open, with the risk clock at
 /// [`SWITCHED_AT`].
@@ -764,7 +764,7 @@ fn the_alert_survives_a_tick_handed_again_after_an_append_in_doubt() {
     let mut shell = shell.restart_ready(&ports);
     let alerted = |effects: &[Effect]| {
         effects.iter().any(
-            |effect| matches!(effect, Effect::Notify(notice) if notice.message_key == RETRIES_EXHAUSTED),
+            |effect| matches!(effect, Effect::Notify(notice) if notice.kind.key() == RETRIES_EXHAUSTED),
         )
     };
     let drafted = |effects: &[Effect]| {

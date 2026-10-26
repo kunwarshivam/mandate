@@ -49,7 +49,7 @@ suffix included, and a heading whose number differs from its file name's.
 | DEC-2500 to DEC-2599 | Notifications and approvals |
 | DEC-2600 to DEC-2699 | Process and CI |
 | DEC-2700 to DEC-2799 | The control plane |
-| DEC-2800 to DEC-2899 | Spare |
+| DEC-2800 to DEC-2899 | The trading core, R0, and live: its second range, once DEC-2300 to DEC-2399 ran out |
 
 Work that fits two categories takes the one whose crates or documents it changes most. When a
 category's range runs out, a PR that edits only this table gives it the spare range, and the next

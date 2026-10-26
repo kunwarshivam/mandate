@@ -1,6 +1,7 @@
 //! The deployment's gate dry run over the journaled fold (DEC-2388), on the cell's demo mandate:
 //! the gate's own checks run over the journaled facts with DEC-2378 item 11's four checks deferred,
-//! every opening is still denied while any is deferred, and an exit is never denied.
+//! an opening they allow is answered with every deferral named, so the runtime asks the owner and
+//! none is reported passed (DEC-2388 item 13), and an exit is never denied.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
@@ -10,7 +11,7 @@ use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_bars::LiquidityFacts;
 use mandate_canon::{DecStr, Digest, Value};
 use mandate_daemon::bars::BarsReader;
-use mandate_daemon::production::{Facts, Gate, Liquidity, UNJOURNALED, UNSEEN, verdict};
+use mandate_daemon::production::{Facts, Gate, Liquidity, UNJOURNALED, UNSEEN, deferral, verdict};
 use mandate_gate_context::{Freshness, gate_rule_set};
 use mandate_journal::StoredEvent;
 use mandate_marketdata::dataset::Store;
@@ -22,7 +23,7 @@ use mandate_risk::{
     Advisory, CheckOutcome, Computed, Decision, Deferred, GateConfig, Purpose as GatePurpose,
     ReasonCode, Verdict,
 };
-use mandate_runtime::{DryRunVerdict, GateDryRun, Proposal, Purpose};
+use mandate_runtime::{Deferral, DryRunVerdict, GateDryRun, LiquidityRead, Proposal, Purpose};
 use mandate_spec::document::Mandate;
 use mandate_time::{Date, ExchangeCalendar, UtcNanos, new_york_midnight};
 use proptest::prelude::*;
@@ -178,9 +179,63 @@ fn denied(reason: &str) -> DryRunVerdict {
     }
 }
 
+/// The twelve parts the runtime names beside the liquidity floor and participation, written out
+/// by hand: every one the dry run defers whatever the bars say.
+fn twelve() -> BTreeSet<Deferral> {
+    BTreeSet::from([
+        Deferral::AccountExposure,
+        Deferral::AgentEquity,
+        Deferral::AgentMode,
+        Deferral::ConductHistory,
+        Deferral::DayTradeBudget,
+        Deferral::Eligibility,
+        Deferral::FeeReservation,
+        Deferral::Halt,
+        Deferral::OtherOrders,
+        Deferral::QuoteAsk,
+        Deferral::ReentryCooldown,
+        Deferral::RelatedAccounts,
+    ])
+}
+
+/// An opening the gate allows with no bars read: all twelve deferred, and both liquidity checks
+/// with them.
+fn asked() -> DryRunVerdict {
+    DryRunVerdict::AllowDeferring {
+        deferred: twelve(),
+        liquidity: None,
+    }
+}
+
+/// `facts` as the dry run records them, read at the fold's risk clock.
+fn read_of(facts: &LiquidityFacts) -> LiquidityRead {
+    LiquidityRead {
+        prior_close: facts.prior_close,
+        median_dollar_volume_20d: facts.median_dollar_volume_20d,
+        adv_20d: facts.adv_20d,
+        trailing_5m_volume: facts.trailing_5m_volume,
+        read_at: UtcNanos::parse(REGULAR).unwrap(),
+    }
+}
+
+/// An opening the gate allows on `facts`: the twelve deferred, the liquidity checks evaluated.
+fn asked_on(facts: &LiquidityFacts) -> DryRunVerdict {
+    DryRunVerdict::AllowDeferring {
+        deferred: twelve(),
+        liquidity: Some(read_of(facts)),
+    }
+}
+
+fn denied_on(reason: &str, facts: &LiquidityFacts) -> DryRunVerdict {
+    DryRunVerdict::DenyOnFigures {
+        reason_code: reason.to_owned(),
+        liquidity: read_of(facts),
+    }
+}
+
 /// The plan's own opening on the demo: three shares at the bid, $299.85, under every cap.
 #[test]
-fn an_opening_the_gate_allows_is_still_denied_while_its_checks_are_deferred() {
+fn an_opening_the_gate_allows_is_answered_with_every_deferral_named() {
     let gate = gate_over(&journaled_with(&RICH), Some(config()));
     let proposal = opening("3", "99.95");
     let advisory = gate.advisory(&proposal).unwrap();
@@ -224,7 +279,7 @@ fn an_opening_the_gate_allows_is_still_denied_while_its_checks_are_deferred() {
             "{deferred:?} is reported deferred, never passed: {advisory:?}"
         );
     }
-    assert_eq!(gate.check(&proposal), denied("deferred_to_binding"));
+    assert_eq!(gate.check(&proposal), asked());
 }
 
 #[test]
@@ -240,9 +295,10 @@ fn every_check_of_dec_2378_item_11_is_deferred_until_its_fact_is_journaled() {
     );
 }
 
-/// The verdict of an advisory answer: only an allow with nothing deferred is an allow.
+/// The verdict of an advisory answer: an allow with nothing deferred is an allow, an allow with
+/// any deferral names each, a refusal carries its reason, and the figures go with each.
 #[test]
-fn only_an_allow_with_nothing_deferred_is_an_allow() {
+fn each_advisory_answer_maps_to_its_verdict() {
     let decision = |verdict, reason| Decision {
         verdict,
         reason,
@@ -255,35 +311,121 @@ fn only_an_allow_with_nothing_deferred_is_an_allow() {
         decision: decision(verdict, reason),
         deferred: deferred.iter().copied().collect(),
     };
+    let figures = read_of(&liquid());
     assert_eq!(
-        verdict(Ok(advisory(Verdict::Allow, None, &[]))),
+        verdict(Ok((
+            advisory(Verdict::Allow, None, &[]),
+            Some(figures.clone())
+        ))),
         DryRunVerdict::Allow
     );
-    for deferred in UNJOURNALED {
+    assert_eq!(
+        verdict(Ok((advisory(Verdict::Allow, None, &[]), None))),
+        DryRunVerdict::AllowDeferring {
+            deferred: BTreeSet::new(),
+            liquidity: None
+        },
+        "no figures read leaves both liquidity checks to the binding gate"
+    );
+    for deferred in UNJOURNALED.into_iter().chain(UNSEEN) {
+        let liquid = matches!(deferred, Deferred::LiquidityFloor | Deferred::Participation);
         assert_eq!(
-            verdict(Ok(advisory(Verdict::Allow, None, &[deferred]))),
-            denied("deferred_to_binding"),
-            "{deferred:?}"
+            verdict(Ok((
+                advisory(Verdict::Allow, None, &[deferred]),
+                Some(figures.clone())
+            ))),
+            DryRunVerdict::AllowDeferring {
+                deferred: deferral(deferred).into_iter().collect(),
+                liquidity: (!liquid).then(|| figures.clone()),
+            },
+            "{deferred:?}: a liquidity check still deferred drops the figures"
         );
     }
     for gate_verdict in [Verdict::Deny, Verdict::Hold, Verdict::Defer] {
         assert_eq!(
-            verdict(Ok(advisory(
-                gate_verdict,
-                Some(ReasonCode::MaxOrderSize),
-                &[]
+            verdict(Ok((
+                advisory(gate_verdict, Some(ReasonCode::MaxOrderSize), &[]),
+                None
             ))),
             denied("max_order_size"),
             "{gate_verdict:?}"
         );
         assert_eq!(
-            verdict(Ok(advisory(gate_verdict, None, &UNJOURNALED))),
+            verdict(Ok((
+                advisory(gate_verdict, Some(ReasonCode::MaxOrderSize), &UNSEEN),
+                Some(figures.clone())
+            ))),
+            DryRunVerdict::DenyOnFigures {
+                reason_code: "max_order_size".to_owned(),
+                liquidity: figures.clone()
+            },
+            "{gate_verdict:?} on figures"
+        );
+        assert_eq!(
+            verdict(Ok((advisory(gate_verdict, None, &UNJOURNALED), None))),
             denied("gate_refused"),
             "{gate_verdict:?} with no reason"
         );
     }
     assert_eq!(verdict(Err("facts_held")), denied("facts_held"));
 }
+
+/// Each part the gate defers is named by the runtime as the journal names it: the liquidity floor
+/// and participation by the runtime itself, the other twelve by the part of the same name. The
+/// names are read from the journal's vectors, not from either crate.
+#[test]
+fn each_deferred_part_is_named_as_the_journal_names_it() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/refcases/journal.json"
+    );
+    let fixture = mandate_canon::parse(&std::fs::read(path).unwrap()).unwrap();
+    let parts: BTreeSet<&str> = fixture
+        .get("deferred_to_binding")
+        .and_then(|section| section.get("parts"))
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    let by_hand = [
+        (Deferred::Eligibility, "eligibility"),
+        (Deferred::LiquidityFloor, "liquidity_floor"),
+        (Deferred::Participation, "participation"),
+        (Deferred::DayTradeBudget, "day_trade_budget"),
+        (Deferred::AgentMode, "agent_mode"),
+        (Deferred::AgentEquity, "agent_equity"),
+        (Deferred::ReentryCooldown, "reentry_cooldown"),
+        (Deferred::Halt, "halt"),
+        (Deferred::OtherOrders, "other_orders"),
+        (Deferred::QuoteAsk, "quote_ask"),
+        (Deferred::ConductHistory, "conduct_history"),
+        (Deferred::RelatedAccounts, "related_accounts"),
+        (Deferred::FeeReservation, "fee_reservation"),
+        (Deferred::AccountExposure, "account_exposure"),
+    ];
+    assert_eq!(
+        by_hand
+            .iter()
+            .map(|(_, name)| *name)
+            .collect::<BTreeSet<_>>(),
+        parts
+    );
+    for (deferred, name) in by_hand {
+        match deferral(deferred) {
+            Some(named) => assert_eq!(named.name(), name, "{deferred:?}"),
+            None => assert!(LIQUIDITY_PARTS.contains(&name), "{deferred:?}"),
+        }
+    }
+    assert_eq!(
+        Deferral::ALL.len() + LIQUIDITY_PARTS.len(),
+        parts.len(),
+        "every runtime name is a journal part"
+    );
+}
+
+/// The two parts the runtime names exactly when no figures were evaluated (journal spec rule 270).
+const LIQUIDITY_PARTS: [&str; 2] = ["liquidity_floor", "participation"];
 
 #[test]
 fn the_gates_own_reason_is_journaled_before_any_deferral() {
@@ -384,7 +526,7 @@ fn an_order_of_the_agents_still_working_denies_the_opening() {
     );
     assert_eq!(
         gate_over(&rows, Some(config())).check(&opening("3", "99.95")),
-        denied("deferred_to_binding"),
+        asked(),
         "an order no longer working counts for nothing"
     );
 }
@@ -433,7 +575,7 @@ fn oracle(blocked: bool, cash: u32, units: u32, limit_cents: u32) -> DryRunVerdi
     } else if cost_cents > u64::from(cash) * 100 {
         denied("insufficient_settled_buying_power")
     } else {
-        denied("deferred_to_binding")
+        asked()
     }
 }
 
@@ -441,9 +583,10 @@ proptest! {
     #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
 
     /// Over blocked and active accounts, any cash, any whole quantity and any cent limit, the dry
-    /// run answers as the spec's checks computed on their own, and never allows an opening.
+    /// run answers as the spec's checks computed on their own, and never allows an opening with
+    /// nothing deferred.
     #[test]
-    fn the_dry_run_answers_as_the_checks_and_never_allows_an_opening(
+    fn the_dry_run_answers_as_the_checks_and_never_allows_an_opening_unasked(
         blocked in any::<bool>(),
         cash in 0_u32..2_000,
         units in 1_u32..15,
@@ -592,7 +735,7 @@ fn a_proposal_labelled_an_opening_that_the_gate_types_as_an_exit_is_denied() {
     increase.purpose = Purpose::Increase;
     assert_eq!(
         gate.check(&increase),
-        denied("deferred_to_binding"),
+        asked(),
         "a buy while holding is the gate's increase, still deferred"
     );
 }
@@ -612,7 +755,7 @@ fn a_mandate_version_applied_after_the_start_holds_every_opening() {
     };
     assert_eq!(
         applied(DEPLOYED),
-        denied("deferred_to_binding"),
+        asked(),
         "the version the gate was built on"
     );
     assert_eq!(
@@ -677,7 +820,7 @@ fn each_blocking_flag_and_any_status_but_active_blocks_the_account() {
         snapshot(&mut rows, status, "INACTIVE", flags);
         gate_over(&rows, Some(config())).check(&opening("3", "99.95"))
     };
-    assert_eq!(check("ACTIVE", [false; 3]), denied("deferred_to_binding"));
+    assert_eq!(check("ACTIVE", [false; 3]), asked());
     for flags in [
         [true, false, false],
         [false, true, false],
@@ -787,7 +930,7 @@ fn gate_reading_under(
 }
 
 /// DEC-2274 item 3: with the bars read, the liquidity floor and participation are evaluated,
-/// never deferred, and the other twelve stay deferred, so the opening is still denied.
+/// never deferred, and the other twelve stay deferred, so the opening is asked with its figures.
 #[test]
 fn with_the_bars_read_the_floor_and_participation_are_evaluated() {
     let (gate, reads) = gate_reading(&journaled_with(&RICH), Some(liquid()));
@@ -801,10 +944,7 @@ fn with_the_bars_read_the_floor_and_participation_are_evaluated() {
         12,
         "eligibility, the day-trade budget and the ten unseen parts: {advisory:?}"
     );
-    assert_eq!(
-        gate.check(&opening("3", "99.95")),
-        denied("deferred_to_binding")
-    );
+    assert_eq!(gate.check(&opening("3", "99.95")), asked_on(&liquid()));
 }
 
 /// DEC-2378 item 11 condition 2: each check moves from deferred to evaluated when its bars appear,
@@ -842,15 +982,11 @@ fn each_liquidity_check_moves_from_deferred_to_evaluated_when_its_bars_appear() 
                 && deferred.deferred.contains(&Deferred::Participation),
             "{check}: deferred without bars"
         );
-        assert_eq!(
-            without.check(&opening("3", "99.95")),
-            denied("deferred_to_binding"),
-            "{check}"
-        );
-        let (with, _) = gate_reading(&rows, Some(facts));
+        assert_eq!(without.check(&opening("3", "99.95")), asked(), "{check}");
+        let (with, _) = gate_reading(&rows, Some(facts.clone()));
         assert_eq!(
             with.check(&opening("3", "99.95")),
-            denied(reason),
+            denied_on(reason, &facts),
             "{check}"
         );
     }
@@ -873,7 +1009,7 @@ fn an_exit_never_reaches_the_reader() {
         exit.purpose = purpose;
         assert_eq!(gate.check(&exit), DryRunVerdict::Allow, "{purpose:?}");
         assert_ne!(
-            verdict(gate.advisory(&exit)),
+            verdict(gate.read(&exit)),
             DryRunVerdict::Allow,
             "{purpose:?}: the advisory pass called directly on an exit label never allows it"
         );
@@ -984,24 +1120,18 @@ fn each_participation_cap_reads_its_own_figure() {
     let mut tight = config();
     tight.order_size_participation = Fraction::parse("0.01").unwrap();
     let rows = journaled_with(&RICH);
-    let (passes, _, _) = gate_reading_under(
-        &rows,
-        Some(figures("99.95", "20000000000", "100", "300")),
-        tight.clone(),
-    );
+    let passing = figures("99.95", "20000000000", "100", "300");
+    let (passes, _, _) = gate_reading_under(&rows, Some(passing.clone()), tight.clone());
     assert_eq!(
         passes.check(&opening("3", "99.95")),
-        denied("deferred_to_binding"),
+        asked_on(&passing),
         "order cap 3 of 300 trailing, daily cap 5 of 100 ADV"
     );
-    let (swapped, _, _) = gate_reading_under(
-        &rows,
-        Some(figures("99.95", "20000000000", "300", "100")),
-        tight,
-    );
+    let swapping = figures("99.95", "20000000000", "300", "100");
+    let (swapped, _, _) = gate_reading_under(&rows, Some(swapping.clone()), tight);
     assert_eq!(
         swapped.check(&opening("3", "99.95")),
-        denied("conduct_limit_breached"),
+        denied_on("conduct_limit_breached", &swapping),
         "order cap 1 of 100 trailing"
     );
 }

@@ -11,9 +11,9 @@ use crate::ports::{IdGen, Ports};
 use crate::state::{RuntimeState, UnresolvedAppend};
 use crate::types::{
     Autonomy, Classified, Command, DecisionClip, DryRunVerdict, Effect, EventDraft, EventId,
-    ExitOrigin, FlattenRequest, Initiator, Input, IntentBody, IntentHandoff, KillScope, Mode,
-    ModelOutput, NotificationRef, Observation, OwnerConfirmation, Proposal, Purpose, RiskClock,
-    Seq, TimeInForce, TimerId, TimerRequest, WriterEpoch,
+    ExitOrigin, FlattenRequest, Initiator, Input, IntentBody, IntentHandoff, KillScope,
+    LiquidityRead, Mode, ModelOutput, NotificationRef, Observation, OwnerConfirmation, Proposal,
+    Purpose, RiskClock, RuntimeAlert, Seq, TimeInForce, TimerId, TimerRequest, WriterEpoch,
 };
 
 /// One step of the runtime (ADR-0001 ES-06).
@@ -510,22 +510,106 @@ fn decide(
         return Ok(());
     }
     let verdict = dry_run(state, ports, &proposal, now);
-    let classified = ports.plan.classify(ports.view, &proposal);
+    let classified = overlaid(ports.plan.classify(ports.view, &proposal), &verdict);
     let decision = batch.journal(
         "DecisionMade",
         None,
         decided(&proposal, &inputs, &verdict, &classified)?,
     )?;
     match &verdict {
-        DryRunVerdict::Deny { .. } => {
+        DryRunVerdict::Deny { .. } | DryRunVerdict::DenyOnFigures { .. } => {
             batch.notify(NotificationRef {
                 subject_event: decision,
-                message_key: "decision_skipped",
+                kind: RuntimeAlert::DecisionSkipped,
             });
             Ok(())
         }
-        DryRunVerdict::Allow => allowed(state, &proposal, &classified, now, ports, decision, batch),
+        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. } => {
+            allowed(state, &proposal, &classified, now, ports, decision, batch)
+        }
     }
+}
+
+/// The policy overlay's label (mandate spec §6.2 step 5c), which a decision the overlay changed
+/// carries.
+const POLICY_OVERLAY: &str = "policy_overlay";
+
+/// `classified`, unless the dry run deferred a check: then an `auto` becomes an `ask` labelled
+/// `policy_overlay`, so an opening whose checks the dry run could not all see is never proposed
+/// without the owner (DEC-2378 item 11 condition 4, DEC-2388 item 12). An `ask` or a `deny` keeps
+/// its own label. [`settled`] leaves a deferral only on an opening or an increase, so no exit is
+/// ever asked (`AGENTS.md` rule 13).
+pub(crate) fn overlaid(classified: Classified, verdict: &DryRunVerdict) -> Classified {
+    match (verdict, classified.autonomy) {
+        (DryRunVerdict::AllowDeferring { .. }, Autonomy::Auto) => Classified {
+            autonomy: Autonomy::Ask,
+            decided_by: Some(POLICY_OVERLAY.to_owned()),
+        },
+        _ => classified,
+    }
+}
+
+/// The gate's `verdict` as the journal can record it for a proposal of `purpose` (journal spec
+/// v0.85 rules 269 and 270): an exit defers nothing and carries no figures, so a deferring allow
+/// of one is an allow and a denial on figures a denial; and an allow that left nothing to the
+/// binding gate, having evaluated both liquidity checks on its figures, is an allow, written at
+/// version 1 as any other.
+fn settled(verdict: DryRunVerdict, purpose: Purpose) -> DryRunVerdict {
+    match verdict {
+        DryRunVerdict::AllowDeferring { .. } if !purpose.adds_risk() => DryRunVerdict::Allow,
+        DryRunVerdict::DenyOnFigures { reason_code, .. } if !purpose.adds_risk() => {
+            DryRunVerdict::Deny { reason_code }
+        }
+        DryRunVerdict::AllowDeferring {
+            deferred,
+            liquidity: Some(_),
+        } if deferred.is_empty() => DryRunVerdict::Allow,
+        verdict => verdict,
+    }
+}
+
+/// The names `deferred_to_binding` carries for `verdict`, in byte order (rule 269): its deferrals,
+/// and the liquidity floor and participation when no figures were evaluated (rule 270).
+fn deferred_names(verdict: &DryRunVerdict) -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = match verdict {
+        DryRunVerdict::AllowDeferring {
+            deferred,
+            liquidity,
+        } => deferred
+            .iter()
+            .map(|deferral| deferral.name())
+            .chain(
+                liquidity
+                    .is_none()
+                    .then_some(["liquidity_floor", "participation"])
+                    .into_iter()
+                    .flatten(),
+            )
+            .collect(),
+        DryRunVerdict::Allow | DryRunVerdict::Deny { .. } | DryRunVerdict::DenyOnFigures { .. } => {
+            Vec::new()
+        }
+    };
+    names.sort_by_key(|name| name.as_bytes());
+    names.dedup();
+    names
+}
+
+/// Version 3's `liquidity`: the four figures as decimals and the clock they were read at.
+fn liquidity_value(read: &LiquidityRead) -> Result<Value, RuntimeError> {
+    payload::object(vec![
+        ("prior_close", payload::text(&read.prior_close.to_string())),
+        (
+            "median_dollar_volume_20d",
+            payload::text(&read.median_dollar_volume_20d.to_string()),
+        ),
+        ("adv_20d", payload::text(&read.adv_20d.to_string())),
+        (
+            "trailing_5m_volume",
+            payload::text(&read.trailing_5m_volume.to_string()),
+        ),
+        ("read_at", payload::text(&read.read_at.to_string())),
+    ])
 }
 
 /// The dry run of one proposal at `now`. An opening or increase the connection's checks do not
@@ -550,7 +634,7 @@ pub(crate) fn dry_run(
             reason_code: payload::WORKING_ORDER_LIMIT.to_owned(),
         };
     }
-    ports.gate.check(proposal)
+    settled(ports.gate.check(proposal), proposal.purpose)
 }
 
 /// What the autonomy classification does with a proposal the dry run allowed (mandate spec §6):
@@ -631,24 +715,32 @@ fn decided(
     classified: &Classified,
 ) -> Result<Value, RuntimeError> {
     let (dry_run, reason_code) = match verdict {
-        DryRunVerdict::Allow => ("allow", Value::Null),
-        DryRunVerdict::Deny { reason_code } => ("deny", payload::text(reason_code)),
+        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. } => ("allow", Value::Null),
+        DryRunVerdict::Deny { reason_code } | DryRunVerdict::DenyOnFigures { reason_code, .. } => {
+            ("deny", payload::text(reason_code))
+        }
     };
+    let allowed = matches!(
+        verdict,
+        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. }
+    );
     let classification = match classified.autonomy {
         Autonomy::Auto => "auto",
         Autonomy::Ask => "ask",
         Autonomy::Deny => "deny",
     };
-    let classified_value = match verdict {
-        DryRunVerdict::Allow => payload::text(classification),
-        DryRunVerdict::Deny { .. } => Value::Null,
+    let classified_value = if allowed {
+        payload::text(classification)
+    } else {
+        Value::Null
     };
-    let decided_by = match verdict {
-        DryRunVerdict::Allow => classified
+    let decided_by = if allowed {
+        classified
             .decided_by
             .as_deref()
-            .map_or(Value::Null, payload::text),
-        DryRunVerdict::Deny { .. } => Value::Null,
+            .map_or(Value::Null, payload::text)
+    } else {
+        Value::Null
     };
     let outputs_used = proposal
         .outputs_used
@@ -669,7 +761,7 @@ fn decided(
             payload::object(vec![("key", payload::text(key)), ("value", value.clone())])
         })
         .collect::<Result<Vec<_>, _>>()?;
-    payload::object(vec![
+    let body = payload::object(vec![
         ("instrument_id", payload::text(proposal.instrument.as_str())),
         ("side", payload::text(payload::side_name(proposal.side))),
         ("type", payload::text("limit")),
@@ -715,7 +807,36 @@ fn decided(
         ("delegation_id", Value::Null),
         ("requested_by", payload::text("agent")),
         ("client_id", Value::Null),
-    ])
+    ])?;
+    let read = match verdict {
+        DryRunVerdict::AllowDeferring { liquidity, .. } => liquidity.as_ref(),
+        DryRunVerdict::DenyOnFigures { liquidity, .. } => Some(liquidity),
+        DryRunVerdict::Allow | DryRunVerdict::Deny { .. } => None,
+    };
+    let version_3 = match verdict {
+        DryRunVerdict::AllowDeferring { .. } | DryRunVerdict::DenyOnFigures { .. } => true,
+        DryRunVerdict::Allow | DryRunVerdict::Deny { .. } => false,
+    };
+    if !version_3 {
+        return Ok(body);
+    }
+    let Value::Object(mut members) = body else {
+        return Err(payload::non_canonical("payload"));
+    };
+    let deferred = Value::Array(
+        deferred_names(verdict)
+            .into_iter()
+            .map(payload::text)
+            .collect(),
+    );
+    let liquidity = read.map_or(Ok(Value::Null), liquidity_value)?;
+    for (name, value) in [("deferred_to_binding", deferred), ("liquidity", liquidity)] {
+        members.insert(
+            mandate_canon::Key::new(name).map_err(|_| payload::non_canonical(name))?,
+            value,
+        );
+    }
+    Ok(Value::Object(members))
 }
 
 fn tif_of(proposal: &Proposal) -> TimeInForce {
