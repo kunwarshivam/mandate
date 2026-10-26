@@ -10,7 +10,7 @@ import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
 import type { CommandPhase, Decoder, PreparedCommand } from "@/api/types";
-import { activityRead, journalPageRead } from "@/api/activity";
+import { activityRead, journalPageRead, holdingsRead } from "@/api/activity";
 import { connectStartBody, connectionRead, connectionsRead } from "@/api/connect";
 import { type PasskeyKind, type StepUpAction, type StepUpChallenge, confirmCode, connectStepUpDigest } from "@/api/step-up";
 import { prepareCreateVersion, readConfirmation, versionCreated } from "@/api/versions";
@@ -30,6 +30,7 @@ import {
   type CommandKind,
   type CommandRecord,
   type MandateChangeRequest,
+  type PositionsAnswer,
   type Runtime,
   RuntimeContext,
   type SetUp,
@@ -436,6 +437,15 @@ export function ApiRuntimeProvider({
     [client, journalTail],
   );
 
+  /** `GET /agents/{id}/positions` alone (DEC-2111): the positions screen reads every agent's, not their orders or journals. */
+  const holdings = useCallback(
+    async (agentId: string): Promise<PositionsAnswer> => {
+      const read = await client.read(`/agents/${encodeURIComponent(agentId)}/positions`, holdingsRead(agentId));
+      return read.ok ? { ok: true, account_ref: read.value.account_ref, items: read.value.items, account_positions: read.value.account_positions } : { ok: false, reason: read.error.code };
+    },
+    [client],
+  );
+
   /** Mandate changes go through drafts, versions and confirmation (spec §4.1), which this slice does not send. */
   const changeMandate = useCallback<Runtime["changeMandate"]>((proposal, origin, record) => {
     counter.current += 1;
@@ -590,8 +600,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

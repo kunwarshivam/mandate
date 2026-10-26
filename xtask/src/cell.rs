@@ -6553,7 +6553,7 @@ mod tests {
             .map(|(body, _)| body)
             .context("cell.rs has no up()")?;
         let imported = up
-            .split_once("for image in [")
+            .split_once("let images = [")
             .and_then(|(_, rest)| rest.split_once(']'))
             .map(|(list, _)| list)
             .context("up() has no import list")?;

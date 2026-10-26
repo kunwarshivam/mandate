@@ -8,7 +8,7 @@ import { type Origin, type Proposal, type Recorded, reachSafePoint, recordChange
 import { RESTRICTIONS } from "./restrictions";
 import { type BacktestRead, backtestNotFound, servedBacktest } from "@/api/backtest";
 import { backtestOfVersion, servedBacktestFixture } from "@/fixtures/backtests";
-import type { ApiView } from "@/api/read-models";
+import type { ApiView, ReadPosition } from "@/api/read-models";
 import type { Applies, Classification } from "@/api/confirm";
 import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-up";
 import type { AgentHolding, AgentOrder, JournalLine } from "@/api/activity";
@@ -193,6 +193,8 @@ export interface Runtime {
   disclosures: DisclosurePort | null;
   /** An agent's orders and own positions over the API (§4.7 D3, DEC-2111); `null` over the fixtures, whose screens show their own. */
   activity: ((agentId: string) => Promise<ActivityAnswer>) | null;
+  /** An agent's own positions alone (`GET /agents/{id}/positions`, DEC-2111), for the positions screen; `null` over the fixtures. */
+  holdings: ((agentId: string) => Promise<PositionsAnswer>) | null;
   setUps: SetUp[];
   /** Step 1: `POST /mandate-drafts/{id}/versions`. */
   createVersion: (request: NewAgent) => SetUp;
@@ -242,6 +244,9 @@ export interface ConnectPort {
   /** `GET /connections`. */
   list: () => Promise<{ ok: true; connections: ConnectionDetail[] } | { ok: false; reason: string }>;
 }
+
+/** An agent's own positions with its account's holdings from the same read (DEC-2111), or why not. */
+export type PositionsAnswer = { ok: true; account_ref: string | null; items: AgentHolding[]; account_positions: ReadPosition[] | null } | { ok: false; reason: string };
 
 /** Each list as served, or not reported: a list that cannot be read is never shown as empty. */
 export interface ActivityAnswer {
@@ -643,7 +648,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

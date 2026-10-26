@@ -28,7 +28,9 @@ import yaml
 from common import (
     BOOL,
     DEC,
+    DEFERRED_PARTS,
     ENVELOPE,
+    LIQUIDITY_PAIR,
     ULID,
     INT,
     REF,
@@ -1332,6 +1334,9 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "AccountCloseRequested"): (1,),
     ("acct", "AccountRestrictionChanged"): (1,),
     ("acct", "KillSwitchActivated"): (1,),
+    ("acct", "ExternalActivityIngested"): (1,),
+    ("acct", "RejectObserved"): (1,),
+    ("acct", "OrderAbandoned"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2, 3),
@@ -1416,6 +1421,32 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("restriction", one_of("closing_only", "blocked")),
         ("cause", one_of("broker_reject", "broker_notice", "connection_unavailable")),
         ("reason_code", one_of("account_trading_blocked", "account_restricted")),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # v0.90 §9.5 (DEC-2803): the broker's activity the executor did not originate, a reject it
+    # answered with, and an intent the executor gave up on. Every broker-supplied member is
+    # nullable: the executor writes an empty one as null.
+    ("acct", "ExternalActivityIngested", 1): rec(
+        ("source", one_of("open_order", "fill")),
+        ("broker_order_id", opt(STR)),
+        ("fill_id", opt(STR)),
+        ("client_order_id", opt(STR)),
+        ("instrument", opt(STR)),
+        ("side", opt(one_of("buy", "sell"))),
+        ("qty", opt(DEC)),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    ("acct", "RejectObserved", 1): rec(
+        ("http_status", INT),
+        ("code", opt(STR)),
+        ("message", opt(STR)),
+        ("client_order_id", opt(STR)),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    ("acct", "OrderAbandoned", 1): rec(
+        ("client_order_id", STR),
+        ("intent_id", IDENT_T),
+        ("reason", one_of("intent_too_old", "gate_recheck", "released_to_owner", "unprotected_interval_limit")),
         ("risk_clock", RISK_CLOCK),
     ),
     # v0.75 §9.5 (DEC-2337): one instrument's close-position under an account kill switch,
@@ -1546,13 +1577,26 @@ REQUEST_TOP = (
 )
 VERSIONED_VERSIONS[("ctl", "CredentialEnrolled")] = (1, 2)
 VERSIONED_SCHEMAS[("ctl", "CredentialEnrolled", 2)] = CREDENTIAL_ENROLLED_V2
-VERSIONED_VERSIONS[("agent", "ApprovalRequested")] = (1, 2)
+VERSIONED_VERSIONS[("agent", "ApprovalRequested")] = (1, 2, 3)
 VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 1)] = rec(
     *REQUEST_TOP, ("content", REQUEST_CONTENT_V1), ("content_hash", REF)
 )
 VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 2)] = rec(
     *REQUEST_TOP,
     ("content", rec(*REQUEST_CONTENT_V1.fields, ("execution", REQUEST_EXECUTION))),
+    ("content_hash", REF),
+)
+# v0.92 (DEC-2515): version 2's content, then the checks the dry run deferred to the binding gate.
+VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 3)] = rec(
+    *REQUEST_TOP,
+    (
+        "content",
+        rec(
+            *REQUEST_CONTENT_V1.fields,
+            ("execution", REQUEST_EXECUTION),
+            ("deferred_to_binding", list_of(one_of(*DEFERRED_PARTS))),
+        ),
+    ),
     ("content_hash", REF),
 )
 # §9.6's mirrors: each top-level member and the content member it repeats.
@@ -1968,6 +2012,28 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("279", coded, "schema", "payload.reason_code")
         else:
             rule("280", not blocked or noticed, "schema", "payload.cause")
+    if event_type == "ExternalActivityIngested":
+        fill = p["source"] == "fill"
+        if fill:
+            members = ("client_order_id", "instrument", "side", "qty")
+            if "rule.297.order" in skip:
+                members = ("instrument", "client_order_id", "side", "qty")
+            if "rule.297.broker_order_id" not in skip:
+                members = ("broker_order_id",) + members
+            wrong = next((m for m in members if p[m] is not None), None)
+            rule("297", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+        else:
+            required = ("instrument", "side", "qty")
+            if "rule.298.order" in skip:
+                required = ("side", "instrument", "qty")
+            if "rule.298.side" in skip:
+                required = ("instrument", "qty")
+            fill_null = p["fill_id"] is None or "rule.298.fill_id" in skip
+            missing = next((m for m in required if p[m] is None), None)
+            if not fill_null:
+                rule("298", False, "schema", "payload.fill_id")
+            else:
+                rule("298", missing is None, "schema", f"payload.{missing}" if missing else "")
     if event_type == "AccountCloseRequested":
         qty = normalize_decimal(p["qty"])
         if qty is None:
@@ -2275,7 +2341,8 @@ def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
 
 def request_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
     """§9.6's `ApprovalRequested` rules, on a well-typed payload, in the journal's order: each mirror,
-    then rule 136 (version 2's plan names the order's asset class), the deadline, the label, the
+    then rule 136 (version 2's plan names the order's asset class), rule 291 (version 3's deferrals
+    are ascending, never empty, and pair the liquidity checks), the deadline, the label, the
     default, the choices, and last the content hash over the whole content, the plan included."""
     if event_type != "ApprovalRequested":
         return []
@@ -2295,6 +2362,13 @@ def request_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
     if "execution" in content:
         same = content["execution"]["asset_class"] == p["asset_class"]
         rule("136", same, "payload.content.execution.asset_class")
+    if "deferred_to_binding" in content:
+        named = content["deferred_to_binding"]
+        path = "payload.content.deferred_to_binding"
+        if not ascending(named) and "rule.291.ascending" not in skip:
+            out.append(Violation("rule.291.ascending", "non_canonical", path))
+        rule("291.nonempty", bool(named), path)
+        rule("291.pair", len(set(LIQUIDITY_PAIR) & set(named)) != 1, path)
     rule("9.6.deadline", p["deadline"] == epoch_seconds(content["deadline"]), "payload.deadline")
     label = content["evidence"]["combined_score"]["label"]
     rule("9.6.label", label == "combined model score, not a probability of profit", "payload.content.evidence.combined_score.label")

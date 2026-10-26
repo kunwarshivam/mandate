@@ -15,10 +15,12 @@
 //! a protective order, a risk exit, or a kill switch on its own account (`AGENTS.md` rules 3 and
 //! 13). It keeps `paused` or `stopped` only when the last readable view already was.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use mandate_canon::{Object, Value, parse};
-use mandate_domain::{AgentMode, AssetId, MarketSession};
+use mandate_domain::{AgentMode, AssetId, MarketSession, Side};
 use mandate_journal::StoredEvent;
-use mandate_num::Price;
+use mandate_num::{Price, Qty, Usd};
 use mandate_spec::SpecError;
 use mandate_spec::document::{LadderAction, OnComplete};
 use mandate_spec::risk::{
@@ -31,6 +33,16 @@ use mandate_time::UtcNanos;
 use crate::ExecutorError;
 use crate::payload::{int, object, text};
 use crate::tripwire::TripwireState;
+
+/// The order states that end an order (trading-domain spec §5.7), as the executor's fold ends one.
+const TERMINAL: [&str; 6] = [
+    "filled",
+    "canceled",
+    "rejected",
+    "expired",
+    "replaced",
+    "abandoned",
+];
 
 /// How the fold reads an account-stream event type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +58,13 @@ enum Reading {
     /// A risk input the fold reads at no version yet, so every version is one it does not know and
     /// the view fails closed rather than skip the input (DEC-2304 item 1).
     RiskInput,
+    /// A record that says whose an order is (DEC-2393 item 1): read for that, and stepping nothing.
+    Order,
+    /// A fill, read at version 1: the agent's own steps the risk state (DEC-2393 item 2).
+    Fill,
+    /// `FeesCharged`, read at version 1: one charged to the agent's own order steps a fee (DEC-2393
+    /// item 3).
+    Fee,
 }
 
 /// The account stream's catalogue (journal spec §9): every event type `mandate-journal`'s
@@ -61,9 +80,9 @@ const ACCOUNT_STREAM: [(&str, Reading); 52] = [
     ("OwnerCommandRefused", Reading::Record),
     ("IntentReceived", Reading::Record),
     ("GateDecided", Reading::Record),
-    ("FillApplied", Reading::RiskInput),
-    ("LateFillApplied", Reading::RiskInput),
-    ("FeesCharged", Reading::RiskInput),
+    ("FillApplied", Reading::Fill),
+    ("LateFillApplied", Reading::Fill),
+    ("FeesCharged", Reading::Fee),
     ("SettlementPosted", Reading::Record),
     ("DividendPaid", Reading::RiskInput),
     ("CashInLieuPosted", Reading::RiskInput),
@@ -79,9 +98,9 @@ const ACCOUNT_STREAM: [(&str, Reading); 52] = [
     ("InstrumentRestrictionChanged", Reading::Record),
     ("GoalCompleted", Reading::Record),
     ("UniverseChanged", Reading::RiskInput),
-    ("OrderSubmitted", Reading::Record),
-    ("OrderRequestRecorded", Reading::Record),
-    ("OrderStateChanged", Reading::Record),
+    ("OrderSubmitted", Reading::Order),
+    ("OrderRequestRecorded", Reading::Order),
+    ("OrderStateChanged", Reading::Order),
     ("OrderAbandoned", Reading::Record),
     ("BrokerExchangeRecorded", Reading::Record),
     ("MarkUpdated", Reading::Mark),
@@ -221,6 +240,36 @@ fn unread_bid() -> Result<Price, UnreadableCause> {
     Price::parse("1").map_err(|_| UnreadableCause::Undecodable)
 }
 
+/// The versions of the order records the fold reads for ownership (journal spec §9.5, §9.16):
+/// `OrderSubmitted` and `OrderStateChanged` at 1 and 2, `OrderRequestRecorded` at 1. Any other is
+/// one it does not know, and the view fails closed rather than miss whose an order is.
+fn order_version(event_type: &str, version: u64) -> bool {
+    match event_type {
+        "OrderRequestRecorded" => version == 1,
+        _ => matches!(version, 1 | 2),
+    }
+}
+
+/// The sum of a fill's `fees` charged in `USD` (DEC-2393 item 3). A fee in any other asset moves
+/// the quantity received by a rule the fold does not apply, so it is a refusal to decide.
+fn usd_fees(payload: &Object) -> Result<Usd, UnreadableCause> {
+    let Some(Value::Array(fees)) = payload.get("fees") else {
+        return Err(UnreadableCause::Undecodable);
+    };
+    fees.iter().try_fold(Usd::ZERO, |sum, fee| {
+        let member = |name: &str| fee.get(name).and_then(Value::as_str);
+        if member("asset").ok_or(UnreadableCause::Undecodable)? != "USD" {
+            return Err(UnreadableCause::RefusedToDecide);
+        }
+        let amount = member("amount")
+            .and_then(|amount| Usd::parse(amount).ok())
+            .filter(|amount| !amount.is_negative())
+            .ok_or(UnreadableCause::Undecodable)?;
+        sum.checked_add(amount)
+            .map_err(|_| UnreadableCause::Undecodable)
+    })
+}
+
 /// The trading calendar the fold steps the risk state on: §5.5's session seconds, and the session
 /// each input arrived in (mandate spec §5.2). The caller supplies it, since this crate holds no
 /// calendar.
@@ -337,6 +386,14 @@ pub struct AccountRiskFold<'c> {
     /// and the view becomes unreadable. Ids are compared exactly, as the journal's canonical asset
     /// ids.
     instrument: Option<String>,
+    /// Each `OrderRequestRecorded` not yet named by its `OrderSubmitted`, by event id, with the
+    /// agent it names (journal spec rule 45).
+    requests: BTreeMap<String, String>,
+    /// The agent's own orders by client order id (DEC-2393 item 1).
+    own: BTreeSet<String>,
+    /// The `fill_id`s of the agent's own fills already stepped, each once, as the executor's fold
+    /// applies a fill once (DEC-2393 item 2).
+    fills: BTreeSet<String>,
 }
 
 impl<'c> AccountRiskFold<'c> {
@@ -384,6 +441,9 @@ impl<'c> AccountRiskFold<'c> {
             view,
             clock: opening.at,
             instrument: instrument.map(str::to_owned),
+            requests: BTreeMap::new(),
+            own: BTreeSet::new(),
+            fills: BTreeSet::new(),
         })
     }
 
@@ -439,21 +499,177 @@ impl<'c> AccountRiskFold<'c> {
             (Some(Reading::Record), _) | (Some(Reading::Mark), 1) => Ok(Vec::new()),
             (Some(Reading::Tick), 1) => self.tick(row, payload),
             (Some(Reading::Mark), 2) => self.mark(row, payload),
+            (Some(Reading::Order), version) if order_version(&row.event_type, version) => {
+                self.order(row, &body, payload)?;
+                Ok(Vec::new())
+            }
+            (Some(Reading::Fill), 1) => self.fill(row, payload),
+            (Some(Reading::Fee), 1) => self.fee(row, payload),
             (Some(_), _) => Err(UnreadableCause::UnknownSchemaVersion),
         }
     }
 
     /// Binds the fold to the first instrument a row names, and refuses to decide a row naming any
-    /// other (DEC-2308 item 4): openings wait, exits go on (`AGENTS.md` rule 13).
+    /// other (DEC-2308 item 4), or a first one that is not a canonical asset id (DEC-2314): openings
+    /// wait, exits go on (`AGENTS.md` rule 13).
     fn bind(&mut self, instrument: &str) -> Result<(), UnreadableCause> {
         match &self.instrument {
             Some(bound) if bound != instrument => Err(UnreadableCause::RefusedToDecide),
             Some(_) => Ok(()),
+            None if AssetId::parse(instrument).is_err() => Err(UnreadableCause::RefusedToDecide),
             None => {
                 self.instrument = Some(instrument.to_owned());
                 Ok(())
             }
         }
+    }
+
+    /// Whose an order is (DEC-2393 item 1), as the executor's own fold attributes it: an
+    /// `OrderSubmitted`'s companion, the `OrderRequestRecorded` its `causation_id` names, else the
+    /// submission's own `agent_id`; and an order that replaces one of the agent's, or that one of
+    /// its terminal states names as `replaced_by`.
+    fn order(
+        &mut self,
+        row: &StoredEvent,
+        body: &Value,
+        payload: &Object,
+    ) -> Result<(), UnreadableCause> {
+        let named = |member: &str| payload.get(member).and_then(Value::as_str);
+        match row.event_type.as_str() {
+            "OrderRequestRecorded" => {
+                let agent = named("agent_id")
+                    .or_else(|| named("agent"))
+                    .ok_or(UnreadableCause::Undecodable)?;
+                self.requests.insert(row.event_id.clone(), agent.to_owned());
+            }
+            "OrderSubmitted" => {
+                let order = named("client_order_id").ok_or(UnreadableCause::Undecodable)?;
+                let companion = body
+                    .get("causation_id")
+                    .and_then(Value::as_str)
+                    .and_then(|cause| self.requests.remove(cause));
+                let agent = companion
+                    .or_else(|| {
+                        named("agent_id")
+                            .or_else(|| named("agent"))
+                            .map(str::to_owned)
+                    })
+                    .ok_or(UnreadableCause::Undecodable)?;
+                if agent == self.agent {
+                    self.own.insert(order.to_owned());
+                }
+            }
+            _ => {
+                let order = named("client_order_id").ok_or(UnreadableCause::Undecodable)?;
+                if named("replaces").is_some_and(|old| self.own.contains(old)) {
+                    self.own.insert(order.to_owned());
+                }
+                let terminal = named("state").is_some_and(|state| TERMINAL.contains(&state));
+                let ignored = payload.get("ignored") == Some(&Value::Bool(true));
+                if let Some(successor) = named("replaced_by")
+                    && terminal
+                    && !ignored
+                    && self.own.contains(order)
+                {
+                    self.own.insert(successor.to_owned());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Steps a fill of the agent's own order (DEC-2393 item 2): `Input::Fill` at its `risk_clock`,
+    /// in the session the calendar places it in, then the `USD` fees it carries as one
+    /// `Input::Fee` at the same instant (item 3). A fill of any other order steps nothing; a fee in
+    /// any other asset is a refusal to decide.
+    fn fill(
+        &mut self,
+        row: &StoredEvent,
+        payload: &Object,
+    ) -> Result<Vec<RiskAppend>, UnreadableCause> {
+        let ours = payload
+            .get("client_order_id")
+            .and_then(Value::as_str)
+            .is_some_and(|order| self.own.contains(order));
+        if !ours {
+            return Ok(Vec::new());
+        }
+        let fill_id = payload
+            .get("fill_id")
+            .and_then(Value::as_str)
+            .ok_or(UnreadableCause::Undecodable)?;
+        if self.fills.contains(fill_id) {
+            return Ok(Vec::new());
+        }
+        let instrument = payload
+            .get("instrument_id")
+            .and_then(Value::as_str)
+            .ok_or(UnreadableCause::Undecodable)?;
+        let side = match payload.get("side").and_then(Value::as_str) {
+            Some("buy") => Side::Buy,
+            Some("sell") => Side::Sell,
+            _ => return Err(UnreadableCause::Undecodable),
+        };
+        let qty = payload
+            .get("qty_gross")
+            .and_then(Value::as_str)
+            .and_then(|qty| Qty::parse(qty).ok())
+            .filter(|qty| !qty.is_zero())
+            .ok_or(UnreadableCause::Undecodable)?;
+        let price = payload
+            .get("price")
+            .and_then(Value::as_str)
+            .and_then(|price| Price::parse(price).ok())
+            .ok_or(UnreadableCause::Undecodable)?;
+        let fees = usd_fees(payload)?;
+        let clock = whole_second(payload, "risk_clock")?;
+        self.bind(instrument)?;
+        self.fills.insert(fill_id.to_owned());
+        let session = self.calendar.session(clock).map_err(refused)?;
+        let outcome = self.step(clock, session, Input::Fill { side, qty, price })?;
+        let mut appends = self.records(row, clock, &outcome)?;
+        if !fees.is_zero() {
+            let outcome = self.step(clock, session, Input::Fee { usd: fees })?;
+            appends.extend(self.records(row, clock, &outcome)?);
+        }
+        Ok(appends)
+    }
+
+    /// Steps a `FeesCharged` of the agent's own order (DEC-2393 item 3): the regulatory fee the
+    /// paper executor simulates for its fill (`simulated`, family `equities`) as `Input::Fee` of its
+    /// `accrued`, the fee trading spec §8.2 takes from equity and §10 puts in P&L; the record
+    /// writes `charged` 0, since no broker charges it. Any other shape naming an own order is one
+    /// no slice reads yet, a refusal to decide. One of any other order, or of none, steps nothing.
+    fn fee(
+        &mut self,
+        row: &StoredEvent,
+        payload: &Object,
+    ) -> Result<Vec<RiskAppend>, UnreadableCause> {
+        let ours = payload
+            .get("client_order_id")
+            .and_then(Value::as_str)
+            .is_some_and(|order| self.own.contains(order));
+        if !ours {
+            return Ok(Vec::new());
+        }
+        let simulated = payload.get("simulated") == Some(&Value::Bool(true))
+            && payload.get("family").and_then(Value::as_str) == Some("equities");
+        if !simulated {
+            return Err(UnreadableCause::RefusedToDecide);
+        }
+        let charged = payload
+            .get("accrued")
+            .and_then(Value::as_str)
+            .and_then(|accrued| Usd::parse(accrued).ok())
+            .filter(|accrued| !accrued.is_negative())
+            .ok_or(UnreadableCause::Undecodable)?;
+        if charged.is_zero() {
+            return Ok(Vec::new());
+        }
+        let clock = whole_second(payload, "risk_clock")?;
+        let session = self.calendar.session(clock).map_err(refused)?;
+        let outcome = self.step(clock, session, Input::Fee { usd: charged })?;
+        self.records(row, clock, &outcome)
     }
 
     /// Steps a `MarkUpdated` at version 2 (journal spec §9.30, DEC-2305): its `bid` and `sane`
@@ -549,9 +765,10 @@ impl<'c> AccountRiskFold<'c> {
     /// - `KillSwitchActivated` is never returned. The fold never acts; the cancels and closes a
     ///   `flatten_and_pause` rung asks for are slice C5's (DEC-2307 item 3).
     /// - `AgentModeApplied` is the executor's own, and names as its restriction the action of the
-    ///   step's last `RiskLimitTriggered` before it (DEC-2308 item 3). A mode change with no trigger
-    ///   before it in the step names the limit or event that caused it, which B2b-2b writes; until
-    ///   then it fails closed.
+    ///   step's last `RiskLimitTriggered` before it (DEC-2308 item 3). With no trigger before it in
+    ///   the step, it names the step's last `RiskLimitLifted` (its ladder action, or its limit's
+    ///   journal name when it carries none), or `goal_completed` after `GoalCompleted` (DEC-2331
+    ///   item 1); any other mode change with no cause in its step fails closed.
     /// - `InstrumentRestrictionChanged` names the bound instrument (DEC-2307 item 4, DEC-2308 item 2),
     ///   which `open` and `bind` only ever bind to a canonical asset id or to one a mark named; a
     ///   restriction on an instrument that is not a canonical asset id fails closed as a refusal to
@@ -588,7 +805,8 @@ impl<'c> AccountRiskFold<'c> {
             ]
         };
         let mut appends = Vec::new();
-        let mut last_action = None;
+        let mut last_action: Option<String> = None;
+        let mut cause: Option<String> = None;
         for (index, event) in outcome.journal.iter().enumerate() {
             let (event_type, agent, mut members) = match event {
                 RiskEvent::RiskDayStarted { day_start_equity } => (
@@ -607,7 +825,7 @@ impl<'c> AccountRiskFold<'c> {
                     action,
                     reason,
                 } => {
-                    last_action = Some(*action);
+                    last_action = Some(action.as_str().to_owned());
                     let breach_time_s = outcome
                         .breach_time_s(index)
                         .ok()
@@ -635,6 +853,9 @@ impl<'c> AccountRiskFold<'c> {
                     reason,
                 } => {
                     let reason = reason.map(|r| spelled(&LIFT_REASONS, r)).transpose()?;
+                    cause = Some(
+                        action.map_or_else(|| limit.journal_name(), |a| a.as_str().to_owned()),
+                    );
                     let mut members = figures();
                     members.extend([
                         ("limit", text(limit.journal_name())),
@@ -644,13 +865,16 @@ impl<'c> AccountRiskFold<'c> {
                     ("RiskLimitLifted", "agent_id", members)
                 }
                 RiskEvent::AgentModeApplied { to, .. } => {
-                    let restriction = last_action.ok_or(UnreadableCause::AppendFailed)?;
+                    let restriction = last_action
+                        .clone()
+                        .or_else(|| cause.clone())
+                        .ok_or(UnreadableCause::AppendFailed)?;
                     (
                         "AgentModeApplied",
                         "agent",
                         vec![
                             ("to", text(spelled(&MODES, *to)?)),
-                            ("restriction", text(restriction.as_str())),
+                            ("restriction", text(restriction)),
                             ("originated", Value::Bool(true)),
                         ],
                     )
@@ -680,15 +904,18 @@ impl<'c> AccountRiskFold<'c> {
                     reason,
                     then,
                     on_complete,
-                } => (
-                    "GoalCompleted",
-                    "agent_id",
-                    vec![
-                        ("reason", nullable(reason.map(GoalReason::as_str))),
-                        ("then", nullable(then.map(ThenAction::as_str))),
-                        ("on_complete", nullable(on_complete.map(OnComplete::as_str))),
-                    ],
-                ),
+                } => {
+                    cause = Some("goal_completed".to_owned());
+                    (
+                        "GoalCompleted",
+                        "agent_id",
+                        vec![
+                            ("reason", nullable(reason.map(GoalReason::as_str))),
+                            ("then", nullable(then.map(ThenAction::as_str))),
+                            ("on_complete", nullable(on_complete.map(OnComplete::as_str))),
+                        ],
+                    )
+                }
                 RiskEvent::KillSwitchActivated { .. } => continue,
                 RiskEvent::HighWaterMarkReset { .. }
                 | RiskEvent::PositionReleased { .. }
