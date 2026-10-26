@@ -2283,6 +2283,30 @@ fn rule_271_an_event_run_names_its_own_item_and_one_item_starts_one_run() {
             None,
         ),
         (
+            "an_item_a_scheduled_run_saw_may_still_start_an_event_run",
+            |s| {
+                s.insert(
+                    0,
+                    vec![observed(OTHER_OBSERVED, OTHER_RUN, Some(AAPL), 'a'), {
+                        let mut start = started();
+                        set(
+                            &mut start,
+                            "event_id",
+                            Some(Value::Str("01J9GY00A000000000000000S0".into())),
+                        );
+                        set(
+                            &mut start,
+                            "correlation_id",
+                            Some(Value::Str(OTHER_RUN.into())),
+                        );
+                        start
+                    }],
+                );
+                event_first(s, 'a');
+            },
+            None,
+        ),
+        (
             "a_scheduled_run_after_an_event_run",
             |s| {
                 event_first(s, 'a');

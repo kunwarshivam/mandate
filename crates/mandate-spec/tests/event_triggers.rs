@@ -149,6 +149,20 @@ fn every_bound_and_member_the_schema_states_is_refused_at_its_pointer() {
             ))),
             format!("{at}/debounce_s"),
         ),
+        (
+            researched(Some(edit(
+                &triggers(&["news"], 900, 6),
+                &[("/sources", None)],
+            ))),
+            format!("{at}/sources"),
+        ),
+        (
+            researched(Some(edit(
+                &triggers(&["news"], 900, 6),
+                &[("/max_runs_per_day", None)],
+            ))),
+            format!("{at}/max_runs_per_day"),
+        ),
         (researched(Some(s("news"))), at.to_owned()),
     ] {
         assert_eq!(refused_at(&document), pointer);
@@ -222,6 +236,12 @@ fn a_change_classifies_by_whether_it_lets_more_items_start_runs() {
         (on(), off.clone(), RiskReducing),
         (on(), null.clone(), RiskReducing),
         (off.clone(), null.clone(), Neutral),
+        (null.clone(), off.clone(), Neutral),
+        (
+            researched(Some(triggers(&["filings", "news"], 900, 6))),
+            researched(Some(triggers(&["news"], 900, 7))),
+            RiskIncreasing,
+        ),
         (
             on(),
             researched(Some(triggers(&["filings", "news"], 900, 6))),
