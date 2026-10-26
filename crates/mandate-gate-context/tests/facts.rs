@@ -615,3 +615,72 @@ fn the_mandate_in_force_is_the_same_whichever_stream_is_folded_first() {
         Err(Held::NoMandate)
     );
 }
+
+fn registered(kind: &str, model: Option<(&str, &str)>, hash: &str) -> Value {
+    let nullable = |value: Option<&str>| value.map_or(Value::Null, text);
+    object(&[
+        ("kind", text(kind)),
+        ("content_hash", text(hash)),
+        ("model_id", nullable(model.map(|(id, _)| id))),
+        ("model_version", nullable(model.map(|(_, version)| version))),
+        ("params", Value::Array(Vec::new())),
+        ("admits_instruments", Value::Null),
+    ])
+}
+
+/// The models the workspace registered, by id and version, with their content hashes: the
+/// builder sizes only outputs of a model the registry hashes (DEC-2378 item 10). Another kind of
+/// snapshot registers no model, and a model registered again keeps its latest hash.
+#[test]
+fn the_registered_models_are_folded_from_their_snapshots() {
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+    let ma = Some(("quant.ma_crossover", "1.0.0"));
+    on(
+        &mut state,
+        CONTROL,
+        "ConfigSnapshotRegistered",
+        &registered("model_version", ma, "sha256:aa"),
+    );
+    on(
+        &mut state,
+        CONTROL,
+        "ConfigSnapshotRegistered",
+        &registered("rule_set", None, "sha256:bb"),
+    );
+    let expected = [(
+        ("quant.ma_crossover".to_owned(), "1.0.0".to_owned()),
+        "sha256:aa".to_owned(),
+    )];
+    assert_eq!(state.models(), expected.clone().into());
+    on(
+        &mut state,
+        CONTROL,
+        "ConfigSnapshotRegistered",
+        &registered("model_version", ma, "sha256:cc"),
+    );
+    let latest = [(
+        ("quant.ma_crossover".to_owned(), "1.0.0".to_owned()),
+        "sha256:cc".to_owned(),
+    )];
+    assert_eq!(state.models(), latest.into());
+}
+
+#[test]
+fn a_model_snapshot_without_its_id_version_or_hash_is_refused() {
+    for payload in [
+        registered("model_version", None, "sha256:aa"),
+        registered("model_version", Some(("m", "1")), "sha256:aa").without("content_hash"),
+        registered("model_version", Some(("m", "1")), "sha256:aa")
+            .with("model_version", Value::Null),
+        object(&[("content_hash", text("sha256:aa"))]),
+    ] {
+        let mut state = ready();
+        let row = Row {
+            stream: CONTROL,
+            event_type: "ConfigSnapshotRegistered",
+            payload: &payload,
+        };
+        assert!(state.fold(row).is_err(), "{payload:?}");
+        assert_eq!(state.facts(ASSET, FRESH), Err(Held::Unreadable));
+    }
+}
