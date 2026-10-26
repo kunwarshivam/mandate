@@ -31,7 +31,11 @@
   `draft_bytes_with_pii`; `src/launch.rs` (the account from `run`'s flags or the deployment
   manager's variables) and the `mandate-executord` binary (`run`, `connect-check`, `probe`;
   SIGTERM drains, DEC-2007 item 3).
-- **Tests:** `crates/mandate-executord/tests/broker_input.rs` (DEC-2821): a broker answer the
+- **Tests:** `crates/mandate-executord/tests/connection_health.rs` (DEC-2832, `src/health.rs`):
+  lost answers in a row or `401`s restrict the account to closing with cause
+  `connection_unavailable`, a good answer resets its class, a `403` is not an authorization
+  failure, and the counter fuzzed against an independent oracle.
+  `crates/mandate-executord/tests/broker_input.rs` (DEC-2821): a broker answer the
   core cannot apply holds every agent's openings once, alerts the operator once, and a later kill
   switch still applies; `src/process.rs`'s `a_core_error_is_held_for_a_broker_input_alone`; in
   `mandate-executor`, `reconcile.rs`'s `a_failed_broker_input_holds_every_agents_openings_once`.

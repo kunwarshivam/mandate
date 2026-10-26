@@ -19,9 +19,9 @@ use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountRef, AccountScope, ActivityCursor, AgentId, BindingGateConfigRefs, BindingGateInput,
     BindingGateRequest, BindingGateSource, BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome,
-    BrokerPosition, BrokerRequest, BrokerUnknown, ConnectorError, EventId, ExecutorConfig,
-    ExitTier, FillId, IdGen, InstrumentSnapshot, MandateVersion, MandateView, ProtectionPrices,
-    Purpose, Seq, WorkspaceId, WriterEpoch, equity_bracket_prices,
+    BrokerPosition, BrokerReject, BrokerRequest, BrokerUnknown, ConnectorError, EventId,
+    ExecutorConfig, ExitTier, FillId, IdGen, InstrumentSnapshot, MandateVersion, MandateView,
+    ProtectionPrices, Purpose, Seq, WorkspaceId, WriterEpoch, equity_bracket_prices,
 };
 use mandate_executord::marks::NoMarks;
 use mandate_executord::quotes::NoQuotes;
@@ -416,6 +416,9 @@ struct Books {
     account_wide: Option<bool>,
     /// Whether every close-position's answer is lost after the close takes effect.
     lose_closes: bool,
+    /// Requests refused unanswered with this HTTP status, before they reach the books: how a
+    /// credential the broker no longer accepts answers (`401`).
+    refuse_with: Option<(u16, usize)>,
     sequence: u64,
 }
 
@@ -543,6 +546,11 @@ impl Paper {
         self.books.borrow_mut().lose_answers = n;
     }
 
+    /// The next `n` requests are refused with `status`, and nothing they asked takes effect.
+    pub fn refuse_next_with(&self, status: u16, n: usize) {
+        self.books.borrow_mut().refuse_with = Some((status, n));
+    }
+
     /// Every cancel-all and close-position is accepted from now on. Each close is an order of the
     /// broker's own that names no client order id, for the whole position: if `closes_fill`, it
     /// sells it at once, else it works until [`Paper::expire_closes`].
@@ -591,6 +599,17 @@ impl Broker for Paper {
             journaled_first,
             appended: self.journal.appends(),
         });
+        if let Some((status, left)) = books.refuse_with
+            && left > 0
+        {
+            books.refuse_with = Some((status, left.saturating_sub(1)));
+            return Ok(BrokerOutcome::Rejected(BrokerReject {
+                client_order_id: None,
+                http_status: status,
+                code: None,
+                message: "refused".to_owned(),
+            }));
+        }
         let outcome = answer(&mut books, request)?;
         if books.lose_closes && matches!(request, BrokerRequest::ClosePosition(..)) {
             return Err(ConnectorError::Unknown(BrokerUnknown::Timeout));

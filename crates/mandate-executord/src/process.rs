@@ -22,6 +22,7 @@ use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::{ExchangeCalendar, UtcNanos};
 
 use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches};
+use crate::health::{Health, UNAUTHORIZED};
 use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
 use crate::robinhood::AccountReads;
@@ -226,6 +227,9 @@ pub struct ExecutorProcess<S, B> {
     /// nothing is marked, so the gate holds (`AGENTS.md` rule 3).
     calendar: Option<ExchangeCalendar>,
     written_at: UtcNanos,
+    /// The connection's health as this process's broker answers show it (DEC-2832): each pass
+    /// tells the core of every trouble it holds, which restricts the account first (DEC-2826).
+    health: Health,
 }
 
 /// What one pass reads from the agents' streams: the kill switches this stream has not applied,
@@ -275,6 +279,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             deployed: BTreeMap::new(),
             max_chain: config.max_chain,
             written_at: now,
+            health: Health::default(),
             polled: QuotePoll::new(Duration::from_secs(
                 u64::try_from(wiring_step).unwrap_or_default(),
             )),
@@ -384,6 +389,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 return alerts;
             }
         }
+        for trouble in self.health.troubles() {
+            if !self.hand(now, now, Input::Connection(trouble), &mut alerts, 0) {
+                return alerts;
+            }
+        }
         let Some(Followed {
             switches,
             proposals: proposed,
@@ -484,7 +494,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// one of the fold's orders): every status it reports is final. A read that fails, or a status
     /// it does not name, keeps the executor running (DEC-2347 item 3.5).
     fn broker_quiet(&mut self) -> bool {
-        let listed = match self.broker.account_reads() {
+        let listed = match self.account_reads() {
             Some(read) => read
                 .map(|reads| BrokerOutcome::OpenOrders(reads.open_orders))
                 .map_err(read_error),
@@ -983,7 +993,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     fn flush(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>, depth: usize) -> bool {
         let next = depth.saturating_add(1);
         while let Some(request) = self.outbox.pop_front() {
-            let answer = match self.broker.call(&request) {
+            let answer = match self.call(&request) {
                 Ok(outcome) => Input::Broker(Ok(outcome)),
                 Err(ConnectorError::Unknown(unknown)) => Input::Broker(Err(unknown)),
                 Err(_) => {
@@ -1057,11 +1067,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             .checkpoint()
             .cloned()
             .unwrap_or_else(|| ActivityCursor(String::new()));
-        if let Some(read) = self.broker.account_reads() {
+        if let Some(read) = self.account_reads() {
             let mut reads = read.map_err(read_error)?;
             if self.list_unlisted(&reads.open_orders, now, alerts, depth)? {
                 reads = self
-                    .broker
                     .account_reads()
                     .ok_or(Read::Unusable)?
                     .map_err(read_error)?;
@@ -1168,8 +1177,34 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         Ok(handed)
     }
 
+    /// A read of the broker. One the broker refused with `401` changed nothing there and is read
+    /// again on a later pass, like a lost one, so a credential the broker no longer accepts is
+    /// counted until the connection is `suspended` and the account restricted (DEC-2832), never a
+    /// stop that a restart would repeat with its count lost.
     fn read(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, Read> {
-        self.broker.call(request).map_err(read_error)
+        match self.call(request) {
+            Ok(BrokerOutcome::Rejected(reject)) if reject.http_status == UNAUTHORIZED => {
+                Err(Read::Lost)
+            }
+            answer => answer.map_err(read_error),
+        }
+    }
+
+    /// Every request to the broker, its answer counted toward the connection's health (DEC-2832).
+    fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
+        let answer = self.broker.call(request);
+        self.health.observe(&answer);
+        answer
+    }
+
+    /// A one-read broker's account reads, counted as one answer (DEC-2832).
+    fn account_reads(&mut self) -> Option<Result<AccountReads, ConnectorError>> {
+        let read = self.broker.account_reads()?;
+        match &read {
+            Ok(_) => self.health.observe_answered(),
+            Err(error) => self.health.observe_error(error),
+        }
+        Some(read)
     }
 
     fn account_head(&self) -> u64 {
@@ -1364,7 +1399,11 @@ fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> 
 fn failed_on_broker(input: &Input) -> bool {
     matches!(
         input,
-        Input::Broker(_) | Input::BrokerUpdate(_) | Input::BrokerSnapshot(_) | Input::Market(_)
+        Input::Broker(_)
+            | Input::BrokerUpdate(_)
+            | Input::BrokerSnapshot(_)
+            | Input::Market(_)
+            | Input::Connection(_)
     )
 }
 
