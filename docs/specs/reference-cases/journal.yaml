@@ -85780,7 +85780,7 @@ snapshot_prior_close:
     - path: payload.last_equity
       value: '24750.50'
     - path: payload.maintenance_margin
-      value: 7.50025e3
+      value: '7.50025E+3'
     expect:
       outcome: Valid
   - name: margin_zero

@@ -136498,7 +136498,7 @@
      },
      {
       "path": "payload.maintenance_margin",
-      "value": "7.50025e3"
+      "value": "7.50025E+3"
      }
     ],
     "expect": {

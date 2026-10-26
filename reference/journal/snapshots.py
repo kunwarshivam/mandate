@@ -237,7 +237,7 @@ def valid_drafts() -> list[dict]:
             "figures_normalized",
             "§4.6: a decimal input with a trailing zero or an exponent is normalized, not refused",
             V2,
-            [change("payload.last_equity", "24750.50"), change("payload.maintenance_margin", "7.50025e3")],
+            [change("payload.last_equity", "24750.50"), change("payload.maintenance_margin", "7.50025E+3")],
         ),
         valid("margin_zero", "§9.35: no requirement is a figure", V2, [change("payload.maintenance_margin", "0")]),
         valid("margin_equal_to_equity", "§9.35: an excess of zero", V2, [change("payload.maintenance_margin", "25000")]),
