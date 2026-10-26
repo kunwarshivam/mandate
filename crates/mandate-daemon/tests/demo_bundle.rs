@@ -313,7 +313,22 @@ fn the_demo_feed_brings_one_allowlisted_item_on_the_demo_instrument_that_the_mon
         "{}",
         item.source.as_str()
     );
-    assert!(item.arrives_s > 0, "it arrives after the deployment");
+    let mandate: Value = serde_json::from_str(
+        &std::fs::read_to_string(Path::new(DEMO).join("../research-mandate.json")).unwrap(),
+    )
+    .unwrap();
+    let research_envelope = &mandate["behavior"]["research"];
+    let triggers = &research_envelope["event_triggers"];
+    assert_eq!(triggers["sources"], serde_json::json!(["news"]));
+    let debounce = triggers["debounce_s"].as_u64().unwrap();
+    let interval = research_envelope["interval_s"].as_u64().unwrap();
+    let arrives = u64::from(item.arrives_s);
+    assert!(
+        debounce <= arrives && arrives < interval,
+        "the item arrives once the debounce from the first run has passed, and before the next \
+         scheduled research call would make it no newer than the last ({debounce} <= {arrives} \
+         < {interval})"
+    );
     let monitor: Value =
         serde_json::from_str(research["monitor_reply"]["output"].as_str().unwrap()).unwrap();
     let invalidations = monitor["invalidations"].as_array().unwrap();

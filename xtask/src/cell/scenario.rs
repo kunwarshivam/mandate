@@ -2602,10 +2602,10 @@ mod tests {
         let research = reference(&research_mandate());
         assert_eq!(
             research,
-            "sha256:ec2cd92db438bd53a46dae58c0dbdf4965aaaa085dcb9b3cfe486819f2f74a8b"
+            "sha256:74c62ef9b06275bfec0cfaaddd0ccf95693a1375640f3d8f29d93d176e2db350"
         );
-        assert_eq!(confirm_code(&research), "b7532ea7");
-        assert_eq!(deploy_code(RESEARCH_AGENT, &research), "c7b13550");
+        assert_eq!(confirm_code(&research), "92847110");
+        assert_eq!(deploy_code(RESEARCH_AGENT, &research), "a6fe7565");
     }
 
     /// The steps run 1 to 7 in order, then the record; a shown code precedes the gesture that types
@@ -2905,8 +2905,9 @@ mod tests {
     /// The research agent's envelope: paper, every admission and opening asked, an unpinned
     /// universe of one instrument, a research envelope, and exactly one `llm.` model admitting
     /// instruments beside the demo's quant model, sorted by id (V-009, V-036; DEC-2246 item 4), and
-    /// a news item may bring a monitoring run forward (DEC-2392, DEC-2275). Its connection is the
-    /// demo's.
+    /// a news item may bring a monitoring run forward (DEC-2392, DEC-2275). Its order, position,
+    /// exposure and allocation caps are the demo's, so one whole SPY share fits. Its connection is
+    /// its own (DEC-2070 item 2).
     #[test]
     fn the_research_envelope_researches_one_instrument_and_asks_everything() {
         let m = parsed(RESEARCH_MANDATE_FILE);
@@ -2941,6 +2942,18 @@ mod tests {
             models,
             [("llm.research_agent", true), ("quant.ma_crossover", false)]
         );
+        let demo = parsed(MANDATE_FILE);
+        for cap in [
+            "max_order_usd",
+            "max_position_usd",
+            "max_gross_exposure_usd",
+        ] {
+            assert_eq!(
+                m["risk"][cap], demo["risk"][cap],
+                "{cap}: the demo's, so one whole SPY share fits one order (#2609)"
+            );
+        }
+        assert_eq!(m["capital"], demo["capital"]);
         assert_eq!(m["connection_id"], RESEARCH_CONNECTION);
         assert_ne!(
             m["connection_id"],
