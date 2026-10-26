@@ -2,7 +2,9 @@
 
 mod research;
 
-pub use research::{ArtifactSink, ResearchParts, ResearchSource, ResearchWiring, ResearchWorker};
+pub use research::{
+    ArtifactSink, ContextUnread, ResearchParts, ResearchSource, ResearchWiring, ResearchWorker,
+};
 
 use std::collections::VecDeque;
 use std::time::Duration;
