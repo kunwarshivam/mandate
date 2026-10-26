@@ -17,7 +17,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const BIN: &str = env!("CARGO_BIN_EXE_mandate-daemon");
-const BUNDLE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/research");
+const BUNDLE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../mandate-daemon/tests/fixtures/research"
+);
 const BOUND: Duration = Duration::from_secs(10);
 const DEPLOYMENT: [&str; 8] = [
     "--workspace",
