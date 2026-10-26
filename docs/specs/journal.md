@@ -4578,7 +4578,8 @@ incident (§11 "Incomplete").
     `failure`'s `seq` is non-null exactly when its check is reported at an event (§11's per-event
     checks 1 to 6, `anchor_head_mismatch` at the anchored `seq`, `anchor_self_mismatch`,
     `break_glass_cause_mismatch`, `intent_action_mismatch`, `mode_event_mismatch`, `held_mismatch`,
-    `connection_lifecycle_mismatch`, `connection_cause_mismatch`, and `approval_deferral_mismatch`) and null for `anchor_root_mismatch`, `tsa_token_invalid`,
+    `connection_lifecycle_mismatch`, `connection_cause_mismatch`, and
+    `approval_deferral_mismatch`) and null for `anchor_root_mismatch`, `tsa_token_invalid`,
     `segment_manifest_mismatch`, `segment_gap`, and, at version 2, `segment_rows_mismatch` (`failure.seq`); a non-null `seq` lies from
     `from_seq` to `to_seq` (`failure.seq`); and `to_hash` is non-null when `failure` is null
     (`to_hash`).
@@ -7536,18 +7537,20 @@ On an agent stream ([§9.1](#91-agent-stream-payload-schemas-dec-177)):
   anchor, and a version-1 record before it is not judged: every stream written before §9.11 is all
   version 1, and the full-chain run or an anchored range catches a version 1 after an unseen
   version 2. Reported at the first record that breaks it.
-- `approval_deferral_mismatch` — rule 292 across batches ([DEC-2522](../project/decisions/DEC-2522.md)):
-  an `ApprovalRequested` names a `causation_id`, that cause is an earlier `DecisionMade` on this
-  stream, and the request's `content.deferred_to_binding` equals the decision's
-  `payload.deferred_to_binding`, an absent member read as empty on either side. A cause is looked up
-  only among the range's earlier events: one outside them fails on a full chain, so a request
-  before its decision, or naming no event, fails there, and is left unchecked on a later range,
-  whose earlier events are not in hand. Reported at the `ApprovalRequested`. `append` checks rule
-  292 only within one batch, which is how the runtime writes the two; this check catches a request
-  written in another batch that hides or invents a deferral. The workspace API reads and refuses
-  the same disagreement at the read and the grant ([DEC-2519](../project/decisions/DEC-2519.md),
-  [DEC-2521](../project/decisions/DEC-2521.md)). The test vectors' `approval_deferrals.ranges`
-  hold a case for each clause.
+- `approval_deferral_mismatch` — rule 292 across batches
+  ([DEC-2522](../project/decisions/DEC-2522.md)): an `ApprovalRequested` names a `causation_id`,
+  that cause is an earlier `DecisionMade` on this stream, and the request's
+  `content.deferred_to_binding` equals the decision's `payload.deferred_to_binding`, an absent
+  member read as empty on either side, each list as `append` admitted it (rules 269 and 291 fix its
+  order), so the same names in another order differ. A cause is looked up only among the range's
+  earlier events: one outside them fails on a full chain, so a request before its decision, or
+  naming no event, fails there, and is left unchecked on a later range, whose earlier events are not
+  in hand. Reported at the `ApprovalRequested`. `append` checks rule 292 only within one batch,
+  which is how the runtime writes the two; this check catches a request written in another batch
+  that hides or invents a deferral. The workspace API reads and refuses the same disagreement at the
+  read and the grant ([DEC-2519](../project/decisions/DEC-2519.md),
+  [DEC-2521](../project/decisions/DEC-2521.md)). The test vectors' `approval_deferrals.ranges` hold
+  a case for each clause.
 
 On a control or account stream ([§9.8](#98-connection-records-dec-800)):
 
