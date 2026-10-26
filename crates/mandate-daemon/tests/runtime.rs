@@ -11,7 +11,7 @@ use std::time::Duration;
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Key, Object, Value, parse};
 use mandate_daemon::deployment::ApproverSource;
-use mandate_daemon::models::{Evaluated, Models};
+use mandate_daemon::models::{Evaluated, Models, Streams};
 use mandate_daemon::{ArtifactSink, Config, ModelsWiring, Refs, RuntimeProcess, Wiring, fixture};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Conviction, Price, Qty, Unit};
@@ -1206,7 +1206,7 @@ struct Host {
     asked: Rc<Cell<u32>>,
 }
 impl Models for Host {
-    fn evaluate(&self, _: RiskClock) -> Vec<Evaluated> {
+    fn evaluate(&self, _: RiskClock, _: Streams<'_>) -> Vec<Evaluated> {
         self.asked.set(self.asked.get() + 1);
         self.answer.borrow().clone()
     }
