@@ -34,7 +34,7 @@ use mandate_num::{Price, Qty, ShareIncrement, SignedQty, Usd};
 use mandate_robinhood::{Tickers, Tools, ref_id, robinhood_profile};
 use serde_json::{Value, json};
 use support::{
-    ACCOUNT_STREAM, AGENT, Allowing, Error, Ids, Instruments, Journal, Mandate, NOON,
+    ACCOUNT_STREAM, AGENT, Allowing, Error, Fault, Ids, Instruments, Journal, Mandate, NOON,
     TwoPercentStop, at, config, deployed, fees, process_config, propose,
 };
 
@@ -61,6 +61,9 @@ const STOP: &str = "147";
 const STOP_LIMIT: &str = "146.265";
 /// The cash after the stop sold the 10 at [`STOP_LIMIT`]: 98505 + 1462.65.
 const SOLD: &str = "99967.65";
+
+/// The first event the core journals when a listing answer adopts the filled opening.
+const ADOPTION_FIRST_DRAFT: &str = "OrderStateChanged";
 
 /// What each read of the account answers, set by the test between passes.
 struct Book {
@@ -276,7 +279,6 @@ fn listings(calls: &Calls) -> usize {
 /// DEC-2386 item 3: the process's broker declares Robinhood's own profile, the one the executor
 /// reads its protection and its listing fallback from (DEC-531).
 #[test]
-#[ignore = "pending E21-30"]
 fn the_broker_declares_robinhoods_profile() -> Result<(), Error> {
     let broker = broker(seam(CASH).tools)?;
     assert_eq!(broker.profile()?, robinhood_profile()?);
@@ -287,7 +289,6 @@ fn the_broker_declares_robinhoods_profile() -> Result<(), Error> {
 /// order's derived `ref_id`, each request exactly the contract's arguments for the order, and
 /// answered as the order the place answered.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_submit_is_reviewed_then_placed_through_the_connector() -> Result<(), Error> {
     let seam = seam(CASH);
     let mut broker = broker(seam.tools)?;
@@ -326,7 +327,6 @@ fn a_submit_is_reviewed_then_placed_through_the_connector() -> Result<(), Error>
 /// and placed as the contract's limit sell, `gfd`, on the recorded account, never turned into a
 /// close-position or anything else (`AGENTS.md` rules 12 and 13).
 #[test]
-#[ignore = "pending E21-30"]
 fn a_risk_exit_sell_is_placed_as_asked() -> Result<(), Error> {
     let seam = seam(CASH);
     let mut broker = broker(seam.tools)?;
@@ -358,7 +358,6 @@ fn a_risk_exit_sell_is_placed_as_asked() -> Result<(), Error> {
 /// recorded account and nothing else, and the broker's `cancelled` record answers it accepted; it
 /// is never a cancel-all (`AGENTS.md` rule 13).
 #[test]
-#[ignore = "pending E21-30"]
 fn a_cancel_goes_by_the_placed_orders_broker_id() -> Result<(), Error> {
     let seam = seam(CASH);
     let mut broker = broker(seam.tools)?;
@@ -383,7 +382,6 @@ fn a_cancel_goes_by_the_placed_orders_broker_id() -> Result<(), Error> {
 /// reads as the cash, the equity is the cash, the account active at 1×, and buying power below the
 /// cash is read as itself; the working order the broker lists is the account's open order.
 #[test]
-#[ignore = "pending E21-30"]
 fn the_account_is_read_once_and_mapped_by_broker_account() -> Result<(), Error> {
     let seam = seam("1000.5");
     {
@@ -455,7 +453,6 @@ fn the_account_is_read_once_and_mapped_by_broker_account() -> Result<(), Error> 
 /// What Robinhood does not offer is never sent: the activity feed, the four Alpaca reads and the
 /// lookup by client order id are `NotSent`, with nothing called.
 #[test]
-#[ignore = "pending E21-30"]
 fn what_robinhood_does_not_offer_is_never_sent() -> Result<(), Error> {
     let seam = seam(CASH);
     let mut broker = broker(seam.tools)?;
@@ -679,7 +676,6 @@ fn reconciled_without_activity(journal: &Journal) {
 /// OCO, DEC-966), and reconciles: the run that books the fill adopts it, and every later run is
 /// clean.
 #[test]
-#[ignore = "pending E21-30"]
 fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Error> {
     let (journal, _process, seam) = protected_position()?;
     let bought = fills(&journal, "buy");
@@ -749,6 +745,11 @@ fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Err
         sent(&seam.calls, "cancel_equity_order").is_empty(),
         "nothing is cancelled"
     );
+    assert_eq!(
+        listings(&seam.calls),
+        1,
+        "only the filled opening is listed: the resting stop the read lists as working never is"
+    );
     only_the_contracts_tools(&seam.calls);
     assert!(
         journal
@@ -776,7 +777,6 @@ fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Err
 /// `limit:<id>:10`, and reconciles with no mismatch and no agent held: the ledger is flat, as the
 /// broker is.
 #[test]
-#[ignore = "pending E21-30"]
 fn the_resting_stop_sells_out_and_is_booked_at_its_limit() -> Result<(), Error> {
     let (journal, mut process, seam) = protected_position()?;
     assert_eq!(stop_places(&seam.calls).len(), 1, "one stop is placed");
@@ -820,7 +820,6 @@ fn the_resting_stop_sells_out_and_is_booked_at_its_limit() -> Result<(), Error> 
 /// agent is held, and no stop is placed. Once the listing answers, the fill is booked once, by an
 /// adopting run.
 #[test]
-#[ignore = "pending E21-30"]
 fn an_unanswered_listing_holds_and_never_adopts() -> Result<(), Error> {
     let (journal, mut process, seam) = opened()?;
     let runs_before = journal.payloads("ReconciliationRun").len();
@@ -892,11 +891,51 @@ fn an_unanswered_listing_holds_and_never_adopts() -> Result<(), Error> {
     Ok(())
 }
 
+/// DEC-2800 item 3: a listing answered but whose hand-off does not commit holds too. The fill's
+/// first append is in doubt, so the pass ends with nothing booked and no reconciliation run; the
+/// next pass commits the same answer, and the fill is booked exactly once, by an adopting run.
+#[test]
+fn a_listing_answer_that_does_not_commit_holds() -> Result<(), Error> {
+    let (journal, mut process, seam) = opened()?;
+    let runs_before = journal.payloads("ReconciliationRun").len();
+    filled(&seam)?;
+    journal.fail_next_of(ADOPTION_FIRST_DRAFT, &[Fault::Unavailable]);
+    pass(&journal, &mut process, "t1", 10)?;
+    assert!(listings(&seam.calls) >= 1, "the pass asks for the listing");
+    assert!(
+        fills(&journal, "buy").is_empty(),
+        "nothing is booked: {:?}",
+        journal.types(ACCOUNT_STREAM)
+    );
+    assert_eq!(
+        journal.payloads("ReconciliationRun").len(),
+        runs_before,
+        "no reconciliation runs on an uncommitted hand-off"
+    );
+    assert!(
+        stop_places(&seam.calls).is_empty(),
+        "nothing is protected yet"
+    );
+    for (second, id) in [(20, "t2"), (30, "t3")] {
+        pass(&journal, &mut process, id, second)?;
+    }
+    assert_eq!(fills(&journal, "buy").len(), 1, "booked once");
+    let runs = runs_from_the_fill(&journal, "buy")?;
+    assert_eq!(
+        runs.first().and_then(|run| text(run, "result")),
+        Some("adopted"),
+        "{runs:?}"
+    );
+    assert_eq!(stop_places(&seam.calls).len(), 1, "protected once");
+    only_the_contracts_tools(&seam.calls);
+    reconciled_without_activity(&journal);
+    Ok(())
+}
+
 /// After a restart the broker is rebuilt from the account stream: the opening's key is never
 /// placed again, so a second `Submit` of it sends nothing and answers `Unknown` (DEC-860 items 4
 /// and 7).
 #[test]
-#[ignore = "pending E21-30"]
 fn a_restored_broker_never_places_a_journaled_key_again() -> Result<(), Error> {
     let (journal, _process, _seam) = protected_position()?;
     let records = journal
