@@ -1192,3 +1192,37 @@ fn the_feed_is_optional_and_read_strictly() {
         })
     );
 }
+
+/// An item's arrival hangs on this agent's `AgentDeployed` in this environment only: another
+/// environment's deployment of the same agent, later, moves nothing, and a control record of
+/// another type is passed over.
+#[test]
+fn an_arrival_hangs_on_this_environment_s_deployment_only() {
+    let feed = json!([feed_item("nw-feed-early", "AAPL", 3_600)]);
+    let bundle = bundle_fed("environment", &feed).unwrap();
+    let (journal, source) = deployed(&bundle, &triggered());
+    let before = source.parts(&state()).unwrap().events;
+    let seq = u64::try_from(journal.control.borrow().len()).unwrap() + 1;
+    journal.control.borrow_mut().push(row_at(
+        "ctl:ws1",
+        seq,
+        "AgentDeployed",
+        "live",
+        &format!(
+            r#"{{"agent_id":"{AGENT}","mandate_version":"sha256:{}"}}"#,
+            "0".repeat(64)
+        ),
+        "2026-10-16T09:00:00.000000000Z",
+    ));
+    journal.control.borrow_mut().push(row_at(
+        "ctl:ws1",
+        seq + 1,
+        "ConfigSnapshotRegistered",
+        "paper",
+        r#"{"kind":"rule_set"}"#,
+        "2026-10-16T10:00:00.000000000Z",
+    ));
+    let after = source.parts(&state()).unwrap().events;
+    assert_eq!(after, before);
+    assert_eq!(after.len(), 1);
+}
