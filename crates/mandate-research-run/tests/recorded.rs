@@ -8,7 +8,9 @@
 use mandate_canon::{Key, Value, parse, to_canonical};
 use mandate_gateway::money::Usage;
 use mandate_gateway::registry::{Locality, Reported, Status};
-use mandate_research_run::recorded::{RecordedError, RecordedModel};
+use mandate_research_run::recorded::{
+    RecordedError, RecordedModel, SHOWN_THESIS, memory_theses, shown_thesis,
+};
 
 const DEMO: &str = include_str!("../../../deploy/cell/demo/research/research.json");
 const AGENTIC: &str =
@@ -284,4 +286,26 @@ fn turns_the_entry_could_not_serve_refuse_whole() {
         }),
         "no turns is no turns"
     );
+}
+
+/// A recorded monitor reply names the thesis the call showed (agent harness spec §6.9): the least
+/// id the call's memory listed replaces every placeholder, and with none shown the output is left
+/// as recorded, so the invalidation names no thesis and ends nothing.
+#[test]
+fn a_monitor_reply_names_the_least_thesis_the_call_showed() {
+    let output = format!(r#"{{"invalidations":[{{"thesis_id":"{SHOWN_THESIS}","evidence":[]}}]}}"#);
+    assert_eq!(
+        shown_thesis(&output, &["01B", "01A"]),
+        r#"{"invalidations":[{"thesis_id":"01A","evidence":[]}]}"#
+    );
+    assert_eq!(shown_thesis(&output, &[]), output);
+    let inputs = std::collections::BTreeMap::from([(
+        "memory".to_owned(),
+        r#"[{"expires_at":"2026-10-20T00:00:00.000000000Z","symbol":"SPY","thesis_id":"01T2"},{"expires_at":"2026-10-20T00:00:00.000000000Z","symbol":"AAPL","thesis_id":"01T1"}]"#
+            .to_owned(),
+    )]);
+    assert_eq!(memory_theses(&inputs), ["01T2", "01T1"]);
+    assert!(memory_theses(&std::collections::BTreeMap::new()).is_empty());
+    let garbled = std::collections::BTreeMap::from([("memory".to_owned(), "{}".to_owned())]);
+    assert!(memory_theses(&garbled).is_empty());
 }

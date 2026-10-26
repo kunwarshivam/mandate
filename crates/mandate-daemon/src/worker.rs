@@ -21,7 +21,8 @@ use mandate_gateway::registry::{Locality, Reported};
 use mandate_gateway::{CallRecord, Gateway, RateCaps, RequestError, Settings};
 use mandate_journal::{ArtifactRef, ArtifactStore, Environment, get_artifact};
 use mandate_research::{AssetClass as EnvelopeClass, WorkingUniverse};
-use mandate_research_run::agentic::LoopBounds;
+use mandate_research_run::agentic::{LoopBounds, RunKind};
+use mandate_research_run::recorded::shown_thesis;
 use mandate_research_run::{
     Allowlist, Answer, CallContext, CallPlan, DispatchScope, EarlierTurn, MemoryThesis, ModelCalls,
     Readers, RecordedKey, ResearchRunError, Retrieval, RetrievalPlan, RetrievedItem, Scope,
@@ -175,6 +176,7 @@ pub struct RecordedWorker<T: Transport = RecordedTransport> {
     plan: RetrievalPlan,
     reply: RecordedReply,
     turns: Vec<ScriptedTurn>,
+    monitor_reply: Option<RecordedReply>,
     slug: String,
     provider: String,
     workspace: String,
@@ -331,6 +333,7 @@ impl<T: Transport> RecordedWorker<T> {
             plan: bundle.entry.plan,
             reply: bundle.reply.clone(),
             turns: bundle.turns.clone(),
+            monitor_reply: bundle.monitor_reply.clone(),
             slug: bundle.entry.identity.model_name.clone(),
             provider: bundle.endpoint.route.reported_provider.clone(),
             workspace: who.workspace,
@@ -477,7 +480,18 @@ impl<T: Transport> RecordedWorker<T> {
             })
             .collect::<Option<Vec<_>>>()
             .ok_or(TurnError::Missing)?;
-        self.script_reply(Some(request.plan.turn));
+        let shown: Vec<String> = self
+            .runs
+            .get(&run_id)
+            .map(|run| {
+                run.context
+                    .theses
+                    .iter()
+                    .map(|thesis| thesis.thesis_id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.script_reply(Some((request.plan.turn, request.kind)), &shown);
         let Some(run) = self.runs.get_mut(&run_id) else {
             return Err(TurnError::NotStarted);
         };
@@ -601,7 +615,7 @@ impl<T: Transport> RecordedWorker<T> {
         if !self.runs.contains_key(&plan.run_id) {
             return;
         }
-        self.script_reply(None);
+        self.script_reply(None, &[]);
         let Some(run) = self.runs.get_mut(&plan.run_id) else {
             return;
         };
@@ -633,19 +647,34 @@ impl<T: Transport> RecordedWorker<T> {
     }
 
     /// Moves the in-process gateway's clock to now and scripts the recorded reply for the next call
-    /// alone: an agentic run's turn n its scripted turn n, and the single call and every turn past
-    /// the script the final reply (DEC-2266). A reply left by a call that was never sent (one not
-    /// built, or refused before sending) is cleared first. The model-gateway service scripts its own
-    /// replies, so a remote worker primes nothing.
-    fn script_reply(&mut self, turn: Option<u32>) {
+    /// alone: a `monitor` run's turn the bundle's monitor reply, when it has one, naming the least of
+    /// the `shown` theses the run's context showed the model, with no scripted turn
+    /// (agent harness spec §6.9); else an agentic run's turn n its scripted turn n, and the single
+    /// call and every turn past the script the final reply (DEC-2266). A reply left by a call that
+    /// was never sent (one not built, or refused before sending) is cleared first. The
+    /// model-gateway service scripts its own replies, so a remote worker primes nothing.
+    fn script_reply(&mut self, turn: Option<(u32, RunKind)>, shown: &[String]) {
         let now = (self.now)();
         let Models::Local { gateway, prime } = &mut self.models else {
             return;
         };
         gateway.clock_mut().wait_until(now);
+        let monitor = self
+            .monitor_reply
+            .clone()
+            .filter(|_| matches!(turn, Some((_, RunKind::Monitor))));
         let scripted = turn
-            .and_then(|turn| turn.checked_sub(1))
+            .filter(|_| monitor.is_none())
+            .and_then(|(turn, _)| turn.checked_sub(1))
             .and_then(|index| self.turns.get(usize::try_from(index).ok()?));
+        let shown: Vec<&str> = shown.iter().map(String::as_str).collect();
+        let last = match monitor {
+            Some(reply) => RecordedReply {
+                output: shown_thesis(&reply.output, &shown),
+                ..reply
+            },
+            None => self.reply.clone(),
+        };
         let (latency_ms, body) = match scripted {
             Some(scripted) => {
                 let calls: Vec<(&str, &str)> = scripted
@@ -663,13 +692,8 @@ impl<T: Transport> RecordedWorker<T> {
                 )
             }
             None => (
-                self.reply.latency_ms,
-                recorded_reply(
-                    &self.reply.output,
-                    &self.slug,
-                    &self.provider,
-                    self.reply.usage,
-                ),
+                last.latency_ms,
+                recorded_reply(&last.output, &self.slug, &self.provider, last.usage),
             ),
         };
         (*prime)(

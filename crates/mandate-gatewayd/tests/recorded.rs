@@ -186,3 +186,115 @@ fn the_settings_are_the_recording_s_endpoint_under_the_cell_s_rate_caps() {
         );
     }
 }
+
+const INVALIDATION: &str =
+    r#"{\"invalidations\":[{\"thesis_id\":\"01ACTIVE\",\"evidence\":[\"nw-1\"]}]}"#;
+
+/// `text`, a recording, with a `monitor_reply` whose output is [`INVALIDATION`].
+fn with_monitor_reply(text: &str) -> String {
+    let end = text.rfind('}').unwrap();
+    format!(
+        r#"{},"monitor_reply":{{"output":"{INVALIDATION}","latency_ms":7,"input_tokens":900,"output_tokens":40,"cached_tokens":0}}}}"#,
+        &text[..end]
+    )
+}
+
+/// Agent harness spec §6.9: a `monitor` run's call takes the recording's monitor reply, at any
+/// turn, with no scripted turn, and an `ideate` run's calls take their scripted turns and the final
+/// reply as before. A recording with no monitor reply answers a monitor call as before.
+#[test]
+fn a_monitor_call_takes_the_monitor_reply_and_an_ideate_call_its_script() {
+    let recording = model(&with_monitor_reply(AGENTIC));
+    let monitor = recording.monitor_reply.clone().unwrap();
+    assert_eq!(
+        monitor.output,
+        r#"{"invalidations":[{"thesis_id":"01ACTIVE","evidence":["nw-1"]}]}"#
+    );
+    let replies = Replies::new(&recording);
+    let monitor_body = recorded_reply(
+        &monitor.output,
+        recording.probe.model.as_deref().unwrap(),
+        recording.probe.provider.as_deref().unwrap(),
+        monitor.usage,
+    );
+    for earlier in [0, 1, recording.turns.len()] {
+        let reply = replies.reply_for(&request(Some("monitor"), earlier));
+        assert_eq!(body(&reply.delivery), monitor_body.as_slice(), "{earlier}");
+        assert_eq!(reply.latency_ms, 7);
+    }
+    let first = &recording.turns[0];
+    let calls: Vec<(&str, &str)> = first
+        .calls
+        .iter()
+        .map(|(name, arguments)| (name.as_str(), arguments.as_str()))
+        .collect();
+    assert_eq!(
+        body(&replies.reply_for(&request(Some("ideate"), 0)).delivery),
+        openrouter_reply(None, &calls, &recording.probe, first.usage).as_slice()
+    );
+    assert_eq!(
+        body(
+            &replies
+                .reply_for(&request(Some("ideate"), recording.turns.len()))
+                .delivery
+        ),
+        final_body(&recording).as_slice()
+    );
+    assert_eq!(
+        body(&replies.reply_for(&request(None, 0)).delivery),
+        final_body(&recording).as_slice()
+    );
+    let plain = model(AGENTIC);
+    assert_eq!(plain.monitor_reply, None);
+    assert_eq!(
+        body(
+            &Replies::new(&plain)
+                .reply_for(&request(Some("monitor"), 0))
+                .delivery
+        ),
+        openrouter_reply(None, &calls, &plain.probe, first.usage).as_slice(),
+        "no monitor reply: the script, as before"
+    );
+}
+
+/// A monitor reply needs an agentic entry, whose runs alone can be `monitor` runs, and every
+/// member a reply has.
+#[test]
+fn a_monitor_reply_is_refused_on_a_single_call_entry_or_short_a_member() {
+    let refused = |text: &str| RecordedModel::read(&parse(text.as_bytes()).unwrap()).err();
+    assert_eq!(
+        refused(&with_monitor_reply(DEMO)),
+        Some(mandate_research_run::recorded::RecordedError::Malformed(
+            "monitor_reply"
+        ))
+    );
+    let short = with_monitor_reply(AGENTIC).replace(r#","latency_ms":7"#, "");
+    assert_eq!(
+        refused(&short),
+        Some(mandate_research_run::recorded::RecordedError::Malformed(
+            "latency_ms"
+        ))
+    );
+}
+
+/// The monitor reply names the least thesis the call's `memory` input shows, so the recorded double
+/// invalidates a thesis the runtime actually holds.
+#[test]
+fn a_monitor_reply_names_the_thesis_the_call_showed() {
+    let recording = model(&with_monitor_reply(AGENTIC).replace("01ACTIVE", "$THESIS_ID"));
+    let replies = Replies::new(&recording);
+    let mut monitor = request(Some("monitor"), 0);
+    monitor.inputs.insert(
+        "memory".to_owned(),
+        r#"[{"expires_at":"2026-10-20T00:00:00.000000000Z","symbol":"SPY","thesis_id":"01THESISB"},{"expires_at":"2026-10-20T00:00:00.000000000Z","symbol":"SPY","thesis_id":"01THESISA"}]"#
+            .to_owned(),
+    );
+    let reply = replies.reply_for(&monitor);
+    let expected = recorded_reply(
+        r#"{"invalidations":[{"thesis_id":"01THESISA","evidence":["nw-1"]}]}"#,
+        recording.probe.model.as_deref().unwrap(),
+        recording.probe.provider.as_deref().unwrap(),
+        recording.monitor_reply.as_ref().unwrap().usage,
+    );
+    assert_eq!(body(&reply.delivery), expected.as_slice());
+}
