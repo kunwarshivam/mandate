@@ -852,7 +852,6 @@ fn long_on(instrument: &str, now: &str) -> SignalInputs {
 /// within the envelope's order cap, with its protective stop; and the owner is asked (the research
 /// envelope's `default: ask`), never AUTO.
 #[test]
-#[ignore = "pending E21-2"]
 fn an_unpinned_mandate_opens_on_its_working_universe_and_asks() {
     let rows = research_journaled(REGULAR);
     let plan = research_plan(&rows);
@@ -920,7 +919,6 @@ fn a_pinned_mandate_never_opens_outside_its_pins() {
 /// DEC-2819 item 2, as the executor opens: two surviving theses mean no one working instrument,
 /// so no opening, even with a `Long` on one of them.
 #[test]
-#[ignore = "pending E21-2"]
 fn two_surviving_theses_open_nothing() {
     let mut rows = research_journaled(REGULAR);
     rows.push(
@@ -944,7 +942,6 @@ fn two_surviving_theses_open_nothing() {
 /// A `Long` on an instrument a thesis once admitted but no longer holds, its thesis expired or
 /// invalidated, proposes nothing.
 #[test]
-#[ignore = "pending E21-2"]
 fn a_long_on_an_instrument_whose_thesis_no_longer_holds_opens_nothing() {
     let mut expired = research_registered(REGULAR);
     thesis(
@@ -977,7 +974,6 @@ fn a_long_on_an_instrument_whose_thesis_no_longer_holds_opens_nothing() {
 /// nothing; and while an opening is held so, a held instrument whose thesis ended is still sold
 /// (rule 13).
 #[test]
-#[ignore = "pending E21-2"]
 fn an_unreadable_thesis_record_opens_nothing_and_never_holds_an_exit() {
     let mut rows = research_journaled(REGULAR);
     rows.push(
@@ -1008,7 +1004,6 @@ fn an_unreadable_thesis_record_opens_nothing_and_never_holds_an_exit() {
 /// class the envelope does not allow (the research envelope allows `us_equity` alone) is never
 /// opened, and a proposal on an instrument the working universe does not name is denied.
 #[test]
-#[ignore = "pending E21-2"]
 fn an_instrument_outside_the_envelopes_asset_classes_is_never_opened() {
     let mut crypto = research_registered(REGULAR);
     thesis(
@@ -1045,7 +1040,6 @@ fn an_instrument_outside_the_envelopes_asset_classes_is_never_opened() {
 /// `AGENTS.md` rule 3: an opening whose thesis ended between the plan and its classification is
 /// denied, since its instrument is no longer the working one.
 #[test]
-#[ignore = "pending E21-2"]
 fn an_opening_whose_thesis_ended_before_it_is_classified_is_denied() {
     let mut rows = research_journaled(REGULAR);
     let facts = Facts::new(CLOCK, AGENT);

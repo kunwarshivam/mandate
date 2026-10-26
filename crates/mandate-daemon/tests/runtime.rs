@@ -2910,7 +2910,6 @@ fn research_in_session_with(more: impl Fn(&Rig)) -> (Rig, RuntimeProcess<Rig>) {
 /// `Long` on SPY decides once in session and asks its owner about the opening, both naming SPY;
 /// nothing is proposed to the executor before the grant.
 #[test]
-#[ignore = "pending E21-2"]
 fn a_research_deployment_decides_and_asks_about_its_working_universe_in_session() {
     let (rig, mut process) = research_in_session();
     for second in 1..4 {
@@ -2954,7 +2953,6 @@ const RESEARCH_QQQ: &str = "3a9e1f0c-2b7d-4c55-8e61-0f4d2a6b9c13";
 /// working instrument, so the research deployment decides nothing in session, though both models'
 /// `Long` on SPY are journaled.
 #[test]
-#[ignore = "pending E21-2"]
 fn a_research_deployment_with_two_surviving_theses_opens_nothing() {
     let (rig, mut process) = research_in_session_with(|rig| {
         thesis_on(
@@ -2984,7 +2982,6 @@ fn a_research_deployment_with_two_surviving_theses_opens_nothing() {
 /// executor maps exits), so no operator alert `flatten_unplanned` is raised for it. Today it maps
 /// only the pinned universe, which a research mandate has none of.
 #[test]
-#[ignore = "pending E21-2"]
 fn a_research_deployments_kill_switch_sells_its_held_instrument() {
     let rig = held_spy_under_a_thesis_expiring_at(NOW + 3_600);
     let mut process = RuntimeProcess::start(rig.clone(), research_wired(), &config(), at(NOW + 4));
@@ -3023,4 +3020,52 @@ fn research_wired() -> Wiring {
         CLOCK,
         AGENT,
     )
+}
+
+/// DEC-2841: the owner's grant of a research deployment's opening is acted on. The runtime
+/// revalidates a grant against the view's working universe (`in_working_universe`), which for an
+/// unpinned mandate is read again from the agent stream at every pass, so the instrument its
+/// single surviving thesis holds is proposed to the executor once granted, never skipped as
+/// outside a pinned list it has none of.
+#[test]
+fn a_research_deployments_granted_opening_is_proposed_on_its_working_instrument() {
+    let (rig, mut process) = research_in_session();
+    for second in 1..4 {
+        tick(&rig, IN_SESSION + second);
+        process.step(at(IN_SESSION + second));
+    }
+    let rows = agent_rows(&rig);
+    let asked = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalRequested")
+        .unwrap_or_else(|| panic!("the opening is asked: {:?}", kinds(&rig)));
+    let body = parse(&asked.body).unwrap();
+    let hash = body
+        .get("payload")
+        .and_then(|payload| payload.get("content_hash"))
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_owned();
+    granted(&rig, asked.event_id.as_str(), &hash);
+    tick(&rig, IN_SESSION + 4);
+    process.step(at(IN_SESSION + 4));
+    assert_eq!(count(&rig, "ApprovalResponded"), 1, "{:?}", kinds(&rig));
+    assert_eq!(
+        count(&rig, "IntentProposed"),
+        1,
+        "the grant is acted on: {:?}",
+        kinds(&rig)
+    );
+    let rows = agent_rows(&rig);
+    let intent = rows
+        .iter()
+        .find(|row| row.event_type == "IntentProposed")
+        .unwrap();
+    let payload = parse(&intent.body)
+        .unwrap()
+        .get("payload")
+        .cloned()
+        .unwrap();
+    assert_eq!(member(&payload, "instrument_id"), Some(SPY), "{payload:?}");
+    assert_eq!(member(&payload, "side"), Some("buy"), "{payload:?}");
 }
