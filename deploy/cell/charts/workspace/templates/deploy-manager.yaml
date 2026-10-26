@@ -82,6 +82,11 @@ DEC-2031). Its probes are processes.json's `probe`, as a Deployment's are (DEC-1
 {{- $args := list "run" "--probe" "/tmp/process.sock" -}}
 {{- if and (eq .p.name "runtime") .root.Values.runtime.research -}}
 {{- $args = concat $args (list "--research" .root.Values.runtime.research) -}}
+{{- /* A researching runtime of the workspace the model gateway serves calls models through it
+(DEC-2397 item 6); any other keeps its in-process recorded fake. */ -}}
+{{- if and (index .root.Values.images "model-gateway") (eq (.root.Values.api.workspace | default "") .root.Values.modelGateway.workspace) -}}
+{{- $args = concat $args (list "--gateway" "model-gateway:8080") -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .p.name "executor" -}}
 {{- $args = concat $args (include "mandate.executorBroker" .root | fromJsonArray) -}}

@@ -167,7 +167,6 @@ fn words(text: &str) -> Vec<String> {
 /// DEC-2397 item 6: `--gateway <host:port>` beside `--research` names the model-gateway service;
 /// without the flag the runtime keeps its in-process recorded fake.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_gateway_flag_names_the_service_beside_research() {
     assert_eq!(
         launch::gateway(&words("run --research /b --gateway 127.0.0.1:8080"), true),
@@ -180,7 +179,6 @@ fn the_gateway_flag_names_the_service_beside_research() {
 /// DEC-2397 item 6: the flag written `--gateway=`, with no value, with another flag in its place,
 /// with a value that names no address, or without `--research`, refuses the start.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_gateway_flag_that_names_no_service_refuses_the_start() {
     for (text, research) in [
         ("run --research /b --gateway=127.0.0.1:8080", true),

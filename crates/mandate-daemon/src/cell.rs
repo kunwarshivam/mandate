@@ -24,6 +24,7 @@ use mandate_time::UtcNanos;
 use crate::deployment;
 use crate::meter::CellMeter;
 use crate::recorded::{Bundle, BundleError};
+use crate::remote::RemoteGateway;
 use crate::runtime::{Refs, ResearchWiring};
 use crate::source::{CellSource, Rows, SourceFor};
 use crate::worker::{RecordedWorker, StoreSink, WorkerError, WorkerFor};
@@ -223,6 +224,24 @@ pub fn research_metered(
     wired(opted, rows, meter, artifacts, now)
 }
 
+/// As [`research_metered`], calling models through the model-gateway service at `remote`
+/// (DEC-2397 items 1, 4 and 6): the worker builds no gateway, and the research source reads `meter`,
+/// the service's journaled stream read without its writer epoch, for its own checks. The service
+/// meters and holds each research call to the deployed daily cap.
+///
+/// # Errors
+/// As [`research_metered`].
+pub fn research_remote(
+    opted: OptIn,
+    rows: Box<dyn Rows>,
+    meter: Box<dyn MeterStore>,
+    artifacts: &Path,
+    now: Box<dyn FnMut() -> UtcNanos>,
+    remote: RemoteGateway,
+) -> Result<CellResearch, CellError> {
+    wired_through(opted, rows, meter, artifacts, now, Some(remote))
+}
+
 /// The research `opted` asks for, reading the streams through `rows` and the mandate documents and
 /// artifacts from the store at `artifacts`, its meter in memory, for fixtures and tests (DEC-2259
 /// item 1).
@@ -246,6 +265,19 @@ fn wired(
     meter: Box<dyn MeterStore>,
     artifacts: &Path,
     now: Box<dyn FnMut() -> UtcNanos>,
+) -> Result<CellResearch, CellError> {
+    wired_through(opted, rows, meter, artifacts, now, None)
+}
+
+/// The research `opted` asks for: its worker calls models through `remote` when one is given, and
+/// otherwise through its own gateway, which shares `meter` with the source.
+fn wired_through(
+    opted: OptIn,
+    rows: Box<dyn Rows>,
+    meter: Box<dyn MeterStore>,
+    artifacts: &Path,
+    now: Box<dyn FnMut() -> UtcNanos>,
+    remote: Option<RemoteGateway>,
 ) -> Result<CellResearch, CellError> {
     let OptIn {
         bundle,
@@ -292,19 +324,29 @@ fn wired(
         })
     })?;
     let daily = research_daily_cap(&document)?;
-    let worker = RecordedWorker::capped(
-        &bundle,
-        WorkerFor {
-            workspace: deployment.workspace.clone(),
-            agent: deployment.agent.clone(),
-            description: description.clone(),
-        },
-        Box::new(StoreSink(open()?)),
-        Box::new(clock),
-        meter.clone(),
-        daily,
-    )
-    .map_err(CellError::Worker)?;
+    let worker_for = WorkerFor {
+        workspace: deployment.workspace.clone(),
+        agent: deployment.agent.clone(),
+        description: description.clone(),
+    };
+    let worker = match remote {
+        Some(remote) => RecordedWorker::remote(
+            &bundle,
+            worker_for,
+            Box::new(StoreSink(open()?)),
+            Box::new(clock),
+            remote,
+        ),
+        None => RecordedWorker::capped(
+            &bundle,
+            worker_for,
+            Box::new(StoreSink(open()?)),
+            Box::new(clock),
+            meter.clone(),
+            daily,
+        )
+        .map_err(CellError::Worker)?,
+    };
     let source = CellSource::metered(&bundle, who, rows, Box::new(open()?), meter);
     let refs = ResearchRefs {
         mandate_version: version,

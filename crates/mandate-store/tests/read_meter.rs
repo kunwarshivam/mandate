@@ -64,7 +64,6 @@ fn settlement(n: u128) -> Settlement {
 
 /// What the writer wrote reads back through the reader as itself, in stream order.
 #[test]
-#[ignore = "pending E21-62"]
 fn what_the_writer_wrote_reads_back() {
     let store = MemoryStore::default();
     let mut gateway = writer(store.clone());
@@ -84,7 +83,6 @@ fn what_the_writer_wrote_reads_back() {
 /// DEC-2397 item 4: a reader opened and read between the writer's appends takes no epoch, so the
 /// writer is never fenced.
 #[test]
-#[ignore = "pending E21-62"]
 fn reading_never_fences_the_writer() {
     let store = MemoryStore::default();
     let mut gateway = writer(store.clone());
@@ -102,7 +100,6 @@ fn reading_never_fences_the_writer() {
 
 /// Every append through the reader is refused and writes nothing.
 #[test]
-#[ignore = "pending E21-62"]
 fn every_append_is_refused_and_writes_nothing() {
     let store = MemoryStore::default();
     let mut reader = ReadMeter::open(store.clone(), "ws_1");
@@ -141,7 +138,6 @@ impl Store for Down {
 
 /// A journal that cannot answer, or a workspace that names no stream, reads `Unavailable`.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_stream_it_cannot_read_fails_closed() {
     assert_eq!(
         ReadMeter::open(Down, "ws_1").read(),
