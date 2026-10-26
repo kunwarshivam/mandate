@@ -248,7 +248,6 @@ fn resolved(records: &[ControlRecord], texts: &[&str]) -> BTreeSet<String> {
 /// it, each role reference and the founder's own `user:` reference resolve to the founder, whoever
 /// recorded the connection; another user's reference resolves to no one.
 #[test]
-#[ignore = "pending E7-31"]
 fn a_founded_workspace_resolves_each_reference_to_the_founder() {
     let founded = [
         founding(1, 0, ULID_FOUNDER),
@@ -282,7 +281,6 @@ fn a_founded_workspace_resolves_each_reference_to_the_founder() {
 /// record, only while it holds the approver role, and never once deactivated; `role:owner` names
 /// the founder alone, and `role:workspace_admin` only an approver who is also workspace admin.
 #[test]
-#[ignore = "pending E7-31"]
 fn an_invitee_resolves_only_while_an_active_approver() {
     let inv_b = "01K6C0000000000000000001B0";
     let joined = vec![
@@ -417,7 +415,6 @@ fn invitee() -> impl Strategy<Value = Invitee> {
 /// admin, `role:owner` while it is the founder, or `user:` with its id. The oracle reads the
 /// drawn history and the reference texts itself, never the fold or `resolve`.
 #[test]
-#[ignore = "pending E7-31"]
 fn a_responder_is_an_approver_exactly_when_an_active_approver_answers_a_reference_naming_them() {
     let strategy = (
         proptest::collection::vec(invitee(), 2),
@@ -437,6 +434,7 @@ fn a_responder_is_an_approver_exactly_when_an_active_approver_answers_a_referenc
         let mut seq = 1;
         let mut eligible: BTreeSet<&str> = BTreeSet::new();
         let mut admin: BTreeSet<&str> = BTreeSet::from([ULID_FOUNDER]);
+        let mut leaving = Vec::new();
         let tail = if late { 10_000 } else { 500 };
         for (k, (joins, mask, long, leaves)) in invitees.iter().enumerate() {
             let member = ULIDS[k + 1];
@@ -453,8 +451,7 @@ fn a_responder_is_an_approver_exactly_when_an_active_approver_answers_a_referenc
             records.push(accepted(seq, base + 5, member, &invitation, &granted, cool));
             let cooled = base + 5 + cool <= tail;
             if *leaves {
-                seq += 1;
-                records.push(deactivated(seq, 100 + i64::try_from(k).unwrap(), member));
+                leaving.push(member);
             } else {
                 if cooled && granted.contains(&"approver") {
                     eligible.insert(member);
@@ -463,6 +460,10 @@ fn a_responder_is_an_approver_exactly_when_an_active_approver_answers_a_referenc
                     admin.insert(member);
                 }
             }
+        }
+        for (k, member) in leaving.into_iter().enumerate() {
+            seq += 1;
+            records.push(deactivated(seq, 100 + i64::try_from(k).unwrap(), member));
         }
         if founder_leaves {
             seq += 1;
@@ -644,7 +645,6 @@ fn the_production_view_hands_the_runtime_the_owner_not_the_role() {
 /// production view hands the runtime the founder, so check 3 admits the founder's grant, the
 /// web app's and the CLI's alike, and no one else's.
 #[test]
-#[ignore = "pending E7-31"]
 fn the_production_view_hands_the_runtime_the_founder_of_a_founded_workspace() {
     let mut founded = Stream::deployed(&snapshot(), common::RULES, common::FEE);
     let ends = founded.records.len() + 1;

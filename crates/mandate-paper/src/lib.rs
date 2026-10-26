@@ -1242,15 +1242,15 @@ impl<T: Tools + 'static> Session for Connected<T> {
     }
 }
 
-/// One verified row as the control-stream fold reads it: its `seq`, type and body's `payload`,
-/// and the stream and environment it was journaled on (DEC-957).
+/// One verified row as the control-stream fold reads it: its `seq`, its body's `event_time`, type
+/// and body's `payload`, and the stream and environment it was journaled on (DEC-957).
 fn control_record(row: &StoredEvent) -> Result<ControlRecord, PaperError> {
     let body = mandate_canon::parse(&row.body).map_err(|_| PaperError::Control)?;
     let payload = body.get("payload").ok_or(PaperError::Control)?.clone();
     let origin = Origin::of(&row.stream_id, &row.environment).ok_or(PaperError::Control)?;
     Ok(ControlRecord {
         seq: row.seq,
-        event_time: None,
+        event_time: ControlRecord::event_time_of(&body),
         event_type: row.event_type.clone(),
         payload,
         origin,

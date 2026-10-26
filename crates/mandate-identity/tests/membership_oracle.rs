@@ -718,13 +718,11 @@ fn roster_disagrees(reader: impl Fn(&[(i64, Event)], i64) -> Option<Plain>, hone
     caught.get()
 }
 
-/// The crate's roster, as plain ids, or `None` when it refuses the records as unreadable; any
-/// other answer fails the test with that answer.
+/// The crate's roster, as plain ids, or `None` when it refuses the records as unreadable.
 fn read_roster(events: &[(i64, Event)], p: i64) -> Option<Plain> {
     match Roster::read(records(events), t(p)) {
         Ok(roster) => Some(plain(&roster)),
         Err(RosterRefused::Unreadable { .. }) => None,
-        Err(other) => panic!("the roster read answered {other:?}"),
     }
 }
 
@@ -732,7 +730,6 @@ fn read_roster(events: &[(i64, Event)], p: i64) -> Option<Plain> {
 /// the oracle reads `active`, each with its effective roles, and the founder while it is `active`;
 /// and it refuses exactly where the oracle reads the history as broken.
 #[test]
-#[ignore = "pending E7-31"]
 fn the_roster_equals_the_oracles_active_members_over_random_histories() {
     roster_disagrees(read_roster, true);
 }
@@ -798,7 +795,6 @@ fn the_roster_oracle_agrees_with_the_folds_honest_reading() {
 /// is a founding grant: a later activation with no invitation names no founder, and a stream whose
 /// first record is an invitation has none.
 #[test]
-#[ignore = "pending E7-31"]
 fn the_founder_is_the_first_records_founding_member_only() {
     let approver = set(0b00001);
     let later = vec![
@@ -821,7 +817,6 @@ fn the_founder_is_the_first_records_founding_member_only() {
 /// E7-31: a record after the instant read is not folded, so the roster at the founding instant
 /// holds only the founder, with the owner bundle in effect at once (rule 103).
 #[test]
-#[ignore = "pending E7-31"]
 fn a_roster_reads_only_the_records_at_or_before_its_instant() {
     let history = vec![
         founding(),

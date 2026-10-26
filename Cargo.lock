@@ -2561,6 +2561,7 @@ dependencies = [
  "mandate-canon",
  "mandate-domain",
  "mandate-executor",
+ "mandate-identity",
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-liquidity",

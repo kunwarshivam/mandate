@@ -10,9 +10,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use mandate_identity_seal::Seal;
 use mandate_time::UtcNanos;
 
-use crate::{MembershipRecord, PrincipalId, Role};
+use crate::{
+    MembershipEvent, MembershipFold, MembershipRecord, MembershipState, PrincipalId, Role,
+};
 
 /// The members `active` at one instant, each with the roles in effect then, and the founder: the
 /// member of the stream's first membership record when that record is the founding grant (an
@@ -30,8 +33,6 @@ pub struct Roster {
 pub enum RosterRefused {
     /// The fold is unreadable at the instant read, from the record at `seq` (DEC-657 item 4).
     Unreadable { seq: u64 },
-    /// The story that implements the read has not landed.
-    Unimplemented { story: &'static str },
 }
 
 impl Roster {
@@ -41,7 +42,31 @@ impl Roster {
     /// [`RosterRefused::Unreadable`] when a record at or before `at` does not fit the state it
     /// finds, or is out of order.
     pub fn read(records: Vec<MembershipRecord>, at: UtcNanos) -> Result<Self, RosterRefused> {
-        let _: (Vec<MembershipRecord>, UtcNanos) = (records, at);
-        Err(RosterRefused::Unimplemented { story: "E7-31" })
+        let founding = records.first().and_then(|record| match record.event() {
+            MembershipEvent::Activated {
+                member,
+                invitation: None,
+                ..
+            } => Some(*member),
+            _ => None,
+        });
+        let activated: BTreeSet<PrincipalId> = records
+            .iter()
+            .filter_map(|record| match record.event() {
+                MembershipEvent::Activated { member, .. } => Some(*member),
+                _ => None,
+            })
+            .collect();
+        let fold = MembershipFold::new(Seal::grant(), records);
+        if let Some(seq) = fold.refused(at) {
+            return Err(RosterRefused::Unreadable { seq });
+        }
+        let active: BTreeMap<PrincipalId, BTreeSet<Role>> = activated
+            .into_iter()
+            .filter(|member| fold.state(*member, at) == Some(MembershipState::Active))
+            .map(|member| (member, fold.effective_roles(member, at)))
+            .collect();
+        let founder = founding.filter(|member| active.contains_key(member));
+        Ok(Self { active, founder })
     }
 }

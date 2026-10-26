@@ -592,8 +592,8 @@ pub fn lt10_end(
 }
 
 /// One row's record, mapped one-to-one as the run's own control-stream read maps it (DEC-914
-/// item 2; `run()`'s `control_record`): its `seq`, its `event_type` and its body's `payload`
-/// member, and no other member re-read from anywhere but the row's own body — a row whose
+/// item 2; `run()`'s `control_record`): its `seq`, its body's `event_time`, its `event_type` and
+/// its body's `payload` member, and no other member re-read from anywhere but the row's own body — a row whose
 /// envelope cannot be parsed or payload cannot be read holds members the run cannot read, so it
 /// refuses as a difference and nothing is sent (`AGENTS.md` rule 3).
 fn record_of(row: &StoredEvent) -> Result<ControlRecord, GrantRefusal> {
@@ -604,7 +604,7 @@ fn record_of(row: &StoredEvent) -> Result<ControlRecord, GrantRefusal> {
     let origin = Origin::of(&row.stream_id, &row.environment).ok_or(GrantRefusal::Mismatched)?;
     Ok(ControlRecord {
         seq: row.seq,
-        event_time: None,
+        event_time: ControlRecord::event_time_of(&body),
         event_type: row.event_type.clone(),
         payload: payload.clone(),
         origin,

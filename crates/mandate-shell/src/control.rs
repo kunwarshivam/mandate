@@ -47,6 +47,19 @@ pub struct Origin {
     pub environment: Environment,
 }
 
+impl ControlRecord {
+    /// The `event_time` a stored envelope `body` carries in the journal's canonical form, or
+    /// `None` when it carries none the run can read (DEC-2384 item 4).
+    pub fn event_time_of(body: &Value) -> Option<UtcNanos> {
+        body.get("event_time")
+            .and_then(Value::as_str)
+            .and_then(|text| match UtcNanos::parse(text) {
+                Ok(at) => Some(at),
+                Err(_) => None,
+            })
+    }
+}
+
 impl Origin {
     /// The origin a stored row names: its stream id and its envelope's environment, `paper` or
     /// `live`. Any other environment text is no origin, and the caller refuses the row.

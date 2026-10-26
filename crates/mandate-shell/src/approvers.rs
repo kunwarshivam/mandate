@@ -1,66 +1,85 @@
 //! The mandate's approver references resolved to the user ids admission compares (mandate spec
-//! §6.4 check 3, V-024; [DEC-953](../../../docs/project/decisions/DEC-953.md)).
+//! §6.4 check 3, V-024; [DEC-953](../../../docs/project/decisions/DEC-953.md),
+//! [DEC-2384](../../../docs/project/decisions/DEC-2384.md)).
 //!
 //! A mandate names its approvers as `role:approver`, `role:owner`, `role:workspace_admin` or
 //! `user:<id>`, while an answer names its responder by opaque user id, so the runtime can admit
-//! only a set of user ids. The run reads the workspace's members from the one identity record the
-//! founder's control stream journals, the same one `mandate approvals approve` reads for DEC-923's
-//! check: the `user` who recorded the mandate connection's latest `ConnectionEstablished`, the
-//! workspace owner. In that one-person workspace the owner holds every workspace role (identity
-//! spec §3.2, §4.3), so each role reference and the owner's own `user:` reference resolve to the
-//! owner, and nothing else resolves. A stream the run cannot read that way resolves no one, so
-//! every grant is refused `not_an_approver` and nothing is sent (`AGENTS.md` rule 3).
+//! only a set of user ids. A stream with no §9.12 membership record is DEC-953's one-person
+//! workspace: its member is the `user` who recorded the mandate connection's latest
+//! `ConnectionEstablished`, the record `mandate approvals approve` reads for DEC-923's check, who
+//! holds every workspace role (identity spec §3.2, §4.3). A stream with one, as every workspace
+//! `mandate workspace found` founds, is folded by `mandate_identity::Roster` at its latest record's
+//! instant, and each reference resolves only among the members active then who hold the approver
+//! role in effect. A stream the run cannot read either way resolves no one, so every grant is
+//! refused `not_an_approver` and nothing is sent (`AGENTS.md` rule 3).
 
 use std::collections::BTreeSet;
 
-use mandate_canon::Value;
+use mandate_canon::{Value, encode_ulid};
 use mandate_domain::Environment;
+use mandate_identity::{MEMBERSHIP_TYPES, Role, Roster, membership_record};
 use mandate_num::Usd;
 use mandate_runtime::{LiveBroker, LiveScope, OpaqueUser};
 use mandate_spec::Mandate;
 use mandate_spec::document::ApproverRef;
+use mandate_time::UtcNanos;
 
 use crate::control::ControlRecord;
 
 /// The workspace's members as the run reads them off its control stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Members {
-    /// No member the run can name: the connection has no `ConnectionEstablished`, its latest
-    /// record is a revocation, the record names no user, or the stream holds a §9.12 membership
-    /// record the run does not fold, so the workspace may have more than one member.
+    /// No member the run can name: with no §9.12 record, the connection has no
+    /// `ConnectionEstablished`, its latest record is a revocation, or the record names no user;
+    /// with one, the stream does not fold (DEC-2384 item 4).
     Unread,
     /// A one-person workspace whose one member, the owner, holds every workspace role.
     Owner(String),
+    /// The members the §9.12 fold reads active at the stream's latest record (DEC-2384).
+    Folded(Roster),
 }
 
-/// The §9.12 membership records: any of them means a membership the run does not fold.
-const MEMBERSHIP_RECORDS: [&str; 7] = [
-    "MemberInvited",
-    "MemberInvitationRevoked",
-    "MemberActivated",
-    "MemberRoleChanged",
-    "MemberDeactivated",
-    "MemberReactivated",
-    "MemberRemoved",
-];
-
-/// The members `records` show for the workspace whose mandate names `connection`: the owner is
-/// the `user` of the connection's latest `ConnectionEstablished` or `ConnectionRevoked` by `seq`,
-/// a revocation outranking an establishment at the same `seq`, and only while that record is an
-/// establishment naming a user as non-empty text. Any §9.12 membership record leaves them
-/// [`Members::Unread`].
+/// The members `records` show for the workspace whose mandate names `connection`. With no §9.12
+/// membership record, the owner is the `user` of the connection's latest `ConnectionEstablished`
+/// or `ConnectionRevoked` by `seq`, a revocation outranking an establishment at the same `seq`,
+/// and only while that record is an establishment naming a user as non-empty text. With one, the
+/// stream's [`Roster`] at its latest record, or [`Members::Unread`] when it does not fold.
 pub fn members(records: &[ControlRecord], connection: &str) -> Members {
     if records
         .iter()
-        .any(|record| MEMBERSHIP_RECORDS.contains(&record.event_type.as_str()))
+        .any(|record| MEMBERSHIP_TYPES.contains(&record.event_type.as_str()))
     {
-        return Members::Unread;
+        return roster(records).map_or(Members::Unread, Members::Folded);
     }
     match latest_record(records, connection) {
         Some(record) if record.event_type == "ConnectionEstablished" => text_of(record, "user")
             .filter(|user| !user.is_empty())
             .map_or(Members::Unread, |user| Members::Owner(user.to_owned())),
         Some(_) | None => Members::Unread,
+    }
+}
+
+/// The roster `records`, in stream order, fold to at the latest record's `event_time`
+/// (DEC-2384 items 2 and 4): `None` when any record carries no `event_time`, a membership record
+/// does not map, or the fold is unreadable then.
+fn roster(records: &[ControlRecord]) -> Option<Roster> {
+    let timed: Vec<(&ControlRecord, UtcNanos)> = records
+        .iter()
+        .map(|record| record.event_time.map(|at| (record, at)))
+        .collect::<Option<_>>()?;
+    let at = timed.iter().map(|(_, at)| *at).max()?;
+    let Ok(memberships) = timed
+        .into_iter()
+        .filter_map(|(record, at)| {
+            membership_record(record.seq, &record.event_type, at, &record.payload).transpose()
+        })
+        .collect::<Result<Vec<_>, _>>()
+    else {
+        return None;
+    };
+    match Roster::read(memberships, at) {
+        Ok(roster) => Some(roster),
+        Err(_) => None,
     }
 }
 
@@ -80,12 +99,14 @@ fn latest_record<'r>(records: &'r [ControlRecord], connection: &str) -> Option<&
 }
 
 /// The user ids `references` resolve to among `members`: the set admission check 3 compares a
-/// responder against. A role reference resolves to the owner, who holds every workspace role; a
-/// `user:` reference resolves only when it names the owner, since no one else is a member. Empty
-/// when nothing resolves, so every grant is refused.
+/// responder against. Among DEC-953's owner, a role reference resolves to the owner, who holds
+/// every workspace role, and a `user:` reference only when it names the owner. Among a roster, see
+/// [`folded`]. Empty when nothing resolves, so every grant is refused.
 pub fn resolve(references: &[ApproverRef], members: &Members) -> BTreeSet<String> {
-    let Members::Owner(owner) = members else {
-        return BTreeSet::new();
+    let owner = match members {
+        Members::Unread => return BTreeSet::new(),
+        Members::Folded(roster) => return folded(references, roster),
+        Members::Owner(owner) => owner,
     };
     references
         .iter()
@@ -95,6 +116,31 @@ pub fn resolve(references: &[ApproverRef], members: &Members) -> BTreeSet<String
             Some(_) | None => false,
         })
         .map(|_| owner.clone())
+        .collect()
+}
+
+/// The user ids `references` resolve to among `roster`'s active members holding the approver role
+/// in effect (DEC-2384 item 3): `role:approver` names each, `role:workspace_admin` each also holding
+/// workspace admin, `role:owner` the founder, and `user:<id>` the one whose ULID text is `<id>`.
+fn folded(references: &[ApproverRef], roster: &Roster) -> BTreeSet<String> {
+    let approvers = roster
+        .active
+        .iter()
+        .filter(|(_, roles)| roles.contains(&Role::Approver));
+    approvers
+        .filter(|(member, roles)| {
+            let id = encode_ulid(member.0);
+            references
+                .iter()
+                .any(|reference| match reference.as_str().split_once(':') {
+                    Some(("role", "approver")) => true,
+                    Some(("role", "workspace_admin")) => roles.contains(&Role::WorkspaceAdmin),
+                    Some(("role", "owner")) => roster.founder == Some(**member),
+                    Some(("user", user)) => user == id,
+                    Some(_) | None => false,
+                })
+        })
+        .map(|(member, _)| encode_ulid(member.0))
         .collect()
 }
 

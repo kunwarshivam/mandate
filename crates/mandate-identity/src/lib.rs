@@ -207,7 +207,7 @@ pub use membership::{
     RecordRefusal, check_independence, check_order,
 };
 pub use permission::Permission;
-pub use record::{MEMBERSHIP_TYPES, UnreadableRecord, control_entry};
+pub use record::{MEMBERSHIP_TYPES, UnreadableRecord, control_entry, membership_record};
 pub use roster::{Roster, RosterRefused};
 pub use writer::{
     ATTEMPTS, Appended, ControlEntry, ControlStream, ControlView, WriteError, write_membership,
