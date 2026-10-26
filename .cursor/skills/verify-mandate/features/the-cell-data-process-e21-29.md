@@ -1,4 +1,4 @@
-# The cell's data process: the deployed instrument's recorded daily bars (E21-29, lane SC)
+# The cell's data process: each listed instrument's recorded daily and minute bars (E21-29, lane SC)
 
 - **Spec:** [data-plane spec](../../../../docs/specs/data-plane.md) §3.6 (signal inputs recorded
   as `ObservationRecorded` with the bar window as an artifact), §3.7 (eligibility statistics from
@@ -9,22 +9,26 @@
   completed regular sessions, ending on `last_completed_regular_session(now)`; `close_on`: each
   close a function of its date alone, the anchor's close plus 0.1 a trading day; `publish`: one
   `mandate_marketdata::dataset::Store::put_day` per session under `cell-recorded/`;
-  `session_minutes` and `publish_minutes`: the current trading day's regular-session minute bars,
-  written once), `src/observation.rs` (`put_closes`: the closes object of the trusted closes, in
+  `session_minutes`, `minute_day` and `publish_minutes`: the regular-session minute bars of the
+  latest trading day on or before the New York date, written once; `Instrument::parse_list`: the
+  `--instruments` list), `src/observation.rs` (`put_closes`: the closes object of the trusted closes, in
   the artifact store), and the
   `mandate-datad` binary (`run`, whose first write is its start-up check, again every 60 s; and
   `probe` for `exec` probes; SIGTERM drains). The chart runs it as `data`, writing
-  `/var/lib/mandate/artifacts/datasets`, with `data.symbol` and `data.anchor`, which only the
-  local cell's values set.
+  `/var/lib/mandate/artifacts/datasets`, with `data.instruments` (SPY and QQQ), which only the
+  local cell's values list. The executor drill (`xtask/src/cell/executor.rs` `bars`) inspects
+  each instrument's daily and minute datasets.
 - **Tests:** `crates/mandate-datad/tests/series.rs`: the sessions end on the last completed session;
   a close is a function of its date (an oracle walking the calendar its own way); closes rise every
   session; an anchor and its reach are checked; the stored dataset passes the trust check's
   conditions under `mandate-marketdata`'s own inspection, and writing again conflicts with nothing; the closes object is stored for the trusted closes;
-  the minute bars cover the regular session, an early close's included, and the trailing minutes
-  are the complete ones before the clock.
-  `tests/process.rs`: ready only once stored, a store it cannot write refuses the start with a code
+  the minute bars cover the regular session, an early close's included, the trailing minutes
+  are the complete ones before the clock (a clock just past 00:00Z and a closed day read none),
+  the minute day is the latest trading day, and the instruments list is parsed strictly.
+  `tests/process.rs`: ready only once both instruments are stored, one closes object each, a store it cannot write refuses the start with a code
   and no symbol, probes, and SIGTERM drain. `deploy/tests/test_cell.py`: the data process's
-  launch, mounts and egress, and no render without its series.
+  launch, mounts and egress, no render without its series, and the local cell lists both demo
+  agents' instruments.
 - **Run:** `cargo nextest run -p mandate-datad`; the chart's with
   `uv run --directory python pytest ../deploy/tests` (helm required), as `cargo xtask ci cell` runs
   them.

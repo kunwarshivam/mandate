@@ -9,7 +9,7 @@ use std::time::Duration;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_bars::trailing_minutes;
 use mandate_datad::observation::put_closes;
-use mandate_datad::series::{self, Anchor, SESSIONS};
+use mandate_datad::series::{self, Anchor, Instrument, SESSIONS, SeriesError};
 use mandate_journal::{ArtifactRef, get_artifact};
 use mandate_marketdata::inspect::{GapClass, inspect};
 use mandate_num::Usd;
@@ -370,13 +370,91 @@ fn the_trailing_minutes_are_the_complete_ones_before_the_clock() {
         again.outcomes.iter().all(|o| !o.written),
         "the day never changes"
     );
-    let sunday = series::publish_minutes(
-        &root,
-        "SPY",
-        &anchor(),
-        &calendar,
-        at("2026-10-25T15:00:00Z"),
+    let midnight = at("2026-10-27T00:00:30Z");
+    let late = series::publish_minutes(&root, "SPY", &anchor(), &calendar, midnight)
+        .unwrap()
+        .unwrap();
+    assert!(
+        trailing_minutes(&late.dir, "SPY", midnight)
+            .unwrap()
+            .is_empty(),
+        "a clock just past 00:00Z reads an empty window, so participation fails closed"
     );
-    assert!(sunday.unwrap().is_none());
+    let sunday = at("2026-10-25T15:00:00Z");
+    let friday = series::publish_minutes(&root, "SPY", &anchor(), &calendar, sunday)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        friday.outcomes.iter().map(|o| o.day).collect::<Vec<_>>(),
+        [Date::new(2026, 10, 23).unwrap()],
+        "a closed day stores the last session's minutes"
+    );
+    assert!(
+        trailing_minutes(&friday.dir, "SPY", sunday)
+            .unwrap()
+            .is_empty(),
+        "none of the last session's minutes is inside a closed day's window"
+    );
     fs::remove_dir_all(&root).ok();
+}
+
+/// The minute day is the latest trading day on or before the clock's New York date: today on a
+/// trading day, before its open included (New York midnight is 04:00Z in October), and the last
+/// session on a weekend, on Thanksgiving, and on the Saturday after Christmas.
+#[test]
+fn the_minute_day_is_the_latest_trading_day() {
+    let calendar = ExchangeCalendar::us_equities().unwrap();
+    for (now, day) in [
+        ("2026-10-26T12:00:00Z", (2026, 10, 26)),
+        ("2026-10-26T03:59:59Z", (2026, 10, 23)),
+        ("2026-10-26T04:00:00Z", (2026, 10, 26)),
+        ("2026-10-25T15:00:00Z", (2026, 10, 23)),
+        ("2026-11-26T15:00:00Z", (2026, 11, 25)),
+        ("2026-12-26T15:00:00Z", (2026, 12, 24)),
+    ] {
+        let expected = Date::new(day.0, day.1, day.2).unwrap();
+        assert_eq!(
+            series::minute_day(&calendar, at(now)).unwrap(),
+            Some(expected),
+            "{now}"
+        );
+    }
+}
+
+/// An instrument is `<symbol>:<asset-id>:<anchor>`, and the list names each symbol once.
+#[test]
+fn the_instruments_are_parsed_strictly() {
+    let list = Instrument::parse_list(
+        "SPY:b0b6dd9d-8b9b-48a9-ba46-b9d54906e415:2026-10-23=150,\
+         QQQ:eb82ffb0-efd6-4f4e-9307-8fead28e04f6:2026-10-23=140",
+    )
+    .unwrap();
+    assert_eq!(
+        list.iter().map(|i| i.symbol.as_str()).collect::<Vec<_>>(),
+        ["SPY", "QQQ"]
+    );
+    assert_eq!(list[1].asset_id, "eb82ffb0-efd6-4f4e-9307-8fead28e04f6");
+    assert_eq!(list[1].anchor, Anchor::parse("2026-10-23=140").unwrap());
+    for (text, refused) in [
+        ("", "an empty list"),
+        ("SPY:a:2026-10-23=150,", "an empty member"),
+        ("SPY::2026-10-23=150", "no asset id"),
+        ("spy:a:2026-10-23=150", "a symbol the dataset refuses"),
+        ("SPY:a", "no anchor"),
+        ("SPY:a:2026-10-23=150:x", "a fourth part"),
+        (
+            "SPY:a:2026-10-23=150,SPY:b:2026-10-23=150",
+            "a symbol twice",
+        ),
+    ] {
+        assert!(
+            matches!(Instrument::parse_list(text), Err(SeriesError::Instruments)),
+            "{refused}"
+        );
+    }
+    assert!(matches!(
+        Instrument::parse_list("SPY:a:2026-10-23"),
+        Err(SeriesError::Anchor)
+    ));
+    assert_eq!(SeriesError::Instruments.code(), "instruments_malformed");
 }
