@@ -172,7 +172,7 @@ impl Books {
         filled.filled_qty = filled.qty.clone();
         filled.filled_avg_price = Some(price);
         for leg in &mut self.orders {
-            if leg.parent.as_deref() == Some(order.id.as_str()) && leg.status == "held" {
+            if leg.parent.as_deref() == Some(order.id.as_str()) {
                 leg.status = "new".to_owned();
             }
         }
@@ -241,15 +241,17 @@ impl FixturePaper {
                     None => refusal(404, 40_410_000, "order not found"),
                 }
             }
-            (Method::Get, route) if route.starts_with("/v2/orders/") => {
-                let wanted = route.trim_start_matches("/v2/orders/");
+            (Method::Post, "/v2/orders") => self.submit(request.body()),
+            (Method::Get, route) => {
                 let books = self.books.borrow();
-                match books.orders.iter().find(|o| o.id == wanted) {
+                match route
+                    .strip_prefix("/v2/orders/")
+                    .and_then(|wanted| books.orders.iter().find(|o| o.id == wanted))
+                {
                     Some(order) => ok(nested(&books.group(&order.id), &self.at)),
-                    None => refusal(404, 40_410_000, "order not found"),
+                    None => refusal(404, 40_410_000, "not found"),
                 }
             }
-            (Method::Post, "/v2/orders") => self.submit(request.body()),
             (Method::Delete, route) => match route.strip_prefix("/v2/orders/") {
                 Some(id) => self.cancel(id),
                 None => refusal(404, 40_410_000, "not found"),
@@ -615,4 +617,155 @@ fn order_json(order: &Order, legs: Value, at: &str) -> Value {
         ("time_in_force", s(&order.time_in_force)),
         ("type", s(&order.order_type)),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_alpaca::{HttpRequest, Method};
+    use mandate_canon::{Value, parse};
+    use mandate_time::UtcNanos;
+
+    use super::{FixturePaper, decimal, scaled};
+
+    type Error = Box<dyn std::error::Error>;
+
+    fn answer(
+        paper: &FixturePaper,
+        method: Method,
+        path: &str,
+        body: Option<&str>,
+    ) -> Result<Value, Error> {
+        let request = HttpRequest::new(method, path, body.map(str::to_owned))?;
+        Ok(parse(&paper.answer(&request).body)?)
+    }
+
+    fn text<'a>(value: &'a Value, member: &str) -> Option<&'a str> {
+        value.get(member).and_then(Value::as_str)
+    }
+
+    fn open(paper: &FixturePaper) -> Result<Vec<Value>, Error> {
+        let listed = answer(
+            paper,
+            Method::Get,
+            "/v2/orders?status=open&limit=500&direction=asc&nested=true",
+            None,
+        )?;
+        Ok(listed.as_array().ok_or("an array")?.to_vec())
+    }
+
+    fn legs(parent: &Value) -> Result<Vec<Value>, Error> {
+        Ok(parent
+            .get("legs")
+            .and_then(Value::as_array)
+            .ok_or("legs")?
+            .to_vec())
+    }
+
+    const BUY: &str = r#"{"client_order_id":"md-01JINTENT0000000000000000A","limit_price":"150","order_class":"simple","qty":"10","side":"buy","symbol":"AAPL","time_in_force":"day","type":"limit"}"#;
+    const OCO: &str = r#"{"client_order_id":"md-01JINTENT0000000000000000A-p1","order_class":"oco","qty":"10","side":"sell","stop_loss":{"stop_price":"147"},"symbol":"AAPL","take_profit":{"limit_price":"157.5"},"time_in_force":"gtc","type":"limit"}"#;
+    const BRACKET: &str = r#"{"client_order_id":"md-01JINTENT0000000000000000B","order_class":"bracket","qty":"10","side":"buy","stop_loss":{"stop_price":"147"},"symbol":"AAPL","take_profit":{"limit_price":"157.5"},"time_in_force":"day","type":"market"}"#;
+
+    /// An OCO is listed as Alpaca lists it: its take-profit limit first, under the client order id
+    /// it was sent with, and its stop nested under it as a leg with ids of its own.
+    #[test]
+    fn an_oco_is_its_limit_with_its_stop_nested() -> Result<(), Error> {
+        let paper = FixturePaper::filling(UtcNanos::parse("2026-09-21T15:00:00.000000000Z")?);
+        answer(&paper, Method::Post, "/v2/orders", Some(BUY))?;
+        answer(&paper, Method::Post, "/v2/orders", Some(OCO))?;
+        let listed = open(&paper)?;
+        let [parent] = listed.as_slice() else {
+            return Err(format!("one OCO open: {listed:?}").into());
+        };
+        assert_eq!(
+            text(parent, "client_order_id"),
+            Some("md-01JINTENT0000000000000000A-p1")
+        );
+        assert_eq!(text(parent, "order_class"), Some("oco"));
+        assert_eq!(text(parent, "type"), Some("limit"));
+        assert_eq!(text(parent, "limit_price"), Some("157.5"));
+        assert_eq!(parent.get("stop_price"), Some(&Value::Null));
+        let legs = legs(parent)?;
+        let [stop] = legs.as_slice() else {
+            return Err(format!("one stop leg: {legs:?}").into());
+        };
+        assert_eq!(text(stop, "type"), Some("stop"));
+        assert_eq!(text(stop, "stop_price"), Some("147"));
+        assert_eq!(stop.get("limit_price"), Some(&Value::Null));
+        assert_eq!(text(stop, "status"), Some("new"));
+        assert_ne!(text(stop, "id"), text(parent, "id"));
+        assert_ne!(
+            text(stop, "client_order_id"),
+            text(parent, "client_order_id")
+        );
+        Ok(())
+    }
+
+    /// A bracket whose entry has not filled holds its two legs: a sell limit at the take-profit
+    /// and a sell stop at the stop, each `held`, each with ids of its own.
+    #[test]
+    fn an_unfilled_brackets_legs_are_held() -> Result<(), Error> {
+        let paper = FixturePaper::filling(UtcNanos::parse("2026-09-21T15:00:00.000000000Z")?);
+        answer(&paper, Method::Post, "/v2/orders", Some(BRACKET))?;
+        let listed = open(&paper)?;
+        let [parent] = listed.as_slice() else {
+            return Err(format!("one bracket open: {listed:?}").into());
+        };
+        assert_eq!(
+            text(parent, "status"),
+            Some("new"),
+            "a market entry rests here"
+        );
+        let legs = legs(parent)?;
+        let [take, stop] = legs.as_slice() else {
+            return Err(format!("two legs: {legs:?}").into());
+        };
+        assert_eq!(
+            (text(take, "type"), text(take, "limit_price")),
+            (Some("limit"), Some("157.5"))
+        );
+        assert_eq!(
+            (text(stop, "type"), text(stop, "stop_price")),
+            (Some("stop"), Some("147"))
+        );
+        for leg in [take, stop] {
+            assert_eq!(
+                (text(leg, "side"), text(leg, "status")),
+                (Some("sell"), Some("held"))
+            );
+            assert_ne!(text(leg, "id"), text(parent, "id"));
+            assert_ne!(
+                text(leg, "client_order_id"),
+                text(parent, "client_order_id")
+            );
+        }
+        assert_ne!(text(take, "id"), text(stop, "id"));
+        assert_ne!(text(take, "client_order_id"), text(stop, "client_order_id"));
+        Ok(())
+    }
+
+    /// A read of an order by an id it never gave, or of any other path, is `404`.
+    #[test]
+    fn an_order_it_never_gave_is_not_found() -> Result<(), Error> {
+        let paper = FixturePaper::filling(UtcNanos::parse("2026-09-21T15:00:00.000000000Z")?);
+        let request = HttpRequest::new(
+            Method::Get,
+            "/v2/orders/00000000-0000-4000-8000-000000000009",
+            None,
+        )?;
+        assert_eq!(paper.answer(&request).status, 404);
+        Ok(())
+    }
+
+    /// Decimal text to the fixture's scale and back: nine places at most, a whole part always,
+    /// and a sign only below zero.
+    #[test]
+    fn decimals_read_and_write_at_nine_places() {
+        assert_eq!(scaled("1.123456789"), Some(1_123_456_789));
+        assert_eq!(scaled("1.1234567891"), None);
+        assert_eq!(scaled(".5"), None);
+        assert_eq!(scaled("-1.5"), Some(-1_500_000_000));
+        assert_eq!(decimal(0), "0");
+        assert_eq!(decimal(-1_500_000_000), "-1.5");
+        assert_eq!(decimal(1_500_000_000), "1.5");
+    }
 }
