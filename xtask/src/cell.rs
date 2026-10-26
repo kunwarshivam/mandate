@@ -5891,8 +5891,6 @@ mod tests {
 
     use super::*;
 
-    /// A drill job runs both variants locally, and one each in CI's matrix; any other value is
-    /// refused rather than running nothing.
     /// The cluster's default arguments are exactly the ones before [`LOW_EVICTION_ENV`] existed, so
     /// CI and a laptop create the same cluster; the switch adds only the kubelet's lowered
     /// hard-eviction thresholds, and the cgroup v1 argument is independent of it.
@@ -5936,6 +5934,8 @@ mod tests {
         assert_eq!(LOW_EVICTION_ENV, "MANDATE_CELL_LOW_EVICTION");
     }
 
+    /// A drill job runs both variants locally, and one each in CI's matrix; any other value is
+    /// refused rather than running nothing.
     #[test]
     fn a_drill_job_runs_the_drills_its_matrix_names() -> Result<()> {
         assert_eq!(
