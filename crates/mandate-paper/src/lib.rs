@@ -51,7 +51,7 @@ use mandate_alpaca::{
     AlpacaPaperHttp, Credentials, DataTransport, LatestQuote, Pause, TokioPause, TradingTransport,
 };
 use mandate_artifacts_fs::FsArtifactStore;
-use mandate_canon::{Key, Object, Value, to_canonical};
+use mandate_canon::Value;
 use mandate_domain::{AssetClass, Environment};
 use mandate_journal::{
     AppendOutcome, ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent, StreamId, get_artifact,
@@ -59,7 +59,7 @@ use mandate_journal::{
 use mandate_journal_pg::PgJournal;
 use mandate_mcp::{McpClient, Tools};
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, Refusal, Signal, evaluate};
-use mandate_num::{Price, Usd};
+use mandate_num::Usd;
 use mandate_robinhood::AccountSnapshot;
 use mandate_runtime::Observation;
 use mandate_shell::adapters::Sources;
@@ -81,7 +81,7 @@ use mandate_shell::{
 use mandate_shell::{close_window_bound, poll_interval};
 use mandate_spec::Mandate;
 use mandate_spec::context::{AgentId, Membership};
-use mandate_time::{Date, ExchangeCalendar, UtcNanos};
+use mandate_time::{ExchangeCalendar, UtcNanos};
 
 pub use ask::{BrokerAsk, QuoteRead};
 pub use connect_check::{
@@ -681,7 +681,8 @@ pub fn run<P: Ports>(
             Evaluation::Long(output) => *output,
             Evaluation::NoOutput(signal) => return Ok(Outcome::NoOutput(signal)),
         };
-    let bytes = closes_object(&daily.closes, instrument.asset_id.as_str())?;
+    let bytes = mandate_bars::closes_object(&daily.closes, instrument.asset_id.as_str())
+        .map_err(|_| absent(Stage::Journal, "the observation's members"))?;
     let data_ref = store.put_artifact(&bytes).map_err(|_| PaperError::Store)?;
     let observation = Observation {
         source: SOURCE.to_owned(),
@@ -1108,27 +1109,6 @@ fn deployed_document(
     let bytes = get_artifact(store, &version).ok()?;
     let document = mandate_canon::parse(&bytes).ok()?;
     Mandate::parse(&document).ok()
-}
-
-/// The closes the host read as DEC-846 item 3's canonical object: `[session, close]` pairs,
-/// oldest first, and the pinned asset id.
-fn closes_object(closes: &[(Date, Price)], asset_id: &str) -> Result<Vec<u8>, PaperError> {
-    let pair = |(day, close): &(Date, Price)| {
-        Value::Array(vec![
-            Value::Str(day.to_string()),
-            Value::Str(close.to_string()),
-        ])
-    };
-    let mut object = Object::new();
-    for (name, value) in [
-        ("closes", Value::Array(closes.iter().map(pair).collect())),
-        ("instrument_id", Value::Str(asset_id.to_owned())),
-    ] {
-        let key =
-            Key::new(name).map_err(|_| absent(Stage::Journal, "the observation's members"))?;
-        object.insert(key, value);
-    }
-    Ok(to_canonical(&Value::Object(object)))
 }
 
 /// The binary's ports (DEC-846 item 1, DEC-937 item 1): the control stream read from the

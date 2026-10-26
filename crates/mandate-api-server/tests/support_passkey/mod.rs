@@ -1,7 +1,8 @@
-//! A software authenticator for passkey step-up (DEC-2108 items 7 and 8, DEC-2126): one key, its
-//! COSE_Key, §9.31's records for it, and assertions it signs over a challenge, as a browser would
-//! send them. The encoders and the canonical form of a sent assertion are written out here, so the
-//! tests check the server with oracles of their own.
+//! A software authenticator for passkey step-up and enrolment (DEC-2108 items 4, 7 and 8,
+//! DEC-2126): one key, its COSE_Key, §9.31's records for it, the registration responses that enrol
+//! it, and assertions it signs over a challenge, as a browser would send them. The encoders and the
+//! canonical form of a sent assertion are written out here, so the tests check the server with
+//! oracles of their own.
 
 #![allow(dead_code, reason = "each test file uses part of the shared helpers")]
 
@@ -222,6 +223,118 @@ impl Signer {
             authenticator_data,
             client_data_json,
             signature,
+        }
+    }
+}
+
+/// A registration response as a browser sends it (DEC-2108 item 4): the attestation object and the
+/// client data, each the bytes before base64url.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Registered {
+    pub attestation_object: Vec<u8>,
+    pub client_data_json: Vec<u8>,
+}
+
+/// What a registration response carries that a refusal case changes; [`Shape::good`] is the one
+/// `mandate_passkey::enrol` accepts.
+#[derive(Debug, Clone)]
+pub struct Shape {
+    pub ceremony: &'static str,
+    pub origin: String,
+    pub rp_id: String,
+    pub flags: u8,
+    pub fmt: &'static str,
+    pub counter: u32,
+}
+
+impl Shape {
+    /// A `webauthn.create` for [`rp`], user present and verified, attested, attestation `none`.
+    pub fn good() -> Self {
+        Self {
+            ceremony: "webauthn.create",
+            origin: ORIGIN.to_owned(),
+            rp_id: RP_ID.to_owned(),
+            flags: UP_UV | AT,
+            fmt: "none",
+            counter: 0,
+        }
+    }
+
+    /// [`Shape::good`] from a backup-eligible authenticator.
+    pub fn backup_eligible() -> Self {
+        Self {
+            flags: UP_UV | AT | BE,
+            ..Self::good()
+        }
+    }
+}
+
+/// The attested-credential-data flag (WebAuthn's AT bit).
+pub const AT: u8 = 0x40;
+
+/// A CBOR head of `major` type with `len`, written out here (RFC 8949 §3).
+fn cbor_head(major: u8, len: usize) -> Vec<u8> {
+    let top = major << 5;
+    match u16::try_from(len) {
+        Ok(small) if small < 24 => vec![top | u8::try_from(small).expect("under 24")],
+        Ok(small) if small < 256 => vec![top | 24, u8::try_from(small).expect("one byte")],
+        Ok(wide) => [vec![top | 25], wide.to_be_bytes().to_vec()].concat(),
+        Err(_) => panic!("a test registration fits in 65,535 bytes"),
+    }
+}
+
+fn cbor_text(text: &str) -> Vec<u8> {
+    [cbor_head(3, text.len()), text.as_bytes().to_vec()].concat()
+}
+
+fn cbor_bytes(bytes: &[u8]) -> Vec<u8> {
+    [cbor_head(2, bytes.len()), bytes.to_vec()].concat()
+}
+
+impl Signer {
+    /// A registration of this key as `passkey_id` over `challenge`, shaped as [`Shape::good`].
+    pub fn register(&self, challenge: &[u8], passkey_id: &str) -> Registered {
+        self.register_shaped(challenge, passkey_id, &Shape::good())
+    }
+
+    /// A registration of this key as `passkey_id` over `challenge`, shaped as `shape`: the
+    /// attested authenticator data (RP ID hash, flags, counter, a zero AAGUID, the credential id
+    /// and its length, the COSE key) in a CBOR map of `fmt`, an empty `attStmt`, and `authData`.
+    pub fn register_shaped(&self, challenge: &[u8], passkey_id: &str, shape: &Shape) -> Registered {
+        let credential = unb64url(passkey_id);
+        let auth_data = [
+            sha256(shape.rp_id.as_bytes()),
+            vec![shape.flags],
+            shape.counter.to_be_bytes().to_vec(),
+            vec![0; 16],
+            u16::try_from(credential.len())
+                .expect("a short id")
+                .to_be_bytes()
+                .to_vec(),
+            credential,
+            self.cose_key(),
+        ]
+        .concat();
+        let attestation_object = [
+            vec![0xa3],
+            cbor_text("fmt"),
+            cbor_text(shape.fmt),
+            cbor_text("attStmt"),
+            vec![0xa0],
+            cbor_text("authData"),
+            cbor_bytes(&auth_data),
+        ]
+        .concat();
+        let client_data_json = format!(
+            r#"{{"type":"{}","challenge":"{}","origin":"{}","crossOrigin":false}}"#,
+            shape.ceremony,
+            b64url(challenge),
+            shape.origin
+        )
+        .into_bytes();
+        Registered {
+            attestation_object,
+            client_data_json,
         }
     }
 }

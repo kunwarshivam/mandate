@@ -14,6 +14,7 @@ mandate-audit = { path = "crates/mandate-audit", version = "0.0.0" }
 mandate-artifacts-fs = { path = "crates/mandate-artifacts-fs", version = "0.0.0" }
 mandate-authn = { path = "crates/mandate-authn", version = "0.0.0" }
 mandate-backtest = { path = "crates/mandate-backtest", version = "0.0.0" }
+mandate-bars = { path = "crates/mandate-bars", version = "0.0.0" }
 mandate-builder = { path = "crates/mandate-builder", version = "0.0.0" }
 mandate-canon = { path = "crates/mandate-canon", version = "0.0.0" }
 mandate-cp-agent = { path = "crates/mandate-cp-agent", version = "0.0.0" }
@@ -28,6 +29,7 @@ mandate-domain = { path = "crates/mandate-domain", version = "0.0.0" }
 mandate-evaluation = { path = "crates/mandate-evaluation", version = "0.0.0" }
 mandate-executor = { path = "crates/mandate-executor", version = "0.0.0" }
 mandate-executord = { path = "crates/mandate-executord", version = "0.0.0" }
+mandate-gate-inputs = { path = "crates/mandate-gate-inputs", version = "0.0.0" }
 mandate-gateway = { path = "crates/mandate-gateway", version = "0.0.0" }
 mandate-gateway-http = { path = "crates/mandate-gateway-http", version = "0.0.0" }
 mandate-gatewayd = { path = "crates/mandate-gatewayd", version = "0.0.0" }
