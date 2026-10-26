@@ -28,7 +28,9 @@ import yaml
 from common import (
     BOOL,
     DEC,
+    DEFERRED_PARTS,
     ENVELOPE,
+    LIQUIDITY_PAIR,
     ULID,
     INT,
     REF,
@@ -93,6 +95,9 @@ DIGEST_HEX_FORM = re.compile(r"^[0-9a-f]{64}\Z")
 # §9.29 (DEC-2104 item 1): the code the web app shows for a challenge, normalized.
 CONFIRM_CODE = T("confirm_code")
 CONFIRM_CODE_FORM = re.compile(r"^[0-9A-HJKMNP-TV-Z]{8}\Z")
+# §9.36 (DEC-2134): the accepted decision an enabled real-money gate cites.
+DECISION_ID = T("decision_id")
+DECISION_ID_FORM = re.compile(r"^DEC-[1-9][0-9]{0,4}\Z")
 # §9.31 (DEC-2108 item 2): a WebAuthn credential id as unpadded base64url, 16 to 1023 bytes, and the
 # authenticator's 32-bit signature counter.
 CREDENTIAL_ID = T("credential_id")
@@ -541,6 +546,20 @@ SCHEMAS[("ctl", "StepUpConfirmed")] = rec(
     ("principal", ULID),
     ("code", CONFIRM_CODE),
     ("confirmed_at", INT),
+)
+
+# §9.36 v0.91 (DEC-2134): the customer real-money gate's setting, by a platform operator, and the
+# workspace API's refusal of a request that named another environment while it was off.
+SCHEMAS[("ctl", "RealMoneyGateChanged")] = rec(
+    ("enabled", BOOL),
+    ("operator", ULID),
+    ("decision", opt(DECISION_ID)),
+)
+SCHEMAS[("ctl", "RealMoneyRefused")] = rec(
+    ("action", one_of("create_version", "deploy", "connect", "go_live")),
+    ("requested", one_of("live")),
+    ("principal", ULID),
+    ("reason", one_of("gate_off")),
 )
 
 # §9.31 v0.69 (DEC-2108): a member's passkeys with the workspace's relying party, the fold the API's
@@ -1315,6 +1334,9 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "AccountCloseRequested"): (1,),
     ("acct", "AccountRestrictionChanged"): (1,),
     ("acct", "KillSwitchActivated"): (1,),
+    ("acct", "ExternalActivityIngested"): (1,),
+    ("acct", "RejectObserved"): (1,),
+    ("acct", "OrderAbandoned"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2, 3),
@@ -1399,6 +1421,32 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("restriction", one_of("closing_only", "blocked")),
         ("cause", one_of("broker_reject", "broker_notice", "connection_unavailable")),
         ("reason_code", one_of("account_trading_blocked", "account_restricted")),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # v0.90 §9.5 (DEC-2803): the broker's activity the executor did not originate, a reject it
+    # answered with, and an intent the executor gave up on. Every broker-supplied member is
+    # nullable: the executor writes an empty one as null.
+    ("acct", "ExternalActivityIngested", 1): rec(
+        ("source", one_of("open_order", "fill")),
+        ("broker_order_id", opt(STR)),
+        ("fill_id", opt(STR)),
+        ("client_order_id", opt(STR)),
+        ("instrument", opt(STR)),
+        ("side", opt(one_of("buy", "sell"))),
+        ("qty", opt(DEC)),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    ("acct", "RejectObserved", 1): rec(
+        ("http_status", INT),
+        ("code", opt(STR)),
+        ("message", opt(STR)),
+        ("client_order_id", opt(STR)),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    ("acct", "OrderAbandoned", 1): rec(
+        ("client_order_id", STR),
+        ("intent_id", IDENT_T),
+        ("reason", one_of("intent_too_old", "gate_recheck", "released_to_owner", "unprotected_interval_limit")),
         ("risk_clock", RISK_CLOCK),
     ),
     # v0.75 §9.5 (DEC-2337): one instrument's close-position under an account kill switch,
@@ -1529,13 +1577,26 @@ REQUEST_TOP = (
 )
 VERSIONED_VERSIONS[("ctl", "CredentialEnrolled")] = (1, 2)
 VERSIONED_SCHEMAS[("ctl", "CredentialEnrolled", 2)] = CREDENTIAL_ENROLLED_V2
-VERSIONED_VERSIONS[("agent", "ApprovalRequested")] = (1, 2)
+VERSIONED_VERSIONS[("agent", "ApprovalRequested")] = (1, 2, 3)
 VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 1)] = rec(
     *REQUEST_TOP, ("content", REQUEST_CONTENT_V1), ("content_hash", REF)
 )
 VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 2)] = rec(
     *REQUEST_TOP,
     ("content", rec(*REQUEST_CONTENT_V1.fields, ("execution", REQUEST_EXECUTION))),
+    ("content_hash", REF),
+)
+# v0.92 (DEC-2515): version 2's content, then the checks the dry run deferred to the binding gate.
+VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 3)] = rec(
+    *REQUEST_TOP,
+    (
+        "content",
+        rec(
+            *REQUEST_CONTENT_V1.fields,
+            ("execution", REQUEST_EXECUTION),
+            ("deferred_to_binding", list_of(one_of(*DEFERRED_PARTS))),
+        ),
+    ),
     ("content_hash", REF),
 )
 # §9.6's mirrors: each top-level member and the content member it repeats.
@@ -1651,12 +1712,16 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
         if whole and 0 <= value <= top:
             return []
         return [Violation("types", "schema", path)]
-    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest", "limit_key", "confirm_code", "credential_id"):
+    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest", "limit_key", "confirm_code", "credential_id", "decision_id"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
         if ty.kind == "credential_id":
             padless = len(value) % 4 != 1 or "types.credential_id_length" in skip
             ok = bool(CREDENTIAL_ID_FORM.match(value)) and padless
+        elif ty.kind == "decision_id":
+            ok = bool(DECISION_ID_FORM.match(value)) or (
+                "types.decision_id_zero" in skip and bool(re.match(r"^DEC-[0-9]{1,5}\Z", value))
+            )
         elif ty.kind == "confirm_code":
             ok = bool(CONFIRM_CODE_FORM.match(value)) or (
                 "types.confirm_code_case" in skip and bool(CONFIRM_CODE_FORM.match(value.upper()))
@@ -1947,6 +2012,28 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("279", coded, "schema", "payload.reason_code")
         else:
             rule("280", not blocked or noticed, "schema", "payload.cause")
+    if event_type == "ExternalActivityIngested":
+        fill = p["source"] == "fill"
+        if fill:
+            members = ("client_order_id", "instrument", "side", "qty")
+            if "rule.297.order" in skip:
+                members = ("instrument", "client_order_id", "side", "qty")
+            if "rule.297.broker_order_id" not in skip:
+                members = ("broker_order_id",) + members
+            wrong = next((m for m in members if p[m] is not None), None)
+            rule("297", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+        else:
+            required = ("instrument", "side", "qty")
+            if "rule.298.order" in skip:
+                required = ("side", "instrument", "qty")
+            if "rule.298.side" in skip:
+                required = ("instrument", "qty")
+            fill_null = p["fill_id"] is None or "rule.298.fill_id" in skip
+            missing = next((m for m in required if p[m] is None), None)
+            if not fill_null:
+                rule("298", False, "schema", "payload.fill_id")
+            else:
+                rule("298", missing is None, "schema", f"payload.{missing}" if missing else "")
     if event_type == "AccountCloseRequested":
         qty = normalize_decimal(p["qty"])
         if qty is None:
@@ -2185,6 +2272,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     out += deployment_manager_violations(event_type, draft, skip)
     out += connection_role_violations(event_type, draft, skip)
     out += retirement_held_violations(event_type, draft, skip)
+    out += real_money_violations(event_type, draft, skip)
     return out
 
 
@@ -2253,7 +2341,8 @@ def connection_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
 
 def request_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
     """§9.6's `ApprovalRequested` rules, on a well-typed payload, in the journal's order: each mirror,
-    then rule 136 (version 2's plan names the order's asset class), the deadline, the label, the
+    then rule 136 (version 2's plan names the order's asset class), rule 291 (version 3's deferrals
+    are ascending, never empty, and pair the liquidity checks), the deadline, the label, the
     default, the choices, and last the content hash over the whole content, the plan included."""
     if event_type != "ApprovalRequested":
         return []
@@ -2273,6 +2362,13 @@ def request_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
     if "execution" in content:
         same = content["execution"]["asset_class"] == p["asset_class"]
         rule("136", same, "payload.content.execution.asset_class")
+    if "deferred_to_binding" in content:
+        named = content["deferred_to_binding"]
+        path = "payload.content.deferred_to_binding"
+        if not ascending(named) and "rule.291.ascending" not in skip:
+            out.append(Violation("rule.291.ascending", "non_canonical", path))
+        rule("291.nonempty", bool(named), path)
+        rule("291.pair", len(set(LIQUIDITY_PAIR) & set(named)) != 1, path)
     rule("9.6.deadline", p["deadline"] == epoch_seconds(content["deadline"]), "payload.deadline")
     label = content["evidence"]["combined_score"]["label"]
     rule("9.6.label", label == "combined model score, not a probability of profit", "payload.content.evidence.combined_score.label")
@@ -3052,6 +3148,31 @@ def connection_role_violations(event_type: str, draft: dict, skip: frozenset[str
 
     rule("261.system", draft["actor"]["kind"] == "system", "actor.kind")
     rule("261.cause", draft["causation_id"] is not None, "causation_id")
+    return out
+
+
+def real_money_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.35's rules 273 and 274, on a well-typed payload: the gate is set by a platform operator as
+    itself, and turned on only with a decision; a refusal is recorded as the principal refused."""
+    if event_type not in ("RealMoneyGateChanged", "RealMoneyRefused"):
+        return []
+    p = draft["payload"]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> bool:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+            return False
+        return True
+
+    actor = draft["actor"]
+    if event_type == "RealMoneyGateChanged":
+        if rule("273.operator", actor["kind"] == "platform_operator", "actor.kind"):
+            rule("273.self", actor["id"] == p["operator"], "actor.id")
+        rule("273.decision", p["enabled"] is not True or p["decision"] is not None, "payload.decision")
+    else:
+        if rule("274.user", actor["kind"] == "user", "actor.kind"):
+            rule("274.self", actor["id"] == p["principal"], "actor.id")
     return out
 
 

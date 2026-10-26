@@ -283,7 +283,7 @@ const RISK_STATE_ON_ACCOUNT: [(&str, &str); 2] =
 const THESIS_ON_AGENT: [(&str, &str); 2] = [("ThesisProposed", AGENT), ("ThesisRevised", AGENT)];
 
 /// The account stream's closed executor records (DEC-446, DEC-447, DEC-459, DEC-460).
-const EXECUTOR_ON_ACCOUNT: [(&str, &str); 10] = [
+const EXECUTOR_ON_ACCOUNT: [(&str, &str); 14] = [
     ("IntentReceived", ACCT),
     ("GateDecided", ACCT),
     ("OrderSubmitted", ACCT),
@@ -294,6 +294,10 @@ const EXECUTOR_ON_ACCOUNT: [(&str, &str); 10] = [
     ("AgentModeApplied", ACCT),
     ("CompensatingEvent", ACCT),
     ("AccountRestrictionChanged", ACCT),
+    ("KillSwitchActivated", ACCT),
+    ("ExternalActivityIngested", ACCT),
+    ("RejectObserved", ACCT),
+    ("OrderAbandoned", ACCT),
 ];
 
 fn closed_by_section_9_2(event_type: &str, kind: &str) -> bool {
@@ -1570,6 +1574,13 @@ fn the_anchor_and_segment_records_are_catalogued_and_closed_on_the_control_strea
 #[test]
 fn the_step_up_confirmation_is_catalogued_and_closed_on_the_control_stream() {
     closed_on_the_control_stream(&["StepUpConfirmed"]);
+}
+
+/// Journal spec v0.91 §9.36 (DEC-2134): `RealMoneyGateChanged` and `RealMoneyRefused` are on the
+/// control stream alone, with no configuration, closed there at schema version 1.
+#[test]
+fn the_real_money_gate_records_are_catalogued_and_closed_on_the_control_stream() {
+    closed_on_the_control_stream(&["RealMoneyGateChanged", "RealMoneyRefused"]);
 }
 
 /// Journal spec v0.69 §9.31 (DEC-2108): `CredentialEnrolled` and `CredentialRemoved` are on the

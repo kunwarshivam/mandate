@@ -3220,6 +3220,100 @@ proptest! {
     }
 }
 
+/// The owner's protection read (`mandate_gate_context::Positions`, DEC-2138 item 4) of a run's
+/// journal, against the executor's own fold of the same rows, the oracle: per instrument, the
+/// resting orders, the covered quantity, the prices, and the earliest open interval's start. Its
+/// count first, so no run passes on nothing.
+fn the_read_agrees_with_the_fold(run: &Run) -> Result<usize, TestCaseError> {
+    let replayed = run
+        .shell
+        .replay()
+        .map_err(|e| TestCaseError::fail(format!("the replay refused: {e}")))?;
+    let mut read = mandate_gate_context::Positions::new(ACCOUNT_STREAM, "any-agent");
+    for event in &run.shell.account_journal {
+        read.fold(mandate_gate_context::Row {
+            stream: &event.stream,
+            event_type: &event.event_type,
+            payload: &event.payload,
+        })
+        .map_err(|e| TestCaseError::fail(format!("the read refused {}: {e}", event.event_type)))?;
+    }
+    let mut compared = 0;
+    for instrument in [AAPL, CPHC] {
+        let id = mandate_accounting::InstrumentId::new(instrument)
+            .map_err(|e| TestCaseError::fail(e.to_string()))?;
+        let served = read.protection(instrument);
+        let folded = replayed
+            .protection(&id)
+            .map_err(|e| TestCaseError::fail(e.to_string()))?;
+        let resting: Vec<String> = folded
+            .map(|p| p.resting.iter().map(|id| id.as_str().to_owned()).collect())
+            .unwrap_or_default();
+        prop_assert_eq!(&served.orders, &resting, "resting orders in {}", instrument);
+        prop_assert_eq!(
+            served.covered_qty,
+            folded.map_or(mandate_num::Qty::ZERO, |p| p.covered_qty),
+            "covered quantity in {}",
+            instrument
+        );
+        prop_assert_eq!(
+            served.stop,
+            folded.and_then(|p| p.prices).map(|prices| prices.stop),
+            "stop in {}",
+            instrument
+        );
+        prop_assert_eq!(
+            served.take_profit,
+            folded
+                .and_then(|p| p.prices)
+                .and_then(|prices| prices.take_profit),
+            "take-profit in {}",
+            instrument
+        );
+        let open = replayed
+            .unprotected_intervals()
+            .iter()
+            .filter(|interval| interval.instrument == id && interval.ended_at.is_none())
+            .map(|interval| interval.started_at.secs())
+            .min();
+        prop_assert_eq!(
+            served.unprotected_since.map(|at| at.secs()),
+            open,
+            "open interval in {}",
+            instrument
+        );
+        compared += resting.len()
+            + replayed
+                .unprotected_intervals()
+                .iter()
+                .filter(|interval| interval.instrument == id)
+                .count();
+    }
+    Ok(compared)
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn the_owners_protection_read_agrees_with_the_executors_fold(script in scripted_protected()) {
+        let run = play(&script);
+        prop_assume!(the_read_agrees_with_the_fold(&run)? > 0);
+    }
+
+    #[test]
+    fn the_owners_protection_read_agrees_while_exits_wait(script in scripted_exiting()) {
+        let run = play(&script);
+        prop_assume!(the_read_agrees_with_the_fold(&run)? > 0);
+    }
+
+    #[test]
+    fn the_owners_protection_read_agrees_while_cancels_are_awaited(script in scripted_awaited()) {
+        let run = play(&script);
+        prop_assume!(the_read_agrees_with_the_fold(&run)? > 0);
+    }
+}
+
 /// #244 round 2, blocker 1: the reviewer's shrunk script. `External` leaves the second `CPHC` order
 /// `Unknown` before the protected lead's entry completes, which rule 13 lets hold the entry's legs,
 /// so `protective_sell_quantity_never_exceeds_the_position_in_any_script` must skip it rather than

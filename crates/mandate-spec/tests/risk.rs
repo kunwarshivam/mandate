@@ -4952,3 +4952,100 @@ fn an_allocation_changes_settling_trigger_keeps_its_own_position() -> Result<(),
     );
     Ok(())
 }
+
+/// A fee charged to the agent's own order (DEC-2393 item 3).
+fn fee(when: &str, charged: &str) -> Step {
+    Step {
+        at: at(when),
+        session: MarketSession::Regular,
+        input: Input::Fee { usd: usd(charged) },
+    }
+}
+
+/// §5.1: E is A plus realized P&L net of fees, so a fee lowers E by exactly what it charged and
+/// leaves H where it was (DEC-2393 item 3).
+#[test]
+fn a_fee_lowers_equity_by_what_it_charged() -> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let clock = RegularSessionClock::new();
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &clock,
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "105"),
+            fee("2026-09-21T14:02:00.000000000Z", "12.34"),
+            fee("2026-09-21T14:03:00.000000000Z", "0"),
+        ],
+    )?;
+    let charged = step_of(&outcomes, 2)?;
+    assert_eq!(
+        charged.snapshot.agent_equity,
+        usd("10487.66"),
+        "10500 - 12.34"
+    );
+    assert_eq!(charged.snapshot.high_water_mark, usd("10500"));
+    assert_eq!(
+        charged.snapshot.drawdown,
+        ratio("0.001175238095"),
+        "12.34 / 10500, half-even at 12 places"
+    );
+    assert!(trace(&charged.journal).is_empty());
+    let nothing = step_of(&outcomes, 3)?;
+    assert_eq!(
+        nothing.snapshot, charged.snapshot,
+        "a fee of 0 moves nothing"
+    );
+    Ok(())
+}
+
+/// A fee is an input like any other (§5.2's evaluation order): one that takes E to a rung's level
+/// breaches it in its own step.
+#[test]
+fn a_fee_alone_can_breach_a_rung() -> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let clock = RegularSessionClock::new();
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &clock,
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "105"),
+            mark("2026-09-21T14:02:00.000000000Z", "101.86"),
+            fee("2026-09-21T14:03:00.000000000Z", "1"),
+        ],
+    )?;
+    let short = step_of(&outcomes, 2)?;
+    assert_eq!(short.snapshot.agent_equity, usd("10186"));
+    assert!(
+        trace(&short.journal).is_empty(),
+        "314 / 10500 is below 0.03"
+    );
+    let breached = step_of(&outcomes, 3)?;
+    assert_eq!(breached.snapshot.agent_equity, usd("10185"));
+    assert_eq!(breached.snapshot.drawdown, ratio("0.03"), "315 / 10500");
+    assert_eq!(
+        trace(&breached.journal),
+        vec!["triggered DrawdownRung(0) ScaleSizes"]
+    );
+    Ok(())
+}
+
+/// A fee only charges: a negative one would raise E, so the state refuses to decide it.
+#[test]
+fn a_negative_fee_is_refused() -> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let clock = RegularSessionClock::new();
+    let mut state = RiskState::open(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &clock,
+    )
+    .map_err(|e| e.to_string())?;
+    let refused = state.step(&fee("2026-09-21T14:01:00.000000000Z", "-0.01"));
+    assert!(
+        matches!(refused, Err(SpecError::InvalidInput { .. })),
+        "{refused:?}"
+    );
+    Ok(())
+}
