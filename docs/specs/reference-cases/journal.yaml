@@ -86754,7 +86754,7 @@ real_money:
     expect:
       enabled: true
 account_restrictions:
-  spec: docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2137)
+  spec: docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2137) and stream rule 309 (DEC-2816)
   drafts:
     blocked:
       envelope_version: 1
@@ -87050,6 +87050,602 @@ account_restrictions:
       value: live
     expect:
       outcome: Valid
+  streams:
+  - name: one_cause
+    clause: 'rule 309: a cause raised once'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: a_second_cause_while_restricted
+    clause: 'rule 309: another cause at the same restriction is journaled (DEC-2816)'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_notice
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: a_cause_restricts_further
+    clause: 'rule 309: the same cause again at a stricter restriction (§7.3 rows 4 then 1)'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_notice
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: a_looser_cause_beside_a_block
+    clause: 'rule 309: a reject''s closing-only beside a notice''s block, which leaves the state unchanged'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: every_cause
+    clause: 'rule 309: each of the three causes once'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: connection_unavailable
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S003
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: another_record_between
+    clause: 'rule 309: a record of another type between two restrictions changes nothing'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE3A0A000000000000000X3
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RejectObserved
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        http_status: 403
+        code: '40310000'
+        message: insufficient buying power
+        client_order_id: md-01JAE3A0A000000000000000N1
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: payload.cause
+  - name: the_same_cause_twice
+    clause: 'rule 309: a cause in force is journaled once'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.cause
+  - name: a_block_twice
+    clause: 'rule 309: a cause blocking the account is journaled once'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.cause
+  - name: a_cause_restricts_less
+    clause: 'rule 309: the same cause at a looser restriction is already in force'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_notice
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.cause
+  - name: a_repeat_after_others
+    clause: 'rule 309: earlier records count, not only the last'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: connection_unavailable
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S003
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A0000000000000S004
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: connection_unavailable
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 3
+      reason: schema
+      path: payload.cause
 account_switches:
   spec: docs/specs/journal.md §9.5 rules 281, 282 and 293 to 296 (DEC-2139)
   drafts:
@@ -88063,6 +88659,803 @@ account_activity:
       value: k-01JAE3A0A000000000000000K1-2
     - path: payload.client_order_id
       value: md-k-01JAE3A0A000000000000000K1-2
+    expect:
+      outcome: Valid
+fill_applied:
+  spec: docs/specs/journal.md §9.5 `FillApplied` version 2 and rule 299 (DEC-2812)
+  drafts:
+    attributed:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAE3A0A000000000000000Y1
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: FillApplied
+      schema_version: 2
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: broker
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        fee_config: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        instrument_snapshot: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        settlement_calendar: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        trading_calendar: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      payload:
+        fill_id: f-20261026-1
+        client_order_id: md-01JAE3A0A000000000000000F1
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        side: buy
+        qty_gross: '10'
+        price: '150'
+        trade_date: '2026-10-26'
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+        fees: []
+      artifact_refs: []
+      pii_refs: []
+    unattributed:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAE3A0A000000000000000Y2
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: FillApplied
+      schema_version: 2
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: broker
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        fee_config: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        instrument_snapshot: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        settlement_calendar: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        trading_calendar: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      payload:
+        fill_id: f-20261026-1
+        client_order_id: null
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        side: buy
+        qty_gross: '10'
+        price: '150'
+        trade_date: '2026-10-26'
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+        fees: []
+      artifact_refs: []
+      pii_refs: []
+    version_1:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAE3A0A000000000000000Y3
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: FillApplied
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: broker
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        fee_config: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        instrument_snapshot: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        settlement_calendar: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        trading_calendar: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      payload:
+        fill_id: f-20261026-1
+        client_order_id: 01J8Z3M1P0000000000000000X-1
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        side: buy
+        qty_gross: '10'
+        price: '150'
+        trade_date: '2026-10-26'
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+        fees: []
+      artifact_refs: []
+      pii_refs: []
+    late:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAE3A0A000000000000000Y4
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: LateFillApplied
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: broker
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        fee_config: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        instrument_snapshot: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        settlement_calendar: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        trading_calendar: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      payload:
+        fill_id: f-20261026-1
+        client_order_id: md-01JAE3A0A000000000000000F1
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        side: buy
+        qty_gross: '10'
+        price: '150'
+        trade_date: '2026-10-26'
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+        fees: []
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: v2_another_systems_id
+    clause: 'rule 299: a named order is one of ours (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: theirs-1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: v2_prefix_only
+    clause: 'rule 299: a named order is one of ours (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: md-
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: v2_upper_case_prefix
+    clause: 'rule 299: a named order is one of ours (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: MD-01JAE3A0A000000000000000F1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: v2_no_hyphen_after_md
+    clause: 'rule 299: a named order is one of ours (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: md01JAE3A0A000000000000000F1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: v2_an_underscore
+    clause: 'rule 299: a named order is one of ours (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: md-01JAE3A0A_00000000000000F1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: v2_a_space
+    clause: 'rule 299: a named order is one of ours (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: md-01JAE3A0A 00000000000000F1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: v2_a_dot
+    clause: 'rule 299: a named order is one of ours (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: md-01JAE3A0A.00000000000000F1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: v2_a_non_ascii_letter
+    clause: 'rule 299: a named order is one of ours (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: md-01JAE3A0Aé0000000000000F1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: v2_one_past_the_longest
+    clause: 'rule 299: a named order is one of ours (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: md-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: v2_the_intent_alone
+    clause: 'rule 299: a named order is one of ours (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: 01JAE3A0A000000000000000F1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: v2_client_order_id_empty
+    clause: '§9.1: `text?` is never empty'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.client_order_id
+  - name: v2_client_order_id_number
+    clause: '§9.1: `text?` is text'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: v2_client_order_id_missing
+    clause: '§9.5: every member present, `null` when absent'
+    base_draft: unattributed
+    changes:
+    - path: payload.client_order_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: v1_unattributed
+    clause: '§9.5: version 1''s `client_order_id` is never null'
+    base_draft: version_1
+    changes:
+    - path: payload.client_order_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: late_unattributed
+    clause: '§9.5: a late fill is always of an order of ours'
+    base_draft: late
+    changes:
+    - path: payload.client_order_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: v2_fill_id_null
+    clause: '§9.5: `fill_id` is never null'
+    base_draft: unattributed
+    changes:
+    - path: payload.fill_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.fill_id
+  - name: v2_fill_id_empty
+    clause: '§9.1: `text` is never empty'
+    base_draft: unattributed
+    changes:
+    - path: payload.fill_id
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.fill_id
+  - name: v2_qty_number
+    clause: '§9.1: a decimal is text'
+    base_draft: unattributed
+    changes:
+    - path: payload.qty_gross
+      value: 10
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty_gross
+  - name: v2_price_not_decimal
+    clause: '§9.1: a decimal'
+    base_draft: attributed
+    changes:
+    - path: payload.price
+      value: one fifty
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.price
+  - name: v2_trade_date_time
+    clause: '§9.1: a date'
+    base_draft: attributed
+    changes:
+    - path: payload.trade_date
+      value: '2026-10-26T15:00:00.250000000Z'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.trade_date
+  - name: v2_no_risk_clock
+    clause: '§9.5: every member present'
+    base_draft: unattributed
+    changes:
+    - path: payload.risk_clock
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: v2_fee_without_status
+    clause: '§9.5: a fee''s members are closed'
+    base_draft: attributed
+    changes:
+    - path: payload.fees
+      value:
+      - kind: commission
+        amount: '0.01'
+        asset: USD
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.fees[0].status
+  - name: v2_extra_agent
+    clause: '§9.5: the schema is closed; an unattributed fill names no agent'
+    base_draft: unattributed
+    changes:
+    - path: payload.agent
+      value: agenta
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.agent
+  - name: v2_no_fee_config
+    clause: '§9: `FillApplied` requires `fee_config`'
+    base_draft: unattributed
+    changes:
+    - path: config_refs.fee_config
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.fee_config
+  - name: v2_no_instrument_snapshot
+    clause: '§9: `FillApplied` requires `instrument_snapshot`'
+    base_draft: unattributed
+    changes:
+    - path: config_refs.instrument_snapshot
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.instrument_snapshot
+  - name: version_3
+    clause: '§9.5: registered at `schema_version` 1 and 2 only'
+    base_draft: attributed
+    changes:
+    - path: schema_version
+      value: 3
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: late_version_2
+    clause: '§9.5: `LateFillApplied` stays at version 1'
+    base_draft: late
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: on_the_control_stream
+    clause: '§9.5: an account-stream record'
+    base_draft: unattributed
+    changes:
+    - path: stream_id
+      value: ctl:ws_01J8Z2
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  valid_drafts:
+  - name: v2_replacement
+    clause: 'rule 299: our id''s forms (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: md-r-01JAE3A0A000000000000000R1
+    expect:
+      outcome: Valid
+  - name: v2_watchdog_exit
+    clause: 'rule 299: our id''s forms (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: md-w-01JAE3A0A000000000000000W1
+    expect:
+      outcome: Valid
+  - name: v2_kill_switch_flatten
+    clause: 'rule 299: our id''s forms (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: md-k-01JAE3A0A000000000000000K1-2
+    expect:
+      outcome: Valid
+  - name: v2_protective_stop_leg
+    clause: 'rule 299: our id''s forms (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: md-01JAE3A0A000000000000000F1-p01JAE3A0A000000000000000P1-sl
+    expect:
+      outcome: Valid
+  - name: v2_ladder_rung
+    clause: 'rule 299: our id''s forms (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: md-01JAE3A0A000000000000000F1-l2
+    expect:
+      outcome: Valid
+  - name: v2_the_longest
+    clause: 'rule 299: our id''s forms (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: md-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Valid
+  - name: v2_lower_case_body
+    clause: 'rule 299: our id''s forms (trading spec §2.3)'
+    base_draft: attributed
+    changes:
+    - path: payload.client_order_id
+      value: md-x
+    expect:
+      outcome: Valid
+  - name: v2_unattributed_sell
+    clause: '§9.5: an unattributed fill on either side'
+    base_draft: unattributed
+    changes:
+    - path: payload.side
+      value: sell
+    - path: payload.qty_gross
+      value: '0.5'
+    expect:
+      outcome: Valid
+  - name: v2_unattributed_with_a_fee
+    clause: '§9.5: an unattributed fill carries the broker''s fees'
+    base_draft: unattributed
+    changes:
+    - path: payload.fees
+      value:
+      - kind: commission
+        amount: '0.01'
+        asset: USD
+        status: charged
+    expect:
+      outcome: Valid
+  - name: v1_another_form
+    clause: '§9.5: version 1 is unchanged and binds no form'
+    base_draft: version_1
+    changes:
+    - path: payload.client_order_id
+      value: theirs-1
+    expect:
+      outcome: Valid
+  - name: late_another_form
+    clause: '§9.5: `LateFillApplied` version 1 is unchanged'
+    base_draft: late
+    changes:
+    - path: payload.client_order_id
+      value: theirs-1
+    expect:
+      outcome: Valid
+  - name: live
+    clause: '§9.5: either environment'
+    base_draft: unattributed
+    changes:
+    - path: environment
+      value: live
+    expect:
+      outcome: Valid
+account_clock:
+  spec: docs/specs/journal.md §9.5 rules 301 and 302 (DEC-2808)
+  drafts:
+    tick:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAE3A0B000000000000000T1
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: ClockAdvanced
+      schema_version: 1
+      event_time: '2026-10-26T15:00:01.250000000Z'
+      clock_source: local
+      causation_id: 01JAE3A0B000000000000000C1
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        clock: '2026-10-26T15:00:01.000000000Z'
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    midnight:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAE7F00000000000000000T2
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: ClockAdvanced
+      schema_version: 1
+      event_time: '2026-10-27T04:00:00.125000000Z'
+      clock_source: local
+      causation_id: 01JAE7F00000000000000000C2
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        clock: '2026-10-27T04:00:00.000000000Z'
+        risk_clock: '2026-10-27T04:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: clock_missing
+    clause: '§9.5: every member present'
+    base_draft: tick
+    changes:
+    - path: payload.clock
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.clock
+  - name: risk_clock_missing
+    clause: '§2, §9.5: every account-stream row the fold reads carries `risk_clock`'
+    base_draft: tick
+    changes:
+    - path: payload.risk_clock
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: extra_date
+    clause: '§9.5: the schema is closed; the date is `TradingDayStarted`''s'
+    base_draft: midnight
+    changes:
+    - path: payload.date
+      value: '2026-10-27'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.date
+  - name: clock_with_nanoseconds
+    clause: '§9.2: a `risk_clock` is a whole second'
+    base_draft: tick
+    changes:
+    - path: payload.clock
+      value: '2026-10-26T15:00:01.250000000Z'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.clock
+  - name: risk_clock_with_nanoseconds
+    clause: '§9.2: a `risk_clock` is a whole second'
+    base_draft: tick
+    changes:
+    - path: payload.risk_clock
+      value: '2026-10-26T15:00:01.000000001Z'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.risk_clock
+  - name: clock_as_seconds
+    clause: '§9.2: a `risk_clock` is a timestamp, never integer seconds'
+    base_draft: tick
+    changes:
+    - path: payload.clock
+      value: 1793026801
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.clock
+  - name: clock_null
+    clause: '§9.5: `clock` is never null'
+    base_draft: tick
+    changes:
+    - path: payload.clock
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.clock
+  - name: risk_clock_null
+    clause: '§9.5: `risk_clock` is never null'
+    base_draft: tick
+    changes:
+    - path: payload.risk_clock
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: clock_with_offset
+    clause: '§4: a timestamp is UTC, written with `Z`'
+    base_draft: tick
+    changes:
+    - path: payload.clock
+      value: '2026-10-26T11:00:01.000000000-04:00'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.clock
+  - name: risk_clock_after_clock
+    clause: 'rule 301: `risk_clock` equals `clock`'
+    base_draft: tick
+    changes:
+    - path: payload.risk_clock
+      value: '2026-10-26T15:00:02.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: risk_clock_before_clock
+    clause: 'rule 301: `risk_clock` equals `clock`'
+    base_draft: tick
+    changes:
+    - path: payload.risk_clock
+      value: '2026-10-26T15:00:00.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: risk_clock_on_the_eve
+    clause: 'rule 301: the midnight copy''s `risk_clock` is its own tick'
+    base_draft: midnight
+    changes:
+    - path: payload.risk_clock
+      value: '2026-10-27T03:59:59.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: no_causation
+    clause: 'rule 302: the copy names the scheduler''s tick'
+    base_draft: tick
+    changes:
+    - path: causation_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: midnight_no_causation
+    clause: 'rule 302: the copy names the scheduler''s tick'
+    base_draft: midnight
+    changes:
+    - path: causation_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: risk_clock_reported_before_causation
+    clause: rule 301 before rule 302
+    base_draft: tick
+    changes:
+    - path: causation_id
+      value: null
+    - path: payload.risk_clock
+      value: '2026-10-26T15:00:02.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: version_2
+    clause: '§9.5: registered at `schema_version` 1 only'
+    base_draft: tick
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: on_the_control_stream
+    clause: '§9.5: an account-stream record'
+    base_draft: tick
+    changes:
+    - path: stream_id
+      value: ctl:ws_01J8Z2
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: on_the_agent_stream
+    clause: '§9.5: an account-stream record'
+    base_draft: tick
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  valid_drafts:
+  - name: causation_not_on_this_stream
+    clause: 'rule 302: the journal checks presence, not the named event'
+    base_draft: tick
+    changes:
+    - path: causation_id
+      value: 01JAE3A0B000000000000000C9
+    expect:
+      outcome: Valid
+  - name: later_tick
+    clause: 'rule 301: any whole second, the two equal'
+    base_draft: tick
+    changes:
+    - path: payload.clock
+      value: '2026-10-26T19:59:59.000000000Z'
+    - path: payload.risk_clock
+      value: '2026-10-26T19:59:59.000000000Z'
+    expect:
+      outcome: Valid
+  - name: first_second_of_the_year
+    clause: 'rule 301: any whole second, the two equal'
+    base_draft: tick
+    changes:
+    - path: payload.clock
+      value: '2027-01-01T05:00:00.000000000Z'
+    - path: payload.risk_clock
+      value: '2027-01-01T05:00:00.000000000Z'
+    expect:
+      outcome: Valid
+  - name: live
+    clause: '§9.5: either environment'
+    base_draft: midnight
+    changes:
+    - path: environment
+      value: live
+    expect:
+      outcome: Valid
+  - name: with_correlation
+    clause: '§9.5: no rule reads `correlation_id`'
+    base_draft: tick
+    changes:
+    - path: correlation_id
+      value: 01JAE3A0B000000000000000R1
     expect:
       outcome: Valid
 snapshot_prior_close:

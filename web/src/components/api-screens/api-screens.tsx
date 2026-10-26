@@ -11,6 +11,7 @@ import { PAGE_GRID, Panel, Section, WorkspaceGate } from "@/components/screens/c
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import { type ShownChallenge, approvalConfirmCommand } from "@/api/step-up";
 import { HostConfirm } from "./host-confirm";
+import { APPROVER_SENTENCE, type DeferredChecks, deferredCheckLabel, deferredChecks } from "@/lib/deferred-checks";
 import { clock, percent, price, quantity, usd } from "@/lib/format";
 import { type ActivityAnswer, type ApprovalRecord, type ApprovalResponse, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
@@ -439,6 +440,40 @@ function noCode(reason: string): string {
   return "No code: your deployment did not answer with one. Nothing was approved; try again.";
 }
 
+const DEFERRED_UNREADABLE = "This request names checks that have not been run yet, and they cannot be read. Approving is not offered: skip it, or let it time out.";
+
+/** The lines the deferred checks add to what the approver is shown, in screen order (DEC-2515 item 5). */
+function deferredLines(deferred: DeferredChecks): string[] {
+  if (deferred.kind === "none") return [];
+  if (deferred.kind === "unreadable") return [DEFERRED_UNREADABLE];
+  return [APPROVER_SENTENCE, ...deferred.names.map(deferredCheckLabel)];
+}
+
+/**
+ * The checks the dry run left to the binding gate, under the fixed sentence (mandate spec §6.4): what
+ * has not happened yet, never a pass. A list it cannot read says so rather than show none.
+ */
+function DeferredChecksPanel({ deferred }: { deferred: Exclude<DeferredChecks, { kind: "none" }> }) {
+  return (
+    <section aria-label="Checks not run yet" data-slot="deferred-checks">
+      <Panel>
+        {deferred.kind === "unreadable" ? (
+          <p className="text-pretty">{DEFERRED_UNREADABLE}</p>
+        ) : (
+          <div className="grid gap-2">
+            <p className="text-pretty">{APPROVER_SENTENCE}</p>
+            <ul className="list-disc ps-5">
+              {deferred.names.map((name) => (
+                <li key={name}>{deferredCheckLabel(name)}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Panel>
+    </section>
+  );
+}
+
 type Asking = { phase: "asking" } | { phase: "shown"; shown: ShownChallenge; command: string } | { phase: "failed"; reason: string };
 
 export function ApiApproval({ approvalId }: { approvalId: string }) {
@@ -461,7 +496,8 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
     ["Protection", o.protection ? `Stop at ${price(o.protection.stop)}${o.protection.take_profit ? `, take profit at ${price(o.protection.take_profit)}` : ""}` : "Not reported"],
     ["Deadline", clock(deadlineIso(approval.deadline))],
   ];
-  const shown = [nameOf(agent) ?? "Name not reported", line, ...facts.map(([term, value]) => `${term}: ${value}`)];
+  const deferred = deferredChecks(approval.content);
+  const shown = [nameOf(agent) ?? "Name not reported", line, ...facts.map(([term, value]) => `${term}: ${value}`), ...deferredLines(deferred)];
   const environment = agent?.environment ?? "unknown";
   const record: ApprovalRecord = { screen: "D6", environment, shown, modelOutputExpanded: false };
   const skip = () => {
@@ -471,6 +507,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
   /** Approve asks for a code first (DEC-2104): one challenge per press, bound to this request's content hash. */
   const approve = () => {
     const digest = approval.content_hash;
+    if (deferred.kind === "unreadable") return;
     if (!stepUp || !digest) return setAsking({ phase: "failed", reason: "no_step_up" });
     setAsking({ phase: "asking" });
     void stepUp({ kind: "approve", digest }).then((answer) => {
@@ -482,6 +519,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
   const submit = (shownChallenge: ShownChallenge) => respond(approval.approval_id, "approve", record, shownChallenge.challenge);
   const settled = response && response.phase !== "undelivered";
   const open = approval.state === "pending" && canRespond && !settled;
+  const approvable = deferred.kind !== "unreadable";
   return (
     <WorkspaceGate api>
       <article className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-6" aria-labelledby="api-request-title">
@@ -504,6 +542,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
             ))}
           </dl>
         </Panel>
+        {deferred.kind !== "none" ? <DeferredChecksPanel deferred={deferred} /> : null}
         {approval.state !== "pending" ? <p className="text-h3">{ENDED[approval.state]}</p> : null}
         {response ? (
           <p role="status" data-phase={response.phase} className="text-sm">
@@ -520,14 +559,16 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
             {noCode(asking.reason)}
           </p>
         ) : null}
-        {open && asking?.phase === "shown" && response?.phase !== "sent" ? (
+        {open && approvable && asking?.phase === "shown" && response?.phase !== "sent" ? (
           <HostConfirm key={asking.shown.challenge.challenge_id} shown={asking.shown} command={asking.command} submitLabel="Approve" onSubmit={() => submit(asking.shown)} onCancel={() => setAsking(null)} />
         ) : null}
         {open && asking?.phase !== "shown" && asking?.phase !== "asking" ? (
-          <div className={cn("grid grid-cols-2 gap-3")}>
-            <button type="button" className={DECISION_KEY} onClick={approve}>
-              Approve
-            </button>
+          <div className={cn("grid gap-3", approvable ? "grid-cols-2" : "grid-cols-1")}>
+            {approvable ? (
+              <button type="button" className={DECISION_KEY} onClick={approve}>
+                Approve
+              </button>
+            ) : null}
             <button type="button" className={DECISION_KEY} onClick={skip}>
               Skip
             </button>

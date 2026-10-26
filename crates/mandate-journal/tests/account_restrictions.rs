@@ -3,11 +3,14 @@
 //! `account_restrictions` section. Every base and valid draft parses; every invalid draft is
 //! refused with its reason at its path. Before the registration the journal refused the record as
 //! `unknown_schema`, so the executor's batch for a restricted account was refused whole.
+//!
+//! Journal spec v0.96 (DEC-2816): stream rule 309 keeps each cause in force on the stream once per
+//! restriction, judged by [`check_stream`] over the section's `streams`.
 
 use std::path::Path;
 
 use mandate_canon::{Key, Object, Value, parse, to_canonical};
-use mandate_journal::{Draft, StreamType, closes};
+use mandate_journal::{Draft, StreamType, check_stream, closes, reads_stream};
 
 fn section() -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
@@ -126,5 +129,66 @@ fn the_catalogue_closes_the_restriction_on_the_account_stream_at_version_1() {
             !closes("AccountRestrictionChanged", 1, stream),
             "{stream:?}"
         );
+    }
+}
+
+/// Rule 309 (v0.96, DEC-2816): each `streams` vector judged by [`check_stream`] from the stream's
+/// start, as one batch and one record at a time, as the vector says: a cause in force is journaled
+/// once at each restriction, and another cause, a stricter restriction, or another record between
+/// is admitted.
+#[test]
+fn every_restriction_stream_is_judged_from_its_start_as_its_vector_says() {
+    let section = section();
+    let streams = list(&section, "streams");
+    let mut failed = Vec::new();
+    for case in streams {
+        let records: Vec<Draft> = list(case, "records")
+            .iter()
+            .map(|record| Draft::parse(&to_canonical(record)).unwrap())
+            .collect();
+        let expect = case.get("expect").unwrap();
+        let want = (text(expect, "outcome") == "Invalid").then(|| {
+            (
+                expect
+                    .get("index")
+                    .and_then(Value::as_int)
+                    .and_then(|i| usize::try_from(i).ok())
+                    .unwrap_or_default(),
+                text(expect, "reason").to_owned(),
+                text(expect, "path").to_owned(),
+            )
+        });
+        let as_batch = check_stream(&[], &records)
+            .err()
+            .map(|(i, e)| (i, e.reason.code().to_owned(), e.path));
+        let one_by_one = (0..records.len()).find_map(|i| {
+            check_stream(&records[..i], &records[i..=i])
+                .err()
+                .map(|(at, e)| (i + at, e.reason.code().to_owned(), e.path))
+        });
+        if as_batch != want || one_by_one != want {
+            failed.push(format!(
+                "{}: expected {want:?}, as one batch {as_batch:?}, one by one {one_by_one:?}",
+                text(case, "name")
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+    assert!(
+        streams.len() >= 10,
+        "{} streams; never fewer",
+        streams.len()
+    );
+}
+
+/// `append` reads the account stream's earlier records for a batch holding a restriction, so rule
+/// 309 sees every cause already in force.
+#[test]
+fn a_restriction_reads_its_stream() {
+    let section = section();
+    let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
+    for body in drafts.values() {
+        let restriction = Draft::parse(&to_canonical(body)).unwrap();
+        assert!(reads_stream(std::slice::from_ref(&restriction)));
     }
 }

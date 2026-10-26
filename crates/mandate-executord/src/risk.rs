@@ -286,6 +286,15 @@ impl RiskBook {
             })
     }
 
+    /// Records that the batch the folds owed was refused as invalid, so none of them can be
+    /// appended: every fold's view becomes unreadable, `append_failed`, and owes nothing
+    /// (DEC-2399, DEC-2304).
+    pub fn append_failed(&mut self) {
+        for open in self.folds.values_mut() {
+            open.fold.append_failed();
+        }
+    }
+
     /// `agent`'s risk view: its fold's, or [`NOT_OPENED`].
     pub fn view(&self, agent: &AgentId) -> RiskView {
         self.folds

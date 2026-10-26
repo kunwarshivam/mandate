@@ -46,7 +46,10 @@ pub struct LiftHoldRequest {
 }
 
 /// `POST /agents/{agent_id}/resume` (§5.4). A `null` step-up is forwarded, and the runtime refuses
-/// it (`OwnerCommandRefused`).
+/// it (`OwnerCommandRefused`). `step_up_assertion` is optional, an absent one read as `null`, and
+/// is carried only beside `passkey` evidence ([DEC-2128] item 1, item 6's own slice).
+///
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(remote = "Self", deny_unknown_fields)]
 pub struct ResumeRequest {
@@ -54,6 +57,8 @@ pub struct ResumeRequest {
     pub record: Option<Record>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub step_up: Option<StepUpEvidence>,
+    #[serde(default)]
+    pub step_up_assertion: Option<StepUpAssertion>,
 }
 
 /// `POST /step-up/challenges` (§3.6, DEC-2103 item 1): the one action the challenge binds. The
@@ -96,7 +101,7 @@ pub enum Side {
 }
 
 crate::wire::rules!(none: PauseRequest, HoldRequest, EndDelegationRequest, LiftHoldRequest);
-crate::wire::rules!(none: ResumeRequest, AcknowledgeRequest, OwnerRequest, StepUpChallengeRequest);
+crate::wire::rules!(none: AcknowledgeRequest, OwnerRequest, StepUpChallengeRequest);
 
 /// `POST /mandate-versions/{mandate_version}/confirm` (§5.1): each confirmed path is a pointer.
 /// `step_up_assertion` is optional, an absent one read as `null`, and is carried only beside
@@ -176,7 +181,8 @@ pub enum Shape {
     KindForTime,
 }
 
-/// `POST /agents/{agent_id}/stop` (§4.2, DEC-682 item 10): a warning exactly with `release`.
+/// `POST /agents/{agent_id}/stop` (§4.2, DEC-682 item 10): a warning exactly with `release`, and
+/// a `step_up_assertion` only beside `passkey` evidence, as on a resume.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(remote = "Self", deny_unknown_fields)]
 pub struct StopRequest {
@@ -186,6 +192,8 @@ pub struct StopRequest {
     pub record: Option<Record>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub step_up: Option<StepUpEvidence>,
+    #[serde(default)]
+    pub step_up_assertion: Option<StepUpAssertion>,
     pub release: bool,
 }
 
@@ -392,6 +400,23 @@ impl Rules for StopRequest {
     fn rules(&self, at: &str, check: &mut Check) {
         let holds = self.warning_shown.is_some() == self.release;
         check.rule(holds, &format!("{at}/warning_shown"), "condition");
+        assertion_rules(
+            self.step_up.as_ref(),
+            self.step_up_assertion.as_ref(),
+            at,
+            check,
+        );
+    }
+}
+
+impl Rules for ResumeRequest {
+    fn rules(&self, at: &str, check: &mut Check) {
+        assertion_rules(
+            self.step_up.as_ref(),
+            self.step_up_assertion.as_ref(),
+            at,
+            check,
+        );
     }
 }
 
@@ -412,7 +437,7 @@ impl Rules for OauthStartRequest {
     }
 }
 
-crate::wire::rules!(checked: StopRequest, OauthStartRequest);
+crate::wire::rules!(checked: StopRequest, ResumeRequest, OauthStartRequest);
 crate::wire::rules!(none: KillSwitchRequest, OwnerExitRequest, RevokeRequest);
 
 crate::wire::object_only!(

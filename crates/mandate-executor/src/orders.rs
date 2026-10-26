@@ -20,8 +20,8 @@ use crate::payload::{broker_text, int, object, text};
 use crate::protection::{overdue, protection_cancelled};
 use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
-    AccountState, BrokerAccount, BrokerFill, BrokerOrder, BrokerReject, BrokerRequest, EventId,
-    Mode, OrderState, Purpose, RiskClock, Seq, StatusMapping,
+    AccountState, AgentId, BrokerAccount, BrokerFill, BrokerOrder, BrokerReject, BrokerRequest,
+    EventId, Mode, OrderState, Purpose, RiskClock, Seq, StatusMapping,
 };
 
 /// Trading-domain spec §5.7's broker status table. It is **total**: every value the table names
@@ -590,7 +590,9 @@ fn replaced(
 /// `LateFillApplied` that triggers a reconciliation. A fill that cannot be one of our orders' —
 /// not our id, another instrument or side, or more than the order has left — is still applied to
 /// accounting, unattributed, as external activity: every agent goes `exits_only` and the owner is
-/// alerted (§7.1), so filled quantity never exceeds an order's quantity.
+/// alerted (§7.1), so filled quantity never exceeds an order's quantity. Its `FillApplied` is
+/// version 2's, naming no order (`null`), and moves the account's position and cash, no agent's
+/// (journal spec §9.5, DEC-2812).
 ///
 /// `before` is the state a reconciliation began from, when the fill is one it found missing: an
 /// order the same reconciliation adopted as terminal was not terminal when the fill happened, so
@@ -652,6 +654,7 @@ pub(crate) fn fill(
                 ("qty", Value::Null),
             ],
         )?;
+        pairs.push(("client_order_id", Value::Null));
         batch.journal_with_refs("FillApplied", None, refs, pairs)?;
         every_agent_alerted(
             batch,
@@ -723,6 +726,33 @@ pub(crate) fn every_agent_alerted(
 
 /// The subject external activity is recorded and acknowledged under (§7.1).
 pub(crate) const EXTERNAL: &str = "external_activity";
+
+/// The subject a run or batch that could not be recorded whole is held and acknowledged under (§11,
+/// DEC-140's slice-5 amendment, DEC-2805 item 1).
+pub(crate) const INCOMPLETE: &str = "incomplete";
+
+/// DEC-2805 item 1: the journal refused the last batch. Every agent's openings are held under
+/// [`INCOMPLETE`] and the owner alerted, once while the hold is in force, so a batch refused again
+/// adds nothing. Exits, protection and the kill switch go on (`AGENTS.md` rule 13).
+pub(crate) fn held_on_refusal(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let restriction = restriction_for(INCOMPLETE);
+    let held = (AgentId(EVERY_AGENT.to_owned()), restriction.clone());
+    if batch.view.restrictions.contains_key(&held) {
+        return Ok(());
+    }
+    let applied = batch.journal(
+        "AgentModeApplied",
+        None,
+        vec![
+            ("agent", text(EVERY_AGENT)),
+            ("to", text(crate::codec::mode_name(Mode::ExitsOnly))),
+            ("restriction", text(restriction)),
+            ("originated", Value::Bool(true)),
+        ],
+    )?;
+    batch.notify(applied, OwnerAlertKind::Reconciliation);
+    Ok(())
+}
 
 /// The `config_refs` a fill of `instrument` is journaled with (journal spec §9: `fee`, `cal`,
 /// `set`, `ins`), from the instrument snapshot's port; none when the port knows none, which the

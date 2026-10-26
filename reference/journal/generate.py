@@ -33,6 +33,8 @@ from pathlib import Path
 
 import account
 import account_activity
+import fill_applied
+import account_clock
 import account_closes
 import account_restrictions
 import account_switches
@@ -4270,6 +4272,8 @@ def render(
     account_switches_section: dict,
     snapshots_section: dict,
     account_activity_section: dict,
+    fill_applied_section: dict,
+    account_clock_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -4328,6 +4332,8 @@ def render(
             "account_restrictions": account_restrictions_section,
             "account_switches": account_switches_section,
             "account_activity": account_activity_section,
+            "fill_applied": fill_applied_section,
+            "account_clock": account_clock_section,
             "snapshot_prior_close": snapshots_section,
         },
         Dumper=Dumper,
@@ -4418,6 +4424,8 @@ def main(argv: list[str] | None = None) -> int:
     account_restrictions_section = account_restrictions.build_section()
     account_switches_section = account_switches.build_section()
     account_activity_section = account_activity.build_section()
+    fill_applied_section = fill_applied.build_section()
+    account_clock_section = account_clock.build_section()
     snapshots_section = snapshots.build_section()
 
     problems = check_chain(section, v3)
@@ -4498,6 +4506,10 @@ def main(argv: list[str] | None = None) -> int:
     problems += account_switches.run_mutants(account_switches_section)
     problems += account_activity.check_section(account_activity_section)
     problems += account_activity.run_mutants(account_activity_section)
+    problems += fill_applied.check_section(fill_applied_section)
+    problems += fill_applied.run_mutants(fill_applied_section)
+    problems += account_clock.check_section(account_clock_section)
+    problems += account_clock.run_mutants(account_clock_section)
     problems += snapshots.check_section(snapshots_section)
     problems += snapshots.run_mutants(snapshots_section)
     problems += connection_requested.check_section(connection_requested_section)
@@ -4592,6 +4604,8 @@ def main(argv: list[str] | None = None) -> int:
         account_switches_section,
         snapshots_section,
         account_activity_section,
+        fill_applied_section,
+        account_clock_section,
     )
     reread = yaml.safe_load(rendered)
     canonical_self_test()
@@ -4650,6 +4664,8 @@ def main(argv: list[str] | None = None) -> int:
         or account_restrictions.check_section(reread["account_restrictions"])
         or account_switches.check_section(reread["account_switches"])
         or account_activity.check_section(reread["account_activity"])
+        or fill_applied.check_section(reread["fill_applied"])
+        or account_clock.check_section(reread["account_clock"])
         or snapshots.check_section(reread["snapshot_prior_close"])
         or connection_roles.check_section(reread["connection_roles"])
         or connection_requested.check_section(reread["connection_requested"])
@@ -4753,7 +4769,8 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(real_money.VALIDATOR_MUTANTS)} validator, {len(real_money.FOLD_MUTANTS)} fold and "
         f"{len(real_money.vector_mutants(real_money_section))} vector mutants caught; "
         f"{len(account_restrictions_section['invalid_drafts'])} invalid and {len(account_restrictions_section['valid_drafts'])} valid "
-        f"AccountRestrictionChanged drafts, {len(account_restrictions.VALIDATOR_MUTANTS)} validator and "
+        f"AccountRestrictionChanged drafts and {len(account_restrictions_section['streams'])} rule-309 streams, "
+        f"{len(account_restrictions.VALIDATOR_MUTANTS)} validator, {len(account_restrictions.STREAM_MUTANTS)} stream and "
         f"{len(account_restrictions.vector_mutants(account_restrictions_section))} vector mutants caught; "
         f"{len(account_switches_section['invalid_drafts'])} invalid and {len(account_switches_section['valid_drafts'])} valid "
         f"account KillSwitchActivated drafts, {len(account_switches.VALIDATOR_MUTANTS)} validator and "
@@ -4761,6 +4778,12 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(account_activity_section['invalid_drafts'])} invalid and {len(account_activity_section['valid_drafts'])} valid "
         f"account activity drafts, {len(account_activity.VALIDATOR_MUTANTS)} validator and "
         f"{len(account_activity.vector_mutants(account_activity_section))} vector mutants caught; "
+        f"{len(fill_applied_section['invalid_drafts'])} invalid and {len(fill_applied_section['valid_drafts'])} valid "
+        f"version-2 FillApplied drafts, {len(fill_applied.VALIDATOR_MUTANTS)} validator and "
+        f"{len(fill_applied.vector_mutants(fill_applied_section))} vector mutants caught; "
+        f"{len(account_clock_section['invalid_drafts'])} invalid and {len(account_clock_section['valid_drafts'])} valid "
+        f"account ClockAdvanced drafts, {len(account_clock.VALIDATOR_MUTANTS)} validator and "
+        f"{len(account_clock.vector_mutants(account_clock_section))} vector mutants caught; "
         f"{len(snapshots_section['invalid_drafts'])} invalid and {len(snapshots_section['valid_drafts'])} valid "
         f"version-2 AccountSnapshotRecorded drafts, {len(snapshots_section['readings'])} readings, "
         f"{len(snapshots.VALIDATOR_MUTANTS)} validator, {len(snapshots.READING_MUTANTS)} reading and "

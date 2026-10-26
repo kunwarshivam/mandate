@@ -540,6 +540,17 @@ fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Err
         "{snapshots:?}"
     );
     assert!(
+        !snapshots.is_empty()
+            && snapshots.iter().all(|s| {
+                s.get("account_type") == Some(&Value::Str("margin".to_owned()))
+                    && s.get("day_trading_regime")
+                        == Some(&Value::Str("intraday_margin".to_owned()))
+                    && s.get("last_equity").is_some()
+            }),
+        "the process journals its broker's declaration and figures on every snapshot (§9.35): \
+         {snapshots:?}"
+    );
+    assert!(
         journal
             .payloads("AgentModeApplied")
             .iter()
@@ -618,5 +629,33 @@ fn nothing_working_is_never_reconciled_on_schedule() -> Result<(), Error> {
         pass(&journal, &mut process, id, now)?;
     }
     assert_eq!(journal.payloads("ReconciliationRun").len(), started);
+    Ok(())
+}
+
+/// DEC-2813: the fixture takes one of its assets' ids as an order's `symbol`, as Alpaca does, and
+/// names that asset by its ticker in the answer, the order read back, the position and the fill;
+/// a symbol that is no asset's id stays as sent.
+#[test]
+fn an_asset_id_symbol_is_answered_by_its_ticker() -> Result<(), Error> {
+    let mut broker = broker()?;
+    let mut by_id = order("md-01JINTENT0000000000000000A", Side::Buy, "1", "580.13")?;
+    by_id.instrument = InstrumentId::new("b28f4066-5c6d-479b-a2af-85dc1a8f16fb")?;
+    let placed = submit(&mut broker, by_id)?;
+    assert_eq!(placed.instrument.as_str(), "SPY");
+    let (booked, _) = fills(&mut broker, "")?;
+    assert_eq!(
+        booked
+            .iter()
+            .map(|fill| fill.instrument.as_str())
+            .collect::<Vec<_>>(),
+        ["SPY"]
+    );
+    assert_eq!(
+        held(&mut broker)?,
+        [("SPY".to_owned(), "1".to_owned(), "580.13".to_owned())]
+    );
+    let mut unknown = order("md-01JINTENT0000000000000000B", Side::Buy, "1", "10")?;
+    unknown.instrument = InstrumentId::new("AAPL")?;
+    assert_eq!(submit(&mut broker, unknown)?.instrument.as_str(), "AAPL");
     Ok(())
 }

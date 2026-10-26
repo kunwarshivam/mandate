@@ -4,11 +4,13 @@
 //! past it is never sent; every read is bounded by the time left to the deadline plus [`GRACE`],
 //! so a reply the service finishes at its own deadline is still read, and one trickled a byte at a
 //! time still ends. Any exchange that does not bring back the whole reply, for this call, by then is
-//! [`RequestError::GatewayUnreachable`], and it is never sent again.
+//! [`RequestError::GatewayUnreachable`], and it is never sent again. The service's name is
+//! resolved for each call, so a name that does not resolve yet, or a service that moved, costs that
+//! call alone, never the runtime's start (DEC-2397 item 6).
 
 use std::io::{self, Read, Write};
-use std::net::{SocketAddr, TcpStream};
-use std::num::NonZeroU64;
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::num::{NonZeroU16, NonZeroU64};
 use std::time::Duration;
 
 use mandate_gateway::frame;
@@ -21,22 +23,71 @@ use mandate_time::UtcNanos;
 /// clocks' skew, never a longer call (DEC-2397 item 1).
 pub const GRACE: Duration = Duration::from_secs(2);
 
+/// The service's `host:port` as written: a name or an address, and a port other than 0. It is
+/// only parsed, never resolved, so it names the service whether or not its name resolves yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayAddress {
+    host: String,
+    port: u16,
+}
+
+impl GatewayAddress {
+    /// `host:port`, `None` when the host is empty or the port is not a number from 1 to 65535.
+    pub fn parse(text: &str) -> Option<Self> {
+        let (host, port) = text.rsplit_once(':')?;
+        let host = host
+            .strip_prefix('[')
+            .and_then(|h| h.strip_suffix(']'))
+            .unwrap_or(host);
+        (!host.is_empty()).then_some(())?;
+        Some(Self {
+            host: host.to_owned(),
+            port: port.parse::<NonZeroU16>().ok()?.get(),
+        })
+    }
+
+    /// The host as written, without the brackets of an IPv6 address.
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    /// The port.
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// The first address the name resolves to now, `None` when it resolves to none.
+    fn resolve(&self) -> Option<SocketAddr> {
+        (self.host.as_str(), self.port)
+            .to_socket_addrs()
+            .ok()?
+            .next()
+    }
+}
+
+impl From<SocketAddr> for GatewayAddress {
+    fn from(address: SocketAddr) -> Self {
+        Self {
+            host: address.ip().to_string(),
+            port: address.port(),
+        }
+    }
+}
+
 /// The model-gateway service at one address, read against one clock.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct RemoteGateway {
-    address: SocketAddr,
+    address: GatewayAddress,
     clock: fn() -> UtcNanos,
 }
 
 impl RemoteGateway {
     /// The service at `address`, its calls built and bounded at `clock()`.
-    pub fn new(address: SocketAddr, clock: fn() -> UtcNanos) -> Self {
-        Self { address, clock }
-    }
-
-    /// The time left from now to `deadline`, `None` once it has passed.
-    fn left(&self, deadline: UtcNanos) -> Option<Duration> {
-        remaining((self.clock)(), deadline)
+    pub fn new(address: impl Into<GatewayAddress>, clock: fn() -> UtcNanos) -> Self {
+        Self {
+            address: address.into(),
+            clock,
+        }
     }
 }
 
@@ -46,14 +97,17 @@ impl ModelCalls for RemoteGateway {
     }
 
     fn call(&mut self, request: &CallRequest) -> Result<CallRecord, RequestError> {
-        let left = self
-            .left(request.deadline)
+        let address = self
+            .address
+            .resolve()
             .ok_or(RequestError::GatewayUnreachable)?;
-        let stream = TcpStream::connect_timeout(&self.address, left)
+        let left =
+            remaining((self.clock)(), request.deadline).ok_or(RequestError::GatewayUnreachable)?;
+        let stream = TcpStream::connect_timeout(&address, left)
             .map_err(|_| RequestError::GatewayUnreachable)?;
         let mut bounded = Bounded {
             stream,
-            gateway: *self,
+            clock: self.clock,
             deadline: request.deadline,
             grace: GRACE,
         };
@@ -84,19 +138,19 @@ fn total_nanos(at: UtcNanos) -> i128 {
 /// time left to `deadline` plus `grace`.
 struct Bounded {
     stream: TcpStream,
-    gateway: RemoteGateway,
+    clock: fn() -> UtcNanos,
     deadline: UtcNanos,
     grace: Duration,
 }
 
 impl Bounded {
     fn write_bound(&self) -> io::Result<()> {
-        let left = self.gateway.left(self.deadline).ok_or_else(timed_out)?;
+        let left = remaining((self.clock)(), self.deadline).ok_or_else(timed_out)?;
         self.stream.set_write_timeout(Some(left))
     }
 
     fn read_bound(&self) -> io::Result<()> {
-        let now = (self.gateway.clock)();
+        let now = (self.clock)();
         let left = match remaining(now, self.deadline) {
             Some(left) => left.checked_add(self.grace),
             None => remaining_past(now, self.deadline, self.grace),

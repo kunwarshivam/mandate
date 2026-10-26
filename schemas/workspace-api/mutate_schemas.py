@@ -49,6 +49,9 @@ DELIBERATE: dict[str, str] = {
     "read-models/backtest.schema.json/$defs/Backtest/allOf/0/if/required drops state": "`state` is required by `Backtest` itself, so an instance without it fails whatever the `if` reads (DEC-1001)",
     "read-models/backtest.schema.json/$defs/Backtest/allOf/1/if/required drops state": "`state` is required by `Backtest` itself, so an instance without it fails whatever the `if` reads (DEC-1001)",
     "read-models/backtest.schema.json/$defs/Backtest/allOf/2/if/required drops state": "`state` is required by `Backtest` itself, so an instance without it fails whatever the `if` reads (DEC-1001)",
+    "read-models/alerts.schema.json/$defs/Alert/allOf/0/if/properties/kind/enum gains a value": "the value the mutant adds is not in `kind`'s own enum, so no instance that carries it is valid whatever the `if` reads (DEC-2141)",
+    "read-models/alerts.schema.json/$defs/Alert/properties/class/enum gains a value": "the `allOf` pins `class` to `info` or `safety` for every kind, so an added value is refused whatever the enum holds (DEC-2141)",
+    "read-models/alerts.schema.json/$defs/AlertStream/properties/type/enum gains a value": "each `oneOf` branch pins `type` to one constant, so an added value matches no branch (DEC-2141)",
     "read-models/session.schema.json/allOf/1/if/required drops kind": "`kind` is required by the session itself, so an instance without it fails whatever the `if` reads (DEC-2113)",
 }
 

@@ -143,6 +143,8 @@ pub struct Bundle {
     /// The scripted replies of an agentic run's turns before its final one, turn 1 first; empty
     /// for a bundle with no `turns` (DEC-2266).
     pub turns: Vec<ScriptedTurn>,
+    /// A `monitor` run's final reply, when the recording has one (agent harness spec §6.9).
+    pub monitor_reply: Option<RecordedReply>,
     pub plane: RecordedPlane,
     /// The recorded feed, empty when the bundle holds no `feed.json` (DEC-2275).
     pub feed: Vec<FeedItem>,
@@ -225,6 +227,7 @@ impl Bundle {
                 .transpose()?,
             reply: model.reply,
             turns: model.turns,
+            monitor_reply: model.monitor_reply,
             plane,
             feed,
             halted,
