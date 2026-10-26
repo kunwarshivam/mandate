@@ -632,7 +632,10 @@ fn a_deployed_runs_gate_reads_the_runs_own_broker_facts() -> Result<(), Error> {
     let paper = mandate_executord::paper::FixturePaper::new(at(MONDAY)?).quoting(wall_clock);
     let broker = mandate_executord::alpaca::AlpacaBroker::new(paper.clone())?;
     let run = mandate_executord::run::fixture(broker, &scope())?;
-    assert!(run.facts().is_some(), "the fixture run carries the fixture's facts");
+    assert!(
+        run.facts().is_some(),
+        "the fixture run carries the fixture's facts"
+    );
     let rows = journal.clone();
     let run = run.deployed(
         &scope(),
@@ -642,14 +645,21 @@ fn a_deployed_runs_gate_reads_the_runs_own_broker_facts() -> Result<(), Error> {
             liquidity: Box::new(Bars(Rc::new(Cell::new(0)))),
         },
     );
-    assert!(run.facts().is_none(), "the run's facts went to its deployment");
+    assert!(
+        run.facts().is_none(),
+        "the run's facts went to its deployment"
+    );
     let (agent, spy) = (agent(), spy()?);
     let gate = &run.wiring().gate;
     assert!(
         gate.input(&request(&agent, &spy, Purpose::RiskExit, Side::Sell)?)
             .is_none()
     );
-    assert_eq!(paper.served(), Vec::<String>::new(), "an exit asks the broker nothing");
+    assert_eq!(
+        paper.served(),
+        Vec::<String>::new(),
+        "an exit asks the broker nothing"
+    );
     let _held_until_the_gate_admits_intraday_margin =
         gate.input(&request(&agent, &spy, Purpose::Open, Side::Buy)?);
     assert_eq!(
