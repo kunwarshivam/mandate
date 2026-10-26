@@ -177,6 +177,9 @@ struct Resolved {
     loss_carry: Usd,
     symbol: String,
     instrument: InstrumentId,
+    /// Whether the deployed version pins its universe: the binding gate's hold once the account
+    /// has traded is named by it (DEC-2143).
+    pinned: bool,
 }
 
 /// The deployments read at one control-stream length and trade date, so a port asked again within
@@ -671,6 +674,7 @@ impl Deployment {
             loss_carry: confirmed.connection_loss_carry(),
             symbol: reviewed.instrument.symbol.as_str().to_owned(),
             instrument: InstrumentId::new(reviewed.instrument.asset_id.as_str()).ok()?,
+            pinned: confirmed.mandate().universe.pinned,
         })
     }
 
@@ -950,7 +954,7 @@ impl BindingGateSource for Deployment {
             .remove(request.agent)?;
         if facts.mandate_version != resolved.version
             || !resolved.view.covers(request.agent, request.instrument)
-            || !journaled.untraded()
+            || journaled.opening_hold(resolved.pinned).is_some()
             || !self.openable_at(request.agent, request.instrument, facts.now)
         {
             return None;

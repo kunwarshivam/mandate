@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_canon::{Digest, parse};
+use mandate_canon::{Digest, Key, Value, parse, to_canonical};
 use mandate_gateway::fake::{RecordedTransport, openrouter_reply};
 use mandate_gateway::guard::GuardContext;
 use mandate_gateway::kinds::{KeyOwner, Purpose};
@@ -23,6 +23,22 @@ use mandate_time::UtcNanos;
 const DEMO: &str = include_str!("../../../deploy/cell/demo/research/research.json");
 const AGENTIC: &str =
     include_str!("../../mandate-daemon/tests/fixtures/research-agentic/research.json");
+
+/// The demo recording as a single-call one: its entry names no loop, and it scripts no turn and no
+/// monitor reply.
+fn single_call_demo() -> String {
+    let Value::Object(mut demo) = parse(DEMO.as_bytes()).unwrap() else {
+        panic!("the recording is an object")
+    };
+    for member in ["turns", "monitor_reply"] {
+        demo.remove(&Key::new(member).unwrap());
+    }
+    let Some(Value::Object(entry)) = demo.get_mut(&Key::new("entry").unwrap()) else {
+        panic!("the entry is an object")
+    };
+    entry.remove(&Key::new("agentic").unwrap());
+    String::from_utf8(to_canonical(&Value::Object(demo))).unwrap()
+}
 
 fn model(text: &str) -> RecordedModel {
     RecordedModel::read(&parse(text.as_bytes()).unwrap()).unwrap()
@@ -164,10 +180,17 @@ fn priming_replaces_a_reply_no_call_took() {
 #[test]
 fn the_settings_are_the_recording_s_endpoint_under_the_cell_s_rate_caps() {
     for (text, turns) in [
-        (DEMO, 1),
-        (AGENTIC, model(AGENTIC).entry.agentic.unwrap().max_turns),
+        (single_call_demo(), 1),
+        (
+            DEMO.to_owned(),
+            model(DEMO).entry.agentic.unwrap().max_turns,
+        ),
+        (
+            AGENTIC.to_owned(),
+            model(AGENTIC).entry.agentic.unwrap().max_turns,
+        ),
     ] {
-        let recorded = model(text);
+        let recorded = model(&text);
         assert_eq!(
             settings("ws_1", &recorded),
             Settings {
@@ -263,7 +286,7 @@ fn a_monitor_call_takes_the_monitor_reply_and_an_ideate_call_its_script() {
 fn a_monitor_reply_is_refused_on_a_single_call_entry_or_short_a_member() {
     let refused = |text: &str| RecordedModel::read(&parse(text.as_bytes()).unwrap()).err();
     assert_eq!(
-        refused(&with_monitor_reply(DEMO)),
+        refused(&with_monitor_reply(&single_call_demo())),
         Some(mandate_research_run::recorded::RecordedError::Malformed(
             "monitor_reply"
         ))

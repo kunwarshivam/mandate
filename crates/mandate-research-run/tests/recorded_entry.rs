@@ -1,7 +1,8 @@
 //! DEC-2247 item 1: a recorded research entry reads as one `ResearchEntry`, the same content the
 //! recorded bundle's loader pins and `model register --entry` registers. Each member is required
 //! and nothing is defaulted. The oracle is the demo recording's entry, typed out here. An optional
-//! `agentic` member names the entry's pinned loop (DEC-2263).
+//! `agentic` member names the entry's pinned loop (DEC-2263); the demo's names `v0_2`, and the same
+//! entry without it is the single-call one.
 
 use mandate_canon::{Key, Value, parse};
 use mandate_gateway::registry::{Identity, Mode, Snapshot};
@@ -59,7 +60,7 @@ fn the_demo_recording_reads_as_its_entry_with_the_fixed_plan_and_bounds() {
         seed: Some(7),
         plan: RetrievalPlan::v0_1(),
         bounds: OutputBounds::v0_1(),
-        agentic: None,
+        agentic: Some(LoopBounds::v0_2()),
     };
     assert_eq!(ResearchEntry::recorded(&recorded_entry()), Ok(expected));
 }
@@ -106,6 +107,11 @@ fn agentic() -> ResearchEntry {
         .unwrap_or_else(|e| panic!("{e:?}"))
 }
 
+/// The demo recording's entry with no `agentic` member: the single-call entry.
+fn single_call() -> ResearchEntry {
+    ResearchEntry::recorded(&with("agentic", None)).unwrap_or_else(|e| panic!("{e:?}"))
+}
+
 /// Words the agentic system text never holds: it says what the tools may do, never to trade, to
 /// size, or to recommend (the coordinator's condition on DEC-2263).
 const NEVER_SAID: [&str; 7] = [
@@ -120,7 +126,7 @@ const NEVER_SAID: [&str; 7] = [
 
 #[test]
 fn a_recording_without_the_member_is_a_single_call_entry() {
-    let entry = ResearchEntry::recorded(&recorded_entry()).unwrap();
+    let entry = single_call();
     assert_eq!(entry.agentic, None);
     assert_eq!(entry.content().mode, Mode::SingleCall);
 }
@@ -151,9 +157,7 @@ fn a_recording_naming_any_other_loop_is_refused_by_name() {
 fn the_agentic_entry_pins_its_loop_and_its_own_system_text() {
     let entry = agentic();
     let content = entry.content();
-    let single = ResearchEntry::recorded(&recorded_entry())
-        .unwrap()
-        .content();
+    let single = single_call().content();
     let pinned = agentic_loop(&LoopBounds::v0_2(), &OutputBounds::v0_1())
         .unwrap_or_else(|e| panic!("{e:?}"));
     assert_eq!(content.mode, Mode::Agentic(pinned));
