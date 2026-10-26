@@ -6,7 +6,8 @@ import { type Page, expect, test } from "@playwright/test";
  * deployed paper agent's request appears in the web app, the owner approves it in the browser with
  * the code the host confirms (`cli_confirm`, DEC-2104), the executor places and fills the order on
  * the fixture broker, the agent's screen shows the order filled, the position and the journal
- * records from the served reads (DEC-2377), and the browser's kill switch is recorded.
+ * records from the served reads (DEC-2377), the positions screen shows the agent's own position, and
+ * the browser's kill switch is recorded.
  *
  * The driver sets it up and plays the host. It runs this file with `OWLHEAD_CELL_SPEC=trade-loop.spec.ts`
  * and the agent in `OWLHEAD_CELL_AGENT`. The spec triggers nothing itself: it waits for a pending
@@ -117,6 +118,14 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     if (!held) refuse("the agent's screen showed the fill but no position or no journal record within 30 s");
     step("position");
     step("journal", String(await journal.getByRole("listitem").count()));
+  });
+
+  await test.step("the positions screen shows the agent's own position from the API, its unserved members as not reported", async () => {
+    const own = page.locator(`[data-slot=agent-positions][data-agent="${AGENT}"]`);
+    const shown = await until(page, "/positions", 30_000, async () => (await own.getByRole("row").count()) > 1);
+    if (!shown) refuse("the positions screen showed no row of the agent's own position within 30 s");
+    await expect(own.getByRole("cell", { name: "Not reported" }).first()).toBeVisible();
+    step("positions_screen");
   });
 
   await test.step("the browser's kill switch is recorded for this agent alone", async () => {
