@@ -10,7 +10,7 @@ import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDige
 import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
-import type { CommandPhase, Decoder, PreparedCommand } from "@/api/types";
+import type { CommandPhase, CommandStatus, Decoder, PreparedCommand } from "@/api/types";
 import { activityRead, journalPageRead, holdingsRead } from "@/api/activity";
 import { connectStartBody, connectionRead, connectionsRead } from "@/api/connect";
 import { type PasskeyKind, type StepUpAction, type StepUpChallenge, confirmCode, connectStepUpDigest } from "@/api/step-up";
@@ -73,6 +73,12 @@ const SENDS = 4;
 /** How many times a recorded command's status is read before the runtime stops following it (spec §6.3 item 4). */
 const STATUS_READS = 30;
 const SETTLED: ReadonlySet<CommandPhase> = new Set(["applied", "refused", "ended"]);
+
+/** Why the runtime refused an approval answer: the reason its `ApprovalResponded` step carries (journal spec rule 47), or none. */
+function refusalOf(status: CommandStatus): string | null {
+  const responded = status.steps.find((step) => step.event_type === "ApprovalResponded" && step.reason !== null);
+  return responded?.reason ?? status.steps.find((step) => step.reason !== null)?.reason ?? null;
+}
 
 type Delivery = { phase: "recorded"; eventId: string; body?: unknown } | { phase: "undelivered"; reason: string } | { phase: "unknown"; eventId: string | null };
 
@@ -238,14 +244,14 @@ export function ApiRuntimeProvider({
     [client, retryMs],
   );
 
-  /** Follows a recorded command to `applied`, `refused` or `ended`, then reads the workspace again (spec §6.3). */
-  const follow = useCallback(
-    async (eventId: string): Promise<CommandPhase | null> => {
+  /** Follows a recorded command to `applied`, `refused` or `ended`, then reads the workspace again (spec §6.3); the settled status, with its steps. */
+  const settle = useCallback(
+    async (eventId: string): Promise<CommandStatus | null> => {
       for (let read = 0; read < STATUS_READS && mounted.current; read += 1) {
         const status = await client.commandStatus(eventId);
         if (status.ok && SETTLED.has(status.value.phase)) {
           await refresh();
-          return status.value.phase;
+          return status.value;
         }
         await wait(statusPollMs);
       }
@@ -254,6 +260,8 @@ export function ApiRuntimeProvider({
     },
     [client, refresh, statusPollMs],
   );
+
+  const follow = useCallback(async (eventId: string): Promise<CommandPhase | null> => (await settle(eventId))?.phase ?? null, [settle]);
 
   const send = useCallback(
     (kind: CommandKind, agentId: string | null, record?: CommandRecord): Command => {
@@ -319,11 +327,13 @@ export function ApiRuntimeProvider({
           return;
         }
         update({ phase: "recorded", recordedAt: nowRef.current });
-        const settled = await follow(delivered.eventId);
-        if (response === "approve" && settled === "applied" && mounted.current) update({ phase: "decided" });
+        const settled = await settle(delivered.eventId);
+        if (!mounted.current) return;
+        if (settled?.phase === "refused") return update({ phase: "refused", reason: refusalOf(settled) ?? undefined });
+        if (response === "approve" && settled?.phase === "applied") update({ phase: "decided" });
       })();
     },
-    [client, deliver, follow],
+    [client, deliver, follow, settle],
   );
 
   /**

@@ -1776,7 +1776,7 @@ here, so replacing fixtures with calls changes no screen contract:
 | `Approval` (bound order, risk impact, evidence, grants) | `GET /approvals/{id}` |
 | `GateDecision`, `TimelineEvent` | `GET /journal/events/{id}/gate`, `GET /agents/{id}/timeline` |
 | `Connection` | `GET /connections/{id}` |
-| `mock-runtime.tsx` command phases (`sent`, `recorded`, `undelivered`, `unknown`) | §5.5's phases; `undelivered` is `effect: none` |
+| `mock-runtime.tsx` command phases (`sent`, `recorded`, `undelivered`, `unknown`); an approval response's also `decided` and `refused` | §5.5's phases; `undelivered` is `effect: none`; an approval response's `decided` is §5.5's `applied` and its `refused` is §5.5's `refused`, with its `ApprovalResponded` step's reason ([DEC-2822](../project/decisions/DEC-2822.md)) |
 
 ### 4.10 Routes outside the workspace prefix
 
