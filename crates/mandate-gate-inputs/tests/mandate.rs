@@ -2,6 +2,7 @@
 //! (DEC-2380 item 5).
 
 use mandate_accounting::{AssetClass, InstrumentId, ProspectiveOrder, Side, fee_reservation};
+use mandate_canon::Digest;
 use mandate_gate_inputs::{
     CALENDAR_MEMBERS, artifact_from, fee_artifact, fees, gate_mandate, reservation,
 };
@@ -79,15 +80,9 @@ fn the_limits_and_ladder_are_the_mandates() -> Result<(), String> {
 
 #[test]
 fn the_trim_action_and_etp_choices_are_copied() -> Result<(), String> {
-    let changed = MANDATE
-        .replace("\"limit_buys\"", "\"trim_to_target\"")
-        .replace(
-            "\"leveraged_etp_disclosure_version\":null,\"leveraged_etps_enabled\":false",
-            "\"leveraged_etp_disclosure_version\":\"1\",\"leveraged_etps_enabled\":true",
-        );
-    let Ok(parsed) = document(&changed) else {
-        return Err("the changed fixture must still parse".to_owned());
-    };
+    let changed = MANDATE.replace("\"limit_buys\"", "\"trim_to_target\"");
+    assert_ne!(changed, MANDATE, "the fixture names limit_buys");
+    let mut parsed = document(&changed)?;
     let mandate = gate_mandate(&parsed).map_err(text)?;
     assert!(
         mandate
@@ -96,14 +91,16 @@ fn the_trim_action_and_etp_choices_are_copied() -> Result<(), String> {
             .iter()
             .all(|rung| rung.scale_action == Some(ScaleAction::TrimToTarget))
     );
-    assert_eq!(
-        mandate.leveraged_etps_enabled(),
-        changed.contains("\"leveraged_etps_enabled\":true")
-    );
-    assert_eq!(
-        mandate.leveraged_etp_disclosure_accepted(),
-        changed.contains("\"leveraged_etp_disclosure_version\":\"1\"")
-    );
+    assert!(!mandate.leveraged_etps_enabled());
+    assert!(!mandate.leveraged_etp_disclosure_accepted());
+    parsed.universe.leveraged_etps_enabled = true;
+    let enabled = gate_mandate(&parsed).map_err(text)?;
+    assert!(enabled.leveraged_etps_enabled());
+    assert!(!enabled.leveraged_etp_disclosure_accepted());
+    parsed.universe.leveraged_etp_disclosure_version = Some(Digest::of(b"disclosure-v1"));
+    let disclosed = gate_mandate(&parsed).map_err(text)?;
+    assert!(disclosed.leveraged_etps_enabled());
+    assert!(disclosed.leveraged_etp_disclosure_accepted());
     Ok(())
 }
 

@@ -140,6 +140,9 @@ fn required_positive_u32(value: &Value, name: &'static str) -> Result<u32, Input
     u32::try_from(required_positive_u64(value, name)?).map_err(|_| missing(name))
 }
 
+/// A positive duration read as `i64`: every value [`required_positive_u64`] admits is at most
+/// 2^53 − 1, the canonical integer bound (journal spec §4.4), so the conversion refuses nothing
+/// it reads; it stays checked rather than cast.
 fn required_positive_i64(value: &Value, name: &'static str) -> Result<i64, InputError> {
     i64::try_from(required_positive_u64(value, name)?).map_err(|_| missing(name))
 }
