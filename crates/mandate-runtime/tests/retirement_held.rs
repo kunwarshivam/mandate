@@ -81,17 +81,19 @@ type Broken = Box<dyn Fn() -> mandate_runtime::FoldedEvent>;
 
 #[test]
 fn a_held_record_that_does_not_read_is_refused_and_folds_nothing() {
-    let cases: [(&str, Broken); 4] = [
+    let cases: [(&str, &str, Broken); 4] = [
         (
             "no cause",
+            "causation_id",
             Box::new(|| mandate_runtime::FoldedEvent {
                 causation_id: None,
                 ..held(2, 1, SINCE + DAY)
             }),
         ),
-        ("period 0", Box::new(|| held(2, 0, SINCE + DAY))),
+        ("period 0", "period", Box::new(|| held(2, 0, SINCE + DAY))),
         (
             "no risk clock",
+            "risk_clock",
             Box::new(|| {
                 let mut e = held(2, 1, SINCE + DAY);
                 if let Value::Object(p) = &mut e.payload {
@@ -102,6 +104,7 @@ fn a_held_record_that_does_not_read_is_refused_and_folds_nothing() {
         ),
         (
             "a held_since off the second",
+            "held_since",
             Box::new(|| {
                 let mut e = held(2, 1, SINCE + DAY);
                 if let Value::Object(p) = &mut e.payload {
@@ -114,11 +117,11 @@ fn a_held_record_that_does_not_read_is_refused_and_folds_nothing() {
             }),
         ),
     ];
-    for (case, record) in cases {
+    for (case, field, record) in cases {
         let mut state = opened();
         let refused = fold(&mut state, &record());
         assert!(
-            matches!(refused, Err(ref e) if !matches!(e, RuntimeError::NotInterpreted { .. })),
+            matches!(refused, Err(RuntimeError::NonCanonicalPayload { field: ref f }) if f == field),
             "{case}: {refused:?}"
         );
         assert!(state.retirement_held().is_none(), "{case}: nothing folded");

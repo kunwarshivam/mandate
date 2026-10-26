@@ -205,7 +205,9 @@ impl RuntimeState {
     }
 
     /// The latest period of a held retirement folded from the agent stream, or `None` (journal
-    /// spec §9.34).
+    /// spec §9.34). It does not say whether that sequence is still open: its ends, the agent's
+    /// stop, an owner's resume or stop, and a cancelling version, are its writer's to read
+    /// (DEC-2352 item 8).
     pub fn retirement_held(&self) -> Option<&HeldPeriod> {
         self.retirement_held.as_ref()
     }
