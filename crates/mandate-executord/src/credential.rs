@@ -359,7 +359,7 @@ pub fn paper_broker<V: SecretSource>(
 ///
 /// # Errors
 /// `credential_rotated`, `credential_lost`, or the tick's own refusal: each drains the process and
-/// stops it for its supervisor.
+/// stops it for its supervisor, a lost credential after restricting the account (DEC-2839).
 pub fn lease_verdict(tick: Result<Held<AccessToken>, &'static str>) -> Result<(), &'static str> {
     match tick? {
         Held::Unchanged => Ok(()),

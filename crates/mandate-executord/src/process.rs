@@ -1216,15 +1216,31 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         answer
     }
 
-    /// Tells the core the run's credential is lost (DEC-2839): connections spec §9.2 treats a
-    /// lease that expired as `suspended` for openings, so the account is restricted to closing,
-    /// cause `connection_unavailable`, before the run drains. The restriction is on the stream when
-    /// the supervisor restarts the process, and it lifts only as every connection restriction does
-    /// (E7-2y). A core error on it is held, never a stop (DEC-2821).
+    /// Tells the core the run's credential is lost (DEC-2839). Connections spec §9.2 treats a lease
+    /// that expired as `suspended` for openings (reason `lease_expired`, DEC-800), so before the
+    /// run drains, the account is restricted to closing with cause `connection_unavailable`. The
+    /// connection's state change follows in a later batch (DEC-2826), so both are on the stream
+    /// when the supervisor restarts the process.
+    ///
+    /// An input already in doubt is handed again first, as a pass does, so it is never replaced.
+    /// While it stays in doubt nothing more is handed, and the drain retries it. A process that has
+    /// exited hands nothing. A core error on the trouble is held, never a stop (DEC-2821).
     pub fn credential_lost(&mut self, now: UtcNanos) {
-        let lost = Input::Connection(ConnectionTrouble::Suspended(SuspendReason::LeaseExpired));
+        if self.exited() {
+            return;
+        }
         let mut alerts = Vec::new();
-        self.hand(now, now, lost, &mut alerts, 0);
+        if let Some((input, at)) = self.pending.take()
+            && !self.hand(now, at, input, &mut alerts, 0)
+        {
+            return;
+        }
+        for _batch in ["restriction", "state change"] {
+            let lost = Input::Connection(ConnectionTrouble::Suspended(SuspendReason::LeaseExpired));
+            if !self.hand(now, now, lost, &mut alerts, 0) {
+                return;
+            }
+        }
     }
 
     /// Tells the core of every trouble the connection's health holds (DEC-2832): after the pass's

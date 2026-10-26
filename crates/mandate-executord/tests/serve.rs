@@ -320,6 +320,43 @@ fn restriction_causes(journal: &Journal) -> Vec<String> {
         .collect()
 }
 
+fn member(payload: &Value, name: &str) -> String {
+    payload
+        .get(name)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// An input in doubt when the lease is lost is handed again first and never replaced: with the
+/// journal down for one more append, the restriction is held in doubt and the drain commits it
+/// (DEC-2839).
+#[test]
+fn a_lost_credential_with_the_journal_down_restricts_through_the_drain() -> Result<(), Error> {
+    let journal = connecting()?;
+    establish(&journal)?;
+    let broker = Paper::new(&journal);
+    let wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    let each = |pass: usize| {
+        if pass == 3 {
+            journal.fail_next(&[support::Fault::Unavailable]);
+        }
+        Ok(())
+    };
+    with_edge_stopping(3, Some((3, "credential_lost")), &each, |edge, _| {
+        serve(
+            journal.clone(),
+            broker.clone(),
+            wiring,
+            &process_config(Environment::Paper),
+            &starting_status(),
+            edge,
+        )
+    })?;
+    assert_eq!(restriction_causes(&journal), ["connection_unavailable"]);
+    Ok(())
+}
+
 /// DEC-2839: a credential the lease lost restricts the account to closing, cause
 /// `connection_unavailable`, before the run drains (connections spec §9.2: at lease expiry the
 /// connection is treated as `suspended` for openings), so the restart finds it in force. A
@@ -353,6 +390,32 @@ fn a_lost_credential_restricts_the_account_before_the_drain() -> Result<(), Erro
         };
         assert_eq!(restriction_causes(&journal), expected, "{lapse:?}");
         if restricted {
+            let types = journal.types(ACCOUNT_STREAM);
+            let at = |kind: &str| types.iter().position(|t| t == kind);
+            assert!(
+                at("AccountRestrictionChanged") < at("ConnectionStateChanged")
+                    && at("ConnectionStateChanged").is_some(),
+                "the restriction, then the state change: {types:?}"
+            );
+            let change = journal.payloads("ConnectionStateChanged");
+            assert_eq!(
+                change
+                    .iter()
+                    .map(|p| (member(p, "from"), member(p, "to"), member(p, "reason")))
+                    .collect::<Vec<_>>(),
+                [(
+                    "active".to_owned(),
+                    "suspended".to_owned(),
+                    "lease_expired".to_owned()
+                )]
+            );
+            let alerts = journal.payloads("OwnerAlertSent");
+            assert!(
+                alerts
+                    .iter()
+                    .any(|p| member(p, "kind") == "connection_unavailable"),
+                "the owner's alert is journaled for the dispatcher: {alerts:?}"
+            );
             let modes = journal.payloads("AgentModeApplied");
             assert!(
                 modes.iter().any(|payload| {
