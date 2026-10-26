@@ -32,7 +32,7 @@ const AGENT: &str = "demo-spy";
 const CLOCK: &str = "clock:ws1";
 const CONTROL: &str = "ctl:ws1";
 const ACCOUNT: &str = "acct:ws1:01J8Z3MACCOUNTREF000000001";
-const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 const HASH: &str = "cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d";
 const FRESH: Freshness = Freshness {
     mark_max_age_s: 60,

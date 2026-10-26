@@ -73,7 +73,7 @@ pub const FOUNDER: &str = DEMO_OWNER;
 pub const AGENT: &str = "demo-spy";
 /// The instrument the demo's envelope pins (SPY, [`INSTRUMENT_FILE`]'s `instrument_id`), which the
 /// owner's exit names.
-pub const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+pub const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 /// The bid, bid size and floor the owner's exit confirms, as the CLI's canonical text (DEC-2507
 /// item 1): fixed values the scenario types, since the cell shows no live quote.
 const EXIT_BID: (&str, &str, &str) = ("501.25", "100", "500");
@@ -455,9 +455,9 @@ pub const BACKTEST_ID: &str = "bt-demo-01";
 /// The payload and report the runner stores for the demo version and inputs, the committed golden
 /// store's (DEC-1144 item 8: the demo's payload reference is fixed).
 pub const DEMO_PAYLOAD: &str =
-    "sha256:5f267af48ab755b83dc6c8dab902ae522aeb61db417ca7266d1441246a7eb50a";
+    "sha256:2723d06322272475e568c2111fe113ee4d38b3c6755ba758e65b16dce6e9e1e2";
 pub const DEMO_REPORT: &str =
-    "sha256:884ac9e109fe39450f9b1a58ca0969fe89d150c5c69117f8c3f0aa2837161349";
+    "sha256:3172f2086db7b356d999110b941f62d7a7ea8614e95ebc9ac2565506f6204fc4";
 
 /// `sha256:` and the hex SHA-256 of `bytes`: an artifact reference (journal spec §4).
 pub fn reference(bytes: &[u8]) -> String {
@@ -2466,9 +2466,9 @@ mod tests {
             "the code `connection record` showed for an Alpaca paper record of the demo's \
              connection, scope trading, on that account, caused by that check, for that owner"
         );
-        let version = "sha256:9a5b97d24a888b6a4f5c62ecb64820ae8e2f7af27cdb05371977f753ec4b07ed";
-        assert_eq!(confirm_code(version), "c584a3db");
-        assert_eq!(deploy_code(WEB_AGENT, version), "748643fc");
+        let version = "sha256:8e09904f299adb4afc9e09343071e36953db6b7faf5dc52494a86fe9a1dcb89f";
+        assert_eq!(confirm_code(version), "ab1b80cd");
+        assert_eq!(deploy_code(WEB_AGENT, version), "9056947e");
         assert_eq!(code(""), "e3b0c442");
         let research = reference(&research_mandate());
         assert_eq!(

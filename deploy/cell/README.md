@@ -262,8 +262,10 @@ The run's own report is the up-to-date list; on 2026-10-26, with DEC-2379, it re
 | 6. The owner's exit at a confirmed floor | partial | `agent exit` of the agent's SPY with a confirmed bid, bid size and floor, committed with no code, since an owner's exit reduces risk and needs no approval (AGENTS.md rules 2 and 13), recorded before the closing export and verify | P2 (E21-29): the scheduler in the cell, whose tick makes the executor step 2 starts ready, so it hands the exit to its core, priced at the confirmed floor (#1736); X (E21-30) and D1 (E21-2): the paper fill on the fixture in slice X1b-3, out of the position step 4 fills |
 | 7. The kill switch | ready | The agent's kill switch pressed in `web/` after the gestures' Job, last: the trade loop's own, or, when the loop stopped before it, lane W2's `kill_switch_from_web` alone; its command read back with the owner's session from the run's control stream (not run on a machine without npm, `web/node_modules`, Playwright's Chromium or openssl, unless `MANDATE_DEMO_WEB_REQUIRED` is set, which makes it fail; that switch alone still reads an unreachable API as not run, so a job that must run the gesture sets it with `MANDATE_CELL_REQUIRED`); then read back until it is `applied`, the runtime step 2's deployment started having journaled its `KillSwitchActivated` (up to 90 s). No CLI kill switch runs: every gesture runs in the Job before the browser, so it would stop the agent before the trade loop (web/'s kill switch comes after the closing export and verify, so the read stands in for the verify) | |
 
-The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY on the moving-average crossover,
-every opening asked, protection on. It is the run's workspace's one agent's: one agent to an account
+The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY (Alpaca asset id
+`b28f4066-5c6d-479b-a2af-85dc1a8f16fb`) on the moving-average crossover, every opening asked,
+protection on, and a 1000 USD order cap, its position, exposure and allocation caps (V-013), so one
+whole share fits. It is the run's workspace's one agent's: one agent to an account
 (V-048), and one Alpaca paper connection to a workspace until the account fingerprint tells two
 apart (DEC-802 item 3). `deploy/cell/demo/web-mandate.json`, the same envelope on QQQ
 (`web-instrument.json`), is no longer deployed; `mandate-runtime-models`' tests read it. CI's `cell-demo` job, which no required check depends on, runs

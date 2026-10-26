@@ -675,7 +675,7 @@ the processes it starts render as Deployments of their own; its pod templates ar
 
 
 HOSTED = "01KDEM0000000000000000000W"
-SPY_ASSET = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"
+SPY_ASSET = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb"
 QQQ_ASSET = "eb82ffb0-efd6-4f4e-9307-8fead28e04f6"
 # The cell's two recorded instruments: the demo agent's SPY and the second agent's QQQ, which the
 # trade loop runs on (`demo/instrument.json`, `demo/web-instrument.json`).

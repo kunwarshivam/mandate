@@ -17,7 +17,7 @@ use mandate_runtime::{
 const AGENT: &str = "agent-a";
 const CLOCK: &str = "clock:ws1";
 const ACCOUNT: &str = "acct:ws1:01J8Z3MACCOUNTREF000000001";
-const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 const BTC: &str = "5d2c1a3e-0b4f-4c7a-9e21-3f6d8a9b0c11";
 const STAMP: &str = "2026-10-16T13:00:00.000000000Z";
 

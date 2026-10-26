@@ -24,7 +24,7 @@ const DEMO: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../deploy/cell/demo/research"
 );
-const DEMO_INSTRUMENT: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+const DEMO_INSTRUMENT: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 const CUT_OFF: i64 = 1_792_180_800;
 const RUN: &str = "01RUNDEMOBUNDLE";
 
