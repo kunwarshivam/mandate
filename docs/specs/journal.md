@@ -15,13 +15,16 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 - **v0.107 ([DEC-2826](../project/decisions/DEC-2826.md), [DEC-2832](../project/decisions/DEC-2832.md),
   2026-10-26; E7-2z, lane EX):** §9.5's sentence that left the `connection_unavailable`
   restriction and its alert to E7-2z now says what the account's executor journals and when.
-  - **What it journals:** the restriction, every agent `exits_only`, and the alert, in one batch,
-    before it takes any opening. The connection's `ConnectionStateChanged` follows in a later
-    batch, once per reason per state. The executor counts the broker's answers per class
+  - **What it journals:** the restriction and its alert in one batch, before the next opening once
+    a count is at its threshold, with every agent `exits_only` when the account state becomes
+    stricter. The connection's `ConnectionStateChanged` follows in a later batch, once per reason
+    since the state was entered or the condition last cleared. This supersedes v0.96's "stay
+    unjournaled". The executor counts the broker's answers per class
     (connections spec §8.2): a lost or unreadable answer is a network failure, and a refused
     credential an authorization failure.
   - **What does not change:** no record, member, or rule. The existing rules 59, 60, 68 and 309
-    already admit these records in this order, so the vectors stay version 3.
+    already admit these records in this order, so the vectors stay version 3 and nothing is
+    regenerated. v0.106 is held by another branch's change.
 - **v0.105 ([DEC-2522](../project/decisions/DEC-2522.md), 2026-10-26; E21-30, lane GL):** §11
   gains the agent-stream check `approval_deferral_mismatch`, which is rule 292 across batches.
   - An `ApprovalRequested` must name a cause, that cause must be an earlier `DecisionMade` on the
@@ -3077,12 +3080,20 @@ refused one leaves the account restricted (`AGENTS.md` rules 3 and 13).
 The restriction for an unavailable connection, `connection_unavailable`, and its distinct owner
 alert are journaled by the account's executor (v0.107, [DEC-2826](../project/decisions/DEC-2826.md),
 [DEC-2832](../project/decisions/DEC-2832.md)). The executor process counts the broker's answers per
-class (connections spec §8.2): a lost or unreadable answer is a network failure, and a refused
-credential an authorization failure. While a count is at its threshold, the executor journals the
-restriction, every agent's `AgentModeApplied` `exits_only` and the `OwnerAlertSent` in one batch,
-before it takes any opening. In a later batch it journals the `ConnectionStateChanged` (§9.8),
-once per reason while the connection stays in a state. A degrading cause while `suspended`, and
-any state change before the stream's copy of `ConnectionEstablished` (rule 68), journal nothing.
+class (connections spec §8.2): a lost answer is a network failure, and so is an unreadable one
+while later answers keep the process up (DEC-85); a refused credential is an authorization
+failure.
+- **The restriction.** Once a count is at its threshold, the executor journals the restriction
+  with its `OwnerAlertSent` in one batch, before it takes the next opening. When this makes the
+  account state stricter, every agent's `AgentModeApplied` `exits_only` is in that batch too.
+  Beside a cause at that restriction or a stricter one, only the cause and its alert are journaled
+  (rule 309).
+- **The state change.** In a later batch the executor journals the `ConnectionStateChanged` (§9.8):
+  once per reason since the connection entered its state, or since the latest `condition_cleared`
+  or `acknowledged`. A degrading cause while `suspended` journals no state change, and neither does
+  anything before the stream's copy of `ConnectionEstablished` (rule 68); the restriction is
+  journaled all the same.
+
 Its lift is specified here.
 
 **`ExternalActivityIngested`**, **`RejectObserved`** and **`OrderAbandoned`** on the account stream
