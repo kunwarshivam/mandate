@@ -441,7 +441,10 @@ fn a_start_is_live_only_within_its_bound() -> Result<(), Error> {
 #[test]
 fn a_fixture_run_serves_until_drained() -> Result<(), Error> {
     let journal = deployed()?;
-    let run = run::fixture(AlpacaBroker::new(FixturePaper::new(at(NOON)?))?)?;
+    let run = run::fixture(
+        AlpacaBroker::new(FixturePaper::new(at(NOON)?))?,
+        &process_config(Environment::Paper).scope,
+    )?;
     let status = starting_status();
     let (exit, said) = with_edge(2, None, &|_| Ok(()), |edge, seen| {
         let exit = serve_run(

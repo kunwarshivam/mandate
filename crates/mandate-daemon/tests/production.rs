@@ -247,7 +247,7 @@ fn a_resolved_deployment_is_wired_with_the_fold_and_the_flatten_over_its_univers
     );
     let version = "sha256:19dd24280000000000000000000000000000000000000000000000000000092e6";
     let wiring = mandate_daemon::production::wired(
-        mandate_daemon::fixture::wiring("user-owner"),
+        mandate_daemon::fixture::wiring("user-owner", "agent:ws1:agent-a"),
         version,
         &document,
         None,

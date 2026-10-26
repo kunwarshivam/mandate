@@ -57,12 +57,20 @@ impl Broker for Unreadable {
 fn checked(store: &mut MemoryStore, connection: &str, passes: bool) -> Result<(), Error> {
     let checked = if passes {
         let mut broker = AlpacaBroker::new(FixturePaper::new(now()?))?;
-        connect_check(store, &mut broker, &Ids, &scope(), connection, PII, now()?)?
+        connect_check(
+            store,
+            &mut broker,
+            &Ids::of(&scope()),
+            &scope(),
+            connection,
+            PII,
+            now()?,
+        )?
     } else {
         connect_check(
             store,
             &mut Unreadable,
-            &Ids,
+            &Ids::of(&scope()),
             &scope(),
             connection,
             PII,

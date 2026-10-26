@@ -158,7 +158,7 @@ fn a_read_account_is_kept_in_its_entry_and_only_its_reference_is_journaled() -> 
     let vault = CreateOnce::default();
     let checked = oauth_connect_check(
         &mut store,
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         check(Some(BROKER_ID), PII)?,
         |path, secret| vault.create(path, secret),
@@ -216,7 +216,7 @@ fn an_unread_account_creates_nothing_and_journals_a_null_reference() -> Result<(
     let vault = CreateOnce::default();
     let checked = oauth_connect_check(
         &mut store,
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         check(None, PII)?,
         |path, secret| vault.create(path, secret),
@@ -245,7 +245,7 @@ fn an_unhashed_account_creates_nothing_and_journals_a_null_reference() -> Result
     unhashed.fingerprint = None;
     let checked = oauth_connect_check(
         &mut store,
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         unhashed,
         |path, secret| vault.create(path, secret),
@@ -270,7 +270,7 @@ fn a_refused_fingerprint_create_keeps_no_account_id() -> Result<(), Error> {
     vault.asked.borrow_mut().clear();
     let checked = oauth_connect_check(
         &mut store,
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         check(Some(BROKER_ID), PII)?,
         |path, secret| vault.create(path, secret),
@@ -307,7 +307,7 @@ fn a_refused_account_create_leaves_only_the_fingerprint() -> Result<(), Error> {
     vault.asked.borrow_mut().clear();
     let checked = oauth_connect_check(
         &mut store,
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         check(Some(BROKER_ID), PII)?,
         |path, secret| vault.create(path, secret),
@@ -344,7 +344,7 @@ fn a_retry_after_a_crash_before_the_record_fails_closed() -> Result<(), Error> {
             journal: journal.clone(),
             owned: true,
         },
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         check(Some(BROKER_ID), PII)?,
         |path, secret| vault.create(path, secret),
@@ -356,7 +356,7 @@ fn a_retry_after_a_crash_before_the_record_fails_closed() -> Result<(), Error> {
     let mut store = journal.clone();
     let retried = oauth_connect_check(
         &mut store,
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         check(Some(BROKER_ID), RETRY_PII)?,
         |path, secret| vault.create(path, secret),
@@ -400,7 +400,7 @@ fn every_refused_create_journals_a_null_reference() -> Result<(), Error> {
         let mut store = MemoryStore::default();
         let checked = oauth_connect_check(
             &mut store,
-            &Ids,
+            &Ids::of(&scope()),
             &scope(),
             check(Some(BROKER_ID), PII)?,
             |_, _| Err(refusal.clone()),
@@ -427,7 +427,7 @@ fn nothing_is_created_before_the_stream_is_taken() -> Result<(), Error> {
             journal: MemoryStore::default(),
             owned: false,
         },
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         check(Some(BROKER_ID), PII)?,
         |path, secret| vault.create(path, secret),
