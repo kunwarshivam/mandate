@@ -154,7 +154,7 @@ resource "cloudflare_zero_trust_access_application" "api" {
   session_duration = "24h"
 
   # The web app (app.owlhead.ai) calls the API across origins with credentials (the founder's
-  # decision of 2026-10-26; its DEC number is pending). A browser's CORS preflight is an OPTIONS
+  # decision of 2026-10-26, DEC-2381). A browser's CORS preflight is an OPTIONS
   # request that never carries cookies, so Access would answer it with a redirect to its login
   # and the browser would refuse the real call. Access passes preflights alone to the API, which
   # answers them exactly for the app's origin; every other request still needs the Access
