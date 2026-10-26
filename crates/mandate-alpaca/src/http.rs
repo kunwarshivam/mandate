@@ -18,6 +18,7 @@
 //! outside the table can exist for [`TradingTransport::send`] to be handed.
 
 use std::future::Future;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
@@ -248,6 +249,56 @@ pub struct Response {
 pub trait TradingTransport {
     fn send(&self, request: &HttpRequest)
     -> impl Future<Output = Result<Response, TransportError>>;
+
+    /// The rate limit the latest trading response reported (connections spec §8.2's headroom,
+    /// DEC-2842), or `None` when it reported none or no response came back. The default reports
+    /// none.
+    fn rate_limit(&self) -> Option<RateLimit> {
+        None
+    }
+}
+
+/// A trading response's rate limit: the requests the budget allows and those it has left
+/// (Alpaca's `X-RateLimit-Limit` and `X-RateLimit-Remaining`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateLimit {
+    pub limit: u32,
+    pub remaining: u32,
+}
+
+/// The latest rate limit a transport's trading responses reported, shared by every clone of the
+/// transport, so a reader beside the broker sees what the broker's last request was told.
+#[derive(Debug, Clone, Default)]
+pub struct RateLimitSeen(Arc<Mutex<Option<RateLimit>>>);
+
+impl RateLimitSeen {
+    /// Records what `headers` report, or that they reported none: a limit and a remaining count
+    /// that both read as whole numbers, the limit above zero. Anything else is none, never a
+    /// guess.
+    pub fn record(&self, headers: &HeaderMap) {
+        let number = |name: &str| headers.get(name)?.to_str().ok()?.trim().parse::<u32>().ok();
+        let seen = match (number("x-ratelimit-limit"), number("x-ratelimit-remaining")) {
+            (Some(limit), Some(remaining)) if limit > 0 => Some(RateLimit { limit, remaining }),
+            _ => None,
+        };
+        self.set(seen);
+    }
+
+    /// Records that no response came back, so no limit is known.
+    pub fn forget(&self) {
+        self.set(None);
+    }
+
+    /// The latest rate limit recorded.
+    pub fn latest(&self) -> Option<RateLimit> {
+        self.0.lock().ok().and_then(|seen| *seen)
+    }
+
+    fn set(&self, seen: Option<RateLimit>) {
+        if let Ok(mut latest) = self.0.lock() {
+            *latest = seen;
+        }
+    }
 }
 
 /// The paper account's trading credentials: the key pair read through an injected lookup, so a
@@ -476,6 +527,8 @@ fn safe(text: &str, extra: &[u8]) -> bool {
 pub struct AlpacaPaperHttp {
     client: reqwest::Client,
     credentials: Credentials,
+    /// The rate limit the latest trading response reported (DEC-2842).
+    seen: RateLimitSeen,
 }
 
 impl AlpacaPaperHttp {
@@ -492,6 +545,7 @@ impl AlpacaPaperHttp {
         Ok(Self {
             client,
             credentials,
+            seen: RateLimitSeen::default(),
         })
     }
 }
@@ -506,7 +560,12 @@ impl TradingTransport for AlpacaPaperHttp {
             Method::Post => reqwest::Method::POST,
             Method::Delete => reqwest::Method::DELETE,
         };
-        self.dispatch(method, url, request.body.as_deref()).await
+        self.dispatch(method, url, request.body.as_deref(), Some(&self.seen))
+            .await
+    }
+
+    fn rate_limit(&self) -> Option<RateLimit> {
+        self.seen.latest()
     }
 }
 
@@ -514,13 +573,13 @@ impl DataTransport for AlpacaPaperHttp {
     /// The request is a latest-quote read by construction, so this only dials [`DATA_HOST`] with
     /// the same paper credentials, the same way (DEC-168 item 2).
     async fn send(&self, request: &QuoteRequest) -> Result<Response, TransportError> {
-        self.dispatch(reqwest::Method::GET, data_url(request)?, None)
+        self.dispatch(reqwest::Method::GET, data_url(request)?, None, None)
             .await
     }
 
     /// The request is the one bars read by construction, sent the same way (DEC-471).
     async fn send_bars(&self, request: &BarsRequest) -> Result<Response, TransportError> {
-        self.dispatch(reqwest::Method::GET, bars_url(request)?, None)
+        self.dispatch(reqwest::Method::GET, bars_url(request)?, None, None)
             .await
     }
 }
@@ -545,6 +604,7 @@ impl AlpacaPaperHttp {
         method: reqwest::Method,
         url: Url,
         body: Option<&str>,
+        seen: Option<&RateLimitSeen>,
     ) -> Result<Response, TransportError> {
         let headers = self.credentials.headers()?;
         let mut builder = self.client.request(method, url).headers(headers);
@@ -553,7 +613,18 @@ impl AlpacaPaperHttp {
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
                 .body(body.to_owned());
         }
-        let response = builder.send().await.map_err(classify)?;
+        let response = match builder.send().await {
+            Ok(response) => response,
+            Err(error) => {
+                if let Some(seen) = seen {
+                    seen.forget();
+                }
+                return Err(classify(error));
+            }
+        };
+        if let Some(seen) = seen {
+            seen.record(response.headers());
+        }
         let status = response.status().as_u16();
         let body = response.bytes().await.map_err(classify)?.to_vec();
         Ok(Response { status, body })
@@ -589,6 +660,66 @@ fn classify(error: reqwest::Error) -> TransportError {
 #[cfg(test)]
 mod tests {
     use mandate_accounting::InstrumentId;
+
+    use reqwest::header::{HeaderMap, HeaderValue};
+
+    use super::{RateLimit, RateLimitSeen};
+
+    fn headers(pairs: &[(&'static str, &'static str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (name, value) in pairs {
+            map.insert(*name, HeaderValue::from_static(value));
+        }
+        map
+    }
+
+    /// DEC-2842: a response's rate-limit headers are recorded, shared with every clone, and
+    /// anything that does not read as a limit and a remaining count, or a limit of zero, records
+    /// none; a request with no response forgets the last.
+    #[test]
+    fn a_response_s_rate_limit_is_recorded_and_anything_else_is_none() {
+        let seen = RateLimitSeen::default();
+        let clone = seen.clone();
+        assert_eq!(seen.latest(), None);
+        seen.record(&headers(&[
+            ("x-ratelimit-limit", "200"),
+            ("x-ratelimit-remaining", " 37 "),
+        ]));
+        assert_eq!(
+            clone.latest(),
+            Some(RateLimit {
+                limit: 200,
+                remaining: 37
+            })
+        );
+        for unread in [
+            headers(&[("x-ratelimit-limit", "200")]),
+            headers(&[("x-ratelimit-remaining", "37")]),
+            headers(&[("x-ratelimit-limit", "0"), ("x-ratelimit-remaining", "0")]),
+            headers(&[
+                ("x-ratelimit-limit", "lots"),
+                ("x-ratelimit-remaining", "37"),
+            ]),
+            headers(&[
+                ("x-ratelimit-limit", "200"),
+                ("x-ratelimit-remaining", "-1"),
+            ]),
+            HeaderMap::new(),
+        ] {
+            seen.record(&headers(&[
+                ("x-ratelimit-limit", "200"),
+                ("x-ratelimit-remaining", "150"),
+            ]));
+            seen.record(&unread);
+            assert_eq!(clone.latest(), None, "{unread:?}");
+        }
+        seen.record(&headers(&[
+            ("x-ratelimit-limit", "200"),
+            ("x-ratelimit-remaining", "150"),
+        ]));
+        seen.forget();
+        assert_eq!(clone.latest(), None);
+    }
 
     use std::time::Duration;
 

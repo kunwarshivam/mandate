@@ -11,10 +11,15 @@
 //!   `401` from a connector that answers it so) is a failure; any other answer the broker gave is
 //!   a good result, except a `403`, which is the broker's refusal and counts neither way.
 //!
+//! - **headroom:** a response whose rate limit leaves under a fifth of the budget is a failure,
+//!   one that leaves more is a good result, and one that reports no rate limit counts neither way
+//!   (connections spec §8.2, DEC-2842).
+//!
 //! A request that never left the process (`NotSent`) says nothing about the connection and counts
 //! neither way. The counts live only in this process: a restart starts them again, and what they
 //! led to is on the stream (journal spec §9.8).
 
+use mandate_alpaca::RateLimit;
 use mandate_executor::{
     BrokerOutcome, BrokerUnknown, ConnectionTrouble, ConnectorError, DegradeReason, SuspendReason,
 };
@@ -29,6 +34,11 @@ pub const FORBIDDEN: u16 = 403;
 /// account (connections spec §8.2's cadence while any agent is deployed, Proposed; DEC-2837). It is
 /// fixed for every process: the faster of §8.2's two cadences, so no executor probes less often.
 pub const PROBE_EVERY_S: i64 = 60;
+
+/// Responses in a row whose rate limit leaves under a fifth of the budget that make the
+/// connection `degraded` (§8.2: under 20% of the published or default budget; DEC-2842). One is
+/// enough: §8.2 counts no run for headroom.
+pub const HEADROOM_FAILURES: u32 = 1;
 
 /// Consecutive network failures that make the connection `degraded` (§8.2, Proposed).
 pub const NETWORK_FAILURES: u32 = 3;
@@ -48,6 +58,7 @@ enum Reading {
 pub struct Health {
     network: u32,
     authorization: u32,
+    headroom: u32,
     /// Whether a later permission check failed in this process (DEC-2840). Only a replaced
     /// credential ends `suspended` (connections spec §9.1), so nothing here clears it.
     check_failed: bool,
@@ -64,6 +75,22 @@ impl Health {
     /// Counts a failed read of a one-read broker's account, which answers as one call.
     pub fn observe_error(&mut self, error: &ConnectorError) {
         self.observe(&Err(*error));
+    }
+
+    /// Counts the rate limit a broker's response reported (DEC-2842): under a fifth of the budget
+    /// left is a failure of the headroom class, more is a good result, none counts neither way.
+    pub fn observe_rate_limit(&mut self, rate_limit: Option<RateLimit>) {
+        let reading = match rate_limit {
+            None => Reading::Silent,
+            Some(RateLimit { limit, remaining }) => {
+                if u64::from(remaining).saturating_mul(5) < u64::from(limit) {
+                    Reading::Failed
+                } else {
+                    Reading::Good
+                }
+            }
+        };
+        count(&mut self.headroom, reading);
     }
 
     /// Notes a later permission check that failed (DEC-2840).
@@ -84,6 +111,9 @@ impl Health {
         let mut troubles = Vec::new();
         if self.network >= NETWORK_FAILURES {
             troubles.push(ConnectionTrouble::Degraded(DegradeReason::NetworkErrors));
+        }
+        if self.headroom >= HEADROOM_FAILURES {
+            troubles.push(ConnectionTrouble::Degraded(DegradeReason::RateHeadroom));
         }
         if self.authorization >= AUTHORIZATION_FAILURES {
             troubles.push(ConnectionTrouble::Suspended(
@@ -126,9 +156,37 @@ fn count(failures: &mut u32, reading: Reading) {
 
 #[cfg(test)]
 mod tests {
-    use mandate_executor::{BrokerUnknown, ConnectionTrouble, ConnectorError, SuspendReason};
+    use mandate_alpaca::RateLimit;
+    use mandate_executor::{
+        BrokerUnknown, ConnectionTrouble, ConnectorError, DegradeReason, SuspendReason,
+    };
 
     use super::Health;
+
+    /// DEC-2842: a rate limit under a fifth of the budget degrades at once, a fifth or more is a
+    /// good result that clears the class, and no rate limit leaves it as it was.
+    #[test]
+    fn under_a_fifth_of_the_budget_degrades_and_no_reading_counts_neither_way() {
+        let left = |remaining| {
+            Some(RateLimit {
+                limit: 200,
+                remaining,
+            })
+        };
+        let degraded = vec![ConnectionTrouble::Degraded(DegradeReason::RateHeadroom)];
+        let mut health = Health::default();
+        health.observe_rate_limit(left(40));
+        assert!(
+            health.troubles().is_empty(),
+            "exactly a fifth left is enough"
+        );
+        health.observe_rate_limit(left(39));
+        assert_eq!(health.troubles(), degraded);
+        health.observe_rate_limit(None);
+        assert_eq!(health.troubles(), degraded, "no reading changes nothing");
+        health.observe_rate_limit(left(40));
+        assert!(health.troubles().is_empty());
+    }
 
     /// A one-read broker's account reads count as one answer each (DEC-2832): two refused
     /// credentials in a row suspend, and an answered read between them resets the count.

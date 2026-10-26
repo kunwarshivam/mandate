@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
+use mandate_alpaca::RateLimit;
 use mandate_canon::{Object, Value, parse};
 use mandate_connections::checks::{AccountRead, CheckReport, Occasion, Outcome};
 use mandate_connections::record::{AccountPiiRef, ConnectionId};
@@ -49,6 +50,12 @@ pub trait Broker {
     /// DEC-933 item 1, DEC-2386 item 4); `None` for a broker that answers the four reads a
     /// reconciliation asks for, as Alpaca does.
     fn account_reads(&mut self) -> Option<Result<AccountReads, ConnectorError>> {
+        None
+    }
+
+    /// The rate limit the broker's latest response reported (connections spec §8.2's headroom,
+    /// DEC-2842), or `None`, the default, for a broker that reports none.
+    fn rate_limit(&self) -> Option<RateLimit> {
         None
     }
 
@@ -1273,6 +1280,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         let answer = self.broker.call(request);
         self.health.observe(&answer);
+        self.health.observe_rate_limit(self.broker.rate_limit());
         answer
     }
 

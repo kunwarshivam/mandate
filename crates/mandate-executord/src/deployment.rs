@@ -26,6 +26,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use mandate_accounting::{AssetClass, InstrumentId};
+use mandate_alpaca::RateLimit;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Value, parse};
 use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
@@ -1016,6 +1017,10 @@ impl<B: Broker> Broker for Named<B> {
         self.broker.has_later_checks()
     }
 
+    fn rate_limit(&self) -> Option<RateLimit> {
+        self.broker.rate_limit()
+    }
+
     fn later_check(
         &self,
         connection: ConnectionId,
@@ -1028,6 +1033,7 @@ impl<B: Broker> Broker for Named<B> {
 
 #[cfg(test)]
 mod tests {
+    use mandate_alpaca::RateLimit;
     use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
     use mandate_connections::record::ConnectionId;
     use mandate_domain::{CapabilityProfile, ProfileError};
@@ -1050,6 +1056,13 @@ mod tests {
 
         fn has_later_checks(&self) -> bool {
             true
+        }
+
+        fn rate_limit(&self) -> Option<RateLimit> {
+            Some(RateLimit {
+                limit: 200,
+                remaining: 7,
+            })
         }
 
         fn later_check(
@@ -1086,6 +1099,12 @@ mod tests {
             None
         );
         assert!(!Named::new(Plain, None).has_later_checks());
+        assert_eq!(
+            Plain.rate_limit(),
+            None,
+            "a broker reports no rate limit by default"
+        );
+        assert_eq!(Named::new(Plain, None).rate_limit(), None);
         Ok(())
     }
 
@@ -1095,6 +1114,14 @@ mod tests {
     fn a_named_broker_runs_its_inner_broker_s_later_checks() -> Result<(), String> {
         let named = Named::new(Checking, None);
         assert!(named.has_later_checks());
+        assert_eq!(
+            named.rate_limit(),
+            Some(RateLimit {
+                limit: 200,
+                remaining: 7
+            }),
+            "and its rate limit (DEC-2842)"
+        );
         let connection = ConnectionId::new("conn-1").map_err(|e| format!("{e:?}"))?;
         assert_eq!(
             named.later_check(connection, Occasion::Daily, AccountRead::Unreadable),
