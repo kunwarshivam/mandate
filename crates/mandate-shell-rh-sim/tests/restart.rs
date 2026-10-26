@@ -437,8 +437,9 @@ fn first_run(server: &Rc<SimServer>, line: Line) -> Stages {
 /// `order_id`. The broker holds one order and saw one place: nothing was sent again. The
 /// reconciliation that follows reads the broker's working order, whose record carries no key of
 /// ours (U-R2), and stops the restart before its cycle, fail closed: the order is marked
-/// `Unknown` again and the executor drafts `ExternalActivityIngested`, which has no registered
-/// schema, so the journal refuses it (DEC-956 item 5). Matching it by its journaled broker id is
+/// `Unknown` again and the executor drafts `ExternalActivityIngested` for the order it cannot match,
+/// and the reconciliation's difference stops the restart (DEC-956 item 5). Matching it by its
+/// journaled broker id is
 /// DEC-956 item 2's proposal, for the founder. The run is refused on such an account anyway
 /// (DEC-529 item 3, DEC-470 item 1).
 #[test]
