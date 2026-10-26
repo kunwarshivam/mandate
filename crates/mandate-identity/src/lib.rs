@@ -185,6 +185,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_time::UtcNanos;
 
+pub mod approvers;
 pub mod demand;
 mod founding;
 mod matrix;

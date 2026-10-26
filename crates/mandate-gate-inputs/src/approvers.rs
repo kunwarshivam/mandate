@@ -12,51 +12,28 @@
 //! membership record's instant, and each reference resolves only among the members active then
 //! who hold the approver role in effect. A stream the run cannot read either way resolves no one,
 //! so every grant is refused `not_an_approver` and nothing is sent (`AGENTS.md` rule 3).
+//!
+//! The resolution itself is [`mandate_identity::approvers`], over the records' sequence, type,
+//! event time and payload, so the runtime daemon resolves the same way; this module reads the
+//! control stream's records into it and adds DEC-923's live `cli_confirm` scope.
 
 use std::collections::BTreeSet;
 
-use mandate_canon::{Value, encode_ulid};
+use mandate_canon::Value;
 use mandate_domain::Environment;
-use mandate_identity::{MEMBERSHIP_TYPES, Roster, membership_record};
+pub use mandate_identity::approvers::Members;
+use mandate_identity::approvers::{self as resolution, RecordView, latest_connection_record};
 use mandate_num::Usd;
 use mandate_runtime::{LiveBroker, LiveScope, OpaqueUser};
 use mandate_spec::Mandate;
 use mandate_spec::document::ApproverRef;
-use mandate_time::UtcNanos;
 
 use crate::control::ControlRecord;
 
-/// The workspace's members as the run reads them off its control stream.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Members {
-    /// No member the run can name: with no §9.12 record, the connection has no
-    /// `ConnectionEstablished`, its latest record is a revocation, or the record names no user;
-    /// with one, the stream does not fold (DEC-2384 item 4).
-    Unread,
-    /// A one-person workspace whose one member, the owner, holds every workspace role.
-    Owner(String),
-    /// The members the §9.12 fold reads active at the stream's latest membership record (DEC-2384).
-    Folded(Roster),
-}
-
-/// The members `records` show for the workspace whose mandate names `connection`. With no §9.12
-/// membership record, the owner is the `user` of the connection's latest `ConnectionEstablished`
-/// or `ConnectionRevoked` by `seq`, a revocation outranking an establishment at the same `seq`,
-/// and only while that record is an establishment naming a user as non-empty text. With one, the
-/// stream's [`Roster`] at its latest membership record, or [`Members::Unread`] when it does not fold.
+/// The members `records` show for the workspace whose mandate names `connection`, as
+/// [`mandate_identity::approvers::members`] reads them.
 pub fn members(records: &[ControlRecord], connection: &str) -> Members {
-    if records
-        .iter()
-        .any(|record| MEMBERSHIP_TYPES.contains(&record.event_type.as_str()))
-    {
-        return roster(records).map_or(Members::Unread, Members::Folded);
-    }
-    match latest_record(records, connection) {
-        Some(record) if record.event_type == "ConnectionEstablished" => text_of(record, "user")
-            .filter(|user| !user.is_empty())
-            .map_or(Members::Unread, |user| Members::Owner(user.to_owned())),
-        Some(_) | None => Members::Unread,
-    }
+    resolution::members(&views(records), connection)
 }
 
 /// What the run resolves its approvers from again at each read of the control stream (DEC-2384
@@ -81,90 +58,25 @@ impl ApproverSource {
     }
 }
 
-/// The roster `records`, in stream order, fold to at the latest membership record's
-/// `event_time` (DEC-2384 items 2 and 4): `None` when any record carries no `event_time`, a membership record
-/// does not map, or the fold is unreadable then.
-fn roster(records: &[ControlRecord]) -> Option<Roster> {
-    let timed: Vec<(&ControlRecord, UtcNanos)> = records
-        .iter()
-        .map(|record| record.event_time.map(|at| (record, at)))
-        .collect::<Option<_>>()?;
-    let at = timed
-        .iter()
-        .filter(|(record, _)| MEMBERSHIP_TYPES.contains(&record.event_type.as_str()))
-        .map(|(_, at)| *at)
-        .max()?;
-    let Ok(memberships) = timed
-        .into_iter()
-        .filter_map(|(record, at)| {
-            membership_record(record.seq, &record.event_type, at, &record.payload).transpose()
-        })
-        .collect::<Result<Vec<_>, _>>()
-    else {
-        return None;
-    };
-    let Ok(roster) = Roster::read(memberships, at) else {
-        return None;
-    };
-    Some(roster)
+/// The user ids `references` resolve to among `members`, as
+/// [`mandate_identity::approvers::resolve`] reads them: the set admission check 3 compares a
+/// responder against. Empty when nothing resolves, so every grant is refused.
+pub fn resolve(references: &[ApproverRef], members: &Members) -> BTreeSet<String> {
+    let texts: Vec<&str> = references.iter().map(ApproverRef::as_str).collect();
+    resolution::resolve(&texts, members)
 }
 
-/// The latest `ConnectionEstablished` or `ConnectionRevoked` of `connection` by `seq`, a
-/// revocation outranking an establishment at the same `seq`: the one record both [`members`] and
-/// [`live_cli_confirm`] read, so the two never disagree on which record governs.
-fn latest_record<'r>(records: &'r [ControlRecord], connection: &str) -> Option<&'r ControlRecord> {
+/// The resolution's view of each of `records`.
+fn views(records: &[ControlRecord]) -> Vec<RecordView<'_>> {
     records
         .iter()
-        .filter(|record| {
-            matches!(
-                record.event_type.as_str(),
-                "ConnectionEstablished" | "ConnectionRevoked"
-            ) && text_of(record, "connection_id") == Some(connection)
-        })
-        .max_by_key(|record| (record.seq, record.event_type == "ConnectionRevoked"))
-}
-
-/// The user ids `references` resolve to among `members`: the set admission check 3 compares a
-/// responder against. Among DEC-953's owner, a role reference resolves to the owner, who holds
-/// every workspace role, and a `user:` reference only when it names the owner. Among a roster, see
-/// [`folded`]. Empty when nothing resolves, so every grant is refused.
-pub fn resolve(references: &[ApproverRef], members: &Members) -> BTreeSet<String> {
-    let owner = match members {
-        Members::Unread => return BTreeSet::new(),
-        Members::Folded(roster) => return folded(references, roster),
-        Members::Owner(owner) => owner,
-    };
-    references
-        .iter()
-        .filter(|reference| match reference.as_str().split_once(':') {
-            Some(("role", _)) => true,
-            Some(("user", user)) => user == owner,
-            Some(_) | None => false,
-        })
-        .map(|_| owner.clone())
-        .collect()
-}
-
-/// The user ids `references` resolve to among `roster`, by [`Roster::approvers`], the one
-/// resolution the API's grant check shares (DEC-2384 item 3, DEC-2130): each member's ULID in both
-/// of its spellings, the canonical upper case the API's session names and the lower case the
-/// CLI's `--user` takes (DEC-527 item 3), so check 3's comparison of a responder's text admits the
-/// same principal either way and no one else.
-fn folded(references: &[ApproverRef], roster: &Roster) -> BTreeSet<String> {
-    let texts: Vec<&str> = references.iter().map(ApproverRef::as_str).collect();
-    roster
-        .approvers(&texts)
-        .into_iter()
-        .flat_map(|member| {
-            let canonical = encode_ulid(member.0);
-            [canonical.to_ascii_lowercase(), canonical]
+        .map(|record| RecordView {
+            seq: record.seq,
+            event_type: &record.event_type,
+            event_time: record.event_time,
+            payload: &record.payload,
         })
         .collect()
-}
-
-/// One text member of `record`'s payload.
-fn text_of<'r>(record: &'r ControlRecord, name: &str) -> Option<&'r str> {
-    record.payload.get(name).and_then(Value::as_str)
 }
 
 /// DEC-923's scope for a live `cli_confirm` grant, read as `mandate approvals approve` reads it
@@ -182,14 +94,16 @@ pub fn live_cli_confirm(
         return None;
     }
     let connection = mandate.connection_id.as_str();
-    let Members::Owner(owner) = members(records, connection) else {
+    let views = views(records);
+    let Members::Owner(owner) = resolution::members(&views, connection) else {
         return None;
     };
-    let latest = latest_record(records, connection)?;
-    if text_of(latest, "environment") != Some("live") {
+    let latest = latest_connection_record(&views, connection)?;
+    let text = |name: &str| latest.payload.get(name).and_then(Value::as_str);
+    if text("environment") != Some("live") {
         return None;
     }
-    let broker = match text_of(latest, "broker") {
+    let broker = match text("broker") {
         Some("robinhood") => LiveBroker::Robinhood,
         Some(_) | None => LiveBroker::Other,
     };
