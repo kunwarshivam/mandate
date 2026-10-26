@@ -74,7 +74,7 @@ impl Account {
 
 /// A position every fill of which was at 10 (`Account::fill`'s price), so trading spec §8.1's
 /// basis is the quantity × 10 however it was reached; with no mark there is no value, and with no
-/// `ProtectionChanged` no protection (DEC-2136).
+/// `ProtectionChanged` no protection (DEC-2138).
 fn position(instrument: &str, qty: &str) -> Value {
     let basis = SignedQty::parse(qty)
         .expect("a quantity")
@@ -250,7 +250,7 @@ fn the_fold_matches_an_independent_sum_and_catches_seeded_bugs() {
 }
 
 /// A net sale is marked at the ask, which a risk mark does not carry, so neither its value nor its
-/// P&L is served at the bid (DEC-2136 item 3).
+/// P&L is served at the bid (DEC-2138 item 3).
 #[test]
 fn a_short_sub_ledger_is_never_valued_at_the_bid() {
     let mut a = Account::default();

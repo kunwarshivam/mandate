@@ -3128,7 +3128,7 @@ proptest! {
     }
 }
 
-/// The owner's protection read (`mandate_gate_context::Positions`, DEC-2136 item 4) of a run's
+/// The owner's protection read (`mandate_gate_context::Positions`, DEC-2138 item 4) of a run's
 /// journal, against the executor's own fold of the same rows, the oracle: per instrument, the
 /// resting orders, the covered quantity, the prices, and the earliest open interval's start. Its
 /// count first, so no run passes on nothing.

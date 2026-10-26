@@ -1173,7 +1173,7 @@ fn holds(steps: Vec<Step>) -> Result<(), TestCaseError> {
     the_owners_read_agrees(&shell)
 }
 
-/// The owner's protection read (`mandate_gate_context::Positions`, DEC-2136 item 4) of the run's
+/// The owner's protection read (`mandate_gate_context::Positions`, DEC-2138 item 4) of the run's
 /// journal, against the executor's live state, the oracle: the resting stops, what they cover,
 /// their prices, and the earliest open interval's start. Plain entries' intervals end only with
 /// their own stops (DEC-966 item 2), which the read must follow too.

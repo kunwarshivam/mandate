@@ -422,8 +422,8 @@ fn set(members: &mut [(&'static str, Value)], name: &str, value: Value) {
 /// The agent's net filled quantity per instrument (`read-models/positions`, DEC-2111 item 4): the
 /// `FillApplied` and `LateFillApplied` records of its own orders, buys adding and sells
 /// subtracting, in instrument order, leaving out an instrument that nets to zero. Its orders are
-/// those `mandate_gate_context::Positions` attributes to it (DEC-2136 item 1): its requests, their
-/// replacements, and the protective legs the broker created for its entries. Beside it, DEC-2136's
+/// those `mandate_gate_context::Positions` attributes to it (DEC-2138 item 1): its requests, their
+/// replacements, and the protective legs the broker created for its entries. Beside it, DEC-2138's
 /// figures from the same reading: the sub-ledger's §8.1 `cost_basis`, the latest counted
 /// `risk_mark`, §8.2's `market_value` and `unrealized_pnl` at that mark when it is sane and the
 /// position long, and the account's `protection`. `None` when a row the reading reads cannot be
@@ -469,7 +469,7 @@ fn decimal(figure: Option<impl std::fmt::Display>) -> Value {
 }
 
 /// §8.2's market value Q × bid and unrealized P&L Q × bid − B, exactly: `Some(None)` unless the
-/// basis is served, long or flat, and the mark is sane (DEC-2136 item 3; a short is marked at the
+/// basis is served, long or flat, and the mark is sane (DEC-2138 item 3; a short is marked at the
 /// ask, which a risk mark does not carry), `None` when the arithmetic overflows.
 fn valued(basis: Option<Position>, mark: Option<RiskMark>) -> Option<Option<(Usd, Usd)>> {
     let long = basis.filter(|basis| !basis.qty().is_negative());

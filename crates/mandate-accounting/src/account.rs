@@ -90,7 +90,7 @@ impl Position {
 
     /// The position after a fill of signed quantity `q` at `price`, with the fill's gross realized
     /// P&L, by the one §8.1 rule the account fold applies, so a sub-ledger read elsewhere never
-    /// re-derives it (DEC-2136 item 1).
+    /// re-derives it (DEC-2138 item 1).
     ///
     /// # Errors
     /// Whatever the §8.1 arithmetic overflows on.

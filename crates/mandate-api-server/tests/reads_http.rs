@@ -907,7 +907,7 @@ fn an_agents_positions_are_its_own_fills_beside_the_accounts_holdings() {
     assert_eq!(
         served.get("positions"),
         Some(&positions),
-        "agt_b's fill is not agt_a's; its basis is 2 × 101.5, worth 2 × 103 at the sane bid (DEC-2136)"
+        "agt_b's fill is not agt_a's; its basis is 2 × 101.5, worth 2 × 103 at the sane bid (DEC-2138)"
     );
     let holdings = parse(
         br#"[{"instrument":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","qty":"3","broker_qty":"3","mismatch":false,"observed_at":"2026-10-17T10:00:02.000000000Z"}]"#,

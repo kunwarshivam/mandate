@@ -1,4 +1,4 @@
-//! What the owner reads of one agent's positions (DEC-2136): the agent sub-ledger's cost basis,
+//! What the owner reads of one agent's positions (DEC-2138): the agent sub-ledger's cost basis,
 //! each instrument's latest risk mark, and the account's protection in it, folded from the account
 //! stream's rows alone.
 //!
@@ -36,7 +36,7 @@ impl CountedSession {
 }
 
 /// An instrument's latest version-2 mark from a counted session, as journaled: its bid when it is
-/// sane, never a price when it is not (DEC-2136 item 2).
+/// sane, never a price when it is not (DEC-2138 item 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RiskMark {
     pub bid: Option<Price>,
@@ -45,7 +45,7 @@ pub struct RiskMark {
     pub at: UtcNanos,
 }
 
-/// The account's protection in one instrument (trading spec §5.4, DEC-2136 item 4): the
+/// The account's protection in one instrument (trading spec §5.4, DEC-2138 item 4): the
 /// protective orders resting, the quantity they cover, their prices, and the start of the earliest
 /// unprotected interval still open.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,7 +190,7 @@ impl Positions {
 
     /// Folds one row. A row on another stream changes nothing. A row of a type the fold reads that
     /// does not parse is refused, and the caller serves no position from the rows so far
-    /// (DEC-2136 item 6).
+    /// (DEC-2138 item 6).
     ///
     /// # Errors
     /// [`Unreadable`], naming the row's type and the member that did not parse.
@@ -247,7 +247,7 @@ impl Positions {
         Ok(())
     }
 
-    /// The agent sub-ledger's position in `instrument` (DEC-2136 item 1): `None` when the agent has
+    /// The agent sub-ledger's position in `instrument` (DEC-2138 item 1): `None` when the agent has
     /// no fill in it, or when a release, a corporate action, or a fee in the asset leaves its basis
     /// for the accounting fold to say.
     pub fn cost_basis(&self, instrument: &str) -> Option<Position> {
@@ -259,7 +259,7 @@ impl Positions {
 
     /// The net quantity of the agent's own fills per instrument, in instrument order, leaving out an
     /// instrument that nets to zero (DEC-2111 item 4): buys add, sells subtract, each `fill_id`
-    /// once, over the agent's orders as item 1 of DEC-2136 attributes them.
+    /// once, over the agent's orders as item 1 of DEC-2138 attributes them.
     pub fn filled(&self) -> impl Iterator<Item = (&str, SignedQty)> {
         self.filled
             .iter()
@@ -267,12 +267,12 @@ impl Positions {
             .map(|(instrument, qty)| (instrument.as_str(), *qty))
     }
 
-    /// The instrument's latest counted version-2 mark (DEC-2136 item 2).
+    /// The instrument's latest counted version-2 mark (DEC-2138 item 2).
     pub fn risk_mark(&self, instrument: &str) -> Option<RiskMark> {
         self.marks.get(instrument).copied()
     }
 
-    /// The account's protection in `instrument` (DEC-2136 item 4).
+    /// The account's protection in `instrument` (DEC-2138 item 4).
     pub fn protection(&self, instrument: &str) -> Protection {
         let unprotected_since = self
             .intervals
@@ -334,7 +334,7 @@ impl Positions {
     /// its replacement inherits the rest of. Any other fill is another agent's, passed over unread
     /// (DEC-2112 item 2). A fill of a protective leg whose id names no known entry, in an
     /// instrument the agent holds, may be the agent's (DEC-160's single-holder rule, which needs
-    /// every agent's lots), so it is refused rather than guessed (DEC-2136 item 1).
+    /// every agent's lots), so it is refused rather than guessed (DEC-2138 item 1).
     fn fill(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
         let order = payload.text("client_order_id")?.to_owned();
         let protective = self

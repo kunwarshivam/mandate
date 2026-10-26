@@ -1,4 +1,4 @@
-//! The owner's position read (DEC-2136): the agent sub-ledger's §8.1 basis, the latest counted
+//! The owner's position read (DEC-2138): the agent sub-ledger's §8.1 basis, the latest counted
 //! mark, and the account's protection, each figure computed here by hand from the rows.
 
 use mandate_accounting::Position;
