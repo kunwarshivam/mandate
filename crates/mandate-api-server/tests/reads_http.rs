@@ -225,15 +225,18 @@ fn seed(f: &Fixture) {
                     version(7)
                 ),
             ),
-            row(
-                &a,
-                3,
-                "ApprovalRequested",
-                &format!(
-                    r#"{{"content":{{{ACTION}}},"content_hash":"{}","deadline":800}}"#,
-                    version(8)
-                ),
-            ),
+            StoredEvent {
+                schema_version: 3,
+                ..row(
+                    &a,
+                    3,
+                    "ApprovalRequested",
+                    &format!(
+                        r#"{{"content":{{{ACTION}}},"content_hash":"{}","deadline":800}}"#,
+                        version(8)
+                    ),
+                )
+            },
             row(
                 &a,
                 4,
@@ -462,6 +465,10 @@ fn the_approvals_inbox_and_one_approval_read_from_the_agent_streams() {
                 .iter()
                 .map(|a| {
                     assert!(a.get("content").is_none(), "the inbox carries no content");
+                    assert!(
+                        a.get("schema_version").is_none(),
+                        "nor the version its content comes from"
+                    );
                     assert_eq!(a.get("order"), Some(&bound_order()), "but its order");
                     text(a, "approval_id").to_owned()
                 })
@@ -487,6 +494,20 @@ fn the_approvals_inbox_and_one_approval_read_from_the_agent_streams() {
         Some(&parse(format!("{{{ACTION}}}").as_bytes()).expect("JSON"))
     );
     assert_eq!(approval.get("order"), Some(&bound_order()));
+    assert_eq!(
+        approval.get("schema_version").and_then(Value::as_int),
+        Some(3),
+        "the single read names the ApprovalRequested version its content comes from (DEC-2518)"
+    );
+    let reply = get(&f, &ws(&format!("/approvals/{pending}")), Some(&cookie));
+    assert_eq!(
+        json(&reply)
+            .get("approval")
+            .and_then(|a| a.get("schema_version"))
+            .and_then(Value::as_int),
+        Some(1),
+        "a version 1 request reads as version 1"
+    );
     for absent in ["01JBH3BTZ8K2M4N6P8R0S2T099", "not-an-id"] {
         assert_eq!(
             get(&f, &ws(&format!("/approvals/{absent}")), Some(&cookie)).status,

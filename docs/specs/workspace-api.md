@@ -998,14 +998,21 @@ workspace that ran it, and no route aggregates backtests across workspaces.
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
 | Inbox | `GET /approvals?state=pending\|resolved` | — | Pending by deadline, then resolved with outcome (D5) |
-| Read one | `GET /approvals/{id}` | — | The content object exactly as `ApprovalRequested` holds it, its `content_hash`, the deadline, the grants so far, and the status folded from the agent stream. Never a scorecard, profit estimate, or price target (DEC-126) |
+| Read one | `GET /approvals/{id}` | — | The content object exactly as `ApprovalRequested` holds it, the `ApprovalRequested` version it comes from (`schema_version`, [DEC-2518](../project/decisions/DEC-2518.md)), its `content_hash`, the deadline, the grants so far, and the status folded from the agent stream. Never a scorecard, profit estimate, or price target (DEC-126) |
 | Delegation preview | `POST /approvals/{id}/delegation-previews` | — | §5.3. Offered only where mandate spec §6.4 allows a scope |
 | Respond | `POST /approvals/{id}/responses` | `ApprovalResponseSubmitted` | §5.2. Users only |
 | Resolve a notice | `GET /notices/{notice_id}` | `RecordsAccessed` | §3.9 |
 
 The inbox and the single read return `read-models/approvals` and `read-models/approval`
 ([DEC-979](../project/decisions/DEC-979.md)): each approval's id, agent, state, `requested_at`,
-`deadline` (the journaled risk-clock seconds), and `content_hash`; the single read adds `content`.
+`deadline` (the journaled risk-clock seconds), and `content_hash`; the single read adds `content`
+and `schema_version`, the `ApprovalRequested` version `content` comes from (1, 2 or 3;
+[DEC-2518](../project/decisions/DEC-2518.md)). Version 3's content names the checks its dry run
+deferred (journal spec §9.6, rule 291) and versions 1 and 2 name none, so a client tells a
+version 3 request without its list from an older one and shows it as unreadable, never as
+nothing deferred (mandate spec §6.4). A version 1 or 2 request whose decision, written in another
+batch, deferred checks is not caught here: that is rule 292's cross-batch debt
+(`E21-30-approval-deferral-range-check`).
 The state is folded from the agent stream, and the first terminal event wins: `pending` until
 re-validation acts (`acted`) or the approval ends `skipped` (by the owner's Skip or by
 re-validation), `timed_out`, or `canceled`. An admitted grant still awaiting re-validation, and a
