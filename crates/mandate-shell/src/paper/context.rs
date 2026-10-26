@@ -18,7 +18,7 @@ use mandate_builder::{
 use mandate_domain::{AssetClass as DomainAssetClass, Environment, MarketSession};
 use mandate_executor::{
     BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource, FillConfigRefs,
-    InstrumentSnapshot, MandateVersion, MandateView as ExecutorMandateView, equity_bracket_prices,
+    InstrumentSnapshot, MandateVersion, MandateView as ExecutorMandateView,
 };
 use mandate_num::{
     CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, ShareIncrement, Signed, SizeFraction,
@@ -31,11 +31,14 @@ use mandate_spec::context::stop_limit_asset_classes;
 use mandate_spec::document::{Protection, ProvenanceMap};
 use mandate_time::{Date, UtcNanos};
 
+use mandate_gate_inputs::fill_refs;
+pub(super) use mandate_gate_inputs::stop_limit_offset;
+
 use super::artifacts::Artifacts;
 use super::facts::{BrokerFacts, PaperFacts};
 use super::gate::{advisory_gate_context, gate_template, reservation};
 use super::judge::{judge, judge_submission_time};
-use super::{absent, usd};
+use super::usd;
 use crate::adapters::{BuilderContext, DecisionContext, ExecutorContext, RunContext};
 use crate::envelope::{IdSpace, Ids};
 use crate::error::Cause;
@@ -263,47 +266,18 @@ impl BindingGateSource for ReconcilingPaperContext {
     }
 }
 
-/// The fill records' configuration from the registered references: the fee configuration, the
-/// trading calendar (which also settles the paper run, DEC-938 item 2) and the instrument
-/// snapshot, or none when any is missing, which the journal refuses.
-fn fill_refs(refs: &BindingGateConfigRefs) -> Option<FillConfigRefs> {
-    let calendar = refs.trading_calendar.clone()?;
-    Some(FillConfigRefs {
-        fee_config: refs.fee_config.clone()?,
-        settlement_calendar: calendar.clone(),
-        trading_calendar: calendar,
-        instrument_snapshot: refs.instrument_snapshot.clone()?,
-    })
-}
-
-/// The mandate's protection for an entry at `entry`, as the executor derives it, or none when the
-/// mandate disables protection. Enabled protection without a stop distance is refused rather than
-/// sent unprotected.
+/// The mandate's protection for an entry at `entry`, as the executor derives it
+/// ([`mandate_gate_inputs::protection_prices`]), in the runtime's terms.
 pub(super) fn protection_prices(
     protection: &Protection,
     entry: Price,
 ) -> Result<Option<ProtectionPrices>, Cause> {
-    if !protection.enabled {
-        return Ok(None);
-    }
-    let stop_distance = protection
-        .stop_distance
-        .as_ref()
-        .ok_or_else(|| absent("the mandate's stop distance"))?;
-    let take_profit_distance = protection
-        .take_profit_distance
-        .as_ref()
-        .map(|distance| Fraction::parse(distance.as_str()))
-        .transpose()?;
-    let bracket = equity_bracket_prices(
-        entry,
-        Fraction::parse(stop_distance.as_str())?,
-        take_profit_distance,
-    )?;
-    Ok(Some(ProtectionPrices {
-        stop: bracket.stop,
-        take_profit: bracket.take_profit,
-    }))
+    Ok(
+        mandate_gate_inputs::protection_prices(protection, entry)?.map(|prices| ProtectionPrices {
+            stop: prices.stop,
+            take_profit: prices.take_profit,
+        }),
+    )
 }
 
 /// The classes a stop-limit protects that the run's own validation reads (V-008, W-002; DEC-539
@@ -318,19 +292,6 @@ pub(super) fn run_stop_limit_classes(
         Environment::Paper => stop_limit_asset_classes("alpaca"),
         Environment::Live => None,
     }
-}
-
-/// The mandate's stop-limit offset when its protection is on and sets one; an offset that does
-/// not read as a fraction refuses the run rather than leaving a stop-limit without its limit.
-pub(super) fn stop_limit_offset(protection: &Protection) -> Result<Option<Fraction>, Cause> {
-    let Some(offset) = protection
-        .crypto_stop_limit_offset
-        .as_ref()
-        .filter(|_| protection.enabled)
-    else {
-        return Ok(None);
-    };
-    Ok(Some(Fraction::parse(offset.as_str())?))
 }
 
 fn run_context(

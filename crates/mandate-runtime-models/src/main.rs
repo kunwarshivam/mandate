@@ -19,6 +19,10 @@
 //! livez|readyz --probe <socket>` is its `exec` probe (DEC-994 item 5). This is the one place the
 //! host clock is read (ES-05).
 //!
+//! A deployment resolved from the journal evaluates its confirmed mandate's pinned quant models on
+//! each tick, over the daily closes stored under `MANDATE_BARS`, through
+//! [`mandate_runtime_models::wiring`] (DEC-2383 item 7); with no bars root it evaluates none.
+//!
 //! A pod the deployment manager starts runs `mandate-daemon run --probe <socket>` and names its
 //! workspace and agent by variables instead ([`launch`], DEC-1015). Until the connection and the
 //! owner are read from the agent's deployment, such a launch refuses `deployment_unresolved`.
@@ -212,17 +216,24 @@ fn run(
             let (version, document) =
                 deployment::document(&rows, &agent, Environment::Paper, &artifacts)?;
             let rules = deployment::rule_set(&rows, Environment::Paper, &artifacts).ok();
+            let bars = std::env::var(BARS_ENV).ok();
+            let models = mandate_runtime_models::wiring(
+                &rows,
+                Environment::Paper,
+                &document,
+                bars.as_deref(),
+                FsArtifactStore::open_existing(root.as_str())
+                    .map_err(|_| "artifact_store_unavailable")?,
+            );
             let mut wiring = production::wired(
                 fixture::wiring_for(&found.approvers, &found.author, &stream),
                 &version,
                 &document,
-                (
-                    rules,
-                    BarsReader::new(std::env::var(BARS_ENV).ok().as_deref()),
-                ),
+                (rules, BarsReader::new(bars.as_deref())),
                 &format!("clock:{workspace}"),
                 &agent,
             );
+            wiring.models = models;
             if let Some(opted) = opted {
                 let meter = JournalMeter::open(
                     PgStore::connect(&dsn)?,

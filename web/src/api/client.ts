@@ -127,6 +127,7 @@ export const OPERATIONS: Readonly<Record<Operation, `/${string}`>> = {
   end_delegation: "/agents/{agent}/delegations/{delegation}/end",
   confirm_version: "/mandate-versions/{version}/confirm",
   create_version: "/mandate-versions",
+  deploy: "/agents",
 };
 
 /** Spec §3.3's CSRF defence (L2's pin, DEC-681): a header a cross-site form cannot set, on every command. */

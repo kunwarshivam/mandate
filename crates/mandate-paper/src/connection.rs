@@ -92,8 +92,8 @@ impl ConnectionRefusal {
 }
 
 /// What the account the connection binds holds, as the connector's snapshot of it answered
-/// (DEC-470 item 1): every position the snapshot listed, a zero quantity included, and every
-/// working order, counted. The account is flat only when both counts are zero.
+/// (DEC-470 item 1): every position the snapshot listed of a non-zero quantity, long or short,
+/// and every working order, counted (DEC-2390 item 1: a row of quantity exactly zero is flat). The account is flat only when both counts are zero.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Held {
     /// How many positions the snapshot listed.

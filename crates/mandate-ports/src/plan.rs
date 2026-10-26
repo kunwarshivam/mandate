@@ -2,10 +2,12 @@
 //! runtime's model outputs mapped to the builder's, the builder's proposal mapped back to the
 //! runtime's, and the §6 classification with the §6.2 step 5c policy overlay.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_builder::{
-    Action as BuilderAction, ActionContext, BuilderMandate, Clip as BuilderClip, Direction,
-    ModelOutput as BuilderModelOutput,
+    AccountSnapshot, Action as BuilderAction, ActionContext, BuilderMandate, Clip as BuilderClip,
+    Direction, Market, ModelOutput as BuilderModelOutput,
 };
 use mandate_canon::Value;
 use mandate_domain::{AutonomyDecision, Purpose as BuilderPurpose};
@@ -265,7 +267,13 @@ fn action_order_matches(
 }
 
 /// `mandate-builder`'s `conviction_linear` sizing of `inputs` under `validated`, as the runtime's
-/// proposal: `None` for a hold.
+/// proposal: `None` for a hold. An instrument whose thesis ended (`inputs.ended_theses`, mandate
+/// spec §8.6) takes §8.3 step 2's first branch instead: the whole position sold, with
+/// `exit_origin` `removed_instrument`, reading no model output, so an output the mandate no longer
+/// pins cannot hold the exit (MI-34, DEC-2391). The runtime's working exits in the instrument come
+/// off the position first, so an exit already working is never stacked; when they cover it, the
+/// subtraction refuses to go below zero and the branch holds. A pinned universe takes no such branch: the
+/// owner's pin is the universe, and the research agent is off (V-037).
 ///
 /// # Errors
 /// [`PortError::Absent`] for an output the mandate does not pin or the registry does not hash, a
@@ -277,10 +285,24 @@ pub fn size(
     inputs: &SignalInputs,
 ) -> Result<Option<Proposal>, PortError> {
     let mandate = BuilderMandate::try_from(validated)?;
-    let outputs = builder_outputs(inputs, &mandate, builder)?;
     let now = UtcNanos::from_parts(inputs.now.secs(), 0).map_err(|_| PortError::Absent {
         what: "the decision timestamp",
     })?;
+    if !validated.mandate().universe.pinned
+        && inputs
+            .ended_theses
+            .iter()
+            .any(|ended| ended.as_str() == builder.market.instrument.as_str())
+    {
+        return thesis_exit(
+            false,
+            &builder.account,
+            &builder.market,
+            builder.execution,
+            inputs,
+        );
+    }
+    let outputs = builder_outputs(inputs, &mandate, builder)?;
     let proposal = mandate_builder::propose(
         &mandate,
         &builder.account,
@@ -290,6 +312,83 @@ pub fn size(
         now,
     )?;
     runtime_proposal(proposal, builder, &mandate, validated)
+}
+
+/// Mandate spec v0.10 §8.3 step 2's first branch on its own (MI-34, DEC-2391): when `market`'s
+/// instrument's thesis ended (`inputs.ended_theses`) and the universe is unpinned, the whole
+/// `account` position less the runtime's working exits in it, at the bid, with `exit_origin`
+/// `removed_instrument`; `Ok(None)` for any other instrument, a pinned universe (V-037: the owner's
+/// list is the universe), or nothing left to sell. It reads no model output, no validated mandate,
+/// and no opening fact, so nothing an opening needs (the account's equity against the allocation,
+/// a protective stop, a model registry) can hold the exit (`AGENTS.md` rule 13). Its
+/// `DecisionMade` carries no c, b, or s and no outputs, weights, or clips (journal spec §9.1 rule
+/// 8). When the working exits cover the position, the subtraction refuses to go below zero and the
+/// branch holds, so an exit already working is never stacked.
+///
+/// # Errors
+/// [`PortError::Absent`] for an execution that is not a plain sell of the market's asset class;
+/// [`PortError::Builder`] as the exit's notional refuses.
+pub fn thesis_exit(
+    pinned: bool,
+    account: &AccountSnapshot,
+    market: &Market,
+    execution: OrderExecution,
+    inputs: &SignalInputs,
+) -> Result<Option<Proposal>, PortError> {
+    let instrument = market.instrument.as_str();
+    if pinned
+        || !inputs
+            .ended_theses
+            .iter()
+            .any(|ended| ended.as_str() == instrument)
+    {
+        return Ok(None);
+    }
+    let working = inputs
+        .working_exits
+        .iter()
+        .find(|(held, _)| held.as_str() == instrument)
+        .map_or(Qty::ZERO, |(_, qty)| *qty);
+    let unsold = AccountSnapshot {
+        position_qty: account
+            .position_qty
+            .checked_sub(working)
+            .unwrap_or(Qty::ZERO),
+        ..account.clone()
+    };
+    let BuilderAction::Sell {
+        purpose,
+        qty,
+        limit_price,
+        ..
+    } = mandate_builder::propose_thesis_exit(&unsold, market)?.action
+    else {
+        return Ok(None);
+    };
+    validate_order_execution(Side::Sell, runtime_purpose(purpose), execution)?;
+    if execution.asset_class != market.asset_class || execution.protection_required {
+        return Err(PortError::Absent {
+            what: "a plain sell's execution in the market's asset class",
+        });
+    }
+    Ok(Some(Proposal {
+        instrument: InstrumentId::new(instrument).map_err(|_| PortError::Absent {
+            what: "the builder market's runtime instrument id",
+        })?,
+        asset_class: market.asset_class,
+        side: Side::Sell,
+        qty,
+        limit: limit_price,
+        purpose: runtime_purpose(purpose),
+        exit_origin: Some(ExitOrigin::RemovedInstrument),
+        exit_conviction: None,
+        buy_conviction: None,
+        combined_score: Value::Null,
+        outputs_used: BTreeSet::new(),
+        model_weights: BTreeMap::new(),
+        clips_applied: Vec::new(),
+        execution: Some(execution),
+    }))
 }
 
 /// The `decided_by` label of mandate spec §6.2 step 5c, the policy overlay (DEC-536 item 2;

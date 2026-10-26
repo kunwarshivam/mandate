@@ -74,6 +74,9 @@ KUBE_API = "192.0.2.200/32"
 MANAGER = "deploy-manager"
 TEMPLATES = "deploy-manager-templates"
 HOOK = "pre-install,pre-upgrade"
+# The model gateway's workspace and deployment, which its image requires (E21-62); no budget, so a
+# rendering names none unless a test sets one (DEC-2326 item 2).
+GATEWAY = {"workspace": "01KDEM0000000000000000000W", "deployment": "cell-test"}
 # Where the interim runtime image carries the recorded research bundle (DEC-2246).
 RESEARCH = "/usr/local/share/mandate/research"
 
@@ -114,6 +117,7 @@ def every_image() -> list[str]:
         for i, instrument in enumerate(INSTRUMENTS)
         for key, value in instrument.items()
     ]
+    sets += [f"modelGateway.{key}={value}" for key, value in GATEWAY.items()]
     return [arg for s in sets for arg in ("--set", s)]
 
 
@@ -767,6 +771,60 @@ def test_the_data_process_never_renders_without_its_series_or_outside_the_cell(t
     for values in ("k3s.yaml", "managed.yaml"):
         done = helm(CHART, "-f", str(CELL / "values" / values), *DATA)
         assert done.returncode != 0 and "data.instruments" in done.stderr, f"{values}: only the local cell names a series"
+
+
+GATEWAY_BUDGETS = ("MANDATE_GATEWAY_WORKSPACE_MONTHLY_USD", "MANDATE_GATEWAY_DEPLOYMENT_MONTHLY_USD")
+
+
+def gateway_env(docs: list[dict]) -> dict[str, str]:
+    gateway = next(w for w in workloads(docs) if w["metadata"]["name"] == "model-gateway")
+    return {e["name"]: e.get("value", "") for e in first_container(gateway).get("env", [])}
+
+
+def test_the_model_gateway_serves_the_recording_and_names_no_budget_of_its_own():
+    """E21-62, DEC-2326 items 2 and 3: the model gateway runs `--recorded` over the bundle its image
+    carries and never a live start; its workspace and deployment are required; its budgets render
+    only where values name them, which only the local cell's do, and the chart refuses them where
+    images are not the cell's own."""
+    docs = render_all()
+    gateway = next(w for w in workloads(docs) if w["metadata"]["name"] == "model-gateway")
+    args = first_container(gateway)["args"]
+    assert args[args.index("--recorded") + 1] == f"{RESEARCH}/research.json"
+    assert not any(a.startswith("--registry") for a in args), args
+    env = gateway_env(docs)
+    assert env["MANDATE_GATEWAY_WORKSPACE"] == GATEWAY["workspace"]
+    assert env["MANDATE_GATEWAY_DEPLOYMENT"] == GATEWAY["deployment"]
+    assert (env[GATEWAY_BUDGETS[0]], env[GATEWAY_BUDGETS[1]]) == ("50", "20"), "the recorded bundle's caps"
+    mount = next(m for m in first_container(gateway)["volumeMounts"] if m["name"] == "artifacts")
+    assert mount["readOnly"] is True
+    unnamed = render_all("--set", "modelGateway.workspaceMonthlyUsd=", "--set", "modelGateway.deploymentMonthlyUsd=")
+    assert not set(GATEWAY_BUDGETS) & set(gateway_env(unnamed)), "no budget without the values naming one"
+    for unset in ("modelGateway.workspace=", "modelGateway.deployment="):
+        done = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", unset)
+        assert done.returncode != 0 and "is required with images.model-gateway" in done.stderr, unset
+    hosted = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", "localImages=false")
+    assert hosted.returncode != 0 and "named only by the local cell's values" in hosted.stderr, hosted.stderr
+
+
+def test_only_the_local_cell_names_the_model_gateway_s_budgets():
+    """DEC-2326 item 2, DEC-2396: no values file but the local cell's names a model budget, and the
+    local cell's gateway serves the workspace its API hosts."""
+    for values in sorted((CELL / "values").glob("*.yaml")) + sorted(
+        (CELL.parent / "gitops").rglob("*.yaml")
+    ):
+        if values.name == "k3d.yaml":
+            continue
+        text = values.read_text()
+        assert "MonthlyUsd" not in text, f"{values} names a model budget"
+    defaults = (CHART / "values.yaml").read_text()
+    for budget in ("workspaceMonthlyUsd", "deploymentMonthlyUsd"):
+        assert f'  {budget}: ""\n' in defaults, f"the chart defaults {budget}"
+    k3d = (CELL / "values" / "k3d.yaml").read_text()
+    workspaces = {
+        block: re.search(rf"^{block}:\n(?:  .*\n)*?  workspace: (\S+)$", k3d, re.MULTILINE).group(1)
+        for block in ("api", "modelGateway")
+    }
+    assert workspaces["api"] == workspaces["modelGateway"], workspaces
 
 
 def test_the_local_cell_records_both_demo_agents_instruments():
