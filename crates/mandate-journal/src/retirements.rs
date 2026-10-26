@@ -69,7 +69,11 @@ pub(crate) fn rules(
         .filter_map(Value::as_str)
         .collect();
     ensure(
-        !waiting.is_empty() && waiting.windows(2).all(|pair| pair[0] < pair[1]),
+        !waiting.is_empty()
+            && waiting
+                .iter()
+                .zip(waiting.iter().skip(1))
+                .all(|(before, after)| before < after),
         "payload.waiting_on",
     )
 }
@@ -170,10 +174,14 @@ pub fn retirement_failure(agent: &str, records: &[Value]) -> Option<usize> {
                     return Some(i);
                 }
             }
-            HELD => {
-                if !held(record, records.get(i + 1), &mut open, &mut finished) {
-                    return Some(i);
-                }
+            HELD if !held(
+                record,
+                records.get(i.saturating_add(1)),
+                &mut open,
+                &mut finished,
+            ) =>
+            {
+                return Some(i);
             }
             _ => {}
         }
@@ -231,7 +239,7 @@ fn held<'a>(
     let continues = match open.as_ref() {
         None => !finished.contains(&cause) && period == 1,
         Some(o) => {
-            period == o.period + 1
+            Some(period) == o.period.checked_add(1)
                 && since == o.since
                 && (version == o.version || o.moved_to == Some(version))
                 && at >= o.at.saturating_add(DAY_S)
