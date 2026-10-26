@@ -941,8 +941,9 @@ per workspace deployment (item 6).
          refused here and not journaled for the executor to refuse. An account stream the server
          cannot read is `journal_unavailable`.
       6. An acknowledgment naming a `request`: an `OwnerAcknowledgmentRequested` on the control
-         stream has that `event_id`, its `agent`, `event`, and `subject` equal the acknowledgment's,
-         no `OwnerAcknowledged` names it yet, and its `requested_by` is not the caller (journal spec
+         stream has that `event_id`, its `agent`, `event`, and `subject` equal the acknowledgment's
+         (a version 1 request's subject is `limit`, and a `subject` that is not text matches nothing,
+         as the CLI reads rule 240, DEC-2838), no `OwnerAcknowledged` names it yet, and its `requested_by` is not the caller (journal spec
          rules 239 to 241): else `409` `acknowledgment_request_invalid`.
       7. Step-up: `passkey` evidence with its `step_up_assertion`, judged by the port against the
          action's digest below, as a resume's is (§3.6, DEC-2140). Unlike a resume's, unverified
