@@ -1030,6 +1030,10 @@ mod tests {
             answered.ok_or(TransportError::Timeout)
         }
     }
+    /// One refused-cancel case: its name, the id cancelled, its open-orders page, and the answers
+    /// its other requests get.
+    type RefusedStep = (&'static str, &'static str, String, Vec<(u16, String)>);
+
     /// A refused credential on any step of a cancel, its `DELETE` or its read-back, is an unknown
     /// outcome that says so (connections spec §5.4, DEC-2832): never a read-back of the order
     /// taken as the cancel's answer, and never the ambiguity of a failing broker, which counts
@@ -1046,7 +1050,7 @@ mod tests {
         };
         let refused = (401, "{\"message\":\"unauthorized\"}".to_owned());
         let bracket = entry_with(&resting_legs("1", "0.8", "1", "999"));
-        let cases: Vec<(&str, &str, String, Vec<(u16, String)>)> = vec![
+        let cases: Vec<RefusedStep> = vec![
             (
                 "a resolved leg's DELETE refused",
                 handle,
