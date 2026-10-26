@@ -235,6 +235,12 @@ start without them (AGENTS.md rule 3).
 - name: {{ ternary "MANDATE_API_ARTIFACTS" "MANDATE_ARTIFACTS" (eq .p.name "api") }}
   value: {{ include "mandate.artifactsPath" . | quote }}
 {{- end }}
+{{- /* The stored bars' root the runtime's dry run and the executor's binding gate read their
+liquidity figures from (DEC-2274), only where the data process stores them. */}}
+{{- if and (has .p.name (list "runtime" "executor")) .root.Values.images.data (include "mandate.artifactsAccess" .) }}
+- name: MANDATE_BARS
+  value: {{ printf "%s/datasets/cell-recorded" (include "mandate.artifactsPath" .) | quote }}
+{{- end }}
 {{- end -}}
 
 {{- define "mandate.mounts" -}}

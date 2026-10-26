@@ -14,11 +14,15 @@
 //! - [`trusted`]: the trust check on a stored daily-bar dataset and the bars and closes it admits.
 //! - [`closes`]: the closes a model output rested on, as the artifact its observation names.
 //! - [`minutes`]: the complete one-minute bars a trailing-volume figure rests on.
+//! - [`liquidity`]: the four figures the liquidity floor and participation read, at the reader's
+//!   own clock, for the runtime's dry run and the executor's binding gate alike (DEC-2274).
 
 pub mod closes;
+pub mod liquidity;
 pub mod minutes;
 pub mod trusted;
 
 pub use closes::{MemberRefused, closes_object};
+pub use liquidity::{LiquidityFacts, daily_dir, liquidity, minute_dir, trusted_daily_liquidity};
 pub use minutes::trailing_minutes;
 pub use trusted::{BarsError, trusted_daily_bars, trusted_daily_closes};
