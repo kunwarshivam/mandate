@@ -325,6 +325,9 @@ fn wiring() -> Result<Wiring, Error> {
 
 type Process = ExecutorProcess<Journal, RobinhoodBroker<Scripted>>;
 
+/// The journal, the process, the account's book and the seam's calls.
+type Protected = (Journal, Process, Rc<RefCell<Book>>, Calls);
+
 fn pass(journal: &Journal, process: &mut Process, id: &str, now: &str) -> Result<(), Error> {
     support::tick(journal, id, now)?;
     process.step(at(now)?);
@@ -348,7 +351,7 @@ fn result(run: &Canon) -> Option<&str> {
 /// the broker's record read it filled with the 10 held, and the passes a minute apart that book it
 /// and place its protective stop, which the broker then lists as working. Answers the journal, the
 /// process, the account's book and the seam's calls.
-fn protected_position() -> Result<(Journal, Process, Rc<RefCell<Book>>, Calls), Error> {
+fn protected_position() -> Result<Protected, Error> {
     let journal: Journal = deployed()?;
     propose(&journal, AGENT, OPEN, "buy", "10", "150", "open")?;
     let (tools, book, calls) = seam(CASH);
