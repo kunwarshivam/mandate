@@ -866,7 +866,10 @@ per workspace deployment (item 6).
       - `GET /signal-models` returns `read-models/signal-models`: the registry the create's V-007
         reads, from the same facts folded in stream order (`mandate-spec`'s validation context):
         the latest `ConfigSnapshotRegistered` of kind `model_version` per `model_id`, whatever its
-        version. A model withdrawn by `PlatformOperatorAction` `model_withdrawn` leaves the
+        version. A model whose registration no mandate document can name (a `model_version` off the
+        mandate schema's version pattern, more than 32 parameters, or a parameter name off its key
+        pattern) is omitted, as an unpinnable instrument is ([DEC-2142](../project/decisions/DEC-2142.md)).
+        A model withdrawn by `PlatformOperatorAction` `model_withdrawn` leaves the
         registry, and so the list, once the fold maps that action (E10-11w); until then the create
         admits it and the list shows it, the two never differing. Each listed model has that
         registration's `model_id`, `model_version`, `content_hash`, `params` (in the order V-007
@@ -876,7 +879,7 @@ per workspace deployment (item 6).
         object stored under `content_hash`, its `authorship` and `methodology` when they are
         strings, and of its `params_schema` only `constraints` (strings) and each parameter's
         `name`, `type`, `min` and `max` (DEC-518 item 3), member by member, each only when
-        present; `null` when the store cannot give or parse the object. Nothing else of the object
+        present and within `read-models/signal-models`' bounds, never cut short (DEC-2142 item 2); `null` when the store cannot give or parse the object. Nothing else of the object
         is served: no prompt template, model identity, retrieval plan, tool declaration, input or
         output declaration, or source path. It serves nothing about how a model performed (no scorecard, backtest figure or
         ranking; DEC-99, DEC-126), so the list never reads as a recommendation.
