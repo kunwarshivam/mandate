@@ -35,8 +35,10 @@ import account
 import account_activity
 import account_closes
 import account_restrictions
+import account_switches
 import acknowledgments
 import approval
+import approval_deferrals
 import audit
 import backtest_records
 import canceled
@@ -69,6 +71,7 @@ import risk_state
 import segment_rows
 import timeouts
 import retirements
+import real_money
 import unapplied
 import verification
 import workspace
@@ -77,6 +80,7 @@ from common import (
     BOOL,
     CONFIG_REF_KINDS,
     DEC,
+    DEFERRED_PARTS,
     DIGEST,
     ENVELOPE,
     ID,
@@ -312,25 +316,6 @@ REGRESSIONS = {
 }
 
 
-# Journal spec v0.85 (DEC-2388 item 10): the checks, or parts of checks, the cell's runtime's
-# advisory dry run deferred to the executor's binding gate, in strictly ascending byte order.
-DEFERRED_PARTS = (
-    "account_exposure",
-    "agent_equity",
-    "agent_mode",
-    "conduct_history",
-    "day_trade_budget",
-    "eligibility",
-    "fee_reservation",
-    "halt",
-    "liquidity_floor",
-    "other_orders",
-    "participation",
-    "quote_ask",
-    "reentry_cooldown",
-    "related_accounts",
-)
-assert list(DEFERRED_PARTS) == sorted(DEFERRED_PARTS, key=str.encode), "listed in byte order"
 LIQUIDITY = rec(
     ("prior_close", DEC),
     ("median_dollar_volume_20d", DEC),
@@ -3875,6 +3860,25 @@ def deferred_case_failures(chain: list[dict], section: dict, skip: frozenset[str
     return problems
 
 
+def deferral_decisions(chain: list[dict]) -> dict[str, dict]:
+    """The two asked openings `approval_deferrals` pairs requests with (v0.92, DEC-2515): the chain's
+    decision asked at version 1, deferring nothing, and the same decision at version 3 deferring the
+    halt and both liquidity checks, read without figures, asked under the policy overlay."""
+    asked = [change("payload.autonomy", "ask")]
+    plain = {"base_seq": SEQ["decision"], "changes": asked}
+    deferring = {
+        "base_seq": SEQ["decision"],
+        "changes": [
+            change("schema_version", 3),
+            change("payload.deferred_to_binding", list(approval_deferrals.NAMED)),
+            change("payload.liquidity", None),
+            *asked,
+            change("payload.decided_by", "policy_overlay"),
+        ],
+    }
+    return {"plain": apply_changes(chain, plain), "deferring": apply_changes(chain, deferring)}
+
+
 def check_deferred(section: dict, agent_section: dict) -> list[str]:
     problems = deferred_case_failures(agent_section["chain"], section)
     if section["base"] != "agent_stream":
@@ -4215,6 +4219,7 @@ def render(
     production_config_refs: dict,
     policy_overlay: dict,
     deferred_section: dict,
+    deferrals_section: dict,
     control_section: dict,
     risk_section: dict,
     research_section: dict,
@@ -4260,7 +4265,9 @@ def render(
     account_closes_section: dict,
     connection_roles_section: dict,
     stepped_up_section: dict,
+    real_money_section: dict,
     account_restrictions_section: dict,
+    account_switches_section: dict,
     snapshots_section: dict,
     account_activity_section: dict,
 ) -> str:
@@ -4271,6 +4278,7 @@ def render(
             "production_config_refs": production_config_refs,
             "policy_overlay": policy_overlay,
             "deferred_to_binding": deferred_section,
+            "approval_deferrals": deferrals_section,
             "control_stream": control_section,
             "risk_state": risk_section,
             "research": research_section,
@@ -4316,7 +4324,9 @@ def render(
             "account_closes": account_closes_section,
             "connection_roles": connection_roles_section,
             "stepped_up_records": stepped_up_section,
+            "real_money": real_money_section,
             "account_restrictions": account_restrictions_section,
+            "account_switches": account_switches_section,
             "account_activity": account_activity_section,
             "snapshot_prior_close": snapshots_section,
         },
@@ -4359,6 +4369,7 @@ def main(argv: list[str] | None = None) -> int:
     production_config_refs = build_production_config_refs_section(control_section)
     policy_overlay = build_policy_overlay_section()
     deferred_section = build_deferred_section()
+    deferrals_section = approval_deferrals.build_section(deferral_decisions(section["chain"]))
     risk_section = risk_state.build_section()
     research_section = research.build_section()
     account_section = account.build_section(v3["genesis_prev_hash"])
@@ -4403,7 +4414,9 @@ def main(argv: list[str] | None = None) -> int:
     account_closes_section = account_closes.build_section()
     connection_roles_section = connection_roles.build_section()
     stepped_up_section = stepped_up.build_section()
+    real_money_section = real_money.build_section()
     account_restrictions_section = account_restrictions.build_section()
+    account_switches_section = account_switches.build_section()
     account_activity_section = account_activity.build_section()
     snapshots_section = snapshots.build_section()
 
@@ -4415,6 +4428,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += run_policy_overlay_mutants(policy_overlay, section)
     problems += check_deferred(deferred_section, section)
     problems += run_deferred_mutants(deferred_section, section)
+    problems += approval_deferrals.check_section(deferrals_section, violations)
+    problems += approval_deferrals.run_mutants(deferrals_section, violations)
     problems += control.check_section(control_section)
     problems += control.run_mutants(control_section)
     problems += risk_state.check_section(risk_section)
@@ -4475,8 +4490,12 @@ def main(argv: list[str] | None = None) -> int:
     problems += account_closes.run_mutants(account_closes_section)
     problems += stepped_up.check_section(stepped_up_section)
     problems += stepped_up.run_mutants(stepped_up_section)
+    problems += real_money.check_section(real_money_section)
+    problems += real_money.run_mutants(real_money_section)
     problems += account_restrictions.check_section(account_restrictions_section)
     problems += account_restrictions.run_mutants(account_restrictions_section)
+    problems += account_switches.check_section(account_switches_section)
+    problems += account_switches.run_mutants(account_switches_section)
     problems += account_activity.check_section(account_activity_section)
     problems += account_activity.run_mutants(account_activity_section)
     problems += snapshots.check_section(snapshots_section)
@@ -4522,6 +4541,7 @@ def main(argv: list[str] | None = None) -> int:
         production_config_refs,
         policy_overlay,
         deferred_section,
+        deferrals_section,
         control_section,
         risk_section,
         research_section,
@@ -4567,7 +4587,9 @@ def main(argv: list[str] | None = None) -> int:
         account_closes_section,
         connection_roles_section,
         stepped_up_section,
+        real_money_section,
         account_restrictions_section,
+        account_switches_section,
         snapshots_section,
         account_activity_section,
     )
@@ -4583,6 +4605,7 @@ def main(argv: list[str] | None = None) -> int:
         or check_production_config_refs(reread["production_config_refs"])
         or check_policy_overlay(reread["policy_overlay"], reread["agent_stream"])
         or check_deferred(reread["deferred_to_binding"], reread["agent_stream"])
+        or approval_deferrals.check_section(reread["approval_deferrals"], violations)
         or control.check_section(reread["control_stream"])
         or risk_state.check_section(reread["risk_state"])
         or research.check_section(reread["research"])
@@ -4623,7 +4646,9 @@ def main(argv: list[str] | None = None) -> int:
         or owner_confirmations.check_section(reread["owner_confirmations"])
         or account_closes.check_section(reread["account_closes"])
         or stepped_up.check_section(reread["stepped_up_records"])
+        or real_money.check_section(reread["real_money"])
         or account_restrictions.check_section(reread["account_restrictions"])
+        or account_switches.check_section(reread["account_switches"])
         or account_activity.check_section(reread["account_activity"])
         or snapshots.check_section(reread["snapshot_prior_close"])
         or connection_roles.check_section(reread["connection_roles"])
@@ -4655,6 +4680,10 @@ def main(argv: list[str] | None = None) -> int:
         f"policy-overlay drafts, {len(OVERLAY_VALIDATOR_MUTANTS)} validator and 2 vector mutants caught; "
         f"{len(deferred_section['invalid_drafts'])} invalid and {len(deferred_section['valid_drafts'])} valid "
         f"version-3 DecisionMade drafts, {len(DEFERRED_VALIDATOR_MUTANTS)} validator and 2 vector mutants caught; "
+        f"{len(deferrals_section['invalid_drafts'])} invalid and {len(deferrals_section['valid_drafts'])} valid "
+        f"version-3 ApprovalRequested drafts and {len(deferrals_section['batches'])} rule-292 batches, "
+        f"{len(approval_deferrals.VALIDATOR_MUTANTS)} validator and "
+        f"{len(approval_deferrals.vector_mutants(deferrals_section))} vector mutants caught; "
         f"{len(control_section['chain'])} control-stream events, {len(control_section['drafts'])} base drafts, "
         f"{len(control_section['journaled_facts'])} journaled facts, {len(control_section['invalid_drafts'])} invalid "
         f"and {len(control_section['valid_drafts'])} valid drafts; {len(control.VALIDATOR_MUTANTS)} validator and "
@@ -4719,9 +4748,16 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(stepped_up_section['mappings'])} mappings and {len(stepped_up_section['streams'])} rule-201 streams, "
         f"{len(stepped_up.VALIDATOR_MUTANTS)} validator, {len(stepped_up.READER_MUTANTS)} reader and "
         f"{len(stepped_up.vector_mutants(stepped_up_section))} vector mutants caught; "
+        f"{len(real_money_section['invalid_drafts'])} invalid and {len(real_money_section['valid_drafts'])} valid "
+        f"real-money gate drafts and {len(real_money_section['streams'])} setting streams, "
+        f"{len(real_money.VALIDATOR_MUTANTS)} validator, {len(real_money.FOLD_MUTANTS)} fold and "
+        f"{len(real_money.vector_mutants(real_money_section))} vector mutants caught; "
         f"{len(account_restrictions_section['invalid_drafts'])} invalid and {len(account_restrictions_section['valid_drafts'])} valid "
         f"AccountRestrictionChanged drafts, {len(account_restrictions.VALIDATOR_MUTANTS)} validator and "
         f"{len(account_restrictions.vector_mutants(account_restrictions_section))} vector mutants caught; "
+        f"{len(account_switches_section['invalid_drafts'])} invalid and {len(account_switches_section['valid_drafts'])} valid "
+        f"account KillSwitchActivated drafts, {len(account_switches.VALIDATOR_MUTANTS)} validator and "
+        f"{len(account_switches.vector_mutants(account_switches_section))} vector mutants caught; "
         f"{len(account_activity_section['invalid_drafts'])} invalid and {len(account_activity_section['valid_drafts'])} valid "
         f"account activity drafts, {len(account_activity.VALIDATOR_MUTANTS)} validator and "
         f"{len(account_activity.vector_mutants(account_activity_section))} vector mutants caught; "

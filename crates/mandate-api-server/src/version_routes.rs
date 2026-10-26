@@ -35,6 +35,7 @@ use crate::commands::{Event, Settled, Writer, envelope};
 use crate::http::{App, browser, invalid, problem, problem_body};
 use crate::objects::ObjectStore;
 use crate::reads::account_ref;
+use crate::real_money::{Action as Gated, gated};
 use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
@@ -399,6 +400,7 @@ async fn created(
     let mandate = Mandate::parse(&value).map_err(|_| Answer::schema("", "mandate"))?;
     match value.get("environment").and_then(Value::as_str) {
         Some("live") => {
+            gated(app, &admitted.reader, &admitted.gate, Gated::CreateVersion).await?;
             return Err(Answer::Code(
                 StatusCode::CONFLICT,
                 ProblemCode::LiveUnavailable,
@@ -928,6 +930,7 @@ async fn deployed(
     }
     match document.get("environment").and_then(Value::as_str) {
         Some("live") => {
+            gated(app, &admitted.reader, &admitted.gate, Gated::Deploy).await?;
             return Err(Answer::Code(
                 StatusCode::CONFLICT,
                 ProblemCode::LiveUnavailable,
@@ -1047,8 +1050,8 @@ async fn refused_live(app: &App, headers: &HeaderMap, workspace: &str) -> Result
     if !browser(headers, &app.settings.app_origin) {
         return Err(Refused::Forbidden.into());
     }
-    one_key(headers).ok_or(Refused::Invalid)?;
-    authorized(
+    let key = one_key(headers).ok_or(Refused::Invalid)?;
+    let reader = authorized(
         app,
         &admitted,
         now,
@@ -1057,6 +1060,8 @@ async fn refused_live(app: &App, headers: &HeaderMap, workspace: &str) -> Result
         Unreadable::Command,
     )
     .await?;
+    let gate = Gate { admitted, now, key };
+    gated(app, &reader, &gate, Gated::GoLive).await?;
     Err(Answer::Code(
         StatusCode::CONFLICT,
         ProblemCode::LiveUnavailable,
