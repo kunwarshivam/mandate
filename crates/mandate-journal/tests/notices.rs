@@ -48,7 +48,8 @@ const STREAMS: [&str; 5] = [STREAM, "agent:ws_1:agent_a", "ctl:ws_1", "clock:ws_
 /// DEC-720's kinds, with DEC-795 item 6's `notification_address_changed`, in notifications spec
 /// §3.2's order, each `kind:class`.
 const KINDS: &str = "approval_requested:action approval_reminder:action risk_limit:safety \
-    kill_switch:safety agent_held:safety account_restriction:safety protection:safety \
+    kill_switch:safety kill_switch_unapplied:safety agent_held:safety retirement_held:safety \
+    account_restriction:safety protection:safety \
     exit_stalled:safety reconciliation:safety external_activity:safety account_state:safety \
     data_feed_down:safety integrity_incident:safety credential_added:safety new_device:safety \
     notification_address_changed:safety recovery_used:safety role_granted:safety \
@@ -403,7 +404,7 @@ fn every_kind_and_vocabulary_member_is_admitted_where_dec_720_allows_it() {
         .split_whitespace()
         .filter_map(|pair| pair.split_once(':'))
         .collect();
-    assert_eq!(kinds.len(), 33, "notifications spec §3.2's 33 kinds");
+    assert_eq!(kinds.len(), 35, "notifications spec §3.2's 35 kinds");
     for (kind, class) in kinds {
         let cause_stream = match kind {
             "approval_requested" | "approval_reminder" => "agent:ws_1:agent_a",

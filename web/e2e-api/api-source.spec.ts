@@ -60,6 +60,26 @@ test("Approve shows a code to confirm on the host, and the approve that follows 
   for (const call of calls) expect(operationFor(call.method(), call.url(), WS), `${call.method()} ${call.url()}`).not.toBeNull();
 });
 
+test("a grant the runtime refused not_an_approver reads as refused in words, never as approved, and is not sent again (DEC-2818)", async ({ page }) => {
+  const calls = apiCalls(page);
+  await page.route(`**/v1/workspaces/${WS}/commands/*`, async (route) => {
+    const served = await route.fetch();
+    const body = (await served.json()) as Record<string, unknown>;
+    const step = { stream_id: "agent", seq: 9, event_type: "ApprovalResponded", recorded_at: "2026-10-26T15:00:00.000000000Z", reason: "not_an_approver" };
+    await route.fulfill({ response: served, json: { ...body, phase: "refused", steps: [step] } });
+  });
+  await page.goto("/?scenario=approvals");
+  await page.getByRole("region", { name: /^Needs you/ }).getByRole("link").first().click();
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await page.getByRole("region", { name: "Confirm on the host" }).getByRole("button", { name: "Approve", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Refused: you are not an approver of this request now. Nothing was approved." })).toBeVisible();
+  await expect(page.getByText("Recorded in the journal: you approved")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
+  const answers = () => calls.filter((c) => c.method() === "POST" && new URL(c.url()).pathname.endsWith("/responses"));
+  await page.waitForTimeout(500);
+  expect(answers()).toHaveLength(1);
+});
+
 test("Connect Alpaca paper shows the disclosure and a host code, starts with that challenge's evidence, and lands on the connection (DEC-2623, DEC-2626)", async ({ page }) => {
   const calls = apiCalls(page);
   let authorize = "";
@@ -119,7 +139,7 @@ test("the audit timeline reads the journal's streams from the API, newest first,
 });
 
 test("a screen the API does not serve yet says so, and shows no fixture figures", async ({ page }) => {
-  await page.goto("/alerts?scenario=approvals");
+  await page.goto("/audit/decisions?scenario=approvals");
   await expect(page.getByRole("heading", { name: "Not available from your deployment yet" })).toBeVisible();
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
 });

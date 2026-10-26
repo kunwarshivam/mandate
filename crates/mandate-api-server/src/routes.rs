@@ -375,6 +375,10 @@ fn approval_value(view: &ApprovalView, with_content: bool) -> Value {
     if with_content {
         members.push(("content", view.content.clone()));
         members.push(("schema_version", int(view.schema_version)));
+        members.push((
+            "decision_deferred_to_binding",
+            view.decision_deferred_to_binding.clone(),
+        ));
     }
     object(members)
 }

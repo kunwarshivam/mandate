@@ -49,14 +49,23 @@ describe("the read models as the API serves them (#1446, #1499; DEC-1096)", () =
     expect(ok(agentRead({ agent: { ...ROW, account_positions: null } }, ""))).toBe(true);
     expect(approvalsRead({ approvals: [APPROVAL] }, "")).toEqual({ ok: true, value: { approvals: [APPROVAL] } });
     const protectedOrder = { ...ORDER, tif: "day", protection: { stop: "54000", take_profit: null } };
-    expect(ok(approvalRead({ approval: { ...APPROVAL, order: protectedOrder, content: { action: { side: "buy" } }, schema_version: 2 } }, ""))).toBe(true);
+    expect(ok(approvalRead({ approval: { ...APPROVAL, order: protectedOrder, content: { action: { side: "buy" } }, schema_version: 2, decision_deferred_to_binding: [] } }, ""))).toBe(true);
   });
 
   it("reads the ApprovalRequested version an approval's content comes from, and refuses a read without one (DEC-2518)", () => {
-    const detail = { ...APPROVAL, content: { action: { side: "buy" } } };
+    const detail = { ...APPROVAL, content: { action: { side: "buy" } }, decision_deferred_to_binding: [] };
     for (const version of [1, 2, 3]) expect(approvalRead({ approval: { ...detail, schema_version: version } }, ""), String(version)).toMatchObject({ ok: true, value: { approval: { schema_version: version } } });
     expect(problem(approvalRead({ approval: detail }, ""))).toBe("missing /approval/schema_version");
     for (const version of [0, 4, "3", null, 2.5]) expect(problem(approvalRead({ approval: { ...detail, schema_version: version } }, "")), String(version)).toMatch(/^(unknown_enum_value|wrong_type) \/approval\/schema_version$/);
+  });
+
+  it("reads the deferred checks of the decision behind an approval, or null without one, and refuses a read without them (DEC-2519)", () => {
+    const detail = { ...APPROVAL, content: { action: { side: "buy" } }, schema_version: 2 };
+    for (const decided of [null, [], ["halt"], ["anything", 7]]) {
+      expect(approvalRead({ approval: { ...detail, decision_deferred_to_binding: decided } }, ""), JSON.stringify(decided)).toMatchObject({ ok: true, value: { approval: { decision_deferred_to_binding: decided } } });
+    }
+    expect(problem(approvalRead({ approval: detail }, ""))).toBe("missing /approval/decision_deferred_to_binding");
+    for (const decided of ["halt", 3, {}]) expect(problem(approvalRead({ approval: { ...detail, decision_deferred_to_binding: decided } }, "")), JSON.stringify(decided)).toBe("wrong_type /approval/decision_deferred_to_binding");
   });
 
   it("refuses a decimal sent as a JSON number, and a count that is not one", () => {

@@ -280,7 +280,10 @@ export function createMockServer(options: MockServerOptions): MockServer {
     if (!agent) return null;
     const orders = [...agent.past_orders, ...agent.orders].sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at));
     const told = [{ type: "AgentDeployed", at: orders[0]?.submitted_at ?? workspace.now }, ...orders.flatMap((o) => [{ type: "OrderSubmitted", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])])];
-    return told.map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: "0".repeat(64), body: "e30=" }));
+    return told.map((e, i) => {
+      const body = JSON.stringify({ event_type: e.type, payload: {} });
+      return { seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: sha256Hex(body), body: Buffer.from(body, "utf8").toString("base64") };
+    });
   }
 
   /** The connection's account stream: every agent's orders requested and filled, in time order. Types and times only. */
@@ -369,7 +372,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const approvalRoute = route.match(/^\/approvals\/([^/]+)$/);
     if (approvalRoute) {
       const approval = approvalBy(decodeURIComponent(approvalRoute[1]));
-      return approval ? read({ approval: { ...approvalRow(approval), content: { action: { side: approval.bound.side } }, schema_version: 2 } }) : problem(404, "not_found", "none");
+      return approval ? read({ approval: { ...approvalRow(approval), content: { action: { side: approval.bound.side } }, schema_version: 2, decision_deferred_to_binding: [] } }) : problem(404, "not_found", "none");
     }
     const backtestRoute = route.match(/^\/backtests\/([^/]+)$/);
     if (backtestRoute) {

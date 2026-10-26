@@ -1001,7 +1001,7 @@ workspace that ran it, and no route aggregates backtests across workspaces.
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
 | Inbox | `GET /approvals?state=pending\|resolved` | — | Pending by deadline, then resolved with outcome (D5) |
-| Read one | `GET /approvals/{id}` | — | The content object exactly as `ApprovalRequested` holds it, the `ApprovalRequested` version it comes from (`schema_version`, [DEC-2518](../project/decisions/DEC-2518.md)), its `content_hash`, the deadline, the grants so far, and the status folded from the agent stream. Never a scorecard, profit estimate, or price target (DEC-126) |
+| Read one | `GET /approvals/{id}` | — | The content object exactly as `ApprovalRequested` holds it, the `ApprovalRequested` version it comes from (`schema_version`, [DEC-2518](../project/decisions/DEC-2518.md)), its decision's deferred checks (`decision_deferred_to_binding`, [DEC-2519](../project/decisions/DEC-2519.md)), its `content_hash`, the deadline, the grants so far, and the status folded from the agent stream. Never a scorecard, profit estimate, or price target (DEC-126) |
 | Delegation preview | `POST /approvals/{id}/delegation-previews` | — | §5.3. Offered only where mandate spec §6.4 allows a scope |
 | Respond | `POST /approvals/{id}/responses` | `ApprovalResponseSubmitted` | §5.2. Users only |
 | Resolve a notice | `GET /notices/{notice_id}` | `RecordsAccessed` | §3.9 |
@@ -1013,9 +1013,13 @@ and `schema_version`, the `ApprovalRequested` version `content` comes from (1, 2
 [DEC-2518](../project/decisions/DEC-2518.md)). Version 3's content names the checks its dry run
 deferred (journal spec §9.6, rule 291) and versions 1 and 2 name none, so a client tells a
 version 3 request without its list from an older one and shows it as unreadable, never as
-nothing deferred (mandate spec §6.4). A version 1 or 2 request whose decision, written in another
-batch, deferred checks is not caught here: that is rule 292's cross-batch debt
-(`E21-30-approval-deferral-range-check`).
+nothing deferred (mandate spec §6.4). The single read also adds `decision_deferred_to_binding`:
+the `deferred_to_binding` of the `DecisionMade` the request's `causation_id` names on the agent
+stream, an empty list for a decision that names none, or `null` when no such decision is there
+([DEC-2519](../project/decisions/DEC-2519.md)). A client shows the request's checks only when its
+own list (empty for versions 1 and 2) is exactly that list, and shows any other request as
+unreadable: so a request that hides or invents a deferral is caught at the read wherever the two
+were written, which rule 292 checks only within one batch.
 The state is folded from the agent stream, and the first terminal event wins: `pending` until
 re-validation acts (`acted`) or the approval ends `skipped` (by the owner's Skip or by
 re-validation), `timed_out`, or `canceled`. An admitted grant still awaiting re-validation, and a
@@ -1213,6 +1217,24 @@ adds the account's holdings at its last reconciliation as `account_positions`, t
 names (model and broker quantities, the mismatch flag, and when observed), `null` when that stream
 is not found. They are the account's, not the agent's: no journaled fold attributes holdings per
 agent yet. The account stream's watermark joins `as_of`.
+The single read also serves `openings_held` ([DEC-2143](../project/decisions/DEC-2143.md)): a
+standing reason every opening of the agent's is held whatever the order, as the binding gate's
+source decides it, computed by the one function the executor process binds on
+(`mandate-gate-context`'s `Journaled::opening_hold`), from the account stream's fold and whether the
+deployed mandate pins its universe. `{"reason": "account_traded"}` while the account has traded
+and the account risk view, which must then read every opening, does not yet;
+`{"reason": "research_agent_traded"}` while the account has traded and the mandate is unpinned
+(its working universe is research's, mandate spec §8), since that view binds an instrument at
+deployment and such an agent has none ([DEC-2819](../project/decisions/DEC-2819.md) item 4);
+`{"reason": "unknown"}` when the agent has no account stream, the deployed document cannot be
+read, or any row the fold reads cannot be read (the fold then holds every opening), so openings
+may be held; and `null` when none of these applies. `null` is not "openings run": a hold that lasts
+only until a fact arrives or ages in (no risk clock, account snapshot, or mark yet, or a stale
+one) and a hold for one order (its quote, the session, a limit) are the gate's verdict on each
+order, and the owner's hold and a paused or stopped agent show as `mode`. No exit, protective
+order, or kill switch is held by any of them (`AGENTS.md` rule 13). The read is served once the
+executor binds on the same function (DEC-2819's executor slice), so the two never differ.
+**(planned: E11-9)**
 
 `GET /agents/{id}/orders` and `GET /agents/{id}/positions` return `read-models/orders` and
 `read-models/positions` ([DEC-2111](../project/decisions/DEC-2111.md)), from the account stream of
@@ -1786,7 +1808,7 @@ here, so replacing fixtures with calls changes no screen contract:
 | `Approval` (bound order, risk impact, evidence, grants) | `GET /approvals/{id}` |
 | `GateDecision`, `TimelineEvent` | `GET /journal/events/{id}/gate`, `GET /agents/{id}/timeline` |
 | `Connection` | `GET /connections/{id}` |
-| `mock-runtime.tsx` command phases (`sent`, `recorded`, `undelivered`, `unknown`) | §5.5's phases; `undelivered` is `effect: none` |
+| `mock-runtime.tsx` command phases (`sent`, `recorded`, `undelivered`, `unknown`); an approval response's also `decided` and `refused` | §5.5's phases; `undelivered` is `effect: none`; an approval response's `decided` is §5.5's `applied` and its `refused` is §5.5's `refused`, with its `ApprovalResponded` step's reason ([DEC-2822](../project/decisions/DEC-2822.md)) |
 
 ### 4.10 Routes outside the workspace prefix
 
