@@ -7,6 +7,7 @@ import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCom
 import { confirmAccepted, confirmStepUpDigest } from "@/api/confirm";
 import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPasskey, browserAuthenticator, deployStepUpDigest, ownerCommandStepUpDigest, passkeysRead, usablePasskeys } from "@/api/passkey";
 import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDigest, passkeyList } from "@/api/enrol";
+import { type CatalogueAnswer, instrumentsRead, signalModelsRead } from "@/api/catalogue";
 import { type ApiView, agentRead, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
@@ -39,6 +40,9 @@ import {
   RuntimeContext,
   type SetUp,
 } from "./mock-runtime";
+
+/** Refusal codes a set-up step names in words of their own rather than as a plain `invalid` (DEC-2809 item 1, DEC-2133). */
+const NAMED_VIOLATIONS: ReadonlySet<string> = new Set(["second_instrument", "second_agent_on_account", "connection_unrecorded"]);
 
 /** How many of an agent stream's latest events its screen lists. */
 const JOURNAL_TAIL = 20;
@@ -228,7 +232,7 @@ export function ApiRuntimeProvider({
         if (outcome.ok) return { phase: "recorded", eventId: outcome.accepted.event_id, body: outcome.body };
         const { error } = outcome;
         if (error.effect === "none" && ambiguous) return { phase: "unknown", eventId };
-        if (error.effect === "none") return { phase: "undelivered", reason: error.code };
+        if (error.effect === "none") return { phase: "undelivered", reason: (error.code === "invalid" ? error.violations.find((v) => NAMED_VIOLATIONS.has(v.code))?.code : undefined) ?? error.code };
         ambiguous = true;
         eventId = error.event_id ?? eventId;
         if (error.effect === "recorded" && eventId) return { phase: "recorded", eventId };
@@ -528,6 +532,14 @@ export function ApiRuntimeProvider({
     [client],
   );
 
+  /** `GET /instruments` and `GET /signal-models` (§4.1, DEC-2136), read together when the set-up opens. */
+  const catalogue = useCallback(async (): Promise<CatalogueAnswer> => {
+    const [instruments, models] = await Promise.all([client.read("/instruments", instrumentsRead), client.read("/signal-models", signalModelsRead)]);
+    if (!instruments.ok) return { ok: false, reason: instruments.error.code };
+    if (!models.ok) return { ok: false, reason: models.error.code };
+    return { ok: true, instruments: instruments.value.instruments, models: models.value.models };
+  }, [client]);
+
   /** `GET /alerts` (§4.7, DEC-2141): the workspace's owner alerts, with only this member's own deliveries. */
   const alerts = useCallback(async (): Promise<AlertsAnswer> => {
     const read = await client.read("/alerts", alertsRead);
@@ -706,8 +718,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, streamTail: journalTail, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, journalTail, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, streamTail: journalTail, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, journalTail, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

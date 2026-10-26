@@ -28,6 +28,7 @@ import { CONNECT_DISCLOSURE, connectStepUpDigest } from "./step-up";
 import type { Watermark } from "./types";
 import { servedBacktestFixture } from "@/fixtures/backtests";
 import { buildWorkspace } from "@/fixtures/workspace";
+import { INSTRUMENTS } from "@/fixtures/mandates";
 import type { Agent, Approval, ApprovalStatus, Health, Mandate, Scenario } from "@/fixtures/types";
 import { dec, mul, toDecimalString } from "@/lib/decimal";
 import { mandateVersion } from "@/lib/fixture-journey";
@@ -93,6 +94,31 @@ export interface IssuedChallenge {
   expires_at: string;
   used: boolean;
 }
+
+/**
+ * The one signal model the mock registers, as `GET /signal-models` serves the host's
+ * `quant.ma_crossover` (`mandate-modelhost`): its version, a stand-in content hash, and the projection
+ * of its content object, methodology and parameter bounds included.
+ */
+export const MOCK_MODEL = {
+  model_id: "quant.ma_crossover",
+  model_version: "1.0.0",
+  content_hash: `sha256:${"cf".repeat(32)}`,
+  params: ["fast_periods", "slow_periods"],
+  admits_instruments: false,
+  content: {
+    authorship: "platform",
+    methodology: "Long when the mean of the last fast_periods daily closes is strictly above the mean of the last slow_periods daily closes, compared by cross-multiplying the window sums; otherwise no output.",
+    params_schema: {
+      constraints: ["fast_periods < slow_periods"],
+      params: [
+        { max: 1000, min: 1, name: "fast_periods", type: "integer" },
+        { max: 1000, min: 2, name: "slow_periods", type: "integer" },
+      ],
+    },
+  },
+  registered_at: "2026-09-28T13:00:00.000000000Z",
+} as const;
 
 /** The mock's one principal, as `GET /v1/me/session` serves it. */
 export const MOCK_PRINCIPAL = "01JBR2C4D6E8F0G2H4J6K8M0P3";
@@ -284,6 +310,13 @@ export function createMockServer(options: MockServerOptions): MockServer {
       return event ? read({ event: { ...event, stream_id: `ctl:${workspaceId}`, artifact_refs: [], config_refs: {} } }) : problem(404, "not_found", "none");
     }
     if (route === "/health") return read(healthBody(workspace.health, servedAt));
+    if (route === "/instruments")
+      return read({
+        instruments: Object.values(INSTRUMENTS)
+          .map((i) => ({ instrument_id: i.asset_id, symbol: i.symbol, asset_class: i.asset_class, snapshot: `sha256:${sha256Hex(`instrument:${i.asset_id}`)}`, registered_at: servedAt }))
+          .sort((a, b) => (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0)),
+      });
+    if (route === "/signal-models") return read({ models: [MOCK_MODEL] });
     /** `read-models/alerts` (DEC-2141): the fixtures journal no owner alert, so none is invented. */
     if (route === "/alerts") return read({ alerts: [], truncated: false });
     if (route === "/passkeys") return read({ passkeys: passkeys.map((p) => ({ passkey_id: p.passkey_id, alg: "es256", enrolled_at: servedAt, cool_off_ends: p.cool_off_ends })) });
