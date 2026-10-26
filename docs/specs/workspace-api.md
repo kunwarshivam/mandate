@@ -1238,8 +1238,8 @@ pull channel's list is the journal itself). Users only, until client tokens land
   nine about members and access, `credential_added`, `new_device`, `notification_address_changed`,
   `recovery_used`, `role_granted`, `member_deactivated`, `deprovisioned`, `break_glass`, and
   `client_connected`, which this read never serves, since they go to one member or to admins
-  alone. An `OwnerAlertSent` that does not read, or whose kind is not one §9.15 admits, is
-  `journal_unavailable`, never skipped.
+  alone; those nine are left out, not failed. An `OwnerAlertSent` that does not read, or whose
+  kind is not one §9.15 admits, is `journal_unavailable`, never skipped.
 - **Order and limit.** Most recently raised first, by `raised_at` and then `alert_id`, both
   descending. `?limit=` takes 1 to 200 (default 50); anything else, or another query member, is
   `invalid`. `truncated` says whether older alerts were left out.
@@ -1253,7 +1253,7 @@ pull channel's list is the journal itself). Users only, until client tokens land
   `delivery`, the asking member's own latest `NoticeAttempted` per push channel (the highest
   notice-stream `seq` among that member's attempts on the channel), matched by recipient (`p_` and
   the member's id in lowercase, notifications spec §5.9), with its `channel`, `status`, `attempt`
-  and `recorded_at`. Another member's attempts, recipients, addresses, provider message ids, and
+  and `recorded_at`, in channel-name order. Another member's attempts, recipients, addresses, provider message ids, and
   the notice id are never served; `delivery` is empty while no attempt to the member is recorded.
   `notice` is `null` while no notice names the alert: before the dispatcher reaches it, or for
   the second of two alerts a user's one kill switch raised, which §3.4 gives one notice.
