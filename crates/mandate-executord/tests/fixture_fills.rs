@@ -289,7 +289,6 @@ fn a_filled_order_does_not_cancel() -> Result<(), Error> {
 /// A `client_order_id` the fixture already holds is refused as Alpaca refuses it, `422`, which the
 /// client reads as the order already being there: one fill, one position.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_duplicate_client_order_id_is_refused() -> Result<(), Error> {
     let mut broker = broker()?;
     let id = "md-01JINTENT0000000000000000A";
@@ -310,7 +309,6 @@ fn a_duplicate_client_order_id_is_refused() -> Result<(), Error> {
 /// No short sales (`AGENTS.md` rule 12): a sell with no position, or larger than the position, is
 /// refused as Alpaca refuses it, `403` with code 40310000, and fills nothing.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_sell_beyond_the_position_is_refused() -> Result<(), Error> {
     let mut broker = broker()?;
     let refused = |outcome: BrokerOutcome| match outcome {
@@ -507,7 +505,6 @@ fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Err
 /// no unexplained difference, its snapshot's cash the model's cash. A snapshot that read its own
 /// account report as an older base would count the fill's notional twice and mismatch.
 #[test]
-#[ignore = "pending E21-30"]
 fn the_fills_one_reconciliation_books_it_and_its_cash_is_the_models() -> Result<(), Error> {
     let (journal, mut process) = running(FixturePaper::filling(at(NOON)?), true)?;
     pass(&journal, &mut process, "t0", NOON)?;
@@ -532,7 +529,6 @@ fn the_fills_one_reconciliation_books_it_and_its_cash_is_the_models() -> Result<
 /// a pass five seconds after the start's reconciliation reads nothing, and one ten seconds after
 /// reconciles once.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_working_order_is_reconciled_every_ten_seconds() -> Result<(), Error> {
     let (journal, mut process) = running(FixturePaper::new(at(NOON)?), true)?;
     pass(&journal, &mut process, "t0", NOON)?;

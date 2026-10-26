@@ -10,7 +10,9 @@
 //! - `GET /v2/account/activities`: its fills as `FILL` activities, oldest first, after the
 //!   `page_token` the client sends;
 //! - `POST /v2/orders`: an order accepted, or `422` for a `client_order_id` it already holds, as
-//!   Alpaca answers; a bracket or an OCO with its two legs;
+//!   Alpaca answers; a bracket or an OCO with its two legs; a sell of more than the position,
+//!   none held included, `403` with code 40310000, since there are no short sales
+//!   (`AGENTS.md` rule 12);
 //! - `GET /v2/orders` (open orders, legs nested), `GET /v2/orders:by_client_order_id` (`404` for
 //!   one it never took), and `DELETE /v2/orders/{id}` (`204`, the order and its group then
 //!   `canceled`; `422` for one no longer open).
@@ -21,7 +23,8 @@
 //! the fill, which later reads report, as a marketable order's would. An OCO, a stop and a market
 //! order rest, since the fixture has no price. The serving process with no paper credential runs
 //! over [`FixturePaper::filling`], so the cell's trade loop fills (X1b-3). A fill names the broker's order id and no client order id, as Alpaca's activity does
-//! (DEC-2353), and paper's fees are simulated, so a fill moves the cash by its notional alone.
+//! (DEC-2353), and Alpaca paper does not simulate regulatory fees (trading spec §11), so a fill
+//! moves the cash by its notional alone.
 //!
 //! Every other request is `404`. Ids are a counter in UUID form, so a run is deterministic.
 
@@ -259,6 +262,13 @@ impl FixturePaper {
             .any(|o| o.client_order_id == client_order_id)
         {
             return refusal(422, 40_010_001, "client_order_id must be unique");
+        }
+        if side == "sell" {
+            let available = books.holdings.get(&symbol).map_or(0, |holding| holding.qty);
+            let wanted = text("qty").as_deref().and_then(scaled);
+            if wanted.is_none_or(|wanted| wanted > available) {
+                return refusal(403, 40_310_000, "insufficient qty available for order");
+            }
         }
         let class = text("order_class").unwrap_or_else(|| "simple".to_owned());
         let take_profit = leg_price("take_profit", "limit_price");
