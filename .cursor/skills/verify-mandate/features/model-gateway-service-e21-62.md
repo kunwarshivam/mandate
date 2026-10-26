@@ -13,7 +13,11 @@
   anything is reserved, and the start's check that every deployed agent's cap reads),
   `src/config.rs` (`Config::from_env`, every start-up value required, none with a default),
   `src/control.rs` (`StoreControl`, the control stream through the journal store),
-  `src/recorded.rs` (`Replies` and `settings`, the `--recorded` mode, DEC-2326 item 3);
+  `src/recorded.rs` (`Replies` and `settings`, the `--recorded` mode, DEC-2326 item 3),
+  `src/run.rs` (`command`, the binary's arguments, a live start refused `live_not_built` in every
+  form; `recorded_service`, the recorded service over the journaled meter streams, started only
+  when both read and every deployed cap reads; the ids, the host clock, the log and the
+  heartbeat), `src/main.rs` (the `mandate-gatewayd run|probe` binary);
   `RequestError::ALL`, `RequestError::code` and `Meter::set_research_daily` in `mandate-gateway`.
 - **Tests:** `crates/mandate-gatewayd/tests/key.rs` (read once, only as the model gateway, each
   vault failure's code, a value a header cannot carry, and a canary that the key shows in no
@@ -31,10 +35,16 @@
   read for, the start refusing unless every deployed agent's cap reads, and what is held bounded by
   the deployed agents), `tests/config.rs` (each value unset, empty or malformed stopping the start
   with its code), `tests/control.rs` (the workspace's own control stream), `tests/recorded.rs` (each call
-  primed with its turn's reply, and the recording's settings under DEC-2316's rate caps);
+  primed with its turn's reply, and the recording's settings under DEC-2316's rate caps),
+  `tests/run.rs` (the arguments and each refusal's code, the recording read strictly, a call
+  reserved and settled on both journaled meter streams and answered with the recording, a foreign
+  workspace and a budget below the call's maximum refused with nothing sent, the start refused
+  while a meter stream or a deployed cap does not read, the ids, the log and the heartbeat),
+  `tests/bin.rs` (the binary's exit codes);
   `crates/mandate-gateway/tests/wire.rs` (every refusal's code crosses the wire as itself),
   `crates/mandate-gateway/tests/meter.rs` (a replaced daily cap binds the next reservation, and an
   unread one refuses `Unavailable` reserving nothing).
-- **Not yet:** the binary with its lifecycle and probes, the §4.3 identity probe before
-  registration, and the runtime's worker over the service.
+- **Not yet:** the live start (the registry file, the vault key and HTTPS, refused
+  `live_not_built` until the founder names the live model and budgets, DEC-2265 item 10), the §4.3
+  identity probe before registration, and the runtime's worker over the service.
 - **Run:** `cargo nextest run -p mandate-gatewayd`.

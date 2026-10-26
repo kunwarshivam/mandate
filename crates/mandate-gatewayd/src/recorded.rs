@@ -4,10 +4,16 @@
 //! call is primed with the reply its turn takes: the scripted turn a recording names for an
 //! agentic call, else the recorded final reply.
 
-use mandate_gateway::fake::{Recorded, RecordedTransport};
-use mandate_gateway::registry::Reported;
-use mandate_gateway::{CallRequest, Settings};
+use std::collections::BTreeSet;
+
+use mandate_gateway::fake::{Recorded, RecordedTransport, openrouter_reply};
+use mandate_gateway::guard::GuardContext;
+use mandate_gateway::policy::EndpointPolicy;
+use mandate_gateway::provider::Delivery;
+use mandate_gateway::registry::{Locality, Reported};
+use mandate_gateway::{CallRequest, RateCaps, Settings};
 use mandate_research_run::recorded::{RecordedModel, RecordedReply, ScriptedTurn};
+use mandate_research_run::recorded_reply;
 
 /// The workspace's calls a minute, fixed whatever the entry pins, as the cell's gateway holds them
 /// (DEC-2316).
@@ -25,37 +31,80 @@ pub struct Replies {
     reported: Reported,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 impl Replies {
     pub fn new(model: &RecordedModel) -> Self {
-        let _ = model;
-        todo!()
+        Self {
+            reply: model.reply.clone(),
+            turns: model.turns.clone(),
+            reported: model.probe.clone(),
+        }
     }
 
     /// The reply `request` takes: an agentic call's scripted turn, the one after the turns its
     /// transcript already holds, when the recording scripts one; else the recorded final reply.
     pub fn reply_for(&self, request: &CallRequest) -> Recorded {
-        let _ = (&self.reply, &self.turns, &self.reported, request);
-        todo!()
+        let scripted = request
+            .run_kind
+            .as_ref()
+            .and_then(|_| self.turns.get(request.turns.len()));
+        let (latency_ms, body) = match scripted {
+            Some(turn) => {
+                let calls: Vec<(&str, &str)> = turn
+                    .calls
+                    .iter()
+                    .map(|(name, arguments)| (name.as_str(), arguments.as_str()))
+                    .collect();
+                (
+                    turn.latency_ms,
+                    openrouter_reply(None, &calls, &self.reported, turn.usage),
+                )
+            }
+            None => (
+                self.reply.latency_ms,
+                recorded_reply(
+                    &self.reply.output,
+                    self.reported.model.as_deref().unwrap_or_default(),
+                    self.reported.provider.as_deref().unwrap_or_default(),
+                    self.reply.usage,
+                ),
+            ),
+        };
+        Recorded {
+            latency_ms,
+            delivery: Delivery::Response {
+                status: 200,
+                body,
+                retry_after_ms: None,
+            },
+        }
     }
 
     /// Scripts `request`'s reply on `transport`, replacing any reply a call never took.
     pub fn prime(&self, transport: &mut RecordedTransport, request: &CallRequest) {
-        let _ = (transport, request);
-        todo!()
+        transport.clear_script();
+        transport.script(vec![self.reply_for(request)]);
     }
 }
 
 /// The gateway's settings for `workspace` over the recording's endpoint: hosted, through its one
 /// upstream, under the cell's rate caps (DEC-2316).
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn settings(workspace: &str, model: &RecordedModel) -> Settings {
-    let _ = (workspace, model);
-    todo!()
+    let turns = model
+        .entry
+        .agentic
+        .as_ref()
+        .map_or(1, |bounds| bounds.max_turns);
+    Settings {
+        workspace_id: workspace.to_owned(),
+        policy: EndpointPolicy::new(
+            BTreeSet::from([Locality::Hosted]),
+            Some(BTreeSet::from([model.endpoint.route.upstream.clone()])),
+            None,
+        ),
+        guard: GuardContext::default(),
+        rate: RateCaps {
+            per_workspace: WORKSPACE_RATE,
+            per_agent: turns.saturating_add(RATE_MARGIN),
+        },
+    }
 }

@@ -18,13 +18,15 @@
 //! [`cap`] reads each agent's daily research cap from the deployed mandate (DEC-2272), and
 //! [`service`] holds each research call to it before the gateway reserves anything. [`config`]
 //! reads the start-up values, none with a default, and [`control`] reads the control stream through
-//! the journal store. [`recorded`] is the `--recorded` mode's replies and settings (DEC-2326).
+//! the journal store. [`recorded`] replays a recording's model half, and [`run`] reads the binary's
+//! arguments and builds the `--recorded` service over the journaled meters.
 
 pub mod cap;
 pub mod config;
 pub mod control;
 pub mod key;
 pub mod recorded;
+pub mod run;
 pub mod serve;
 pub mod service;
 pub mod start;

@@ -2,7 +2,8 @@
 //! pass over a context built from [`Facts`], with DEC-2378 item 11's four checks and DEC-2388
 //! item 8's unseen parts deferred to the executor's binding gate. It can only narrow: every
 //! opening it allows is still judged by the binding gate on the account stream (`AGENTS.md`
-//! rules 1 and 12), and while any check is deferred it allows none.
+//! rules 1 and 12), and an allow with any check deferred names each, so the runtime asks the owner
+//! and never reports one passed (DEC-2388 item 13).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -18,7 +19,9 @@ use mandate_risk::{
     Purpose as GatePurpose, RiskSnapshot, SaneQuote, TimeInForce, ValidatedMandate, Verdict,
     WorkingUniverse,
 };
-use mandate_runtime::{DryRunVerdict, GateDryRun, Proposal, Purpose as RuntimePurpose};
+use mandate_runtime::{
+    Deferral, DryRunVerdict, GateDryRun, LiquidityRead, Proposal, Purpose as RuntimePurpose,
+};
 use mandate_spec::document::Mandate;
 use mandate_time::UtcNanos;
 
@@ -50,7 +53,6 @@ pub const UNSEEN: [Deferred; 10] = [
     Deferred::AccountExposure,
 ];
 
-const DEFERRED_TO_BINDING: &str = "deferred_to_binding";
 const FACTS_HELD: &str = "facts_held";
 const GATE_REFUSED: &str = "gate_refused";
 const RULE_SET_UNAVAILABLE: &str = "rule_set_unavailable";
@@ -107,11 +109,23 @@ impl Gate {
     ///
     /// # Errors
     /// The reason code the dry run journals.
+    pub fn advisory(&self, proposal: &Proposal) -> Result<Advisory, &'static str> {
+        self.read(proposal).map(|(advisory, _)| advisory)
+    }
+
+    /// The [`advisory`](Self::advisory) pass of `proposal` and the liquidity figures it was
+    /// evaluated on, with the fold's risk clock they were read at; `None` when none were read.
+    ///
+    /// # Errors
+    /// The reason code the dry run journals, as [`advisory`](Self::advisory) gives it.
     #[allow(
         clippy::disallowed_methods,
         reason = "the cell's runtime's advisory dry run, the one caller that may defer checks (DEC-2378 item 11)"
     )]
-    pub fn advisory(&self, proposal: &Proposal) -> Result<Advisory, &'static str> {
+    pub fn read(
+        &self,
+        proposal: &Proposal,
+    ) -> Result<(Advisory, Option<LiquidityRead>), &'static str> {
         let config = self.config.clone().ok_or(RULE_SET_UNAVAILABLE)?;
         let mandate = self.gate_mandate.clone().ok_or(GATE_REFUSED)?;
         let (context, figures) = self
@@ -126,10 +140,18 @@ impl Gate {
             .chain(liquidity_deferred(figures.as_ref()))
             .chain(UNSEEN)
             .collect();
+        let read_at = context.now;
         let advisory =
             evaluate_deferring(proposal, &context, &deferred).map_err(|_| GATE_REFUSED)?;
+        let read = figures.map(|facts| LiquidityRead {
+            prior_close: facts.prior_close,
+            median_dollar_volume_20d: facts.median_dollar_volume_20d,
+            adv_20d: facts.adv_20d,
+            trailing_5m_volume: facts.trailing_5m_volume,
+            read_at,
+        });
         match advisory.decision.purpose {
-            GatePurpose::Open | GatePurpose::Increase => Ok(advisory),
+            GatePurpose::Open | GatePurpose::Increase => Ok((advisory, read)),
             _ => Err(GATE_REFUSED),
         }
     }
@@ -326,23 +348,78 @@ impl Liquidity for BarsReader {
     }
 }
 
-/// The dry run's answer to an advisory pass: an allow only when the gate allows and nothing was
-/// deferred; any deferral denies `deferred_to_binding` until `DecisionMade` can name it (DEC-2388
-/// item 6); a gate denial or hold carries the gate's reason code; anything else is denied with the
-/// code the pass gave.
+/// The dry run's answer to an advisory pass (DEC-2388 item 13):
+/// - **An allow with nothing deferred** is an allow.
+/// - **An allow with any check deferred** names each as a [`Deferral`], with the figures the
+///   liquidity floor and participation were evaluated on. Should either still be deferred, no
+///   figures are given, so both are named, never reported evaluated. The runtime then asks the
+///   owner, and the binding gate evaluates every deferred check.
+/// - **A gate denial or hold** carries the gate's reason code, with the figures when they were
+///   read.
+/// - **Anything else** is denied with the code the pass gave.
 #[must_use]
-pub fn verdict(advisory: Result<Advisory, &'static str>) -> DryRunVerdict {
-    let reason_code = match advisory {
-        Ok(advisory) => match (advisory.decision.verdict, advisory.decision.reason) {
-            (Verdict::Allow, _) if advisory.deferred.is_empty() => return DryRunVerdict::Allow,
-            (Verdict::Allow, _) => DEFERRED_TO_BINDING,
-            (_, Some(reason)) => reason.as_str(),
-            (_, None) => GATE_REFUSED,
-        },
-        Err(code) => code,
+pub fn verdict(read: Result<(Advisory, Option<LiquidityRead>), &'static str>) -> DryRunVerdict {
+    let (advisory, liquidity) = match read {
+        Ok(read) => read,
+        Err(code) => {
+            return DryRunVerdict::Deny {
+                reason_code: code.to_owned(),
+            };
+        }
     };
-    DryRunVerdict::Deny {
-        reason_code: reason_code.to_owned(),
+    match (advisory.decision.verdict, advisory.decision.reason) {
+        (Verdict::Allow, _) => {
+            let liquidity = liquidity.filter(|_| {
+                !advisory.deferred.contains(&Deferred::LiquidityFloor)
+                    && !advisory.deferred.contains(&Deferred::Participation)
+            });
+            let deferred: BTreeSet<Deferral> = advisory
+                .deferred
+                .iter()
+                .filter_map(|deferred| deferral(*deferred))
+                .collect();
+            if deferred.is_empty() && liquidity.is_some() {
+                DryRunVerdict::Allow
+            } else {
+                DryRunVerdict::AllowDeferring {
+                    deferred,
+                    liquidity,
+                }
+            }
+        }
+        (_, reason) => {
+            let reason_code = reason
+                .map_or(GATE_REFUSED, |reason| reason.as_str())
+                .to_owned();
+            match liquidity {
+                Some(liquidity) => DryRunVerdict::DenyOnFigures {
+                    reason_code,
+                    liquidity,
+                },
+                None => DryRunVerdict::Deny { reason_code },
+            }
+        }
+    }
+}
+
+/// The runtime's name for a deferred part, or `None` for the liquidity floor and participation,
+/// which the runtime names itself exactly when no figures were evaluated (journal spec rule 270).
+#[must_use]
+pub fn deferral(deferred: Deferred) -> Option<Deferral> {
+    match deferred {
+        Deferred::LiquidityFloor | Deferred::Participation => None,
+        Deferred::Eligibility => Some(Deferral::Eligibility),
+        Deferred::DayTradeBudget => Some(Deferral::DayTradeBudget),
+        Deferred::AgentMode => Some(Deferral::AgentMode),
+        Deferred::AgentEquity => Some(Deferral::AgentEquity),
+        Deferred::ReentryCooldown => Some(Deferral::ReentryCooldown),
+        Deferred::Halt => Some(Deferral::Halt),
+        Deferred::OtherOrders => Some(Deferral::OtherOrders),
+        Deferred::QuoteAsk => Some(Deferral::QuoteAsk),
+        Deferred::ConductHistory => Some(Deferral::ConductHistory),
+        Deferred::RelatedAccounts => Some(Deferral::RelatedAccounts),
+        Deferred::FeeReservation => Some(Deferral::FeeReservation),
+        Deferred::AccountExposure => Some(Deferral::AccountExposure),
     }
 }
 
@@ -353,6 +430,6 @@ impl GateDryRun for Gate {
         if !proposal.purpose.adds_risk() {
             return DryRunVerdict::Allow;
         }
-        verdict(self.advisory(proposal))
+        verdict(self.read(proposal))
     }
 }
