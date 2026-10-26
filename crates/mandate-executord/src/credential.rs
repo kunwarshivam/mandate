@@ -496,4 +496,9 @@ impl<D: DataTransport, P: Pause> QuoteFeed for AlpacaQuotes<D, P> {
             observed_at: RiskClock::from_secs(quote.at.min(now).secs()),
         })
     }
+
+    /// Alpaca's IEX feed, the one paper reads (DEC-2359).
+    fn feed(&self) -> &'static str {
+        "iex"
+    }
 }

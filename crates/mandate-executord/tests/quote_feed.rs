@@ -75,6 +75,10 @@ impl QuoteFeed for Recorded {
             .filter(|quote| &quote.instrument == instrument)
             .ok_or("no_quote")
     }
+
+    fn feed(&self) -> &'static str {
+        "recorded"
+    }
 }
 
 /// The executor of a held exit beside its protection, its journal, its broker, and the count of

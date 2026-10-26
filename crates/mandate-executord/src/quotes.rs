@@ -37,6 +37,9 @@ pub trait QuoteFeed {
         instrument: &InstrumentId,
         now: UtcNanos,
     ) -> Result<MarketObservation, &'static str>;
+
+    /// The feed's name, as a mark records it (`MarkUpdated`'s `feed`, journal spec §9.30).
+    fn feed(&self) -> &'static str;
 }
 
 /// A feed with no quotes: the fixture broker's, and any wiring that reads none.
@@ -50,6 +53,10 @@ impl QuoteFeed for NoQuotes {
         _now: UtcNanos,
     ) -> Result<MarketObservation, &'static str> {
         Err("no_quotes")
+    }
+
+    fn feed(&self) -> &'static str {
+        "none"
     }
 }
 

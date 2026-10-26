@@ -23,6 +23,7 @@ use mandate_executor::{
     ExitTier, FillId, IdGen, InstrumentSnapshot, MandateVersion, MandateView, ProtectionPrices,
     Purpose, Seq, WorkspaceId, WriterEpoch, equity_bracket_prices,
 };
+use mandate_executord::marks::NoMarks;
 use mandate_executord::quotes::NoQuotes;
 use mandate_executord::serve::ScriptedBroker;
 use mandate_executord::{Broker, Config, ExecutorProcess, Protections, Unplanned, Wiring};
@@ -806,6 +807,7 @@ pub fn wired(
         gate,
         protections,
         quotes: Box::new(NoQuotes),
+        marked: Box::new(NoMarks),
     })
 }
 

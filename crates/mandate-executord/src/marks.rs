@@ -4,7 +4,10 @@
 //! mark records what the quote was, sane or not; the fold, not this module, decides what a mark
 //! that is not sane, or one outside the regular session, does.
 
-use mandate_accounting::AssetClass;
+use std::collections::BTreeSet;
+use std::time::Duration;
+
+use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::{Key, Object, Value};
 use mandate_executor::{EventDraft, EventId, MarketObservation, RiskClock};
 use mandate_num::Price;
@@ -12,6 +15,27 @@ use mandate_time::{ExchangeCalendar, UtcNanos};
 
 /// The record this module writes, at its version 2 (journal spec §9.30).
 const MARK: &str = "MarkUpdated";
+
+/// How often each marked instrument is marked: well inside the data profile's quote staleness
+/// bound, so the latest mark the gate reads is never stale while the feed answers.
+pub const MARK_EVERY: Duration = Duration::from_secs(15);
+
+/// The instruments the executor marks: those the deployments it serves may open, so the risk
+/// fold and the gate context hold a fresh mark before an opening is proposed.
+pub trait Marked {
+    /// The instruments to mark now.
+    fn instruments(&self) -> BTreeSet<InstrumentId>;
+}
+
+/// No instrument to mark: a wiring that knows no deployment's instruments.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoMarks;
+
+impl Marked for NoMarks {
+    fn instruments(&self) -> BTreeSet<InstrumentId> {
+        BTreeSet::new()
+    }
+}
 
 /// The `MarkUpdated` version-2 draft of `observation` for an instrument of `class`, with event id
 /// `event_id`, at the executor's latest tick `risk_clock`, from the feed named `feed`:

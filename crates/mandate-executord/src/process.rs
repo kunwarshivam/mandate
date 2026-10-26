@@ -21,6 +21,7 @@ use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::UtcNanos;
 
 use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches};
+use crate::marks::Marked;
 use crate::quotes::{QuoteFeed, QuotePoll};
 
 /// The version the envelope's actor carries.
@@ -63,8 +64,11 @@ pub struct Wiring {
     pub fees: mandate_accounting::Config,
     pub gate: Box<dyn BindingGateSource>,
     pub protections: Box<dyn Protections>,
-    /// The latest quote of each instrument whose exit waits on a price (E21-30, DEC-2359).
+    /// The latest quote of each instrument whose exit waits on a price (E21-30, DEC-2359), and
+    /// of each instrument marked.
     pub quotes: Box<dyn QuoteFeed>,
+    /// The instruments the executor marks (DEC-2380 item 3).
+    pub marked: Box<dyn Marked>,
 }
 
 impl Wiring {
