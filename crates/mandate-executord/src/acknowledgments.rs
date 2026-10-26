@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn the_latest_membership_record_sets_the_overlay_and_none_is_false() {
         let ack = acknowledged(3, "ak", "agenta", None, "a1");
-        let none = handed(&[ack.clone()]);
+        let none = handed(std::slice::from_ref(&ack));
         assert_eq!(
             none.map(|h| h.iter().map(|x| x.independent_overlay).collect::<Vec<_>>()),
             Ok(vec![false])
@@ -290,13 +290,15 @@ mod tests {
         ];
         let handed = handed(&control).unwrap_or_default();
         assert_eq!(handed.len(), 2, "the request and the acknowledgment");
-        let ack = &handed[1];
+        let (Some(request), Some(ack)) = (handed.first(), handed.get(1)) else {
+            unreachable!("two handed: {handed:?}");
+        };
         assert_eq!(
             ack.spent,
             BTreeSet::from(["c1".to_owned(), "r1".to_owned(), "p1".to_owned()])
         );
         assert_eq!(ack.request_spent, Some(BTreeSet::from(["c1".to_owned()])));
-        assert_eq!(handed[0].request_spent, None);
+        assert_eq!(request.request_spent, None);
         assert_eq!(ack.processed_at, RiskClock::from_secs(100));
         assert_eq!(ack.methods, BTreeSet::from(["cli_confirm".to_owned()]));
     }
@@ -308,8 +310,10 @@ mod tests {
             acknowledged(2, "ak", "agenta", None, "a1"),
         ];
         let handed = handed(&control).unwrap_or_default();
-        assert_eq!(handed.len(), 1);
-        assert_eq!(handed[0].spent, BTreeSet::from(["z1".to_owned()]));
+        assert_eq!(
+            handed.iter().map(|h| h.spent.clone()).collect::<Vec<_>>(),
+            [BTreeSet::from(["z1".to_owned()])]
+        );
     }
 
     #[test]
