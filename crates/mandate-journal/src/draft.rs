@@ -147,7 +147,9 @@ impl Draft {
         } else {
             let schema = payload_schema(event_type, int("schema_version"))
                 .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
-            normalize(schema, written, "payload")?
+            let payload = normalize(schema, written, "payload")?;
+            crate::schema::rules(event_type, int("schema_version"), &payload)?;
+            payload
         };
 
         let mut referenced = BTreeSet::new();

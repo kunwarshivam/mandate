@@ -389,7 +389,11 @@ fn an_unreachable_endpoint_is_endpoint_failed_and_names_no_secret() {
 
 #[test]
 fn the_live_adapter_builds_without_sending_anything() {
-    assert!(HttpTokenEndpoint::live().is_ok());
+    assert!(
+        HttpTokenEndpoint::live().is_ok(),
+        "the live token client did not build: the likeliest cause is no CA roots where this runs \
+         (an image on an empty base without a CA bundle; DEC-2063 item 8, E10-25)"
+    );
 }
 
 /// The live adapter's client refuses a plain `http` URL before anything is sent.

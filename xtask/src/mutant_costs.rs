@@ -199,10 +199,10 @@ pub fn provisional(
     })
 }
 
-/// The histories `histories` folded into one (DEC-2367 item 1): each `mutants-costs` job folds its
-/// run into the latest history it can read, so two that overlap each upload a history without the
-/// other's records. Reading the recent ones together keeps both, and [`fold`] counts a record
-/// held by several only once.
+/// The histories `histories`, oldest first, folded into one (DEC-2367 item 1): each `mutants-costs`
+/// job folds its run into the latest history it can read, so two that overlap each upload a
+/// history without the other's records. Reading the recent ones together keeps both, and [`fold`]
+/// counts a record held by several only once, the one from the latest history.
 pub fn merged(histories: impl IntoIterator<Item = History>) -> History {
     histories
         .into_iter()
@@ -368,23 +368,40 @@ pub const HISTORIES_READ: usize = 10;
 /// empty one when there is none. One that cannot be read is skipped, as said in the log
 /// ([`readable`]), so the history alone never fails a job; only a listing that fails does.
 pub fn latest_history(repo: &str, dir: &Path) -> Result<History> {
-    let listing = gh_api(&[
-        &format!(
-            "repos/{repo}/actions/artifacts?name={HISTORY_ARTIFACT}&per_page={HISTORIES_READ}"
-        ),
-        "--jq",
-        ".artifacts[] | select(.expired | not) | \"\\(.id) \\(.name)\"",
-    ])?;
-    let read = ids_named(&listing, HISTORY_ARTIFACT)?
+    latest_from(
+        || {
+            gh_api(&[
+                &format!(
+                    "repos/{repo}/actions/artifacts?name={HISTORY_ARTIFACT}&per_page={HISTORIES_READ}"
+                ),
+                "--jq",
+                ".artifacts[] | select(.expired | not) | \"\\(.id) \\(.name)\"",
+            ])
+        },
+        |id| artifact_text(repo, id, dir),
+    )
+}
+
+/// [`latest_history`] from `list`, the `<id> <name>` listing newest first as the Actions API orders
+/// it, and `read`, one artifact's text: at most [`HISTORIES_READ`] histories, each that cannot be
+/// read skipped, [`merged`] oldest first so that a later record replaces an earlier one for the
+/// same run and shard, as a re-run's clean record replaces its first attempt's `unfinished` one.
+fn latest_from(
+    list: impl FnOnce() -> Result<Vec<u8>>,
+    read: impl Fn(&str) -> Result<String>,
+) -> Result<History> {
+    let mut newest_first: Vec<(String, Result<History>)> = ids_named(&list()?, HISTORY_ARTIFACT)?
         .into_iter()
         .take(HISTORIES_READ)
         .map(|id| {
-            let history = artifact_text(repo, &id, dir).and_then(|text| {
+            let history = read(&id).and_then(|text| {
                 serde_json::from_str::<History>(&text).context("parsing the cost history")
             });
             (id, history)
-        });
-    Ok(merged(readable(read)))
+        })
+        .collect();
+    newest_first.reverse();
+    Ok(merged(readable(newest_first)))
 }
 
 /// The histories of `read` that could be read, by artifact id; each that could not is said and
@@ -798,6 +815,80 @@ mod tests {
             on_time.longest_mutant_ms, 26_000,
             "a shard on time keeps its measure"
         );
+        Ok(())
+    }
+
+    /// The listing [`latest_from`] reads for `ids`, newest first.
+    fn listing(ids: &[u64]) -> Vec<u8> {
+        ids.iter()
+            .map(|id| format!("{id} {HISTORY_ARTIFACT}\n"))
+            .collect::<String>()
+            .into_bytes()
+    }
+
+    /// R2's finding on DEC-2367: a run re-run clean keeps its first attempt's provisional record
+    /// unless the newer history wins. The listing is newest first, and the clean record is in the
+    /// newer history, so it replaces the `unfinished` one; the other way round, the `unfinished`
+    /// one stands.
+    #[test]
+    fn a_later_history_replaces_an_earlier_record_of_the_same_run_and_shard() -> Result<()> {
+        let unfinished =
+            provisional(7, "0/2".to_owned(), vec!["a".to_owned()], 5).expect("a record");
+        let clean = ShardCost {
+            run: 7,
+            shard: "0/2".to_owned(),
+            ..cost(7, "0/2", &["a"])
+        };
+        let first = serde_json::to_string(&fold(History::default(), &[unfinished]))?;
+        let rerun = serde_json::to_string(&fold(History::default(), &[clean]))?;
+        let text = |newer: &str, older: &str| {
+            let (newer, older) = (newer.to_owned(), older.to_owned());
+            move |id: &str| -> Result<String> {
+                Ok(if id == "2" {
+                    newer.clone()
+                } else {
+                    older.clone()
+                })
+            }
+        };
+        let got = latest_from(|| Ok(listing(&[2, 1])), text(&rerun, &first))?;
+        assert_eq!(got.by_package["a"].len(), 1);
+        assert_eq!(
+            got.by_package["a"][0].outcome, "caught",
+            "the re-run, the newer, wins"
+        );
+        let got = latest_from(|| Ok(listing(&[2, 1])), text(&first, &rerun))?;
+        assert_eq!(
+            got.by_package["a"][0].outcome, UNFINISHED,
+            "the newer wins either way"
+        );
+        Ok(())
+    }
+
+    /// DEC-2367 item 1 through the real reader: at most [`HISTORIES_READ`] histories, the newest,
+    /// and one that cannot be read is skipped; a listing that fails fails the read.
+    #[test]
+    fn the_reader_takes_the_newest_ten_and_skips_an_unreadable_one() -> Result<()> {
+        let read = |id: &str| -> Result<String> {
+            let run: u64 = id.parse()?;
+            if run == 5 {
+                bail!("expired");
+            }
+            Ok(serde_json::to_string(&fold(
+                History::default(),
+                &[cost(run, "0/1", &["a"])],
+            ))?)
+        };
+        let ids: Vec<u64> = (1..=12).rev().collect();
+        let got = latest_from(|| Ok(listing(&ids)), read)?;
+        let runs: Vec<u64> = got.by_package["a"].iter().map(|c| c.run).collect();
+        assert_eq!(
+            runs,
+            [3, 4, 6, 7, 8, 9, 10, 11, 12],
+            "the ten newest, less the unreadable 5"
+        );
+        assert!(latest_from(|| bail!("no listing"), read).is_err());
+        assert_eq!(latest_from(|| Ok(Vec::new()), read)?, History::default());
         Ok(())
     }
 
