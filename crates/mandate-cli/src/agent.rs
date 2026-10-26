@@ -51,12 +51,51 @@ pub enum Command {
     Acknowledge {
         event: String,
         request: Option<String>,
+        subject: Option<Subject>,
     },
     /// The owner's request that another user acknowledge `event`, committed as
     /// `OwnerAcknowledgmentRequested` (journal spec §9.28, DEC-2512 item 1).
     RequestAcknowledgment {
         event: String,
+        subject: Option<Subject>,
     },
+}
+
+/// What an acknowledgment or its request names as `event`, written as version 2's `subject`
+/// (journal spec v0.104 §9.28, DEC-2824, DEC-2830). Without one, the record is version 1, which
+/// every reader takes as a limit's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Subject {
+    /// A `RiskLimitTriggered`.
+    Limit,
+    /// An `AccountRestrictionChanged`.
+    Restriction,
+    /// The executor's own `AgentModeApplied` holding agents under `reconciliation:<subject>`.
+    Reconciliation,
+}
+
+impl Command {
+    /// The subject an acknowledgment or its request names, if the owner gave one.
+    const fn subject(&self) -> Option<Subject> {
+        match self {
+            Self::Acknowledge { subject, .. } | Self::RequestAcknowledgment { subject, .. } => {
+                *subject
+            }
+            _ => None,
+        }
+    }
+}
+
+impl Subject {
+    /// The name version 2's `subject` member carries.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Limit => "limit",
+            Self::Restriction => "restriction",
+            Self::Reconciliation => "reconciliation",
+        }
+    }
 }
 
 /// The warning `mandate agent stop --release` shows before the owner types the code (DEC-136,
@@ -108,7 +147,7 @@ fn code_at(agent: &str, command: &Command, head: u64) -> Result<Option<String>, 
         Command::Stop { release: true } => ("stop_release", None, &None, None),
         Command::Exit { instrument, bid } => ("owner_exit", Some(instrument), bid, None),
         Command::Acknowledge { event, .. } => ("acknowledge", None, &None, Some(event)),
-        Command::RequestAcknowledgment { event } => ("request_ack", None, &None, Some(event)),
+        Command::RequestAcknowledgment { event, .. } => ("request_ack", None, &None, Some(event)),
     };
     let mut bound = vec![
         ("confirms", text(name)),
@@ -126,6 +165,9 @@ fn code_at(agent: &str, command: &Command, head: u64) -> Result<Option<String>, 
     } = command
     {
         bound.push(("request", text(request)));
+    }
+    if let Some(subject) = command.subject() {
+        bound.push(("subject", text(subject.as_str())));
     }
     Ok(Some(code_of(&object(bound)?)))
 }
@@ -186,32 +228,42 @@ pub fn command(
             | Command::RequestAcknowledgment { .. }
     );
     let (event_type, key, timed): (_, _, &[&'static str]) = match command {
-        Command::Acknowledge { event, request } => {
+        Command::Acknowledge {
+            event,
+            request,
+            subject,
+        } => {
             let requested_by = match request {
-                Some(request) => requester(journal, owner, agent, event, request)?,
+                Some(request) => requester(journal, owner, agent, event, request, *subject)?,
                 None => owner.user.clone(),
             };
             (
                 ACKNOWLEDGED,
-                vec![
-                    ("agent", text(agent)),
-                    ("event", text(event)),
-                    ("user", text(&owner.user)),
-                    ("requested_by", text(&requested_by)),
-                    ("independent_required", Value::Bool(request.is_some())),
-                    ("request", request.as_deref().map_or(Value::Null, text)),
-                ],
+                subjected(
+                    *subject,
+                    vec![
+                        ("agent", text(agent)),
+                        ("event", text(event)),
+                        ("user", text(&owner.user)),
+                        ("requested_by", text(&requested_by)),
+                        ("independent_required", Value::Bool(request.is_some())),
+                        ("request", request.as_deref().map_or(Value::Null, text)),
+                    ],
+                ),
                 &["risk_clock", "submitted_at"],
             )
         }
-        Command::RequestAcknowledgment { event } => (
+        Command::RequestAcknowledgment { event, subject } => (
             REQUESTED,
-            vec![
-                ("agent", text(agent)),
-                ("event", text(event)),
-                ("requested_by", text(&owner.user)),
-                ("independent_required", Value::Bool(true)),
-            ],
+            subjected(
+                *subject,
+                vec![
+                    ("agent", text(agent)),
+                    ("event", text(event)),
+                    ("requested_by", text(&owner.user)),
+                    ("independent_required", Value::Bool(true)),
+                ],
+            ),
             &["risk_clock", "submitted_at"],
         ),
         Command::Pause => (
@@ -271,8 +323,29 @@ pub fn command(
             {
                 unspent(journal, owner, request)?;
             }
-            commit(journal, ids, owner, decided, timed, now)
+            let version = if command.subject().is_some() { 2 } else { 1 };
+            commit(journal, ids, owner, decided.at_version(version), timed, now)
         }
+    }
+}
+
+/// `key` with version 2's `subject` added when the owner gave one (journal spec §9.28, DEC-2824).
+fn subjected(
+    subject: Option<Subject>,
+    mut key: Vec<(&'static str, Value)>,
+) -> Vec<(&'static str, Value)> {
+    if let Some(subject) = subject {
+        key.push(("subject", text(subject.as_str())));
+    }
+    key
+}
+
+/// The subject a §9.28 record names: version 2's `subject`, and a limit's for version 1, which
+/// has none.
+fn subject_of(record: &Value) -> Option<String> {
+    match record.get("payload").and_then(|p| p.get("subject")) {
+        None => Some(Subject::Limit.as_str().to_owned()),
+        Some(subject) => subject.as_str().map(str::to_owned),
     }
 }
 
@@ -314,7 +387,8 @@ fn named(record: &Value, path: &str) -> Option<String> {
 ///
 /// # Errors
 /// [`ControlError::Refused`] with `request_invalid` when no `OwnerAcknowledgmentRequested` has
-/// that id, or it names another agent or event (rule 240); with `not_independent` when the owner
+/// that id, or it names another agent, event or subject (rule 240; a
+/// version-1 record names a limit); with `not_independent` when the owner
 /// requested it (rule 239); and [`ControlError::Journal`] when the journal cannot be read.
 fn requester(
     journal: &dyn ControlJournal,
@@ -322,6 +396,7 @@ fn requester(
     agent: &str,
     event: &str,
     request: &str,
+    subject: Option<Subject>,
 ) -> Result<String, ControlError> {
     let refused = |reason| ControlError::Refused { reason };
     let records = records(journal, owner)?;
@@ -337,7 +412,8 @@ fn requester(
         return Err(refused("not_independent"));
     }
     let same = named(asked, "payload.agent").as_deref() == Some(agent)
-        && named(asked, "payload.event").as_deref() == Some(event);
+        && named(asked, "payload.event").as_deref() == Some(event)
+        && subject_of(asked).as_deref() == Some(subject.unwrap_or(Subject::Limit).as_str());
     if !same {
         return Err(refused("request_invalid"));
     }

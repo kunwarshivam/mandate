@@ -77,12 +77,14 @@ fn acknowledge(event: u64, request: Option<&str>) -> Command {
     Command::Acknowledge {
         event: trigger(event),
         request: request.map(str::to_owned),
+        subject: None,
     }
 }
 
 fn request(event: u64) -> Command {
     Command::RequestAcknowledgment {
         event: trigger(event),
+        subject: None,
     }
 }
 
@@ -219,6 +221,7 @@ fn a_plain_acknowledgment_under_a_requiring_policy_is_the_one_the_executor_refus
     let ack = Command::Acknowledge {
         event: event.clone(),
         request: None,
+        subject: None,
     };
     answer(
         "acknowledge",
