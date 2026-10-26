@@ -632,6 +632,9 @@ pub struct SignalInputs {
     /// Per instrument, the sells this runtime proposed that are still working, which a plan takes
     /// off the position before it proposes an exit (§8.3 step 2, "minus working exits").
     pub working_exits: BTreeMap<InstrumentId, Qty>,
+    /// The asset class of each instrument an admitted thesis named (journal spec §9.4), which a
+    /// plan reads to price and route an exit of an instrument the mandate does not pin.
+    pub thesis_classes: BTreeMap<InstrumentId, mandate_accounting::AssetClass>,
 }
 
 /// Whether the executor is known to hold an intent yet.

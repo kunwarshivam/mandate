@@ -73,7 +73,80 @@ impl Plan {
 }
 
 impl OrderPlan for Plan {
+    /// The thesis exit of an instrument the agent holds first (mandate spec §8.3 step 2, MI-34,
+    /// DEC-2391), and only then an opening: an exit never waits behind a buy.
     fn plan(&self, _view: &MandateView, inputs: &SignalInputs) -> Option<Proposal> {
+        self.thesis_exit(inputs).or_else(|| self.opening(inputs))
+    }
+
+    /// Mandate spec §6 over the proposal's own figures. An exit is built-in AUTO, never asked or
+    /// denied (§6.1, `AGENTS.md` rules 2 and 13). A proposal the plan could not have made,
+    /// or one whose facts have gone, is denied, which never adds risk (`AGENTS.md` rule 3). The
+    /// plan cannot see every fact an autonomy rule may read (drawdown, daily P&L, what the agent
+    /// bought today, gross exposure), so it never answers `auto` for an opening: §6.2 step 5c with
+    /// `auto_allowed` false makes an `auto` opening `ask` (DEC-2378 item 10).
+    fn classify(&self, view: &MandateView, proposal: &Proposal) -> Classified {
+        if !proposal.purpose.adds_risk() {
+            return Classified {
+                autonomy: Autonomy::Auto,
+                decided_by: Some(BUILTIN_RISK_REDUCING.to_owned()),
+            };
+        }
+        self.classify_opening(view, proposal)
+    }
+}
+
+/// The `decided_by` label of an exit's built-in AUTO (journal spec §9.1, mandate spec §6.2 step 3).
+const BUILTIN_RISK_REDUCING: &str = "builtin_risk_reducing";
+
+impl Plan {
+    /// §8.3 step 2's first branch over the fold: the first instrument, in id order, whose thesis
+    /// ended and which the agent's fills still hold, sold by `mandate_ports::size` less the
+    /// runtime's working exits, with its asset class from its thesis record. A pinned universe has
+    /// no theses (V-037), and an instrument with no sane mark cannot be priced, so neither proposes
+    /// one; the instrument is offered again at the next evaluation, and a risk exit or a kill
+    /// switch never waits on this.
+    fn thesis_exit(&self, inputs: &SignalInputs) -> Option<Proposal> {
+        if self.mandate.universe.pinned {
+            return None;
+        }
+        inputs.ended_theses.iter().find_map(|instrument| {
+            let class = *inputs.thesis_classes.get(instrument)?;
+            let (held, facts, models) = self.facts.read(|journaled| {
+                (
+                    journaled.held().get(instrument.as_str()).copied(),
+                    journaled.facts(instrument.as_str(), self.fresh),
+                    journaled.models(),
+                )
+            })?;
+            let (held, facts) = (held?, facts.ok()?);
+            let validation = validation_context(facts.account.equity, facts.now)?;
+            let validated = ValidatedMandate::new(self.mandate.clone(), &validation, &[]).ok()?;
+            let named = InstrumentRef {
+                asset_id: mandate_domain::AssetId::parse(instrument.as_str()).ok()?,
+                symbol: String::new(),
+                asset_class: class,
+            };
+            let mut builder =
+                builder_context(&self.mandate, &named, &facts, exit_session(class), &models)?;
+            builder.account.position_qty = held;
+            builder.execution = OrderExecution {
+                asset_class: class,
+                tif: match class {
+                    AssetClass::UsEquity => TimeInForce::Day,
+                    AssetClass::Crypto => TimeInForce::Gtc,
+                },
+                protection_required: false,
+                protection: None,
+            };
+            mandate_ports::size(&validated, &builder, inputs)
+                .ok()
+                .flatten()
+                .filter(|proposal| !proposal.purpose.adds_risk())
+        })
+    }
+
+    fn opening(&self, inputs: &SignalInputs) -> Option<Proposal> {
         self.mandate
             .universe
             .pinned_instruments
@@ -87,12 +160,7 @@ impl OrderPlan for Plan {
             .filter(|proposal| proposal.purpose.adds_risk())
     }
 
-    /// Mandate spec §6 over the proposal's own figures. A proposal the plan could not have made,
-    /// or one whose facts have gone, is denied, which never adds risk (`AGENTS.md` rule 3). The
-    /// plan cannot see every fact an autonomy rule may read (drawdown, daily P&L, what the agent
-    /// bought today, gross exposure), so it never answers `auto`: §6.2 step 5c with `auto_allowed`
-    /// false makes an `auto` opening `ask` (DEC-2378 item 10).
-    fn classify(&self, _view: &MandateView, proposal: &Proposal) -> Classified {
+    fn classify_opening(&self, _view: &MandateView, proposal: &Proposal) -> Classified {
         let denied = Classified {
             autonomy: Autonomy::Deny,
             decided_by: None,
@@ -182,6 +250,18 @@ fn opening_session(asset_class: AssetClass, now: UtcNanos) -> Option<MarketSessi
             (span.session() == Session::Regular && left > CLOSE_WINDOW_S)
                 .then_some(MarketSession::Regular)
         }
+    }
+}
+
+/// The session an exit in `asset_class` is labelled with: crypto's, or the regular session for
+/// an equity. It only labels the builder's market: whether an equity exit waits for the regular
+/// session is the gate's `defer` and the executor's, never the plan's (`AGENTS.md` rule 13), and
+/// how it is priced, marketable in the close window included, is the executor's (trading spec
+/// §5.6), since the runtime's proposal carries no order shape.
+fn exit_session(asset_class: AssetClass) -> MarketSession {
+    match asset_class {
+        AssetClass::Crypto => MarketSession::Crypto,
+        AssetClass::UsEquity => MarketSession::Regular,
     }
 }
 

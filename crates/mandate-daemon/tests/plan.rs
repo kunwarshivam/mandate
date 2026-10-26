@@ -160,6 +160,7 @@ fn inputs(now: &str) -> SignalInputs {
         now: RiskClock::from_secs(secs),
         ended_theses: Default::default(),
         working_exits: Default::default(),
+        thesis_classes: Default::default(),
     }
 }
 
@@ -495,5 +496,169 @@ fn a_deny_rule_on_a_fact_the_plan_cannot_see_denies_every_opening() {
         asked.autonomy,
         Autonomy::Ask,
         "an ask rule on an unseen fact still asks, never denies: {asked:?}"
+    );
+}
+
+/// The demo's research mandate: an unpinned universe, so its theses can end (V-037).
+fn research_document() -> Value {
+    let bytes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../deploy/cell/demo/research-mandate.json"
+    ))
+    .unwrap();
+    mandate_canon::parse(&bytes).unwrap()
+}
+
+fn research_plan(rows: &Rows) -> Plan {
+    let facts = Facts::new(CLOCK, AGENT);
+    facts.follow(ACCOUNT);
+    facts.feed(&rows.0);
+    Plan::new(facts, Mandate::parse(&research_document()).unwrap(), FRESH)
+}
+
+/// `rows` with the agent holding `qty` SPY from one filled buy of its own, journaled at `now`.
+fn holding(mut rows: Rows, qty: &str, now: &str) -> Rows {
+    rows.push(
+        ACCOUNT,
+        "OrderRequestRecorded",
+        &format!(r#"{{"agent_id":"{AGENT}","purpose":"open","risk_clock":"{now}"}}"#),
+    );
+    rows.push(
+        ACCOUNT,
+        "OrderSubmitted",
+        &format!(r#"{{"client_order_id":"o1","instrument_id":"{SPY}","side":"buy"}}"#),
+    );
+    rows.push(
+        ACCOUNT,
+        "FillApplied",
+        &format!(
+            r#"{{"fill_id":"f1","client_order_id":"o1","instrument_id":"{SPY}","side":"buy","qty_gross":"{qty}","price":"99.95","risk_clock":"{now}"}}"#
+        ),
+    );
+    rows.push(
+        ACCOUNT,
+        "OrderStateChanged",
+        r#"{"client_order_id":"o1","state":"filled","replaced_by":null,"ignored":false}"#,
+    );
+    rows
+}
+
+/// No output at all, SPY's thesis ended, and its class from its thesis record (DEC-2391).
+fn ended_inputs(now: &str) -> SignalInputs {
+    let spy = InstrumentId::new(SPY).unwrap();
+    SignalInputs {
+        outputs: BTreeMap::new(),
+        output_events: BTreeMap::new(),
+        now: RiskClock::from_secs(at(now).secs()),
+        ended_theses: [spy.clone()].into(),
+        working_exits: Default::default(),
+        thesis_classes: [(spy, mandate_accounting::AssetClass::UsEquity)].into(),
+    }
+}
+
+/// Mandate spec §8.3 step 2, MI-34: a held instrument whose thesis ended is sold whole at the
+/// bid, with `exit_origin` `removed_instrument`, built-in AUTO, in every session: whether an
+/// equity exit waits for the regular session is the gate's and the executor's, never the plan's.
+#[test]
+fn a_held_instrument_whose_thesis_ended_is_sold_whole_and_auto_in_every_session() {
+    for now in [REGULAR, CLOSING, PRE_MARKET] {
+        let rows = holding(journaled(now), "3", now);
+        let plan = research_plan(&rows);
+        let proposal = plan
+            .plan(&view(), &ended_inputs(now))
+            .unwrap_or_else(|| panic!("{now}: an exit"));
+        assert_eq!(proposal.side, Side::Sell, "{now}");
+        assert_eq!(proposal.purpose, Purpose::DiscretionaryExit, "{now}");
+        assert_eq!(
+            proposal.exit_origin,
+            Some(mandate_runtime::ExitOrigin::RemovedInstrument),
+            "{now}"
+        );
+        assert_eq!(proposal.qty, Qty::parse("3").unwrap(), "{now}");
+        assert_eq!(proposal.limit, Price::parse("99.95").unwrap(), "{now}");
+        assert_eq!(
+            proposal.execution.map(|e| e.protection_required),
+            Some(false),
+            "{now}: an exit carries no protection"
+        );
+        assert_eq!(
+            plan.classify(&view(), &proposal),
+            Classified {
+                autonomy: Autonomy::Auto,
+                decided_by: Some("builtin_risk_reducing".into()),
+            },
+            "{now}"
+        );
+    }
+}
+
+#[test]
+fn nothing_held_no_ended_thesis_or_no_mark_sells_nothing() {
+    let none = research_plan(&journaled(REGULAR));
+    assert!(
+        none.plan(&view(), &ended_inputs(REGULAR)).is_none(),
+        "nothing held"
+    );
+    let held = research_plan(&holding(journaled(REGULAR), "3", REGULAR));
+    let current = SignalInputs {
+        ended_theses: Default::default(),
+        ..ended_inputs(REGULAR)
+    };
+    assert!(
+        held.plan(&view(), &current).is_none(),
+        "the thesis is current"
+    );
+    let classless = SignalInputs {
+        thesis_classes: Default::default(),
+        ..ended_inputs(REGULAR)
+    };
+    assert!(
+        held.plan(&view(), &classless).is_none(),
+        "no thesis record names its class"
+    );
+    let mut stale = holding(journaled(REGULAR), "3", REGULAR);
+    stale.push(
+        CLOCK,
+        "ClockAdvanced",
+        r#"{"clock":"2026-10-26T15:05:00.000000000Z"}"#,
+    );
+    assert!(
+        research_plan(&stale)
+            .plan(&view(), &ended_inputs("2026-10-26T15:05:00.000000000Z"))
+            .is_none(),
+        "no fresh mark to price it at"
+    );
+}
+
+#[test]
+fn a_working_exit_is_taken_off_the_position_and_never_stacked() {
+    let plan = research_plan(&holding(journaled(REGULAR), "3", REGULAR));
+    let spy = InstrumentId::new(SPY).unwrap();
+    let part = SignalInputs {
+        working_exits: [(spy.clone(), Qty::parse("1").unwrap())].into(),
+        ..ended_inputs(REGULAR)
+    };
+    assert_eq!(
+        plan.plan(&view(), &part).map(|p| p.qty),
+        Some(Qty::parse("2").unwrap())
+    );
+    let covered = SignalInputs {
+        working_exits: [(spy, Qty::parse("3").unwrap())].into(),
+        ..ended_inputs(REGULAR)
+    };
+    assert!(plan.plan(&view(), &covered).is_none());
+}
+
+#[test]
+fn a_pinned_universe_sells_nothing_for_an_ended_thesis_and_never_denies_an_exit() {
+    let pinned = plan_over(&holding(journaled(REGULAR), "3", REGULAR));
+    assert!(pinned.plan(&view(), &ended_inputs(REGULAR)).is_none());
+    let exit = research_plan(&holding(journaled(REGULAR), "3", REGULAR))
+        .plan(&view(), &ended_inputs(REGULAR))
+        .unwrap();
+    assert_eq!(
+        pinned.classify(&view(), &exit).autonomy,
+        Autonomy::Auto,
+        "an exit is never denied or asked (rule 13)"
     );
 }

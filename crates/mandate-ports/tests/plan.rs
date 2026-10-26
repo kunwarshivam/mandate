@@ -190,6 +190,7 @@ fn inputs() -> SignalInputs {
         now: RiskClock::from_secs(secs("2026-09-22T14:00:00Z")),
         ended_theses: Default::default(),
         working_exits: Default::default(),
+        thesis_classes: Default::default(),
     }
 }
 
