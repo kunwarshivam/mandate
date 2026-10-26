@@ -145,26 +145,26 @@ pub fn fold_research(
     instruments: &[InstrumentFact],
 ) -> Result<ResearchFold, FoldError> {
     let unreadable = |member| FoldError::Unreadable { member };
-    let mut payloads: Vec<(&str, Value)> = Vec::new();
-    for row in agent {
-        if !matches!(
-            row.event_type.as_str(),
-            "ThesisProposed" | "ThesisRevised" | "ThesisInvalidated"
-        ) {
-            continue;
-        }
-        let body = parse(&row.body).map_err(|_| unreadable("payload"))?;
-        let payload = body.get("payload").ok_or(unreadable("payload"))?.clone();
-        payloads.push((row.event_type.as_str(), payload));
-    }
-    let replayed = replay_theses(
-        payloads.iter().map(|(event_type, payload)| ThesisRecord {
-            event_type,
-            payload,
-        }),
-        at,
-    )
-    .map_err(|ReplayError::Unreadable { member }| unreadable(member))?;
+    let records = agent
+        .iter()
+        .filter(|row| {
+            matches!(
+                row.event_type.as_str(),
+                "ThesisProposed" | "ThesisRevised" | "ThesisInvalidated"
+            )
+        })
+        .map(|row| {
+            let payload = parse(&row.body)
+                .ok()
+                .and_then(|body| body.get("payload").cloned())
+                .ok_or(ReplayError::Unreadable { member: "payload" })?;
+            Ok(ThesisRecord {
+                event_type: row.event_type.as_str(),
+                payload,
+            })
+        });
+    let replayed = replay_theses(records, at)
+        .map_err(|ReplayError::Unreadable { member }| unreadable(member))?;
     let active = replayed
         .active
         .iter()

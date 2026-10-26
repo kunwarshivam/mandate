@@ -55,11 +55,13 @@ fn kind(revision: u32) -> &'static str {
     }
 }
 
-fn records<'a>(rows: &'a [(&'static str, Value)]) -> Vec<ThesisRecord<'a>> {
+fn records<'a>(rows: &'a [(&'static str, Value)]) -> Vec<Result<ThesisRecord<'a>, ReplayError>> {
     rows.iter()
-        .map(|(event_type, payload)| ThesisRecord {
-            event_type,
-            payload,
+        .map(|(event_type, payload)| {
+            Ok(ThesisRecord {
+                event_type,
+                payload: payload.clone(),
+            })
         })
         .collect()
 }
@@ -200,4 +202,65 @@ fn another_record_is_passed_over_and_an_unreadable_one_gives_nothing() {
             "{event_type}"
         );
     }
+}
+
+/// Another lineage's admitted thesis on the same instrument replaces the one that held it, without
+/// a second entry; an invalidation of the replaced thesis then removes nothing; the instrument is
+/// admitted once.
+#[test]
+fn a_replacement_holds_the_instrument_and_a_stale_invalidation_removes_nothing() {
+    let rows = [
+        (
+            "ThesisProposed",
+            thesis("th-1", "th-1", 0, INSTRUMENT_1, None, T + 3_600),
+        ),
+        (
+            "ThesisProposed",
+            thesis("th-2", "th-2", 0, INSTRUMENT_1, None, T + 7_200),
+        ),
+        ("ThesisInvalidated", invalidated("th-1")),
+    ];
+    let replayed = replay_theses(records(&rows), at(T)).expect("it replays");
+    assert_eq!(replayed.universe, universe(&[INSTRUMENT_1]));
+    assert_eq!(
+        replayed
+            .active
+            .iter()
+            .map(|entry| (entry.thesis_id.clone(), entry.invalidated))
+            .collect::<Vec<_>>(),
+        [(thesis_id("th-2"), false)],
+        "th-2 holds the instrument, and th-1's invalidation names no entry"
+    );
+    assert_eq!(replayed.admitted, ever(&[INSTRUMENT_1]));
+}
+
+/// The replay reads each item only after the one before it replayed: a record that cannot be read
+/// stops it where it stands, before a later item its reader could not give.
+#[test]
+fn the_first_unreadable_item_in_stream_order_decides() {
+    let bad = mandate_canon::parse(br#"{"lineage_id":"th-1"}"#).expect("a payload");
+    let items = vec![
+        Ok(ThesisRecord {
+            event_type: "ThesisProposed",
+            payload: bad,
+        }),
+        Err(ReplayError::Unreadable { member: "payload" }),
+    ];
+    assert_eq!(
+        replay_theses(items, at(T)),
+        Err(ReplayError::Unreadable {
+            member: "thesis_id"
+        })
+    );
+    let items = vec![
+        Err(ReplayError::Unreadable { member: "payload" }),
+        Ok(ThesisRecord {
+            event_type: "ThesisProposed",
+            payload: thesis("th-1", "th-1", 0, INSTRUMENT_1, None, T + 3_600),
+        }),
+    ];
+    assert_eq!(
+        replay_theses(items, at(T)),
+        Err(ReplayError::Unreadable { member: "payload" })
+    );
 }

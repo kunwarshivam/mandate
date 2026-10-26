@@ -14,10 +14,10 @@ use crate::{
 };
 
 /// One record of an agent stream, as the replay reads it: its type and its payload.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ThesisRecord<'a> {
     pub event_type: &'a str,
-    pub payload: &'a Value,
+    pub payload: Value,
 }
 
 /// What an agent stream's thesis records replay to.
@@ -42,7 +42,9 @@ pub enum ReplayError {
     Unreadable { member: &'static str },
 }
 
-/// Replays `records`, in stream order, at `at`. Each `ThesisProposed` and `ThesisRevised` replays
+/// Replays `records`, in stream order, at `at`, reading each only when the one before it replayed,
+/// so a record its reader could not give (an `Err` item) stops the replay where it stands in the
+/// stream, as a member a record cannot give does. Each `ThesisProposed` and `ThesisRevised` replays
 /// its recorded decision into its lineage through [`LineageState::replay`]; an admitted one becomes
 /// its instrument's one universe entry, replacing whatever thesis held it, and joins `admitted`; a
 /// `ThesisInvalidated` marks the entry of the thesis it names, while that thesis still holds its
@@ -50,10 +52,11 @@ pub enum ReplayError {
 /// `at`, and the survivors are the universe and the active theses.
 ///
 /// # Errors
-/// [`ReplayError::Unreadable`] naming the first member a record cannot give, including an admitted
-/// record with a `reason`, a refused one without one, or a reason that is not a refusal's code.
+/// The first `Err` item, or [`ReplayError::Unreadable`] naming the first member a record cannot
+/// give, including an admitted record with a `reason`, a refused one without one, or a reason that
+/// is not a refusal's code, whichever comes first in the stream.
 pub fn replay_theses<'a>(
-    records: impl IntoIterator<Item = ThesisRecord<'a>>,
+    records: impl IntoIterator<Item = Result<ThesisRecord<'a>, ReplayError>>,
     at: UtcNanos,
 ) -> Result<Replayed, ReplayError> {
     let unreadable = |member| ReplayError::Unreadable { member };
@@ -61,11 +64,12 @@ pub fn replay_theses<'a>(
     let mut entries: BTreeMap<AssetId, UniverseEntry> = BTreeMap::new();
     let mut admitted = BTreeSet::new();
     for record in records {
+        let record = record?;
         let invalidation = record.event_type == "ThesisInvalidated";
         if !invalidation && !matches!(record.event_type, "ThesisProposed" | "ThesisRevised") {
             continue;
         }
-        let payload = record.payload;
+        let payload = &record.payload;
         let text = |member| {
             payload
                 .get(member)
