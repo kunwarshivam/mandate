@@ -43,7 +43,7 @@ use mandate_identity::{
 };
 use mandate_identity_seal::Seal;
 use mandate_identity_testkit::{StaticLookup, membership, session};
-use mandate_journal::{ArtifactRef, ArtifactSource, Draft, StoredEvent, get_artifact};
+use mandate_journal::{ArtifactRef, ArtifactSource, Draft, StoredEvent, check_batch, get_artifact};
 use mandate_time::UtcNanos;
 use support_passkey::{CREDENTIAL, Signer, enrol, enrolled, unb64url};
 
@@ -1892,6 +1892,32 @@ fn a_passkey_confirm_commits_mandate_confirmed_then_its_assertion_and_stores_the
     let confirmed = &rows[rows.len() - 2];
     let assertion = &rows[rows.len() - 1];
     assert_eq!(confirmed.event_id, derived("confirm_version", KEY));
+    assert_eq!(
+        assertion.event_id,
+        derived("confirm_version_step_up_asserted", KEY),
+        "the assertion's id is §3.4's under its own operation (DEC-2128 item 3)"
+    );
+    assert_eq!(
+        confirmed.schema_version, 3,
+        "version 3 under passkey step-up (DEC-2131 item 3)"
+    );
+    let evidence = format!(
+        r#"{{"assertion_id":"{}","authenticated_at":"{}","method":"passkey"}}"#,
+        issued.id, issued.issued_at
+    );
+    let confirmation = payload(confirmed);
+    assert_eq!(
+        confirmation.get("step_up").map(to_canonical),
+        Some(to_canonical(&parse(evidence.as_bytes()).expect("JSON"))),
+        "the evidence the API judged, which rule 253 reads"
+    );
+    for member in ["agent_id", "base_version"] {
+        assert_eq!(
+            confirmation.get(member),
+            Some(&Value::Null),
+            "a new mandate's version 2 members: {member}"
+        );
+    }
     let canonical = signed.canonical(CREDENTIAL);
     let expected = format!(
         r#"{{"assertion":"sha256:{}","challenge":"{}","credential":"{CREDENTIAL}","sign_count":9}}"#,
@@ -1910,9 +1936,15 @@ fn a_passkey_confirm_commits_mandate_confirmed_then_its_assertion_and_stores_the
         Ok(canonical),
         "the raw assertion is stored under its own digest"
     );
-    for row in [confirmed, assertion] {
-        Draft::parse(&row.body).unwrap_or_else(|e| panic!("{}: {e:?}", row.event_type));
-    }
+    let drafts: Vec<Draft> = [confirmed, assertion]
+        .into_iter()
+        .map(|row| Draft::parse(&row.body).unwrap_or_else(|e| panic!("{}: {e:?}", row.event_type)))
+        .collect();
+    assert_eq!(
+        check_batch(&drafts),
+        Ok(()),
+        "the journal's batch rules, rule 253 among them, admit the batch"
+    );
     assert!(!w.held(&issued), "the challenge is taken");
 }
 

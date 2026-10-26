@@ -26,7 +26,7 @@ use mandate_api::requests::ConfirmRequest;
 use mandate_api::responses::Classification;
 use mandate_api::wire::{EventId, Id, Ref, decode, encode};
 use mandate_authn::Request;
-use mandate_canon::{Value, parse, to_canonical};
+use mandate_canon::{Key, Value, parse, to_canonical};
 use mandate_identity::{Permission, StepUpActionKind};
 use mandate_journal::{StoredEvent, StreamId};
 use mandate_spec::Mandate;
@@ -643,6 +643,18 @@ async fn confirmed(
         Vec::new(),
     )
     .ok_or(Refused::JournalUnavailable)?;
+    let passkey = request.step_up_assertion.is_some();
+    let event = match (passkey, request.step_up.as_ref()) {
+        (true, Some(evidence)) => {
+            let (record, event) = event;
+            let judged = journaled(Some(evidence)).ok_or(Refused::JournalUnavailable)?;
+            (
+                record,
+                passkey_confirmation(event, judged).ok_or(Refused::JournalUnavailable)?,
+            )
+        }
+        _ => event,
+    };
     let drafted = drafted(&admitted, "confirm_version", event)?;
     if let Some(repeated) = repeat(&admitted, &drafted) {
         return Ok(confirm_accepted(
@@ -702,11 +714,31 @@ async fn confirmed(
         request.step_up_assertion.as_ref(),
         &action,
     )?;
+    if asserted.is_some() != passkey {
+        return Err(Refused::JournalUnavailable.into());
+    }
     let assertion = asserted
         .map(|asserted| assertion_drafted(&admitted, &drafted, CONFIRM_ASSERTED, &asserted))
         .transpose()?;
     let row = commit(app, &admitted, drafted, assertion.as_deref()).await?;
     Ok(confirm_accepted(StatusCode::ACCEPTED, &admitted, &row))
+}
+
+/// The confirmation committed under passkey step-up: `MandateConfirmed` version 3 ([DEC-2131]
+/// item 3, journal spec v0.84 §9.9), version 2's members (a new mandate's, so no agent link and no
+/// base), then `step_up`, the evidence the port judged, which the record also holds and §9.32's
+/// rule 253 reads. `None` when the payload is not an object.
+///
+/// [DEC-2131]: ../../../docs/project/decisions/DEC-2131.md
+fn passkey_confirmation(mut event: Event, step_up: Value) -> Option<Event> {
+    let Value::Object(members) = &mut event.payload else {
+        return None;
+    };
+    members.insert(Key::new("agent_id").ok()?, Value::Null);
+    members.insert(Key::new("base_version").ok()?, Value::Null);
+    members.insert(Key::new("step_up").ok()?, step_up);
+    event.schema_version = 3;
+    Some(event)
 }
 
 /// `commands/confirm-accepted` for a first version.
