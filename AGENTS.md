@@ -131,7 +131,10 @@ agent needs the same correction twice, put the rule on the highest rung that can
    mutants on the diff of safety-critical crates, an `Unimplemented` stub body in a crate whose
    tests are still pending aside, and, while the general email footer is unresolved, the mail
    guard (`cargo xtask mail-guard`: no mail transport but the recorded fixture and the founder's,
-   and no mail-sending crate elsewhere; DEC-2511), and the backlog guard (a new row is its own
+   and no mail-sending crate elsewhere; DEC-2511), the deferring guard (`cargo xtask
+   deferring-guard`: no crate but `mandate-risk`, `mandate-ports` and `mandate-daemon` names
+   `evaluate_deferring`, so the binding gate always evaluates every check; DEC-2378 item 11), and
+   the backlog guard (a new row is its own
    file under `docs/project/backlog/`, and 06 gains only rows whose files the change deletes;
    DEC-2373).
 3. **Guided:** this file, skills under `.cursor/skills/`, and `.cursor/BUGBOT.md`.
