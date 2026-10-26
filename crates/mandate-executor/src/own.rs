@@ -16,8 +16,8 @@ use crate::orders::fill;
 use crate::ports::Ports;
 use crate::state::ExecutorState;
 use crate::types::{
-    BrokerFill, BrokerOrder, BrokerPosition, Effect, FillId, Order, RiskClock, TimeInForce,
-    WriterEpoch,
+    BrokerFill, BrokerOrder, BrokerPosition, Effect, FillId, Order, Purpose, RiskClock,
+    TimeInForce, WriterEpoch,
 };
 
 /// The orders this stream owns whose fills it may not have booked: every order it journaled
@@ -216,18 +216,122 @@ pub fn recorded_fills(state: &ExecutorState, positions: &[BrokerPosition]) -> Ve
 /// booked at the order's journaled limit price, the worst price the order allowed, under the id
 /// `limit:<client order id>:<cumulative filled quantity>`, when the ledger holds the instrument long
 /// at least the increment with no unattributed fill, no other order in the instrument has an
-/// unbooked report, and the broker lists the position reduced by exactly the increment. A `day`
-/// sell is dated by its submission's New York date, a GTC sell by the New York date of the
-/// executor's clock, never earlier. Anything else derives nothing (`AGENTS.md` rule 3).
+/// unbooked report, and the broker lists the position reduced by exactly the increment, no row in
+/// the instrument reading as zero. A `day` sell submitted before the earliest regular close is
+/// dated by its submission's New York date; any other sell by the New York date of the executor's
+/// clock, never earlier than its submission's. Anything else derives nothing (`AGENTS.md` rule 3).
 ///
 /// # Errors
-/// [`ExecutorError::Unimplemented`] until DEC-2395's implementation lands.
+/// [`ExecutorError::Num`] when a quantity or a date cannot be computed exactly.
 pub fn limit_fills(
     state: &ExecutorState,
     positions: &[BrokerPosition],
 ) -> Result<Vec<BrokerFill>, ExecutorError> {
-    let _ = (state, positions);
-    Err(ExecutorError::Unimplemented { story: "E7-6" })
+    let mut found = Vec::new();
+    for order in state.orders.values() {
+        if let Some(fill) = limit_fill(state, positions, order)? {
+            found.push(fill);
+        }
+    }
+    Ok(found)
+}
+
+/// The one fill [`limit_fills`] reads for `order`, or `None`.
+fn limit_fill(
+    state: &ExecutorState,
+    positions: &[BrokerPosition],
+    order: &Order,
+) -> Result<Option<BrokerFill>, ExecutorError> {
+    let Some(detail) = state.details.get(&order.client_order_id) else {
+        return Ok(None);
+    };
+    let (Some(reported), Some(request)) = (detail.reported_filled, detail.request.as_ref()) else {
+        return Ok(None);
+    };
+    let reduces = matches!(
+        order.purpose,
+        Purpose::Protective | Purpose::RiskExit | Purpose::OwnerExit | Purpose::DiscretionaryExit
+    );
+    let Some(limit) = request.limit_price else {
+        return Ok(None);
+    };
+    if order.side != Side::Sell || !reduces || reported <= order.filled_qty || reported > order.qty
+    {
+        return Ok(None);
+    }
+    let increment = reported.checked_sub(order.filled_qty)?;
+    let ledger = state
+        .positions
+        .get(&order.instrument)
+        .copied()
+        .unwrap_or(SignedQty::ZERO);
+    let unattributed = state
+        .unattributed
+        .get(&order.instrument)
+        .is_some_and(|fills| !fills.is_empty());
+    let left = ledger.checked_add(SignedQty::from(increment).negated())?;
+    if unattributed || left < SignedQty::ZERO || !alone(state, order) {
+        return Ok(None);
+    }
+    let mut rows = positions
+        .iter()
+        .filter(|position| position.instrument == order.instrument);
+    let listed = match (rows.next(), rows.next()) {
+        (None, _) => SignedQty::ZERO,
+        (Some(row), None) => row.qty,
+        (Some(_), Some(_)) => return Ok(None),
+    };
+    if listed != left {
+        return Ok(None);
+    }
+    let Some(submitted) = detail
+        .submitted_at
+        .and_then(|at| UtcNanos::from_parts(at.secs(), 0).ok())
+    else {
+        return Ok(None);
+    };
+    let (submitted_on, hour) = new_york_date_and_hour(submitted)?;
+    let trade_date = if request.tif == TimeInForce::Day && hour < EARLIEST_CLOSE_HOUR {
+        submitted_on
+    } else {
+        let now = UtcNanos::from_parts(state.clock().secs(), 0)?;
+        let (booked_on, _) = new_york_date_and_hour(now)?;
+        booked_on.max(submitted_on)
+    };
+    Ok(Some(BrokerFill {
+        fill_id: FillId(format!(
+            "limit:{}:{reported}",
+            order.client_order_id.as_str()
+        )),
+        client_order_id: Some(order.client_order_id.as_str().to_owned()),
+        broker_order_id: None,
+        instrument: order.instrument.clone(),
+        side: Side::Sell,
+        qty: increment,
+        price: limit,
+        fees: Usd::ZERO,
+        trade_date,
+    }))
+}
+
+/// The New York hour of the earliest regular close, an early-close day's 13:00. A `day` sell
+/// submitted before it filled on its submission's date; one submitted later may have been queued
+/// to the next session, so it is dated as a GTC sell is, never earlier than when it is booked,
+/// which keeps its proceeds unsettled longer and adds no buying power (DEC-2395 item 3).
+const EARLIEST_CLOSE_HOUR: u8 = 13;
+
+/// Whether every other order in `order`'s instrument has booked all its broker record reported,
+/// so no other fill can be in the position the broker lists.
+fn alone(state: &ExecutorState, order: &Order) -> bool {
+    state.orders.values().all(|other| {
+        other.client_order_id == order.client_order_id
+            || other.instrument != order.instrument
+            || state
+                .details
+                .get(&other.client_order_id)
+                .and_then(|other_detail| other_detail.reported_filled)
+                .is_none_or(|filled| filled <= other.filled_qty)
+    })
 }
 
 /// The one fill [`recorded_fills`] reads for `order`, or `None`.
@@ -253,16 +357,7 @@ fn recorded_fill(
             .unattributed
             .get(&order.instrument)
             .is_none_or(Vec::is_empty);
-    let alone = state.orders.values().all(|other| {
-        other.client_order_id == order.client_order_id
-            || other.instrument != order.instrument
-            || state
-                .details
-                .get(&other.client_order_id)
-                .and_then(|other_detail| other_detail.reported_filled)
-                .is_none_or(|filled| filled <= other.filled_qty)
-    });
-    if !(entry && flat && alone) {
+    if !(entry && flat && alone(state, order)) {
         return None;
     }
     let mut held = positions

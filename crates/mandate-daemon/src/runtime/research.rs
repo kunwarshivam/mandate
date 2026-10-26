@@ -320,6 +320,7 @@ impl<S: Store> RuntimeProcess<S> {
             active_theses: &parts.active,
             last_reservation: parts.last_reservation,
             data_symbols: &parts.data_symbols,
+            event_triggers: None,
         };
         let ports = self.wiring.ports();
         let head = self.state.head(agent.as_str()).map_or(0, |seq| seq.0);
