@@ -4571,6 +4571,7 @@
  },
  "approval_deferrals": {
   "spec": "docs/specs/journal.md v0.90 §9.6 rules 291 and 292 (DEC-2515)",
+  "approver_sentence": "These checks have not been run yet. They run when the order is placed, and may still refuse it:",
   "decisions": {
    "plain": {
     "envelope_version": 1,
@@ -4700,6 +4701,96 @@
    }
   },
   "drafts": {
+   "requested_v1": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z3P0A000000000000000Q1",
+    "stream_id": "agent:ws_01J8Z2:agent_a",
+    "event_type": "ApprovalRequested",
+    "schema_version": 1,
+    "event_time": "2026-09-21T14:10:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z3N9A000000000000000Q0",
+    "correlation_id": null,
+    "actor": {
+     "kind": "agent",
+     "id": "agent_a",
+     "version": "0.1.0",
+     "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "payload": {
+     "instrument": "AAPL",
+     "asset_class": "us_equity",
+     "side": "buy",
+     "qty": "10",
+     "limit": "155",
+     "purpose": "open",
+     "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "decided_by": "rule:large_order",
+     "combined_score": "0.5",
+     "reference_mark": {
+      "price": "155",
+      "seq": 41
+     },
+     "approvers_required": 1,
+     "independent_required": false,
+     "deadline": 1790000100,
+     "timeout_s": 300,
+     "on_timeout": "skip",
+     "content": {
+      "action": {
+       "instrument": "AAPL",
+       "asset_class": "us_equity",
+       "side": "buy",
+       "qty": "10",
+       "limit": "155",
+       "order_usd": "1550",
+       "purpose": "open"
+      },
+      "trigger": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "decided_by": "rule:large_order"
+      },
+      "evidence": {
+       "combined_score": {
+        "label": "combined model score, not a probability of profit",
+        "value": "0.5"
+       },
+       "outputs": [
+        {
+         "event_id": "01J8Z3N8A000000000000000Q9",
+         "artifact": null,
+         "label": "Output of software you selected"
+        }
+       ]
+      },
+      "risk_impact": [],
+      "reference_mark": {
+       "price": "155",
+       "seq": 41
+      },
+      "deadline": "2026-09-21T14:15:00.000000000Z",
+      "default": "If you do nothing, this action is skipped",
+      "choices": [
+       "approve",
+       "skip"
+      ],
+      "approvers": {
+       "required": 1,
+       "independent": false
+      }
+     },
+     "content_hash": "sha256:664091efc72d9be42ff2cbaf1300dc50ea48899b89d89963caa97f8c247f5702"
+    },
+    "artifact_refs": [
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "sha256:664091efc72d9be42ff2cbaf1300dc50ea48899b89d89963caa97f8c247f5702"
+    ],
+    "pii_refs": []
+   },
    "requested_v2": {
     "envelope_version": 1,
     "environment": "paper",
@@ -5303,6 +5394,7 @@
      "base_draft": "requested_v3",
      "changes": []
     },
+    "order": "decision_first",
     "expect": {
      "outcome": "Valid"
     }
@@ -5315,6 +5407,7 @@
      "base_draft": "requested_v2",
      "changes": []
     },
+    "order": "decision_first",
     "expect": {
      "outcome": "Valid"
     }
@@ -5327,6 +5420,7 @@
      "base_draft": "requested_v2",
      "changes": []
     },
+    "order": "decision_first",
     "expect": {
      "outcome": "Invalid",
      "index": 1,
@@ -5362,6 +5456,7 @@
       }
      ]
     },
+    "order": "decision_first",
     "expect": {
      "outcome": "Invalid",
      "index": 1,
@@ -5377,9 +5472,42 @@
      "base_draft": "requested_v3",
      "changes": []
     },
+    "order": "decision_first",
     "expect": {
      "outcome": "Invalid",
      "index": 1,
+     "reason": "schema",
+     "path": "payload.content.deferred_to_binding"
+    }
+   },
+   {
+    "name": "v1_request_hides_a_deferral",
+    "clause": "rule 292 at every version",
+    "decision": "deferring",
+    "request": {
+     "base_draft": "requested_v1",
+     "changes": []
+    },
+    "order": "decision_first",
+    "expect": {
+     "outcome": "Invalid",
+     "index": 1,
+     "reason": "schema",
+     "path": "payload.content.deferred_to_binding"
+    }
+   },
+   {
+    "name": "request_written_before_its_decision",
+    "clause": "rule 292 judges the batch, whatever the order",
+    "decision": "deferring",
+    "request": {
+     "base_draft": "requested_v2",
+     "changes": []
+    },
+    "order": "request_first",
+    "expect": {
+     "outcome": "Invalid",
+     "index": 0,
      "reason": "schema",
      "path": "payload.content.deferred_to_binding"
     }
@@ -5397,6 +5525,7 @@
       }
      ]
     },
+    "order": "decision_first",
     "expect": {
      "outcome": "Valid"
     }

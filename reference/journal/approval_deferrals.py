@@ -20,7 +20,7 @@ from collections.abc import Callable
 
 from common import DEFERRED_PARTS, Violation, apply_change, change, delete, digest_strings
 from control import check_of, draft_for, reported, violations
-from requests import PLAN, V2, base_drafts, oracle_hash, restated
+from requests import PLAN, V1, V2, base_drafts, oracle_hash, restated
 
 SPEC = "docs/specs/journal.md v0.90 §9.6 rules 291 and 292 (DEC-2515)"
 V3 = "requested_v3"
@@ -30,6 +30,9 @@ NAMED = ["halt", "liquidity_floor", "participation"]
 figures."""
 
 Validator = Callable[[dict, frozenset[str]], list[Violation]]
+
+APPROVER_SENTENCE = "These checks have not been run yet. They run when the order is placed, and may still refuse it:"
+"""Mandate spec v0.12 §6.4: what the approver is shown, exactly, before each deferred check's name."""
 
 
 def v3_base() -> dict:
@@ -43,7 +46,7 @@ def v3_base() -> dict:
 
 
 def bases() -> dict[str, dict]:
-    return {V2: copy.deepcopy(base_drafts()[V2]), V3: v3_base()}
+    return {V1: copy.deepcopy(base_drafts()[V1]), V2: copy.deepcopy(base_drafts()[V2]), V3: v3_base()}
 
 
 def again(base: str, changes: list[dict]) -> list[dict]:
@@ -145,16 +148,25 @@ def valid_drafts() -> list[dict]:
     ]
 
 
-def batch(name, clause, decision, request_base, changes, expect=None):
+def batch(name, clause, decision, request_base, changes, expect=None, request_first=False):
     """A batch of the `decision` this section holds, then a request on `request_base` that names it,
-    with `changes`. `expect` is `None` for a batch `append` accepts."""
+    with `changes`, or the request first when `request_first`. `expect` is `None` for a batch
+    `append` accepts."""
     return {
         "name": name,
         "clause": clause,
         "decision": decision,
         "request": {"base_draft": request_base, "changes": changes},
+        "order": "request_first" if request_first else "decision_first",
         "expect": expect or {"outcome": "Valid"},
     }
+
+
+def batch_drafts(section: dict, case: dict) -> list[dict]:
+    """The case's two drafts, in its order."""
+    decision = section["decisions"][case["decision"]]
+    pair = [decision, request_of(section, case, decision)]
+    return pair[::-1] if case["order"] == "request_first" else pair
 
 
 def refused(index: int, reason: str = "schema", path: str = DEFERRED) -> dict:
@@ -189,6 +201,23 @@ def batches() -> list[dict]:
             V3,
             [],
             refused(1),
+        ),
+        batch(
+            "v1_request_hides_a_deferral",
+            "rule 292 at every version",
+            "deferring",
+            V1,
+            [],
+            refused(1),
+        ),
+        batch(
+            "request_written_before_its_decision",
+            "rule 292 judges the batch, whatever the order",
+            "deferring",
+            V2,
+            [],
+            refused(0),
+            request_first=True,
         ),
         batch(
             "request_naming_another_decision",
@@ -269,7 +298,7 @@ def expected_batch(section: dict, case: dict) -> dict:
         return {"outcome": "Valid"}
     theirs = set(decision["payload"].get("deferred_to_binding") or ())
     mine = set(request["payload"]["content"].get("deferred_to_binding") or ())
-    return {"outcome": "Valid"} if theirs == mine else refused(1)
+    return {"outcome": "Valid"} if theirs == mine else refused(0 if case["order"] == "request_first" else 1)
 
 
 def check_section(section: dict, decide: Validator) -> list[str]:
@@ -287,6 +316,8 @@ def check_section(section: dict, decide: Validator) -> list[str]:
         got = decide(decision, frozenset())
         if got:
             problems.append(found("decisions.valid", f"decision {name}: {got}"))
+    if section["approver_sentence"] != APPROVER_SENTENCE:
+        problems.append(found("decisions.named", "the approver's sentence is not mandate spec §6.4's"))
     if deferrals(section["decisions"]["deferring"]["payload"]) != NAMED:
         problems.append(found("decisions.named", "the deferring decision names other checks"))
     if "deferred_to_binding" in section["decisions"]["plain"]["payload"]:
@@ -300,8 +331,7 @@ def check_section(section: dict, decide: Validator) -> list[str]:
         if got:
             problems.append(found("valid_drafts", f"{case['name']}: expected Valid, got {got}"))
     for case in section["batches"]:
-        decision = section["decisions"][case["decision"]]
-        got = outcome(batch_violations([decision, request_of(section, case, decision)], decide))
+        got = outcome(batch_violations(batch_drafts(section, case), decide))
         want = case["expect"]
         if got != want or want != expected_batch(section, case):
             problems.append(found("batches", f"{case['name']}: stated {want}, got {got}, oracle {expected_batch(section, case)}"))
@@ -374,8 +404,7 @@ def run_mutants(section: dict, decide: Validator) -> list[str]:
             got = violations(d, skip)
             caught |= bool(got) if want is None else not reported(got, want)
         for c in section["batches"]:
-            decision = section["decisions"][c["decision"]]
-            got = outcome(batch_violations([decision, request_of(section, c, decision)], decide, skip))
+            got = outcome(batch_violations(batch_drafts(section, c), decide, skip))
             caught |= got != c["expect"]
         if not caught:
             escaped.append(f"approval deferral validator mutant {mutant}")
@@ -398,6 +427,7 @@ def build_section(decisions: dict[str, dict]) -> dict:
     (version 1, asked) decisions, whole drafts."""
     return {
         "spec": SPEC,
+        "approver_sentence": APPROVER_SENTENCE,
         "decisions": copy.deepcopy(decisions),
         "drafts": bases(),
         "invalid_drafts": invalid_drafts(),
