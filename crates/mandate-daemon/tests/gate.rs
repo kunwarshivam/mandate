@@ -2,13 +2,21 @@
 //! the gate's own checks run over the journaled facts with DEC-2378 item 11's four checks deferred,
 //! every opening is still denied while any is deferred, and an exit is never denied.
 
+use std::cell::Cell;
 use std::collections::BTreeSet;
+use std::rc::Rc;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
-use mandate_canon::{Digest, Value};
-use mandate_daemon::production::{Facts, Gate, UNJOURNALED, UNSEEN, verdict};
+use mandate_bars::LiquidityFacts;
+use mandate_canon::{DecStr, Digest, Value};
+use mandate_daemon::bars::BarsReader;
+use mandate_daemon::production::{Facts, Gate, Liquidity, UNJOURNALED, UNSEEN, verdict};
 use mandate_gate_context::{Freshness, gate_rule_set};
 use mandate_journal::StoredEvent;
+use mandate_marketdata::dataset::Store;
+use mandate_marketdata::model::{
+    AssetClass as MarketAssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol,
+};
 use mandate_num::{Price, Qty};
 use mandate_risk::{
     Advisory, CheckOutcome, Computed, Decision, Deferred, GateConfig, Purpose as GatePurpose,
@@ -16,6 +24,7 @@ use mandate_risk::{
 };
 use mandate_runtime::{DryRunVerdict, GateDryRun, Proposal, Purpose};
 use mandate_spec::document::Mandate;
+use mandate_time::{Date, ExchangeCalendar, UtcNanos, new_york_midnight};
 use proptest::prelude::*;
 
 const AGENT: &str = "demo-spy";
@@ -711,4 +720,230 @@ fn a_crypto_opening_needs_an_active_crypto_account() {
         denied("crypto_account_inactive"),
         "an active crypto account passes check 1"
     );
+}
+
+/// A liquidity port that answers `facts` to every read and counts the reads.
+struct Figures {
+    facts: Option<LiquidityFacts>,
+    reads: Rc<Cell<u32>>,
+}
+
+impl Liquidity for Figures {
+    fn opening(
+        &self,
+        _purpose: GatePurpose,
+        symbol: &str,
+        _now: mandate_time::UtcNanos,
+    ) -> Option<LiquidityFacts> {
+        assert_eq!(symbol, "SPY", "the pinned instrument's symbol is read");
+        self.reads.set(self.reads.get() + 1);
+        self.facts.clone()
+    }
+}
+
+/// SPY's figures: a close of `close` and a 20-day median dollar volume of `median`, an ADV of
+/// `adv` shares and `trailing` shares in the last five minutes.
+fn figures(close: &str, median: &str, adv: &str, trailing: &str) -> LiquidityFacts {
+    LiquidityFacts {
+        prior_close: Price::parse(close).unwrap(),
+        median_dollar_volume_20d: mandate_num::Usd::parse(median).unwrap(),
+        adv_20d: Qty::parse(adv).unwrap(),
+        trailing_5m_volume: Qty::parse(trailing).unwrap(),
+    }
+}
+
+fn liquid() -> LiquidityFacts {
+    figures("99.95", "20000000000", "80000000", "500000")
+}
+
+fn gate_reading(rows: &Rows, facts: Option<LiquidityFacts>) -> (Gate, Rc<Cell<u32>>) {
+    let reads = Rc::new(Cell::new(0));
+    let fold = Facts::new(CLOCK, AGENT);
+    fold.follow(ACCOUNT);
+    fold.feed(&rows.0);
+    let gate = Gate::new(fold, version(), Some(config()), FRESH).reading(Box::new(Figures {
+        facts,
+        reads: Rc::clone(&reads),
+    }));
+    (gate, reads)
+}
+
+/// DEC-2274 item 3: with the bars read, the liquidity floor and participation are evaluated,
+/// never deferred, and the other twelve stay deferred, so the opening is still denied.
+#[test]
+fn with_the_bars_read_the_floor_and_participation_are_evaluated() {
+    let (gate, reads) = gate_reading(&journaled_with(&RICH), Some(liquid()));
+    let advisory = gate.advisory(&opening("3", "99.95")).unwrap();
+    assert_eq!(reads.get(), 1);
+    assert_eq!(advisory.decision.verdict, Verdict::Allow, "{advisory:?}");
+    assert!(!advisory.deferred.contains(&Deferred::LiquidityFloor));
+    assert!(!advisory.deferred.contains(&Deferred::Participation));
+    assert_eq!(
+        advisory.deferred.len(),
+        12,
+        "eligibility, the day-trade budget and the ten unseen parts: {advisory:?}"
+    );
+    assert_eq!(
+        gate.check(&opening("3", "99.95")),
+        denied("deferred_to_binding")
+    );
+}
+
+/// DEC-2378 item 11 condition 2: each check moves from deferred to evaluated when its bars appear,
+/// with nothing else changed. Without bars a refusing figure is never read, so both stay deferred;
+/// with them, each refuses with the binding gate's reason.
+#[test]
+fn each_liquidity_check_moves_from_deferred_to_evaluated_when_its_bars_appear() {
+    for (check, facts, reason) in [
+        (
+            "the price floor",
+            figures("4", "20000000000", "80000000", "500000"),
+            "below_price_floor",
+        ),
+        (
+            "the liquidity floor",
+            figures("99.95", "999999", "80000000", "500000"),
+            "below_liquidity_floor",
+        ),
+        (
+            "the order-size participation",
+            figures("99.95", "20000000000", "80000000", "59"),
+            "conduct_limit_breached",
+        ),
+        (
+            "the daily participation",
+            figures("99.95", "20000000000", "59", "500000"),
+            "conduct_limit_breached",
+        ),
+    ] {
+        let rows = journaled_with(&RICH);
+        let (without, _) = gate_reading(&rows, None);
+        let deferred = without.advisory(&opening("3", "99.95")).unwrap();
+        assert!(
+            deferred.deferred.contains(&Deferred::LiquidityFloor)
+                && deferred.deferred.contains(&Deferred::Participation),
+            "{check}: deferred without bars"
+        );
+        assert_eq!(
+            without.check(&opening("3", "99.95")),
+            denied("deferred_to_binding"),
+            "{check}"
+        );
+        let (with, _) = gate_reading(&rows, Some(facts));
+        assert_eq!(
+            with.check(&opening("3", "99.95")),
+            denied(reason),
+            "{check}"
+        );
+    }
+}
+
+/// DEC-2274 item 6, the call site's test: an exit never reaches the reader, even with a readable
+/// store: neither the dry run nor its advisory pass called directly on an exit label reads it.
+#[test]
+fn an_exit_never_reaches_the_reader() {
+    let (gate, reads) = gate_reading(&journaled_with(&RICH), Some(liquid()));
+    for purpose in [
+        Purpose::DiscretionaryExit,
+        Purpose::RiskExit,
+        Purpose::OwnerExit,
+        Purpose::Protective,
+        Purpose::Flatten,
+    ] {
+        let mut exit = opening("3", "99.95");
+        exit.side = Side::Sell;
+        exit.purpose = purpose;
+        assert_eq!(gate.check(&exit), DryRunVerdict::Allow, "{purpose:?}");
+        assert_ne!(
+            verdict(gate.advisory(&exit)),
+            DryRunVerdict::Allow,
+            "{purpose:?}: the advisory pass called directly on an exit label never allows it"
+        );
+    }
+    assert_eq!(reads.get(), 0, "no exit read the bars");
+    gate.check(&opening("3", "99.95"));
+    assert_eq!(reads.get(), 1, "an opening does");
+}
+
+/// The production reader over a stored root: the same figures `mandate_bars::liquidity` gives, at
+/// the fold's risk clock; a root with no dataset for SPY keeps both checks deferred.
+#[test]
+fn the_bars_reader_reads_the_stored_root_at_the_risk_clock() {
+    let root =
+        std::env::temp_dir().join(format!("mandate-daemon-gate-bars-{}", std::process::id()));
+    std::fs::remove_dir_all(&root).ok();
+    store_spy(&root);
+    let rows = journaled_with(&RICH);
+    let fold = Facts::new(CLOCK, AGENT);
+    fold.follow(ACCOUNT);
+    fold.feed(&rows.0);
+    let gate = Gate::new(fold, version(), Some(config()), FRESH)
+        .reading(Box::new(BarsReader::new(root.to_str())));
+    let advisory = gate.advisory(&opening("3", "99.95")).unwrap();
+    assert!(
+        !advisory.deferred.contains(&Deferred::LiquidityFloor),
+        "{advisory:?}"
+    );
+    assert!(mandate_bars::liquidity(&root, "SPY", UtcNanos::parse(REGULAR).unwrap()).is_ok());
+    std::fs::remove_dir_all(&root).ok();
+    let empty = gate_over(&rows, Some(config()));
+    let none = empty.advisory(&opening("3", "99.95")).unwrap();
+    assert!(none.deferred.contains(&Deferred::LiquidityFloor));
+    assert!(none.deferred.contains(&Deferred::Participation));
+}
+
+/// SPY's last 30 sessions to 2026-10-23, each closing 99.95 on 2,000,000 shares, and its minutes
+/// of 2026-10-26 from the open, as the data process stores them.
+fn store_spy(root: &std::path::Path) {
+    let store = Store::new(root);
+    let dataset = |timeframe: &str| {
+        DatasetId::new(
+            MarketAssetClass::UsEquity,
+            Feed::Iex,
+            Kind::Bars(timeframe.parse().unwrap()),
+            Symbol::parse("SPY").unwrap(),
+        )
+        .unwrap()
+    };
+    let bar = |start: UtcNanos, volume: &str| {
+        let price = DecStr::parse("99.95").unwrap();
+        Bar {
+            start,
+            open: price.clone(),
+            high: price.clone(),
+            low: price.clone(),
+            close: price.clone(),
+            volume: DecStr::parse(volume).unwrap(),
+            vwap: price,
+            trade_count: 10,
+        }
+    };
+    let calendar = ExchangeCalendar::us_equities().unwrap();
+    let mut days = Vec::new();
+    let mut day = Date::new(2026, 8, 1).unwrap();
+    while day <= Date::new(2026, 10, 23).unwrap() {
+        if calendar.is_trading_day(day).unwrap() {
+            days.push(day);
+        }
+        day = day.next().unwrap();
+    }
+    for day in days.split_off(days.len() - 30) {
+        let bars = vec![bar(new_york_midnight(day).unwrap(), "2000000")];
+        store
+            .put_day(&dataset("1Day"), day, &Records::Bars(bars))
+            .unwrap();
+    }
+    let open = UtcNanos::parse("2026-10-26T13:30:00.000000000Z")
+        .unwrap()
+        .secs();
+    let minutes = (0..390)
+        .map(|n| bar(UtcNanos::from_parts(open + 60 * n, 0).unwrap(), "5000"))
+        .collect();
+    store
+        .put_day(
+            &dataset("1Min"),
+            Date::new(2026, 10, 26).unwrap(),
+            &Records::Bars(minutes),
+        )
+        .unwrap();
 }

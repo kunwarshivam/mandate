@@ -250,7 +250,7 @@ fn a_resolved_deployment_is_wired_with_the_fold_and_the_flatten_over_its_univers
         mandate_daemon::fixture::wiring("user-owner"),
         version,
         &document,
-        None,
+        (None, mandate_daemon::bars::BarsReader::default()),
         CLOCK,
         AGENT,
     );

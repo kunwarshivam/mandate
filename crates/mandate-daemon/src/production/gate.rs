@@ -6,6 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use mandate_bars::LiquidityFacts;
 use mandate_gate_context::{Freshness, Journaled};
 use mandate_num::{Qty, Ratio, Usd};
 use mandate_ports::{AdvisoryGateContext, AdvisoryOrderFacts, evaluate_deferring, gate_mandate};
@@ -16,10 +17,12 @@ use mandate_risk::{
     Purpose as GatePurpose, RiskSnapshot, SaneQuote, TimeInForce, ValidatedMandate, Verdict,
     WorkingUniverse,
 };
-use mandate_runtime::{DryRunVerdict, GateDryRun, Proposal};
+use mandate_runtime::{DryRunVerdict, GateDryRun, Proposal, Purpose as RuntimePurpose};
 use mandate_spec::document::Mandate;
+use mandate_time::UtcNanos;
 
 use super::Facts;
+use crate::bars::{BarsReader, liquidity_deferred};
 
 /// The checks deferred to the binding gate because nothing journals their facts yet (DEC-2378
 /// item 11): each turns on, under condition 2, only once its fact is folded.
@@ -57,6 +60,7 @@ const WORKING_ORDERS_UNSEEN: &str = "working_orders_unseen";
 /// DEC-2388 item 3) and how fresh a mark and a snapshot must be.
 pub struct Gate {
     facts: Facts,
+    liquidity: Box<dyn Liquidity>,
     version: String,
     mandate: Mandate,
     gate_mandate: Option<ValidatedMandate>,
@@ -74,12 +78,21 @@ impl Gate {
         let gate_mandate = gate_mandate(&mandate).ok();
         Self {
             facts,
+            liquidity: Box::new(BarsReader::default()),
             version: version.to_owned(),
             mandate,
             gate_mandate,
             config,
             fresh,
         }
+    }
+
+    /// This gate reading the liquidity floor's and participation's inputs through `liquidity`
+    /// (DEC-2274 item 3). Without it there are no figures, and both checks stay deferred.
+    #[must_use]
+    pub fn reading(mut self, liquidity: Box<dyn Liquidity>) -> Self {
+        self.liquidity = liquidity;
+        self
     }
 
     /// The advisory pass of the opening `proposal` over the fold, with [`UNJOURNALED`] and [`UNSEEN`]
@@ -101,11 +114,18 @@ impl Gate {
     pub fn advisory(&self, proposal: &Proposal) -> Result<Advisory, &'static str> {
         let config = self.config.clone().ok_or(RULE_SET_UNAVAILABLE)?;
         let mandate = self.gate_mandate.clone().ok_or(GATE_REFUSED)?;
-        let context = self
+        let (context, figures) = self
             .facts
             .read(|journaled| self.context(journaled, proposal, config, mandate))
             .ok_or(FACTS_HELD)??;
-        let deferred = UNJOURNALED.into_iter().chain(UNSEEN).collect();
+        let deferred: BTreeSet<Deferred> = UNJOURNALED
+            .into_iter()
+            .filter(|deferred| {
+                !matches!(deferred, Deferred::LiquidityFloor | Deferred::Participation)
+            })
+            .chain(liquidity_deferred(figures.as_ref()))
+            .chain(UNSEEN)
+            .collect();
         let advisory =
             evaluate_deferring(proposal, &context, &deferred).map_err(|_| GATE_REFUSED)?;
         match advisory.decision.purpose {
@@ -120,7 +140,7 @@ impl Gate {
         proposal: &Proposal,
         config: GateConfig,
         mandate: ValidatedMandate,
-    ) -> Result<AdvisoryGateContext, &'static str> {
+    ) -> Result<(AdvisoryGateContext, Option<LiquidityFacts>), &'static str> {
         let instrument = proposal.instrument.as_str();
         let facts = journaled
             .facts(instrument, self.fresh)
@@ -128,6 +148,7 @@ impl Gate {
         if facts.mandate_version != self.version {
             return Err(FACTS_HELD);
         }
+        let figures = self.figures(proposal, facts.now);
         if !journaled.working().is_empty() {
             return Err(WORKING_ORDERS_UNSEEN);
         }
@@ -162,7 +183,7 @@ impl Gate {
             .map_err(|_| GATE_REFUSED)?;
         let gate_agent = GateAgentId(1);
         let whole_share = Qty::parse("1").map_err(|_| GATE_REFUSED)?;
-        Ok(AdvisoryGateContext {
+        let context = AdvisoryGateContext {
             now: facts.now,
             pass: GatePass::First,
             config,
@@ -226,8 +247,8 @@ impl Gate {
                 etp: EtpClass::Unclassified,
                 etp_classified_at: None,
                 quote_currency: None,
-                prior_close: None,
-                median_dollar_volume_20d: None,
+                prior_close: figures.as_ref().map(|f| f.prior_close),
+                median_dollar_volume_20d: figures.as_ref().map(|f| f.median_dollar_volume_20d),
                 median_dollar_volume_30d: None,
                 min_order_size: whole_share,
                 qty_increment: whole_share,
@@ -241,8 +262,8 @@ impl Gate {
                     at: facts.mark.at,
                 }),
                 last_trade: None,
-                trailing_5m_volume: None,
-                adv_20d: None,
+                trailing_5m_volume: figures.as_ref().map(|f| f.trailing_5m_volume),
+                adv_20d: figures.as_ref().map(|f| f.adv_20d),
             },
             conduct: ConductState::default(),
             universe: WorkingUniverse::Known {
@@ -264,7 +285,40 @@ impl Gate {
                 client_order_id: ClientOrderId(1),
                 fee_reservation: Usd::ZERO,
             },
-        })
+        };
+        Ok((context, figures))
+    }
+
+    /// The liquidity figures of `proposal`'s instrument at `now`, the fold's risk clock, read only
+    /// for a proposal labelled an opening or an increase and only for a pinned instrument, by its
+    /// symbol. An exit never reads them (`AGENTS.md` rule 13, DEC-2274 item 3).
+    fn figures(&self, proposal: &Proposal, now: UtcNanos) -> Option<LiquidityFacts> {
+        let purpose = match proposal.purpose {
+            RuntimePurpose::Open => GatePurpose::Open,
+            RuntimePurpose::Increase => GatePurpose::Increase,
+            _ => return None,
+        };
+        let pinned = self
+            .mandate
+            .universe
+            .pinned_instruments
+            .iter()
+            .find(|pinned| pinned.asset_id.as_str() == proposal.instrument.as_str())?;
+        self.liquidity.opening(purpose, &pinned.symbol, now)
+    }
+}
+
+/// Where an opening's dry run reads the liquidity floor's and participation's inputs: the stored
+/// bars through [`BarsReader`] in production (DEC-2274 item 3).
+pub trait Liquidity {
+    /// The figures for an opening or an increase in `symbol` at `now`, or `None` when there are
+    /// none, which keeps both checks deferred.
+    fn opening(&self, purpose: GatePurpose, symbol: &str, now: UtcNanos) -> Option<LiquidityFacts>;
+}
+
+impl Liquidity for BarsReader {
+    fn opening(&self, purpose: GatePurpose, symbol: &str, now: UtcNanos) -> Option<LiquidityFacts> {
+        BarsReader::opening(self, purpose, symbol, now)
     }
 }
 
