@@ -151,3 +151,64 @@ fn the_right_code_stores_the_document_and_commits_a_valid_acceptance_with_step_u
     assert_eq!(refs, [version()]);
     assert_eq!(ids.assertions, 1);
 }
+
+/// The binary without `--code` prints the document's version and its code and opens no journal: a
+/// DSN that names no host still exits 0. With a wrong code it opens the journal only after the
+/// owner flags pass, so an unreachable one refuses, and nothing names the DSN.
+#[test]
+fn the_binary_shows_the_code_without_a_journal_and_never_prints_the_dsn() {
+    let dsn = "postgres://gl-user-sentinel@gl-host-sentinel.invalid:1/gl-db";
+    let run = |extra: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_mandate"))
+            .args([
+                "disclosure",
+                "accept",
+                "go_live_risk",
+                "--workspace",
+                "ws1",
+                "--user",
+                "u1",
+            ])
+            .args(["--journal", dsn, "--store", "/nonexistent-gl-store"])
+            .args(extra)
+            .output()
+            .unwrap()
+    };
+    let shown = run(&[]);
+    assert!(shown.status.success(), "{shown:?}");
+    let out = String::from_utf8(shown.stdout).unwrap();
+    assert_eq!(
+        out,
+        format!(
+            "document go_live_risk version {}\ncode {}\n",
+            version(),
+            gesture_code(&version())
+        )
+    );
+    let refused = run(&["--code", &gesture_code(&version())]);
+    assert!(!refused.status.success());
+    let all = format!(
+        "{}{}",
+        String::from_utf8_lossy(&refused.stdout),
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert!(!all.contains("sentinel"), "{all}");
+    let unknown = std::process::Command::new(env!("CARGO_BIN_EXE_mandate"))
+        .args([
+            "disclosure",
+            "accept",
+            "leveraged_etp",
+            "--workspace",
+            "ws1",
+            "--user",
+            "u1",
+            "--journal",
+            dsn,
+            "--store",
+            "/x",
+        ])
+        .output()
+        .unwrap();
+    assert!(!unknown.status.success());
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("document_unknown"));
+}
