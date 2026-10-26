@@ -1250,6 +1250,7 @@ fn control_record(row: &StoredEvent) -> Result<ControlRecord, PaperError> {
     let origin = Origin::of(&row.stream_id, &row.environment).ok_or(PaperError::Control)?;
     Ok(ControlRecord {
         seq: row.seq,
+        event_time: None,
         event_type: row.event_type.clone(),
         payload,
         origin,

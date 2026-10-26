@@ -24,12 +24,14 @@ use mandate_time::{Date, UtcNanos};
 
 use crate::approvers::{Members, members};
 
-/// One record of the workspace control stream as the run read it: its sequence number, type and
-/// payload (journal spec §9.2), and the stream it was journaled on. The journal has already
-/// verified the chain it came from.
+/// One record of the workspace control stream as the run read it: its sequence number, its
+/// envelope's `event_time` when the run read one, type and payload (journal spec §9.2), and the
+/// stream it was journaled on. The journal has already verified the chain it came from. The §9.12
+/// membership fold reads `event_time` (DEC-2384); a record the run read none for folds no one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControlRecord {
     pub seq: u64,
+    pub event_time: Option<UtcNanos>,
     pub event_type: String,
     pub payload: Value,
     pub origin: Origin,

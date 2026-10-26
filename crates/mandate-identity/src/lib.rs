@@ -174,6 +174,10 @@
 //! journal spec §9.12's records to each member's state and roles and `workspace_users` (§5.3,
 //! ID-7).
 //!
+//! **Approver references read a roster** (E7-31, DEC-2384): [`Roster::read`] folds the same
+//! records inside this crate to the members `active` at one instant, with their effective roles,
+//! and the founder, so a run resolves a mandate's approvers without holding the seal.
+//!
 //! Every entry point is pure: no clock, no randomness, no I/O, ordered collections only.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -187,6 +191,7 @@ mod matrix;
 mod membership;
 mod permission;
 mod record;
+mod roster;
 mod writer;
 
 pub use founding::{
@@ -203,6 +208,7 @@ pub use membership::{
 };
 pub use permission::Permission;
 pub use record::{MEMBERSHIP_TYPES, UnreadableRecord, control_entry};
+pub use roster::{Roster, RosterRefused};
 pub use writer::{
     ATTEMPTS, Appended, ControlEntry, ControlStream, ControlView, WriteError, write_membership,
 };

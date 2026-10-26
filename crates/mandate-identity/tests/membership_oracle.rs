@@ -21,14 +21,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use grammar::{Row, matrix};
 use mandate_identity::{
     Authorized, InvitationId, InvitationState, LookupFailed, Membership, MembershipEvent as Event,
-    MembershipFold, MembershipLookup, MembershipQuery, MembershipState, OrgId, Permission,
-    Principal, PrincipalId, Role, Scope, Session, SessionKind, SessionRef, StepUp, WorkspaceId,
-    authorize,
+    MembershipFold, MembershipLookup, MembershipQuery, MembershipRecord, MembershipState, OrgId,
+    Permission, Principal, PrincipalId, Role, Roster, RosterRefused, Scope, Session, SessionKind,
+    SessionRef, StepUp, WorkspaceId, authorize,
 };
 use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_time::UtcNanos;
 use membership::{
-    B, DAY, EPOCH, FOUNDER, activated, cool, fold, founding, invited, reactivated, set, t,
+    B, DAY, EPOCH, FOUNDER, activated, cool, fold, founding, invited, reactivated, record, set, t,
 };
 use proptest::prelude::*;
 use proptest::test_runner::{TestCaseError, TestRng, TestRunner};
@@ -279,6 +279,15 @@ fn ops() -> impl Strategy<Value = Vec<Op>> {
 /// The fold of the history `ops` name, the oracle after each record, and the instants to probe:
 /// each record's, a day later less a second, a day later, and a week past the last.
 fn history(ops: Vec<Op>) -> (MembershipFold, Vec<(i64, Oracle)>, Vec<i64>) {
+    let (events, snapshots, probes) = events_of(ops);
+    (fold(events), snapshots, probes)
+}
+
+/// A history's records with their instants, the oracle after each record, and the probes.
+type Drawn = (Vec<(i64, Event)>, Vec<(i64, Oracle)>, Vec<i64>);
+
+/// [`history`]'s records, numbered from 1 as [`fold`] numbers them, rather than their fold.
+fn events_of(ops: Vec<Op>) -> Drawn {
     let mut oracle = Oracle::default();
     let mut events = vec![founding()];
     oracle.step(0, &events[0].1);
@@ -296,7 +305,7 @@ fn history(ops: Vec<Op>) -> (MembershipFold, Vec<(i64, Oracle)>, Vec<i64>) {
         .flat_map(|(at, _)| [*at, at + DAY - 1, at + DAY])
         .chain([at + 8 * DAY]);
     let probes = probes.collect();
-    (fold(events), snapshots, probes)
+    (events, snapshots, probes)
 }
 
 /// ID-7 and §5.1 over random histories: at every probe, `workspace_users`, the unreadable latch,
@@ -651,4 +660,176 @@ fn id3_a_deactivated_viewer_is_refused_and_each_planted_bug_is_caught_granting_i
         let failure = interleave(flaw, &rows, ops.clone(), &asks).unwrap_err();
         assert!(failure.to_string().contains("ID-3:"), "{flaw:?}: {failure}");
     }
+}
+
+/// The records of `events`, numbered from 1, as [`fold`] numbers them.
+fn records(events: &[(i64, Event)]) -> Vec<MembershipRecord> {
+    let numbered = events.iter().zip(1..);
+    numbered
+        .map(|((at, e), seq)| record(seq, *at, e.clone()))
+        .collect()
+}
+
+/// The roster the oracle gives at `at`: each member it reads `active`, with its effective roles,
+/// and the founder, the founding grant's member, while it is `active`; none while it is broken.
+fn expected_roster(o: &Oracle, at: i64) -> Option<(BTreeMap<u128, Roles>, Option<u128>)> {
+    let active: BTreeMap<u128, Roles> = MEMBERS
+        .into_iter()
+        .filter_map(|m| match o.reading(m, at) {
+            (Some(MembershipState::Active), effective, _) => Some((m, effective)),
+            _ => None,
+        })
+        .collect();
+    let founder = active.contains_key(&FOUNDER).then_some(FOUNDER);
+    (!o.broken).then_some((active, founder))
+}
+
+/// A roster as plain ids, for comparing with the oracle's.
+type Plain = (BTreeMap<u128, Roles>, Option<u128>);
+
+fn plain(roster: &Roster) -> Plain {
+    let active = roster.active.iter().map(|(m, r)| (m.0, r.clone()));
+    (active.collect(), roster.founder.map(|m| m.0))
+}
+
+/// Whether the roster oracle disagrees with `reader` somewhere over the deterministic histories;
+/// with `honest`, any disagreement fails the property instead.
+fn roster_disagrees(reader: impl Fn(&[(i64, Event)], i64) -> Option<Plain>, honest: bool) -> bool {
+    let config = ProptestConfig {
+        cases: 512,
+        failure_persistence: None,
+        ..Default::default()
+    };
+    let rng = TestRng::deterministic_rng(config.rng_algorithm);
+    let caught = Cell::new(false);
+    let body = |ops: Vec<Op>| -> Result<(), TestCaseError> {
+        let (events, snapshots, probes) = events_of(ops);
+        for p in probes {
+            let o = &snapshots.iter().rev().find(|(at, _)| *at <= p).unwrap().1;
+            let (got, want) = (reader(&events, p), expected_roster(o, p));
+            prop_assert!(!honest || got == want, "at {}: {:?} != {:?}", p, got, want);
+            caught.set(caught.get() || got != want);
+        }
+        Ok(())
+    };
+    if let Err(failure) = TestRunner::new_with_rng(config, rng).run(&ops(), body) {
+        panic!("{failure}");
+    }
+    caught.get()
+}
+
+/// The crate's roster, as plain ids, or `None` when it refuses the records as unreadable; any
+/// other answer fails the test with that answer.
+fn read_roster(events: &[(i64, Event)], p: i64) -> Option<Plain> {
+    match Roster::read(records(events), t(p)) {
+        Ok(roster) => Some(plain(&roster)),
+        Err(RosterRefused::Unreadable { .. }) => None,
+        Err(other) => panic!("the roster read answered {other:?}"),
+    }
+}
+
+/// E7-31 (DEC-2384): over random histories, at every probe the roster holds exactly the members
+/// the oracle reads `active`, each with its effective roles, and the founder while it is `active`;
+/// and it refuses exactly where the oracle reads the history as broken.
+#[test]
+#[ignore = "pending E7-31"]
+fn the_roster_equals_the_oracles_active_members_over_random_histories() {
+    roster_disagrees(read_roster, true);
+}
+
+/// The fold's public reading at `p`, perturbed by `flaw`, as plain ids: the planted rosters the
+/// roster oracle must tell from the honest one.
+fn planted_roster(events: &[(i64, Event)], p: i64, flaw: u8) -> Option<Plain> {
+    let fold = fold(events.to_vec());
+    if fold.unreadable(t(p)) {
+        return (flaw == 3).then(|| (BTreeMap::new(), None));
+    }
+    let admits = |s: MembershipState| match flaw {
+        0 => matches!(s, MembershipState::Active | MembershipState::CoolingOff),
+        _ => s == MembershipState::Active,
+    };
+    let active: BTreeMap<u128, Roles> = MEMBERS
+        .into_iter()
+        .filter(|m| fold.state(PrincipalId(*m), t(p)).is_some_and(admits))
+        .map(|m| {
+            let roles = match flaw {
+                1 => fold.kept_roles(PrincipalId(m), t(p)),
+                _ => fold.effective_roles(PrincipalId(m), t(p)),
+            };
+            (m, roles)
+        })
+        .collect();
+    let founder = match flaw {
+        2 => active.keys().next().copied(),
+        _ => active.contains_key(&FOUNDER).then_some(FOUNDER),
+    };
+    Some((active, founder))
+}
+
+/// E7-31: the roster oracle catches a roster that admits members still cooling off, one that
+/// reads kept roles for effective ones, one that takes the first active member for the founder,
+/// and one that
+/// answers an unreadable fold with an empty roster.
+#[test]
+fn the_roster_oracle_catches_planted_rosters() {
+    for (flaw, what) in [
+        (0, "cooling-off members"),
+        (1, "kept roles"),
+        (2, "any active member as the founder"),
+        (3, "an empty roster for an unreadable fold"),
+    ] {
+        let reader = |events: &[(i64, Event)], p| planted_roster(events, p, flaw);
+        assert!(roster_disagrees(reader, false), "missed {what}");
+    }
+}
+
+/// The planted rosters' harness is not vacuous: the fold's honest public reading agrees with the
+/// roster oracle everywhere.
+#[test]
+fn the_roster_oracle_agrees_with_the_folds_honest_reading() {
+    let honest = |events: &[(i64, Event)], p| planted_roster(events, p, 4);
+    assert!(
+        !roster_disagrees(honest, true),
+        "the honest reading was flagged"
+    );
+}
+
+/// E7-31: the founder is the member of the first membership record only, and only when that record
+/// is a founding grant: a later activation with no invitation names no founder, and a stream whose
+/// first record is an invitation has none.
+#[test]
+#[ignore = "pending E7-31"]
+fn the_founder_is_the_first_records_founding_member_only() {
+    let approver = set(0b00001);
+    let later = vec![
+        founding(),
+        (10, activated(B, None, approver.clone(), false, 10)),
+    ];
+    let roster = Roster::read(records(&later), t(DAY)).unwrap();
+    assert_eq!(roster.founder, Some(PrincipalId(FOUNDER)), "the first");
+    assert!(roster.active.contains_key(&PrincipalId(B)), "B is active");
+    let invited_first = vec![
+        (0, invited(1, approver.clone(), 0)),
+        (10, activated(B, Some(1), approver.clone(), false, 10)),
+        (20, activated(0xC, None, approver, false, 20)),
+    ];
+    let roster = Roster::read(records(&invited_first), t(DAY)).unwrap();
+    assert_eq!(roster.founder, None, "no founding grant first");
+    assert_eq!(roster.active.len(), 2, "B and C are active");
+}
+
+/// E7-31: a record after the instant read is not folded, so the roster at the founding instant
+/// holds only the founder, with the owner bundle in effect at once (rule 103).
+#[test]
+#[ignore = "pending E7-31"]
+fn a_roster_reads_only_the_records_at_or_before_its_instant() {
+    let history = vec![
+        founding(),
+        (10, activated(B, None, set(0b00001), false, 10)),
+    ];
+    let roster = Roster::read(records(&history), t(0)).unwrap();
+    let founder = PrincipalId(FOUNDER);
+    let bundle = BTreeSet::from([Role::Approver, Role::Operator, Role::WorkspaceAdmin]);
+    assert_eq!(roster.active, BTreeMap::from([(founder, bundle)]));
+    assert_eq!(roster.founder, Some(founder));
 }

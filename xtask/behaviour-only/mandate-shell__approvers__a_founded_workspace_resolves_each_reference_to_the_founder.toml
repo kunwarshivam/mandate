@@ -1,0 +1,7 @@
+file = "crates/mandate-shell/tests/approvers.rs"
+test = "a_founded_workspace_resolves_each_reference_to_the_founder"
+reason = """
+E7-31 (DEC-2384): the shell resolves approvers by DEC-953 until the impl PR folds §9.12, so on a
+stream holding a membership record it answers the empty set rather than reaching the roster's
+stub, which only that fold calls. The impl PR deletes this file with its `#[ignore]` line.
+"""

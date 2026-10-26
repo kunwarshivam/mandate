@@ -604,6 +604,7 @@ fn record_of(row: &StoredEvent) -> Result<ControlRecord, GrantRefusal> {
     let origin = Origin::of(&row.stream_id, &row.environment).ok_or(GrantRefusal::Mismatched)?;
     Ok(ControlRecord {
         seq: row.seq,
+        event_time: None,
         event_type: row.event_type.clone(),
         payload: payload.clone(),
         origin,
@@ -626,6 +627,7 @@ fn journaled(rows: &[StoredEvent], folded: &[&str]) -> Result<Vec<Journaled>, Gr
                 causation_id: None,
                 record: ControlRecord {
                     seq: row.seq,
+                    event_time: None,
                     event_type: row.event_type.clone(),
                     payload: Value::Null,
                     origin: Origin::of(&row.stream_id, &row.environment).ok_or(refusal)?,
