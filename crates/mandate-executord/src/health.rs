@@ -25,6 +25,11 @@ pub const UNAUTHORIZED: u16 = 401;
 /// it says nothing of the credential.
 pub const FORBIDDEN: u16 = 403;
 
+/// How often, in seconds, the process probes the connection's health with a read of the broker's
+/// account (connections spec §8.2's cadence while any agent is deployed, Proposed; DEC-2837). It is
+/// fixed for every process: the faster of §8.2's two cadences, so no executor probes less often.
+pub const PROBE_EVERY_S: i64 = 60;
+
 /// Consecutive network failures that make the connection `degraded` (§8.2, Proposed).
 pub const NETWORK_FAILURES: u32 = 3;
 /// Consecutive authorization failures that make the connection `suspended` (§8.2, Proposed).

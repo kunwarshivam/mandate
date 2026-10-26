@@ -129,6 +129,14 @@ artifacts:
   # ReadWriteOnce keeps every mounting pod on one node; ReadWriteMany needs a class that offers it.
   accessMode: ReadWriteOnce
 
+# The research store (DEC-2279 item 5): the research runtime's artifacts, which only the model
+# gateway writes, mounted at /var/lib/mandate/research-artifacts. It renders with the gateway. The
+# gateway's fixed cap is 512 MiB, and the chart's tests hold the size at no less than twice that.
+researchArtifacts:
+  size: 2Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
 # Where the workspace journal's Postgres is. The journal-db chart's defaults match these.
 journal:
   host: journal-rw

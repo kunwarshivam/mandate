@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use mandate_artifacts_fs::FsArtifactStore;
@@ -26,8 +26,8 @@ use mandate_time::UtcNanos;
 use crate::deployment;
 use crate::meter::CellMeter;
 use crate::recorded::{Bundle, BundleError};
-use crate::remote::{GatewayAddress, RemoteGateway};
-use crate::runtime::{Refs, ResearchWiring};
+use crate::remote::{GatewayAddress, RemoteGateway, RemoteSink};
+use crate::runtime::{ArtifactSink, Refs, ResearchWiring};
 use crate::source::{CellSource, Rows, SourceFor};
 use crate::worker::{RecordedWorker, StoreSink, WorkerError, WorkerFor};
 
@@ -226,10 +226,24 @@ pub fn research_metered(
     wired(opted, rows, meter, artifacts, now)
 }
 
+/// Where a researching runtime that goes through the model-gateway service finds the research
+/// store, read-only (DEC-2279 item 5).
+pub const RESEARCH_ARTIFACTS_ENV: &str = "MANDATE_RESEARCH_ARTIFACTS";
+
+/// The model-gateway service a researching runtime goes through, and the research store it reads
+/// its artifacts back from (DEC-2397, DEC-2279 items 3 and 5). An empty `research` names no store,
+/// so every read-back fails and research halts, and the runtime still starts.
+#[derive(Debug, Clone)]
+pub struct ViaGateway {
+    pub address: GatewayAddress,
+    pub research: PathBuf,
+}
+
 /// As [`research_metered`], calling models through the model-gateway service at `remote`
 /// (DEC-2397 items 1, 4 and 6): the worker builds no gateway, and the research source reads `meter`,
 /// the service's journaled stream read without its writer epoch, for its own checks. The service
-/// meters and holds each research call to the deployed daily cap.
+/// meters and holds each research call to the deployed daily cap, and stores the research
+/// artifacts in the research store at `research`, which they are read back from (DEC-2279).
 ///
 /// # Errors
 /// As [`research_metered`].
@@ -240,8 +254,9 @@ pub fn research_remote(
     artifacts: &Path,
     now: Box<dyn FnMut() -> UtcNanos>,
     remote: RemoteGateway,
+    research: &Path,
 ) -> Result<CellResearch, CellError> {
-    wired_through(opted, rows, meter, artifacts, now, Some(remote))
+    wired_through(opted, rows, meter, artifacts, now, Some((remote, research)))
 }
 
 /// The research a journaled process wires for `workspace`'s paper deployment, its meter stream in
@@ -258,16 +273,17 @@ pub fn research_through<S: Store + 'static>(
     workspace: &str,
     artifacts: &Path,
     clock: fn() -> UtcNanos,
-    gateway: Option<GatewayAddress>,
+    gateway: Option<ViaGateway>,
 ) -> Result<CellResearch, CellError> {
     match gateway {
-        Some(address) => research_remote(
+        Some(via) => research_remote(
             opted,
             rows,
             Box::new(ReadMeter::open(journal, workspace)),
             artifacts,
             Box::new(clock),
-            RemoteGateway::new(address, clock),
+            RemoteGateway::new(via.address, clock),
+            &via.research,
         ),
         None => research_metered(
             opted,
@@ -313,14 +329,17 @@ fn wired(
 }
 
 /// The research `opted` asks for: its worker calls models through `remote` when one is given, and
-/// otherwise through its own gateway, which shares `meter` with the source.
+/// otherwise through its own gateway, which shares `meter` with the source. With `remote`, its
+/// artifacts are stored through it too, in the research store it names, each read back from there
+/// (DEC-2279 items 3 and 5), since the runtime's own mounts are read-only; without it, they are
+/// put in `artifacts` directly.
 fn wired_through(
     opted: OptIn,
     rows: Box<dyn Rows>,
     meter: Box<dyn MeterStore>,
     artifacts: &Path,
     now: Box<dyn FnMut() -> UtcNanos>,
-    remote: Option<RemoteGateway>,
+    remote: Option<(RemoteGateway, &Path)>,
 ) -> Result<CellResearch, CellError> {
     let OptIn {
         bundle,
@@ -341,6 +360,16 @@ fn wired_through(
     let meter = CellMeter::over(meter, Rc::clone(&rows), who.clone(), Rc::new(clock.clone()));
     let open =
         || FsArtifactStore::open_existing(artifacts).map_err(|_| CellError::ArtifactsUnavailable);
+    let sink = || -> Result<Box<dyn ArtifactSink>, CellError> {
+        Ok(match &remote {
+            Some((remote, research)) => Box::new(RemoteSink::new(
+                remote.clone(),
+                &deployment.workspace,
+                *research,
+            )),
+            None => Box::new(StoreSink(open()?)),
+        })
+    };
     let control = StreamId::parse(&format!("ctl:{}", deployment.workspace))
         .ok_or(CellError::Mandate("deployment_missing"))?;
     let rows_now = rows
@@ -372,18 +401,18 @@ fn wired_through(
         agent: deployment.agent.clone(),
         description: description.clone(),
     };
-    let worker = match remote {
-        Some(remote) => RecordedWorker::remote(
+    let worker = match &remote {
+        Some((remote, _)) => RecordedWorker::remote(
             &bundle,
             worker_for,
-            Box::new(StoreSink(open()?)),
+            sink()?,
             Box::new(clock),
-            remote,
+            remote.clone(),
         ),
         None => RecordedWorker::capped(
             &bundle,
             worker_for,
-            Box::new(StoreSink(open()?)),
+            sink()?,
             Box::new(clock),
             meter.clone(),
             daily,
@@ -409,7 +438,7 @@ fn wired_through(
             },
             source: Box::new(source),
             worker: Box::new(worker),
-            artifacts: Box::new(StoreSink(open()?)),
+            artifacts: sink()?,
         },
         refs: Box::new(refs),
     })

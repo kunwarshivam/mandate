@@ -9,7 +9,8 @@
 use std::path::Path;
 
 use mandate_canon::{Int, Key, Object, Value, parse, to_canonical};
-use mandate_journal::{Draft, retirement_failure};
+use mandate_journal::{Draft, RetirementTerms, retirement_failure, retirement_held_silent};
+use mandate_num::Ratio;
 use mandate_time::UtcNanos;
 
 const AGENT: &str = "agent_a";
@@ -434,4 +435,471 @@ fn a_held_record_is_answered_only_by_its_own_retirement_held_alert() {
             "and the oracle agrees: {case}"
         );
     }
+}
+
+/// One version's terms as the `silence` vectors give them.
+fn terms_of(case: &Value, version: &str) -> Option<RetirementTerms> {
+    let mandate = list(case, "mandates")
+        .iter()
+        .find(|m| text(m, "version") == version)?;
+    let t = mandate.get("terms")?;
+    Some(RetirementTerms {
+        profit_level: Ratio::parse(canonical(text(t, "profit_level"))).ok()?,
+        end_date: text(t, "end_date").to_owned(),
+        on_complete: text(t, "on_complete").to_owned(),
+    })
+}
+
+/// A mandate document's decimal in the journal's canonical form (§4.6): no trailing fractional
+/// zeros, and no point without a fraction.
+fn canonical(decimal: &str) -> &str {
+    if decimal.contains('.') {
+        decimal.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        decimal
+    }
+}
+
+/// A decimal as an integer of millionths, the oracle's own fixed point: every figure the vectors
+/// give has at most six fractional digits.
+fn micros(decimal: &str) -> i128 {
+    let (whole, fraction) = decimal.split_once('.').unwrap_or((decimal, ""));
+    let negative = whole.starts_with('-');
+    let whole: i128 = whole.trim_start_matches('-').parse().unwrap();
+    assert!(
+        fraction.len() <= 6,
+        "the oracle's fixed point holds {decimal} exactly"
+    );
+    let digits = format!("{fraction:0<6}");
+    let fraction: i128 = digits[..6].parse().unwrap();
+    let value = whole * 1_000_000 + fraction;
+    if negative { -value } else { value }
+}
+
+/// §9.34's `retirement_held_silent` read another way: the sequence's last `RetirementHeld`, then
+/// every record after it, each end and each cancelling version clearing it and the version it was
+/// held under; a profit level read as millionths and compared with the trigger's return by
+/// cross-multiplying in `i128`, with no division to truncate.
+fn silent_oracle(case: &Value) -> bool {
+    let cause = case.get("cause").unwrap();
+    let terms = |version: &str| {
+        list(case, "mandates")
+            .iter()
+            .find(|m| text(m, "version") == version)
+            .and_then(|m| m.get("terms"))
+    };
+    let mut last: Option<i64> = None;
+    let mut held_under: Option<&Value> = None;
+    for r in list(case, "records") {
+        match text(r, "event_type") {
+            "RetirementHeld" => {
+                last = Some(seconds(text(payload(r), "risk_clock")));
+                if held_under.is_none() {
+                    held_under = terms(version(r));
+                }
+            }
+            "AgentStopped" if text(payload(r), "agent_id") == AGENT => {
+                last = None;
+                held_under = None;
+            }
+            "OwnerCommandIssued"
+                if text(payload(r), "scope") == "agent"
+                    && text(payload(r), "subject") == AGENT
+                    && matches!(text(payload(r), "command"), "resume" | "stop") =>
+            {
+                last = None;
+                held_under = None;
+            }
+            "MandateVersionApplied"
+                if last.is_some()
+                    && text(payload(r), "agent_id") == AGENT
+                    && text(payload(r), "result") == "applied" =>
+            {
+                let Some(new) = terms(text(payload(r), "new_version")) else {
+                    continue;
+                };
+                let c = payload(cause);
+                let cancels = match text(cause, "event_type") {
+                    "RiskLimitTriggered" => {
+                        text(c, "limit") == "profit_stop" && {
+                            let base = micros(text(c, "capital_base"));
+                            let gain = micros(text(c, "agent_equity")) - base;
+                            base > 0 && micros(text(new, "profit_level")) * base > gain * 1_000_000
+                        }
+                    }
+                    "GoalCompleted" if text(c, "reason") == "end_date" => {
+                        held_under.is_some_and(|h| text(new, "end_date") > text(h, "end_date"))
+                    }
+                    "GoalCompleted" if text(c, "on_complete") == "release" => held_under
+                        .is_some_and(|h| text(new, "on_complete") != text(h, "on_complete")),
+                    _ => false,
+                };
+                if cancels {
+                    last = None;
+                    held_under = None;
+                }
+            }
+            _ => {}
+        }
+    }
+    last.is_some_and(|at| seconds(text(case, "now")) - at > 2 * DAY)
+}
+
+#[test]
+fn every_silence_case_is_judged_as_the_vectors_judge_it_by_the_finding_and_the_oracle() {
+    let section = section();
+    let cases = list(&section, "silence");
+    assert!(
+        cases.len() >= 11,
+        "{} silence cases; never fewer",
+        cases.len()
+    );
+    let mut failed = Vec::new();
+    for case in cases {
+        let want = case.get("silent") == Some(&Value::Bool(true));
+        let now = seconds(text(case, "now"));
+        let found = retirement_held_silent(
+            AGENT,
+            case.get("cause").unwrap(),
+            list(case, "records"),
+            |version| terms_of(case, version),
+            now,
+        );
+        let read = silent_oracle(case);
+        if found != want || read != want {
+            failed.push(format!(
+                "{}: want {want}, finding {found}, oracle {read}",
+                text(case, "name")
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+/// The finding's edges the vectors leave open: at exactly 48 hours it is no silence, one second past
+/// it is; another agent's stop ends nothing; a version whose terms cannot be read cancels nothing,
+/// so a silence is still reported (`AGENTS.md` rule 3); and no held record is no sequence.
+#[test]
+fn the_silence_finding_reads_its_edges_conservatively() {
+    let section = section();
+    let case = list(&section, "silence")
+        .iter()
+        .find(|c| text(c, "name") == "held_and_writing")
+        .unwrap();
+    let cause = case.get("cause").unwrap();
+    let records = list(case, "records");
+    let last = seconds(text(payload(&records[0]), "risk_clock"));
+    let terms = |version: &str| terms_of(case, version);
+    let judge =
+        |records: &[Value], now: i64| retirement_held_silent(AGENT, cause, records, terms, now);
+    assert!(
+        !judge(records, last + 2 * DAY),
+        "48 hours exactly is not silent"
+    );
+    assert!(judge(records, last + 2 * DAY + 1), "a second past it is");
+    let mut others = records.to_vec();
+    others.push(record(
+        r#"{"event_id":"01J8Z5RHH00000000000000000","event_type":"AgentStopped","causation_id":null,"config_refs":{},"payload":{"agent_id":"agent_b"}}"#,
+    ));
+    assert!(
+        judge(&others, last + 3 * DAY),
+        "another agent's stop ends nothing"
+    );
+    let mut stopped = records.to_vec();
+    stopped.push(record(
+        r#"{"event_id":"01J8Z5RHJ00000000000000000","event_type":"AgentStopped","causation_id":null,"config_refs":{},"payload":{"agent_id":"agent_a"}}"#,
+    ));
+    assert!(!judge(&stopped, last + 3 * DAY), "its own stop ends it");
+    let mut unknown = records.to_vec();
+    unknown.push(record(
+        r#"{"event_id":"01J8Z5RHK00000000000000000","event_type":"MandateVersionApplied","causation_id":null,"config_refs":{},"payload":{"agent_id":"agent_a","new_version":"sha256:9999999999999999999999999999999999999999999999999999999999999999","result":"applied"}}"#,
+    ));
+    assert!(
+        judge(&unknown, last + 3 * DAY),
+        "a version it cannot read cancels nothing"
+    );
+    let mut rejected = records.to_vec();
+    rejected.push(record(
+        r#"{"event_id":"01J8Z5RHM00000000000000000","event_type":"MandateVersionApplied","causation_id":null,"config_refs":{},"payload":{"agent_id":"agent_a","new_version":"sha256:2222222222222222222222222222222222222222222222222222222222222222","result":"rejected"}}"#,
+    ));
+    assert!(
+        judge(&rejected, last + 3 * DAY),
+        "a rejected version cancels nothing"
+    );
+    let cancelling = list(&section, "silence")
+        .iter()
+        .find(|c| text(c, "name") == "cancelled_by_a_raised_level")
+        .unwrap();
+    let raised = |agent: &str| {
+        let mut records = list(cancelling, "records").to_vec();
+        for r in &mut records {
+            if text(r, "event_type") == "MandateVersionApplied"
+                && let Value::Object(record) = r
+            {
+                set_payload(record, "agent_id", Value::Str(agent.into()));
+            }
+        }
+        retirement_held_silent(
+            AGENT,
+            cancelling.get("cause").unwrap(),
+            &records,
+            |version| terms_of(cancelling, version),
+            seconds(text(cancelling, "now")),
+        )
+    };
+    assert!(!raised(AGENT), "its own raised level cancels it");
+    assert!(
+        raised("agent_b"),
+        "another agent's raised level cancels nothing"
+    );
+    assert!(!judge(&[], last + 30 * DAY), "no held record, no sequence");
+}
+
+/// `case` with `change` applied to its object.
+fn changed(case: &Value, change: impl Fn(&mut Object)) -> Value {
+    let mut out = case.as_object().cloned().unwrap();
+    change(&mut out);
+    Value::Object(out)
+}
+
+/// Each reading is shown to fail on a seeded bug before it is trusted: a cancelling case whose cause
+/// becomes a drawdown trigger, or whose cancelling version is dropped, and an ended case whose end is
+/// dropped, each turn silent; a silent case read a day earlier is not. The finding and the oracle
+/// both follow each change.
+#[test]
+fn the_finding_and_the_oracle_both_follow_a_seeded_change_to_every_case() {
+    let section = section();
+    let cases = list(&section, "silence");
+    let named = |name: &str| cases.iter().find(|c| text(c, "name") == name).unwrap();
+    let both = |case: &Value| {
+        let found = retirement_held_silent(
+            AGENT,
+            case.get("cause").unwrap(),
+            list(case, "records"),
+            |version| terms_of(case, version),
+            seconds(text(case, "now")),
+        );
+        (found, silent_oracle(case))
+    };
+    let drop_type = |event_type: &'static str| {
+        move |case: &mut Object| {
+            if let Some(Value::Array(records)) = case.get_mut("records") {
+                records.retain(|r| text(r, "event_type") != event_type);
+            }
+        }
+    };
+    let drawdown = changed(named("cancelled_by_a_raised_level"), |case| {
+        if let Some(Value::Object(cause)) = case.get_mut("cause") {
+            set_payload(cause, "limit", Value::Str("drawdown_rung".into()));
+        }
+    });
+    let unversioned = changed(
+        named("cancelled_by_a_later_end_date"),
+        drop_type("MandateVersionApplied"),
+    );
+    let unreleased = changed(
+        named("cancelled_by_on_complete"),
+        drop_type("MandateVersionApplied"),
+    );
+    let unended = changed(named("ended"), |case| {
+        if let Some(Value::Array(records)) = case.get_mut("records") {
+            records.retain(|r| {
+                !matches!(text(r, "event_type"), "AgentStopped" | "OwnerCommandIssued")
+            });
+        }
+    });
+    let earlier = changed(named("silent"), |case| {
+        let now = seconds(case.get("now").and_then(Value::as_str).unwrap()) - DAY;
+        case.insert(
+            Key::new("now").unwrap(),
+            Value::Str(UtcNanos::from_parts(now, 0).unwrap().to_string()),
+        );
+    });
+    for (bug, case, want) in [
+        ("a drawdown cause", &drawdown, true),
+        ("no cancelling end_date", &unversioned, true),
+        ("no cancelling on_complete", &unreleased, true),
+        ("no end", &unended, true),
+        ("a day earlier", &earlier, false),
+    ] {
+        assert_eq!(both(case), (want, want), "{bug}");
+    }
+}
+
+/// A `silence` case built here: `cause`, the versions' terms, records, and `now`, judged by the
+/// finding and by the oracle.
+fn judged(
+    cause: Value,
+    mandates: &[(&str, &str, &str, &str)],
+    records: Vec<Value>,
+    now: i64,
+) -> (bool, bool) {
+    let mandates: Vec<Value> = mandates
+        .iter()
+        .map(|(v, level, end, on)| {
+            record(&format!(
+                r#"{{"version":"{v}","terms":{{"profit_level":"{level}","end_date":"{end}","on_complete":"{on}"}}}}"#
+            ))
+        })
+        .collect();
+    let mut case = Object::new();
+    case.insert(Key::new("cause").unwrap(), cause);
+    case.insert(Key::new("mandates").unwrap(), Value::Array(mandates));
+    case.insert(Key::new("records").unwrap(), Value::Array(records));
+    case.insert(
+        Key::new("now").unwrap(),
+        Value::Str(UtcNanos::from_parts(now, 0).unwrap().to_string()),
+    );
+    let case = Value::Object(case);
+    let found = retirement_held_silent(
+        AGENT,
+        case.get("cause").unwrap(),
+        list(&case, "records"),
+        |version| terms_of(&case, version),
+        now,
+    );
+    (found, silent_oracle(&case))
+}
+
+const V1: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+const V2: &str = "sha256:2222222222222222222222222222222222222222222222222222222222222222";
+const V3: &str = "sha256:3333333333333333333333333333333333333333333333333333333333333333";
+const T0: i64 = 1_790_000_000;
+
+fn held_at(id: &str, version: &str, at: i64) -> Value {
+    record(&format!(
+        r#"{{"event_id":"{id}","event_type":"RetirementHeld","causation_id":"01J8Z5RH0B000000000000000M","config_refs":{{"mandate_version":"{version}"}},"payload":{{"held_since":"{}","period":1,"waiting_on":["position"],"risk_clock":"{}"}}}}"#,
+        UtcNanos::from_parts(at - DAY, 0).unwrap(),
+        UtcNanos::from_parts(at, 0).unwrap()
+    ))
+}
+
+fn applied(id: &str, version: &str) -> Value {
+    record(&format!(
+        r#"{{"event_id":"{id}","event_type":"MandateVersionApplied","causation_id":null,"config_refs":{{}},"payload":{{"agent_id":"agent_a","new_version":"{version}","result":"applied"}}}}"#
+    ))
+}
+
+fn trigger(equity: &str, base: &str, limit: &str) -> Value {
+    record(&format!(
+        r#"{{"event_type":"RiskLimitTriggered","event_id":"01J8Z5RH0A000000000000000S","payload":{{"agent_id":"agent_a","agent_equity":"{equity}","capital_base":"{base}","limit":"{limit}"}}}}"#
+    ))
+}
+
+fn end_date_goal() -> Value {
+    record(
+        r#"{"event_type":"GoalCompleted","event_id":"01J8Z5RH0B000000000000000M","payload":{"agent_id":"agent_a","reason":"end_date","then":null,"on_complete":null}}"#,
+    )
+}
+
+/// The review of #2742's edges, each judged alike by the finding and the oracle (DEC-2835):
+/// a second sequence is read against its own version, never the first one's; an `end_date` equal
+/// to the one held under cancels nothing; a base that is not positive, figures that do not read,
+/// and another limit's trigger with a level above any return cancel nothing; a level exactly at the
+/// trigger's return cancels nothing, one above it does.
+#[test]
+fn every_cancellation_edge_is_read_alike_by_the_finding_and_the_oracle() {
+    let late = T0 + 3 * DAY;
+    let resumed = record(
+        r#"{"event_id":"01J8Z5RHN00000000000000000","event_type":"OwnerCommandIssued","causation_id":null,"config_refs":{},"payload":{"command":"resume","scope":"agent","subject":"agent_a"}}"#,
+    );
+    let second_sequence = vec![
+        held_at("01J8Z5RHP00000000000000000", V1, T0 - 10 * DAY),
+        resumed,
+        held_at("01J8Z5RHQ00000000000000000", V2, T0),
+        applied("01J8Z5RHR00000000000000000", V3),
+    ];
+    let terms = [
+        (V1, "0.1", "2026-09-01", "release"),
+        (V2, "0.1", "2026-11-01", "release"),
+        (V3, "0.1", "2026-10-01", "release"),
+    ];
+    assert_eq!(
+        judged(end_date_goal(), &terms, second_sequence, late),
+        (true, true),
+        "a later end_date than the first sequence's but not the second's cancels nothing"
+    );
+    let same_date = vec![
+        held_at("01J8Z5RHP00000000000000000", V1, T0),
+        applied("01J8Z5RHR00000000000000000", V2),
+    ];
+    let equal = [
+        (V1, "0.1", "2026-10-01", "release"),
+        (V2, "0.1", "2026-10-01", "release"),
+    ];
+    assert_eq!(
+        judged(end_date_goal(), &equal, same_date.clone(), late),
+        (true, true),
+        "an equal end_date"
+    );
+    for (case, cause, want) in [
+        ("a zero base", trigger("-5", "0", "profit_stop"), true),
+        ("a negative base", trigger("-5", "-10", "profit_stop"), true),
+        (
+            "equity that does not read",
+            trigger("x", "10000", "profit_stop"),
+            true,
+        ),
+        (
+            "another limit with a high level",
+            trigger("11200", "10000", "drawdown_rung"),
+            true,
+        ),
+        (
+            "a level at the return",
+            trigger("12000", "10000", "profit_stop"),
+            true,
+        ),
+        (
+            "a level above the return",
+            trigger("11999", "10000", "profit_stop"),
+            false,
+        ),
+    ] {
+        let levels = [
+            (V1, "0.1", "2026-10-01", "release"),
+            (V2, "0.2", "2026-10-01", "release"),
+        ];
+        let records = vec![
+            held_at("01J8Z5RHP00000000000000000", V1, T0),
+            applied("01J8Z5RHR00000000000000000", V2),
+        ];
+        if case == "equity that does not read" {
+            let found = retirement_held_silent(
+                AGENT,
+                &cause,
+                &records,
+                |v| {
+                    levels
+                        .iter()
+                        .find(|(x, ..)| *x == v)
+                        .map(|(_, l, e, o)| RetirementTerms {
+                            profit_level: Ratio::parse(l).unwrap(),
+                            end_date: (*e).to_owned(),
+                            on_complete: (*o).to_owned(),
+                        })
+                },
+                late,
+            );
+            assert_eq!(found, want, "{case}");
+            continue;
+        }
+        assert_eq!(
+            judged(cause, &levels, records, late),
+            (want, want),
+            "{case}"
+        );
+    }
+}
+
+/// A held record whose risk clock cannot be read is as old as can be: the finding is reported,
+/// never dropped (DEC-2835 item 3).
+#[test]
+fn a_held_record_with_an_unreadable_clock_is_reported_silent() {
+    let mut held = held_at("01J8Z5RHP00000000000000000", V1, T0);
+    if let Value::Object(r) = &mut held {
+        set_payload(r, "risk_clock", Value::Str("not a clock".into()));
+    }
+    let found = retirement_held_silent(AGENT, &end_date_goal(), &[held], |_| None, T0);
+    assert!(found);
 }
