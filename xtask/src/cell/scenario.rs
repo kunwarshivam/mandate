@@ -1121,7 +1121,7 @@ pub fn plan(
                               from step 2's version-2 deployment (#1759, #1763), asking the owner \
                               on a deferring opening (#2538), the demo envelope's loop from \
                               decide to proposed as a test (#2637); the owner's inbox is read \
-                              by step 6's web run, since a read in the Job races the runtime's \
+                              by this step's web run below, since a read in the Job races the runtime's \
                               first ask",
                     waits: vec![P5_HOOK],
                 }),
