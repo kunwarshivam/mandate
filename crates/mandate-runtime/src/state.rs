@@ -94,6 +94,22 @@ pub struct RuntimeState {
     /// Each instrument's current thesis and the lineages, from the agent stream's thesis records,
     /// its `ThesisInvalidated`, and the account stream's removals (mandate spec §8.6, DEC-2391).
     theses: Theses,
+    /// The latest `RetirementHeld` on the agent stream, the runtime's own record that a retirement
+    /// has waited another day (journal spec §9.34): what a restarted runtime folds first so it
+    /// never writes a period twice (DEC-2352 item 5).
+    retirement_held: Option<HeldPeriod>,
+}
+
+/// One `RetirementHeld` as the runtime folds it: the record that began the retirement, its place
+/// in the sequence, when the retirement began waiting, and the tick it was written at (journal
+/// spec §9.34). It steps nothing: no mode, hold, or decision reads it. The ends that close its
+/// sequence and the next period's due time are its writer's, E6-5's (DEC-2352 item 8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldPeriod {
+    pub cause: EventId,
+    pub period: u64,
+    pub held_since: RiskClock,
+    pub written_at: RiskClock,
 }
 
 /// One folded `ConnectionChecked`: whether every check it lists passed, and its risk clock.
@@ -184,7 +200,14 @@ impl RuntimeState {
             orders_of: BTreeMap::new(),
             ended: BTreeSet::new(),
             theses: Theses::default(),
+            retirement_held: None,
         }
+    }
+
+    /// The latest period of a held retirement folded from the agent stream, or `None` (journal
+    /// spec §9.34).
+    pub fn retirement_held(&self) -> Option<&HeldPeriod> {
+        self.retirement_held.as_ref()
     }
 
     /// Which deployment this runtime is.
@@ -797,6 +820,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         }
         "ThesisProposed" | "ThesisRevised" => state.theses.recorded(&event.payload)?,
         "ThesisInvalidated" => state.theses.invalidated(&event.payload)?,
+        "RetirementHeld" => state.retirement_held = Some(held_period(event)?),
         "UniverseChanged" => {
             let agent = state.deployment.agent.0.clone();
             state.theses.universe_changed(&event.payload, &agent)?;
@@ -854,6 +878,31 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         }
     }
     Ok(())
+}
+
+/// One `RetirementHeld` read as the journal admits it (rule 265): a cause, a period from 1, and two
+/// whole-second timestamps. A record that does not read so is refused, never folded as a guess.
+fn held_period(event: &FoldedEvent) -> Result<HeldPeriod, RuntimeError> {
+    let cause = event
+        .causation_id
+        .clone()
+        .ok_or_else(|| payload::non_canonical("causation_id"))?;
+    let period = event
+        .payload
+        .get("period")
+        .and_then(Value::as_int)
+        .filter(|period| *period >= 1)
+        .ok_or_else(|| payload::non_canonical("period"))?;
+    let held_since = payload::stamped_clock_of(&event.payload, "held_since")
+        .ok_or_else(|| payload::non_canonical("held_since"))?;
+    let written_at = payload::stamped_clock_of(&event.payload, "risk_clock")
+        .ok_or_else(|| payload::non_canonical("risk_clock"))?;
+    Ok(HeldPeriod {
+        cause,
+        period,
+        held_since,
+        written_at,
+    })
 }
 
 /// An `OrderStateChanged` of an order the runtime follows: a terminal state ends its intent, and a
