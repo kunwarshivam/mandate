@@ -3477,38 +3477,27 @@ fn lint(
     workspace_checks()
 }
 
-/// The two lines git writes around a conflict, each followed by a space and the side's name, that
-/// no tracked file may start a line with: a merge resolved by hand that kept them lands both sides
-/// and git's own markup, as `deploy/cell/README.md` did after #2622. `=======` alone is left out,
-/// since Markdown underlines a heading with it.
-const CONFLICT_MARKERS: [&str; 2] = ["<<<<<<< ", ">>>>>>> "];
+/// The conflict-marker check, the one script both CI paths run: the docs-only path's
+/// `docs-checks.sh` and this lint job, since a conflict left in a Markdown file reaches only the
+/// first (`deploy/cell/README.md` after #2622).
+const CONFLICT_MARKERS: &str = ".github/scripts/conflict-markers.sh";
 
-/// Refuses every tracked file under `root` with a line that starts with one of
-/// [`CONFLICT_MARKERS`], naming the file and line. Files are read as bytes, so a binary or
-/// non-UTF-8 file is checked rather than skipped.
+/// [`CONFLICT_MARKERS`] over the git repository at `root`: refuses every tracked file with a line
+/// that starts with one of git's conflict markers, naming its path and line.
 fn conflict_markers_in(root: &Path) -> Result<()> {
-    eprintln!(
-        "    conflict-markers: checking that no tracked file keeps a merge conflict's markers"
-    );
-    let tracked = output_in(root, "git", &["ls-files", "-z"])?;
-    let mut problems = Vec::new();
-    for file in tracked.split('\0').filter(|file| !file.is_empty()) {
-        let Ok(bytes) = fs::read(root.join(file)) else {
-            continue;
-        };
-        for (n, line) in (1..).zip(bytes.split(|byte| *byte == b'\n')) {
-            if CONFLICT_MARKERS
-                .iter()
-                .any(|marker| line.starts_with(marker.as_bytes()))
-            {
-                problems.push(format!(
-                    "{file}:{n}: a merge conflict's marker; resolve the conflict and remove git's \
-                     markup"
-                ));
-            }
-        }
+    let script = repo_root()?.join(CONFLICT_MARKERS);
+    eprintln!("    $ bash {CONFLICT_MARKERS}");
+    let out = Command::new("bash")
+        .arg(&script)
+        .current_dir(root)
+        .output()
+        .context("starting `bash`")?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    eprint!("{}{stderr}", String::from_utf8_lossy(&out.stdout));
+    if !out.status.success() {
+        bail!("{}", stderr.trim());
     }
-    report(problems, "conflict-markers")
+    Ok(())
 }
 
 /// The backlog every story and debt row was written to until DEC-2373.
@@ -3642,7 +3631,8 @@ fn backlog_row_problem(before: &str, after: &str, folded: &[(String, String)]) -
 }
 
 /// The lint job's checks over the Cargo and uv workspaces in the current directory: fmt, clippy
-/// `-D warnings`, crate layering, the decision numbers, conflict markers, markers, saved proptest seeds, the feature map, typos, and ruff.
+/// `-D warnings`, crate layering, the decision numbers, conflict markers, markers, saved proptest
+/// seeds, the feature map, typos, and ruff.
 fn workspace_lint() -> Result<()> {
     sh("cargo", &["fmt", "--all", "--check"])?;
     sh(
@@ -9253,7 +9243,16 @@ fn backticked_paths(text: &str) -> impl Iterator<Item = &str> {
 /// [`MUTANTS_PLANNED_ENV`]; [`check_schedule`] refuses a shard whose own listing or shard total
 /// disagrees with that plan (DEC-538).
 fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
-    incremental_refused(env::var_os(CARGO_INCREMENTAL).as_deref())?;
+    let (line, verdict) = summarised(root, base, || {
+        incremental_refused(env::var_os(CARGO_INCREMENTAL).as_deref())?;
+        mutants_from_env(root, base)
+    });
+    println!("{line}");
+    verdict
+}
+
+/// [`mutants`]' schedule, read from the environment, and its run.
+fn mutants_from_env(root: &Path, base: Option<&str>) -> Result<()> {
     let shard = env::var(MUTANT_SHARD_ENV)
         .ok()
         .map(|value| MutantShard::parse(&value))
@@ -9268,7 +9267,7 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
         Ok(value) => per_shard_value(&value)?,
         Err(_) => 1,
     };
-    mutants_scheduled(root, base, shard, planned, per_shard)
+    mutants_judged(root, base, shard, planned, per_shard)
 }
 
 /// [`MUTANTS_PER_SHARD_ENV`]'s value: a whole number from 1 to
@@ -9286,36 +9285,36 @@ fn per_shard_value(value: &str) -> Result<usize> {
     Ok(per_shard)
 }
 
-/// [`mutants`] with its schedule passed in rather than read from the environment, which the tests
-/// cannot set (`unsafe` environment mutation is forbidden workspace-wide). It clears
-/// [`MUTANTS_OUT`] before anything else, so no earlier run's outcomes sit there while this one
-/// plans and runs (lane L1 reported one, 2026-10-26), and ends every run, passed or failed, with
-/// [`mutants_summary`]'s one line, the line a lane reports from.
-fn mutants_scheduled(
+/// Clears [`MUTANTS_OUT`] before anything else, so no earlier run's outcomes sit there while
+/// `run` plans and runs (lane L1 reported from one, 2026-10-26), then runs it and returns
+/// [`mutants_summary`]'s one line, the line a lane reports from, beside its verdict. Every run
+/// gets the line, refused before it started or not; a directory that cannot be cleared fails the
+/// run unstarted.
+fn summarised(
     root: &Path,
     base: Option<&str>,
-    shard: Option<MutantShard>,
-    planned: Option<usize>,
-    per_shard: usize,
-) -> Result<()> {
-    match fs::remove_dir_all(root.join(MUTANTS_OUT)) {
+    run: impl FnOnce() -> Result<()>,
+) -> (String, Result<()>) {
+    let verdict = match fs::remove_dir_all(root.join(MUTANTS_OUT)) {
         Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
-            return Err(err).with_context(|| format!("clearing {MUTANTS_OUT} before the run"));
+            Err(err).with_context(|| format!("clearing {MUTANTS_OUT} before the run"))
         }
-        _ => {}
-    }
-    let verdict = mutants_judged(root, base, shard, planned, per_shard);
-    println!(
-        "{}",
-        mutants_summary(root, mutant_costs::run_id(), base, verdict.is_ok())
-    );
-    verdict
+        _ => run(),
+    };
+    let line = mutants_summary(root, mutant_costs::run_id(), base, verdict.is_ok());
+    (line, verdict)
 }
 
-/// The one line every [`mutants_scheduled`] run ends with: the run id, the diff base, the verdict,
-/// and the counts this run's [`MUTANTS_OUT`] outcomes hold, all zero when the run wrote none. A
-/// `pass` with `missed` above zero is DEC-137's: every missed mutant sat in a stub body.
+/// The one line every [`summarised`] run ends with: the run id, the diff base, the verdict, and
+/// the counts this run's [`MUTANTS_OUT`] outcomes hold, or `outcomes=none` when the run wrote none
+/// or none that parse, so a run stopped early never reads as one that tested nothing. A `pass`
+/// with `missed` above zero is DEC-137's: every missed mutant sat in a stub body.
 fn mutants_summary(root: &Path, run: u64, base: Option<&str>, passed: bool) -> String {
+    let head = format!(
+        "mutants summary: run={run} base={} verdict={}",
+        base.unwrap_or("none"),
+        if passed { "pass" } else { "fail" },
+    );
     let counts = fs::read_to_string(root.join(MUTANTS_OUT).join("outcomes.json"))
         .ok()
         .and_then(|text| serde_json::from_str::<MutantRun>(&text).ok())
@@ -9335,19 +9334,13 @@ fn mutants_summary(root: &Path, run: u64, base: Option<&str>, passed: bool) -> S
                 }
             }
             counts
-        })
-        .unwrap_or_default();
+        });
+    let Some(counts) = counts else {
+        return format!("{head} outcomes=none");
+    };
     format!(
-        "mutants summary: run={run} base={} verdict={} tested={} caught={} missed={} timeouts={} \
-         unviable={} other={}",
-        base.unwrap_or("none"),
-        if passed { "pass" } else { "fail" },
-        counts.tested,
-        counts.caught,
-        counts.missed,
-        counts.timeouts,
-        counts.unviable,
-        counts.other,
+        "{head} tested={} caught={} missed={} timeouts={} unviable={} other={}",
+        counts.tested, counts.caught, counts.missed, counts.timeouts, counts.unviable, counts.other,
     )
 }
 
@@ -9362,7 +9355,9 @@ struct MutantCounts {
     other: usize,
 }
 
-/// [`mutants_scheduled`]'s run, between clearing [`MUTANTS_OUT`] and the summary line.
+/// [`mutants`]' run with its schedule passed in rather than read from the environment, which the
+/// tests cannot set (`unsafe` environment mutation is forbidden workspace-wide): what
+/// [`summarised`] runs between clearing [`MUTANTS_OUT`] and the summary line.
 fn mutants_judged(
     root: &Path,
     base: Option<&str>,
@@ -9393,7 +9388,7 @@ fn mutants_judged(
 }
 
 /// The gate's run over `diff`'s `listed` mutants, or `shard`'s slice of them, judged by the tests
-/// of `tested` and their external and simulator oracles: what [`mutants_scheduled`] runs for a
+/// of `tested` and their external and simulator oracles: what [`mutants_judged`] runs for a
 /// pull request and [`sweep_scheduled`] for one shard of the nightly's whole-crate sweep.
 fn gate_run(
     root: &Path,
@@ -12317,7 +12312,7 @@ mod tests {
         forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers, has_pending_tests,
         is_pending_marker, is_stub_function, layer_problems, lint, listed_mutant_counts,
         live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
-        mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
+        mutants_args, mutants_job_cargo, mutants_judged, mutants_outcome, mutants_plan,
         mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
         per_shard_value, plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems,
         registry_rows, rehearsal_runs, release_api_refused, release_exchange_refused,
@@ -12335,7 +12330,7 @@ mod tests {
     };
     use super::{
         CARGO_INCREMENTAL, TIMED_OUT_MUTANTS, conflict_markers_in, incremental_refused,
-        mutants_job_within, mutants_summary,
+        mutants_job_within, mutants_summary, summarised,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
@@ -13644,9 +13639,8 @@ mod tests {
         let fx = Fixture::new("mutants-summary")?;
         assert_eq!(
             mutants_summary(&fx.0, 7, None, true),
-            "mutants summary: run=7 base=none verdict=pass tested=0 caught=0 missed=0 timeouts=0 \
-             unviable=0 other=0",
-            "a run that wrote no outcomes counts nothing"
+            "mutants summary: run=7 base=none verdict=pass outcomes=none",
+            "a run that wrote no outcomes says so rather than counting zero"
         );
         let mutant = |summary: &str| {
             serde_json::json!({
@@ -13685,10 +13679,57 @@ mod tests {
         let fx = Fixture::new("mutants-stale")?;
         fs::create_dir_all(fx.0.join(MUTANTS_OUT))?;
         fs::write(fx.0.join(MUTANTS_OUT).join("outcomes.json"), "{}")?;
-        mutants_scheduled(&fx.0, None, None, Some(0), 1)?;
+        let (line, verdict) = summarised(&fx.0, None, || {
+            mutants_judged(&fx.0, None, None, Some(0), 1)
+        });
+        verdict?;
         assert!(
             !fx.0.join(MUTANTS_OUT).exists(),
             "the last run's outcomes are gone though this run had no diff to judge"
+        );
+        assert!(
+            line.starts_with("mutants summary: run=")
+                && line.ends_with(" base=none verdict=pass outcomes=none"),
+            "the run's line says it passed and wrote no outcomes: {line}"
+        );
+        fs::create_dir_all(fx.0.join(MUTANTS_OUT))?;
+        fs::write(fx.0.join(MUTANTS_OUT).join("outcomes.json"), "{}")?;
+        let (line, verdict) = summarised(&fx.0, Some("origin/main"), || {
+            assert!(
+                !fx.0.join(MUTANTS_OUT).exists(),
+                "the run starts with the last run's outcomes already gone"
+            );
+            bail!("refused before it built anything")
+        });
+        assert!(verdict.is_err(), "the refusal is the run's verdict");
+        assert!(
+            line.ends_with(" base=origin/main verdict=fail outcomes=none"),
+            "a run refused before it started still ends with its line, a failing one: {line}"
+        );
+        Ok(())
+    }
+
+    /// Both CI paths run the one conflict-marker script: the lint job, through
+    /// [`workspace_lint`], and the docs-only path, whose changes are the Markdown files a hand-
+    /// resolved conflict is likeliest to leave markers in.
+    #[test]
+    fn both_ci_paths_run_the_conflict_marker_script() -> Result<()> {
+        let root = repo_root()?;
+        let main = fs::read_to_string(root.join("xtask/src/main.rs"))?;
+        let lint = main
+            .split("fn workspace_lint() -> Result<()> {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n}\n").next())
+            .context("workspace_lint's body")?;
+        assert!(
+            lint.contains("conflict_markers_in(Path::new(\".\"))?;"),
+            "the lint job runs the check over the checkout"
+        );
+        let docs = fs::read_to_string(root.join(".github/scripts/docs-checks.sh"))?;
+        assert!(
+            docs.lines()
+                .any(|line| line == "\"$(dirname \"$0\")/conflict-markers.sh\" || problems=1"),
+            "the docs-only path runs the same script"
         );
         Ok(())
     }
@@ -13712,7 +13753,15 @@ mod tests {
         )?;
         fx.write("untracked.md", &format!("{ours}\n"))?;
         let refused = conflict_markers_in(&fx.0).expect_err("both markers start a line");
-        assert_eq!(format!("{refused:#}"), "conflict-markers: 2 problem(s)");
+        let refused = format!("{refused:#}");
+        assert!(
+            refused.contains("notes.md:2: a merge conflict marker")
+                && refused.contains("notes.md:6: a merge conflict marker")
+                && !refused.contains("untracked.md")
+                && refused.ends_with("conflict-markers: 2 problem(s)"),
+            "each marker line is named by path and line, and an untracked file is not read: \
+             {refused}"
+        );
         Ok(())
     }
 
@@ -15824,6 +15873,13 @@ mod tests {
         assert_eq!(problems, Vec::<String>::new());
         assert_eq!(skipped.len(), 1);
 
+        let (problems, _) = verdicts(&pending(true), &outcomes("MissedMutant", "Timeout"))?;
+        assert_eq!(
+            problems.len(),
+            1,
+            "a timeout beside a stub's missed mutant is still a problem, so a run that exits with \
+             the missed status and also timed out is refused: {problems:?}"
+        );
         let (problems, _) = verdicts(&pending(true), &outcomes("Timeout", "CaughtMutant"))?;
         assert_eq!(
             problems.len(),
@@ -17079,10 +17135,10 @@ mod tests {
         );
         fs::remove_file(&diff).ok();
 
-        let wrong_count = mutants_scheduled(&fx.0, Some(base), None, Some(plan.mutants + 1), 1)
+        let wrong_count = mutants_judged(&fx.0, Some(base), None, Some(plan.mutants + 1), 1)
             .expect_err("a shard whose listing differs from the plan is refused");
         assert!(wrong_count.to_string().contains("plan"), "{wrong_count}");
-        let wrong_total = mutants_scheduled(
+        let wrong_total = mutants_judged(
             &fx.0,
             Some(base),
             Some(MutantShard::parse(&format!("0/{MUTANT_SHARDS}"))?),
@@ -17106,7 +17162,7 @@ mod tests {
         let fx = Fixture::gated("mutants-plan-zero")?;
         let head = fx.git(&["rev-parse", "HEAD"])?;
         assert_eq!(mutants_plan(&fx.0, None)?, MutantPlan::for_mutants(0));
-        mutants_scheduled(&fx.0, None, None, Some(0), 1)?;
+        mutants_judged(&fx.0, None, None, Some(0), 1)?;
 
         fx.write(
             "crates/covered/tests/more.rs",
@@ -17118,7 +17174,7 @@ mod tests {
             MutantPlan::for_mutants(0),
             "a tests-only change"
         );
-        mutants_scheduled(&fx.0, Some(&head), None, Some(0), 1)?;
+        mutants_judged(&fx.0, Some(&head), None, Some(0), 1)?;
 
         fx.write(
             "crates/covered/src/lib.rs",
@@ -17134,7 +17190,7 @@ mod tests {
             MutantPlan::for_mutants(0),
             "changed source that generates no mutant"
         );
-        mutants_scheduled(&fx.0, Some(&head), None, Some(0), 1)?;
+        mutants_judged(&fx.0, Some(&head), None, Some(0), 1)?;
         assert!(
             !fx.0.join(MUTANTS_OUT).exists(),
             "and the gate never started a run"

@@ -3,7 +3,8 @@
 # `spec-guard` part so a docs PR needs no Rust toolchain:
 #   1. `typos` over the repository (the same binary and config `xtask ci lint` uses);
 #   2. protected paths (ES-22) changed only with a DEC-<n> cited in the PR description or a commit;
-#   3. no two decision files with one DEC number (`decision-numbers.sh`, DEC-2600 item 3).
+#   3. no two decision files with one DEC number (`decision-numbers.sh`, DEC-2600 item 3);
+#   4. no tracked file keeps a merge conflict's markers (`conflict-markers.sh`).
 # Usage: MANDATE_PR_BODY=<body> docs-checks.sh   (the base is `base-ref.sh`'s, as xtask chooses it)
 set -euo pipefail
 base=$("$(dirname "$0")/base-ref.sh")
@@ -11,6 +12,7 @@ problems=0
 echo "    $ typos"
 typos || problems=1
 "$(dirname "$0")/decision-numbers.sh" || problems=1
+"$(dirname "$0")/conflict-markers.sh" || problems=1
 if [ -z "$base" ]; then
   echo "    spec-guard: HEAD is the base; nothing to check"
   [ "$problems" -eq 0 ] && echo "    docs checks passed" || exit 1
