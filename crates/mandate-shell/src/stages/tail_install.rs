@@ -40,6 +40,7 @@ const LATER_ANSWER: &str = "00000100000000000000000003";
 const ESTABLISHED: &str = "0000010000000000000000000E";
 const FOUNDING: &str = "0000010000000000000000000F";
 const DEACTIVATION: &str = "0000010000000000000000000D";
+const REACTIVATION: &str = "0000010000000000000000000R";
 const CONTENT_HASH: &str =
     "sha256:3333333333333333333333333333333333333333333333333333333333333333";
 /// The founder answered 100 s before the run's clock (the M7 brief's `submitted_at`), and the
@@ -375,6 +376,81 @@ fn a_grant_from_a_member_deactivated_before_its_admission_is_not_an_approvers() 
         )
     );
     assert!(report.submitted.is_empty(), "nothing is sent: {report:?}");
+    Ok(())
+}
+
+/// [`FOUNDER`]'s deactivation at the control stream's `seq`.
+fn deactivated(world: &World, seq: u64) -> Result<(), String> {
+    let payload = format!(r#"{{"member":"{FOUNDER}"}}"#);
+    seed(
+        world,
+        &control_stream(),
+        seq,
+        DEACTIVATION,
+        "MemberDeactivated",
+        "system",
+        &payload,
+    )
+}
+
+/// DEC-2384 item 6, per grant: a grant is judged against the roster as of its own record, not as
+/// of the read's last. With the founder deactivated, then granting, then reactivated, all in one
+/// read, the grant is refused `not_an_approver`: the reactivation after it never lends it the
+/// role it lacked when it was made.
+#[test]
+fn a_grant_made_while_deactivated_is_refused_though_the_same_read_reactivates_its_member()
+-> Result<(), String> {
+    let world = World::default();
+    asked_agent_stream(&world)?;
+    founded(&world)?;
+    deactivated(&world, 2)?;
+    answered_by(&world, 3, ANSWER, FOUNDER)?;
+    let payload = format!(
+        r#"{{"cool_off_ends_at":"{NOW}","independent_approval_required":false,"member":"{FOUNDER}","roles":["approver","operator","workspace_admin"]}}"#
+    );
+    seed(
+        &world,
+        &control_stream(),
+        4,
+        REACTIVATION,
+        "MemberReactivated",
+        "system",
+        &payload,
+    )?;
+    let report = run_with(
+        &world,
+        Box::new(FoundedMandate {
+            world: world.clone(),
+        }),
+    )?;
+    assert_eq!(
+        the_copy(&world)?,
+        (
+            Some("refused".to_owned()),
+            Some("not_an_approver".to_owned())
+        )
+    );
+    assert!(report.submitted.is_empty(), "nothing is sent: {report:?}");
+    Ok(())
+}
+
+/// DEC-2384 item 6, per grant: a grant the founder made while an approver is admitted though
+/// the same read later deactivates them; the deactivation narrows only what comes after it.
+#[test]
+fn a_grant_made_while_an_approver_is_admitted_though_the_same_read_deactivates_its_member()
+-> Result<(), String> {
+    let world = World::default();
+    asked_agent_stream(&world)?;
+    founded(&world)?;
+    answered_by(&world, 2, ANSWER, FOUNDER)?;
+    deactivated(&world, 3)?;
+    run_with(
+        &world,
+        Box::new(FoundedMandate {
+            world: world.clone(),
+        }),
+    )?;
+    assert_eq!(the_copy(&world)?, (Some("admitted".to_owned()), None));
     Ok(())
 }
 

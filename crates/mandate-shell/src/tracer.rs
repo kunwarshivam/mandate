@@ -500,6 +500,7 @@ impl AskedCycle for Session<'_> {
             .map_err(refused(Stage::Journal))?;
         self.reresolve(&control);
         for event in tailed(&control)? {
+            self.reresolve_at(&control, event.seq.0);
             self.feed_asked(Input::Journal(event))?;
         }
         self.feed_asked(Input::Tick(RiskClock::from_secs(now.secs())))?;
@@ -685,6 +686,7 @@ impl<'s> Session<'s> {
             .map_err(refused(Stage::Journal))?;
         self.reresolve(&rows);
         for event in tailed(&rows)? {
+            self.reresolve_at(&rows, event.seq.0);
             self.feed(Input::Journal(event))?;
         }
         Ok(())
@@ -703,6 +705,18 @@ impl<'s> Session<'s> {
             None => BTreeSet::new(),
         };
         self.current = Some(view);
+    }
+
+    /// [`Self::reresolve`] over the rows of `rows`, read in `seq` order, up to and including `seq`:
+    /// each tailed event is judged against the roster as of its own record, so a membership record
+    /// later in the same read neither lends a grant a role its member lacked when it was made nor
+    /// takes one away (DEC-2384 item 6). A split that cannot be made reads no row, which resolves
+    /// no approver (`AGENTS.md` rule 3).
+    fn reresolve_at(&mut self, rows: &[StoredEvent], seq: u64) {
+        match rows.split_at_checked(rows.partition_point(|row| row.seq <= seq)) {
+            Some((judged, _)) => self.reresolve(judged),
+            None => self.reresolve(&[]),
+        }
     }
 
     /// Journals `mark` as the account stream's `MarkUpdated` for the pinned instrument (journal
