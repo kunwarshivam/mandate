@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/positions.schema.json",
-  "description": "GET /agents/{id}/positions (§4.7 D3, DEC-2111). positions is the net filled quantity of the agent's own orders per instrument, from the FillApplied and LateFillApplied records of orders whose OrderRequestRecorded names the agent; its cost_basis is the agent sub-ledger's §8.1 position (DEC-2136). account_positions is the account's, not the agent's: the latest BrokerPositionObserved per instrument, as GET /agents/{id} serves it (DEC-1020), null when the account stream is not found. as_of names the control stream and the account stream read.",
+  "description": "GET /agents/{id}/positions (§4.7 D3, DEC-2111). positions is the net filled quantity of the agent's own orders per instrument, from the FillApplied and LateFillApplied records of orders whose OrderRequestRecorded names the agent; its cost_basis is the agent sub-ledger's §8.1 position (DEC-2138). account_positions is the account's, not the agent's: the latest BrokerPositionObserved per instrument, as GET /agents/{id} serves it (DEC-1020), null when the account stream is not found. as_of names the control stream and the account stream read.",
   "type": "object",
   "allOf": [
     {
@@ -54,7 +54,7 @@
   "unevaluatedProperties": false,
   "$defs": {
     "Position": {
-      "description": "One instrument the agent's own fills left a non-zero net quantity in, in instrument order (DEC-2111 item 4). cost_basis, risk_mark, market_value, unrealized_pnl and protection are DEC-2136's: null where the journal does not say, never zero or guessed.",
+      "description": "One instrument the agent's own fills left a non-zero net quantity in, in instrument order (DEC-2111 item 4). cost_basis, risk_mark, market_value, unrealized_pnl and protection are DEC-2138's: null where the journal does not say, never zero or guessed.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -76,7 +76,7 @@
           "$ref": "../common.schema.json#/$defs/Decimal"
         },
         "cost_basis": {
-          "description": "The agent sub-ledger's signed quantity and signed cost basis (trading spec §8.1, DEC-2136 item 1), folded from its own fills; null after a release, a corporate action, or a fee charged in the asset.",
+          "description": "The agent sub-ledger's signed quantity and signed cost basis (trading spec §8.1, DEC-2138 item 1), folded from its own fills; null after a release, a corporate action, or a fee charged in the asset.",
           "anyOf": [
             {
               "$ref": "#/$defs/CostBasis"
@@ -87,7 +87,7 @@
           ]
         },
         "risk_mark": {
-          "description": "The instrument's latest version-2 MarkUpdated from a counted session (DEC-2136 item 2); null when there is none.",
+          "description": "The instrument's latest version-2 MarkUpdated from a counted session (DEC-2138 item 2); null when there is none.",
           "anyOf": [
             {
               "$ref": "#/$defs/RiskMark"
@@ -106,7 +106,7 @@
               "type": "null"
             }
           ],
-          "description": "cost_basis.qty × risk_mark.bid (trading spec §8.2), null unless both are served and the mark is sane (DEC-2136 item 3)."
+          "description": "cost_basis.qty × risk_mark.bid (trading spec §8.2), null unless both are served and the mark is sane (DEC-2138 item 3)."
         },
         "unrealized_pnl": {
           "anyOf": [
@@ -190,7 +190,7 @@
       }
     },
     "Protection": {
-      "description": "The account's protective orders in the instrument and its open unprotected interval, folded from ProtectionChanged as the executor folds it (trading spec §5.4, DEC-2136 item 4). With no record: no order, covered_qty 0, the rest null.",
+      "description": "The account's protective orders in the instrument and its open unprotected interval, folded from ProtectionChanged as the executor folds it (trading spec §5.4, DEC-2138 item 4). With no record: no order, covered_qty 0, the rest null.",
       "type": "object",
       "additionalProperties": false,
       "required": [
