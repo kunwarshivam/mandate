@@ -2396,6 +2396,326 @@ pub(crate) mod tests {
         Ok(executor)
     }
 
+    /// Everything's instruments, with the fill configuration a registered instrument carries, so a
+    /// fill of ours or of anyone's has the `config_refs` the journal requires (DEC-938 item 2).
+    struct Registered;
+
+    impl InstrumentSnapshot for Registered {
+        fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
+            Everything.asset_class(instrument)
+        }
+
+        fn increment(&self, instrument: &InstrumentId) -> Option<ShareIncrement> {
+            Everything.increment(instrument)
+        }
+
+        fn exit_tier(&self, instrument: &InstrumentId) -> Option<ExitTier> {
+            Everything.exit_tier(instrument)
+        }
+
+        fn fill_refs(&self, _instrument: &InstrumentId) -> Option<crate::ports::FillConfigRefs> {
+            let digest = |n: char| format!("sha256:{}", n.to_string().repeat(64));
+            Some(crate::ports::FillConfigRefs {
+                fee_config: digest('a'),
+                trading_calendar: digest('b'),
+                settlement_calendar: digest('c'),
+                instrument_snapshot: digest('d'),
+            })
+        }
+    }
+
+    /// `draft` through the journal's own `Draft::parse`, with its own `config_refs`, so a fill
+    /// drafted without the references its schema requires is refused here as the journal refuses it.
+    fn journal_accepts_with_refs(draft: &EventDraft) -> Result<(), ExecutorError> {
+        let causation = draft
+            .causation_id
+            .as_ref()
+            .map_or_else(|| "null".to_owned(), |id| format!("\"{}\"", id.0));
+        let body = format!(
+            r#"{{"envelope_version":1,"environment":"paper","event_id":"{}",
+            "stream_id":"acct:ws1:acct-1","event_type":"{}","schema_version":{},
+            "event_time":"2026-09-21T14:00:00.000000000Z","clock_source":"local",
+            "causation_id":{causation},"correlation_id":null,
+            "actor":{{"kind":"system","id":"executor","version":"0.1.0","build":"sha256:{}"}},
+            "config_refs":{},"payload":{},"artifact_refs":[],"pii_refs":[]}}"#,
+            draft.event_id.0,
+            draft.event_type,
+            draft.schema_version,
+            "3".repeat(64),
+            String::from_utf8_lossy(&to_canonical(&Value::Object(draft.config_refs.clone()))),
+            String::from_utf8_lossy(&to_canonical(&draft.payload))
+        );
+        Draft::parse(body.as_bytes()).map(|_| ()).map_err(|error| {
+            ExecutorError::NonCanonicalPayload {
+                field: format!("{}: {error}", draft.event_type),
+            }
+        })
+    }
+
+    fn external_fill(fill_id: &str) -> Result<BrokerFill, ExecutorError> {
+        Ok(BrokerFill {
+            fill_id: FillId(fill_id.to_owned()),
+            client_order_id: None,
+            broker_order_id: None,
+            instrument: aapl()?,
+            side: Side::Buy,
+            qty: Qty::parse("2")?,
+            price: Price::parse("150")?,
+            fees: Usd::ZERO,
+            trade_date: Date::new(2026, 9, 21)?,
+        })
+    }
+
+    /// DEC-2805 item 2: every external fill's batch is one the journal refuses today. Journal spec
+    /// §9's `FillApplied` version 1 requires a client order id, which an unattributed fill does not
+    /// have, and requires the fill configuration and a non-empty fill id besides. So the executor
+    /// cannot record such a fill, and DEC-2805 item 1's hold, not the batch, keeps it running: the
+    /// batch is refused whole, and every other draft in it is one the journal would accept. The
+    /// backlog's `FillApplied` version 2 books the fill, and this test then fails until it is
+    /// rewritten.
+    #[test]
+    fn every_external_fill_batch_is_refused_at_its_fill_alone() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let unregistered = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let registered = Ports {
+            instruments: &Registered,
+            ..unregistered
+        };
+        for (ports, fill_id, at) in [
+            (&unregistered, "f-ext-1", "config_refs"),
+            (&registered, "", "payload.fill_id"),
+            (&registered, "f-ext-1", "payload.client_order_id"),
+        ] {
+            let mut executor = Executor::opened(ports)?;
+            let run = executor.run_keeping(
+                Input::BrokerUpdate(BrokerUpdate::Fill(external_fill(fill_id)?)),
+                ports,
+                0,
+            )?;
+            assert_eq!(
+                drafted(&run),
+                vec![
+                    "ExternalActivityIngested",
+                    "FillApplied",
+                    "AgentModeApplied",
+                    "OwnerAlertSent"
+                ],
+                "{fill_id:?}"
+            );
+            for effect in &run {
+                match effect {
+                    Effect::Journal(draft) if draft.event_type == "FillApplied" => {
+                        let refused = journal_accepts_with_refs(draft).err();
+                        assert!(
+                            refused
+                                .as_ref()
+                                .is_some_and(|error| format!("{error:?}").contains(at)),
+                            "{fill_id:?}: refused at {at}: {refused:?}"
+                        );
+                    }
+                    Effect::Journal(draft) => journal_accepts_with_refs(draft)?,
+                    _ => {}
+                }
+            }
+            let held = executor.run(Input::BatchRefused, ports)?;
+            assert_eq!(drafted(&held), vec!["AgentModeApplied", "OwnerAlertSent"]);
+            assert_eq!(
+                executor
+                    .state
+                    .effective_mode(&AgentId("agent-a".to_owned())),
+                Mode::ExitsOnly,
+                "every agent holds its openings"
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-2805: a refused batch leaves no tick of its own behind. The batch keeps `now` and
+    /// `previous_now` as they stood before its input, and a refusal puts them back, so the next
+    /// tick is judged against the last tick that committed and an edge it crosses still fires.
+    #[test]
+    fn a_refused_batch_leaves_the_clocks_as_its_input_found_them() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let tick = |at: i64| Input::Tick(crate::types::RiskClock::from_secs(at));
+        let clock = |at: i64| Some(crate::types::RiskClock::from_secs(at));
+        let mut executor = Executor::opened(&ports)?;
+        executor.run(tick(10), &ports)?;
+        executor.run(tick(20), &ports)?;
+        assert_eq!(
+            (executor.state.now, executor.state.previous_now),
+            (clock(20), clock(10))
+        );
+        executor.run_keeping(
+            Input::BrokerUpdate(BrokerUpdate::Fill(external_fill("f-ext-4")?)),
+            &ports,
+            0,
+        )?;
+        assert_eq!(
+            executor.state.unresolved().map(|batch| batch.clocks),
+            Some((clock(20), clock(10))),
+            "the batch keeps the clocks its input found"
+        );
+
+        let found = executor
+            .state
+            .unresolved
+            .as_ref()
+            .map(|batch| batch.clocks)
+            .ok_or_else(|| missing("the refused batch"))?;
+        executor.state.now = clock(30);
+        executor.state.previous_now = clock(20);
+        executor.run(Input::BatchRefused, &ports)?;
+        assert_eq!(
+            (executor.state.now, executor.state.previous_now),
+            found,
+            "a refusal puts back the clocks its input found"
+        );
+        Ok(())
+    }
+
+    /// DEC-2805 item 1: a batch the journal refused leaves nothing committed. The core forgets it,
+    /// so later inputs are handled rather than refused as an unresolved append. It holds every
+    /// agent's openings under `reconciliation:incomplete` and alerts the owner, once: a second
+    /// refusal adds nothing. An opening is then held, and the owner's acknowledgment of `incomplete`
+    /// lifts the hold as it lifts any incomplete run's.
+    #[test]
+    fn a_refused_batch_holds_every_agents_openings_once() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        executor.run(
+            Input::BrokerSnapshot(BrokerSnapshot {
+                account: account("100000")?,
+                ..snapshot(ReconcileReason::Scheduled)?
+            }),
+            &ports,
+        )?;
+        let refused = executor.run_keeping(
+            Input::BrokerUpdate(BrokerUpdate::Fill(external_fill("f-ext-2")?)),
+            &ports,
+            0,
+        )?;
+        assert!(
+            !drafted(&refused).is_empty(),
+            "the refused batch drafted something"
+        );
+        assert!(executor.state.unresolved().is_some());
+
+        let held = executor.run(Input::BatchRefused, &ports)?;
+        assert_eq!(drafted(&held), vec!["AgentModeApplied", "OwnerAlertSent"]);
+        let applied = held
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "AgentModeApplied" => Some(draft),
+                _ => None,
+            })
+            .ok_or_else(|| missing("AgentModeApplied"))?;
+        assert_eq!(
+            applied.payload.get("agent"),
+            Some(&Value::Str("*".to_owned()))
+        );
+        assert_eq!(
+            applied.payload.get("to"),
+            Some(&Value::Str("exits_only".to_owned()))
+        );
+        assert_eq!(
+            applied.payload.get("restriction"),
+            Some(&Value::Str("reconciliation:incomplete".to_owned()))
+        );
+        let alerted = held
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "OwnerAlertSent" => Some(draft),
+                _ => None,
+            })
+            .ok_or_else(|| missing("OwnerAlertSent"))?;
+        assert_eq!(
+            alerted.payload.get("kind"),
+            Some(&Value::Str("reconciliation".to_owned()))
+        );
+        for effect in &held {
+            if let Effect::Journal(draft) = effect {
+                journal_accepts_with_refs(draft)?;
+            }
+        }
+        assert!(executor.state.unresolved().is_none(), "the hold committed");
+
+        let again = executor.run_keeping(
+            Input::BrokerUpdate(BrokerUpdate::Fill(external_fill("f-ext-3")?)),
+            &ports,
+            0,
+        )?;
+        assert!(!drafted(&again).is_empty());
+        assert_eq!(
+            drafted(&executor.run(Input::BatchRefused, &ports)?),
+            Vec::<&str>::new(),
+            "the hold is already in force: nothing more"
+        );
+        assert!(
+            executor.state.unresolved().is_none(),
+            "forgotten all the same"
+        );
+        assert_eq!(
+            drafted(&executor.run(Input::BatchRefused, &ports)?),
+            Vec::<&str>::new(),
+            "nothing refused, nothing to hold"
+        );
+
+        let opening = executor.run(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ0",
+                "agent-a",
+                Side::Buy,
+                Purpose::Open,
+            )?,
+            &ports,
+        )?;
+        assert_eq!(submitted(&opening), 0, "openings are held");
+        executor.commit_one(
+            "OwnerAcknowledged",
+            object(vec![
+                ("subject", Value::Str("incomplete".to_owned())),
+                ("user", Value::Str("user-1".to_owned())),
+                ("step_up", Value::Str("assertion-1".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
+        assert_eq!(
+            executor
+                .state
+                .effective_mode(&AgentId("agent-a".to_owned())),
+            Mode::Normal,
+            "the owner's acknowledgment of `incomplete` lifts the hold"
+        );
+        Ok(())
+    }
+
     /// X10 (DEC-2803): an open order of no order of ours is journaled as `ExternalActivityIngested`
     /// with `source` `open_order`, every member present, and the broker's empty ids written as
     /// `null`, in a draft the journal's own `Draft::parse` accepts.

@@ -618,9 +618,11 @@ pub fn fold(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtime
 /// copy of `ConnectionEstablished` (journal spec §9.8; the runtime reads its connection from the
 /// control stream), `AccountCloseRequested` (an account kill switch's close, which the runtime
 /// reads as `KillSwitchActivated`) and `OwnerConfirmationReceived` (an owner exit's confirmed bid,
-/// whose hand-off it reads as `IntentReceived`). Every type the journal admits on the account and
-/// agent streams has an arm but four, which no writer emits there yet and which stay refused until
-/// a story decides what they mean to the runtime (tests/account_copies.rs names them).
+/// whose hand-off it reads as `IntentReceived`), and the executor's record of an agent-scope
+/// `KillSwitchActivated` on another agent of the same account. Every type the journal admits on
+/// the account and agent streams has an arm but four, which no writer emits there yet and which
+/// stay refused until a story decides what they mean to the runtime (tests/account_copies.rs
+/// names them).
 fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), RuntimeError> {
     if let Some(at) = payload::clock_of(&event.payload, "risk_clock") {
         state.risk_clock = Some(state.risk_clock.map_or(at, |last| last.max(at)));
@@ -633,6 +635,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 .and_then(payload::mode_from)
                 .ok_or_else(|| payload::non_canonical("lifecycle"))?;
         }
+        "KillSwitchActivated" if another_agents_switch(state, &event.payload) => {}
         "KillSwitchActivated" => {
             copy_of(state, event);
             let initiator = payload::str_of(&event.payload, "initiator")
@@ -938,6 +941,17 @@ fn retired(
         .as_ref()
         .is_some_and(|cause| acknowledged.contains_key(cause));
     if lifts { None } else { Some(switch) }
+}
+
+/// Whether a `KillSwitchActivated` is an agent-scope switch on another agent: the executor's
+/// account-stream record of a switch it applied to one agent reaches every runtime following that
+/// account, and is that agent's alone. A switch on the account, or one naming no subject, is never
+/// spared, and the subject is compared ignoring ASCII case, as a ULID is spelt in either case, so
+/// only a subject that is certainly another agent's is spared and this agent's stop never is.
+fn another_agents_switch(state: &RuntimeState, payload: &mandate_canon::Value) -> bool {
+    payload::str_of(payload, "scope") == Some("agent")
+        && payload::str_of(payload, "subject")
+            .is_some_and(|subject| !subject.eq_ignore_ascii_case(&state.deployment.agent.0))
 }
 
 /// Folds one `AgentModeApplied` into `restrictions` as the executor folds it: its mode under its

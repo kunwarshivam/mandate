@@ -10,8 +10,8 @@ use crate::kill::{
 };
 use crate::listing::{listed, query_unknown};
 use crate::orders::{
-    absent, account, cancelled, described, duplicate, fill, kill_cancels_due, lookups_due, reject,
-    silence,
+    absent, account, cancelled, described, duplicate, fill, held_on_refusal, kill_cancels_due,
+    lookups_due, reject, silence,
 };
 use crate::payload::optional_text;
 use crate::ports::{BindingGateSource, Ports};
@@ -68,12 +68,22 @@ pub fn handle(
     if !state.started {
         return Err(ExecutorError::NotStarted);
     }
+    if input == Input::BatchRefused {
+        let Some(refused) = state.unresolved.take() else {
+            return Ok(Vec::new());
+        };
+        (state.now, state.previous_now) = refused.clocks;
+    }
     if let Some(batch) = &state.unresolved
         && batch.input != input
         && !superseded(&batch.input, &input)
     {
         return Err(ExecutorError::AppendUnresolved { head: batch.head.0 });
     }
+    let clocks = state
+        .unresolved
+        .as_ref()
+        .map_or((state.now, state.previous_now), |batch| batch.clocks);
     if let Input::Tick(at) = &input {
         if state.unresolved.is_none() {
             state.previous_now = state.now;
@@ -117,6 +127,7 @@ pub fn handle(
             head,
             input,
             drafts,
+            clocks,
         });
     }
     Ok(effects)
@@ -231,6 +242,7 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
             }
             Ok(())
         }
+        Input::BatchRefused => held_on_refusal(batch),
         Input::Command(Command::Reconcile(_)) => {
             batch.request_reconciliation();
             Ok(())
