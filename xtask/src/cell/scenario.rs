@@ -1888,6 +1888,10 @@ pub enum TradeOutcome {
     Unaskable(String),
     NoTools(String),
     Failed(String),
+    /// The loop stopped before any approval reached `web/`, and the API, read with the owner's
+    /// session, lists no approval of the agent in any state: the runtime proposed nothing, which
+    /// waits on E15-14's composer, not on `web/`.
+    Unproposed(String),
     Ran(web::TradeLoop),
 }
 
@@ -1923,6 +1927,10 @@ fn browse(
         TradeOutcome::NoSpec
     } else {
         match web::trade_loop_from_web(workspace, agent, &mut confirm) {
+            Ok(traded) if traded.first_missing() == Some("approval") => {
+                let listed = api_answer(&requests_read(workspace))?;
+                unproposed(traded, &listed, agent)
+            }
             Ok(traded) => TradeOutcome::Ran(traded),
             Err(why) => TradeOutcome::Failed(format!("{why:#}")),
         }
@@ -1945,6 +1953,42 @@ fn browse(
         None => web_outcome(&WebCheck { shows: "", agent }, workspace)?,
     };
     Ok((traded, web))
+}
+
+/// The signed-in read of every approval in `workspace`, whatever its state.
+pub fn requests_read(workspace: &str) -> ApiCheck {
+    ApiCheck {
+        shows: "the workspace's approvals, read with the owner's session",
+        path: format!("/v1/workspaces/{workspace}/approvals"),
+        status: 200,
+        ask: Ask::Session,
+        body: Body::Any,
+    }
+}
+
+/// A loop that stopped before its approval, read against the API's list of approvals: pending as
+/// [`TradeOutcome::Unproposed`] only when the API answered 200 and lists none of `agent`'s, in any
+/// state. Otherwise the loop stays [`TradeOutcome::Ran`], which fails: a request the runtime made
+/// that `web/` never showed is `web/`'s failure, and a list that cannot be read proves nothing.
+pub fn unproposed(
+    traded: web::TradeLoop,
+    listed: &Result<(u16, String), String>,
+    agent: &str,
+) -> TradeOutcome {
+    let none_listed = match listed {
+        Ok((200, body)) => serde_json::from_str::<Value>(body).ok().and_then(|v| {
+            v["approvals"]
+                .as_array()
+                .map(|a| !a.iter().any(|x| x["agent_id"] == agent))
+        }),
+        _ => None,
+    };
+    if none_listed == Some(true) {
+        let why = traded.error.unwrap_or_else(|| "no error named".into());
+        TradeOutcome::Unproposed(why)
+    } else {
+        TradeOutcome::Ran(traded)
+    }
 }
 
 /// The host's `mandate step-up confirm` for the browser's request, as a one-gesture Job of the
@@ -2019,20 +2063,18 @@ pub fn trade_verdict(outcome: &TradeOutcome, required: Required) -> (&'static st
             ),
             false,
         ),
+        TradeOutcome::Unproposed(why) => (
+            "pending",
+            format!(
+                "no approval request reached web/ ({why}), and the API lists none of the agent's: \
+                 the runtime proposed nothing, which waits on E15-14's composer"
+            ),
+            false,
+        ),
         TradeOutcome::Ran(t) => {
             let stopped = t.first_missing().unwrap_or("the end");
             let why = t.error.clone().unwrap_or_else(|| "no error named".into());
-            if stopped == "approval" {
-                (
-                    "pending",
-                    format!(
-                        "no approval request reached web/ ({why}); the loop waits on the runtime's proposal"
-                    ),
-                    false,
-                )
-            } else {
-                ("failed", format!("stopped before {stopped}: {why}"), true)
-            }
+            ("failed", format!("stopped before {stopped}: {why}"), true)
         }
     }
 }
@@ -3646,8 +3688,9 @@ mod tests {
 
     /// Step 4 runs lane W's trade loop on the second agent, the one nothing stops before the parts
     /// run (the CLI's kill switch is the demo agent's), and reads it: `ran` only when every step
-    /// was reached; `pending`, never failing, while no approval request reaches web/; and
-    /// `failed` for a loop that stopped at any later step, or for a run that failed.
+    /// was reached; `pending`, never failing, only as [`TradeOutcome::Unproposed`], the API's word
+    /// that the runtime asked for nothing; and `failed` for a loop that stopped at any step,
+    /// approval included, or for a run that failed.
     #[test]
     fn step_four_reads_the_browser_trade_loop() {
         let steps = planned("demo1");
@@ -3685,14 +3728,23 @@ mod tests {
                 trade_verdict(&reached(&web::TRADE_LOOP_STEPS, None), required);
             assert_eq!((word, fails), ("ran", false), "{said}");
             assert!(said.contains("v-kill_switch"), "{said}");
-            let (word, _, fails) =
+            let (word, said, fails) =
                 trade_verdict(&reached(&[], Some("no approval within 20000 ms")), required);
+            assert_eq!(
+                (word, fails),
+                ("failed", true),
+                "a loop left at its approval fails unless the API showed no request: {said}"
+            );
+            let (word, _, fails) = trade_verdict(
+                &TradeOutcome::Unproposed("no approval within 20000 ms".into()),
+                required,
+            );
             assert_eq!(
                 (word, fails),
                 ("pending", false),
                 "no proposal yet is upstream, not a fault"
             );
-            for stopped_at in 1..web::TRADE_LOOP_STEPS.len() {
+            for stopped_at in 0..web::TRADE_LOOP_STEPS.len() {
                 let (word, said, fails) = trade_verdict(
                     &reached(&web::TRADE_LOOP_STEPS[..stopped_at], Some("x")),
                     required,
@@ -4014,6 +4066,47 @@ mod tests {
         );
     }
 
+    /// #2466's review: a loop left at its approval is pending only on the API's word that the
+    /// agent has no approval at all. One the runtime requested and `web/` never showed, any state,
+    /// or a list that cannot be read, a non-200, or a body that is not the list, all fail.
+    #[test]
+    fn a_loop_left_at_its_approval_is_pending_only_when_the_api_lists_none_of_the_agent_s() {
+        let stopped = || web::TradeLoop {
+            reached: BTreeMap::new(),
+            error: Some("no approval within 20000 ms".into()),
+        };
+        let listed = |status: u16, body: &str| Ok((status, body.to_owned()));
+        let pending = |outcome: &TradeOutcome| matches!(outcome, TradeOutcome::Unproposed(_));
+        let other = r#"{"approvals":[{"agent_id":"other","state":"pending"}]}"#;
+        assert!(pending(&unproposed(
+            stopped(),
+            &listed(200, r#"{"approvals":[]}"#),
+            WEB_AGENT
+        )));
+        assert!(pending(&unproposed(
+            stopped(),
+            &listed(200, other),
+            WEB_AGENT
+        )));
+        for state in ["pending", "approved", "expired"] {
+            let body = json!({"approvals": [{"agent_id": WEB_AGENT, "state": state}]}).to_string();
+            assert!(
+                !pending(&unproposed(stopped(), &listed(200, &body), WEB_AGENT)),
+                "a {state} request was made"
+            );
+        }
+        for answer in [
+            listed(503, r#"{"approvals":[]}"#),
+            listed(200, "not json"),
+            listed(200, r#"{"agents":[]}"#),
+            Err("no kubectl".to_owned()),
+        ] {
+            assert!(
+                !pending(&unproposed(stopped(), &answer, WEB_AGENT)),
+                "{answer:?}"
+            );
+        }
+    }
     /// Only a terminated container has a code; init containers count, and a running one does not.
     #[test]
     fn exit_codes_come_from_terminated_containers_only() {
