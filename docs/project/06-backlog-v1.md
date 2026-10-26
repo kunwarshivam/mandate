@@ -9,6 +9,9 @@ Epics map to [milestones](02-milestones-and-wbs.md) and [PRD](../product/04-prd-
 requirements. Priority uses MoSCoW: **Must**, **Should**, **Could**, **Won't (v1)**.
 Stories follow "As a … I want … so that …" with acceptance criteria.
 
+New rows, stories and debt alike, are one file each under [backlog/](backlog/README.md) until they
+are folded in here ([DEC-2373](decisions/DEC-2373.md)); add none to this file.
+
 ## Epic overview
 
 | Epic | Milestone | PRD | Priority |
