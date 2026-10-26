@@ -527,3 +527,71 @@ fn a_refused_copy_is_not_offered_again_that_day() -> Result<(), Error> {
     assert_eq!(journal.appends(), before, "no copy offered again that day");
     Ok(())
 }
+
+/// `AGENTS.md` rule 13: the kill switch never waits on the risk book. A batch of owed records the
+/// journal refuses leaves the fold unreadable and the switch applies in the same pass; one in
+/// doubt holds every append, the switch's too, only until the journal answers (rule 5), and the
+/// switch applies on the first pass it does.
+#[test]
+fn the_kill_switch_applies_while_the_books_records_cannot_be_appended() -> Result<(), Error> {
+    let journal = deployed()?;
+    let mut refused = process(&journal, Fixed::new(1))?;
+    refused.step(at(NOON)?);
+    tick(&journal, "t3", TUESDAY)?;
+    journal.fail_next_of("RiskDayStarted", &[support::Fault::Invalid]);
+    support::kill(&journal, AGENT, "01JKILL00000000000000000AA")?;
+    refused.step(at(TUESDAY)?);
+    assert_eq!(
+        journal.switched(),
+        vec![AGENT.to_owned()],
+        "refused: applied"
+    );
+    assert!(refused.ready(), "{:?}", refused.lifecycle().state());
+
+    let journal = deployed()?;
+    let mut doubted = process(&journal, Fixed::new(1))?;
+    doubted.step(at(NOON)?);
+    tick(&journal, "t3", TUESDAY)?;
+    journal.fail_next_of("RiskDayStarted", &[support::Fault::Unavailable]);
+    support::kill(&journal, AGENT, "01JKILL00000000000000000AA")?;
+    doubted.step(at(TUESDAY)?);
+    let later = "2026-09-22T04:00:06Z";
+    tick(&journal, "t4", later)?;
+    doubted.step(at(later)?);
+    assert_eq!(
+        journal.switched(),
+        vec![AGENT.to_owned()],
+        "in doubt: applied once the journal answers"
+    );
+    assert!(doubted.ready(), "{:?}", doubted.lifecycle().state());
+    Ok(())
+}
+
+/// DEC-2804 item 4: with the book's batch in doubt when a tick is handed, the book settles first
+/// and the core takes the tick once, after it: the run ends where a run with no outage does, the
+/// same rows in the same order and the same risk clock, and stays ready.
+#[test]
+fn the_book_settles_before_the_core_takes_a_tick() -> Result<(), Error> {
+    let later = "2026-09-22T04:00:06Z";
+    let run = |doubt: bool| -> Result<(Vec<String>, Option<i64>, bool), Error> {
+        let journal = deployed()?;
+        let mut process = process(&journal, Fixed::new(1))?;
+        process.step(at(NOON)?);
+        tick(&journal, "t3", TUESDAY)?;
+        if doubt {
+            journal.fail_next_of("RiskDayStarted", &[support::Fault::Unavailable]);
+        }
+        process.step(at(TUESDAY)?);
+        tick(&journal, "t4", later)?;
+        process.step(at(later)?);
+        Ok((
+            journal.types(ACCOUNT_STREAM),
+            process.state().risk_clock().map(|clock| clock.secs()),
+            process.ready(),
+        ))
+    };
+    let (doubted, steady) = (run(true)?, run(false)?);
+    assert!(doubted.2, "the doubted run stays ready");
+    assert_eq!((doubted.0, doubted.1), (steady.0, steady.1));
+    Ok(())
+}

@@ -932,6 +932,12 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// Hands `input` to the core, journals its drafts as one batch, and only then sends what it
     /// asks of the broker, handing each answer back; whether all of it committed. An input whose
     /// append is in doubt is kept to be handed again; a refusal or a fence stops the process.
+    ///
+    /// The risk book's batches are settled before the core is handed anything (DEC-2804 item 4):
+    /// one still in doubt keeps the input, unhanded, so the core never takes an input whose batch
+    /// a book batch could then overtake. After that, the core's batch is never [`Ran::Held`]; if it
+    /// were, the core would hold a batch the journal never saw, so the process stops rather than
+    /// hand it again on a state that already took it.
     fn hand(
         &mut self,
         now: UtcNanos,
@@ -942,6 +948,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     ) -> bool {
         if depth > self.max_chain {
             self.lifecycle.observe(now, Lifecycled::Failed);
+            return false;
+        }
+        if !self.settle_risk(now, alerts) {
+            self.pending = Some((input, at));
             return false;
         }
         self.written_at = at;
@@ -1005,7 +1015,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 }
                 Ran::Refused => return self.refused(now, at, input, alerts, depth),
                 Ran::Held => {
-                    self.pending = Some((input, at));
+                    self.lifecycle.observe(now, Lifecycled::Failed);
                     return false;
                 }
                 Ran::InDoubt => {
