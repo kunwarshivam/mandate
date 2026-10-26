@@ -89,7 +89,7 @@ fn the_binarys_process_reconciles_against_the_fixture_and_is_ready() -> Result<(
     let mut process = ExecutorProcess::start(
         store.clone(),
         broker,
-        fixture::wiring()?,
+        fixture::wiring(&config().scope)?,
         &config(),
         noon()?,
     );
@@ -112,7 +112,7 @@ fn the_binarys_process_reconciles_against_the_fixture_and_is_ready() -> Result<(
     let mut restarted = ExecutorProcess::start(
         store.clone(),
         broker,
-        fixture::wiring()?,
+        fixture::wiring(&config().scope)?,
         &config(),
         noon()?,
     );
@@ -120,5 +120,47 @@ fn the_binarys_process_reconciles_against_the_fixture_and_is_ready() -> Result<(
     assert!(restarted.ready(), "{:?}", restarted.lifecycle().state());
     let again = types(&store)?;
     assert_eq!(again.iter().filter(|t| *t == "StreamOpened").count(), 1);
+    Ok(())
+}
+
+/// Lane DR's X9: two accounts' executors on one journal, each on the binary's fixture wiring,
+/// both open their account streams and are ready. The journal refuses an `event_id` another
+/// stream already holds (journal spec §3), so ids derived from the epoch, head and ordinal alone
+/// stopped the second account's executor at its first batch.
+#[test]
+fn two_accounts_executors_on_one_journal_both_open_their_streams() -> Result<(), Error> {
+    let mut store = MemoryStore::default();
+    ticked(&mut store, noon()?)?;
+    let other = "01J8Z2ACCT0000000000000002";
+    let mut config_b = config();
+    config_b.scope.account = AccountRef(other.to_owned());
+    let mut first = ExecutorProcess::start(
+        store.clone(),
+        AlpacaBroker::new(FixturePaper::new(noon()?))?,
+        fixture::wiring(&config().scope)?,
+        &config(),
+        noon()?,
+    );
+    let mut second = ExecutorProcess::start(
+        store.clone(),
+        AlpacaBroker::new(FixturePaper::new(noon()?))?,
+        fixture::wiring(&config_b.scope)?,
+        &config_b,
+        noon()?,
+    );
+    first.step(noon()?);
+    second.step(noon()?);
+    assert!(first.ready(), "{:?}", first.lifecycle().state());
+    assert!(second.ready(), "{:?}", second.lifecycle().state());
+    for stream in [STREAM.to_owned(), format!("acct:ws1:{other}")] {
+        let rows = store
+            .rows(&StreamId::parse(&stream).ok_or("stream")?)
+            .ok_or("rows")?;
+        assert_eq!(
+            rows.first().map(|row| row.event_type.as_str()),
+            Some("StreamOpened"),
+            "{stream}"
+        );
+    }
     Ok(())
 }

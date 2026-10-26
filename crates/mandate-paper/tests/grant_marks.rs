@@ -147,9 +147,11 @@ fn connection(owner: &str) -> String {
 }
 
 /// The validating in-memory journal the run appends to, shared so the founder's CLI can commit
-/// its grant on the control stream while the run waits.
+/// its grant on the control stream while the run waits, and the owner whose `ConnectionEstablished`
+/// the control stream holds beside the grant, as the run's own control read holds it, the record
+/// the runtime resolves its approvers from again at the wake (DEC-2384 item 6).
 #[derive(Clone)]
-struct Shared(Rc<RefCell<StoreJournal>>);
+struct Shared(Rc<RefCell<StoreJournal>>, Option<String>);
 
 impl JournalWriter for Shared {
     fn take_ownership(&mut self, stream: &str) -> Result<u64, Cause> {
@@ -215,7 +217,19 @@ impl Shared {
             r#"{{"envelope_version":1,"environment":"paper","event_id":"01K6C000000000000000000001","stream_id":"{CONTROL}","event_type":"ApprovalResponseSubmitted","schema_version":1,"event_time":"{now}","clock_source":"local","causation_id":null,"correlation_id":null,"actor":{{"kind":"user","id":"user_founder","version":"0.1.0","build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}},"config_refs":{{}},"payload":{payload},"artifact_refs":["{hash}"],"pii_refs":[]}}"#
         );
         let opening = r#"{"actor":{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"control_services","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01K6C000000000000000000000","event_time":"2026-09-29T16:00:00.000000000Z","event_type":"StreamOpened","payload":{"stream_type":"control","workspace_id":"ws_spy"},"pii_refs":[],"schema_version":1,"stream_id":"ctl:ws_spy"}"#;
-        let drafts = [opening, envelope.as_str()].map(|text| to_canonical(&json(text)));
+        let established = self.1.as_ref().map(|owner| {
+            let payload = format!(
+                r#"{{"account_ref":"01K6C0000000000000000000A0","broker":"alpaca","connection_id":"conn_alpaca_paper_01","environment":"paper","margin_attestation":null,"scopes":["trading"],"step_up":{{"assertion_id":"cli-assertion-1","authenticated_at":"2026-09-29T16:00:01.000000000Z","method":"cli_confirm"}},"user":"{owner}"}}"#
+            );
+            format!(
+                r#"{{"actor":{{"build":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","id":"{owner}","kind":"user","version":"0.1.0"}},"artifact_refs":[],"causation_id":"01K6C00000000000000000000R","clock_source":"local","config_refs":{{}},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01K6C00000000000000000000C","event_time":"2026-09-29T16:00:01.000000000Z","event_type":"ConnectionEstablished","payload":{payload},"pii_refs":[],"schema_version":2,"stream_id":"{CONTROL}"}}"#
+            )
+        });
+        let drafts: Vec<Vec<u8>> = std::iter::once(opening)
+            .chain(established.as_deref())
+            .chain(std::iter::once(envelope.as_str()))
+            .map(|text| to_canonical(&json(text)))
+            .collect();
         let mut journal = self.0.borrow_mut();
         let epoch = journal.take_ownership(CONTROL).unwrap();
         let outcome = journal.append(CONTROL, 0, epoch, &drafts);
@@ -501,14 +515,17 @@ fn granted_into(
     let at_preflight = Mark::of_iex(&facts.broker.quote);
     let (observation, output, store) = observed(now);
     let store: Arc<dyn ArtifactSource + Send + Sync> = Arc::new(store);
-    let journal = Shared(Rc::new(RefCell::new(
-        StoreJournal::from_dsn(None, now)
-            .with_artifacts(Some(Arc::clone(&store)))
-            .with_content_store(content.map(|c| {
-                let boxed: Box<dyn mandate_journal::ArtifactStore + Send> = Box::new(c);
-                boxed
-            })),
-    )));
+    let journal = Shared(
+        Rc::new(RefCell::new(
+            StoreJournal::from_dsn(None, now)
+                .with_artifacts(Some(Arc::clone(&store)))
+                .with_content_store(content.map(|c| {
+                    let boxed: Box<dyn mandate_journal::ArtifactStore + Send> = Box::new(c);
+                    boxed
+                })),
+        )),
+        owner.map(str::to_owned),
+    );
     let nanos = Rc::new(Cell::new(now.secs() * NANOS_PER_S));
     let quote = Rc::new(RefCell::new(PREFLIGHT_QUOTE));
     let clock = Clock {

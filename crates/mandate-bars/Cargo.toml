@@ -1,0 +1,18 @@
+[package]
+name = "mandate-bars"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The stored market bars a decision may rest on: the trust check on a daily-bar dataset, shared by the shell, the runner, the runtime process and the executor (DEC-2385)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-liquidity.workspace = true
+mandate-marketdata.workspace = true
+mandate-num.workspace = true
+mandate-time.workspace = true
+thiserror.workspace = true

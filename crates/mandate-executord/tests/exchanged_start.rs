@@ -211,7 +211,7 @@ fn started(
     let connection = connection()?;
     let answer = exchanged_start(
         store,
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         Start {
             connection: &connection,
@@ -296,7 +296,7 @@ fn a_stream_with_a_connect_check_runs_none() -> Result<(), Error> {
         let mut store = MemoryStore::default();
         oauth_connect_check(
             &mut store,
-            &Ids,
+            &Ids::of(&scope()),
             &scope(),
             OAuthCheck {
                 connection: connection()?,
@@ -505,7 +505,7 @@ fn an_unreadable_stream_refuses_the_start() -> Result<(), Error> {
     let mut journal = MemoryStore::default();
     oauth_connect_check(
         &mut journal,
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         OAuthCheck {
             connection: connection()?,
@@ -526,7 +526,7 @@ fn an_unreadable_stream_refuses_the_start() -> Result<(), Error> {
     let connection = connection()?;
     let answer = exchanged_start(
         &mut blind,
-        &Ids,
+        &Ids::of(&scope()),
         &scope(),
         Start {
             connection: &connection,
