@@ -99,8 +99,9 @@ fn cash(broker: &mut AlpacaBroker<FixturePaper>) -> Result<(String, String), Err
     }
 }
 
-/// A limit opening fills whole at its limit when it is placed: the order reads `filled`, one
-/// `FILL` activity names the broker's order id and no client order id (Alpaca's shape, DEC-2353),
+/// A limit opening fills whole at its limit when it is placed. The submission's answer is the order
+/// as Alpaca accepts it, `new` and unfilled; a later lookup reads it `filled`, one `FILL` activity
+/// names the broker's order id and no client order id (Alpaca's shape, DEC-2353),
 /// the cursor it returns reads nothing new, the position is the fill, and the cash falls by its
 /// notional with no fee accrued (paper's fees are simulated).
 #[test]
@@ -111,8 +112,17 @@ fn a_limit_opening_fills_whole_at_its_limit() -> Result<(), Error> {
         &mut broker,
         order("md-01JINTENT0000000000000000A", Side::Buy, "10", "150")?,
     )?;
-    assert_eq!(placed.status, "filled");
-    assert_eq!(placed.filled_qty, Qty::parse("10")?);
+    assert_eq!(
+        (placed.status.as_str(), placed.filled_qty),
+        ("new", Qty::ZERO)
+    );
+    let lookup =
+        BrokerRequest::GetOrderByClientId(ClientOrderId::parse("md-01JINTENT0000000000000000A")?);
+    let BrokerOutcome::Order(found) = broker.call(&lookup)? else {
+        return Err("the opening".into());
+    };
+    assert_eq!(found.status, "filled");
+    assert_eq!(found.filled_qty, Qty::parse("10")?);
     let (booked, cursor) = fills(&mut broker, "")?;
     assert_eq!(booked.len(), 1);
     let fill = &booked[0];
@@ -202,7 +212,7 @@ fn a_sell_limit_fills_and_reduces_the_position() -> Result<(), Error> {
         &mut broker,
         order("md-01JINTENT0000000000000000C", Side::Sell, "4", "155")?,
     )?;
-    assert_eq!(sold.status, "filled");
+    assert_eq!(sold.status, "new", "the answer is the order as accepted");
     assert_eq!(fills(&mut broker, "")?.0.len(), 2);
     assert_eq!(
         held(&mut broker)?,
