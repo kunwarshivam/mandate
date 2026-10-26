@@ -19,6 +19,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / "schemas/workspace-api"
 BACKLOG = ROOT / "docs/project/06-backlog-v1.md"
+# New rows, one file each until folded into BACKLOG (DEC-2373).
+BACKLOG_ROWS = ROOT / "docs/project/backlog"
 MARKER = re.compile(r"\(planned: ([^)]+)\)")
 
 # (spec file, section start, section end, schema file, JSON pointer to the enum's object)
@@ -66,10 +68,10 @@ def planned_objects(node, path=""):
 
 def main() -> int:
     problems: list[str] = []
+    texts = [BACKLOG.read_text(encoding="utf-8")]
+    texts += [row.read_text(encoding="utf-8") for row in sorted(BACKLOG_ROWS.glob("*.md"))]
     stories = set(
-        re.findall(
-            r"^- \*\*(E\d+-\d+)\b", BACKLOG.read_text(encoding="utf-8"), re.MULTILINE
-        )
+        re.findall(r"^- \*\*(E\d+-\d+)\b", "\n".join(texts), re.MULTILINE)
     )
     checked = 0
     for spec in sorted((ROOT / "docs/specs").glob("*.md")):

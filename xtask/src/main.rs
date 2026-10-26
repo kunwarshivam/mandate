@@ -2814,10 +2814,11 @@ const KNOWN_OUTSIDE_CRATES: [&str; 17] = [
 /// (DEC-1190 item 2): every spec, `check_planned.py` globbing `docs/specs/*.md` (the journal
 /// spec among them), the backlog it checks planned operations against, and the requirements file
 /// that pins their Python environment ([`pinned_python`]).
-const SCHEMA_SWEEP_INPUTS: [&str; 4] = [
+const SCHEMA_SWEEP_INPUTS: [&str; 5] = [
     "schemas/",
     "docs/specs/",
     "docs/project/06-backlog-v1.md",
+    "docs/project/backlog/",
     "reference/mandate/requirements.txt",
 ];
 
@@ -3406,7 +3407,74 @@ fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()
     infra_workflow_in(root)?;
     mail::guard_in(root)?;
     leak::guard_in(root)?;
+    backlog_rows_in(root)?;
     workspace_checks()
+}
+
+/// The backlog every story and debt row was written to until DEC-2373.
+const BACKLOG: &str = "docs/project/06-backlog-v1.md";
+
+/// Where a new backlog row goes since DEC-2373: one file each, so two PRs adding rows never touch
+/// the same lines.
+const BACKLOG_ROWS: &str = "docs/project/backlog/";
+
+/// DEC-2373: a change adds no row to [`BACKLOG`]; a new row is a file under [`BACKLOG_ROWS`]. A
+/// row moved in from that directory is no new row, so the backlog may gain as many rows as the
+/// change deletes row files. Skipped with no diff base, as on a push to `main`.
+fn backlog_rows_in(root: &Path) -> Result<()> {
+    eprintln!("    backlog: checking that new rows go one file each under {BACKLOG_ROWS}");
+    let Some(base) = base_ref_in(
+        root,
+        env::var("MANDATE_BASE_REF").ok().as_deref(),
+        env::var("GITHUB_EVENT_NAME").ok().as_deref(),
+    )?
+    else {
+        return Ok(());
+    };
+    let before =
+        output_in(root, "git", &["show", &format!("{base}:{BACKLOG}")]).unwrap_or_default();
+    let after = fs::read_to_string(root.join(BACKLOG)).context("reading the backlog")?;
+    let deleted = output_in(
+        root,
+        "git",
+        &[
+            "diff",
+            "--name-only",
+            "--diff-filter=D",
+            &base,
+            "--",
+            BACKLOG_ROWS,
+        ],
+    )?;
+    let folded = deleted.lines().filter(|path| is_backlog_row(path)).count();
+    if let Some(problem) = backlog_row_problem(backlog_rows(&before), backlog_rows(&after), folded)
+    {
+        bail!("backlog: {problem}");
+    }
+    Ok(())
+}
+
+/// The rows a backlog text holds: its lines that open a bullet in bold, `- **`.
+fn backlog_rows(text: &str) -> usize {
+    text.lines().filter(|line| line.starts_with("- **")).count()
+}
+
+/// Whether `path` is a row file under [`BACKLOG_ROWS`], not its README.
+fn is_backlog_row(path: &str) -> bool {
+    path.strip_prefix(BACKLOG_ROWS)
+        .is_some_and(|name| name.ends_with(".md") && name != "README.md" && !name.contains('/'))
+}
+
+/// The refusal for a backlog that went from `before` rows to `after` while `folded` row files
+/// were deleted, or `None` when it gained no more rows than it folded in.
+fn backlog_row_problem(before: usize, after: usize, folded: usize) -> Option<String> {
+    let added = after.saturating_sub(before);
+    (added > folded).then(|| {
+        format!(
+            "{BACKLOG} gains {added} row(s) but the change folds in {folded}; add a new row as \
+             its own file under {BACKLOG_ROWS} (DEC-2373)"
+        )
+    })
 }
 
 /// The lint job's checks over the Cargo and uv workspaces in the current directory: fmt, clippy
@@ -11904,7 +11972,27 @@ mod tests {
         TOFU_DIR, committed_working_dirs, guarded_word_problems, tofu_committed_working_dirs,
         tofu_forbidden_blocks, tofu_sources, tofu_symlinks,
     };
+    use super::{backlog_row_problem, backlog_rows, is_backlog_row};
     use super::{unoptimised_config, unoptimised_packages};
+
+    /// DEC-2373: a backlog that gains a row with no row file folded in is refused; one that gains
+    /// only what it folds, or loses rows, or keeps its count while a row is edited, is not.
+    #[test]
+    fn a_new_backlog_row_goes_in_its_own_file() {
+        assert!(backlog_row_problem(10, 11, 0).is_some());
+        assert!(backlog_row_problem(10, 12, 1).is_some());
+        assert_eq!(backlog_row_problem(10, 12, 2), None);
+        assert_eq!(backlog_row_problem(10, 10, 0), None);
+        assert_eq!(backlog_row_problem(10, 9, 0), None);
+        assert_eq!(
+            backlog_rows("- **E1-1** a\n  - **not a row**\ntext - **no**\n- **E1-2** b\n"),
+            2
+        );
+        assert!(is_backlog_row("docs/project/backlog/E7-4-a-row.md"));
+        assert!(!is_backlog_row("docs/project/backlog/README.md"));
+        assert!(!is_backlog_row("docs/project/backlog/nested/E7-4.md"));
+        assert!(!is_backlog_row("docs/project/06-backlog-v1.md"));
+    }
 
     #[test]
     fn finds_plain_comments_but_not_docs_or_literals() {

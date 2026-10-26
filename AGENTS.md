@@ -22,7 +22,7 @@ reading that loosens the spec toward the code still goes to the founder.
 |---|---|
 | How is the system structured? | [docs/HLD.md](docs/HLD.md) |
 | What must v1 do? | [docs/product/04-prd-v1.md](docs/product/04-prd-v1.md) |
-| What should I work on? | [docs/project/06-backlog-v1.md](docs/project/06-backlog-v1.md), in milestone order from [docs/project/02-milestones-and-wbs.md](docs/project/02-milestones-and-wbs.md) |
+| What should I work on? | [docs/project/06-backlog-v1.md](docs/project/06-backlog-v1.md) and the rows not yet folded into it under [docs/project/backlog/](docs/project/backlog/README.md) (DEC-2373), in milestone order from [docs/project/02-milestones-and-wbs.md](docs/project/02-milestones-and-wbs.md) |
 | Where does the work stand, and what is next? | [docs/project/08-work-tracker.md](docs/project/08-work-tracker.md), one page, updated at the end of every session; how the work ran, with every PR, is [docs/project/11-work-log.md](docs/project/11-work-log.md) |
 | What has already been decided? | [docs/project/04-decision-log.md](docs/project/04-decision-log.md) for DEC-01 to DEC-302, and one file per decision under [docs/project/decisions/](docs/project/decisions/README.md) after that (DEC-344) |
 | What are the exact trading rules (accounting, orders, fees, settlement, account rules)? | [docs/specs/trading-domain.md](docs/specs/trading-domain.md) and its [reference cases](docs/specs/reference-cases/trading-domain.yaml), which tests must reproduce exactly |
@@ -136,7 +136,8 @@ agent needs the same correction twice, put the rule on the highest rung that can
 4. **Reviewed:** the PR template and the independent review agent, the last resort, not the plan.
 
 Leave the code in a state you would want the next agent to copy: one paved path per task, no
-workarounds, and debt either fixed or recorded in the backlog.
+workarounds, and debt either fixed or recorded in the backlog, as a new row's own file under
+`docs/project/backlog/` (DEC-2373).
 
 ## Getting it right the first time (specs and safety-critical design)
 
@@ -166,7 +167,8 @@ safety-critical design for review.
    replay, every input listed), risk (loopholes, gap risk, lifecycle), and compliance (who chooses
    what, records, wording).
 
-**Freeze rule:** after an external review, fix only blockers and majors. Minors go to the backlog.
+**Freeze rule:** after an external review, fix only blockers and majors. Minors go to the backlog,
+one file each under `docs/project/backlog/`.
 
 ## Conventions
 

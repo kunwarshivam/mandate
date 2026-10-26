@@ -146,6 +146,7 @@ def survivors(show_all: bool, shard: tuple[int, int] = (0, 1)) -> list[str]:
         shutil.copytree(ROOT / "docs/specs", Path(tmp) / "docs/specs")
         (Path(tmp) / "docs/project").mkdir(parents=True)
         shutil.copy(ROOT / "docs/project/06-backlog-v1.md", Path(tmp) / "docs/project")
+        shutil.copytree(ROOT / "docs/project/backlog", Path(tmp) / "docs/project/backlog")
         checkers = [tree / f"workspace-api/{c}" for c in CHECKERS]
         for name in FILES:
             target = tree / "workspace-api" / name

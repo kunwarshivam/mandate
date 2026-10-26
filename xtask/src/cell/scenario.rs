@@ -2780,7 +2780,17 @@ mod tests {
     /// that lane still lands; a PR, when named, is a real number.
     #[test]
     fn every_gap_waits_on_a_named_lane_and_its_backlog_story() {
-        let backlog = fs::read_to_string("../docs/project/06-backlog-v1.md").unwrap();
+        let mut backlog = fs::read_to_string("../docs/project/06-backlog-v1.md").unwrap();
+        let mut rows: Vec<_> = fs::read_dir("../docs/project/backlog")
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "md"))
+            .collect();
+        rows.sort();
+        for row in rows {
+            backlog.push('\n');
+            backlog.push_str(&fs::read_to_string(row).unwrap());
+        }
         let steps = planned("demo1");
         for step in &steps {
             for part in &step.parts {
