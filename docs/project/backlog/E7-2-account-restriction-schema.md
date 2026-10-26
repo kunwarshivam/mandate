@@ -1,4 +1,4 @@
-- **E7-2u (Proposed, M7; X)** As the platform, I want the executor's `AccountRestrictionChanged`
+- **E7-2u (Done, lane L1; #2532, #2549, #2594)** As the platform, I want the executor's `AccountRestrictionChanged`
   registered in the journal (journal spec §9.5), so that an account restriction the broker reports
   is recorded rather than refused. Today `Draft::parse` answers `UnknownSchema` for it (found by
   DEC-2514's journal test), so in the cell the executor's batch for a blocked or restricted account
