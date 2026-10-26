@@ -167,11 +167,17 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "ExternalActivityIngested" => Ok(()),
         "ConnectionChecked" | "ConnectionEstablished" => connection_checked(),
         "AccountRestrictionChanged" => {
-            state.account_state = match required_text(payload, "restriction")? {
+            let restriction = match required_text(payload, "restriction")? {
                 "closing_only" => AccountState::ClosingOnly,
                 "blocked" => AccountState::Blocked,
                 _ => return Err(refused("restriction")),
             };
+            let cause = state
+                .causes
+                .entry(required_text(payload, "cause")?.to_owned())
+                .or_default();
+            *cause = (*cause).max(restriction);
+            state.account_state = state.account_state.max(restriction);
             state.consecutive_403s = 0;
             Ok(())
         }

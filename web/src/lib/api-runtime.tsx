@@ -3,7 +3,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readBacktestFrom } from "@/api/backtest";
 import { type Fetch, createWorkspaceClient } from "@/api/client";
-import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand } from "@/api/commands";
+import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand, prepareOwnerExit } from "@/api/commands";
 import { confirmAccepted, confirmStepUpDigest } from "@/api/confirm";
 import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPasskey, browserAuthenticator, deployStepUpDigest, passkeysRead, usablePasskeys } from "@/api/passkey";
 import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDigest, passkeyList } from "@/api/enrol";
@@ -212,15 +212,22 @@ export function ApiRuntimeProvider({
     };
   }, [refresh, refreshMs, session, keepAliveMs]);
 
-  /** Sends one prepared gesture until the API answers, with the same key and body each time (API-4, API-13). */
+  /**
+   * Sends one prepared gesture until the API answers, with the same key and body each time (API-4,
+   * API-13). A refusal that records nothing after an attempt whose effect was not known is `unknown`,
+   * never `undelivered`: the earlier attempt may have been recorded.
+   */
   const deliver = useCallback(
     async (command: PreparedCommand): Promise<Delivery> => {
       let eventId: string | null = null;
+      let ambiguous = false;
       for (let attempt = 0; attempt < SENDS; attempt += 1) {
         const outcome = await client.send(command);
         if (outcome.ok) return { phase: "recorded", eventId: outcome.accepted.event_id, body: outcome.body };
         const { error } = outcome;
+        if (error.effect === "none" && ambiguous) return { phase: "unknown", eventId };
         if (error.effect === "none") return { phase: "undelivered", reason: error.code };
+        ambiguous = true;
         eventId = error.event_id ?? eventId;
         if (error.effect === "recorded" && eventId) return { phase: "recorded", eventId };
         if (!error.retryable) break;
@@ -274,6 +281,22 @@ export function ApiRuntimeProvider({
         for (const d of delivered) if (d.phase !== "undelivered" && d.eventId) void follow(d.eventId);
       })();
       return command;
+    },
+    [client, deliver, follow],
+  );
+
+  /** The owner's exit (§5.4): sent with one key until answered, then followed to its outcome (§5.5). */
+  const ownerExit = useCallback<NonNullable<Runtime["ownerExit"]>>(
+    async (agentId, instrument, record, onRecorded) => {
+      const prepared = prepareOwnerExit(client, agentId, instrument, record);
+      if (!prepared.ok) return { phase: "undelivered", reason: prepared.reason };
+      const delivered = await deliver(prepared.commands[0]);
+      if (delivered.phase === "undelivered") return { phase: "undelivered", reason: delivered.reason };
+      if (delivered.phase === "recorded") onRecorded();
+      if (!delivered.eventId) return { phase: "unknown" };
+      const settled = await follow(delivered.eventId);
+      if (settled === "applied" || settled === "refused" || settled === "ended") return { phase: settled };
+      return delivered.phase === "recorded" ? { phase: "recorded" } : { phase: "unknown" };
     },
     [client, deliver, follow],
   );
@@ -640,8 +663,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, streamTail: journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, streamTail: journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

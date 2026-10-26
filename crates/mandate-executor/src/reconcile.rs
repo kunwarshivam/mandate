@@ -2400,6 +2400,33 @@ pub(crate) mod tests {
     /// fill of ours or of anyone's has the `config_refs` the journal requires (DEC-938 item 2).
     struct Registered;
 
+    /// Instruments with no snapshot, on an account whose fill configuration is known: an
+    /// unattributed fill in any of them is accounted under the account's (DEC-2817).
+    struct AccountOnly;
+
+    impl InstrumentSnapshot for AccountOnly {
+        fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
+            Everything.asset_class(instrument)
+        }
+
+        fn increment(&self, instrument: &InstrumentId) -> Option<ShareIncrement> {
+            Everything.increment(instrument)
+        }
+
+        fn exit_tier(&self, instrument: &InstrumentId) -> Option<ExitTier> {
+            Everything.exit_tier(instrument)
+        }
+
+        fn account_fill_refs(&self) -> Option<crate::ports::AccountFillRefs> {
+            let digest = |n: char| format!("sha256:{}", n.to_string().repeat(64));
+            Some(crate::ports::AccountFillRefs {
+                fee_config: digest('a'),
+                trading_calendar: digest('b'),
+                settlement_calendar: digest('c'),
+            })
+        }
+    }
+
     impl InstrumentSnapshot for Registered {
         fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
             Everything.asset_class(instrument)
@@ -2466,10 +2493,11 @@ pub(crate) mod tests {
         })
     }
 
-    /// DEC-2812's two cases it leaves to DEC-2805: an external fill in an instrument with no
-    /// instrument snapshot, which has no fill configuration to journal, and one whose fill id the
-    /// broker sent empty. The journal refuses the batch at its `FillApplied` alone, every other
-    /// draft is one it would accept, and DEC-2805 item 1's hold keeps the executor running.
+    /// The two cases DEC-2812 and DEC-2817 leave to DEC-2805: an external fill in an instrument with
+    /// no instrument snapshot on an account whose own fill configuration is not known either, so it
+    /// has no fill configuration to journal, and one whose fill id the broker sent empty. The
+    /// journal refuses the batch at its `FillApplied` alone, every other draft is one it would
+    /// accept, and DEC-2805 item 1's hold keeps the executor running.
     #[test]
     fn an_external_fill_without_its_config_or_its_id_is_refused_at_its_fill_alone()
     -> Result<(), ExecutorError> {
@@ -2533,6 +2561,65 @@ pub(crate) mod tests {
         Ok(())
     }
 
+    /// DEC-2817: an external fill in an instrument with no snapshot is booked under the account's
+    /// fill configuration, naming the fee configuration and both calendars and no instrument
+    /// snapshot, in a batch the journal accepts whole. It moves the account's position in that
+    /// instrument, and every agent holds its openings until the owner acknowledges, as for any
+    /// external fill (trading spec §7.1).
+    #[test]
+    fn an_external_fill_in_an_instrument_with_no_snapshot_is_booked_on_the_accounts_refs()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &AccountOnly,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        let run = executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Fill(external_fill("f-ext-6")?)),
+            &ports,
+        )?;
+        assert_eq!(
+            drafted(&run),
+            vec![
+                "ExternalActivityIngested",
+                "FillApplied",
+                "AgentModeApplied",
+                "OwnerAlertSent"
+            ]
+        );
+        let mut checked = false;
+        for effect in &run {
+            if let Effect::Journal(draft) = effect {
+                journal_accepts_with_refs(draft)?;
+                if draft.event_type == "FillApplied" {
+                    let named: Vec<&str> = draft.config_refs.keys().map(|k| k.as_str()).collect();
+                    assert_eq!(
+                        named,
+                        ["fee_config", "settlement_calendar", "trading_calendar"],
+                        "the account's three, and no instrument snapshot"
+                    );
+                    checked = true;
+                }
+            }
+        }
+        assert!(checked, "the fill was drafted");
+        assert_eq!(
+            executor.state.positions().get(&aapl()?).copied(),
+            Some(SignedQty::from(Qty::parse("2")?))
+        );
+        assert_eq!(
+            executor
+                .state
+                .effective_mode(&AgentId("agent-a".to_owned())),
+            Mode::ExitsOnly
+        );
+        Ok(())
+    }
+
     /// DEC-2812 (trading spec §6.1, §7.1): an external fill in a registered instrument is booked.
     /// Its `FillApplied` is version 2's, naming no order (`null`), and the journal accepts the whole
     /// batch. The fill moves the account's position and no order's filled quantity; every agent
@@ -2570,6 +2657,17 @@ pub(crate) mod tests {
                 if draft.event_type == "FillApplied" {
                     assert_eq!(draft.schema_version, 2);
                     assert_eq!(draft.payload.get("client_order_id"), Some(&Value::Null));
+                    let named: Vec<&str> = draft.config_refs.keys().map(|k| k.as_str()).collect();
+                    assert_eq!(
+                        named,
+                        [
+                            "fee_config",
+                            "instrument_snapshot",
+                            "settlement_calendar",
+                            "trading_calendar"
+                        ],
+                        "a registered instrument's fill names its snapshot too (DEC-2817)"
+                    );
                 }
             }
         }

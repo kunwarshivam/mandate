@@ -304,7 +304,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
       if (!agent) return problem(404, "not_found", "none");
       const head = { agent_id: agent.agent_id, account_ref: workspace.connection.connection_id };
       if (activity[2] === "positions") {
-        const positions = agent.positions.map((p) => ({ instrument_id: p.instrument.symbol, filled_qty: canon(p.qty), cost_basis: null, risk_mark: null, protection: null }));
+        const positions = agent.positions.map((p) => ({ instrument_id: p.instrument.asset_id, filled_qty: canon(p.qty), cost_basis: null, risk_mark: null, protection: null }));
         return read({ ...head, positions, account_positions: agentDetail(agent).account_positions });
       }
       const served = [...agent.past_orders.map((o) => ({ ...o, updated: o.closed_at })), ...agent.orders.map((o) => ({ ...o, updated: o.submitted_at }))];

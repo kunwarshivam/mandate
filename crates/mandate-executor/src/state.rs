@@ -103,7 +103,12 @@ pub struct ExecutorState {
     /// the owner trades the instrument outside the platform, not by anything in this crate.
     pub(crate) unattributed: BTreeMap<InstrumentId, Vec<(Seq, Qty)>>,
     pub(crate) modes: BTreeMap<AgentId, Mode>,
+    /// The strictest of [`Self::causes`]: the account state (§7.3), never the last record's
+    /// (journal spec v0.96 §9.5, DEC-2816 item 2).
     pub(crate) account_state: AccountState,
+    /// Each account-restriction cause in force, by its `cause`, at the strictest restriction its
+    /// records set. Nothing lifts one yet (backlog E7-2y), so a cause stays once raised.
+    pub(crate) causes: BTreeMap<String, AccountState>,
     pub(crate) consecutive_403s: u32,
     pub(crate) observed: Option<ObservedAccount>,
     /// The account-stream `seq` of the report `observed` holds: the base the model's cash moves
@@ -416,6 +421,7 @@ impl ExecutorState {
             unattributed: BTreeMap::new(),
             modes: BTreeMap::new(),
             account_state: AccountState::Active,
+            causes: BTreeMap::new(),
             consecutive_403s: 0,
             observed: None,
             observed_at: None,
