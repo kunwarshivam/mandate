@@ -1,8 +1,8 @@
 //! The deployment's gate dry run over the journaled fold (DEC-2388): `mandate-ports`'s advisory
 //! pass over a context built from [`Facts`], with DEC-2378 item 11's four checks and DEC-2388
-//! item 8's unseen parts deferred to the executor's binding gate. It can only narrow: every opening it allows is still judged by the
-//! binding gate on the account stream (`AGENTS.md` rules 1 and 12), and while any check is
-//! deferred it allows none.
+//! item 8's unseen parts deferred to the executor's binding gate. It can only narrow: every
+//! opening it allows is still judged by the binding gate on the account stream (`AGENTS.md`
+//! rules 1 and 12), and while any check is deferred it allows none.
 
 use std::collections::{BTreeMap, BTreeSet};
 
