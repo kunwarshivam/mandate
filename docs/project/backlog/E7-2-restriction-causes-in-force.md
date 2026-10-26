@@ -6,7 +6,8 @@
   and the fold keeps the state alone, so a `connection_unavailable` restriction raised while a
   broker's is in force is never recorded. The notifications spec's one `account_restriction` type
   also has no cause-keyed alert for `connection_unavailable`, which §7.3 and connections spec CN-6
-  promise. *Accepted when:* each new cause in force is journaled, the fold holds the causes in
-  force and lifts each by its own condition, and the owner's alert for `connection_unavailable` is
-  distinct.
+  promise. *Accepted when:* each new cause in force is journaled under journal spec rule 309
+  ([DEC-2814](../decisions/DEC-2814.md)), the fold holds the causes in force, the account state is
+  the strictest of them, and a record that leaves it unchanged moves no agent. The lift is E7-2y;
+  the connection's restriction and its distinct alert are E7-2z.
 <!-- section: E7 Alpaca connector and recovery -->
