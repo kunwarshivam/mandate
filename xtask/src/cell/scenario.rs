@@ -1059,7 +1059,8 @@ pub fn plan(
                 Part::WebTradeLoop(WebCheck {
                     shows: "the trade loop from web/ on the agent: its approval request \
                             shown, approved with the code the host confirms, the order filled, \
-                            the position and the journal shown, then its kill switch",
+                            the position, the journal and the positions screen shown, the \
+                            owner's exit filled, the audit timeline shown, then its kill switch",
                     agent: WEB_AGENT,
                 }),
                 Part::Gap(Gap {
