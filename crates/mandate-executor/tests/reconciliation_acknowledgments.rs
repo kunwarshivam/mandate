@@ -416,7 +416,8 @@ fn answered(asked: Option<&str>, answered: Option<&str>, ports: &Ports<'_>) -> S
 
 /// Rule 240 at the executor, read as DEC-2838 reads it: an independent acknowledgment answers its
 /// request only when both name the same subject, a version-1 record naming `limit`; a request of
-/// another subject is `request_invalid`, so no lift.
+/// another subject is `request_invalid`, so no lift. The reverse, an acknowledgment of another
+/// subject naming the hold, never reaches the request: check 1 finds no record of its subject.
 #[test]
 fn an_acknowledgment_lifts_a_hold_only_through_a_request_of_its_subject() {
     with_ports!(ports);
@@ -433,10 +434,11 @@ fn an_acknowledgment_lifts_a_hold_only_through_a_request_of_its_subject() {
         );
     }
     for wrong in [None, Some("limit"), Some("restriction")] {
-        assert_ne!(
+        assert_eq!(
             answered(Some("reconciliation"), wrong, &ports),
-            "lift",
-            "an acknowledgment of {wrong:?}"
+            "trigger_unknown",
+            "an acknowledgment of {wrong:?} names no record of its subject, so check 1 refuses it \
+             before check 4 reads the request"
         );
     }
 }

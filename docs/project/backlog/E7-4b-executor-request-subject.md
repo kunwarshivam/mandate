@@ -7,5 +7,7 @@
   `reconciliation_acknowledgments` (or `acknowledgments`) section holds a vector of a version-1
   request answered by a version-2 `reconciliation` copy, refused `request_invalid`, and one of a
   `reconciliation` request answered by the same subject, which lifts, and
-  `reference/journal/reconciliation_acks.py`'s oracle and mutants cover them.
+  `reference/journal/reconciliation_acks.py`'s oracle and mutants cover them; and §9.28's sentence
+  that rule 240's equal members include `subject` "when both records carry it" says, as DEC-2838
+  reads it, that a version-1 record names `limit`.
 <!-- section: E7 Alpaca connector and recovery -->
