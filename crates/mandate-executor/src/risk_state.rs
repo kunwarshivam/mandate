@@ -404,7 +404,8 @@ pub struct AccountRiskFold<'c> {
     /// applies a fill once (DEC-2393 item 2).
     fills: BTreeSet<String>,
     /// The records the fold returned and the stream has not yet carried back, in order (DEC-2301
-    /// item 2): the next risk records on the stream must be exactly these.
+    /// item 2, DEC-2399 items 1 and 2): the next risk records on the stream must be exactly these,
+    /// and no other row may come before them.
     owed: VecDeque<RiskAppend>,
 }
 
@@ -976,7 +977,7 @@ impl<'c> AccountRiskFold<'c> {
 
     /// The records the fold returned that the stream has not carried back yet, in the order they
     /// are owed. At the stream's head after a restart these are the records a crash kept from
-    /// being appended after their cause, which the executor appends next (DEC-2394 item 3).
+    /// being appended after their cause, which the executor appends next (DEC-2399 item 3).
     pub fn owed(&self) -> impl Iterator<Item = &RiskAppend> {
         self.owed.iter()
     }
