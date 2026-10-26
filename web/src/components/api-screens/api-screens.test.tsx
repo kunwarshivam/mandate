@@ -120,6 +120,21 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     expect(screen.queryByRole("list", { name: "Journal" })).toBeNull();
   });
 
+  it("an order's unreported state and quantity say not reported, and unknown stays unknown, never working (trading spec §5.7)", async () => {
+    const agent = fixture.agents.find((a) => a.orders.length + a.past_orders.length >= 2)!;
+    mount(<ApiAgent agentId={agent.agent_id} />, "approvals", (route, body) => {
+      if (!/\/orders$/.test(route)) return body;
+      const [first, second, ...rest] = body.orders as Array<Record<string, unknown>>;
+      return { ...body, orders: [{ ...first, state: null, filled_qty: null }, { ...second, state: "unknown" }, ...rest] };
+    });
+    const orders = await screen.findByRole("list", { name: "Orders" });
+    expect(within(orders).getByText(/^State not reported/)).toBeTruthy();
+    expect(within(orders).getByText(/filled quantity not reported/)).toBeTruthy();
+    const unknown = orders.querySelector("[data-state=unknown]");
+    expect(unknown?.textContent).toContain("Unknown: being checked with the broker");
+    expect(unknown?.textContent).not.toContain("Working");
+  });
+
   it("an order list the API cannot answer says not reported, never none", async () => {
     const agent = fixture.agents[0];
     mount(<ApiAgent agentId={agent.agent_id} />, "approvals", (route, body) => (/\/(orders|positions)$/.test(route) ? { ...body, agent_id: "agt_someone_else" } : body));
