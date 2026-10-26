@@ -101,16 +101,16 @@ fn spent_before(control: &[Value], index: usize) -> BTreeSet<String> {
         .collect()
 }
 
-/// Mandate spec §6.1's methods: `cli_confirm` in paper, and in live only on the founder's own
-/// connection (DEC-529 item 3).
+/// §9.28 check 3's methods (journal spec v0.106, DEC-2523): `passkey` in every environment, and
+/// `cli_confirm` in paper and in live only on the founder's own connection (DEC-529 item 3).
 fn methods(vector: &Value) -> BTreeSet<String> {
     let paper = text(vector, "environment") == "paper";
     let founder = vector.get("founder_connection") == Some(&Value::Bool(true));
+    let mut methods = BTreeSet::from(["passkey".to_owned()]);
     if paper || founder {
-        BTreeSet::from(["cli_confirm".to_owned()])
-    } else {
-        BTreeSet::new()
+        methods.insert("cli_confirm".to_owned());
     }
+    methods
 }
 
 /// What the shell hands for control record `at`, copied as account record `copy` (DEC-2828 item 1).
@@ -251,7 +251,6 @@ macro_rules! with_ports {
 /// Every copy is its original's type, version and payload unchanged, caused by the original, and
 /// the first record of its batch.
 #[test]
-#[ignore = "pending E7-4"]
 fn every_copy_is_its_original_unchanged_and_caused_by_it() {
     with_ports!(ports);
     let mut failed = Vec::new();
@@ -278,7 +277,6 @@ fn every_copy_is_its_original_unchanged_and_caused_by_it() {
 /// time as `effective_at`, the original as `causation_id`), and nothing else. Every expectation
 /// names an acknowledgment copy, and every acknowledgment copy has one.
 #[test]
-#[ignore = "pending E7-4"]
 fn each_acknowledgment_copy_is_judged_as_its_vector_says() {
     with_ports!(ports);
     let mut failed = Vec::new();
@@ -340,7 +338,6 @@ fn each_acknowledgment_copy_is_judged_as_its_vector_says() {
 
 /// A request copy is never judged by itself: its batch is the copy alone.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_request_copy_is_the_copy_alone() {
     with_ports!(ports);
     let mut failed = Vec::new();
@@ -369,7 +366,6 @@ fn a_request_copy_is_the_copy_alone() {
 /// every acknowledgment exactly as one that never restarts. A request's own reuse check is judged
 /// from the handoff's `request_spent`, never from memory of the request's copy.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_restart_between_copies_changes_no_judgment() {
     with_ports!(ports);
     let mut failed = Vec::new();
@@ -398,7 +394,6 @@ fn a_restart_between_copies_changes_no_judgment() {
 /// account stream alone: handing it again drafts nothing, so a shell that hands the control stream
 /// again from its start judges nothing twice.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_original_already_copied_is_not_copied_again() {
     with_ports!(ports);
     let mut failed = Vec::new();

@@ -12,7 +12,7 @@ use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::{Value, parse};
 use mandate_executor::{
     AccountScope, AgentId, EventId, FoldedEvent, HandedConfirmation, Initiator, MandateVersion,
-    OwnerConfirmation, Purpose, RiskClock, Seq, TimeInForce,
+    OwnerConfirmation, Purpose, RiskClock, Seq, ThesisRow, TimeInForce,
 };
 use mandate_journal::{Environment, StoredEvent};
 use mandate_num::{Price, Qty};
@@ -541,6 +541,26 @@ pub fn proposals(rows: &[FoldedEvent]) -> Result<Vec<Proposal>, Unreadable> {
         }
     }
     Ok(proposed)
+}
+
+/// The agent stream's thesis records, in stream order, as the core copies them onto the account
+/// stream (mandate spec §8.5, §8.6; DEC-2823): every `ThesisProposed`, `ThesisRevised` and
+/// `ThesisInvalidated`, admitted or refused, each with its id for the copy to name.
+#[must_use]
+pub fn theses(rows: &[FoldedEvent]) -> Vec<ThesisRow> {
+    rows.iter()
+        .filter(|row| {
+            matches!(
+                row.event_type.as_str(),
+                "ThesisProposed" | "ThesisRevised" | "ThesisInvalidated"
+            )
+        })
+        .map(|row| ThesisRow {
+            event_id: row.event_id.clone(),
+            event_type: row.event_type.clone(),
+            payload: row.payload.clone(),
+        })
+        .collect()
 }
 
 /// How long a confirmation lasts after the step-up that gave it: mandate spec §6.1's step-up

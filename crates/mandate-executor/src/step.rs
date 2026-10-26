@@ -244,6 +244,7 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
             Ok(())
         }
         Input::BatchRefused => held_on_refusal(batch),
+        Input::Theses { agent, records } => crate::universe::copy(batch, &agent, &records),
         Input::InputFailed => {
             silence(batch)?;
             held_on_refusal(batch)
@@ -294,7 +295,8 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
 
 /// A journaled event from a followed stream is a fact the executor copies into the account stream
 /// with its `causation_id` — `AgentModeApplied` from `AgentModeChanged`, `TradingDayStarted`,
-/// `ClockAdvanced` crossing midnight New York, `OwnerAcknowledged` (journal spec §2). That copy is
+/// `ClockAdvanced` crossing midnight New York (journal spec §2); an owner's acknowledgment arrives
+/// as [`crate::Input::Acknowledgment`] instead (DEC-2828). That copy is
 /// E7-4 slice 5's (the trading day, DEC-160); until it lands the input answers its stub, never a
 /// silent `Ok(())` that drops the fact (#244 round 1, the coordinator's ruling 5861479849).
 ///

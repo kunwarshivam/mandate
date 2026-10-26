@@ -2097,3 +2097,67 @@ fn the_deployment_answers_the_risk_its_book_read() -> Result<(), Error> {
     assert_eq!(deployment.risk(&agent()), None);
     Ok(())
 }
+
+/// DEC-2279 Safety: the model gateway writes research artifacts to a store of their own, which the
+/// executor never reads. A cold-started executor resolves a research agent's mandate, snapshots and
+/// admitted instrument, and maps the broker's ticker to it for exits, the same whether the gateway's
+/// objects are all there, all gone, or all corrupted, and its production wiring asks for the shared
+/// store alone, never the research store.
+#[test]
+fn a_cold_start_resolves_the_same_with_every_research_object_gone_or_corrupted() -> Result<(), Error>
+{
+    let research_objects: [&[u8]; 4] = [
+        b"{\"kind\":\"observation\",\"text\":\"SPY closed at 150\"}",
+        b"{\"kind\":\"prompt\",\"turn\":0}",
+        b"{\"kind\":\"response\",\"turn\":0}",
+        b"{\"kind\":\"run_summary\",\"run_id\":\"01RUN\"}",
+    ];
+    let (journal, gone) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    let (without, _) = self::deployment(&journal, gone.clone());
+    let (journal, mut there) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    for bytes in research_objects {
+        assert!(!gone.contains_key(&Digest::of(bytes)));
+        there.insert(Digest::of(bytes), bytes.to_vec());
+    }
+    let (with, _) = self::deployment(&journal, there);
+    let (journal, mut corrupted) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    for bytes in research_objects {
+        corrupted.insert(
+            Digest::of(bytes),
+            b"not the bytes the gateway was sent".to_vec(),
+        );
+    }
+    let (damaged, _) = self::deployment(&journal, corrupted);
+    assert_eq!(answers(&without)?, (true, true, true, true, true, true));
+    assert_eq!(answers(&with)?, answers(&without)?);
+    assert_eq!(answers(&damaged)?, answers(&without)?);
+    assert_eq!(with.version(&agent()), without.version(&agent()));
+    assert_eq!(damaged.version(&agent()), without.version(&agent()));
+
+    let asked = std::cell::RefCell::new(Vec::new());
+    let dir = std::env::temp_dir().join(format!("executord-research-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    mandate_artifacts_fs::FsArtifactStore::open(&dir)?;
+    let root = dir.to_string_lossy().into_owned();
+    let none = || -> Result<mandate_executord::deployment::Rows, &'static str> {
+        Ok(Box::new(|_: &StreamId| None))
+    };
+    let production = mandate_executord::deployment::production(
+        |name| {
+            asked.borrow_mut().push(name.to_owned());
+            (name != "MANDATE_BARS").then(|| root.clone())
+        },
+        none,
+    )?;
+    assert!(production.is_some());
+    assert!(
+        !asked.borrow().iter().any(|name| name.contains("RESEARCH")),
+        "the executor never asks for the research store: {:?}",
+        asked.borrow()
+    );
+    std::fs::remove_dir_all(&dir).ok();
+    Ok(())
+}
