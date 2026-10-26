@@ -259,6 +259,19 @@ mod tests {
         Ok(())
     }
 
+    /// A ticker registered twice maps to its last pair's asset id, which is how a reader registers
+    /// what must win last.
+    #[test]
+    fn a_ticker_registered_twice_maps_to_its_last_pair() -> Result<(), String> {
+        let symbols =
+            BrokerSymbols::registered([(id("SPY")?, id("stale-asset")?), (id("SPY")?, id(ASSET)?)]);
+        assert_eq!(
+            symbols.outcome(BrokerOutcome::Positions(vec![position("SPY")?])),
+            BrokerOutcome::Positions(vec![position(ASSET)?])
+        );
+        Ok(())
+    }
+
     /// A ticker registered as its own asset id maps nothing.
     #[test]
     fn a_ticker_spelled_as_its_asset_id_registers_nothing() -> Result<(), String> {
