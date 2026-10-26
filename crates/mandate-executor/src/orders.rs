@@ -881,7 +881,12 @@ pub(crate) fn account_restriction(
         || account.account_blocked
         || account.trade_suspended_by_user;
     if blocked {
-        restrict(batch, Restriction::Blocked, "account_trading_blocked")?;
+        restrict(
+            batch,
+            Restriction::Blocked,
+            Cause::BrokerNotice,
+            "account_trading_blocked",
+        )?;
     }
     Ok(())
 }
@@ -945,12 +950,31 @@ impl Restriction {
     }
 }
 
+/// What detected a restriction, journaled as its closed `cause` (journal spec §9.5, DEC-441 item
+/// 23, DEC-2137): the broker's account report (§7.3 row 1) or its rejects (rows 2 and 3). A lost
+/// connection restricts nothing here yet (E7-2v), so there is no variant for it.
+#[derive(Debug, Clone, Copy)]
+enum Cause {
+    BrokerNotice,
+    BrokerReject,
+}
+
+impl Cause {
+    fn name(self) -> &'static str {
+        match self {
+            Self::BrokerNotice => "broker_notice",
+            Self::BrokerReject => "broker_reject",
+        }
+    }
+}
+
 /// Stores a detected restriction as account state and applies its agent effect to every agent
 /// (§7.3), alerting the owner. A restriction already in force is not journaled again, and the
 /// answer says whether this one was new.
 fn restrict(
     batch: &mut Batch<'_, '_>,
     restriction: Restriction,
+    cause: Cause,
     reason: &'static str,
 ) -> Result<bool, ExecutorError> {
     if batch.view.account_state >= restriction.state() {
@@ -961,6 +985,7 @@ fn restrict(
         None,
         vec![
             ("restriction", text(restriction.name())),
+            ("cause", text(cause.name())),
             ("reason_code", text(reason)),
         ],
     )?;
@@ -1021,7 +1046,12 @@ pub(crate) fn reject(
     let closing_only = message.contains("closing") || message.contains("restricted");
     let threshold = batch.view.consecutive_403s >= batch.ports.config.restriction_403_threshold;
     if (closing_only || threshold)
-        && restrict(batch, Restriction::ClosingOnly, "account_restricted")?
+        && restrict(
+            batch,
+            Restriction::ClosingOnly,
+            Cause::BrokerReject,
+            "account_restricted",
+        )?
         && threshold
     {
         batch.broker(BrokerRequest::GetAccount);
