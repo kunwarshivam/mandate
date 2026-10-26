@@ -189,9 +189,10 @@ upgrades every release in place.
 | `web/` against the cell's API | The API server is ready; until then `web/` runs on its own fixtures |
 
 The API server listens only on its pod's loopback, so nothing in the cluster reaches it until the
-tunnel's route lands. The demo forwards http://127.0.0.1:8787 to it with the machine's own `kubectl`,
-or prints the `kubectl port-forward` command when there is none, and checks that `/v1` answers with
-the one 401. The forward outlives the demo until its pod goes or it is stopped; a later demo
+tunnel's route lands. The demo forwards http://127.0.0.1:8787 to it with the machine's own `kubectl`
+and checks that `/v1` answers with the one 401. The demo needs that `kubectl` beside docker, k3d and
+helm, and refuses to start without it (`ci cell-demo` skips, unless `MANDATE_CELL_REQUIRED` is set):
+without it the run could point neither the API nor the deployment managers at its workspace. The forward outlives the demo until its pod goes or it is stopped; a later demo
 reuses one that still answers.
 
 Sign-in runs through lane SI's stub issuer (DEC-2100, DEC-1025).
