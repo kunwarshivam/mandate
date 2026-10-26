@@ -2645,6 +2645,19 @@ fn the_opening_second_is_the_agents_and_a_bound_fold_skips_earlier_marks() {
         "a fill at the opening second is the agent's: {:?}",
         at_opening.view()
     );
+    let before = equity(at_opening.view());
+    at_opening
+        .fold(&fees_charged(5, "o-1", "0.01", OPENED))
+        .unwrap();
+    let lowered = Usd::parse(&before)
+        .unwrap()
+        .checked_sub(Usd::parse("0.01").unwrap())
+        .unwrap();
+    assert_eq!(
+        equity(at_opening.view()),
+        lowered.to_string(),
+        "a fee at the opening second is the agent's, and lowers E by its 0.01"
+    );
 }
 
 /// Every latched limit and every figure maps to the gate's own, each distinct so a swap between

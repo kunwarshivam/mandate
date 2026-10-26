@@ -15,6 +15,7 @@
 //! a protective order, a risk exit, or a kill switch on its own account (`AGENTS.md` rules 3 and
 //! 13). It keeps `paused` or `stopped` only when the last readable view already was.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mandate_canon::{Object, Value, parse};
@@ -791,7 +792,7 @@ impl<'c> AccountRiskFold<'c> {
         payload: &Object,
     ) -> Result<Vec<RiskAppend>, UnreadableCause> {
         let clock = whole_second(payload, "clock")?;
-        if clock < self.opened_at {
+        if let Ordering::Less = clock.cmp(&self.opened_at) {
             return Ok(Vec::new());
         }
         let session = self.calendar.session(clock).map_err(refused)?;
@@ -1089,6 +1090,12 @@ impl ExchangeRiskCalendar {
     }
 }
 
+/// The whole seconds `[start, end)` and `[from, to)` share; none when they do not meet.
+fn overlap(start: UtcNanos, end: UtcNanos, from: UtcNanos, to: UtcNanos) -> u64 {
+    let shared = end.min(to).secs().saturating_sub(start.max(from).secs());
+    u64::try_from(shared).unwrap_or(0)
+}
+
 fn whole_seconds(from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
     to.secs()
         .checked_sub(from.secs())
@@ -1106,9 +1113,8 @@ impl SessionClock for ExchangeRiskCalendar {
         let mut date = from.date();
         while date <= to.date() {
             for span in self.calendar.sessions(date)? {
-                let (start, end) = (span.start().max(from), span.end().min(to));
-                if span.session() == Session::Regular && start < end {
-                    total = total.saturating_add(whole_seconds(start, end)?);
+                if span.session() == Session::Regular {
+                    total = total.saturating_add(overlap(span.start(), span.end(), from, to));
                 }
             }
             date = date.next()?;
