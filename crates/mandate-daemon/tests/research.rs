@@ -13,7 +13,9 @@ use mandate_canon::{Digest, Value, parse};
 use mandate_daemon::cell;
 use mandate_daemon::recorded::Bundle;
 use mandate_daemon::worker::{RecordedWorker, WorkerFor};
-use mandate_daemon::{ResearchParts, ResearchSource, ResearchWiring, RuntimeProcess, fixture};
+use mandate_daemon::{
+    ContextUnread, ResearchParts, ResearchSource, ResearchWiring, RuntimeProcess, fixture,
+};
 use mandate_journal::StreamId;
 use mandate_process::{Exit, State};
 use mandate_research::AssetId;
@@ -119,36 +121,115 @@ fn a_refused_worker_answer_is_dropped_with_an_alert_and_stops_nothing() {
 }
 
 /// A source with nothing to give runs no research on that pass, and the worker's answers wait for
-/// one that has: the answer is handed once the context is back, and only then.
+/// one that has: the answer is handed once the context is back, and only then. The pass that first
+/// cannot read its context alerts the operator once, naming the input (DEC-2825).
 #[test]
 fn a_source_with_nothing_to_give_keeps_the_worker_s_answers_waiting() {
-    struct Sometimes(Rc<Cell<bool>>);
-    impl ResearchSource for Sometimes {
-        fn parts(&self, state: &RuntimeState) -> Option<ResearchParts> {
-            if self.0.get() {
-                Open::default().parts(state)
-            } else {
-                None
-            }
-        }
-    }
     let rig = Rig::default();
     let wires = Wired::default();
-    let given = Rc::new(Cell::new(false));
+    let unread = Rc::new(Cell::new(Some(ContextUnread::Meter)));
     let mut research = wires.wiring();
-    research.source = Box::new(Sometimes(Rc::clone(&given)));
+    research.source = Box::new(Sometimes(Rc::clone(&unread)));
     let mut process = start(&rig, Some(research));
     tick(&rig, NOW + 1);
     wires.worker.queued.borrow_mut().push(stray());
-    for second in 1..=2 {
-        let alerts = process.step(at(NOW + second));
-        assert!(alerts.is_empty(), "{:?}", keys(&alerts));
-    }
-    given.set(true);
+    let alerts = process.step(at(NOW + 1));
+    assert_eq!(keys(&alerts), ["research_context_unread"]);
+    let alerts = process.step(at(NOW + 2));
+    assert!(alerts.is_empty(), "{:?}", keys(&alerts));
+    unread.set(None);
     let alerts = process.step(at(NOW + 3));
     assert_eq!(keys(&alerts), ["research_input_refused"]);
     let alerts = process.step(at(NOW + 4));
     assert!(alerts.is_empty(), "{:?}", keys(&alerts));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// A source that gives its context, or the first input it could not read, as `unread` says.
+struct Sometimes(Rc<Cell<Option<ContextUnread>>>);
+
+impl ResearchSource for Sometimes {
+    fn parts(&self, state: &RuntimeState) -> Result<ResearchParts, ContextUnread> {
+        match self.0.get() {
+            None => Open::default().parts(state),
+            Some(reason) => Err(reason),
+        }
+    }
+}
+
+/// Each input a context is read from has its own stable code, written out here so that two
+/// variants sharing a code, or a code changing, fails (DEC-2825 item 1).
+#[test]
+fn every_unread_input_has_its_own_stable_code() {
+    let codes = [
+        (ContextUnread::StreamName, "stream_name"),
+        (ContextUnread::Control, "control"),
+        (ContextUnread::AgentStream, "agent_stream"),
+        (ContextUnread::Meter, "meter"),
+        (ContextUnread::Reservation, "reservation"),
+        (ContextUnread::Deployment, "deployment"),
+        (ContextUnread::Envelope, "envelope"),
+        (ContextUnread::EventTriggers, "event_triggers"),
+        (ContextUnread::Deployments, "deployments"),
+        (ContextUnread::AnotherAgent, "another_agent"),
+        (ContextUnread::Clock, "clock"),
+        (ContextUnread::Spend, "spend"),
+        (ContextUnread::Theses, "theses"),
+        (ContextUnread::PinnedWithTheses, "pinned_with_theses"),
+        (ContextUnread::InstrumentFacts, "instrument_facts"),
+        (ContextUnread::Halted, "halted"),
+        (ContextUnread::Arrivals, "arrivals"),
+    ];
+    for (reason, code) in codes {
+        assert_eq!(reason.code(), code, "{reason:?}");
+    }
+    let distinct: BTreeSet<&str> = codes.iter().map(|(reason, _)| reason.code()).collect();
+    assert_eq!(distinct.len(), codes.len());
+}
+
+/// DEC-2825: a pass that cannot read its research context raises `research_context_unread` with
+/// the unread input's code, once each time that input changes and never once a pass; a pass that
+/// reads it clears the reason, so the next one it cannot read alerts again. The alert names the
+/// input alone.
+#[test]
+fn an_unread_research_context_is_alerted_once_per_reason() {
+    let rig = Rig::default();
+    let wires = Wired::default();
+    let unread = Rc::new(Cell::new(Some(ContextUnread::Meter)));
+    let mut research = wires.wiring();
+    research.source = Box::new(Sometimes(Rc::clone(&unread)));
+    let mut process = start(&rig, Some(research));
+    let subjects = |alerts: &[mandate_daemon::Alert]| -> Vec<Option<String>> {
+        alerts
+            .iter()
+            .filter(|alert| alert.key == "research_context_unread")
+            .map(|alert| alert.subject.clone())
+            .collect()
+    };
+    let mut seen = Vec::new();
+    for (second, reason) in [
+        (1, Some(ContextUnread::Meter)),
+        (2, Some(ContextUnread::Meter)),
+        (3, Some(ContextUnread::Clock)),
+        (4, Some(ContextUnread::Clock)),
+        (5, None),
+        (6, Some(ContextUnread::Clock)),
+    ] {
+        unread.set(reason);
+        tick(&rig, NOW + second);
+        seen.push(subjects(&process.step(at(NOW + second))));
+    }
+    assert_eq!(
+        seen,
+        [
+            vec![Some("meter".to_owned())],
+            vec![],
+            vec![Some("clock".to_owned())],
+            vec![],
+            vec![],
+            vec![Some("clock".to_owned())],
+        ]
+    );
     assert_eq!(process.lifecycle().state(), State::Ready);
 }
 

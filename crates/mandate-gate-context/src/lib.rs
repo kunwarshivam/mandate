@@ -37,6 +37,30 @@ mod rule_set;
 pub use positions::{CountedSession, Positions, Protection, RiskMark};
 pub use rule_set::{RuleSetError, gate_rule_set};
 
+/// Why every opening of an agent's is held whatever the order ([`Journaled::opening_hold`],
+/// DEC-2143). A hold for one order (its quote, the session, a limit) is the gate's verdict on that
+/// order, not one of these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpeningHold {
+    /// The account has traded, and the account risk view, which must then read every opening,
+    /// does not yet read this agent's (DEC-2380 item 2, DEC-2804).
+    AccountTraded,
+    /// The account has traded and the agent's mandate is unpinned: the account risk view binds an
+    /// instrument at deployment, and a research agent has none (DEC-2819 item 4).
+    ResearchAgentTraded,
+}
+
+impl OpeningHold {
+    /// The reason as `read-models/agent`'s `openings_held` names it.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::AccountTraded => "account_traded",
+            Self::ResearchAgentTraded => "research_agent_traded",
+        }
+    }
+}
+
 /// One journal row, as its store hands it over, in journal order.
 #[derive(Debug, Clone, Copy)]
 pub struct Row<'a> {
@@ -283,6 +307,22 @@ impl Journaled {
     /// the account risk view does (DEC-2380 item 2).
     pub fn untraded(&self) -> bool {
         self.fills.is_empty() && !self.ordered
+    }
+
+    /// Why every opening of the agent's is held whatever the order, as the binding gate's source
+    /// binds on it and the workspace API's agent read serves it (DEC-2143): `None` while nothing
+    /// has traded on the account; once anything has, the account risk view must read an opening
+    /// (DEC-2380 item 2), and an unpinned mandate's agent binds no instrument for it (DEC-2819
+    /// item 4). No exit, protective order or kill switch reads it (`AGENTS.md` rule 13).
+    #[must_use]
+    pub fn opening_hold(&self, pinned: bool) -> Option<OpeningHold> {
+        if self.untraded() {
+            None
+        } else if pinned {
+            Some(OpeningHold::AccountTraded)
+        } else {
+            Some(OpeningHold::ResearchAgentTraded)
+        }
     }
 
     /// The account as its latest snapshot states it, current or not; `facts` is what judges it

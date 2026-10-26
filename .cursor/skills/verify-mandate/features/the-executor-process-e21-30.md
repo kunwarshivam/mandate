@@ -108,5 +108,9 @@
   sent under its asset id, filled on the fixture, booked by asset id, its stop resting and every
   later reconciliation clean, on a test deployment and on the cell's demo deployment as checked in
   (`deploy/cell/demo`), and a deployed run's broker answering by asset id (DEC-2813).
+  A research agent's deployment (DEC-2819): its instrument only one its admission admitted, an
+  ended or unreadable thesis holding openings while exits, fills, marks and the ticker map keep
+  it, and the research loop in process: one opening filled and protected, the next held as
+  `opening_held`, and the thesis exit cancelling the protection and selling.
   `tests/fixture_fills.rs` also shows the fixture answering an asset-id symbol by its ticker.
 - **Run:** `cargo nextest run -p mandate-executord` (with `MANDATE_PG_URL` for `tests/pg.rs`).

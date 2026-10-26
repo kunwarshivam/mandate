@@ -3686,5 +3686,12 @@
       },
       "/alerts/1/kind": "risk_limit"
     }
+  },
+  {
+    "label": "the kind connection_unavailable, safety",
+    "set": {
+      "/alerts/1/kind": "connection_unavailable",
+      "/alerts/1/class": "safety"
+    }
   }
 ]

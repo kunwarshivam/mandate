@@ -2097,6 +2097,7 @@ dependencies = [
  "mandate-num",
  "mandate-ports",
  "mandate-process",
+ "mandate-research",
  "mandate-risk",
  "mandate-robinhood",
  "mandate-spec",
