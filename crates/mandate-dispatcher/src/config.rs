@@ -1,8 +1,10 @@
 //! The dispatcher's configuration file (DEC-2500 item 7, DEC-2516 item 2): one JSON object, read
 //! once at start, holding no secret and no address. Unknown members are refused, and so is
 //! anything the cell's dispatcher cannot honour: web push switched on (DEC-2504's interim keeps it
-//! off), a channel with no adapter, or more than one email recipient (the founder-only transport
-//! mails the founder alone). A refusal names its member, never its value.
+//! off), and with it any push-service allowlist entry or VAPID subject, which only web push reads
+//! and which would put an address in the file; a channel with no adapter; or more than one email
+//! recipient (the founder-only transport mails the founder alone). A refusal names its member,
+//! never its value.
 
 use std::collections::BTreeSet;
 
@@ -112,15 +114,11 @@ pub fn read(bytes: &[u8]) -> Result<Loaded, ConfigError> {
     if document.get("web_push") != Some(&Value::Bool(false)) {
         return Err(refused("web_push"));
     }
-    if list("push_allowlist")?
-        .iter()
-        .any(|item| item.as_str().is_none())
-    {
+    if !list("push_allowlist")?.is_empty() {
         return Err(refused("push_allowlist"));
     }
-    match document.get("vapid_subject") {
-        Some(Value::Null | Value::Str(_)) => {}
-        _ => return Err(refused("vapid_subject")),
+    if document.get("vapid_subject") != Some(&Value::Null) {
+        return Err(refused("vapid_subject"));
     }
     Ok(Loaded {
         settings: Settings {
@@ -206,6 +204,19 @@ mod tests {
         Ok(())
     }
 
+    /// Either environment the file may name reads as that environment.
+    #[test]
+    fn paper_and_live_read_as_their_environments() -> Result<(), ConfigError> {
+        for (named, want) in [
+            ("paper", mandate_journal::Environment::Paper),
+            ("live", mandate_journal::Environment::Live),
+        ] {
+            let loaded = read(with("environment", &format!("\"{named}\"")).as_bytes())?;
+            assert_eq!(loaded.settings.environment, want, "{named}");
+        }
+        Ok(())
+    }
+
     /// Each refusal names its member: an unknown one, web push on, a channel with no adapter, a
     /// second email recipient, no recipient, a malformed build, a stream that is not one.
     #[test]
@@ -230,6 +241,16 @@ mod tests {
             ("environment", r#""staging""#, "environment"),
             ("vapid_subject", "7", "vapid_subject"),
             ("push_allowlist", "[7]", "push_allowlist"),
+            (
+                "push_allowlist",
+                r#"["fcm.googleapis.com"]"#,
+                "push_allowlist",
+            ),
+            (
+                "vapid_subject",
+                r#""mailto:someone@example.invalid""#,
+                "vapid_subject",
+            ),
             ("app_origin", r#""not an origin""#, "app_origin"),
             ("workspace", "7", "workspace"),
         ] {

@@ -61,7 +61,7 @@ pub use due::{Due, Next, due};
 pub use email::{EmailProvider, MailFailure, MailTransport, RecordedTransport, Submitted};
 pub use os::{Entropy, EntropyUnavailable, OsRandom, System};
 pub use pg::{PgNotices, READ_DEADLINE};
-pub use process::{Dispatcher, LIVENESS, Settings, outcome};
+pub use process::{Dispatcher, LIVENESS, Settings, outcome, serve, watch_terminate};
 pub use step::{Config, Journal, NoticeWriter, step};
 pub use subjects::subjects;
 pub use webpush::{

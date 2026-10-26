@@ -21,19 +21,17 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mandate_dispatcher::{
-    Dispatcher, EmailProvider, OsRandom, PgNotices, RecordedTransport, read_config,
+    Dispatcher, EmailProvider, OsRandom, PgNotices, RecordedTransport, read_config, serve,
+    watch_terminate,
 };
 use mandate_journal::StreamId;
 use mandate_notify::email::FounderAddress;
-use mandate_process::State;
-use mandate_process::probe::{self, Probe, Status};
+use mandate_process::probe::{self, Probe};
 use mandate_time::UtcNanos;
-use tokio::signal::unix::{SignalKind, signal};
 
 const TICK: Duration = Duration::from_secs(1);
 
@@ -115,48 +113,5 @@ fn run(config: &Path, socket: &Path) -> Result<u8, &'static str> {
         loaded.settings,
         host_now(),
     );
-    serve(dispatcher, socket, &terminate)
-}
-
-fn serve<J, P, R>(
-    mut dispatcher: Dispatcher<J, P, R>,
-    socket: &Path,
-    terminate: &AtomicBool,
-) -> Result<u8, &'static str>
-where
-    J: mandate_dispatcher::Journal,
-    P: mandate_notify::Provider,
-    R: mandate_notify::SecureRandom,
-{
-    let status = Status::new(dispatcher.lifecycle().snapshot());
-    probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
-    loop {
-        if let State::Exited(stopped) = dispatcher.lifecycle().state() {
-            status.publish(dispatcher.lifecycle().snapshot());
-            eprintln!("{}", stopped.code());
-            return Ok(stopped.exit_status());
-        }
-        if terminate.load(Ordering::SeqCst) {
-            dispatcher.drain(host_now());
-        }
-        dispatcher.step(host_now());
-        status.publish(dispatcher.lifecycle().snapshot());
-        thread::sleep(TICK);
-    }
-}
-
-/// Registers SIGTERM before the loop starts, and sets `terminate` when it arrives.
-fn watch_terminate(terminate: Arc<AtomicBool>) -> std::io::Result<()> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_io()
-        .build()?;
-    let mut sigterm = {
-        let _entered = runtime.enter();
-        signal(SignalKind::terminate())?
-    };
-    thread::spawn(move || {
-        runtime.block_on(sigterm.recv());
-        terminate.store(true, Ordering::SeqCst);
-    });
-    Ok(())
+    serve(dispatcher, socket, &terminate, host_now, TICK)
 }

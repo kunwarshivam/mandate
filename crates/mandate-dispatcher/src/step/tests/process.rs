@@ -3,17 +3,21 @@
 //! fenced by a newer dispatcher, settles a drain, and maps each step's result to its lifecycle. The
 //! oracles are the notice stream's rows and the lifecycle's state, never the process's own view.
 
-use super::{A1, AUDIENCE, CTL, Checked, Counter, Shared, alerts, id, now, payloads};
+use super::{A1, A2, AUDIENCE, CTL, Checked, Counter, Shared, alerts, id, now, payloads};
 use crate::DispatchError;
-use crate::process::{Dispatcher, Settings, outcome};
+use crate::process::{Dispatcher, Settings, outcome, serve, watch_terminate};
 use crate::step::{Journal, NoticeWriter};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_notify::{FixtureProvider, Origin};
 use mandate_process::{Exit, Input, State};
 use mandate_time::UtcNanos;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::error::Error;
+use std::process::Command;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 const BUILD: &str = "sha256:3333333333333333333333333333333333333333333333333333333333333333";
 
@@ -36,7 +40,7 @@ fn settings(floor: &[&str]) -> Result<Settings, Box<dyn Error>> {
 #[derive(Clone)]
 struct Laid {
     journal: Shared,
-    control: Vec<StoredEvent>,
+    control: Rc<RefCell<Vec<StoredEvent>>>,
     down: Rc<Cell<bool>>,
 }
 
@@ -46,7 +50,7 @@ impl Journal for Laid {
             return Err(DispatchError::JournalUnavailable);
         }
         if stream.as_str() == CTL {
-            return Ok(self.control.clone());
+            return Ok(self.control.borrow().clone());
         }
         self.journal.committed(stream)
     }
@@ -61,24 +65,30 @@ impl Journal for Laid {
     }
 }
 
-/// A control stream whose one row names `A1`'s connection, so only the control stream names `A1`.
-fn laid(journal: &Shared) -> Laid {
-    let body = r#"{"event_type":"ConnectionEstablished","environment":"paper","payload":{"connection_id":"c1","account_ref":"A1"}}"#;
-    let row = StoredEvent {
+/// The control stream's row at `seq` establishing a connection to `account` in `environment`.
+fn established(seq: u64, account: &str, environment: &str) -> StoredEvent {
+    let body = format!(
+        r#"{{"event_type":"ConnectionEstablished","environment":"{environment}","payload":{{"connection_id":"c{seq}","account_ref":"{account}"}}}}"#
+    );
+    StoredEvent {
         stream_id: CTL.to_owned(),
-        seq: 1,
-        event_id: id(7, 1),
+        seq,
+        event_id: id(7, u8::try_from(seq).unwrap_or(u8::MAX)),
         event_type: "ConnectionEstablished".to_owned(),
         schema_version: 2,
-        environment: "paper".to_owned(),
+        environment: environment.to_owned(),
         recorded_at: super::T.to_owned(),
         prev_hash: mandate_canon::Digest::of(b"prev"),
         hash: mandate_canon::Digest::of(body.as_bytes()),
-        body: body.as_bytes().to_vec(),
-    };
+        body: body.into_bytes(),
+    }
+}
+
+/// A control stream whose one row names `A1`'s connection, so only the control stream names `A1`.
+fn laid(journal: &Shared) -> Laid {
     Laid {
         journal: journal.clone(),
-        control: vec![row],
+        control: Rc::new(RefCell::new(vec![established(1, "A1", "paper")])),
         down: Rc::new(Cell::new(false)),
     }
 }
@@ -228,4 +238,125 @@ fn each_step_result_has_its_lifecycle_input() {
     for (ran, want) in cases {
         assert_eq!(outcome(&ran), want, "{ran:?}");
     }
+}
+
+/// DEC-2516 item 1: an account the control stream names only after the process started, and an
+/// account a live row names, which the paper dispatcher never follows. The alert on `A2` becomes a
+/// notice at the first step after its connection is recorded, never before.
+#[test]
+fn a_connection_recorded_mid_run_is_followed_from_the_next_step() -> Checked {
+    let journal = super::world()?;
+    alerts(&journal, A2, 1, &[(1, "risk_limit")])?;
+    let running = laid(&journal);
+    let control = Rc::clone(&running.control);
+    control.borrow_mut().push(established(2, "A2", "live"));
+    let mut process = Dispatcher::start(
+        running,
+        provider()?,
+        Counter(0),
+        writer(&journal)?,
+        settings(&[])?,
+        now()?,
+    );
+    process.step(now()?);
+    assert!(
+        payloads(&journal, "NoticeIssued").is_empty(),
+        "A2 named only by a live row"
+    );
+    control.borrow_mut().push(established(3, "A2", "paper"));
+    process.step(now()?);
+    let issued: Vec<String> = payloads(&journal, "NoticeIssued")
+        .iter()
+        .map(|p| super::text(p, "cause"))
+        .collect();
+    assert_eq!(
+        issued,
+        [id(1, 1)],
+        "the alert on A2, once its connection is recorded"
+    );
+    Ok(())
+}
+
+fn socket(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "mandate-dispatcher-{}-{name}.sock",
+        std::process::id()
+    ))
+}
+
+/// DEC-2500 item 6: a SIGTERM seen before the first step drains the process at once. Nothing is
+/// sent, the alert waiting on `A1` included, and the loop returns the drained status, 0.
+#[test]
+fn a_drain_requested_before_a_step_sends_nothing_and_exits_drained() -> Checked {
+    let journal = super::world()?;
+    alerts(&journal, A1, 1, &[(1, "risk_limit")])?;
+    let process = Dispatcher::start(
+        laid(&journal),
+        provider()?,
+        Counter(0),
+        writer(&journal)?,
+        settings(&[])?,
+        now()?,
+    );
+    let at = now()?;
+    let terminate = AtomicBool::new(true);
+    let status = serve(
+        process,
+        &socket("drained"),
+        &terminate,
+        move || at,
+        Duration::ZERO,
+    )?;
+    assert_eq!(status, 0);
+    assert!(payloads(&journal, "NoticeIssued").is_empty());
+    Ok(())
+}
+
+/// DEC-2500 item 4: a dispatcher a newer one fenced exits from its loop with the fenced status,
+/// 3, having issued nothing.
+#[test]
+fn a_fenced_dispatcher_leaves_its_loop_with_the_fenced_status() -> Checked {
+    let journal = super::world()?;
+    let old = Dispatcher::start(
+        laid(&journal),
+        provider()?,
+        Counter(0),
+        writer(&journal)?,
+        settings(&[])?,
+        now()?,
+    );
+    let _newer = writer(&journal)?;
+    alerts(&journal, A1, 1, &[(1, "risk_limit")])?;
+    let at = now()?;
+    let terminate = AtomicBool::new(false);
+    let status = serve(
+        old,
+        &socket("fenced"),
+        &terminate,
+        move || at,
+        Duration::ZERO,
+    )?;
+    assert_eq!(status, 3);
+    assert!(payloads(&journal, "NoticeIssued").is_empty());
+    Ok(())
+}
+
+/// DEC-2500 item 6: once watched, a SIGTERM sets the drain flag rather than killing the process.
+/// Without the handler the signal would end this test's own process.
+#[test]
+fn a_sigterm_once_watched_sets_the_drain_flag() -> Checked {
+    let terminate = Arc::new(AtomicBool::new(false));
+    watch_terminate(Arc::clone(&terminate))?;
+    let sent = Command::new("kill")
+        .args(["-TERM", &std::process::id().to_string()])
+        .status()?;
+    assert!(sent.success());
+    for _ in 0..1000 {
+        if terminate.load(Ordering::SeqCst) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(terminate.load(Ordering::SeqCst));
+    Ok(())
 }
