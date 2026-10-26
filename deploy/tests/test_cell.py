@@ -2159,18 +2159,21 @@ def test_the_second_manager_runs_only_in_a_dev_or_ci_cell(tier: str):
 @pytest.mark.parametrize(
     "named, hosted",
     [
+        ("01KDEM0000000000000000000W", None),
+        ("01KDEM0000000000000000000Ws", None),
         ("01KDEM0000000000000000000W", ""),
         ("01KDEM0000000000000000000Ws", ""),
         ("01KDEM0000000000000000000Xr", "01KDEM0000000000000000000W"),
     ],
 )
-def test_the_second_manager_serves_only_the_hosted_workspace_with_r(named: str, hosted: str):
+def test_the_second_manager_serves_only_the_hosted_workspace_with_r(named: str, hosted: str | None):
     """DEC-2070 item 1: the second manager's workspace is the hosted workspace's ULID with `r`, so it
     never reads another manager's control stream; the schema refuses a bare ULID, and the chart a
-    research workspace that is not the hosted one's."""
+    research workspace that is not the hosted one's; with no hosted workspace named, the schema alone
+    refuses it."""
     done = helm(
         CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
-        "--set", f"deployManager.researchWorkspace={named}", *(["--set", f"api.workspace={hosted}"] if hosted else []),
+        "--set", f"deployManager.researchWorkspace={named}", *([] if hosted is None else ["--set", f"api.workspace={hosted}"]),
     )
     assert done.returncode != 0 and "researchWorkspace" in done.stderr, done.stderr
     paired = helm(
