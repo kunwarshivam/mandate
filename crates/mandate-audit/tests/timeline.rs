@@ -872,29 +872,36 @@ fn an_account_restriction_on_the_agents_account_is_the_agents() {
 fn the_account_wide_kill_switches_the_timeline_omits_are_not_yet_recordable() {
     let mut j = Journal::new();
     let to = stream(Some("ACCT1"));
-    let a = text(WS_A);
-    let offers = [
-        (
-            "KillSwitchActivated",
-            r#"{"scope":"connection","subject":"ACCT1","reason":"owner"}"#.to_owned(),
-        ),
-        (
-            "KillSwitchActivated",
-            format!(r#"{{"scope":"workspace","subject":"{a}","reason":"owner"}}"#),
-        ),
-    ];
-    for ((typed, payload), version) in offers.iter().flat_map(|o| [(o, 1), (o, 2)]) {
+    let cause = event_id(900_100);
+    let switch = |scope: &str| {
+        format!(
+            r#"{{"scope":"{scope}","subject":"ACCT1","initiator":"risk_limit","purpose":"risk_exit","cancels":[],"closes":[],"deferred":[],"floor":null,"bid":null,"bid_size":null,"copied_from":null,"risk_clock":"2026-09-21T14:00:00.000000000Z"}}"#
+        )
+    };
+    let mut offer = |scope: &str| {
         j.next += 1;
         let id = event_id(j.next);
+        let payload = switch(scope);
         let body = format!(
             r#"{{"envelope_version":1,"environment":"paper","event_id":"{id}","stream_id":"{to}",
-            "event_type":"{typed}","schema_version":{version},"event_time":"{T}","clock_source":"local",
-            "causation_id":null,"correlation_id":null,"actor":{},"config_refs":{{}},
+            "event_type":"KillSwitchActivated","schema_version":1,"event_time":"{T}","clock_source":"local",
+            "causation_id":"{cause}","correlation_id":null,"actor":{},"config_refs":{{}},
             "payload":{payload},"artifact_refs":[],"pii_refs":[]}}"#,
             actor()
         );
-        let outcome = j.fx.try_append_at(&to, T, &[(id, body.as_bytes())]);
-        let refused = matches!(&outcome, AppendOutcome::Invalid { .. });
-        assert!(refused, "{typed} v{version} {payload}: {outcome:?}");
+        j.fx.try_append_at(&to, T, &[(id, body.as_bytes())])
+    };
+    let recorded = offer("account");
+    assert!(
+        !matches!(recorded, AppendOutcome::Invalid { .. }),
+        "the offered switch is well formed but for its scope: {recorded:?}"
+    );
+    for scope in ["connection", "workspace"] {
+        let outcome = offer(scope);
+        let refused_at_scope = match &outcome {
+            AppendOutcome::Invalid { error, .. } => error.path == "payload.scope",
+            _ => false,
+        };
+        assert!(refused_at_scope, "{scope}: {outcome:?}");
     }
 }
