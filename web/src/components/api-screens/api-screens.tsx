@@ -237,6 +237,7 @@ export function ApiAgent({ agentId }: { agentId: string }) {
               <AgentName agent={agent} />
             </h1>
             <PauseControl agent={agent} />
+            <OpeningsHeldNote held={agent.openings_held} />
           </header>
           <Section title="Mandate">{agent.mandate ? <MandateFacts mandate={agent.mandate} /> : <p className={NOT_REPORTED}>Mandate not reported</p>}</Section>
           <Section title="Account positions">
@@ -251,6 +252,26 @@ export function ApiAgent({ agentId }: { agentId: string }) {
         </article>
       ) : null}
     </WorkspaceGate>
+  );
+}
+
+/**
+ * Why every opening of the agent's is held, in words (DEC-2143), so a held agent never reads as a
+ * stalled one. Nothing is shown when no standing reason applies; exits always still run (`AGENTS.md`
+ * rule 13).
+ */
+export function OpeningsHeldNote({ held }: { held: AgentDetail["openings_held"] }) {
+  if (held === null) return null;
+  const why =
+    held.reason === "research_agent_traded"
+      ? "Openings held: this research agent's account has traded, and a further opening waits for the multi-instrument risk state, which is not built yet."
+      : held.reason === "account_traded"
+        ? "Openings held: this account has traded, and your deployment does not yet read the account's risk for a new opening."
+        : "Openings may be held; status unavailable.";
+  return (
+    <p className="rounded-xl bg-lapis-soft px-4 py-3 text-sm" role="status" data-slot="openings-held" data-reason={held.reason}>
+      {why} Exits still run.
+    </p>
   );
 }
 
