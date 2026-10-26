@@ -834,7 +834,7 @@ mod tests {
 
     /// One opening of 1 × 100 in `a` after `edit`: `Ok(code)` for a denial, `Err("allowed")` for an
     /// allow, which is what "passes every limit" looks like, and `Err(story)` for a refusal that
-    /// names the decision it waits on (DEC-129 item 27).
+    /// names the story it waits on.
     fn limit_row(
         edit: impl FnOnce(&mut Owned) -> Result<(), GateError>,
     ) -> Result<Result<ReasonCode, &'static str>, GateError> {
