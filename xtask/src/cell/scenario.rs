@@ -146,12 +146,12 @@ pub struct ExecutorCheck {
 }
 
 /// The owner command the gesture just before it in its step committed, read back with the
-/// owner's session until its phase is `applied`: a process the manager started took it and
-/// journaled the step that applies it (DEC-2379). That gesture's `committed as event <id>` names
-/// the command.
+/// owner's session until its phase is `applied` with `agent`'s runtime's `KillSwitchActivated` on
+/// the agent's stream (DEC-2379). That gesture's `committed as event <id>` names the command.
 #[derive(Debug)]
 pub struct AppliedCheck {
     pub shows: &'static str,
+    pub agent: &'static str,
 }
 
 /// A gesture in `web/` against the cell's API, run after the gestures' Job (lane W2's
@@ -354,6 +354,7 @@ pub enum Body {
         id: String,
         stream: String,
         phases: &'static [&'static str],
+        step: Option<(&'static str, String)>,
     },
 }
 
@@ -381,7 +382,12 @@ impl Body {
                 let got = value.pointer(pointer).and_then(Value::as_str);
                 (got != Some(want.as_str())).then(|| format!("{pointer} is {got:?}, not {want}"))
             }),
-            Self::Command { id, stream, phases } => {
+            Self::Command {
+                id,
+                stream,
+                phases,
+                step,
+            } => {
                 let phase = value["phase"].as_str().unwrap_or_default();
                 let read_from = value["as_of"]
                     .as_array()
@@ -395,6 +401,14 @@ impl Body {
                     Some(format!("it is not read from {stream}"))
                 } else if !phases.contains(&phase) {
                     Some(format!("its phase is {phase:?}"))
+                } else if let Some((event_type, on)) = step
+                    && !value["steps"].as_array().is_some_and(|steps| {
+                        steps
+                            .iter()
+                            .any(|s| s["event_type"] == *event_type && s["stream_id"] == *on)
+                    })
+                {
+                    Some(format!("no {event_type} step on {on}"))
                 } else {
                     None
                 }
@@ -1102,6 +1116,7 @@ pub fn plan(
                         shows: "the agent's runtime, started from step 2's version-2 \
                                 deployment, applying the CLI's kill switch: its command read \
                                 back applied with the owner's session",
+                        agent: AGENT,
                     }),
                     None => Part::Gap(Gap {
                         what: "the agent's runtime applies it",
@@ -1616,7 +1631,7 @@ pub fn run(name: &str) -> Result<()> {
                             ("failed", why)
                         }
                         (None, Some(command)) => {
-                            let read = applied_read(&workspace, &command);
+                            let read = applied_read(&workspace, check.agent, &command);
                             let (word, said, fails) = poll_applied(&read)?;
                             if fails {
                                 failed.get_or_insert_with(|| format!("GET {}: {said}", read.path));
@@ -1920,13 +1935,16 @@ pub fn command_read(workspace: &str, command: &str) -> ApiCheck {
             id: command.to_owned(),
             stream: format!("ctl:{workspace}"),
             phases: &COMMAND_PHASES,
+            step: None,
         },
     }
 }
 
 /// The signed-in read of `command` in `workspace` that passes only once the command is
-/// `applied`: a runtime journaled its `KillSwitchActivated` (DEC-2379).
-pub fn applied_read(workspace: &str, command: &str) -> ApiCheck {
+/// `applied` with a `KillSwitchActivated` step on `agent`'s own stream, which only that agent's
+/// runtime writes (the executor writes the account stream), so the read names the process that
+/// applied it (DEC-2379, #2430's review).
+pub fn applied_read(workspace: &str, agent: &str, command: &str) -> ApiCheck {
     ApiCheck {
         shows: "the command, read back applied",
         path: format!("/v1/workspaces/{workspace}/commands/{command}"),
@@ -1936,6 +1954,7 @@ pub fn applied_read(workspace: &str, command: &str) -> ApiCheck {
             id: command.to_owned(),
             stream: format!("ctl:{workspace}"),
             phases: &["applied"],
+            step: Some(("KillSwitchActivated", format!("agent:{workspace}:{agent}"))),
         },
     }
 }
@@ -3381,17 +3400,38 @@ mod tests {
             Some("1TSG2CY1PW".into())
         );
         assert_eq!(committed_event(&["code 1234abcd"]), None);
-        let read = applied_read("demo1", "1TSG");
+        assert!(
+            matches!(&step7[at], Part::Applied(c) if c.agent == AGENT),
+            "the runtime of the agent the CLI killed"
+        );
+        let read = applied_read("demo1", AGENT, "1TSG");
         assert_eq!(read.path, "/v1/workspaces/demo1/commands/1TSG");
-        let body = |phase: &str| {
-            json!({"command_id": "1TSG", "phase": phase, "as_of": [{"stream_id": "ctl:demo1"}]})
-                .to_string()
+        let with_steps = |phase: &str, steps: Value| {
+            json!({"command_id": "1TSG", "phase": phase, "steps": steps,
+                "as_of": [{"stream_id": "ctl:demo1"}]})
+            .to_string()
         };
+        let runtime =
+            json!([{"stream_id": "agent:demo1:demo-spy", "event_type": "KillSwitchActivated"}]);
+        let body = |phase: &str| with_steps(phase, runtime.clone());
         assert_eq!(read.body.missing(&body("applied")), None);
         for phase in ["recorded", "taken", "ended", "refused"] {
             assert!(
                 read.body.missing(&body(phase)).is_some(),
                 "{phase} is not applied"
+            );
+        }
+        for other in [
+            json!([]),
+            json!([{"stream_id": "acct:demo1:01KDEA0000000001000000000A", "event_type": "KillSwitchActivated"}]),
+            json!([{"stream_id": "agent:demo1:agt_01KDEM00000000000000000WEB", "event_type": "KillSwitchActivated"}]),
+            json!([{"stream_id": "agent:demo1:demo-spy", "event_type": "AgentModeApplied"}]),
+        ] {
+            assert!(
+                read.body
+                    .missing(&with_steps("applied", other.clone()))
+                    .is_some(),
+                "applied without the demo agent's runtime's KillSwitchActivated: {other}"
             );
         }
         assert_eq!(
