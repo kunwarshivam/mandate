@@ -3551,6 +3551,7 @@ fn land_check_cmd(root: &Path, base: &str) -> Result<()> {
             ],
         )?;
         if let Some(reason) = rerun_blocked(&[&target, dir, &scratch], unprivileged_reaches) {
+            fs::remove_dir_all(&scratch).ok();
             return Err(anyhow::Error::new(RerunUnavailable(reason)).context(format!(
                 "`cargo xtask ci {job}` failed with {status} as root, and no test can run again \
                  as uid {UNPRIVILEGED_ID} here: give land-check a checkout that user can reach \
