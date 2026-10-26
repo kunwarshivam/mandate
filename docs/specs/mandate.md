@@ -774,9 +774,9 @@ stream** fold (journal spec §2). It belongs to the agent and survives restarts 
   move E.
 - **An adopted order state moves no figure** ([DEC-2829](../project/decisions/DEC-2829.md)): a
   `CompensatingEvent` at version 1, whose difference is `order_state`, right after the
-  `OrderStateChanged` it corrects in the same batch, steps nothing; the order's state is that record's
-  and its fill is its own `FillApplied`. Any other compensation is an input not yet read, and the
-  view fails closed.
+  `OrderStateChanged` it corrects in the same append, steps nothing; the order's state is that
+  record's and its fill is its own `FillApplied`. Any other compensation, a crash's included, is an
+  input not yet read, and the view fails closed.
 - **Corporate actions** ([DEC-2303](../project/decisions/DEC-2303.md)) are folded at application,
   trading spec §8.5's instant (20:00 New York time on the last trading day before the ex-date). A
   **split** replaces Q, B and realized by §8.5's rule: Q' and the removed residual basis R, and cash
