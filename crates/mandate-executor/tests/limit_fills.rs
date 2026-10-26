@@ -736,18 +736,41 @@ fn each_guard_alone_refuses_the_fill() {
         derived(&bought, &[]).is_empty(),
         "a buy: nothing is derived"
     );
+}
 
-    let over = replayed(&shell, |kind, payload| {
+/// `shell`'s journal with every filled quantity reported for the order `id` edited to `filled`.
+fn reporting(shell: &Shell, id: &str, filled: &str) -> Shell {
+    replayed(shell, |kind, payload| {
         let reports = payload
             .get("filled_qty")
-            .is_some_and(|filled| *filled != Value::Null);
-        if kind == "OrderStateChanged" && member_is(payload, "client_order_id", &id) && reports {
-            set(payload, "filled_qty", text("3"));
+            .is_some_and(|reported| *reported != Value::Null);
+        if kind == "OrderStateChanged" && member_is(payload, "client_order_id", id) && reports {
+            set(payload, "filled_qty", text(filled));
         }
-    });
+    })
+}
+
+/// DEC-2300 item 1's cap alone: 4 held, a sell of 2, and its record's report edited. Reported 1,
+/// with 3 listed, the increment fits every other guard and is derived, which shows the edit
+/// reaches the fold; reported 3, more than the order's 2, with 1 listed, the ledger still holds the
+/// 3 and the position is reduced by exactly 3, so only the order's quantity refuses it.
+#[test]
+#[ignore = "pending E7-6"]
+fn a_report_beyond_the_orders_quantity_derives_nothing() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (shell, id) = exited(&ports, "4", "2", "2");
+    assert_eq!(
+        derived(&reporting(&shell, &id, "1"), &[held(AAPL, "3")]),
+        vec![expected(&id, "1", "1", price(EXIT_LIMIT), tuesday())],
+        "the edit reaches the fold: a report of 1 of 2 is derived"
+    );
     assert!(
-        derived(&over, &[held(AAPL, "-1")]).is_empty(),
-        "a record reporting more than the order's quantity: nothing is derived"
+        derived(&reporting(&shell, &id, "3"), &[held(AAPL, "1")]).is_empty(),
+        "a record reporting 3 of an order of 2: nothing is derived"
     );
 }
 
@@ -863,7 +886,8 @@ proptest! {
         let config = config();
         let ports = ports(&ids, &mandates, &instruments, &config);
         let total: u32 = 6;
-        let mut shell = holding(&ports, &total.to_string());
+        let owned: u32 = total + 3;
+        let mut shell = holding(&ports, &owned.to_string());
         let exit = sent(&mut shell, &ports, EXIT, risk_exit(AAPL, &total.to_string(), EXIT_LIMIT), "b-exit");
         let id = exit.client_order_id.as_str().to_owned();
         let mut cumulative = 0u32;
@@ -873,7 +897,7 @@ proptest! {
             cumulative = (cumulative + step).min(total);
             let status = if cumulative == total { "filled" } else { "partially_filled" };
             reported(&mut shell, &ports, &id, &total.to_string(), &cumulative.to_string(), status);
-            let left = total - cumulative;
+            let left = owned - cumulative;
             let positions = vec![held(AAPL, &left.to_string())];
             let fills = derived(&shell, &positions);
             for one in &fills {
@@ -889,9 +913,10 @@ proptest! {
         if cumulative < total {
             let beyond = total + overshoot;
             reported(&mut shell, &ports, &id, &total.to_string(), &beyond.to_string(), "filled");
+            let listed = owned - beyond;
             prop_assert!(
-                derived(&shell, &[held(AAPL, "0")]).is_empty(),
-                "a report beyond the order's quantity derives nothing"
+                derived(&shell, &[held(AAPL, &listed.to_string())]).is_empty(),
+                "a report beyond the order's quantity derives nothing, though the ledger holds it"
             );
         }
     }
