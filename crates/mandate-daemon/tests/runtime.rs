@@ -2176,13 +2176,28 @@ const RESEARCH_SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 /// `expires_at`, appended to the agent stream through the journal's own append as the research
 /// writer would leave it. It takes the stream's writer epoch, fencing any process before it.
 fn thesis_at(rig: &Rig, as_of: &str, expires_at: &str) {
+    thesis_on(
+        rig,
+        ("01J8Z3MTHE5000000000000001", "01J8Z3MTHE5000000000000002"),
+        RESEARCH_SPY,
+        (as_of, expires_at),
+    );
+}
+
+/// As [`thesis_at`], for the thesis `thesis` recorded as the event `event` on `instrument`.
+fn thesis_on(
+    rig: &Rig,
+    (thesis, event): (&str, &str),
+    instrument: &str,
+    (as_of, expires_at): (&str, &str),
+) {
     let stream = StreamId::parse(AGENT_STREAM).unwrap();
     let mut journal = rig.journal.clone();
     let head = journal.rows(&stream).unwrap().len();
     let epoch = journal.take_ownership(&stream).unwrap();
     let hash = Digest::of(b"x").to_hex();
     let payload = parse(format!(
-        r#"{{"model_id":"llm.research_agent","model_version":"0.1.0","content_hash":"sha256:{hash}","thesis_id":"01J8Z3MTHE5000000000000001","lineage_id":"01J8Z3MTHE5000000000000001","revision":0,"predecessor_thesis_id":null,"autopsy_ref":null,"instrument_id":"{RESEARCH_SPY}","asset_class":"us_equity","direction":"long","as_of":"{as_of}","expires_at":"{expires_at}","horizon_s":3600,"conviction":"0.6","confidence":"0.7","evidence_ref":null,"evidence_sources":["src.newswire"],"corroboration":"independent_source","invalidation":"a guidance cut","allowlist_version":3,"prompt_ref":"sha256:{hash}","response_ref":"sha256:{hash}","admitted":true,"reason":null}}"#
+        r#"{{"model_id":"llm.research_agent","model_version":"0.1.0","content_hash":"sha256:{hash}","thesis_id":"{thesis}","lineage_id":"{thesis}","revision":0,"predecessor_thesis_id":null,"autopsy_ref":null,"instrument_id":"{instrument}","asset_class":"us_equity","direction":"long","as_of":"{as_of}","expires_at":"{expires_at}","horizon_s":3600,"conviction":"0.6","confidence":"0.7","evidence_ref":null,"evidence_sources":["src.newswire"],"corroboration":"independent_source","invalidation":"a guidance cut","allowlist_version":3,"prompt_ref":"sha256:{hash}","response_ref":"sha256:{hash}","admitted":true,"reason":null}}"#
     ).as_bytes())
     .unwrap();
     let mut refs = Object::new();
@@ -2208,7 +2223,7 @@ fn thesis_at(rig: &Rig, as_of: &str, expires_at: &str) {
             event_time: at(NOW - 3_600),
         },
         &mandate_store::envelope::Fields {
-            event_id: "01J8Z3MTHE5000000000000002",
+            event_id: event,
             event_type: "ThesisProposed",
             schema_version: 1,
             causation_id: None,
@@ -2760,4 +2775,252 @@ fn the_demo_envelope_decides_asks_and_proposes_once_granted_in_session() {
         "{:?}",
         kinds(&rig)
     );
+}
+
+/// The research envelope's content hash for `llm.research_agent` 0.1.0.
+const RESEARCH_MODEL_HASH: &str =
+    "bff754a2e669add9a7928a4b8c71c764cfe61455e361621ae6f6c262af0824cd";
+
+/// The demo's research deployment, an unpinned universe, wired as the deployed runtime wires it,
+/// over the journaled facts an in-session tick finds: both of its models registered, an admitted
+/// thesis on SPY current for the hour, and both models' `Long` on SPY, the research model's from
+/// that thesis (conviction 0.6), journaled first, as the cell's replay of 2026-10-27 journals
+/// them. The first start only opens
+/// the agent stream, so the thesis lands after `StreamOpened`.
+fn research_in_session() -> (Rig, RuntimeProcess<Rig>) {
+    research_in_session_with(|_| {})
+}
+
+/// As [`research_in_session`], with `more` laid down after SPY's thesis.
+fn research_in_session_with(more: impl Fn(&Rig)) -> (Rig, RuntimeProcess<Rig>) {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "AccountSnapshotRecorded",
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":1,"equity":"100000","cash":"100000","buying_power":"100000","non_marginable_buying_power":"100000","risk_clock":"{}"}}"#,
+            at(IN_SESSION)
+        ),
+    );
+    on_account(
+        &rig,
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"{SPY}","price":"580.05","source":"quote","feed":"fixture","bid":"579.95","sane":true,"session":"regular","risk_clock":"{}"}}"#,
+            at(IN_SESSION)
+        ),
+    );
+    let document = parse(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deploy/cell/demo/research-mandate.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let version = format!("sha256:{}", Digest::of(b"research mandate").to_hex());
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    rig.control.borrow_mut().push(row(
+        CONTROL,
+        seq,
+        "AgentDeployed",
+        "user",
+        &format!(r#"{{"agent_id":"{AGENT}","mandate_version":"{version}"}}"#),
+    ));
+    for (model, model_version, hash, admits) in [
+        ("quant.ma_crossover", "1.0.0", DEMO_MODEL_HASH, false),
+        ("llm.research_agent", "0.1.0", RESEARCH_MODEL_HASH, true),
+    ] {
+        let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+        rig.control.borrow_mut().push(row(
+            CONTROL,
+            seq,
+            "ConfigSnapshotRegistered",
+            "user",
+            &format!(
+                r#"{{"kind":"model_version","content_hash":"sha256:{hash}","model_id":"{model}","model_version":"{model_version}","params":[],"admits_instruments":{admits}}}"#
+            ),
+        ));
+    }
+    let wire = || {
+        let mut wiring = mandate_daemon::production::wired(
+            fixture::wiring("user-owner", AGENT_STREAM),
+            &version,
+            &document,
+            (
+                Some(gate_rules()),
+                mandate_daemon::bars::BarsReader::default(),
+            ),
+            CLOCK,
+            AGENT,
+        );
+        wiring.models = Some(ModelsWiring {
+            models: Box::new(Host {
+                answer: Rc::new(RefCell::new(vec![
+                    Evaluated {
+                        output: ModelOutput {
+                            model_id: "llm.research_agent".into(),
+                            model_version: "0.1.0".into(),
+                            content_hash: Digest::from_hex(RESEARCH_MODEL_HASH).unwrap(),
+                            conviction: Conviction::parse("0.6").unwrap(),
+                            confidence: Unit::parse("0.6").unwrap(),
+                            thesis_id: Some("01J8Z3MTHE5000000000000001".into()),
+                            lineage_id: Some("01J8Z3MTHE5000000000000001".into()),
+                            ..daily(IN_SESSION - 60).output
+                        },
+                        ..daily(IN_SESSION - 60)
+                    },
+                    Evaluated {
+                        output: ModelOutput {
+                            content_hash: Digest::from_hex(DEMO_MODEL_HASH).unwrap(),
+                            ..daily(IN_SESSION - 60).output
+                        },
+                        ..daily(IN_SESSION - 60)
+                    },
+                ])),
+                ..Host::default()
+            }),
+            artifacts: Box::new(Closes::default()),
+        });
+        wiring
+    };
+    drop(RuntimeProcess::start(
+        rig.clone(),
+        wire(),
+        &config(),
+        at(IN_SESSION),
+    ));
+    thesis_at(
+        &rig,
+        &at(IN_SESSION - 60).to_string(),
+        &at(IN_SESSION + 3_540).to_string(),
+    );
+    more(&rig);
+    reconciled(&rig, ACCOUNT);
+    let process = RuntimeProcess::start(rig.clone(), wire(), &config(), at(IN_SESSION));
+    (rig, process)
+}
+
+/// E21-2, DEC-2827, the cell's research loop end to end (lane GW's replay of 2026-10-27 found it
+/// stop here): an unpinned research deployment with an admitted SPY thesis and the crossover's
+/// `Long` on SPY decides once in session and asks its owner about the opening, both naming SPY;
+/// nothing is proposed to the executor before the grant.
+#[test]
+#[ignore = "pending E21-2"]
+fn a_research_deployment_decides_and_asks_about_its_working_universe_in_session() {
+    let (rig, mut process) = research_in_session();
+    for second in 1..4 {
+        tick(&rig, IN_SESSION + second);
+        process.step(at(IN_SESSION + second));
+    }
+    assert_eq!(count(&rig, "ThesisProposed"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "DecisionMade"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "ApprovalRequested"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
+    let rows = agent_rows(&rig);
+    let payload = |event_type: &str| {
+        let row = rows
+            .iter()
+            .find(|row| row.event_type == event_type)
+            .unwrap();
+        parse(&row.body).unwrap().get("payload").cloned().unwrap()
+    };
+    let decided = payload("DecisionMade");
+    for (name, want) in [
+        ("instrument_id", SPY),
+        ("side", "buy"),
+        ("purpose", "open"),
+        ("autonomy", "ask"),
+    ] {
+        assert_eq!(member(&decided, name), Some(want), "{name}: {decided:?}");
+    }
+    let asked = payload("ApprovalRequested");
+    assert!(
+        String::from_utf8(mandate_canon::to_canonical(&asked))
+            .unwrap()
+            .contains(SPY),
+        "the request names SPY: {asked:?}"
+    );
+}
+
+/// Another US equity, which the research envelope's theses may admit.
+const RESEARCH_QQQ: &str = "3a9e1f0c-2b7d-4c55-8e61-0f4d2a6b9c13";
+
+/// DEC-2819 item 2, as the executor opens: with two surviving admitted theses there is no one
+/// working instrument, so the research deployment decides nothing in session, though both models'
+/// `Long` on SPY are journaled.
+#[test]
+#[ignore = "pending E21-2"]
+fn a_research_deployment_with_two_surviving_theses_opens_nothing() {
+    let (rig, mut process) = research_in_session_with(|rig| {
+        thesis_on(
+            rig,
+            ("01J8Z3MTHE5000000000000003", "01J8Z3MTHE5000000000000004"),
+            RESEARCH_QQQ,
+            (
+                &at(IN_SESSION - 60).to_string(),
+                &at(IN_SESSION + 3_540).to_string(),
+            ),
+        );
+    });
+    for second in 1..4 {
+        tick(&rig, IN_SESSION + second);
+        process.step(at(IN_SESSION + second));
+    }
+    assert_eq!(count(&rig, "ThesisProposed"), 2, "{:?}", kinds(&rig));
+    assert!(count(&rig, "ModelOutputRecorded") >= 2, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "DecisionMade"), 0, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "ApprovalRequested"), 0, "{:?}", kinds(&rig));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// `AGENTS.md` rule 13: a research deployment holding SPY from its own fill under a current thesis
+/// has the sale planned on the owner's kill switch, as a pinned deployment's is. The flatten maps
+/// every instrument a thesis record admitted, with the class its record names (DEC-2819, as the
+/// executor maps exits), so no operator alert `flatten_unplanned` is raised for it. Today it maps
+/// only the pinned universe, which a research mandate has none of.
+#[test]
+#[ignore = "pending E21-2"]
+fn a_research_deployments_kill_switch_sells_its_held_instrument() {
+    let rig = held_spy_under_a_thesis_expiring_at(NOW + 3_600);
+    let mut process = RuntimeProcess::start(rig.clone(), research_wired(), &config(), at(NOW + 4));
+    process.step(at(NOW + 5));
+    kill_switch(&rig);
+    let alerts = process.step(at(NOW + 6));
+    assert_eq!(count(&rig, "KillSwitchActivated"), 1, "{:?}", kinds(&rig));
+    let keys: Vec<&str> = alerts.iter().map(|alert| alert.key).collect();
+    assert!(
+        !keys.contains(&mandate_daemon::FLATTEN_UNPLANNED),
+        "the held SPY is planned: {keys:?}"
+    );
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+}
+
+/// The demo's research deployment as [`held_spy_under_a_thesis_expiring_at`] wires it.
+fn research_wired() -> Wiring {
+    let document = mandate_canon::parse(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deploy/cell/demo/research-mandate.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    mandate_daemon::production::wired(
+        fixture::wiring("user-owner", AGENT_STREAM),
+        &format!("sha256:{}", Digest::of(b"research mandate").to_hex()),
+        &document,
+        (None, mandate_daemon::bars::BarsReader::default()),
+        CLOCK,
+        AGENT,
+    )
 }
