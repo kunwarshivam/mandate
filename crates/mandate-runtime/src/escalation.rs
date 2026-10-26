@@ -46,9 +46,9 @@ use crate::step::{
 };
 use crate::types::{
     AgentId, Autonomy, ConnectionId, DryRunVerdict, EventId, FlattenLeg, FlattenRequest,
-    FoldedEvent, Initiator, IntentBody, IntentHandoff, KillScope, Mode, OrderExecution,
-    OwnerConfirmation, Proposal, ProtectionPrices, Purpose, RiskClock, TimeInForce, TimerId,
-    TimerRequest, WorkspaceId,
+    FoldedEvent, Initiator, IntentBody, IntentHandoff, KillScope, MandateView, Mode,
+    OrderExecution, OwnerConfirmation, Proposal, ProtectionPrices, Purpose, RiskClock, TimeInForce,
+    TimerId, TimerRequest, WorkspaceId,
 };
 
 /// The control stream's two event types the runtime acts on (journal spec §9, DEC-155 item 2).
@@ -242,39 +242,41 @@ fn bound_action(
     })
 }
 
-/// An ASK (tick step 5, mandate spec §6.4): the request with its content object and hash, its
-/// `cli_inbox` delivery, the deadline timer, and the opaque notification, in that order. The
-/// deadline is the risk clock plus the version's `timeout_s`, and `on_timeout` is `skip`.
-///
-/// The approver requirement is the bound one, one approver and no independence, because the
-/// runtime folds no `PolicyChanged` yet; check 7 reads the overlay as `NONE` until it does
-/// (DEC-257 item 12, DEC-278 item 3).
+/// An ASK the runtime has built in full before it journals the decision that asks: the content
+/// object and its hash, and the deadline the request carries (DEC-2814).
+pub(crate) struct Prepared {
+    content: RequestContent,
+    object: Value,
+    hash: ContentHash,
+    deadline: RiskClock,
+}
+
+/// The ASK of `proposal` at `now` built in full (mandate spec §6.4), or the reason code it cannot
+/// be: `ask_unbound` when the decision cannot be bound (no `decided_by` label, or a
+/// `combined_score` that is not a decimal), `plan_mismatch` when the builder's plan names another
+/// asset class than the order, and `content_unhashable` when the content object or its hash
+/// cannot be written. The decision then journals the dry run's `deny` with that code and is
+/// notified as any skipped decision, so no asked opening is ever dropped unseen (DEC-2814).
 ///
 /// `deferred` names the checks the decision's dry run left to the binding gate, in byte order. The
 /// request's content names the same (version 3, journal spec rules 291 and 292; DEC-2515), so the
 /// approver is told which checks have not run. A deferral with no builder plan never reaches here:
 /// the dry run denies it `plan_required` (DEC-2810).
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the ask's inputs are the decision's own: the proposal, its label, its deferrals, the clock, the ports, the decision and the batch"
-)]
-pub(crate) fn ask(
+///
+/// The approver requirement is the bound one, one approver and no independence, because the
+/// runtime folds no `PolicyChanged` yet; check 7 reads the overlay as `NONE` until it does
+/// (DEC-257 item 12, DEC-278 item 3).
+pub(crate) fn prepared(
     state: &RuntimeState,
     proposal: &Proposal,
     decided_by: Option<&str>,
     deferred: &[&'static str],
     now: RiskClock,
-    ports: &Ports<'_>,
-    decision: EventId,
-    batch: &mut Batch<'_>,
-) -> Result<(), RuntimeError> {
-    let view = ports.view;
-    let Some(bound) = bound_action(state, proposal, decided_by, &view.version) else {
-        return Ok(());
-    };
-    let Ok(execution) = bound_plan(proposal) else {
-        return Ok(());
-    };
+    view: &MandateView,
+) -> Result<Prepared, &'static str> {
+    let bound =
+        bound_action(state, proposal, decided_by, &view.version).ok_or(payload::ASK_UNBOUND)?;
+    let execution = bound_plan(proposal).map_err(|()| payload::PLAN_MISMATCH)?;
     let deadline = RiskClock::from_secs(now.secs().saturating_add(view.approval.timeout_s));
     let evidence = state
         .evidence_for(&proposal.instrument, now)
@@ -293,13 +295,35 @@ pub(crate) fn ask(
         execution,
         deferred_to_binding: deferred.iter().map(|name| (*name).to_owned()).collect(),
     };
-    let (Ok(object), Ok(hash)) = (content_object(&content), content_hash(&content)) else {
-        return Ok(());
-    };
+    let object = content_object(&content).map_err(|_| payload::CONTENT_UNHASHABLE)?;
+    let hash = content_hash(&content).map_err(|_| payload::CONTENT_UNHASHABLE)?;
+    Ok(Prepared {
+        content,
+        object,
+        hash,
+        deadline,
+    })
+}
+
+/// An ASK (tick step 5, mandate spec §6.4): the request [`prepared`] built, its `cli_inbox`
+/// delivery, the deadline timer, and the opaque notification, in that order. The deadline is the
+/// risk clock plus the version's `timeout_s`, and `on_timeout` is `skip`.
+pub(crate) fn ask(
+    prepared: Prepared,
+    timeout_s: i64,
+    decision: EventId,
+    batch: &mut Batch<'_>,
+) -> Result<(), RuntimeError> {
+    let Prepared {
+        content,
+        object,
+        hash,
+        deadline,
+    } = prepared;
     let request = batch.journal(
         "ApprovalRequested",
         Some(decision),
-        requested_payload(&content, object, &hash, view.approval.timeout_s)?,
+        requested_payload(&content, object, &hash, timeout_s)?,
     )?;
     let delivered = payload::object(vec![
         ("approval", payload::text(&request.0)),

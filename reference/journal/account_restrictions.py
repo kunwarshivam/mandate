@@ -1,6 +1,6 @@
 """Journal spec §9.5's reference vectors for `AccountRestrictionChanged` (DEC-2137): an account
 restriction the executor detected (trading spec §7.3), with its closed `cause` (DEC-441 item 23),
-journaled before the modes it applies. v0.95 (DEC-2816) journals every cause in force, and stream
+journaled before the modes it applies. v0.96 (DEC-2816) journals every cause in force, and stream
 rule 309 keeps each on the stream once: the `streams` here are account streams of restrictions.
 
 The schema and rules 279 and 280 live in `control.py`, beside §9.5's other account-stream records,

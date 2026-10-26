@@ -334,9 +334,14 @@ impl Positions {
     /// its replacement inherits the rest of. Any other fill is another agent's, passed over unread
     /// (DEC-2112 item 2). A fill of a protective leg whose id names no known entry, in an
     /// instrument the agent holds, may be the agent's (DEC-160's single-holder rule, which needs
-    /// every agent's lots), so it is refused rather than guessed (DEC-2138 item 1).
+    /// every agent's lots), so it is refused rather than guessed (DEC-2138 item 1). A fill that
+    /// names no order (`FillApplied` version 2's `null`, DEC-2812) is the account's, no agent's,
+    /// and is passed over too.
     fn fill(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
-        let order = payload.text("client_order_id")?.to_owned();
+        let Some(order) = optional_text(payload, "client_order_id")? else {
+            return Ok(());
+        };
+        let order = order.to_owned();
         let protective = self
             .orders
             .get(&order)
@@ -654,7 +659,7 @@ fn quantity(payload: &Payload<'_>, member: &'static str) -> Result<Qty, Unreadab
     Qty::parse(payload.text(member)?).map_err(|_| (payload.refused)(member))
 }
 
-fn optional_text<'p>(
+pub(crate) fn optional_text<'p>(
     payload: &'p Payload<'_>,
     member: &'static str,
 ) -> Result<Option<&'p str>, Unreadable> {

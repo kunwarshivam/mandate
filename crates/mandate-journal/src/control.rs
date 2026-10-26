@@ -73,7 +73,9 @@ const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 /// version 1 (DEC-2040), and so do `AccountCloseRequested` (DEC-2337),
 /// `AccountRestrictionChanged` (DEC-2137), the account stream's `KillSwitchActivated`
 /// (DEC-2139), and `ExternalActivityIngested`, `RejectObserved` and `OrderAbandoned` (DEC-2803).
-const EXECUTOR: [&str; 16] = [
+/// `FillApplied` closes at version 2 and stays at version 1, and `LateFillApplied` stays at
+/// version 1 (DEC-2812).
+const EXECUTOR: [&str; 18] = [
     "IntentReceived",
     "GateDecided",
     "OrderSubmitted",
@@ -87,6 +89,8 @@ const EXECUTOR: [&str; 16] = [
     EXTERNAL,
     REJECT,
     ABANDONED,
+    FILL,
+    "LateFillApplied",
     "BrokerPositionObserved",
     "AgentModeApplied",
     "CompensatingEvent",
@@ -121,6 +125,10 @@ const REJECT: &str = "RejectObserved";
 /// An intent the executor gave up on (§9.5, DEC-2803): no rule, until trading spec §2.3 states the
 /// client order id the executor derives from an intent.
 const ABANDONED: &str = "OrderAbandoned";
+
+/// One broker fill applied to the account (§9.5, DEC-2812): version 2's `client_order_id` is `null`
+/// for a fill that names no order of ours, and rule 299 binds a named one to trading spec §2.3.
+const FILL: &str = "FillApplied";
 
 /// The companion's (§9.5): an `OrderSubmitted` at `schema_version` 2 must be immediately preceded
 /// in its `append` batch by exactly one `OrderRequestRecorded`, which its `causation_id` names.
@@ -425,6 +433,7 @@ pub(crate) fn payload(
         RESTRICTION => restriction_rules(p)?,
         KILL_SWITCH => kill_switch_rules(p, causation_id)?,
         EXTERNAL => external_rules(p)?,
+        FILL if schema_version == 2 => fill_rules(p)?,
         "ProtectionChanged" => protection_changed_rules(p)?,
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
@@ -687,6 +696,24 @@ fn external_rules(p: Payload<'_>) -> Result<(), Invalid> {
     }
     Ok(())
 }
+
+/// Rule 299 (DEC-2812): a `FillApplied` version 2 that names an order names one of ours, as trading
+/// spec §2.3 states it: `md-`, then one or more ASCII letters, digits or hyphens, at most 128
+/// characters in all. A fill that names no order of ours is `null`.
+fn fill_rules(p: Payload<'_>) -> Result<(), Invalid> {
+    if p.is_null("client_order_id") {
+        return Ok(());
+    }
+    let named = p.text("client_order_id");
+    let ours = named.len() <= OUR_CLIENT_ORDER_ID_MAX
+        && named.strip_prefix("md-").is_some_and(|body| {
+            !body.is_empty() && body.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        });
+    ensure(ours, InvalidReason::Schema, "payload.client_order_id")
+}
+
+/// The longest client order id of ours, Alpaca's bound (trading spec §2.3).
+const OUR_CLIENT_ORDER_ID_MAX: usize = 128;
 
 /// Rule 260 (DEC-2337 item 2), a stream rule: an `AccountCloseRequested` names a switch,
 /// instrument, and attempt no earlier one of its stream names together, so a duplicate request is
@@ -1036,6 +1063,8 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         (RESTRICTION, 1) => Some(&ACCOUNT_RESTRICTION_CHANGED),
         (KILL_SWITCH, 1) => Some(&ACCOUNT_KILL_SWITCH_ACTIVATED),
         (EXTERNAL, 1) => Some(&EXTERNAL_ACTIVITY_INGESTED),
+        (FILL, 1) | ("LateFillApplied", 1) => Some(&crate::schema::FILL_APPLIED_V1),
+        (FILL, 2) => Some(&FILL_APPLIED_V2),
         (REJECT, 1) => Some(&REJECT_OBSERVED),
         (ABANDONED, 1) => Some(&ORDER_ABANDONED),
         ("BrokerPositionObserved", 1) => Some(&BROKER_POSITION_OBSERVED),
@@ -1456,6 +1485,28 @@ static EXTERNAL_ACTIVITY_INGESTED: Ty = Ty::Record(&[
     ("side", Ty::Nullable(&Ty::OneOf(&["buy", "sell"]))),
     ("qty", Ty::Nullable(&Ty::Decimal)),
     ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's `FillApplied` version 2 (DEC-2812): version 1's members, in version 1's order, with
+/// `client_order_id` nullable.
+static FILL_APPLIED_V2: Ty = Ty::Record(&[
+    ("fill_id", Ty::Str),
+    ("client_order_id", Ty::Nullable(&Ty::Str)),
+    ("instrument_id", Ty::Str),
+    ("side", Ty::Str),
+    ("qty_gross", Ty::Decimal),
+    ("price", Ty::Decimal),
+    ("trade_date", Ty::Date),
+    ("risk_clock", Ty::RiskClock),
+    (
+        "fees",
+        Ty::List(&Ty::Record(&[
+            ("kind", Ty::Str),
+            ("amount", Ty::Decimal),
+            ("asset", Ty::Str),
+            ("status", Ty::Str),
+        ])),
+    ),
 ]);
 
 /// §9.5's `RejectObserved` (DEC-2803).

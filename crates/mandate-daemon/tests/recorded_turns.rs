@@ -20,7 +20,9 @@ use mandate_gateway::Outcome;
 use mandate_gateway::money::Usd6;
 use mandate_research_run::CallPlan;
 use mandate_research_run::agentic::{RunKind, Tool, TurnPlan};
-use mandate_runtime::{ResearchInput, ResearchRequest, RiskClock, TurnRef, TurnRequest};
+use mandate_runtime::{
+    ActiveThesis, ResearchInput, ResearchRequest, RiskClock, TurnRef, TurnRequest,
+};
 use mandate_time::UtcNanos;
 use serde_json::{Value as Json, json};
 
@@ -335,4 +337,93 @@ fn each_turn_is_answered_with_its_scripted_calls_then_the_final_reply() {
     assert_eq!(record.outcome, Outcome::Ok);
     assert!(record.tool_calls.is_empty());
     assert!(record.output.is_some(), "past the script, the final reply");
+}
+
+/// Agent harness spec §6.9 end to end through the worker's gateway: a bundle's `monitor_reply`,
+/// naming the thesis the run's context showed, answers a `monitor` run's first turn, with no
+/// scripted turn, and the gateway takes it under the
+/// monitor schema, `invalidations` alone, so the record carries it as the run's final output. The
+/// same bundle's ideate run still takes its script.
+#[test]
+fn a_monitor_turn_is_answered_with_the_bundle_s_monitor_reply() {
+    let output =
+        json!({"invalidations": [{"thesis_id": "$THESIS_ID", "evidence": []}]}).to_string();
+    let invalidation = json!({"invalidations": [{"thesis_id": "01SHOWN", "evidence": []}]});
+    let bundle = load_edited("monitor-reply", AGENTIC, |research| {
+        research["monitor_reply"] = json!({
+            "output": output,
+            "latency_ms": 0,
+            "input_tokens": 900,
+            "output_tokens": 40,
+            "cached_tokens": 0
+        });
+    })
+    .unwrap_or_else(|e| panic!("{e:?}"));
+    assert!(bundle.monitor_reply.is_some());
+    let shelf = Shelf::default();
+    let now = || UtcNanos::from_parts(CUT_OFF + 5, 0).unwrap();
+    let mut worker =
+        RecordedWorker::new(&bundle, who(), Box::new(shelf.clone()), Box::new(now)).unwrap();
+    let mut shown = parts();
+    shown.active = vec![ActiveThesis {
+        thesis_id: "01SHOWN".to_owned(),
+        lineage_id: "01SHOWN".to_owned(),
+        revision: 0,
+        instrument: mandate_research::AssetId::new("7b4a1c2e-1111-4a2b-9c3d-000000000001").unwrap(),
+        symbol: mandate_research_run::Symbol::new("AAPL").unwrap(),
+        expires_at: RiskClock::from_secs(CUT_OFF + 86_400),
+    }];
+    worker.hand(
+        &ResearchRequest::Start {
+            run_id: RUN.to_owned(),
+            cut_off: RiskClock::from_secs(CUT_OFF),
+        },
+        &shown,
+    );
+    let answers = worker.answers(RiskClock::from_secs(CUT_OFF + 1));
+    let Some(ResearchInput::Retrieved { items, .. }) = answers.first() else {
+        panic!("the run retrieved: {answers:?}");
+    };
+    let mut monitor = turn(1, items.len(), Vec::new());
+    monitor.kind = RunKind::Monitor;
+    monitor.plan.tools = [Tool::NewsSearch, Tool::NewsGet, Tool::Note].into();
+    worker
+        .turn(&monitor)
+        .unwrap_or_else(|e| panic!("monitor turn: {e:?}"));
+    let answers = worker.answers(RiskClock::from_secs(CUT_OFF + 30));
+    let [ResearchInput::Called { record, .. }] = answers.as_slice() else {
+        panic!("the monitor turn answered one record: {answers:?}");
+    };
+    assert_eq!(record.outcome, Outcome::Ok, "{:?}", record.outcome);
+    assert!(record.tool_calls.is_empty(), "no scripted turn");
+    assert_eq!(
+        record.output.as_ref().map(to_canonical),
+        Some(to_canonical(
+            &parse(invalidation.to_string().as_bytes()).unwrap()
+        ))
+    );
+    let mut ideate = turn(1, items.len(), Vec::new());
+    ideate.call.call_id = encode_ulid((1 << 100) + 99);
+    worker
+        .turn(&ideate)
+        .unwrap_or_else(|e| panic!("ideate turn: {e:?}"));
+    let answers = worker.answers(RiskClock::from_secs(CUT_OFF + 40));
+    let [ResearchInput::Called { record, .. }] = answers.as_slice() else {
+        panic!("the ideate turn answered one record: {answers:?}");
+    };
+    let asked: Vec<(String, String)> = record
+        .tool_calls
+        .iter()
+        .map(|call| {
+            (
+                call.name.clone(),
+                String::from_utf8(to_canonical(&call.arguments)).unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        asked,
+        scripted_in_file()[0],
+        "an ideate turn on the same bundle takes its script, not the monitor reply"
+    );
 }

@@ -103,8 +103,8 @@ after the run date.
 enforced by `is_dec_523` in `crates/mandate-cli/src/config.rs` and again at run time: exactly these eight
 string members. SPY's Alpaca asset id below is the one the shell tests use
 (`crates/mandate-shell/tests/common/mod.rs` `SPY`); confirm it against the paper API (`GET /v2/assets/SPY`),
-because the run refuses if the broker's id differs. Do NOT use `b0b6dd9d-...`: that is AAPL's id, which the CLI
-test fixture `crates/mandate-cli/tests/fixtures/spy_mandate.json` mislabels "SPY".
+because the run refuses if the broker's id differs. `b0b6dd9d-...` is AAPL's id, which the tracer's and the
+Alpaca recordings' fixtures use; nothing labelled SPY carries it any more (#2631).
 ```bash
 cat > $W/files/spy.json <<EOF
 {"asset_class":"us_equity","etp":"plain","etp_classified_at":"$(date -u +%Y-%m-%dT00:00:00Z)","etp_source":"nasdaq_trader_symbol_directory","exchange":"arca","increment":"whole","instrument_id":"b28f4066-5c6d-479b-a2af-85dc1a8f16fb","symbol":"SPY"}
@@ -128,8 +128,7 @@ Keep `autonomy` as is: the paper run acts only on `auto`, and the fixture's `rou
 `auto`. Protection is on with `take_profit_distance` set (required by the brief).
 ```bash
 cp crates/mandate-cli/tests/fixtures/spy_mandate.json $W/files/mandate.json
-sed -i -e 's/b0b6dd9d-8b9b-48a9-ba46-b9d54906e415/b28f4066-5c6d-479b-a2af-85dc1a8f16fb/' \
-       -e 's/sha256:4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc/sha256:cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d/' \
+sed -i -e 's/sha256:4f3559229f89b27c04b43ec773b0ff0b884895362622964b78dfd791d67e18fc/sha256:cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d/' \
        $W/files/mandate.json
 # founder's choice (2026-10-16): $5,000 order cap, $10,000 allocation (paper money)
 sed -i -e 's/"allocation_usd":"1000"/"allocation_usd":"10000"/' \

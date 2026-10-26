@@ -11,14 +11,18 @@ use std::rc::Rc;
 use mandate_canon::Digest;
 use mandate_daemon::meter::CellMeter;
 use mandate_daemon::recorded::Bundle;
+use mandate_daemon::remote::RemoteGateway;
 use mandate_daemon::source::{Rows, SourceFor};
 use mandate_daemon::worker::{RecordedWorker, StoreSink, WorkerError, WorkerFor};
 use mandate_daemon::{ArtifactSink, ResearchParts, ResearchWorker};
 use mandate_gateway::Outcome as CallOutcome;
+use mandate_gateway::frame;
 use mandate_gateway::meter::MeterStore;
 use mandate_gateway::meter::{MeterRecord, SharedMeter};
 use mandate_gateway::money::Usd6;
 use mandate_gateway::provider::SequentialIds;
+use mandate_gateway::wire;
+use mandate_gateway::{CallRecord, CallRequest, RequestError};
 use mandate_journal::{ArtifactRef, ArtifactStore, Environment, StoredEvent, StreamId};
 use mandate_num::Usd;
 use mandate_research::{
@@ -648,5 +652,174 @@ fn a_restarted_worker_over_the_journaled_meter_keeps_the_daily_cap() {
         admitted.outcome,
         CallOutcome::Ok,
         "not held after the restart"
+    );
+}
+
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the remote worker's gateway bounds a real socket against the host clock"
+)]
+fn host_now() -> UtcNanos {
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap();
+    UtcNanos::from_parts(
+        i64::try_from(since.as_secs()).unwrap(),
+        since.subsec_nanos(),
+    )
+    .unwrap()
+}
+
+/// What a scripted model-gateway service does with the one call it takes.
+#[derive(Clone, Copy)]
+enum Service {
+    /// Answers the call with a whole record carrying its call id, prompt and response.
+    Answer,
+    /// Reads the call and closes without a reply.
+    Drop,
+}
+
+/// A scripted service on a local port: it takes one connection, and hands back the call it read.
+fn service(
+    script: Service,
+) -> (
+    std::net::SocketAddr,
+    std::thread::JoinHandle<Option<CallRequest>>,
+) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let handle = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().ok()?;
+        let body = frame::read_frame(&mut stream, frame::MAX_REQUEST_FRAME).ok()?;
+        let request = wire::request_from(&body).ok()?;
+        if let Service::Answer = script {
+            let record = CallRecord {
+                call_id: request.call_id.clone(),
+                agent_id: request.agent_id.clone(),
+                purpose: request.purpose,
+                model: request.model.clone(),
+                endpoint: "recorded:demo".to_owned(),
+                request_digest: Some(Digest::of(b"request")),
+                guard_rule: None,
+                seed: None,
+                prompt_ref: Some(Digest::of(b"the prompt")),
+                response_ref: Some(Digest::of(b"the response")),
+                reported_identity: Some("recorded@Recorded".to_owned()),
+                provider_request_id: None,
+                outcome: CallOutcome::Ok,
+                attempts: 1,
+                tokens: mandate_gateway::money::Usage {
+                    input: 10,
+                    output: 2,
+                    cached: 0,
+                },
+                cost: Usd6::from_micros(50),
+                price_table_ref: Digest::of(b"prices"),
+                cache_hit: false,
+                deadline: request.deadline,
+                completed_at: request.as_of,
+                reservation: Some(mandate_canon::encode_ulid(1 << 80)),
+                observations: vec![],
+                output: None,
+                tool_calls: vec![],
+                prompt: Some(b"the prompt".to_vec()),
+                response: Some(b"the response".to_vec()),
+            };
+            frame::write_frame(
+                &mut stream,
+                &wire::reply_bytes(&Ok(record)),
+                frame::MAX_REPLY_FRAME,
+            )
+            .ok()?;
+        }
+        Some(request)
+    });
+    (address, handle)
+}
+
+fn remote_worker(shelf: &Shelf, address: std::net::SocketAddr) -> RecordedWorker {
+    let who = WorkerFor {
+        workspace: "ws1".to_owned(),
+        agent: "agent-a".to_owned(),
+        description: "Long-only US large caps, on public news and filings.".to_owned(),
+    };
+    let now = || UtcNanos::from_parts(CUT_OFF + 5, 0).unwrap();
+    RecordedWorker::remote(
+        &bundle(),
+        who,
+        Box::new(shelf.clone()),
+        Box::new(now),
+        RemoteGateway::new(address, host_now),
+    )
+}
+
+/// DEC-2397 items 1 and 6: a remote worker retrieves as the recorded one does, sends its call to the
+/// model-gateway service for this run's plan, stores the record's prompt and response before the
+/// answer, and answers the record the service sent, stamped at the pass's risk clock.
+#[test]
+#[ignore = "pending E21-62"]
+fn a_remote_worker_calls_the_service_and_answers_its_record() {
+    let shelf = Shelf::default();
+    let (address, service) = service(Service::Answer);
+    let mut worker = remote_worker(&shelf, address);
+    start(&mut worker);
+    let retrieved = worker.answers(RiskClock::from_secs(CUT_OFF + 1));
+    let Some(ResearchInput::Retrieved { items, .. }) = retrieved.first() else {
+        panic!("the run retrieved: {retrieved:?}");
+    };
+    let plan = call_plan(items.len());
+    worker.hand(&ResearchRequest::Call(plan.clone()), &parts());
+    let sent = service.join().unwrap().expect("the service read the call");
+    assert_eq!(sent.call_id, plan.call_id);
+    assert_eq!(sent.workspace_id, "ws1");
+    let stored = shelf.put.borrow().clone();
+    assert!(
+        stored.ends_with(&[b"the prompt".to_vec(), b"the response".to_vec()]),
+        "stored first"
+    );
+    let at = RiskClock::from_secs(CUT_OFF + 30);
+    let answers = worker.answers(at);
+    let [
+        ResearchInput::Called {
+            run_id,
+            at: stamped,
+            record,
+        },
+    ] = answers.as_slice()
+    else {
+        panic!("one record: {answers:?}");
+    };
+    assert_eq!((run_id.as_str(), *stamped), (RUN, at));
+    assert_eq!(record.call_id, plan.call_id);
+}
+
+/// DEC-2397 item 2: an exchange the service does not answer whole is answered
+/// `gateway_unreachable`, and nothing is stored for it.
+#[test]
+#[ignore = "pending E21-62"]
+fn a_remote_worker_answers_a_lost_exchange_gateway_unreachable() {
+    let shelf = Shelf::default();
+    let (address, service) = service(Service::Drop);
+    let mut worker = remote_worker(&shelf, address);
+    start(&mut worker);
+    let retrieved = worker.answers(RiskClock::from_secs(CUT_OFF + 1));
+    let Some(ResearchInput::Retrieved { items, .. }) = retrieved.first() else {
+        panic!("the run retrieved: {retrieved:?}");
+    };
+    let before = shelf.put.borrow().len();
+    worker.hand(&ResearchRequest::Call(call_plan(items.len())), &parts());
+    assert!(service.join().unwrap().is_some(), "the call was sent once");
+    assert_eq!(
+        shelf.put.borrow().len(),
+        before,
+        "nothing stored for a lost call"
+    );
+    assert_eq!(
+        worker.answers(RiskClock::from_secs(CUT_OFF + 30)),
+        [ResearchInput::Refused {
+            run_id: RUN.to_owned(),
+            at: RiskClock::from_secs(CUT_OFF + 30),
+            error: RequestError::GatewayUnreachable,
+        }]
     );
 }

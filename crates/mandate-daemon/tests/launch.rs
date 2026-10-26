@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use mandate_daemon::launch::{Named, fixture_permitted, named};
+use mandate_daemon::launch::{self, Named, fixture_permitted, named};
 
 fn flags(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
     let map: BTreeMap<String, String> = pairs
@@ -158,4 +158,42 @@ fn the_fixture_journal_is_refused_on_a_managers_pod() {
     assert_eq!(fixture_permitted(true, &none()), Ok(()));
     assert_eq!(fixture_permitted(false, &manager("runtime")), Ok(()));
     assert_eq!(fixture_permitted(false, &none()), Ok(()));
+}
+
+fn words(text: &str) -> Vec<String> {
+    text.split_whitespace().map(str::to_owned).collect()
+}
+
+/// DEC-2397 item 6: `--gateway <host:port>` beside `--research` names the model-gateway service;
+/// without the flag the runtime keeps its in-process recorded fake.
+#[test]
+#[ignore = "pending E21-62"]
+fn the_gateway_flag_names_the_service_beside_research() {
+    assert_eq!(
+        launch::gateway(&words("run --research /b --gateway 127.0.0.1:8080"), true),
+        Ok(Some("127.0.0.1:8080".parse().unwrap()))
+    );
+    assert_eq!(launch::gateway(&words("run --research /b"), true), Ok(None));
+    assert_eq!(launch::gateway(&words("run"), false), Ok(None));
+}
+
+/// DEC-2397 item 6: the flag written `--gateway=`, with no value, with another flag in its place,
+/// with a value that names no address, or without `--research`, refuses the start.
+#[test]
+#[ignore = "pending E21-62"]
+fn a_gateway_flag_that_names_no_service_refuses_the_start() {
+    for (text, research) in [
+        ("run --research /b --gateway=127.0.0.1:8080", true),
+        ("run --research /b --gateway", true),
+        ("run --research /b --gateway --probe /p", true),
+        ("run --research /b --gateway nowhere", true),
+        ("run --gateway 127.0.0.1:8080", false),
+        ("run --gateway=127.0.0.1:8080", false),
+    ] {
+        assert_eq!(
+            launch::gateway(&words(text), research),
+            Err("gateway_address_invalid"),
+            "{text}"
+        );
+    }
 }

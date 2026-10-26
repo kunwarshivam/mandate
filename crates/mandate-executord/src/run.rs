@@ -12,7 +12,7 @@ use mandate_executor::AccountScope;
 use crate::Wiring;
 use crate::alpaca::AlpacaBroker;
 use crate::credential::paper_wiring;
-use crate::deployment::{BrokerFacts, Deployment, Production, Unread};
+use crate::deployment::{BrokerFacts, Deployment, Named, Production, Unread};
 use crate::facts::{alpaca_facts, fixture_facts};
 use crate::paper::FixturePaper;
 
@@ -38,8 +38,9 @@ impl<B> Run<B> {
     /// The run with its wiring's mandate, instrument, protection, binding-gate and marking ports
     /// read from `scope`'s deployments in `production` ([`Deployment::wired`]), in place of the
     /// fixture's, which know nothing; its quote feed stays the broker's, and the broker's facts are
-    /// the run's own.
-    pub fn deployed(self, scope: &AccountScope, production: Production) -> Self {
+    /// the run's own. Its broker's answers name each deployed instrument by its asset id
+    /// ([`Named`]).
+    pub fn deployed(self, scope: &AccountScope, production: Production) -> Run<Named<B>> {
         let Production {
             rows,
             artifacts,
@@ -51,10 +52,27 @@ impl<B> Run<B> {
             facts,
         } = self;
         let facts = facts.unwrap_or_else(|| Box::new(Unread));
-        Self {
-            broker,
-            wiring: Deployment::wired(wiring, scope, rows, artifacts, (liquidity, facts)),
+        let (wiring, deployment) =
+            Deployment::wired(wiring, scope, rows, artifacts, (liquidity, facts));
+        Run {
+            broker: Named::new(broker, Some(deployment)),
+            wiring,
             facts: None,
+        }
+    }
+
+    /// The run as it serves with no deployment read: the fixture's ports, which know nothing, and
+    /// its broker's answers as the broker gave them.
+    pub fn undeployed(self) -> Run<Named<B>> {
+        let Self {
+            broker,
+            wiring,
+            facts,
+        } = self;
+        Run {
+            broker: Named::new(broker, None),
+            wiring,
+            facts,
         }
     }
 
