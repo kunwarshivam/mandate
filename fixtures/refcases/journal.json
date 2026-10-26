@@ -106528,7 +106528,8 @@
   "account_stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
   "step_up_window_s": 300,
   "methods": [
-   "cli_confirm"
+   "cli_confirm",
+   "passkey"
   ],
   "drafts": {
    "requested": {
@@ -114261,6 +114262,268 @@
     ]
    },
    {
+    "name": "passkey_in_paper",
+    "clause": "check 3: `passkey` in paper (v0.106, DEC-2523)",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00002000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_pk_paper",
+        "authenticated_at": 1792339250,
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBTG00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "RiskLimitTriggered",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      },
+      "payload": {
+       "agent_id": "agent_a",
+       "agent_equity": "9700",
+       "high_water_mark": "10000",
+       "drawdown": "0.03",
+       "day_start_equity": "10000",
+       "capital_base": "10000",
+       "inherited_loss": "0",
+       "net_contributed": "10000",
+       "limit": "max_daily_loss",
+       "action": "exits_only",
+       "reason": null,
+       "breach_time_s": 0,
+       "metric": null,
+       "threshold": null,
+       "value": null,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00034000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00002000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_pk_paper",
+        "authenticated_at": 1792339250,
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "lift"
+     }
+    ]
+   },
+   {
+    "name": "passkey_in_live",
+    "clause": "check 3: `passkey` in live, off the founder's connection (v0.106, DEC-2523)",
+    "overlay_independent": false,
+    "environment": "live",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "live",
+      "event_id": "01JBAK00002000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_pk_live",
+        "authenticated_at": 1792339250,
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "live",
+      "event_id": "01JBTG00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "RiskLimitTriggered",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      },
+      "payload": {
+       "agent_id": "agent_a",
+       "agent_equity": "9700",
+       "high_water_mark": "10000",
+       "drawdown": "0.03",
+       "day_start_equity": "10000",
+       "capital_base": "10000",
+       "inherited_loss": "0",
+       "net_contributed": "10000",
+       "limit": "max_daily_loss",
+       "action": "exits_only",
+       "reason": null,
+       "breach_time_s": 0,
+       "metric": null,
+       "threshold": null,
+       "value": null,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "live",
+      "event_id": "01JBCP00035000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00002000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_pk_live",
+        "authenticated_at": 1792339250,
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "lift"
+     }
+    ]
+   },
+   {
     "name": "request_step_up_stale",
     "clause": "check 4: the request's step-up, judged at its own `submitted_at`",
     "overlay_independent": false,
@@ -114383,7 +114646,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00034000000000000000",
+      "event_id": "01JBCP00036000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -114417,7 +114680,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00035000000000000000",
+      "event_id": "01JBCP00037000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -114582,7 +114845,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00036000000000000000",
+      "event_id": "01JBCP00038000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -114616,7 +114879,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00037000000000000000",
+      "event_id": "01JBCP00039000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -114781,7 +115044,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00038000000000000000",
+      "event_id": "01JBCP00040000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -114815,7 +115078,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00039000000000000000",
+      "event_id": "01JBCP00041000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -114980,7 +115243,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00040000000000000000",
+      "event_id": "01JBCP00042000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -115014,7 +115277,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00041000000000000000",
+      "event_id": "01JBCP00043000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -115175,7 +115438,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00042000000000000000",
+      "event_id": "01JBCP00044000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -115205,7 +115468,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00043000000000000000",
+      "event_id": "01JBCP00045000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -115422,7 +115685,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00044000000000000000",
+      "event_id": "01JBCP00046000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -115456,7 +115719,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00045000000000000000",
+      "event_id": "01JBCP00047000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -115621,7 +115884,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00046000000000000000",
+      "event_id": "01JBCP00048000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -115655,7 +115918,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00047000000000000000",
+      "event_id": "01JBCP00049000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -115823,7 +116086,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00048000000000000000",
+      "event_id": "01JBCP00050000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -115990,7 +116253,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00049000000000000000",
+      "event_id": "01JBCP00051000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -116026,7 +116289,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00050000000000000000",
+      "event_id": "01JBCP00052000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -116200,7 +116463,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00051000000000000000",
+      "event_id": "01JBCP00053000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -116327,7 +116590,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00052000000000000000",
+      "event_id": "01JBCP00054000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -116454,7 +116717,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00053000000000000000",
+      "event_id": "01JBCP00055000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -116585,7 +116848,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00054000000000000000",
+      "event_id": "01JBCP00056000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -116716,7 +116979,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00055000000000000000",
+      "event_id": "01JBCP00057000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -116847,7 +117110,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00056000000000000000",
+      "event_id": "01JBCP00058000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -117012,7 +117275,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00057000000000000000",
+      "event_id": "01JBCP00059000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -117046,7 +117309,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00058000000000000000",
+      "event_id": "01JBCP00060000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -117211,7 +117474,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00059000000000000000",
+      "event_id": "01JBCP00061000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -117245,7 +117508,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00060000000000000000",
+      "event_id": "01JBCP00062000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -117410,7 +117673,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00061000000000000000",
+      "event_id": "01JBCP00063000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -117444,7 +117707,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00062000000000000000",
+      "event_id": "01JBCP00064000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -117609,7 +117872,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00063000000000000000",
+      "event_id": "01JBCP00065000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -117643,7 +117906,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00064000000000000000",
+      "event_id": "01JBCP00066000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -117855,7 +118118,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00065000000000000000",
+      "event_id": "01JBCP00067000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -117889,7 +118152,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00066000000000000000",
+      "event_id": "01JBCP00068000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -118054,7 +118317,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00067000000000000000",
+      "event_id": "01JBCP00069000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -118088,7 +118351,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00068000000000000000",
+      "event_id": "01JBCP00070000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -118232,7 +118495,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00069000000000000000",
+      "event_id": "01JBCP00071000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -118400,7 +118663,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00070000000000000000",
+      "event_id": "01JBCP00072000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -118531,7 +118794,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00071000000000000000",
+      "event_id": "01JBCP00073000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -118662,7 +118925,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00072000000000000000",
+      "event_id": "01JBCP00074000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -118883,7 +119146,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00073000000000000000",
+      "event_id": "01JBCP00075000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -118919,7 +119182,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00074000000000000000",
+      "event_id": "01JBCP00076000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -119158,7 +119421,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00075000000000000000",
+      "event_id": "01JBCP00077000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -119192,7 +119455,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00076000000000000000",
+      "event_id": "01JBCP00078000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -119228,7 +119491,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00077000000000000000",
+      "event_id": "01JBCP00079000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -119262,7 +119525,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00078000000000000000",
+      "event_id": "01JBCP00080000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
