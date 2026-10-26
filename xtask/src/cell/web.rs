@@ -518,6 +518,10 @@ fn trade_loop_env(agent: &str, request: &Path, done: &Path) -> [(&'static str, S
 
 /// The customer journey spec under `web/e2e-cell/` (lane GL, DEC-2134).
 const JOURNEY_SPEC: &str = "customer-journey.spec.ts";
+/// Playwright's bound on the journey run (`OWLHEAD_CELL_TIMEOUT_MS`): 300 seconds, past the spec's
+/// own 240 s, which allows `next dev` to compile each route on its first visit, and inside
+/// [`TRADE_LOOP_POLLS`]' 500 s, so Playwright writes its result before the driver gives up.
+const JOURNEY_TIMEOUT_MS: &str = "300000";
 /// The customer journey's steps, in the order the spec reaches them; its result names each one.
 pub const JOURNEY_STEPS: [&str; 5] = [
     "connections",
@@ -541,9 +545,10 @@ pub fn journey_from_web(workspace: &str, agent: &str) -> Result<BTreeMap<String,
         &[
             ("OWLHEAD_CELL_SPEC", JOURNEY_SPEC.to_owned()),
             ("OWLHEAD_CELL_AGENT", agent.to_owned()),
+            ("OWLHEAD_CELL_TIMEOUT_MS", JOURNEY_TIMEOUT_MS.to_owned()),
         ],
         "web-journey",
-        GESTURE_POLLS,
+        TRADE_LOOP_POLLS,
         &mut || Ok(()),
     )?;
     let Some(text) = run.result else {
