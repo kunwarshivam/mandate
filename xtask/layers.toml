@@ -722,6 +722,15 @@ pure = true
 allowed_external = ["thiserror"]
 forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-paper", "mandate-cli", "mandate-daemon", "mandate-journal-pg"]
 
+# The stored market bars a decision may rest on (DEC-2385): the trust check on a daily-bar dataset,
+# moved from the shell so the shell, the runner, the runtime process and the executor read one rule.
+# Below all of them, over mandate-marketdata's dataset; it reads files and decides nothing else.
+[crates.mandate-bars]
+layer = 7
+safety_critical = true
+pure = false
+allowed_external = ["thiserror"]
+
 [crates.mandate-shell]
 layer = 8
 safety_critical = true

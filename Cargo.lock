@@ -1798,6 +1798,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-bars"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-marketdata",
+ "mandate-num",
+ "mandate-time",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-builder"
 version = "0.0.0"
 dependencies = [
@@ -2291,6 +2302,7 @@ dependencies = [
  "mandate-accounting",
  "mandate-alpaca",
  "mandate-artifacts-fs",
+ "mandate-bars",
  "mandate-canon",
  "mandate-connections",
  "mandate-domain",
@@ -2569,6 +2581,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-accounting",
  "mandate-alpaca",
+ "mandate-bars",
  "mandate-builder",
  "mandate-canon",
  "mandate-domain",
