@@ -520,7 +520,6 @@ fn envelope(row: &StoredEvent) -> Json {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_first_passkey_enrols_within_300_s_of_the_sign_in_and_waits_its_cool_off() {
     for signer in [Signer::es256(), Signer::ed25519()] {
         let rows = Rows::opened();
@@ -606,7 +605,6 @@ fn a_first_passkey_enrols_within_300_s_of_the_sign_in_and_waits_its_cool_off() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_backup_eligible_registration_is_recorded_so() {
     let signer = Signer::es256();
     let rows = Rows::opened();
@@ -632,7 +630,6 @@ fn a_backup_eligible_registration_is_recorded_so() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_registration_signed_at_counter_5_is_recorded_at_5() {
     let signer = Signer::es256();
     let rows = Rows::opened();
@@ -671,7 +668,6 @@ fn a_registration_signed_at_counter_5_is_recorded_at_5() {
 /// A registration challenge binds its workspace: ALICE's challenge of another workspace, its
 /// bytes signed, is unknown here.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_registration_challenge_of_another_workspace_is_invalid_at_its_id() {
     let signer = Signer::es256();
     let rows = Rows::opened();
@@ -700,7 +696,6 @@ fn a_registration_challenge_of_another_workspace_is_invalid_at_its_id() {
 /// append (another enrolment of the same passkey id, rule 251) refuses it rather than being
 /// appended over.
 #[test]
-#[ignore = "pending E9-4"]
 fn an_enrolment_whose_head_moved_after_its_read_is_journal_unavailable() {
     let signer = Signer::es256();
     let rows = Rows::opened();
@@ -743,7 +738,6 @@ fn an_enrolment_whose_head_moved_after_its_read_is_journal_unavailable() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_first_enrolment_past_300_s_of_the_sign_in_is_stale_and_spends_its_challenge() {
     let signer = Signer::es256();
     let rows = Rows::opened();
@@ -764,7 +758,6 @@ fn a_first_enrolment_past_300_s_of_the_sign_in_is_stale_and_spends_its_challenge
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_second_enrolment_needs_passkey_step_up_and_own_row_step_up_is_not_judged_yet() {
     let signer = Signer::es256();
     let rows = holding(&signer);
@@ -814,7 +807,6 @@ fn a_second_enrolment_needs_passkey_step_up_and_own_row_step_up_is_not_judged_ye
 /// A member who holds a passkey needs step-up for another however fresh the sign-in: a session
 /// taken over within 300 s of its sign-in cannot add its own passkey.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_second_enrolment_on_a_fresh_sign_in_without_step_up_is_step_up_required() {
     let signer = Signer::es256();
     let rows = holding(&signer);
@@ -841,7 +833,6 @@ fn a_second_enrolment_on_a_fresh_sign_in_without_step_up_is_step_up_required() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_first_enrolment_carrying_step_up_or_half_of_it_is_invalid() {
     let signer = Signer::es256();
     let rows = Rows::opened();
@@ -879,7 +870,6 @@ fn a_first_enrolment_carrying_step_up_or_half_of_it_is_invalid() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_body_with_another_member_or_one_missing_is_invalid() {
     let signer = Signer::es256();
     let rows = Rows::opened();
@@ -917,7 +907,6 @@ fn a_body_with_another_member_or_one_missing_is_invalid() {
 /// A submit spends its challenge, refused or enrolled, and keeps its id as a tombstone, so the
 /// challenge route never revives it under the same key (DEC-2118 item 1).
 #[test]
-#[ignore = "pending E9-4"]
 fn a_registration_challenge_serves_one_submit_whatever_follows_and_a_same_key_retry_finds_it_spent_dec_2118_item_1()
  {
     let signer = Signer::es256();
@@ -979,7 +968,6 @@ fn a_registration_challenge_serves_one_submit_whatever_follows_and_a_same_key_re
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_unknown_expired_or_foreign_registration_challenge_is_invalid_at_its_id() {
     let signer = Signer::es256();
     let rows = Rows::opened();
@@ -1034,7 +1022,6 @@ fn an_unknown_expired_or_foreign_registration_challenge_is_invalid_at_its_id() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_registration_that_does_not_read_is_invalid_with_no_path_and_spends_its_challenge() {
     let signer = Signer::es256();
     let rows = Rows::opened();
@@ -1116,7 +1103,6 @@ fn a_registration_that_does_not_read_is_invalid_with_no_path_and_spends_its_chal
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_challenge_is_judged_before_the_session_and_the_session_before_the_registration() {
     let signer = Signer::es256();
     let rows = Rows::opened();
@@ -1154,7 +1140,6 @@ fn the_challenge_is_judged_before_the_session_and_the_session_before_the_registr
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_passkey_id_the_stream_ever_enrolled_is_invalid_with_no_path() {
     let signer = Signer::es256();
     let mut rows = Rows::opened();
@@ -1194,7 +1179,6 @@ fn a_passkey_id_the_stream_ever_enrolled_is_invalid_with_no_path() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_member_whose_records_break_their_rule_is_journal_unavailable() {
     let signer = Signer::es256();
     let rows = Rows::opened();
@@ -1232,7 +1216,6 @@ fn a_member_whose_records_break_their_rule_is_journal_unavailable() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_non_member_is_refused_and_a_live_workspace_is_live_unavailable() {
     let signer = Signer::es256();
     let rows = Rows::opened();
@@ -1291,7 +1274,6 @@ fn the_registration_encoder_writes_the_shape_mandate_passkey_reads() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn without_an_object_store_an_enrolment_is_journal_unavailable_and_appends_nothing() {
     let signer = Signer::es256();
     let rows = Rows::opened();
