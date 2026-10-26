@@ -41,7 +41,8 @@ use crate::payload;
 use crate::ports::Ports;
 use crate::state::RuntimeState;
 use crate::step::{
-    Batch, Switching, cancel_approvals, dry_run, lifecycle_change, proposed, switched, tif_name,
+    Batch, Switching, cancel_approvals, dry_run, lifecycle_change, overlaid, proposed, switched,
+    tif_name,
 };
 use crate::types::{
     AgentId, Autonomy, ConnectionId, DryRunVerdict, EventId, FlattenLeg, FlattenRequest,
@@ -645,7 +646,8 @@ fn revalidated(
     let bound = &request.content.bound;
     let execution = request.content.execution.as_ref().map(granted_plan);
     let proposal = bound_proposal(bound, execution)?;
-    let classified = ports.plan.classify(ports.view, &proposal);
+    let verdict = dry_run(state, ports, &proposal, now);
+    let classified = overlaid(ports.plan.classify(ports.view, &proposal), &verdict);
     let decided_now = classified.decided_by.clone().unwrap_or_default();
     let classification = match classified.autonomy {
         Autonomy::Auto => Classification::Auto,
@@ -655,9 +657,11 @@ fn revalidated(
         Autonomy::Deny => Classification::Deny,
     };
     let asked_label = asked_by(&classification);
-    let (dry_run, dry_run_name, dry_run_reason) = match dry_run(state, ports, &proposal, now) {
-        DryRunVerdict::Allow => (DryRun::Allow, "allow", Value::Null),
-        DryRunVerdict::Deny { reason_code } => (
+    let (dry_run, dry_run_name, dry_run_reason) = match verdict {
+        DryRunVerdict::Allow | DryRunVerdict::AllowDeferring { .. } => {
+            (DryRun::Allow, "allow", Value::Null)
+        }
+        DryRunVerdict::Deny { reason_code } | DryRunVerdict::DenyOnFigures { reason_code, .. } => (
             DryRun::Deny {
                 reason: reason_code.clone(),
             },

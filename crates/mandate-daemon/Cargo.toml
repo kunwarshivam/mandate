@@ -18,6 +18,7 @@ mandate-canon.workspace = true
 mandate-domain.workspace = true
 mandate-gate-context.workspace = true
 mandate-gateway.workspace = true
+mandate-identity.workspace = true
 mandate-journal.workspace = true
 mandate-num.workspace = true
 mandate-ports.workspace = true

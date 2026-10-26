@@ -468,6 +468,11 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   `deploy`. A call that passes stores the assertion as an artifact and appends its one event,
   `MandateConfirmed` or `AgentDeployed`, and `StepUpAsserted` in one batch, in that order; a refused
   call appends nothing, and a repeat of a committed call answers as before and judges no assertion.
+  The event is version 3, carrying the evidence judged as `step_up` (journal spec v0.84,
+  [DEC-2131](../project/decisions/DEC-2131.md) item 3). A deployment under passkey step-up on a
+  connection §9.24's rule 201 refuses is `invalid` at `/mandate_version`, code
+  `connection_unrecorded`, before step-up is judged, so its challenge is kept
+  ([DEC-2133](../project/decisions/DEC-2133.md)).
   An approval's grant is not served under any method yet (§3.11 item 10), so DEC-2128 leaves it out.
   **(planned: E9-4)**
 
