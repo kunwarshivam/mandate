@@ -1267,3 +1267,58 @@ fn a_later_version_1_snapshot_defers_the_budget_again() {
     let gate = gate_over(&rows, Some(config()));
     assert_eq!(gate.check(&opening("3", "99.95")), asked());
 }
+
+/// The context's account type is the snapshot's declared one, else the multiplier's (DEC-2811):
+/// a cash account's buying-power refusal is the settled one, a margin account's is not, so the type
+/// the dry run reads is the one the reason names.
+#[test]
+fn the_buying_power_refusal_names_the_declared_account_type_else_the_multipliers() {
+    let poor = |multiplier: u32, declared: &str| {
+        let mut rows = journaled_with(&RICH);
+        let members = if declared == "none" {
+            String::new()
+        } else {
+            format!(
+                r#","account_type":{declared},"day_trading_regime":null,"last_equity":"100","maintenance_margin":"0""#
+            )
+        };
+        rows.push(
+            ACCOUNT,
+            "AccountSnapshotRecorded",
+            &format!(
+                r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":{multiplier},"equity":"100","cash":"100","buying_power":"100","non_marginable_buying_power":"100"{members},"risk_clock":"{REGULAR}"}}"#
+            ),
+        );
+        gate_over(&rows, Some(config())).check(&opening("3", "99.95"))
+    };
+    assert_eq!(poor(1, "none"), denied("insufficient_settled_buying_power"));
+    assert_eq!(poor(2, "none"), denied("insufficient_buying_power"));
+    assert_eq!(
+        poor(2, "\"cash\""),
+        denied("insufficient_settled_buying_power")
+    );
+    assert_eq!(poor(1, "\"margin\""), denied("insufficient_buying_power"));
+    assert_eq!(poor(2, "null"), denied("insufficient_buying_power"));
+}
+
+/// Crypto never counts toward the day-trade budget (trading spec §9.2), so a crypto opening's
+/// budget is evaluated even on a version 1 snapshot (DEC-2811).
+#[test]
+fn a_crypto_openings_budget_is_evaluated_without_declared_facts() {
+    let gate = gate_over(&journaled_with(&RICH), Some(config()));
+    let mut crypto = opening("3", "99.95");
+    crypto.asset_class = AssetClass::Crypto;
+    let advisory = gate.advisory(&crypto);
+    if let Ok(advisory) = &advisory {
+        assert!(
+            !advisory.deferred.contains(&Deferred::DayTradeBudget),
+            "{advisory:?}"
+        );
+    }
+    let equity = gate.advisory(&opening("3", "99.95")).unwrap();
+    assert!(equity.deferred.contains(&Deferred::DayTradeBudget));
+    assert!(
+        advisory.is_ok(),
+        "the crypto opening is evaluated: {advisory:?}"
+    );
+}

@@ -247,23 +247,9 @@ impl Gate {
                     AccountState::Active
                 },
                 crypto_active: account.crypto_status == "ACTIVE",
-                regime: match declared.as_ref() {
-                    Some(figures)
-                        if figures.day_trading_regime == Some(DeclaredRegime::IntradayMargin) =>
-                    {
-                        DayTradeRegime::IntradayMargin {
-                            maintenance_excess: figures
-                                .maintenance_excess(account.equity)
-                                .filter(|excess| !excess.is_negative())
-                                .unwrap_or(Usd::ZERO),
-                        }
-                    }
-                    _ => DayTradeRegime::LegacyPdt,
-                },
+                regime: DayTradeRegime::LegacyPdt,
                 equity: account.equity,
-                prior_close_equity: declared
-                    .as_ref()
-                    .map_or(Usd::ZERO, |figures| figures.last_equity),
+                prior_close_equity: Usd::ZERO,
                 model_buying_power: account.cash.min(account.non_marginable_buying_power),
                 broker_buying_power: account.buying_power,
                 broker_non_marginable_buying_power: account.non_marginable_buying_power,
