@@ -20,7 +20,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
 
 use common::control::{Rows, hosted_stream};
-use common::{MemJournal, Reply, WORKSPACE, b64url, hosted, send, serve};
+use common::{MemJournal, Reply, Scripted, WORKSPACE, b64url, hosted, send, serve};
 use mandate_api::envelope::{StepUpAssertion, StepUpEvidence};
 use mandate_api::problem::{Effect, Problem, ProblemCode};
 use mandate_api::wire::decode;
@@ -34,7 +34,9 @@ use mandate_api_server::stepup::{Action, Asserted, Judged, StepUp, Unverified};
 use mandate_api_server::token::{FixedKeys, Issuer};
 use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_canon::{Digest, Value, parse};
-use mandate_identity::{MembershipEvent, MembershipRecord, PrincipalId, Role};
+use mandate_identity::{
+    AssertionId, MembershipEvent, MembershipRecord, PrincipalId, Role, WorkspaceId,
+};
 use mandate_identity_seal::Seal;
 use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, StoredEvent, get_artifact};
 use mandate_time::UtcNanos;
@@ -52,6 +54,8 @@ const SUBJECT: &str = "sha256:aaaa";
 const ALICE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W3Z";
 const BOB: &str = "01JB3K6F0C9R2V7N4M8Q1T5W41";
 const DAVE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W43";
+/// A workspace other than the hosted one, where ALICE holds a registration challenge too.
+const OTHER_WORKSPACE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W50";
 /// A third passkey id: the 16 bytes 64 to 79.
 const THIRD_CREDENTIAL: &str = "QEFCQ0RFRkdISUpLTE1OTw";
 /// A cool-off's length, in seconds (journal spec §9.31 rule 249).
@@ -116,6 +120,7 @@ struct Fixture {
     clock: Arc<NanoClock>,
     objects: Arc<MemObjects>,
     port: Arc<Port>,
+    challenges: Arc<Challenges>,
 }
 
 /// The server's clock, settable to the nanosecond.
@@ -191,6 +196,7 @@ fn fixture_with(rows: &Rows, answer: Unverified, stores: bool) -> Fixture {
         answer,
         asked: Mutex::new(Vec::new()),
     });
+    let challenges = Arc::new(Challenges::default());
     let app = App {
         settings: Settings {
             app_origin: ORIGIN.to_owned(),
@@ -205,7 +211,7 @@ fn fixture_with(rows: &Rows, answer: Unverified, stores: bool) -> Fixture {
         artifacts: None,
         objects: stores.then(|| Arc::clone(&objects) as Arc<dyn ObjectStore>),
         step_up: Arc::clone(&port) as Arc<dyn StepUp>,
-        challenges: Arc::new(Challenges::default()),
+        challenges: Arc::clone(&challenges),
         connect: None,
         reduction: Arc::default(),
     };
@@ -216,6 +222,7 @@ fn fixture_with(rows: &Rows, answer: Unverified, stores: bool) -> Fixture {
         clock,
         objects,
         port,
+        challenges,
     }
 }
 
@@ -626,6 +633,113 @@ fn a_backup_eligible_registration_is_recorded_so() {
 
 #[test]
 #[ignore = "pending E9-4"]
+fn a_registration_signed_at_counter_5_is_recorded_at_5() {
+    let signer = Signer::es256();
+    let rows = Rows::opened();
+    let f = fixture(&rows);
+    let cookie = signed_in(&f, ALICE);
+    let issued = challenge(&f, &cookie, KEY);
+    let registered = signer.register_shaped(
+        &issued.bytes,
+        CREDENTIAL,
+        &Shape {
+            counter: 5,
+            ..Shape::good()
+        },
+    );
+    let reply = enrol_with(
+        &f,
+        &cookie,
+        KEY_2,
+        &first(&issued.id, CREDENTIAL, &registered),
+    );
+    assert_eq!(
+        reply.status,
+        201,
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let all = f.journal.rows_of(&hosted_stream());
+    let row = all.last().expect("the enrolment");
+    assert_eq!(
+        payload(row)["sign_count"],
+        json!(5),
+        "the attested counter, which a later assertion must exceed"
+    );
+}
+
+/// A registration challenge binds its workspace: ALICE's challenge of another workspace, its
+/// bytes signed, is unknown here.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_registration_challenge_of_another_workspace_is_invalid_at_its_id() {
+    let signer = Signer::es256();
+    let rows = Rows::opened();
+    let f = fixture(&rows);
+    let cookie = signed_in(&f, ALICE);
+    let elsewhere = f
+        .challenges
+        .register(
+            id(ALICE),
+            WorkspaceId::from_ulid_text(OTHER_WORKSPACE).expect("a ULID"),
+            AssertionId(derived_in(OTHER_WORKSPACE, ALICE, "passkey_register", KEY)),
+            f.clock.now_at(),
+        )
+        .expect("held in the other workspace");
+    let registered = signer.register(&elsewhere.challenge, CREDENTIAL);
+    challenge_refused(&enrol_with(
+        &f,
+        &cookie,
+        KEY_2,
+        &first(&elsewhere.id, CREDENTIAL, &registered),
+    ));
+    nothing_changed(&f, &rows);
+}
+
+/// The enrolment appends at the head it read, so a record landing between the read and the
+/// append (another enrolment of the same passkey id, rule 251) refuses it rather than being
+/// appended over.
+#[test]
+#[ignore = "pending E9-4"]
+fn an_enrolment_whose_head_moved_after_its_read_is_journal_unavailable() {
+    let signer = Signer::es256();
+    let rows = Rows::opened();
+    let f = fixture(&rows);
+    let cookie = signed_in(&f, ALICE);
+    let issued = challenge(&f, &cookie, KEY);
+    let registered = signer.register(&issued.bytes, CREDENTIAL);
+    f.journal.script(&[Scripted::HeadMismatch]);
+    refused(
+        &enrol_with(
+            &f,
+            &cookie,
+            KEY_2,
+            &first(&issued.id, CREDENTIAL, &registered),
+        ),
+        503,
+        ProblemCode::JournalUnavailable,
+    );
+    assert_eq!(
+        f.journal.rows_of(&hosted_stream()).len(),
+        rows.rows.len(),
+        "nothing appended"
+    );
+    let head = rows.rows.last().map(|row| row.seq).expect("an opened stream");
+    assert_eq!(
+        f.journal
+            .appends
+            .lock()
+            .expect("unpoisoned")
+            .iter()
+            .map(|(_, expected, _)| *expected)
+            .collect::<Vec<_>>(),
+        [head],
+        "one append, at the head read, never retried at a later head"
+    );
+}
+
+#[test]
+#[ignore = "pending E9-4"]
 fn a_first_enrolment_past_300_s_of_the_sign_in_is_stale_and_spends_its_challenge() {
     let signer = Signer::es256();
     let rows = Rows::opened();
@@ -796,6 +910,8 @@ fn a_body_with_another_member_or_one_missing_is_invalid() {
     }
 }
 
+/// A submit spends its challenge, refused or enrolled, and keeps its id as a tombstone, so the
+/// challenge route never revives it under the same key (DEC-2118 item 1).
 #[test]
 #[ignore = "pending E9-4"]
 fn a_registration_challenge_serves_one_submit_whatever_follows_and_a_same_key_retry_finds_it_spent_dec_2118_item_1()
@@ -843,6 +959,19 @@ fn a_registration_challenge_serves_one_submit_whatever_follows_and_a_same_key_re
         rows.rows.len() + 1,
         "a retry under the same key, its challenge spent, appends nothing more"
     );
+    for spent in [KEY, "k4Z-9_dddddddddd"] {
+        refused(
+            &post(
+                &f,
+                &format!("{}/registration-challenges", passkeys_path()),
+                &cookie,
+                spent,
+                b"{}",
+            ),
+            409,
+            ProblemCode::IdempotencyConflict,
+        );
+    }
 }
 
 #[test]
