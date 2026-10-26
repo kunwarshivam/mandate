@@ -85,6 +85,17 @@ const TRADE_LOOP_POLLS: u32 = 2_000;
 /// on the scheduler's tick every second and the browser opens after the gestures' Job, and a loop
 /// with no proposal must leave the `cell-demo-web` job its ten minutes (DEC-464).
 const PROPOSAL_MS: &str = "20000";
+/// The trade loop spec's own waits past the proposal, as `trade-loop.spec.ts` defaults them: the
+/// host's confirmation (60 s), the fill (120 s), and the 120 s it allows the rest of its steps.
+const TRADE_LOOP_SPEC_WAITS_MS: u64 = 60_000 + 120_000 + 120_000;
+/// The longest `next dev` takes to start, as `playwright.cell.config.ts`'s `webServer` bounds it.
+const NEXT_DEV_START_MS: u64 = 60_000;
+/// Playwright's bound on the whole trade loop run (`OWLHEAD_CELL_TIMEOUT_MS`, the config's
+/// `globalTimeout`): 400 seconds, past the spec's `test.setTimeout` of 320 s with `PROPOSAL_MS`
+/// and `next dev`'s start, and inside [`TRADE_LOOP_POLLS`]' 500 s, so Playwright ends the run and
+/// writes its result before the driver gives up on it. Unset, the config's 90 s ends every loop
+/// before its fill.
+const TRADE_LOOP_TIMEOUT_MS: &str = "400000";
 /// The trade loop spec under `web/e2e-cell/` (lane W, #2462).
 const TRADE_LOOP_SPEC: &str = "trade-loop.spec.ts";
 /// The trade loop's steps, in the order the spec reaches them; its result names each one reached.
@@ -481,13 +492,7 @@ pub fn trade_loop_from_web(
     };
     let run = spec_run(
         workspace,
-        &[
-            ("OWLHEAD_CELL_SPEC", TRADE_LOOP_SPEC.to_owned()),
-            ("OWLHEAD_CELL_AGENT", agent.to_owned()),
-            ("OWLHEAD_CELL_CONFIRM_REQUEST", path_text(&request)),
-            ("OWLHEAD_CELL_CONFIRM_DONE", path_text(&done)),
-            ("OWLHEAD_CELL_PROPOSAL_MS", PROPOSAL_MS.to_owned()),
-        ],
+        &trade_loop_env(agent, &request, &done),
         "web-trade-loop",
         TRADE_LOOP_POLLS,
         &mut answer,
@@ -500,6 +505,19 @@ pub fn trade_loop_from_web(
             run.log.display()
         ),
     }
+}
+
+/// What the trade loop's Playwright run is handed beside the shared environment: the spec, the
+/// agent, the host's confirmation files, the proposal's wait, and the run's bound.
+fn trade_loop_env(agent: &str, request: &Path, done: &Path) -> [(&'static str, String); 6] {
+    [
+        ("OWLHEAD_CELL_SPEC", TRADE_LOOP_SPEC.to_owned()),
+        ("OWLHEAD_CELL_AGENT", agent.to_owned()),
+        ("OWLHEAD_CELL_CONFIRM_REQUEST", path_text(request)),
+        ("OWLHEAD_CELL_CONFIRM_DONE", path_text(done)),
+        ("OWLHEAD_CELL_PROPOSAL_MS", PROPOSAL_MS.to_owned()),
+        ("OWLHEAD_CELL_TIMEOUT_MS", TRADE_LOOP_TIMEOUT_MS.to_owned()),
+    ]
 }
 
 /// Whether lane W's trade loop spec is in this checkout (#2462).
@@ -632,6 +650,30 @@ mod tests {
 
     use super::super::{API_LOCAL_PORT, DEMO_WORKSPACE, STUB_PORT};
     use super::*;
+
+    /// Playwright's bound on the trade loop holds the spec's own test timeout and `next dev`'s
+    /// start, and ends before the driver's polls do, so a slow loop is the spec's failure with a
+    /// result rather than a run the driver kills (#2466's review).
+    #[test]
+    fn the_trade_loops_playwright_bound_holds_the_spec_and_ends_before_the_polls() -> Result<()> {
+        let env = trade_loop_env("agent", Path::new("request"), Path::new("done"));
+        let handed = env
+            .iter()
+            .find(|(name, _)| *name == "OWLHEAD_CELL_TIMEOUT_MS")
+            .map(|(_, value)| value.as_str())
+            .context("the run is handed no OWLHEAD_CELL_TIMEOUT_MS")?;
+        let bound: u64 = handed.parse()?;
+        let proposal: u64 = PROPOSAL_MS.parse()?;
+        let polls_ms = u64::from(TRADE_LOOP_POLLS) * u64::try_from(POLL.as_millis())?;
+        assert_eq!(polls_ms, 500_000, "the driver's polls, as their doc gives them");
+        assert!(
+            bound >= proposal + TRADE_LOOP_SPEC_WAITS_MS + NEXT_DEV_START_MS,
+            "{bound} ms cannot hold the spec's {} ms and next dev's start",
+            proposal + TRADE_LOOP_SPEC_WAITS_MS
+        );
+        assert!(bound < polls_ms, "{bound} ms outlasts the driver's polls");
+        Ok(())
+    }
 
     /// The trade loop's request is read whole, every member non-empty; the host's confirmation
     /// passes exactly its members and the cell's journal and store; the result names the steps
