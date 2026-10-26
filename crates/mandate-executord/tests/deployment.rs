@@ -23,6 +23,7 @@ use mandate_executord::deployment::{BrokerFacts, Deployment, LiquidityRead, Sour
 use mandate_executord::gate::{AccountRules, AssetRecord, Liquidity};
 use mandate_executord::marks::Marked;
 use mandate_executord::quotes::QuoteFeed;
+use mandate_executord::risk::RiskOpenings;
 use mandate_executord::{Broker, Protections};
 use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, StreamId};
 use mandate_marketdata::dataset::Store as Datasets;
@@ -628,6 +629,39 @@ fn a_traded_account_holds_the_opening() -> Result<(), Error> {
     Ok(())
 }
 
+/// A traded account that is flat again, its counters read, is still held until the account risk
+/// view's snapshot is wired into the gate: the allocation is no longer the agent's equity
+/// (DEC-2833 item 2).
+#[test]
+fn a_traded_flat_account_is_held_until_its_risk_is_read() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    let text = |value: &str| Value::Str(value.to_owned());
+    for (id, fill, side) in [("a4", "f1", "buy"), ("a5", "f2", "sell")] {
+        journal.write(
+            ACCOUNT_STREAM,
+            id,
+            "FillApplied",
+            2,
+            None,
+            object(vec![
+                ("client_order_id", Value::Null),
+                ("fees", Value::Array(Vec::new())),
+                ("fill_id", text(fill)),
+                ("instrument_id", text(SPY)),
+                ("price", text("500")),
+                ("qty_gross", text("1")),
+                ("risk_clock", text("2026-09-21T16:00:00.000000000Z")),
+                ("side", text(side)),
+                ("trade_date", text("2026-09-21")),
+            ])?,
+        )?;
+    }
+    let (deployment, _) = deployment(&journal, store);
+    assert!(opening(&deployment)?.is_none());
+    Ok(())
+}
+
 /// The opening is held while the clock has not ticked, the account has no snapshot, or the
 /// facts the journal does not hold are unread.
 #[test]
@@ -1073,8 +1107,8 @@ fn unread_answers_nothing() -> Result<(), Error> {
     Ok(())
 }
 
-/// The wiring the deployment replaces answers the binding gate from it: with every fact read,
-/// the untraded agent's opening reaches the gate.
+/// The wiring the deployment replaces answers the binding gate and the risk book's openings from
+/// it: with every fact read, the untraded agent's opening reaches the gate, and its fold opens.
 #[test]
 fn the_wired_gate_reads_the_deployment() -> Result<(), Error> {
     let (journal, store, _) = deployed()?;
@@ -1098,6 +1132,18 @@ fn the_wired_gate_reads_the_deployment() -> Result<(), Error> {
             .gate
             .input(&request(&agent, &spy, Purpose::Open, Side::Buy)?)
             .is_some()
+    );
+    assert!(
+        wiring
+            .risk
+            .opening(
+                &agent,
+                &journal.rows_of(CONTROL_STREAM),
+                Usd::parse("25000")?,
+                Date::parse("2026-09-21")?,
+            )
+            .is_some(),
+        "the wired risk book opens the agent's fold from the deployment"
     );
     Ok(())
 }
@@ -2008,6 +2054,80 @@ fn an_instrument_that_no_longer_resolves_holds_openings_and_keeps_exits() -> Res
         (false, false, false, true, true, true),
         "openings hold on the longer stream; exits keep SPY as it last resolved"
     );
+    Ok(())
+}
+
+/// DEC-2804 item 2: the deployment opens its agent's risk fold on the reviewed instrument, its
+/// class and its quote staleness, with the connection's loss carry, its version validated on the
+/// equity it is handed over the control rows it is handed: an equity below the allocation fails
+/// V-002 and opens none, and so does an agent the rows do not deploy.
+#[test]
+fn the_deployment_opens_its_agents_risk_fold() -> Result<(), Error> {
+    let (journal, store, _) = deployed_as(Variant {
+        retired_loss: Some("40"),
+        ..Variant::default()
+    })?;
+    let (deployment, _) = deployment(&journal, store);
+    let control = journal.rows_of(CONTROL_STREAM);
+    let day = Date::parse("2026-09-21")?;
+    let opening = deployment
+        .opening(&agent(), &control, Usd::parse("25000")?, day)
+        .ok_or("the deployed agent opens")?;
+    assert_eq!(opening.instrument, SPY);
+    assert_eq!(opening.asset_class, AssetClass::UsEquity);
+    assert_eq!(
+        opening.mark_max_age_s, 10,
+        "the rule set's IEX quote staleness"
+    );
+    assert_eq!(opening.inherited_loss_usd, Usd::parse("40")?);
+    assert_eq!(opening.mandate.mandate().universe.max_instruments, 1);
+    assert!(
+        deployment
+            .opening(&agent(), &control, Usd::parse("1")?, day)
+            .is_none(),
+        "V-002: an equity below the allocation"
+    );
+    let before = control
+        .iter()
+        .take_while(|row| row.event_type != "AgentDeployed")
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        deployment
+            .opening(&agent(), &before, Usd::parse("25000")?, day)
+            .is_none(),
+        "rows that do not deploy the agent"
+    );
+    Ok(())
+}
+
+/// DEC-2804 item 7: the risk the process's book hands the deployment is what it answers for the
+/// agent, and an agent it was not handed has none.
+#[test]
+fn the_deployment_answers_the_risk_its_book_read() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    let (deployment, _) = deployment(&journal, store);
+    assert_eq!(deployment.risk(&agent()), None);
+    let risk = mandate_executord::risk::GateRisk {
+        risk: mandate_risk::RiskSnapshot {
+            agent_equity: Usd::parse("990")?,
+            high_water_mark: Usd::parse("1000")?,
+            day_start_equity: Usd::parse("995")?,
+            capital_base: Usd::parse("1000")?,
+            inherited_loss: Usd::ZERO,
+            latched: BTreeSet::new(),
+            active_rungs: BTreeMap::new(),
+            size_factor: mandate_num::Ratio::parse("1")?,
+            agent_mode: mandate_risk::AgentMode::Normal,
+        },
+        mode: mandate_risk::AgentMode::Normal,
+        instrument_restrictions: BTreeMap::new(),
+    };
+    deployment.read(BTreeMap::from([(agent(), risk.clone())]));
+    assert_eq!(deployment.risk(&agent()), Some(risk));
+    assert_eq!(deployment.risk(&AgentId(OTHER_AGENT.to_owned())), None);
+    deployment.read(BTreeMap::new());
+    assert_eq!(deployment.risk(&agent()), None);
     Ok(())
 }
 

@@ -69,19 +69,44 @@ pub fn connect_check<S: Store, B: Broker>(
             },
             _ => AccountRead::Unreadable,
         };
-        run(&CheckInput {
-            connection_id,
-            broker: Venue::Alpaca,
-            environment: Reach::Paper,
-            auth_kind: AuthKind::ApiKey,
-            occasion: Occasion::Connect,
-            granted: Granted::KeyPermissions(None),
-            account,
-            contract: None,
-            pinned_contract: None,
-        })
-        .map_err(|_| "check_refused")
+        alpaca_report(connection_id, Occasion::Connect, account)
     })
+}
+
+/// Connections spec §8.1's checks 1, 2, 3 and 7 of a paper Alpaca API-key connection on
+/// `occasion`, over `account` as the broker answered its read: the connect check's and the
+/// executor's later checks (DEC-2840) run the same input.
+///
+/// # Errors
+/// `check_refused` when the checks cannot run.
+pub fn alpaca_report(
+    connection_id: ConnectionId,
+    occasion: Occasion,
+    account: AccountRead,
+) -> Result<CheckReport, &'static str> {
+    run(&CheckInput {
+        connection_id,
+        broker: Venue::Alpaca,
+        environment: Reach::Paper,
+        auth_kind: AuthKind::ApiKey,
+        occasion,
+        granted: Granted::KeyPermissions(None),
+        account,
+        contract: None,
+        pinned_contract: None,
+    })
+    .map_err(|_| "check_refused")
+}
+
+/// The journal's name for a check's occasion (journal spec §9.8).
+pub(crate) fn occasion_code(occasion: Occasion) -> &'static str {
+    match occasion {
+        Occasion::Connect => "connect",
+        Occasion::Reconnect => "reconnect",
+        Occasion::Reauthorize => "reauthorize",
+        Occasion::ExecutorStart => "executor_start",
+        Occasion::Daily => "daily",
+    }
 }
 
 /// Takes the account stream of `scope`, then has `report` run the checks, and appends
@@ -182,7 +207,7 @@ fn record(
 /// `ConnectionChecked`'s payload (journal spec §9.8): every result, ascending by check (rule 57),
 /// each reason present exactly when it failed (rule 58), the account's reference exactly when it
 /// was read (rule 62), and the check's time on its whole second as `risk_clock` (§4.7).
-fn checked(report: &CheckReport, now: UtcNanos) -> Result<Value, &'static str> {
+pub(crate) fn checked(report: &CheckReport, now: UtcNanos) -> Result<Value, &'static str> {
     let mut results = report.results.clone();
     results.sort_by_key(|(check, _)| check.code());
     let results = results
@@ -210,7 +235,7 @@ fn checked(report: &CheckReport, now: UtcNanos) -> Result<Value, &'static str> {
                 .map_or(Value::Null, |p| text(p.as_str())),
         ),
         ("connection_id", text(report.connection_id.as_str())),
-        ("occasion", text("connect")),
+        ("occasion", text(occasion_code(report.occasion))),
         ("results", Value::Array(results)),
         ("risk_clock", text(&risk_clock.to_string())),
     ])

@@ -599,11 +599,14 @@ fn openings_held(
         else {
             return reason("unknown");
         };
-        let read = fold.fold(Row {
-            stream: &row.stream_id,
-            event_type: &row.event_type,
-            payload: &payload,
-        });
+        let read = fold.fold_recorded(
+            Row {
+                stream: &row.stream_id,
+                event_type: &row.event_type,
+                payload: &payload,
+            },
+            UtcNanos::parse_rfc3339(&row.recorded_at).ok(),
+        );
         if read.is_err() {
             return reason("unknown");
         }
