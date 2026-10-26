@@ -14,6 +14,12 @@ else.
 
 ## Change history
 
+- **v0.2, amended ([DEC-2392](../project/decisions/DEC-2392.md), E19-12):** event triggers. With the
+  mandate's `behavior.research.event_triggers` set (mandate spec v0.11 §8.4), an allowlisted news
+  item or filing about an instrument with an active thesis brings a `monitor` run forward (§5.3,
+  §6.9), bounded by the debounce, the per-day cap, and the cost cap, and journaled before the run
+  starts (journal spec v0.87 rule 271). HI-8 says so. A triggered run is `monitor` whatever the
+  mode, so it can only invalidate; it never proposes a thesis or an order.
 - **v0.2 ([DEC-2203](../project/decisions/DEC-2203.md), [ADR-0005](../adr/0005-agentic-harness.md);
   E19-13):** the research run becomes a bounded agent loop, by the founder's decision of 2026-10-17
   that the platform's harness is agentic, "like Claude Code for trading" (quoted in DEC-2203):
@@ -161,7 +167,7 @@ names it; the gateway's own tests prove the INF side, and these prove the caller
 | HI-5 | **The envelope does not move.** No research run, under any model output, changes an envelope field or the policy (MI-16, INF-16) | Property: the mandate version and the policy digest are equal before and after any sequence of research runs with a compromised model |
 | HI-6 | **Missing is safe.** Every error kind of [inference spec §3.3](inference.md#33-error-kinds), and every harness rejection of §6.5, yields no output from the failing reply. For a `single_call` or `final_output` run that is the run's only output. For an `action_tools` run, invalidations and exit requests accepted in earlier turns stand, every pending thesis is discarded, and nothing after the failing reply is produced. The order builder then counts the failing reply's output as missing: 0 for exits, fully bearish for buys (§8.3, MI-10, INF-4) | Property: for each error kind and each rejection, the builder's buy value is at most its value with the model removed, and no sell is proposed that is not proposed without it, the run's own accepted invalidations and exit requests aside |
 | HI-7 | **Research never blocks trading.** For any input sequence, the trading loop's drafts are the same whatever the research worker's latency, failure, or crash, apart from the research outputs that arrive as inputs (INF-13, caller side) | Property: replay one input sequence with research latency drawn at random, including never finishing; the drafts not caused by research are identical |
-| HI-8 | **Runs are bounded, by independent counters.** At most one run is in flight per agent. No scheduled run starts before `next_proposal_at` (§5.3). No run reads more than its retrieval plan's caps. A `single_call` run makes one model call. An agentic run stays inside every bound of §6.11: turns, tool calls, result bytes, repeated denials, its deadline on the risk clock, and its cost ceiling (with inference spec §7.3's disclosed provider excess). Every bound but result size ends the run: one the core counts (`max_tool_calls`, `max_repeat_denials`, `action_tools`' `max_theses`) as `bound` with its name, the run's announced shape running out (the last turn completing, or the tool calls spent exactly) as `done` with that bound named, one the gateway refuses (`max_tool_calls_per_turn`, `final_output`'s `max_theses`, the per-turn tokens) as `error`, the run's ceiling or any other cap as `cost`, and the deadline as `deadline`. `RunEnded.tool_calls` counts every `ToolCallRecorded`, a reply refused `call_budget` included, so it can exceed `max_tool_calls` by that reply alone; no call beyond `max_tool_calls` ever runs. Spend caps are the gateway's (INF-7) | Property over random schedules, model replies, tool results, clock ticks, and crashes: an oracle that counts runs, turns, tool calls, bytes, denials, and spend from the journal and the meter stream itself (never from the core's loop state) asserts every bound, that a run reaching one has no output after the batch that reached it, and that its `RunEnded` names that bound |
+| HI-8 | **Runs are bounded, by independent counters.** At most one run is in flight per agent. No scheduled run starts before `next_proposal_at` (§5.3). No event-triggered run starts before `last_call` plus the mandate's `debounce_s`, or once `max_runs_per_day` event runs have started in the risk day, and each names the `ObservationRecorded` of the item that triggered it, journaled before it (§5.3, [DEC-2392](../project/decisions/DEC-2392.md)). No run reads more than its retrieval plan's caps. A `single_call` run makes one model call. An agentic run stays inside every bound of §6.11: turns, tool calls, result bytes, repeated denials, its deadline on the risk clock, and its cost ceiling (with inference spec §7.3's disclosed provider excess). Every bound but result size ends the run: one the core counts (`max_tool_calls`, `max_repeat_denials`, `action_tools`' `max_theses`) as `bound` with its name, the run's announced shape running out (the last turn completing, or the tool calls spent exactly) as `done` with that bound named, one the gateway refuses (`max_tool_calls_per_turn`, `final_output`'s `max_theses`, the per-turn tokens) as `error`, the run's ceiling or any other cap as `cost`, and the deadline as `deadline`. `RunEnded.tool_calls` counts every `ToolCallRecorded`, a reply refused `call_budget` included, so it can exceed `max_tool_calls` by that reply alone; no call beyond `max_tool_calls` ever runs. Spend caps are the gateway's (INF-7) | Property over random schedules, event items, model replies, tool results, clock ticks, and crashes: an oracle that counts runs (event runs per risk day and their spacing among them), turns, tool calls, bytes, denials, and spend from the journal and the meter stream itself (never from the core's loop state) asserts every bound, that a run reaching one has no output after the batch that reached it, and that its `RunEnded` names that bound |
 | HI-9 | **A spent budget means fewer ideas, never more risk.** With a binding cap or budget (a spend cap or ceiling, a deadline, or a bound that cuts a run off: any end but `done`), no buy draft is larger than without it, no opening or increase exists that does not exist without it, no sell is proposed that is not proposed without it, and every risk-exit, protective-order, and kill-switch draft is byte-identical (DEC-120, INF-7, rule 2). Stale research outputs may shrink or withhold buys (§7.3 step 3), and a discretionary exit that waited on a research verdict may be absent, as under any model outage (MI-10); both are the intended effect. In an `action_tools` run this holds because every such end discards each pending thesis (§6.9), and only risk-reducing actions take effect mid-run. `max_turns` and an exactly spent tool-call budget are the run's announced shape, told to the model each turn, and end it `done`: the comparison for them is with a run whose model ended at that point | Property: one input sequence run with and without a binding cap, for every mode, `action_tools` included with a model that proposes and later invalidates; compare every draft pairwise by an independent oracle on size and side. For `max_turns`, compare with the journal-equal run whose model ended at the same turn |
 | HI-10 | **Injected text is bounded.** Whatever a news item or filing says, it can at most yield a thesis, an invalidation, or, once declared, an exit request, an owner question, or a mandate-change proposal the owner must confirm. A thesis enters the working universe only through §8.5, and its first order is decided by the autonomy rules with the admission ceiling (§6.2 step 5). An invalidation only removes (MI-19). With a compromised model, no limit is breached | The adversarial bench (E19-6): injection fixtures for every source, in the retrieval plan's reads and in every tool's results, and a compromised model that follows every injected instruction it can express as a tool call; zero limit breaches, zero orders without a dry-run allow, and no read outside the scope HI-4 names |
 | HI-11 | **Inputs hold only what they may.** A call's inputs, every turn's included, contain only: data from the data plane at or before the cut-off, the agent's own memory (§6.4), the owner's `behavior.description`, the working-universe facts §6.4 lists, in an agentic run `mandate.read`'s facts and §6.13's model-visible codes, and the inputs §15 lists for `owner` and `explain` runs (DEC-2243). Never a credential, a vault reference, personal data, a dollar figure of the agent or account (limits appear only as percentages of the allocation, through `mandate.read`), or another agent's or workspace's data (INF-8, caller side) | Canary test: plant canary values in the vault, in another agent's memory, in another workspace, and in the agent's equity; scan every prompt artifact of a run, every turn's, and every tool result artifact for them; plant an operator halt, a latched limit, and a cost cap, and find no code naming them |
@@ -300,6 +306,7 @@ A crash in any state returns to `Constructing`.
 stateDiagram-v2
     [*] --> Idle
     Idle --> Due: risk clock reaches next_proposal_at, and the mode allows
+    Idle --> Due: an event trigger (below) admits an item, and the mode allows
     Due --> Retrieving: the core starts the run
     Due --> Idle: mode, version, or a disabled research agent; nothing is called
     Retrieving --> Calling: ObservationRecorded batch committed (§6.2 step 2)
@@ -323,7 +330,32 @@ stateDiagram-v2
   is the later of the last `ModelInvocationRecorded` with purpose `research` and the last
   reservation the gateway's meter stream holds for this agent (inference spec §3.6). A crash loop
   therefore cannot call faster than the interval, because the reservation is appended before the
-  call leaves. Event sources such as a news burst never bring a run forward.
+  call leaves.
+- **When an event brings a run forward** ([DEC-2392](../project/decisions/DEC-2392.md), E19-12).
+  Only with the version in effect's `behavior.research.event_triggers` set (mandate spec §8.4), and
+  only for an entry pinned `agentic`: a `single_call` entry's runs stay scheduled. An **item** is a
+  news item or filing the data service stored from a source in effect on the allowlist, of a kind
+  `sources` lists, whose knowledge time is after the agent's last research call. It **matches** when
+  one of its instruments has one of the agent's active theses (§6.7). A matching item makes a
+  `monitor` run due when every one of these holds, judged by the core on the risk clock from folded
+  state alone:
+  - the risk clock is at least `last_call` (above) plus `debounce_s`, so a burst of items starts
+    one run and a crash loop cannot call faster than the debounce;
+  - fewer than `max_runs_per_day` event-triggered `RunStarted` records fall in the risk day;
+  - the day's research spend is below `cost_cap_usd_per_day` (the gateway's meter, INF-7);
+  - the mode is not `paused` or `stopped`, and no run is in flight (HI-8).
+
+  Otherwise the item triggers nothing; nothing is journaled for it, and a later run reads it like
+  any other item. A due event run takes the scheduled slot of the trigger queue, so it coalesces
+  with a queued scheduled run rather than adding one, and an `owner` or `explain` run still goes
+  ahead of it.
+
+  The run's starting batch journals the item first, as an `ObservationRecorded` (its source, the
+  matched instrument, the item's knowledge time, and the item as an artifact), and then
+  `RunStarted` with `trigger` `{kind: event, cause: <that record's event_id>}` (journal spec rule
+  271). So the trigger is journaled before the run acts, and one item starts at most one run. The
+  item's text is untrusted like every read (§6.12): at most it leads the model to invalidate a
+  thesis, which only removes (MI-19, HI-10).
 - **A late result.** A result that arrives after its run was cancelled is still journaled as
   `ModelInvocationRecorded`, with the gateway's outcome, so the record of the call is complete. No
   output event follows it, and nothing reads it. In an agentic run that includes a turn's reply: its
@@ -653,16 +685,16 @@ state alone, before anything untrusted is read (§6.10):
 | Kind | Trigger | Starting context | What it may produce |
 |---|---|---|---|
 | `ideate` | The schedule: `behavior.research.interval_s` (§5.3), in mode `normal` with room in the working universe | The brief, the data universe's seed reads, memory | Theses and invalidations |
-| `monitor` | The schedule, in mode `exits_only` or with a full universe, while the agent has an active thesis | The brief, the held instruments' and active theses' seed reads, their lineages, memory | Only risk-reducing output: invalidations (the whole of `final_output`'s), and, once declared, exit requests and risk-reducing mandate-change proposals |
+| `monitor` | The schedule, in mode `exits_only` or with a full universe, while the agent has an active thesis; or an event trigger (§5.3), in any mode but `paused` and `stopped` | The brief, the held instruments' and active theses' seed reads, their lineages, memory | Only risk-reducing output: invalidations (the whole of `final_output`'s), and, once declared, exit requests and risk-reducing mandate-change proposals |
 | `owner`, `explain` | A desk message; an ASK raised | §15's, lane EX's change, which declares them; until it lands no entry offers them | §15's: answers and explanations, never an order or a thesis |
 
-With no kind due, no run starts and nothing is called. **Event triggers wait.** A monitoring run
-started by a news item, a filing, a price move, a fill, or a refusal would add an evaluation trigger
-the mandate does not list, and triggers are envelope fields (rule 11; the same finding as E19-12).
-So until a mandate spec change adds them under `behavior.research`, with their debounce and per-agent
-rate limit, every `ideate` and `monitor` run is scheduled (E19-14). At most one run is in flight per
-agent (HI-8); an `owner` or `explain` run goes ahead of a queued scheduled run, and no run ever
-delays trading.
+With no kind due, no run starts and nothing is called. **Event triggers** are envelope fields (rule
+11): `behavior.research.event_triggers` lists the source kinds (`news`, `filings`) whose matching
+items bring a `monitor` run forward, with its debounce and per-day cap (§5.3, mandate spec §8.4,
+[DEC-2392](../project/decisions/DEC-2392.md)). An event run is always `monitor`, so it can only
+invalidate. A price move, a fill, or a refusal triggers nothing yet; each would be a new source
+kind, with its own mandate spec change. At most one run is in flight per agent (HI-8); an `owner` or
+`explain` run goes ahead of a queued scheduled or event run, and no run ever delays trading.
 
 **What a run produces.** An agentic entry pins one of two ways for the model to give its opinion:
 

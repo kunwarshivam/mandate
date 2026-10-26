@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.10 (a thesis that ends sells its position, [DEC-2391](../project/decisions/DEC-2391.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
+| **Status** | v0.11 (a news item or filing may bring a monitoring run forward, [DEC-2392](../project/decisions/DEC-2392.md); v0.10 a thesis that ends sells its position, [DEC-2391](../project/decisions/DEC-2391.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
 | **Implements** | PRD 6.3 (FR-3.1 to FR-3.8), 6.5 (FR-5.2 to FR-5.5), 6.6 (FR-6.1 to FR-6.6); backlog E6, E10, E17 |
 | **Schemas** | [mandate.schema.json](../../schemas/mandate.schema.json), [policy.schema.json](../../schemas/policy.schema.json) (structural rules) |
 | **Reference cases** | [reference-cases/mandate.yaml](reference-cases/mandate.yaml) |
@@ -20,6 +20,15 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.11 ([DEC-2392](../project/decisions/DEC-2392.md), an agent reading under
+  [DEC-176](../project/04-decision-log.md#decisions); E19-12):** `behavior.research` gains one
+  optional envelope field, `event_triggers` (§1, §8.4): the allowlisted source kinds (`news`,
+  `filings`) whose items may bring a **monitoring** run forward, a debounce, and a cap on such runs
+  per risk day. Absent or `null` is off, which is every version written before it, so no confirmed
+  version changes meaning. A triggered run is always the agent harness's `monitor` kind, which can
+  only invalidate theses (and, once declared, request exits): it never proposes a thesis, never
+  sizes or places an order (rule 4), and its spend counts against `cost_cap_usd_per_day`. Any
+  change to the field classifies as increasing (§9.2), so the owner confirms every one (rule 11).
 - **v0.10 ([DEC-2391](../project/decisions/DEC-2391.md), an agent reading under
   [DEC-176](../project/04-decision-log.md#decisions)):** §8.3 step 2 gains the exit a removed
   instrument lacked. When an instrument's thesis ends (invalidated, expired, or its lineage retired,
@@ -456,7 +465,7 @@ decimal strings; the schema gives each field's bounds.
 | `behavior.description` | The user's description of the strategy; given to LLM signal models and the research agent |
 | `behavior.signal_models[]` | Selected signal models: id, version, content hash, parameters, fixed weight, `max_output_age_s`, `admits_instruments` |
 | `behavior.signal_models[].admits_instruments` | True for the **research agent** (§8.4): at most one model, with the `llm.` prefix (V-036) |
-| `behavior.research` | The research agent's envelope fields: `interval_s` (how often it may propose), `cost_cap_usd_per_day` (DEC-120), `max_revisions_per_lineage` (DEC-111). Null exactly when no model admits (V-036) |
+| `behavior.research` | The research agent's envelope fields: `interval_s` (how often it may propose), `cost_cap_usd_per_day` (DEC-120), `max_revisions_per_lineage` (DEC-111), and `event_triggers` (§8.4, [DEC-2392](../project/decisions/DEC-2392.md)): `null` or absent for none, else `sources` (`news`, `filings`, sorted and unique, at least one), `debounce_s` (300 to 86,400) and `max_runs_per_day` (1 to 24). Null exactly when no model admits (V-036) |
 | `behavior.cadence` | Scheduled interval and the event sources that trigger evaluation |
 | `behavior.sizing` | Sizing method, entry and exit thresholds, rebalance band (§8.3) |
 | `protection` | Resting protection: stop and take-profit distances as fractions of entry price; `stop_limit_offset`, how far below the stop price a protective stop-limit's limit sits, as a fraction of the stop price, for every stop-limit protection (DEC-539) |
@@ -470,7 +479,7 @@ decimal strings; the schema gives each field's bounds.
 
 **Set-like arrays are sorted and unique** (V-009) so that equal mandates hash equally: pinned
 instruments by `asset_id`, signal models by `id`, parameters by `key`, and `asset_classes`,
-`event_sources`, `channels`, and `approvers` lexically, and tripwires by `id` (V-044). Rule order is significant (first match);
+`event_sources`, `research.event_triggers.sources`, `channels`, and `approvers` lexically, and tripwires by `id` (V-044). Rule order is significant (first match);
 rule ids are unique. Delegation order is significant too (the first live match lifts, §6.5), and
 delegation ids are unique (V-041).
 
@@ -1678,6 +1687,19 @@ setting caps each run.
 allowlist version, and the admission decision with its reason; a revision is `ThesisRevised` and
 also records its predecessor (journal spec §9).
 
+**Event triggers** ([DEC-2392](../project/decisions/DEC-2392.md), E19-12). With
+`behavior.research.event_triggers` set, an allowlisted news item or filing about an instrument on
+which the agent has an active thesis may bring a **monitoring** run forward, ahead of `interval_s`
+([agent harness spec §5.3, §6.9](agent-harness.md#53-research-run-states)). Only the source kinds
+listed trigger, and only items from sources in effect on the allowlist (DEC-101, DEC-1130), so the
+field never widens what the agent reads. A triggered run can only invalidate (and, once declared,
+request an exit): it proposes no thesis and admits nothing, so an event can end a position (§8.6)
+but never open or enlarge one. It starts only when the risk clock is at least `debounce_s` after the
+agent's last research call, while fewer than `max_runs_per_day` triggered runs have started in the
+risk day, while the day's research spend is below `cost_cap_usd_per_day`, and never in mode `paused`
+or `stopped`; otherwise the item triggers nothing and is read, if at all, by the next run. A
+triggered run's spend counts against the cost cap like any other.
+
 **Cost cap** (DEC-120). `behavior.research.cost_cap_usd_per_day` bounds the agent's model spend per
 risk day. The cap is enforced by deterministic code, not by the model: a thesis proposed once the
 day's spend has reached the cap is journaled and refused (§8.5, check 7). Existing positions are
@@ -1857,6 +1879,7 @@ invalid (V-031).
 | **Unpinning** (`universe.pinned` true → false) | Increasing: it lets the platform admit instruments the owner did not choose. Needs step-up (DEC-121) |
 | `universe.asset_classes` | Increasing if any class is added; otherwise reducing |
 | `behavior.research` set from null | Increasing (the research agent may now admit); cleared to null is reducing |
+| `behavior.research.event_triggers`, any change (set, cleared, a source, `debounce_s`, `max_runs_per_day`) | Increasing ([DEC-2392](../project/decisions/DEC-2392.md)): a change to what may start a model call is the owner's to confirm (rule 11), and clearing it is listed here too rather than left to judgment; clearing `behavior.research` as a whole stays reducing |
 | `protection.stop_limit_offset` (version 1: `crypto_stop_limit_offset`) | Increasing if newly set or larger; reducing if cleared (no asset class needs it any more) or smaller. A version-1 document is read as version 2 before the two are compared (DEC-539 items 4 and 5) |
 | `autonomy.admission` | Part of the autonomy row: reducing only if it becomes stricter (auto → ask → deny) |
 | `end_date` | Increasing if later or removed (null); reducing if earlier |
