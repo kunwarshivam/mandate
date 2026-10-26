@@ -10355,8 +10355,8 @@ const CARGO_BUILD_TARGET_DIR: &str = "CARGO_BUILD_TARGET_DIR";
 /// run with it at `1`, which cargo ranks above the caller's value, `build.incremental` and the
 /// profiles' `incremental`, so nothing turns it off; [`mutants`] says so when the caller exported
 /// `0` ([`incremental_overridden`]). It does not refuse that caller: CI's `Swatinem/rust-cache`
-/// exports `CARGO_INCREMENTAL=0` into every later step of its job, the mutants job's included, so a refusal
-/// failed every shard (#2648's own landing).
+/// exports `CARGO_INCREMENTAL=0` into every later step of its job, the mutants job's included, so
+/// a refusal failed every shard (#2648's own landing).
 const CARGO_INCREMENTAL: &str = "CARGO_INCREMENTAL";
 
 /// What [`mutants`] says when its caller exported [`CARGO_INCREMENTAL`] as `0`: that the job's
