@@ -301,6 +301,71 @@ fn an_owner_exits_legs_are_handed_again_on_a_retry_and_a_restart_until_taken() -
     Ok(())
 }
 
+/// Journal spec §5.1, rule 13: an owner's kill switch with a confirmed bid and valid step-up whose
+/// append went unanswered is retried with the same drafts, and its flatten is handed again with
+/// the same confirmation.
+#[test]
+fn a_retried_kill_switch_hands_its_flatten_with_the_bid_its_copy_confirmed() -> Checked {
+    let (view, plan) = (view()?, Plan::of(Vec::new(), Autonomy::Auto));
+    let flatten = Holding::of(vec![leg("AAPL", "10", AssetClass::UsEquity)?]);
+    let ports = ports(&view, &plan, &flatten);
+    let (mut rig, _) = Rig::started(&ports)?;
+    let switch = rig.external(
+        CONTROL_STREAM,
+        COMMAND_ISSUED,
+        command(
+            "a",
+            "kill_switch",
+            ("agent", "a"),
+            evidence("s1", AT)?,
+            true,
+        )?,
+        format!("1{:025}", 1),
+    )?;
+    let first = handle(&mut rig.state, Input::Journal(switch.clone()), &ports).map_err(failed)?;
+    let retry = handle(&mut rig.state, Input::Journal(switch), &ports).map_err(failed)?;
+    let confirmed = |effects: &[Effect]| -> Vec<Option<OwnerConfirmation>> {
+        handed(effects)
+            .iter()
+            .filter_map(|h| match &h.body {
+                IntentBody::Flatten(plan) => Some(plan.confirmation.clone()),
+                IntentBody::Order { .. } => None,
+            })
+            .collect()
+    };
+    let shown = confirmed(&first);
+    assert!(
+        matches!(shown.as_slice(), [Some(_)]),
+        "the live switch carries its bid: {first:?}"
+    );
+    assert_eq!(confirmed(&retry), shown, "the retry carries the same bid");
+    assert_eq!(retry, first);
+    Ok(())
+}
+
+/// DEC-2387 item 3, DEC-131 item 22: an owner's exit taken while the owner has paused or stopped
+/// the agent is re-handed on a restart as the owner's flatten was, in every mode, since the owner
+/// asked for it and only the executor's mode gate may hold it (`AGENTS.md` rule 13).
+#[test]
+fn a_paused_or_stopped_agents_untaken_owner_exit_is_handed_again_on_a_restart() -> Checked {
+    for stop in [crate::types::Command::Pause, crate::types::Command::Stop] {
+        let (view, plan) = (view()?, Plan::of(Vec::new(), Autonomy::Auto));
+        let flatten = Holding::of(vec![leg("AAPL", "10", AssetClass::UsEquity)?]);
+        let ports = ports(&view, &plan, &flatten);
+        let (mut rig, _) = Rig::started(&ports)?;
+        rig.step(Input::Command(stop.clone()), &ports)?;
+        let (_, effects) =
+            rig.control(COMMAND_ISSUED, exit_of("AAPL", Value::Null, false)?, &ports)?;
+        let leg_id = the(&effects, "IntentProposed")?.event_id.clone();
+        let (_, recovered) = rig.restarted(&ports)?;
+        assert!(
+            handed(&recovered).iter().any(|h| h.intent_id == leg_id),
+            "{stop:?}: {recovered:?}"
+        );
+    }
+    Ok(())
+}
+
 fn folded(id: &str, members: Vec<(&str, Value)>) -> Result<FoldedEvent, String> {
     Ok(FoldedEvent {
         stream: AGENT_STREAM.to_owned(),
@@ -357,22 +422,25 @@ fn the_fold_reads_a_market_exit_with_no_limit_and_refuses_every_other_shape() ->
         state.body_of(&EventId("i1".to_owned())),
         Some(IntentBody::Order { limit: Some(limit), .. }) if limit.to_string() == "150"
     ));
-    for (kind, limit, purpose, side) in [
-        ("market", Value::Null, "open", "buy"),
-        ("market", Value::Null, "increase", "buy"),
-        ("market", text("150"), "owner_exit", "sell"),
-        ("limit", Value::Null, "owner_exit", "sell"),
-        ("stop", Value::Null, "owner_exit", "sell"),
-        ("stop", text("150"), "owner_exit", "sell"),
+    for (kind, limit, purpose, side, field) in [
+        ("market", Value::Null, "open", "buy", "limit_price"),
+        ("market", Value::Null, "increase", "buy", "limit_price"),
+        ("market", text("150"), "owner_exit", "sell", "limit_price"),
+        ("limit", Value::Null, "owner_exit", "sell", "limit_price"),
+        ("stop", Value::Null, "owner_exit", "sell", "type"),
+        ("stop", text("150"), "owner_exit", "sell", "type"),
     ] {
         let mut state = RuntimeState::new(deployment());
         let refused = fold(
             &mut state,
             &proposed_of(kind, limit.clone(), purpose, side)?,
         );
-        assert!(
-            refused.is_err(),
-            "{kind} {limit:?} {purpose} must be refused"
+        assert_eq!(
+            refused,
+            Err(crate::error::RuntimeError::NonCanonicalPayload {
+                field: field.to_owned()
+            }),
+            "{kind} {limit:?} {purpose} is refused at {field}"
         );
     }
     Ok(())

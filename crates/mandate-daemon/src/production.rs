@@ -200,7 +200,9 @@ impl Facts {
 /// and the broker holds what it will not take (`AGENTS.md` rule 13). A held instrument it cannot
 /// plan, one with no asset class in the universe or an id that does not parse, is counted for the
 /// process's `flatten_unplanned` alert rather than dropped silently; the executor still flattens
-/// its own sub-ledger of it.
+/// its own sub-ledger of it. A plan asked before the account is followed, when nothing can be read,
+/// is counted the same way, never taken as "nothing held": for an owner's exit of one instrument
+/// the plan is the only seller (DEC-2387 item 1).
 pub struct Flatten {
     facts: Facts,
     classes: BTreeMap<String, AssetClass>,
@@ -222,10 +224,18 @@ impl FlattenPlanner for Flatten {
                 .as_ref()
                 .is_none_or(|named| named.as_str() == instrument)
         };
-        let (held, working) = self
+        let Some((held, working)) = self
             .facts
             .read(|journaled| (journaled.held(), journaled.working()))
-            .unwrap_or_default();
+        else {
+            self.facts.note_unplanned(1);
+            return FlattenPlan {
+                cancel_client_order_ids: Vec::new(),
+                sells: Vec::new(),
+                purpose: request.initiator.sell_purpose(),
+                confirmation: request.confirmation.clone(),
+            };
+        };
         let scoped_held: Vec<_> = held
             .into_iter()
             .filter(|(instrument, _)| scoped(instrument))

@@ -1226,13 +1226,18 @@ fn a_kill_switch_with_an_unplanned_holding_raises_the_operator_alert_once() {
 /// The owner's exit of `spy`, as the workspace services journal it: unconfirmed, or with a
 /// confirmed bid and CLI step-up `assertion` authenticated ten seconds before it was committed.
 fn owner_exit(rig: &Rig, assertion: Option<&str>) {
+    owner_exit_at(rig, assertion.map(|assertion| (assertion, NOW - 10)));
+}
+
+/// The owner's exit of `spy` committed at `NOW`, with a confirmed bid of 99 for 100 and floor 95
+/// and CLI step-up `(assertion, authenticated_at)` when given, and no bid otherwise.
+fn owner_exit_at(rig: &Rig, step_up: Option<(&str, i64)>) {
     let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
-    let (bid, step_up) = match assertion {
-        Some(assertion) => (
+    let (bid, step_up) = match step_up {
+        Some((assertion, authenticated_at)) => (
             r#""bid":"99","bid_size":"100","floor":"95""#.to_owned(),
             format!(
-                r#"{{"assertion_id":"{assertion}","authenticated_at":{},"method":"cli_confirm"}}"#,
-                NOW - 10
+                r#"{{"assertion_id":"{assertion}","authenticated_at":{authenticated_at},"method":"cli_confirm"}}"#
             ),
         ),
         None => (
@@ -1439,4 +1444,75 @@ proptest! {
             prop_assert_eq!(leg.get("qty").and_then(Value::as_str), Some("3"));
         }
     }
+}
+
+/// Where the agent-stream rows the runtime writes for an owner's exit are kept, so the executor
+/// process's own test reads exactly them (DEC-2387): the two processes may not link each other
+/// (`xtask/layers.toml`), so this file is their contract.
+const OWNER_EXIT_CONTRACT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/contracts/owner-exit-agent-stream.json"
+);
+
+/// The runtime's agent-stream rows for three owner exits of `spy` (unconfirmed, confirmed with
+/// valid step-up, and confirmed with step-up already stale at commit) are byte for byte the
+/// contract file `mandate-executord`'s test reads. `MANDATE_WRITE_CONTRACTS=1` rewrites it.
+#[test]
+fn the_owner_exit_rows_are_the_executors_contract() {
+    let cases: [(&str, Option<(&str, i64)>); 3] = [
+        ("unconfirmed", None),
+        ("stepped_up", Some(("assertion-valid", NOW - 10))),
+        ("stale", Some(("assertion-stale", NOW - 1_000))),
+    ];
+    let mut listed = Vec::new();
+    for (name, step_up) in cases {
+        let rig = Rig::default();
+        let mut process = holding_spy(&rig, NOW);
+        process.step(at(NOW + 1));
+        owner_exit_at(&rig, step_up);
+        process.step(at(NOW + 2));
+        assert_eq!(process.lifecycle().state(), State::Ready, "{name}");
+        let rows: Vec<Value> = agent_rows(&rig)
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.event_type.as_str(),
+                    "OwnerExitRequested" | "IntentProposed"
+                )
+            })
+            .map(|r| {
+                let mut members = Object::new();
+                let put = |members: &mut Object, key: &str, value: Value| {
+                    members.insert(Key::new(key).unwrap(), value);
+                };
+                put(&mut members, "event_id", Value::Str(r.event_id.clone()));
+                put(&mut members, "event_type", Value::Str(r.event_type.clone()));
+                put(
+                    &mut members,
+                    "causation_id",
+                    causation_of(r).map_or(Value::Null, Value::Str),
+                );
+                put(&mut members, "payload", payload_of(r));
+                Value::Object(members)
+            })
+            .collect();
+        assert_eq!(rows.len(), 2, "{name}: the copy and its one leg");
+        let mut case = Object::new();
+        case.insert(Key::new("name").unwrap(), Value::Str(name.to_owned()));
+        case.insert(Key::new("rows").unwrap(), Value::Array(rows));
+        listed.push(Value::Object(case));
+    }
+    let mut document = Object::new();
+    document.insert(Key::new("cases").unwrap(), Value::Array(listed));
+    let mut bytes = mandate_canon::to_canonical(&Value::Object(document));
+    bytes.push(b'\n');
+    if std::env::var_os("MANDATE_WRITE_CONTRACTS").is_some() {
+        std::fs::write(OWNER_EXIT_CONTRACT, &bytes).unwrap();
+    }
+    let kept = std::fs::read(OWNER_EXIT_CONTRACT).unwrap_or_default();
+    assert!(
+        kept == bytes,
+        "{OWNER_EXIT_CONTRACT} differs from what the runtime writes; rerun with \
+         MANDATE_WRITE_CONTRACTS=1 and re-check mandate-executord's owner_exit_contract test"
+    );
 }

@@ -209,14 +209,19 @@ impl RuntimeState {
     /// "the broker's truth is not yet confirmed", which is a reason not to *decide*, while dropping
     /// an exit already journaled would remove protection rather than add it, and trading-domain spec
     /// §5.5 lets only `paused`, `stopped`, an `Unknown` order, or the broker hold an exit. The copied
-    /// account mode and the lifecycle state still govern, so `stopped` re-hands a flatten alone and
-    /// `exits_only` re-hands no opening (DEC-131 item 22).
+    /// account mode and the lifecycle state still govern, so `stopped` re-hands a flatten and an
+    /// owner's exit alone and `exits_only` re-hands no opening (DEC-131 item 22). An owner's exit
+    /// is re-handed in every mode, as the owner's flatten it replaced was (DEC-2387 item 3): the
+    /// owner asked for it, and the executor's mode gate is what may hold it (`AGENTS.md` rule 13).
     pub fn permits_rehand(&self, purpose: Purpose) -> bool {
         match self.rehand_mode() {
             Mode::Normal => true,
             Mode::ExitsOnly => !purpose.adds_risk(),
-            Mode::Paused => matches!(purpose, Purpose::Protective | Purpose::Flatten),
-            Mode::Stopped => purpose == Purpose::Flatten,
+            Mode::Paused => matches!(
+                purpose,
+                Purpose::Protective | Purpose::Flatten | Purpose::OwnerExit
+            ),
+            Mode::Stopped => matches!(purpose, Purpose::Flatten | Purpose::OwnerExit),
         }
     }
 
