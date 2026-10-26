@@ -226,3 +226,18 @@ fn an_unreadable_acknowledgment_holds_openings_and_hands_every_exit() -> Result<
     );
     Ok(())
 }
+
+/// The lift comes before the step's proposals, and the step goes on to them: an opening proposed
+/// beside the acknowledgment of the hold that held it is handed in the same step.
+#[test]
+fn an_opening_beside_the_lifting_acknowledgment_is_handed_in_the_same_step() -> Result<(), Error> {
+    let journal = held()?;
+    let broker = Paper::new(&journal);
+    let mut process = start_allowing(&journal, &broker)?;
+    process.step(at(NOON)?);
+    acknowledge(&journal)?;
+    propose(&journal, AGENT, OPEN, "buy", "10", "150", "open")?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.received(), [OPEN], "{:?}", after_hold(&journal));
+    Ok(())
+}
