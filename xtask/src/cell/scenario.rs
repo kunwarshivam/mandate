@@ -348,13 +348,6 @@ const DR_CONNECT: Wait = Wait {
     lands: "a connection the dry run can name: staging's comes from the owner's OAuth connect, \
             which the scenario does not run yet",
 };
-const WB_EXIT: Wait = Wait {
-    lane: "WB",
-    story: "E11-9",
-    pr: None,
-    lands: "web/'s owner exit gesture with its bid confirmation, and the trade loop's \
-            `owner_exit` step between the protective stop and the kill switch",
-};
 const W2_WEB: Wait = Wait {
     lane: "W2",
     story: "E11-9",
@@ -993,6 +986,40 @@ pub fn plan(
                 },
                 vec![
                 gesture(
+                    "the same reviewed rule set, registered there: the one its runtime's gate and \
+                     its executor's read (DEC-2819 item 3)",
+                    researcher(&["config", "register", "--kind", "rule_set", &rule_set_in]),
+                    "registered as event".into(),
+                ),
+                gesture(
+                    "the paper fee schedule, registered there",
+                    researcher(&["config", "register", "--kind", "fee_config", &fee_in]),
+                    "registered as event".into(),
+                ),
+                gesture(
+                    "its trading calendar, registered there",
+                    researcher(&[
+                        "config",
+                        "register",
+                        "--kind",
+                        "trading_calendar",
+                        &calendar_in,
+                    ]),
+                    "registered as event".into(),
+                ),
+                gesture(
+                    "SPY's instrument snapshot, registered there: the one instrument its research \
+                     admits, whose own snapshot its executor reads",
+                    researcher(&[
+                        "config",
+                        "register",
+                        "--kind",
+                        "instrument_snapshot",
+                        &instrument_in,
+                    ]),
+                    "registered as event".into(),
+                ),
+                gesture(
                     "the moving-average crossover model, registered there",
                     researcher(&["model", "register", "quant.ma_crossover", "1.0.0"]),
                     "registered as event".into(),
@@ -1126,7 +1153,8 @@ pub fn plan(
                 Part::WebTradeLoop(WebCheck {
                     shows: "the trade loop from web/ on the agent: its approval request \
                             shown, approved with the code the host confirms, the order filled, \
-                            the position and the journal shown, then its kill switch",
+                            the position, the journal and the positions screen shown, the \
+                            owner's exit filled, the audit timeline shown, then its kill switch",
                     agent: WEB_AGENT,
                 }),
                 Part::Gap(Gap {
@@ -1205,15 +1233,14 @@ pub fn plan(
         },
         Step {
             number: 6,
-            title: "the owner exits the agent's instrument at a confirmed floor",
-            parts: vec![Part::Gap(Gap {
-                what: "the owner's exit of the agent's position from web/, at a confirmed bid, \
-                       after the trade loop's fill and its protective stop, so the sale shows in \
-                       its positions and audit before the kill switch",
-                on_main: "the owner's exit over the API (#2501), handed to the executor's core and \
-                          priced at the floor it confirmed (#1736, DEC-2033 item 4); an exit \
-                          before the fill sells nothing, so no gesture of the Job runs one",
-                waits: vec![WB_EXIT],
+            title: "the owner exits the agent's position from the web app",
+            parts: vec![Part::WebTradeLoop(WebCheck {
+                shows: "the owner's exit of the agent's position from web/'s positions screen, \
+                        after step 4's fill, its sell filled on the agent's orders before the \
+                        audit and the kill switch: the trade loop's `owner_exit`, read from step \
+                        4's one run (no gesture of the Job exits, since an exit before the fill \
+                        sells nothing)",
+                agent: WEB_AGENT,
             })],
         },
         Step {
@@ -1395,13 +1422,16 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
             vec![E2E_FILL],
         ),
         link(
-            "a monitor run starts on the held thesis",
+            "the news item starts a monitor run over the held thesis",
             &agent,
             "RunStarted",
-            Some(r#""kind":"monitor""#),
-            "the monitor run over the held thesis, which reads the news item that ends it, \
-             journaled before the run uses it",
-            "the research pass offers arrived items to the core (#2575)",
+            Some(r#""kind":"event""#),
+            "the monitor run the news item triggers, whose trigger names the item's \
+             ObservationRecorded (rule 271); the recorded item arrives 900 seconds after the \
+             research agent is deployed, so a run waits for it only with \
+             MANDATE_CELL_LOOP_WAIT_S",
+            "the research pass offers arrived items to the core (#2575), and the recorded feed's \
+             item in the runtime image's bundle (#2653)",
             vec![NE_NEWS],
         ),
         link(
@@ -2071,10 +2101,27 @@ fn poll_applied(check: &ApiCheck) -> Result<(&'static str, String, bool)> {
 /// How long [`poll_applied`] waits for the kill switch to read back applied.
 const APPLIED_WITHIN: Duration = Duration::from_secs(90);
 
-/// How long the research loop waits for each of its links to appear in the journal: one research
-/// pass at the runtime's tick, or the executor's next reconciliation, with the Job's ten minutes in
-/// mind, since a link not seen stops the loop's later reads.
+/// How long the research loop waits for each of its links to appear in the journal by default: one
+/// research pass at the runtime's tick, or the executor's next reconciliation, with the Job's ten
+/// minutes in mind, since a link not seen stops the loop's later reads.
 const LINK_WITHIN: Duration = Duration::from_secs(60);
+
+/// The variable a rehearsal sets to wait longer for each link, in whole seconds, up to
+/// [`LINK_WITHIN_MAX`]: the recorded news item arrives 900 seconds after the research agent is
+/// deployed (#2653), which a CI run's wait does not reach.
+pub const LOOP_WAIT_ENV: &str = "MANDATE_CELL_LOOP_WAIT_S";
+
+/// The longest a rehearsal may wait for one link, so a mistyped value never holds a run for hours.
+const LINK_WITHIN_MAX: Duration = Duration::from_secs(1_800);
+
+/// The wait for each link: `set`, the variable's value, in whole seconds from 1 to
+/// [`LINK_WITHIN_MAX`]'s, or [`LINK_WITHIN`] when it is unset or not such a number.
+pub fn link_within(set: Option<&str>) -> Duration {
+    set.and_then(|text| text.trim().parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .filter(|wait| !wait.is_zero() && *wait <= LINK_WITHIN_MAX)
+        .unwrap_or(LINK_WITHIN)
+}
 
 /// Whether the research loop's later links are read: `Open` until a link is not seen, then
 /// `Stopped` with that link, so every later link reads as not reached rather than spending its own
@@ -2167,7 +2214,7 @@ pub fn link_query(check: &LoopCheck, after: u64) -> String {
 }
 
 /// Reads `check`'s first event after the last link seen on its stream, `after`'s, from the journal's
-/// primary every two seconds until one is there or [`LINK_WITHIN`] has passed, and records its
+/// primary every two seconds until one is there or [`link_within`]'s wait has passed, and records its
 /// sequence number there: what Postgres holds, not what a process reports.
 #[expect(
     clippy::disallowed_methods,
@@ -2176,7 +2223,8 @@ pub fn link_query(check: &LoopCheck, after: u64) -> String {
 fn journaled(check: &LoopCheck, after: &mut BTreeMap<String, u64>) -> Seen {
     let since = after.get(&check.stream).copied().unwrap_or(0);
     let query = link_query(check, since);
-    let deadline = Instant::now() + LINK_WITHIN;
+    let wait = link_within(env::var(LOOP_WAIT_ENV).ok().as_deref());
+    let deadline = Instant::now() + wait;
     loop {
         match super::on_primary(&query) {
             Ok(answer) => match answer.trim().parse::<u64>() {
@@ -2743,8 +2791,11 @@ pub fn trade_verdict(outcome: &TradeOutcome, required: Required) -> (&'static st
         TradeOutcome::Ran(t) if t.whole() => (
             "ran",
             format!(
-                "approval {}, approved {}, kill switch {}",
-                t.reached["approval"], t.reached["approved"], t.reached["kill_switch"]
+                "approval {}, approved {}, owner exit {}, kill switch {}",
+                t.reached["approval"],
+                t.reached["approved"],
+                t.reached["owner_exit"],
+                t.reached["kill_switch"]
             ),
             false,
         ),
@@ -3285,38 +3336,53 @@ mod tests {
         assert_eq!(lanes, ["W2"], "only web/'s report screen is left");
     }
 
-    /// Step 2 registers the reviewed configuration before any version, once each: the gate's
-    /// rule set, which the runtime's gate and the executor's binding gate both read as the
-    /// control stream's latest `rule_set`, so no later registration of that kind may shadow it,
-    /// then the paper fee schedule and its trading calendar. Each file is the shell's reviewed
-    /// tracer configuration, and the rule set has exactly the members the gates accept.
+    /// Step 2 registers the reviewed configuration before any version, once each in each
+    /// workspace, the run's and its research workspace's (DEC-2819 item 3): the gate's rule set,
+    /// which the runtime's gate and the executor's binding gate both read as the control stream's
+    /// latest `rule_set`, so no later registration of that kind may shadow it, then the paper fee
+    /// schedule, its trading calendar and SPY's instrument snapshot. Each file is the shell's
+    /// reviewed tracer configuration, and the rule set has exactly the members the gates accept.
     #[test]
     fn step_two_registers_the_reviewed_configuration_both_gates_read_once_before_any_version() {
         let steps = planned("demo2");
-        let all = gestures(&steps);
-        let first_version = all
-            .iter()
-            .position(|g| g.args[..2] == ["version", "create"])
-            .unwrap();
-        for (kind, file) in [
-            ("rule_set", "rule-set.json"),
-            ("fee_config", "fee-config.json"),
-            ("trading_calendar", "trading-calendar.json"),
-        ] {
-            let registered: Vec<usize> = all
+        let every = gestures(&steps);
+        for workspace in ["demo2", "demo2r"] {
+            let all: Vec<&&Gesture> = every
                 .iter()
-                .enumerate()
-                .filter(|(_, g)| g.args.windows(2).any(|w| w == ["--kind", kind]))
-                .map(|(n, _)| n)
+                .filter(|g| g.args.windows(2).any(|w| w == ["--workspace", workspace]))
                 .collect();
-            assert_eq!(registered.len(), 1, "{kind} is registered once");
-            assert!(registered[0] < first_version, "{kind} before any version");
-            let path = format!("{INPUTS}/{file}");
-            assert!(
-                all[registered[0]].args.contains(&path),
-                "{kind} registers {path}: {:?}",
-                all[registered[0]].args
-            );
+            let first_version = all
+                .iter()
+                .position(|g| g.args[..2] == ["version", "create"])
+                .unwrap();
+            for (kind, file) in [
+                ("rule_set", "rule-set.json"),
+                ("fee_config", "fee-config.json"),
+                ("trading_calendar", "trading-calendar.json"),
+                ("instrument_snapshot", "instrument.json"),
+            ] {
+                let registered: Vec<usize> = all
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, g)| g.args.windows(2).any(|w| w == ["--kind", kind]))
+                    .map(|(n, _)| n)
+                    .collect();
+                assert_eq!(
+                    registered.len(),
+                    1,
+                    "{workspace}: {kind} is registered once"
+                );
+                assert!(
+                    registered[0] < first_version,
+                    "{workspace}: {kind} before any version"
+                );
+                let path = format!("{INPUTS}/{file}");
+                assert!(
+                    all[registered[0]].args.contains(&path),
+                    "{workspace}: {kind} registers {path}: {:?}",
+                    all[registered[0]].args
+                );
+            }
         }
         for (demo, tracer) in [
             (RULE_SET_FILE, "rule-set.json"),
@@ -3492,6 +3558,10 @@ mod tests {
                 ["workspace", "found"],
                 ["connection", "record"],
                 ["connection", "record"],
+                ["config", "register"],
+                ["config", "register"],
+                ["config", "register"],
+                ["config", "register"],
                 ["model", "register"],
                 ["model", "register"],
                 ["version", "create"],
@@ -3586,7 +3656,7 @@ mod tests {
                     "ProtectionChanged",
                     Some(r#""action":"placed""#)
                 ),
-                (agent.clone(), "RunStarted", Some(r#""kind":"monitor""#)),
+                (agent.clone(), "RunStarted", Some(r#""kind":"event""#)),
                 (agent.clone(), "ThesisInvalidated", None),
                 (
                     acct.clone(),
@@ -3602,7 +3672,7 @@ mod tests {
             assert_eq!(g.args[at + 1], "demo3r", "{:?}", g.args);
         }
         assert_eq!(
-            gestures[5].args[2..6],
+            gestures[9].args[2..6],
             [
                 "llm.research_agent",
                 "0.1.0",
@@ -3611,8 +3681,8 @@ mod tests {
             ]
         );
         let version = reference(&research_mandate());
-        assert_eq!(gestures[6].expect, format!("created {version}"));
-        let deployed = &gestures[10].args;
+        assert_eq!(gestures[10].expect, format!("created {version}"));
+        let deployed = &gestures[14].args;
         assert_eq!(deployed[2..4], [RESEARCH_AGENT, version.as_str()]);
         assert_eq!(
             lanes(step),
@@ -3645,23 +3715,32 @@ mod tests {
             .collect()
     }
 
-    /// Step 6 runs no gesture in the Job: an owner's exit before the trade loop's fill sells
-    /// nothing, so it is a gap until web/'s exit runs after the fill, in the browser.
+    /// Step 6 runs no gesture in the Job, since an owner's exit before the trade loop's fill sells
+    /// nothing: it reads the trade loop's `owner_exit`, which web/ reaches after the fill and
+    /// before the audit timeline and the kill switch, and it waits on no lane.
     #[test]
-    fn step_six_waits_on_web_s_exit_after_the_fill() {
+    fn step_six_reads_web_s_exit_after_the_fill() {
         let steps = planned("demo1");
         let step6 = &steps[5];
         assert_eq!(step6.number, 6);
         assert!(
-            step6.parts.iter().all(|p| matches!(p, Part::Gap(_))),
-            "no gesture of the Job exits"
+            matches!(&step6.parts[..], [Part::WebTradeLoop(c)] if c.agent == WEB_AGENT),
+            "step 6 is the trade loop's own exit on the run's one agent"
         );
         assert!(
             gestures(&steps)
                 .iter()
-                .all(|g| g.args[..2] != ["agent", "exit"])
+                .all(|g| g.args[..2] != ["agent", "exit"]),
+            "no gesture of the Job exits"
         );
-        assert_eq!(lanes(step6), ["WB"]);
+        assert!(lanes(step6).is_empty());
+        let at = |step: &str| web::TRADE_LOOP_STEPS.iter().position(|s| *s == step);
+        assert!(
+            at("positions_screen") < at("owner_exit")
+                && at("owner_exit") < at("audit_timeline")
+                && at("audit_timeline") < at("kill_switch"),
+            "the exit follows the fill's position and comes before the audit and the kill switch"
+        );
         let pinned = parsed(INSTRUMENT_FILE);
         assert_eq!(pinned["instrument_id"], SPY, "SPY's Alpaca asset id");
         assert_eq!(pinned["symbol"], "SPY");
@@ -4115,8 +4194,8 @@ mod tests {
     }
 
     /// Which steps run today: the sign-in, through the API and web/, runs whole; the gestures on
-    /// `main` make steps 2 to 5 partial, step 3's research gestures among them; step 6 is skipped
-    /// until web/'s exit runs after the fill; the kill switch,
+    /// `main` make steps 2 to 5 partial, step 3's research gestures among them; step 6, the trade
+    /// loop's own exit after the fill, runs whole; the kill switch,
     /// applied by the runtime step 2's deployment starts, and the record run whole. Without a
     /// connect check (the staging dry run) step 7 is partial.
     #[test]
@@ -4126,14 +4205,14 @@ mod tests {
         assert_eq!(
             read,
             [
-                Ready, Partial, Partial, Partial, Partial, Skipped, Ready, Ready
+                Ready, Partial, Partial, Partial, Partial, Ready, Ready, Ready
             ]
         );
         let dry: Vec<Readiness> = unconnected("demo1").iter().map(readiness).collect();
         assert_eq!(
             dry,
             [
-                Ready, Partial, Partial, Partial, Partial, Skipped, Partial, Ready
+                Ready, Partial, Partial, Partial, Partial, Ready, Partial, Ready
             ]
         );
         let step = |parts: Vec<Part>| Step {
@@ -4433,6 +4512,19 @@ mod tests {
              seq LIMIT 1"
         );
         assert!(link_query(&check(Some("o'clock")), 0).contains("position('o''clock' in"));
+    }
+
+    /// A rehearsal waits as long as it sets, from a second to half an hour; anything else waits the
+    /// default, so a CI run's wait never grows by accident.
+    #[test]
+    fn a_rehearsal_sets_how_long_each_link_is_waited_for() {
+        assert_eq!(link_within(None), LINK_WITHIN);
+        assert_eq!(link_within(Some("1200")), Duration::from_secs(1_200));
+        assert_eq!(link_within(Some(" 1 ")), Duration::from_secs(1));
+        assert_eq!(link_within(Some("1800")), LINK_WITHIN_MAX);
+        for refused in ["0", "1801", "-5", "20m", ""] {
+            assert_eq!(link_within(Some(refused)), LINK_WITHIN, "{refused}");
+        }
     }
 
     /// The grant reads the CLI's own lines (`mandate_cli::inbox`): the first of the agent's
@@ -4746,9 +4838,15 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(loops.len(), 1);
-        assert_eq!(loops[0].0, 4);
-        assert_eq!(loops[0].1.agent, WEB_AGENT, "never the agent the CLI kills");
+        assert_eq!(
+            loops.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+            [4, 6],
+            "step 4 runs the loop and step 6 reads its owner exit from the same run"
+        );
+        assert!(
+            loops.iter().all(|(_, c)| c.agent == WEB_AGENT),
+            "never the agent the CLI kills"
+        );
         let reached = |steps: &[&str], error: Option<&str>| {
             TradeOutcome::Ran(web::TradeLoop {
                 reached: steps
@@ -4771,7 +4869,10 @@ mod tests {
             let (word, said, fails) =
                 trade_verdict(&reached(&web::TRADE_LOOP_STEPS, None), required);
             assert_eq!((word, fails), ("ran", false), "{said}");
-            assert!(said.contains("v-kill_switch"), "{said}");
+            assert!(
+                said.contains("v-kill_switch") && said.contains("owner exit v-owner_exit"),
+                "{said}"
+            );
             let (word, said, fails) =
                 trade_verdict(&reached(&[], Some("no approval within 20000 ms")), required);
             assert_eq!(

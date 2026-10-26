@@ -73,7 +73,7 @@
       "unevaluatedProperties": false
     },
     "ApprovalDetail": {
-      "description": "One approval with its content, and the ApprovalRequested version that content comes from (DEC-2518): version 3's content names the checks the dry run deferred, never none (journal spec \u00a79.6, rule 291), and versions 1 and 2 name none.",
+      "description": "One approval with its content, and the ApprovalRequested version that content comes from (DEC-2518): version 3's content names the checks the dry run deferred, never none (journal spec \u00a79.6, rule 291), and versions 1 and 2 name none. It also names the deferred checks of the DecisionMade the request's causation_id names, empty for a decision that names none, or null when no such decision is on the agent stream (DEC-2519): a list that differs from the request's own is a request hiding or inventing a deferral.",
       "allOf": [
         {
           "$ref": "#/$defs/ApprovalMembers"
@@ -123,7 +123,8 @@
       ],
       "required": [
         "content",
-        "schema_version"
+        "schema_version",
+        "decision_deferred_to_binding"
       ],
       "properties": {
         "content": {
@@ -135,6 +136,16 @@
             2,
             3
           ]
+        },
+        "decision_deferred_to_binding": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "unevaluatedProperties": false
