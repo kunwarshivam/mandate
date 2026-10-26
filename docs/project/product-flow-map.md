@@ -27,7 +27,7 @@ It stopped in **step 4**: the trade loop "stopped before approval", because no a
 
 | # | Blocker | Evidence on main | Steps | Lane | Size |
 |---|---|---|---|---|---|
-| X1 | ~~No risk clock~~ **Closed.** The scheduler runs in the cell (#2439) | processes.json:189-197 `built: true`; deploy/cell/images/scheduler.Dockerfile; xtask/src/cell.rs:884-891, :982-984. Locally the `scheduler` pod runs. The executor takes the first tick, then `Input::Started` (executord/src/process.rs:322-334); the runtime hands it in `clock_pass` (daemon/src/runtime.rs:415) | — | SC | — |
+| X1 | ~~No risk clock~~ **Closed.** The scheduler runs in the cell (#2439) | deploy/cell/charts/journal-db/files/processes.json:189-197 `built: true`; deploy/cell/images/scheduler.Dockerfile; xtask/src/cell.rs:884-891, :982-984. Locally the `scheduler` pod runs. The executor takes the first tick, then `Input::Started` (executord/src/process.rs:322-334); the runtime hands it in `clock_pass` (daemon/src/runtime.rs:415) | — | SC | — |
 | X2 | **No model outputs in the deployed runtime** | The daemon's models pass is wired: it queues `Observation` and `ModelOutput` ahead of each tick (daemon/src/runtime.rs:448-512, `ModelsWiring` at :54; #2448, DEC-2383). Deployed, `Wiring::models` is `None` (daemon/src/fixture.rs:106), and nothing outside tests implements `Models` (daemon/tests/runtime.rs:1140) | 3, 6 | DR (S3, the composer) | M, after the founder's DEC-503 item 2 layer call |
 | X3 | **Bars yes, marks no** | `data` is built and deployed with SPY and QQQ (processes.json:236-243; values/k3d.yaml:22-30; #2467, #2487), but it appends to no stream (processes.json:237). The executor's `MarkUpdated` v2 writer landed (#2449), but executord's fixture wiring marks nothing (`marked: NoMarks`, executord/src/fixture.rs:102), and its quotes are `NoQuotes` (executord/src/quotes.rs:44) | 3, 4, 6, 7 | X | M |
 | X4 | **The gate's dry run denies every opening** | The deployed runtime uses `production::wired` (daemon/src/main.rs:212-218). It has a real plan (production/plan.rs), flatten, references and view, and a real gate dry run: `Gate` over `evaluate_deferring` with the registered rule set's gate config (production.rs:43-68; production/gate.rs:69-91; #2489, DEC-2388). That gate defers `UNJOURNALED`, which is eligibility, the liquidity floor, participation and the day-trade budget (gate.rs:26-30), on every opening, and denies any opening with a deferred check. `Plan::classify` never answers auto (plan.rs:90-133), so an opening that passed would ask | 3, 6 | D1 (DEC-2378 item 11: journal those four facts, then the `DecisionMade` v2 spec) | L |
@@ -43,11 +43,11 @@ Today: the CLI path runs end to end in the cell (CI 40281337291, step 2). From w
 
 | Item | Wired? | Evidence | Lane | Size |
 |---|---|---|---|---|
-| `/agents/new` over the API | no | page.tsx wraps `WorkspaceGate` without `api`, so `ApiNotYetNotice` shows (components/screens/common.tsx:212-218); the compiler is the fixture one (new-agent-flow.tsx:13) | W | S |
-| Create the version | yes | api-runtime.tsx, then http.rs:196, then version_routes.rs:339 | W | — |
-| Confirm | server yes, web no | The server takes passkey step-up (version_routes.rs:302-314; handler :529); web sends `step_up: null` (web/src/api/commands.ts:138; api-runtime.tsx:407-430) | W + L1 (#2475 waits on DEC-2131's slices) | M |
-| Deploy, `POST /agents` | server yes, web no | version_routes.rs:769; web is `not_sent` (api-runtime.tsx:432-443) | W | S |
-| The connection (Alpaca paper) | yes | web connects with cli_confirm (api-screens/connections.tsx; api-runtime.tsx:285-300; #2453). Staging `alpacaOAuth.clientId` is still "" (deploy/gitops/clusters/staging/workspace.yaml:40): the founder registers the app | founder | — |
+| `/agents/new` over the API | no | page.tsx wraps `WorkspaceGate` without `api`, so `ApiNotYetNotice` shows (components/screens/common.tsx:212-218); the compiler is the fixture one (web/src/components/new-agent/new-agent-flow.tsx:13) | W | S |
+| Create the version | yes | web/src/lib/api-runtime.tsx, then http.rs:196, then version_routes.rs:339 | W | — |
+| Confirm | server yes, web no | The server takes passkey step-up (version_routes.rs:302-314; handler :529); web sends `step_up: null` (web/src/api/commands.ts:138; web/src/lib/api-runtime.tsx:407-430) | W + L1 (#2475 waits on DEC-2131's slices) | M |
+| Deploy, `POST /agents` | server yes, web no | version_routes.rs:769; web is `not_sent` (web/src/lib/api-runtime.tsx:432-443) | W | S |
+| The connection (Alpaca paper) | yes | web connects with cli_confirm (api-screens/connections.tsx; web/src/lib/api-runtime.tsx:285-300; #2453). Staging `alpacaOAuth.clientId` is still "" (deploy/gitops/clusters/staging/workspace.yaml:40): the founder registers the app | founder | — |
 | Reviewed configuration registered | yes (cell) | Step 2 registers the reviewed `rule_set`, `fee_config` and `trading_calendar` before any version: one rule set for both gates (#2495) | DR | — |
 | Runtime and executor started after deploy | yes | CI 40281337291: "the account's executor … answers livez" | — | — |
 
@@ -85,7 +85,7 @@ Today: in the cell, the runtime decides on every tick, but nothing can propose (
 | Marks in the journal | writer yes, deployed no | X3 (#2449, `NoMarks` in the fixture wiring) | X | S |
 | Protection, OCO, watchdog | library yes | NoProtection (X5) | X / LV | L |
 | Drawdown ladder, daily loss | library yes | not called deployed | TW | L |
-| Owner sees positions | agent page yes | The agent page reads orders, positions and the journal from the API (api-runtime.tsx:320-345; api-screens.tsx:279-335; #2459). The `/positions` screen is mock (positions-screen.tsx:6), and the API returns null cost basis, risk mark and protection (reads.rs) | W | M |
+| Owner sees positions | agent page yes | The agent page reads orders, positions and the journal from the API (web/src/lib/api-runtime.tsx:320-345; api-screens.tsx:279-335; #2459). The `/positions` screen is mock (positions-screen.tsx:6), and the API returns null cost basis, risk mark and protection (reads.rs) | W | M |
 
 ## Step 5: acts on news and events
 
@@ -106,7 +106,7 @@ Unchanged since 517ee19: news tools exist on the recorded plane only, live news 
 |---|---|---|---|---|
 | Approve | web yes, server no | X6 | L1 | M |
 | Kill switch | yes | web's and the CLI's are recorded, and the runtime applies the CLI's (cell steps 4 and 7) | — | — |
-| Orders, positions, journal reads | used | the agent page (#2459); `/v1/me/session` by step-up (api-runtime.tsx:272) | W | — |
+| Orders, positions, journal reads | used | the agent page (#2459); `/v1/me/session` by step-up (web/src/lib/api-runtime.tsx:272) | W | — |
 | Screens still on `ApiNotYetNotice` | — | positions, audit, alerts, messages, settings | W | M |
 | Resume, release, mandate change | no | unchanged | W + L1 | M–L |
 
