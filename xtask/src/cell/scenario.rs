@@ -43,9 +43,9 @@ pub const INSTRUMENT_FILE: &str = "deploy/cell/demo/instrument.json";
 pub const RULE_SET_FILE: &str = "deploy/cell/demo/rule-set.json";
 pub const FEE_CONFIG_FILE: &str = "deploy/cell/demo/fee-config.json";
 pub const TRADING_CALENDAR_FILE: &str = "deploy/cell/demo/trading-calendar.json";
-/// [`WEB_AGENT`]'s own envelope and its instrument's snapshot, as canonical JSON: the demo's
-/// envelope on QQQ, since V-006 refuses a second agent on the account an instrument the demo agent
-/// already pins (DEC-2036).
+/// The demo's envelope on QQQ and QQQ's snapshot, as canonical JSON: deployed by no step since the
+/// run's workspace holds one agent, they stay as `mandate-runtime-models`' test mandate and the
+/// data process's second instrument, and the canonical-JSON test still checks them.
 #[cfg(test)]
 pub const WEB_MANDATE_FILE: &str = "deploy/cell/demo/web-mandate.json";
 #[cfg(test)]
@@ -84,8 +84,8 @@ const EXIT_BID: (&str, &str, &str) = ("501.25", "100", "500");
 /// id is `agt_` and a ULID, the only agent id web/'s routes open (`web/src/lib/ids.ts`'s
 /// `AGENT_ID`); any other id is a 404 there.
 pub const WEB_AGENT: &str = "agt_01KDEM00000000000000000WEB";
-/// [`WEB_AGENT`]'s envelope's `name`: a mandate name is lowercase letters, digits and hyphens
-/// (`mandate.schema.json`), so it cannot be the agent's id, and nothing requires that it is.
+/// [`WEB_MANDATE_FILE`]'s envelope's `name`: a mandate name is lowercase letters, digits and
+/// hyphens (`mandate.schema.json`), so it cannot be an agent's id, and nothing requires that it is.
 #[cfg(test)]
 const WEB_ENVELOPE: &str = "demo-web";
 /// The demo's research agent, deployed alone in [`research_workspace_of`] the run's workspace, so
@@ -455,9 +455,9 @@ pub const BACKTEST_ID: &str = "bt-demo-01";
 /// The payload and report the runner stores for the demo version and inputs, the committed golden
 /// store's (DEC-1144 item 8: the demo's payload reference is fixed).
 pub const DEMO_PAYLOAD: &str =
-    "sha256:1ab788b2c066c11d949e53929e1ed0332038f481da4d7d6624e6b2027cfdb240";
+    "sha256:5f267af48ab755b83dc6c8dab902ae522aeb61db417ca7266d1441246a7eb50a";
 pub const DEMO_REPORT: &str =
-    "sha256:9e672eb266902fc30120100af6bba87f135f0ecfe0a77a00cb4b1d15bcdc4a63";
+    "sha256:884ac9e109fe39450f9b1a58ca0969fe89d150c5c69117f8c3f0aa2837161349";
 
 /// `sha256:` and the hex SHA-256 of `bytes`: an artifact reference (journal spec §4).
 pub fn reference(bytes: &[u8]) -> String {
@@ -1014,7 +1014,7 @@ pub fn plan(
                     ],
                 }),
                 Part::WebTradeLoop(WebCheck {
-                    shows: "the trade loop from web/ on the second agent: its approval request \
+                    shows: "the trade loop from web/ on the agent: its approval request \
                             shown, approved with the code the host confirms, the order filled, \
                             the position and the journal shown, then its kill switch",
                     agent: WEB_AGENT,
@@ -1562,7 +1562,7 @@ pub fn run_in(name: &str) -> Result<String> {
     let files = inputs.files();
     let objects = gestures_job(rendered, &all, &format!("demo-in-{id}"), &files, NAMESPACE)?;
     eprintln!("==> the demo, end to end (paper and demo data only; local-cell results)");
-    eprintln!("    workspace {workspace}, agent {AGENT}");
+    eprintln!("    workspace {workspace}, agent {WEB_AGENT}");
     let job = objects
         .iter()
         .find(|o| o["kind"] == "Job")
@@ -1638,18 +1638,10 @@ pub fn run_in(name: &str) -> Result<String> {
                     eprintln!("    {word:<8} {}: {said}", check.shows);
                 }
                 Part::Applied(check) => {
-                    let command = match &browsed {
-                        Some(WebOutcome::Recorded { command, .. }) => Some(command.clone()),
-                        _ => None,
-                    };
-                    let (word, said) = match (&failed, command) {
+                    let (word, said) = match (&failed, applied_from(browsed.as_ref())) {
                         (Some(_), _) => ("not run", "an earlier part failed".to_owned()),
-                        (None, None) => {
-                            let why = "web/'s kill switch recorded no command".to_owned();
-                            failed = Some(why.clone());
-                            ("failed", why)
-                        }
-                        (None, Some(command)) => {
+                        (None, Err(why)) => ("not run", why),
+                        (None, Ok(command)) => {
                             let read = applied_read(&workspace, check.agent, &command);
                             let (word, said, fails) = poll_applied(&read)?;
                             if fails {
@@ -1957,8 +1949,8 @@ pub enum TradeOutcome {
     Ran(web::TradeLoop),
 }
 
-/// The scenario's one pass through the browser on `agent`, the second agent, which nothing has
-/// stopped yet: first the trade loop (lane W's spec, its confirmation run on the host as a control
+/// The scenario's one pass through the browser on `agent`, the run's workspace's one agent, which
+/// nothing in the gestures' Job stops: first the trade loop (lane W's spec, its confirmation run on the host as a control
 /// gesture), then, unless the loop pressed the agent's kill switch itself, the kill switch gesture
 /// alone, so step 1's sign-in, step 4's loop and step 7's kill switch read one browser session's
 /// work. A loop that pressed the kill switch hands step 7 that command.
@@ -2168,9 +2160,8 @@ fn web_outcome(check: &WebCheck, workspace: &str) -> Result<WebOutcome> {
 }
 
 /// The signed-in read of `command` in `workspace`: the API finds it on the workspace's control
-/// stream and reads it accepted. It does not require `applied`: the browser's agent is killed
-/// after the Job, and step 7's [`AppliedCheck`] of the CLI's kill switch proves the runtime applies
-/// one (DEC-2379).
+/// stream and reads it accepted. It does not require `applied`: step 7's [`AppliedCheck`] then
+/// reads the same command back until the agent's runtime applied it (DEC-2379).
 pub fn command_read(workspace: &str, command: &str) -> ApiCheck {
     ApiCheck {
         shows: "the web gesture's command, read back",
@@ -2202,6 +2193,22 @@ pub fn applied_read(workspace: &str, agent: &str, command: &str) -> ApiCheck {
             phases: &["applied"],
             step: Some(("KillSwitchActivated", format!("agent:{workspace}:{agent}"))),
         },
+    }
+}
+
+/// The command step 7's applied check reads back: the one web/'s kill switch recorded, or why
+/// there is none. A browser that could not run, or ran after an earlier failure, leaves nothing
+/// to read, which reads `not run` as web/'s own parts do (their verdict fails it where web/ is
+/// required), never as a failure of its own.
+pub fn applied_from(browsed: Option<&WebOutcome>) -> Result<String, String> {
+    match browsed {
+        Some(WebOutcome::Recorded { command, .. }) => Ok(command.clone()),
+        Some(WebOutcome::Unaskable(why) | WebOutcome::NoTools(why)) => {
+            Err(format!("web/'s kill switch did not run: {why}"))
+        }
+        Some(WebOutcome::Failed(_) | WebOutcome::AfterFailure) | None => {
+            Err("an earlier part failed".to_owned())
+        }
     }
 }
 
@@ -2411,7 +2418,7 @@ mod tests {
         assert_eq!(pinned[0]["symbol"], instrument["symbol"]);
     }
 
-    /// The second agent's envelope is the demo's but for its name, its description and its one
+    /// The QQQ envelope, a test fixture now, is the demo's but for its name, its description and its one
     /// pinned instrument, which its own snapshot names and which is not the demo agent's, so V-006
     /// finds it unclaimed on the shared connection (DEC-2036).
     #[test]
@@ -2459,9 +2466,9 @@ mod tests {
             "the code `connection record` showed for an Alpaca paper record of the demo's \
              connection, scope trading, on that account, caused by that check, for that owner"
         );
-        let version = "sha256:19dd2428a410b41fa00ddc1b3d8d15d5775096ed223a20edf123c50adae292e6";
-        assert_eq!(confirm_code(version), "e869cb19");
-        assert_eq!(deploy_code(AGENT, version), "63fbe39f");
+        let version = "sha256:9a5b97d24a888b6a4f5c62ecb64820ae8e2f7af27cdb05371977f753ec4b07ed";
+        assert_eq!(confirm_code(version), "c584a3db");
+        assert_eq!(deploy_code(WEB_AGENT, version), "748643fc");
         assert_eq!(code(""), "e3b0c442");
         let research = reference(&research_mandate());
         assert_eq!(
@@ -3601,6 +3608,34 @@ mod tests {
         );
     }
 
+    /// Step 7's applied check reads the command web/'s kill switch recorded, and reads anything
+    /// else as `not run`, never as a failure of its own: a machine without the browser's tools, or
+    /// with the API out of reach, still finishes, as web/'s own parts do.
+    #[test]
+    fn the_applied_check_reads_the_recorded_command_or_not_run() {
+        let recorded = WebOutcome::Recorded {
+            agent: WEB_AGENT.into(),
+            workspace: "demo1".into(),
+            command: "1TSG".into(),
+            read: Ok((200, String::new())),
+        };
+        assert_eq!(applied_from(Some(&recorded)), Ok("1TSG".into()));
+        for outcome in [
+            WebOutcome::NoTools("no npm".into()),
+            WebOutcome::Unaskable("no API".into()),
+            WebOutcome::Failed("timed out".into()),
+            WebOutcome::AfterFailure,
+        ] {
+            assert!(applied_from(Some(&outcome)).is_err(), "{outcome:?}");
+        }
+        assert!(applied_from(None).is_err());
+        assert!(
+            applied_from(Some(&WebOutcome::NoTools("no npm".into())))
+                .is_err_and(|why| why.contains("no npm")),
+            "names why"
+        );
+    }
+
     /// DEC-2379: step 7 is web/'s kill switch on the one agent, followed by the check that its
     /// runtime applied it, which reads the command the browser recorded and passes on `applied`
     /// alone. Nothing in the gestures' Job stops the agent first: no `agent kill` is a gesture.
@@ -3722,8 +3757,8 @@ mod tests {
         }
     }
 
-    /// Step 4 runs lane W's trade loop on the second agent, the one nothing stops before the parts
-    /// run (the CLI's kill switch is the demo agent's), and reads it: `ran` only when every step
+    /// Step 4 runs lane W's trade loop on the run's workspace's one agent, which nothing stops
+    /// before the parts run, and reads it: `ran` only when every step
     /// was reached; `pending`, never failing, only as [`TradeOutcome::Unproposed`], the API's word
     /// that the runtime asked for nothing; and `failed` for a loop that stopped at any step,
     /// approval included, or for a run that failed.

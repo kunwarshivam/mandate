@@ -193,10 +193,13 @@ fn a_flat_agent_with_every_fact_journaled_proposes_an_opening_never_above_the_bi
         "{proposal:?}"
     );
     let cost = proposal.qty.notional(proposal.limit).unwrap();
-    assert!(
-        cost <= mandate_num::Usd::parse("300").unwrap(),
-        "{proposal:?}"
-    );
+    let cap = document()
+        .get("risk")
+        .and_then(|risk| risk.get("max_order_usd"))
+        .and_then(Value::as_str)
+        .map(|cap| mandate_num::Usd::parse(cap).unwrap())
+        .unwrap();
+    assert!(cost <= cap, "{proposal:?} within the envelope's order cap");
     assert!(proposal.qty >= Qty::parse("1").unwrap(), "{proposal:?}");
     let execution = proposal.execution.unwrap();
     assert!(execution.protection_required);

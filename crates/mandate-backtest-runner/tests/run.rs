@@ -404,7 +404,7 @@ fn store_spaced() -> (Store, String) {
 /// here one whose order cap is above its own allocation.
 #[test]
 fn a_mandate_the_context_rejects_refuses() {
-    let document = MANDATE.replace(r#""max_order_usd":"300""#, r#""max_order_usd":"2000""#);
+    let document = MANDATE.replace(r#""max_order_usd":"1000""#, r#""max_order_usd":"2000""#);
     assert_ne!(document, MANDATE);
     let mut store = Store::new();
     let canonical = to_canonical(&parse(document.as_bytes()).unwrap());

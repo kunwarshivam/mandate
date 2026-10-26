@@ -128,13 +128,21 @@ fn journaled_with(account: &Account) -> Rows {
     rows
 }
 
+/// The cell's demo envelope with the $300 order cap these cases' arithmetic is written for: the
+/// demo's own cap is one whole share's room, and these cases test the gate's cap, not the demo's.
 fn document() -> Value {
     let bytes = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../deploy/cell/demo/mandate.json"
     ))
     .unwrap();
-    mandate_canon::parse(&bytes).unwrap()
+    let text = String::from_utf8(bytes).unwrap();
+    let capped = text.replace(r#""max_order_usd":"1000""#, r#""max_order_usd":"300""#);
+    assert_ne!(
+        capped, text,
+        "the demo envelope's order cap is where these cases set it"
+    );
+    mandate_canon::parse(capped.as_bytes()).unwrap()
 }
 
 /// The deployed version the demo rows name, and its stored document.
