@@ -207,10 +207,11 @@ fn run(
                 StreamId::parse(&format!("ctl:{workspace}")).ok_or("deployment_missing")?;
             let rows = store.rows(&control).ok_or("journal_unavailable")?;
             let found = deployment::resolved(&rows, &agent, Environment::Paper, &artifacts)?;
-            let (_, document) =
+            let (version, document) =
                 deployment::document(&rows, &agent, Environment::Paper, &artifacts)?;
             let mut wiring = production::wired(
                 fixture::wiring_for(&found.approvers, &found.author),
+                &version,
                 &document,
                 &format!("clock:{workspace}"),
                 &agent,

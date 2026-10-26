@@ -11,6 +11,7 @@
  */
 import { closedEnum, contentRef, isRecord, timestamp } from "./decode";
 import type { ContentRef, Decoded, DecodeProblem, Decoder, Timestamp } from "./types";
+import { sha256Hex } from "@/lib/sha256";
 
 /** `envelope.schema.json`'s `StepUpAction` kinds this client asks for: the two `cli_confirm` confirms. */
 export const CLI_CONFIRM_KINDS = ["approve", "connection"] as const;
@@ -153,6 +154,39 @@ export function approvalConfirmCommand(input: ApprovalConfirm): string {
     `--principal ${input.principalId}`,
     `--agent ${input.agentId}`,
     `--approval ${input.approvalId}`,
+    `--challenge ${input.shown.challenge.challenge_id}`,
+    `--code ${input.shown.code}`,
+    "--journal <journal DSN> --store <artifact store>",
+  ].join(" ");
+}
+
+/** The token-breadth disclosure the owner confirms with a connect's step-up (DEC-2621 item 5, DEC-2622 version 1). */
+export const CONNECT_DISCLOSURE = { document: "alpaca_oauth_token_breadth", version: "1" } as const;
+
+/**
+ * The digest a connect's step-up binds (DEC-2621 item 4): SHA-256 of the canonical `{action:
+ * "connect", broker, disclosure: {document, version}, environment: "paper", workspace_id}`. Its
+ * members are written in journal spec §4's key order; every value is a plain string, so this is the
+ * canonical form `oauth_connect_object` writes.
+ */
+export function connectStepUpDigest(workspaceId: string): ContentRef {
+  const canonical = JSON.stringify({ action: "connect", broker: "alpaca", disclosure: { document: CONNECT_DISCLOSURE.document, version: CONNECT_DISCLOSURE.version }, environment: "paper", workspace_id: workspaceId });
+  return `sha256:${sha256Hex(canonical)}`;
+}
+
+/** What a connect's host command names (DEC-2125 item 3): the command computes the digest itself. */
+export interface ConnectConfirm {
+  workspaceId: string;
+  principalId: string;
+  shown: ShownChallenge;
+}
+
+/** The command the owner runs on the host for a paper connect (`mandate step-up confirm-connect`, DEC-2125 item 3). */
+export function connectConfirmCommand(input: ConnectConfirm): string {
+  return [
+    "mandate step-up confirm-connect",
+    `--workspace ${input.workspaceId}`,
+    `--principal ${input.principalId}`,
     `--challenge ${input.shown.challenge.challenge_id}`,
     `--code ${input.shown.code}`,
     "--journal <journal DSN> --store <artifact store>",

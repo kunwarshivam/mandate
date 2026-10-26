@@ -12,12 +12,14 @@ workspace = true
 [dependencies]
 mandate-accounting.workspace = true
 mandate-artifacts-fs.workspace = true
+mandate-builder.workspace = true
 mandate-canon.workspace = true
 mandate-domain.workspace = true
 mandate-gate-context.workspace = true
 mandate-gateway.workspace = true
 mandate-journal.workspace = true
 mandate-num.workspace = true
+mandate-ports.workspace = true
 mandate-process.workspace = true
 mandate-research.workspace = true
 mandate-research-driver.workspace = true

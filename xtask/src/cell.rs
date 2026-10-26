@@ -130,6 +130,11 @@ const EXECUTOR_DOCKERFILE: &str = "deploy/cell/images/executor.Dockerfile";
 const SCHEDULER_DOCKERFILE: &str = "deploy/cell/images/scheduler.Dockerfile";
 const SCHEDULER_PROCESS: &str = "scheduler";
 const SCHEDULER_PACKAGE: &str = "mandate-scheduler";
+/// The workspace data process's image (E21-29 lane SC): the deployed instrument's daily bars from
+/// the cell's recorded series, which the runtime reads read-only from the artifact store.
+const DATA_DOCKERFILE: &str = "deploy/cell/images/data.Dockerfile";
+const DATA_PROCESS: &str = "data";
+const DATA_PACKAGE: &str = "mandate-datad";
 /// The token-exchange process's image (DEC-1175), which the deployment manager starts once per
 /// OAuth connect.
 const EXCHANGE_DOCKERFILE: &str = "deploy/cell/images/token-exchange.Dockerfile";
@@ -655,7 +660,7 @@ const RUNNER: &str = "mandate-backtest-runner";
 
 /// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
 /// them.
-const BUILT_PACKAGES: [&str; 9] = [
+const BUILT_PACKAGES: [&str; 10] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
@@ -665,6 +670,7 @@ const BUILT_PACKAGES: [&str; 9] = [
     "mandate-provisionerd",
     EXCHANGE_PACKAGE,
     SCHEDULER_PACKAGE,
+    DATA_PACKAGE,
 ];
 
 /// The token exchange's package (DEC-1175), a dev-profile build like the rest, so its cell token
@@ -677,7 +683,7 @@ const STUB_PACKAGE: &str = "mandate-stub-issuer";
 /// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
 /// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
 /// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
-pub const IMAGE_PACKAGES: [&str; 10] = [
+pub const IMAGE_PACKAGES: [&str; 11] = [
     BUILT_PACKAGES[0],
     BUILT_PACKAGES[1],
     BUILT_PACKAGES[2],
@@ -687,6 +693,7 @@ pub const IMAGE_PACKAGES: [&str; 10] = [
     BUILT_PACKAGES[6],
     BUILT_PACKAGES[7],
     BUILT_PACKAGES[8],
+    BUILT_PACKAGES[9],
     STUB_PACKAGE,
 ];
 
@@ -883,6 +890,15 @@ fn scheduler_image() -> Result<Option<String>> {
     local_tag(SCHEDULER_PROCESS, &[SCHEDULER_PACKAGE]).map(Some)
 }
 
+/// The cell's `data` image (E21-29 lane SC): this checkout's `mandate-datad`. `None` where the
+/// `mandate` image is pulled, as for the runtime, which reads what it stores.
+fn data_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag(DATA_PROCESS, &[DATA_PACKAGE]).map(Some)
+}
+
 /// The cell's `token-exchange` image, this checkout's build of `mandate-token-exchange`: none
 /// without the deployment manager, the one process that starts it, as for the manager itself.
 fn exchange_image() -> Result<Option<String>> {
@@ -966,10 +982,13 @@ fn image_sets() -> Result<Vec<String>> {
     if let Some(scheduler) = scheduler_image()? {
         sets.push(format!("images.{SCHEDULER_PROCESS}={scheduler}"));
     }
+    if let Some(data) = data_image()? {
+        sets.push(format!("images.{DATA_PROCESS}={data}"));
+    }
     Ok(sets)
 }
 
-/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `scheduler`,
+/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `scheduler`, `data`,
 /// `deploy-manager` and `role-provisioner` images from this checkout (never with the `live` feature), bring up the k3d
 /// cluster if it is not up, install the CloudNativePG operator, the journal's Postgres and the
 /// vault, issue the vault's AppRole Secrets once the provisioner runs ([`provision_vault`]), install
@@ -986,6 +1005,7 @@ pub fn up() -> Result<()> {
     let runtime = runtime_image()?;
     let executor = executor_image()?;
     let scheduler = scheduler_image()?;
+    let data = data_image()?;
     let stub = stub_image_tag()?;
     let exchange = exchange_image()?;
     if source == ImageSource::Build {
@@ -1005,6 +1025,9 @@ pub fn up() -> Result<()> {
     }
     if let Some(scheduler) = &scheduler {
         build_image(scheduler, SCHEDULER_DOCKERFILE, SCHEDULER_PACKAGE, &[])?;
+    }
+    if let Some(data) = &data {
+        build_image(data, DATA_DOCKERFILE, DATA_PACKAGE, &[])?;
     }
     if let Some(stub) = &stub {
         build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
@@ -1046,6 +1069,7 @@ pub fn up() -> Result<()> {
         runtime.as_ref(),
         executor.as_ref(),
         scheduler.as_ref(),
+        data.as_ref(),
         stub.as_ref(),
         exchange.as_ref(),
         manager.as_ref(),
@@ -1264,11 +1288,11 @@ const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
 /// `mandate-cli`, the backtest runner, `mandate-api-server` and the runtime's `mandate-daemon`
 /// (DEC-1013), the deployment manager's `mandate-deployd` (DEC-1172), the executor's
-/// `mandate-executord` (DEC-2031) and the scheduler's `mandate-scheduler` (E21-29) linked
-/// statically, so their images need no base (DEC-993 item 9), with no feature at all: never
-/// `live`; with them the stub issuer once [`stub_ready`], which the dev profile's debug assertions
-/// are what compile in (DEC-2100 item 2). The dev profile, for the CI job's ten minutes (DEC-464):
-/// it keeps overflow checks, and the cell's journals are small.
+/// `mandate-executord` (DEC-2031), the scheduler's `mandate-scheduler` (E21-29) and the data
+/// process's `mandate-datad` linked statically, so their images need no base (DEC-993 item 9),
+/// with no feature at all: never `live`; with them the stub issuer once [`stub_ready`], which the
+/// dev profile's debug assertions are what compile in (DEC-2100 item 2). The dev profile, for the
+/// CI job's ten minutes (DEC-464): it keeps overflow checks, and the cell's journals are small.
 fn build_binary() -> Result<()> {
     let mut args = vec!["build", "--locked"];
     for package in BUILT_PACKAGES {
@@ -6221,6 +6245,32 @@ mod tests {
         assert_eq!(process["image"], SCHEDULER_PROCESS);
         assert_eq!(process["built"], true);
         assert_eq!(process["probe"][0], "/mandate-scheduler");
+        Ok(())
+    }
+
+    /// The data process's image (E21-29 lane SC): built with the cell's others and followed by the
+    /// cell jobs, its Dockerfile copies exactly that binary on an empty base as non-root, and its
+    /// key is the chart's process and image name.
+    #[test]
+    fn the_cell_builds_the_data_image() -> Result<()> {
+        assert!(BUILT_PACKAGES.contains(&DATA_PACKAGE));
+        assert!(IMAGE_PACKAGES.contains(&DATA_PACKAGE));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dockerfile = fs::read_to_string(root.join(DATA_DOCKERFILE))?;
+        assert!(
+            dockerfile.contains("COPY mandate-datad /mandate-datad")
+                && dockerfile.contains("FROM scratch")
+                && dockerfile.contains("USER 65532:65532"),
+            "{dockerfile}"
+        );
+        let process = processes_in(&root)?
+            .into_iter()
+            .find(|p| p["name"] == DATA_PROCESS)
+            .context("processes.json has no data process")?;
+        assert_eq!(process["image"], DATA_PROCESS);
+        assert_eq!(process["built"], true);
+        assert_eq!(process["db_role"], Value::Null);
+        assert_eq!(process["probe"][0], "/mandate-datad");
         Ok(())
     }
 

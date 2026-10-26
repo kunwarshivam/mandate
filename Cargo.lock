@@ -1798,6 +1798,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-bars"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-liquidity",
+ "mandate-marketdata",
+ "mandate-num",
+ "mandate-time",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-builder"
 version = "0.0.0"
 dependencies = [
@@ -1906,6 +1918,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-accounting",
  "mandate-artifacts-fs",
+ "mandate-builder",
  "mandate-canon",
  "mandate-domain",
  "mandate-gate-context",
@@ -1913,6 +1926,7 @@ dependencies = [
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-num",
+ "mandate-ports",
  "mandate-process",
  "mandate-research",
  "mandate-research-driver",
@@ -1924,6 +1938,24 @@ dependencies = [
  "proptest",
  "serde_json",
  "sqlx",
+ "tokio",
+]
+
+[[package]]
+name = "mandate-datad"
+version = "0.0.0"
+dependencies = [
+ "mandate-artifacts-fs",
+ "mandate-bars",
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-liquidity",
+ "mandate-marketdata",
+ "mandate-num",
+ "mandate-process",
+ "mandate-time",
+ "proptest",
+ "thiserror",
  "tokio",
 ]
 
@@ -2081,6 +2113,7 @@ dependencies = [
  "mandate-canon",
  "mandate-domain",
  "mandate-executor",
+ "mandate-identity",
  "mandate-journal",
  "mandate-num",
  "mandate-risk",
@@ -2310,6 +2343,7 @@ dependencies = [
  "mandate-accounting",
  "mandate-alpaca",
  "mandate-artifacts-fs",
+ "mandate-bars",
  "mandate-canon",
  "mandate-connections",
  "mandate-domain",
@@ -2588,6 +2622,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-accounting",
  "mandate-alpaca",
+ "mandate-bars",
  "mandate-builder",
  "mandate-canon",
  "mandate-domain",

@@ -97,6 +97,7 @@ impl Ports for Probe {
 fn record(seq: u64, event_type: &str, payload: &str) -> Result<ControlRecord, String> {
     Ok(ControlRecord {
         seq,
+        event_time: None,
         event_type: event_type.to_owned(),
         payload: parse(payload)?,
         origin: Origin {
