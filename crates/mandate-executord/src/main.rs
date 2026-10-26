@@ -255,7 +255,7 @@ fn serve<S: Store>(
     let mut say = |line: &str| eprintln!("{line}");
     let Some(mount) = paper else {
         let run = run::fixture(
-            AlpacaBroker::new(FixturePaper::filling(host_now()))?,
+            AlpacaBroker::new(FixturePaper::filling(host_now()).quoting(host_now))?,
             &config.scope,
         )?;
         let run = match production {

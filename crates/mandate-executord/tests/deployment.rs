@@ -567,13 +567,13 @@ fn a_deployed_run_reads_its_ports_from_the_deployment() -> Result<(), Error> {
         Ok(Some(_))
     ));
     assert_eq!(wiring.marked.instruments(), BTreeSet::from([spy.clone()]));
-    assert_eq!(wiring.quotes.feed(), "none", "the fixture broker's feed");
+    assert_eq!(wiring.quotes.feed(), "iex", "the fixture broker's feed");
     assert!(
         wiring
             .gate
             .input(&request(&agent, &spy, Purpose::Open, Side::Buy)?)
             .is_none(),
-        "the broker's facts are unread, so the opening is held"
+        "the fixture quotes nothing and the bars are unread, so the opening is held"
     );
     Ok(())
 }
