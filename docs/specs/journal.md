@@ -25,6 +25,13 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   - **What does not change:** no record, member, or rule. The existing rules 59, 60, 68 and 309
     already admit these records in this order, so the vectors stay version 3 and nothing is
     regenerated. v0.106 is held by another branch's change.
+- **v0.106 ([DEC-2523](../project/decisions/DEC-2523.md), 2026-10-26; lane GL):** §9.28 check 3
+  admits `passkey` step-up on an acknowledgment and its request in every environment, as identity
+  spec §6.1 and §7.3 allow it. `cli_confirm` stays as it was: `paper`, and `live` only on the
+  founder's own connection (DEC-529 item 3, DEC-923). It is a reading that adds no risk (DEC-176),
+  since passkey is stronger evidence than `cli_confirm`. The executor's judgment gains two cases,
+  passkey in paper and in live off the founder's connection, each lifting, and a seeded mutant that
+  drops passkey; the vectors stay version 3.
 - **v0.105 ([DEC-2522](../project/decisions/DEC-2522.md), 2026-10-26; E21-30, lane GL):** §11
   gains the agent-stream check `approval_deferral_mismatch`, which is rule 292 across batches.
   - An `ApprovalRequested` must name a cause, that cause must be an earlier `DecisionMade` on the
@@ -6681,8 +6688,10 @@ refusal of its own:
    They are judged when the executor processes the copy, as mandate spec §6.1's table says (the
    copy's `event_time`), not at the acknowledgment's `submitted_at`. Evidence fresh when the owner
    ran the command but more than 300 s old when the executor reaches it is stale. Its method is
-   one the environment allows: `cli_confirm` in `paper`, and in `live` only on the founder's own
-   connection (mandate spec §6.1, DEC-529 item 3). A request's step-up is judged at its own
+   one the environment allows: `passkey` in every environment, as identity spec §6.1 and §7.3
+   allow it, and `cli_confirm` in `paper`, and in `live` only on the founder's own connection
+   (mandate spec §6.1, DEC-529 item 3, DEC-923) (v0.106,
+   [DEC-2523](../project/decisions/DEC-2523.md)). A request's step-up is judged at its own
    `submitted_at` (check 4), since the request takes no effect of its own.
 4. **Independence**, when the stricter of the copy's `independent_required` and the overlay's
    `independent_approval_required` at processing is `true`:
