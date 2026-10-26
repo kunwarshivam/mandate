@@ -1186,7 +1186,7 @@ fn a_filled_entry_journals_its_fill_price_and_both_streams_verify() {
 /// stops there, and nothing further reaches the broker: no request follows the activity read that
 /// found the fill.
 #[test]
-fn a_fill_in_an_unregistered_ticker_is_booked_and_stops_the_run_at_the_reconciliation() {
+fn a_fill_in_an_unregistered_ticker_stops_the_run_at_the_reconciliation() {
     let mut scene = Scene::new("unregistered-fill", 231..256);
     scene.ports.broker.fills = true;
     scene.ports.broker.fill_symbol = Some("QQQ");
