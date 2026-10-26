@@ -370,3 +370,31 @@ fn a_latest_rule_set_the_gate_cannot_read_is_never_skipped() {
         "no reference"
     );
 }
+
+/// A registration newer than the latest rule set whose row does not parse may itself be a rule
+/// set, so it is never read past (DEC-2388 item 3).
+#[test]
+fn a_newer_registration_that_does_not_parse_is_never_read_past() {
+    let mut world = World::default();
+    world.registered("rule_set", &reviewed(), "paper");
+    assert!(world.rule_set().is_ok());
+    let seq = world.next();
+    let mut corrupt = row(
+        seq,
+        "ConfigSnapshotRegistered",
+        "paper",
+        ("user", "user-owner"),
+        "{}",
+    );
+    corrupt.body = b"not json".to_vec();
+    world.control.push(corrupt);
+    assert_eq!(world.rule_set(), Err("rule_set_unavailable"));
+    world.registered("fee_config", b"{}", "paper");
+    assert_eq!(
+        world.rule_set(),
+        Err("rule_set_unavailable"),
+        "a later registration of another kind does not uncover it"
+    );
+    world.registered("rule_set", &reviewed(), "paper");
+    assert!(world.rule_set().is_ok(), "a newer rule set does");
+}
