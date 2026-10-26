@@ -1168,3 +1168,102 @@ fn a_crypto_opening_never_reads_the_equity_bars() {
     let _crypto_is_denied_on_the_inactive_crypto_account = gate.check(&crypto);
     assert_eq!(reads.get(), 0);
 }
+
+/// A version 2 snapshot of the rich account, later than [`journaled_with`]'s, declaring
+/// `account_type` and `day_trading_regime` (JSON `null` for none) and the prior-close equity
+/// (journal spec v0.89 §9.35).
+fn declared(rows: &mut Rows, account_type: &str, regime: &str, last_equity: &str) {
+    let quoted = |value: &str| {
+        if value == "null" {
+            value.to_owned()
+        } else {
+            format!("\"{value}\"")
+        }
+    };
+    rows.push(
+        ACCOUNT,
+        "AccountSnapshotRecorded",
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":1,"equity":"100000","cash":"100000","buying_power":"100000","non_marginable_buying_power":"100000","account_type":{},"day_trading_regime":{},"last_equity":"{last_equity}","maintenance_margin":"0","risk_clock":"{REGULAR}"}}"#,
+            quoted(account_type),
+            quoted(regime),
+        ),
+    );
+}
+
+/// DEC-2811 (DEC-2378 item 11 condition 2): the day-trade budget moves from deferred to evaluated
+/// exactly when a version 2 snapshot declares the facts under which trading spec §9.2's check
+/// cannot refuse an opening: an `intraday_margin` regime, a cash account, or `legacy_pdt` with a
+/// prior-close equity at or above the rule set's 25000 threshold. The opening is then asked with
+/// the other eleven parts deferred, and the budget reported evaluated, never deferred.
+#[test]
+fn the_day_trade_budget_is_evaluated_once_a_snapshot_declares_it_cannot_refuse() {
+    for (account_type, regime, last_equity) in [
+        ("margin", "intraday_margin", "100"),
+        ("null", "intraday_margin", "100"),
+        ("cash", "legacy_pdt", "100"),
+        ("cash", "null", "100"),
+        ("margin", "legacy_pdt", "25000"),
+        ("null", "legacy_pdt", "30000"),
+    ] {
+        let mut rows = journaled_with(&RICH);
+        declared(&mut rows, account_type, regime, last_equity);
+        let gate = gate_over(&rows, Some(config()));
+        let case = format!("{account_type} {regime} {last_equity}");
+        let advisory = gate.advisory(&opening("3", "99.95")).unwrap();
+        assert!(
+            !advisory.deferred.contains(&Deferred::DayTradeBudget),
+            "{case}: {advisory:?}"
+        );
+        let mut eleven = twelve();
+        eleven.remove(&Deferral::DayTradeBudget);
+        assert_eq!(
+            gate.check(&opening("3", "99.95")),
+            DryRunVerdict::AllowDeferring {
+                deferred: eleven,
+                liquidity: None
+            },
+            "{case}"
+        );
+    }
+}
+
+/// And it stays deferred, never reported passed, whenever the check could refuse on a fact nothing
+/// journals: a version 1 snapshot, an undeclared regime on a margin account, or `legacy_pdt` below
+/// the threshold on an account not declared cash, where the pattern-day-trader flag and the
+/// trailing day-trade count are unseen (DEC-2398's review).
+#[test]
+fn the_day_trade_budget_stays_deferred_while_it_could_refuse_unseen() {
+    let mut cases: Vec<Rows> = vec![journaled_with(&RICH)];
+    for (account_type, regime, last_equity) in [
+        ("margin", "null", "100"),
+        ("null", "null", "100"),
+        ("margin", "legacy_pdt", "24999.99"),
+        ("null", "legacy_pdt", "100"),
+        ("margin", "legacy_pdt", "-5"),
+    ] {
+        let mut rows = journaled_with(&RICH);
+        declared(&mut rows, account_type, regime, last_equity);
+        cases.push(rows);
+    }
+    for (index, rows) in cases.iter().enumerate() {
+        let gate = gate_over(rows, Some(config()));
+        let advisory = gate.advisory(&opening("3", "99.95")).unwrap();
+        assert!(
+            advisory.deferred.contains(&Deferred::DayTradeBudget),
+            "case {index}: {advisory:?}"
+        );
+        assert_eq!(gate.check(&opening("3", "99.95")), asked(), "case {index}");
+    }
+}
+
+/// A later version 1 snapshot takes the declared facts away again, so the budget is deferred
+/// once more: the latest snapshot wins whatever its version (§9.35).
+#[test]
+fn a_later_version_1_snapshot_defers_the_budget_again() {
+    let mut rows = journaled_with(&RICH);
+    declared(&mut rows, "margin", "intraday_margin", "100");
+    snapshot(&mut rows, "ACTIVE", "INACTIVE", [false; 3]);
+    let gate = gate_over(&rows, Some(config()));
+    assert_eq!(gate.check(&opening("3", "99.95")), asked());
+}
