@@ -23,6 +23,7 @@ mandate-num.workspace = true
 mandate-ports.workspace = true
 mandate-process.workspace = true
 mandate-risk.workspace = true
+mandate-spec.workspace = true
 mandate-robinhood.workspace = true
 mandate-store.workspace = true
 mandate-time.workspace = true
@@ -32,7 +33,6 @@ tokio = { workspace = true, features = ["rt", "signal", "time"] }
 
 [dev-dependencies]
 mandate-mcp.workspace = true
-mandate-spec.workspace = true
 mandate-journal-pg.workspace = true
 proptest.workspace = true
 serde_json.workspace = true

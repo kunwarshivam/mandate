@@ -43,6 +43,13 @@ pub fn folded(row: &StoredEvent) -> Result<FoldedEvent, Unreadable> {
     })
 }
 
+/// A row's envelope `event_time`, or `None` when it does not read: a deployment with none opens no
+/// risk fold, and is still followed (DEC-2804 item 2).
+fn event_time(row: &StoredEvent) -> Option<UtcNanos> {
+    let body = parse(&row.body).ok()?;
+    UtcNanos::parse(body.get("event_time")?.as_str()?).ok()
+}
+
 /// The agents whose deployments trade on the account in `scope`, read from the control stream in
 /// `environment` (journal spec §9.8, §9.24, DEC-1171, DEC-2343), with what a revocation changes
 /// for them.
@@ -78,10 +85,29 @@ pub struct Following {
     /// Whether the account's connection is closed (DEC-2347 item 3.2): a connect or a connection
     /// was journaled for it, no connect is open, and none of its connections is live.
     closed: bool,
+    /// Each followed agent's first deployment on this account (DEC-2804 item 2), the one its risk
+    /// fold opens at.
+    pub first: BTreeMap<AgentId, FirstDeployment>,
     /// Whether a connection record on the control stream did not read (DEC-2357): every agent with a
     /// version-2 deployment is followed, with its openings held, every kill-switch command covering
     /// it is applied directly, and the executor is never released, while exits go on.
     unsure: bool,
+}
+
+/// An agent's first version-2 or version-3 `AgentDeployed` naming one of the account's connections
+/// (DEC-2804 item 2): an agent id is deployed once and its stop is final (DEC-1173), so this is
+/// where the agent's rows on the account begin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FirstDeployment {
+    /// Its control-stream `seq`: the rows up to it are the ones its version was confirmed on.
+    pub seq: u64,
+    /// Its envelope's `event_time`.
+    pub at: UtcNanos,
+    /// The `mandate_version` it names.
+    pub version: MandateVersion,
+    /// Whether a later deployment of the agent on the account names another version, a version
+    /// change R2b reads; until then no fold is opened for it.
+    pub redeployed: bool,
 }
 
 /// An `OwnerCommandIssued` `kill_switch` the executor may read itself (DEC-2343 item 3): its
@@ -116,6 +142,7 @@ pub fn agents_of(
     let mut ours: BTreeSet<String> = BTreeSet::new();
     let mut live: BTreeMap<String, bool> = BTreeMap::new();
     let mut deployed: BTreeMap<String, Vec<(u64, String, String)>> = BTreeMap::new();
+    let mut deployed_at: BTreeMap<u64, UtcNanos> = BTreeMap::new();
     let mut revocations: BTreeMap<String, Vec<u64>> = BTreeMap::new();
     let mut commands = Vec::new();
     let mut stopped = BTreeSet::new();
@@ -201,6 +228,9 @@ pub fn agents_of(
                     live.insert(connection, false);
                 }
                 ("AgentDeployed", 2 | 3) => {
+                    if let Some(at) = event_time(row) {
+                        deployed_at.insert(row.seq, at);
+                    }
                     deployed.entry(text("agent_id")?).or_default().push((
                         row.seq,
                         text("connection_id")?,
@@ -276,6 +306,23 @@ pub fn agents_of(
             continue;
         };
         let agent = AgentId(agent);
+        let on_account: Vec<&(u64, String, String)> = deployments
+            .iter()
+            .filter(|(_, connection, _)| unsure || ours.contains(connection))
+            .collect();
+        if let Some((seq, _, first)) = on_account.first()
+            && let Some(at) = deployed_at.get(seq)
+        {
+            following.first.insert(
+                agent.clone(),
+                FirstDeployment {
+                    seq: *seq,
+                    at: *at,
+                    version: MandateVersion(first.clone()),
+                    redeployed: on_account.iter().any(|(_, _, later)| later != first),
+                },
+            );
+        }
         following
             .agents
             .insert(agent.clone(), MandateVersion(version.clone()));
@@ -302,6 +349,11 @@ impl Following {
             } else {
                 self.agents.keys().all(|agent| self.stopped.contains(agent))
             }
+    }
+
+    /// Whether `agent` has an `AgentStopped`, which is final (journal spec v0.56).
+    pub fn stopped(&self, agent: &AgentId) -> bool {
+        self.stopped.contains(agent)
     }
 
     /// The kill-switch commands the executor applies itself to `agent` (DEC-2343 item 3), in

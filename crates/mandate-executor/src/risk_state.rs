@@ -307,6 +307,10 @@ pub enum UnreadableCause {
     AppendFailed,
     /// The risk state refused to decide an input (mandate spec §5.2; `RiskState::step`).
     RefusedToDecide,
+    /// No fold is open for the agent (DEC-2804 items 2 and 8): its deployment, version, equity or
+    /// instrument does not read, it is redeployed on another version, another agent that has not
+    /// stopped is followed on its account, or its universe may hold a second instrument.
+    NotOpened,
 }
 
 /// What the gate reads of the account's risk state.
@@ -377,7 +381,9 @@ pub struct RiskAppend {
     pub payload: Value,
 }
 
-/// The account stream's risk state, folded row by row.
+/// The account stream's risk state, folded row by row. A clone steps a row the live fold has not
+/// journaled, to see whether it would return a record (DEC-2804 item 5).
+#[derive(Clone)]
 pub struct AccountRiskFold<'c> {
     stream: String,
     agent: String,
