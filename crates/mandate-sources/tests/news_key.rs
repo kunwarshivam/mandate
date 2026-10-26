@@ -59,6 +59,10 @@ fn anything_but_one_clean_line_is_refused_malformed() {
         b"PKID\t:s3cret",
         b"PKID:s3\x00cret",
         b"PKID:\xff\xfe",
+        "PKID:s3\u{a0}cret".as_bytes(),
+        "PK\u{2003}ID:s3cret".as_bytes(),
+        b"AK ID:s3cret",
+        b"AKID:s3:cret",
     ] {
         assert_eq!(
             NewsAuth::from_stored(stored).map(|_| ()),

@@ -77,7 +77,9 @@ impl NewsAuth {
     /// The news reader's key as `mandate vault put news-data-key` stores it at
     /// `platform/news-data-key`: one line `<key id>:<secret>`, a final line break allowed. A key
     /// that is not that line is refused [`NewsKeyRefusal::Malformed`], and one whose id is not a
-    /// paper key's [`NewsKeyRefusal::NotPaper`], keeping nothing of it (DEC-2277 items 2 and 4).
+    /// paper key's [`NewsKeyRefusal::NotPaper`], keeping nothing of it (DEC-2277 items 2 and 4). A
+    /// key the vault does not hold is the caller's `NoKey`, decided before this is called. A line
+    /// is judged whole before its id, so a malformed line is `Malformed` whatever its prefix.
     pub fn from_stored(stored: &[u8]) -> Result<Self, NewsKeyRefusal> {
         let text = core::str::from_utf8(stored).map_err(|_| NewsKeyRefusal::Malformed)?;
         let line = text.strip_suffix('\n').unwrap_or(text);
