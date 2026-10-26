@@ -269,6 +269,11 @@ fn behind(stem: &str, mut schema: Value) -> Value {
 /// optional, so the entry is removed in the change that makes the type require it.
 #[test]
 fn a_member_behind_its_schema_is_required_there_and_optional_in_its_type() {
+    assert_eq!(
+        TYPE_BEHIND_SCHEMA.len(),
+        1,
+        "each entry's decode check below names its type: add one for a new entry"
+    );
     let schemas = [("acknowledge-request", schema!("acknowledge-request"))];
     for (stem, member) in TYPE_BEHIND_SCHEMA {
         let found = schemas.iter().find(|(s, _)| *s == stem);
@@ -487,17 +492,42 @@ fn request<T: DeserializeOwned + Serialize + Validate + PartialEq + Debug>(cases
     request_behind::<T>("", cases);
 }
 
-/// [`request`], except that a `.invalid` case refused only for leaving out a [`TYPE_BEHIND_SCHEMA`]
-/// member of `stem`, or giving it `null`, is not asked of the type.
+/// [`request`], except that a `.invalid` case whose one change removes a [`TYPE_BEHIND_SCHEMA`]
+/// member of `stem`, or sets it `null`, is not asked of the type; a case that changes anything else
+/// as well still is.
 fn request_behind<T: DeserializeOwned + Serialize + Validate + PartialEq + Debug>(
     stem: &str,
     cases: [Value; 3],
 ) {
-    let (good, mut bad) = instances(cases);
-    let behind = TYPE_BEHIND_SCHEMA.iter().filter(|(s, _)| *s == stem);
-    for (_, member) in behind {
-        bad.retain(|instance| !instance.get(*member).is_none_or(Value::is_null));
-    }
+    let [base, valid, invalid] = cases;
+    let behind: Vec<&str> = TYPE_BEHIND_SCHEMA
+        .iter()
+        .filter(|(s, _)| *s == stem)
+        .map(|(_, member)| *member)
+        .collect();
+    let only_behind = |case: &Value| {
+        let removed = case["remove"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let set = case["set"]
+            .as_object()
+            .map(|set| set.iter().collect::<Vec<_>>());
+        let pointer = match (removed, set.as_deref().unwrap_or_default()) {
+            ([pointer], []) => pointer.as_str(),
+            ([], [(pointer, Value::Null)]) => Some(pointer.as_str()),
+            _ => None,
+        };
+        pointer.is_some_and(|pointer| behind.iter().any(|m| pointer == format!("/{m}")))
+    };
+    let kept: Vec<Value> = invalid
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|case| !only_behind(case))
+        .cloned()
+        .collect();
+    let (good, bad) = instances([base, valid, Value::Array(kept)]);
     assert!(good.len() > 1 && !bad.is_empty(), "cases to check");
     for instance in &good {
         let value = decode::<T>(instance.to_string().as_bytes());

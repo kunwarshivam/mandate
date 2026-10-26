@@ -206,5 +206,17 @@
     "set": {
       "/acknowledgments/0/reason/instrument": ""
     }
+  },
+  {
+    "label": "a limit's reason naming a restriction's cause too",
+    "set": {
+      "/acknowledgments/1/reason/cause": "broker_notice"
+    }
+  },
+  {
+    "label": "a reconciliation hold's reason naming a limit too",
+    "set": {
+      "/acknowledgments/0/reason/limit": "max_daily_loss"
+    }
   }
 ]

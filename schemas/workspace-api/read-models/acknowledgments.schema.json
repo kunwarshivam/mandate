@@ -111,7 +111,31 @@
               "reason": {
                 "required": [
                   "limit"
-                ]
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "cause"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "restriction"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "kind"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "instrument"
+                      ]
+                    }
+                  ]
+                }
               },
               "mode": {
                 "type": "null"
@@ -135,7 +159,31 @@
               "reason": {
                 "required": [
                   "cause"
-                ]
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "limit"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "restriction"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "kind"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "instrument"
+                      ]
+                    }
+                  ]
+                }
               },
               "mode": {
                 "enum": [
@@ -164,7 +212,21 @@
                   "restriction",
                   "kind",
                   "instrument"
-                ]
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "limit"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "cause"
+                      ]
+                    }
+                  ]
+                }
               },
               "mode": {
                 "enum": [

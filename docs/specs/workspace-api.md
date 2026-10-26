@@ -284,7 +284,7 @@ Errors are RFC 9457 problem documents with these members:
 | `step_up_missing` | 401 | Evidence is presented but does not count: its challenge is unknown, its credential is not the principal's or is in its enrolment cool-off, or its assertion does not verify (identity spec §7.2 steps 4 and 6) |
 | `step_up_stale` | 401 | The challenge has expired, or is presented before its `issued_at`; or a first passkey enrolment's session was opened more than 300 s before (§3.6), which alone carries one violation at `/session` ([DEC-2118](../project/decisions/DEC-2118.md) item 4) |
 | `step_up_reused` | 401 | The challenge was already used |
-| `step_up_method` | 401 | The method is not allowed in this environment: `cli_confirm` in `live` (identity spec §7.3) |
+| `step_up_method` | 401 | The method is not allowed in this environment: `cli_confirm` in `live` (identity spec §7.3); for an acknowledgment or its request, any method but `passkey` (§3.11 item 12) |
 | `step_up_mismatch` | 401 | The challenge names another principal, workspace, action kind, or action digest |
 | `live_unavailable` | 409 | A live environment operation before counsel signs off (rule 8, B5) |
 | `acknowledgment_unavailable` | 409 | **(planned: E10-12)** An acknowledgment, or its request, names a hold §3.11 item 12's list does not serve now for that agent and `subject`: never raised, already lifted, or superseded. `effect: none`, `retryable: false`; title "Nothing to acknowledge" |
@@ -942,13 +942,17 @@ per workspace deployment (item 6).
          cannot read is `journal_unavailable`.
       6. An acknowledgment naming a `request`: an `OwnerAcknowledgmentRequested` on the control
          stream has that `event_id`, its `agent`, `event`, and `subject` equal the acknowledgment's
-         (a version 1 request's subject is `limit`, and a `subject` that is not text matches nothing,
-         as the CLI reads rule 240, DEC-2838), no `OwnerAcknowledged` names it yet, and its `requested_by` is not the caller (journal spec
-         rules 239 to 241): else `409` `acknowledgment_request_invalid`.
+         (a version 1 request, which carries no `subject`, is read as `limit`, as §9.28 reads version
+         1, and a `subject` that is not text matches nothing, so a request for a limit is never
+         answered by an acknowledgment of anything else), no `OwnerAcknowledged` names it yet, and
+         its `requested_by` is not the caller (journal spec rules 239 to 241): else `409`
+         `acknowledgment_request_invalid`.
       7. Step-up: `passkey` evidence with its `step_up_assertion`, judged by the port against the
          action's digest below, as a resume's is (§3.6, DEC-2140). Unlike a resume's, unverified
          evidence is refused with the port's `401` code and nothing is recorded: a `null` step-up is
-         `step_up_required`, and any other method is `step_up_method`. An acknowledgment only lifts
+         `step_up_required`, and any other method is `step_up_method`, `cli_confirm` in `paper`
+         included: the API accepts an acknowledgment by passkey only, and `cli_confirm` stays the
+         CLI's (DEC-2523). An acknowledgment only lifts
          a hold, so refusing it never delays risk reduction, and it spends no challenge.
 
       **The routes.**
@@ -958,7 +962,8 @@ per workspace deployment (item 6).
         and `step_up_assertion`. It commits `OwnerAcknowledged` version 2 with `agent`, `event`,
         `subject`, `user` the caller, `requested_by` the caller or, naming a request, the request's
         `requested_by`, `independent_required` `true` exactly when it names a request, `request`,
-        `submitted_at` and `risk_clock` at receipt as the CLI writes them, and the verified
+        `submitted_at` and `risk_clock` at receipt as the CLI writes them (`submitted_at` the whole
+        second, `risk_clock` that second as a timestamp), and the verified
         `step_up`, then `StepUpAsserted`, in one batch.
       - `POST /agents/{agent_id}/acknowledgment-requests` (`commands/acknowledgment-request-request`):
         `acknowledged`, `subject`, `record`, `step_up`, and `step_up_assertion`, for a workspace
@@ -972,10 +977,12 @@ per workspace deployment (item 6).
         refuse from being journaled.
 
       **The digest.** The step-up binds the SHA-256 of the canonical object (journal spec §4) of
-      DEC-279 item 1, as a resume's does, with three members set: `confirms` (`acknowledge`, or
+      DEC-279 item 1, as a resume's does: its eight members, `confirms` (`acknowledge`, or
       `request_ack` for a request), `agent`, `control_head` (the control stream's head `seq` as a
-      decimal string), `instrument`, `bid`, `bid_size`, and `floor` all `null`, `event` the hold's
-      `event_id`, `subject`, and, only for an acknowledgment naming one, `request`. A control stream
+      decimal string), `instrument`, `bid`, `bid_size`, and `floor` all `null`, and `event` the
+      hold's `event_id`; then two members DEC-279's object does not have, `subject`, and, only for
+      an acknowledgment naming one, `request`. The CLI confirms by its typed code, not this
+      digest, so the members added here are the API's own. A control stream
       that moves between the client's read and the call changes `control_head`, so the port answers
       `step_up_mismatch` and nothing is recorded; the client reads again and asks again. Worked
       vectors, with `agent` `agt_01JB3K6F0C9R2V7N4M8Q1T5W3Z`, `control_head` `"42"`, `event`
@@ -1002,7 +1009,9 @@ per workspace deployment (item 6).
         `{restriction, kind, instrument}` for a reconciliation hold, `kind` one of `instrument`,
         `cash`, `external_activity`, and `incomplete`, read from `restriction`, and `instrument` the
         held asset or `null`;
-      - `mode`, the mode the hold holds (`exits_only` or `paused`), or `null` for a limit;
+      - `mode`, the agent mode the hold holds: for a restriction, the one trading spec §7.3 gives its
+        `restriction` (`closing_only` holds `exits_only`, `blocked` holds `paused`), and for a
+        reconciliation hold, its `AgentModeApplied`'s `to`; `null` for a limit;
       - `raised_at`, the hold record's `recorded_at`;
       - `independent_required`: the workspace's effective `independent_approval_required` (mandate
         spec §4.3), or `null` until the server reads the policy, as it does not yet; a client then
