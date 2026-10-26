@@ -10,10 +10,12 @@
 //! - `GET /v2/account/activities`: its fills as `FILL` activities, oldest first, after the
 //!   `page_token` the client sends;
 //! - `POST /v2/orders`: an order accepted, or `422` for a `client_order_id` it already holds, as
-//!   Alpaca answers; a bracket or an OCO with its two legs; a sell of more than the position,
-//!   none held included, `403` with code 40310000, since there are no short sales
+//!   Alpaca answers; a bracket or an OCO with its two legs; a sell of more than the position
+//!   less what open sells hold (an OCO's or a bracket's legs once), none held included, `403`
+//!   with code 40310000, refused before anything changes, since there are no short sales
 //!   (`AGENTS.md` rule 12);
-//! - `GET /v2/orders` (open orders, legs nested), `GET /v2/orders:by_client_order_id` (`404` for
+//! - `GET /v2/orders` (open orders, legs nested), `GET /v2/orders/{id}` (the read-back of a
+//!   cancel by the broker's id), `GET /v2/orders:by_client_order_id` (`404` for
 //!   one it never took), and `DELETE /v2/orders/{id}` (`204`, the order and its group then
 //!   `canceled`; `422` for one no longer open).
 //!
@@ -101,6 +103,24 @@ impl Default for Books {
 }
 
 impl Books {
+    /// What a new sell of `symbol` may take, as Alpaca's `qty_available`: the holding less what
+    /// open sells already hold, an OCO's or a bracket's legs once per group, since only one of
+    /// them can fill. `None` when the sum does not fit.
+    fn available(&self, symbol: &str) -> Option<i128> {
+        let mut held: BTreeMap<&str, i128> = BTreeMap::new();
+        for order in &self.orders {
+            if order.symbol == symbol && order.side == "sell" && order.status == "new" {
+                let group = order.parent.as_deref().unwrap_or(&order.id);
+                let qty = scaled(&order.qty)?;
+                let slot = held.entry(group).or_default();
+                *slot = (*slot).max(qty);
+            }
+        }
+        let holding = self.holdings.get(symbol).map_or(0, |holding| holding.qty);
+        held.values()
+            .try_fold(holding, |left, qty| left.checked_sub(*qty))
+    }
+
     fn next_id(&mut self) -> String {
         self.sequence = self.sequence.saturating_add(1);
         uuid(self.sequence)
@@ -221,6 +241,14 @@ impl FixturePaper {
                     None => refusal(404, 40_410_000, "order not found"),
                 }
             }
+            (Method::Get, route) if route.starts_with("/v2/orders/") => {
+                let wanted = route.trim_start_matches("/v2/orders/");
+                let books = self.books.borrow();
+                match books.orders.iter().find(|o| o.id == wanted) {
+                    Some(order) => ok(nested(&books.group(&order.id), &self.at)),
+                    None => refusal(404, 40_410_000, "order not found"),
+                }
+            }
             (Method::Post, "/v2/orders") => self.submit(request.body()),
             (Method::Delete, route) => match route.strip_prefix("/v2/orders/") {
                 Some(id) => self.cancel(id),
@@ -264,9 +292,8 @@ impl FixturePaper {
             return refusal(422, 40_010_001, "client_order_id must be unique");
         }
         if side == "sell" {
-            let available = books.holdings.get(&symbol).map_or(0, |holding| holding.qty);
             let wanted = text("qty").as_deref().and_then(scaled);
-            if wanted.is_none_or(|wanted| wanted > available) {
+            if wanted.is_none_or(|wanted| Some(wanted) > books.available(&symbol)) {
                 return refusal(403, 40_310_000, "insufficient qty available for order");
             }
         }
