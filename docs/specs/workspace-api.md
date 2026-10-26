@@ -809,7 +809,13 @@ per workspace deployment (item 6).
       later version over `stale_base`, naming the latest; an agent already deployed with the same
       version answers `200` with its `AgentDeployed`, and with another version `invalid` at
       `/agent_id`; an agent an `AgentStopped` names is `invalid` at `/agent_id` too, since an
-      agent id is deployed once ([DEC-1173](../project/decisions/DEC-1173.md) item 1); every
+      agent id is deployed once ([DEC-1173](../project/decisions/DEC-1173.md) item 1); a version
+      whose `universe.max_instruments` is above 1 is `invalid` at `/mandate_version`, code
+      `second_instrument`: the executor's risk fold reads one agent's one instrument (an account
+      with another deployed agent that has not stopped, `second_agent_on_account` at `/agent_id`,
+      is DEC-2809 item 2's, not yet in force)
+      ([DEC-2809](../project/decisions/DEC-2809.md), [DEC-2804](../project/decisions/DEC-2804.md)
+      item 8); every
       V-rule for the agent (V-002, V-006, and V-032 included) and the pinned instruments, else
       `invalid` with the V-codes. V-002 reads the account's equity from the latest
       `AccountSnapshotRecorded` on the account stream of the document's connection; with
