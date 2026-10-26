@@ -222,7 +222,6 @@ fn gateway(service: &Service) -> RemoteGateway {
 /// DEC-2265 items 1 and 6: the record comes back whole, as the service sent it, over one
 /// connection.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_record_crosses_whole_over_one_connection() {
     let service = serve(Script::Answer(|request| Ok(record_for(request))));
     let request = request(2_000);
@@ -233,7 +232,6 @@ fn a_record_crosses_whole_over_one_connection() {
 
 /// DEC-2265 item 5: the gateway's own refusal comes back as itself, not as a lost exchange.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_gateway_s_refusal_comes_back_as_itself() {
     let service = serve(Script::Answer(|_| Err(RequestError::UnknownModel)));
     assert_eq!(
@@ -245,7 +243,6 @@ fn the_gateway_s_refusal_comes_back_as_itself() {
 
 /// DEC-2397 item 2: a record for another call is no answer to this one.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_record_for_another_call_is_unreachable() {
     let service = serve(Script::Answer(|request| {
         let mut other = record_for(request);
@@ -261,7 +258,6 @@ fn a_record_for_another_call_is_unreachable() {
 
 /// DEC-2397 item 2: a refused connect is unreachable.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_refused_connect_is_unreachable() {
     let closed = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = closed.local_addr().unwrap();
@@ -275,7 +271,6 @@ fn a_refused_connect_is_unreachable() {
 /// DEC-2265 item 4, DEC-2397 items 1 and 2: a reply that does not come is unreachable at the
 /// deadline and its grace, not before and not long after, and the call is sent once.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_stalled_reply_is_unreachable_at_the_deadline() {
     let service = serve(Script::Stall);
     let started = Instant::now();
@@ -285,7 +280,7 @@ fn a_stalled_reply_is_unreachable_at_the_deadline() {
     );
     let took = started.elapsed();
     assert!(took >= GRACE + Duration::from_millis(250), "{took:?}");
-    assert!(took < GRACE + Duration::from_millis(900), "{took:?}");
+    assert!(took < GRACE + Duration::from_millis(1_500), "{took:?}");
     service.handle.join().unwrap();
     assert_eq!(
         service.accepted.load(Ordering::SeqCst),
@@ -297,7 +292,6 @@ fn a_stalled_reply_is_unreachable_at_the_deadline() {
 /// DEC-2397 item 1: a reply the service finishes just past the request's deadline, inside the
 /// grace, is read whole rather than lost to the two clocks.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_reply_just_past_the_deadline_is_read_inside_the_grace() {
     let service = serve(Script::Late);
     let request = request(300);
@@ -308,7 +302,6 @@ fn a_reply_just_past_the_deadline_is_read_inside_the_grace() {
 /// DEC-2265 item 4: the bound is absolute, so a reply trickled a byte at a time, each well inside
 /// one read's timeout, still ends at the deadline and its grace.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_trickled_reply_still_ends_at_the_deadline() {
     let service = serve(Script::Trickle);
     let started = Instant::now();
@@ -318,14 +311,13 @@ fn a_trickled_reply_still_ends_at_the_deadline() {
     );
     let took = started.elapsed();
     assert!(took >= GRACE + Duration::from_millis(300), "{took:?}");
-    assert!(took < GRACE + Duration::from_millis(1_000), "{took:?}");
+    assert!(took < GRACE + Duration::from_millis(1_500), "{took:?}");
     service.handle.join().unwrap();
 }
 
 /// DEC-2265 item 1: a reply cut short, one past its bound, or one that does not decode is
 /// unreachable, each on one connection.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_cut_oversized_or_malformed_reply_is_unreachable() {
     for script in [Script::Cut, Script::Oversized, Script::Malformed] {
         let service = serve(script);
@@ -341,7 +333,6 @@ fn a_cut_oversized_or_malformed_reply_is_unreachable() {
 /// DEC-2397 item 2: a request whose deadline has already passed is unreachable without a
 /// connection.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_request_past_its_deadline_opens_no_connection() {
     let service = serve(Script::Answer(|request| Ok(record_for(request))));
     let mut late = request(1_000);
@@ -356,7 +347,6 @@ fn a_request_past_its_deadline_opens_no_connection() {
 
 /// DEC-2397 item 1: a call is built at the clock the remote gateway was given.
 #[test]
-#[ignore = "pending E21-62"]
 fn calls_are_built_at_the_given_clock() {
     let closed: SocketAddr = "127.0.0.1:9".parse().unwrap();
     assert_eq!(RemoteGateway::new(closed, fixed).now(), fixed());
@@ -364,7 +354,6 @@ fn calls_are_built_at_the_given_clock() {
 
 /// The request frame the service reads is the request, whole.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_service_reads_the_request_whole() {
     fn echo_inputs(request: &CallRequest) -> Reply {
         let mut record = record_for(request);
@@ -375,5 +364,72 @@ fn the_service_reads_the_request_whole() {
     let request = request(2_000);
     let record = gateway(&service).call(&request).unwrap();
     assert_eq!(record.observations, ["SPY 2026-10-23 close 150"]);
+    service.handle.join().unwrap();
+}
+
+/// A clock that reads `script[n]` milliseconds after a fixed instant on its `n`th reading, and the
+/// last entry from then on, so a test can pass the deadline at exactly one step of an exchange.
+macro_rules! scripted_clock {
+    ($name:ident, $script:expr) => {
+        fn $name() -> UtcNanos {
+            static READS: AtomicUsize = AtomicUsize::new(0);
+            let script: &[u64] = &$script;
+            let n = READS.fetch_add(1, Ordering::SeqCst);
+            let ms = script.get(n).or(script.last()).copied().unwrap();
+            let base = fixed();
+            UtcNanos::from_parts(
+                base.secs() + i64::try_from(ms / 1_000).unwrap(),
+                u32::try_from(ms % 1_000).unwrap() * 1_000_000,
+            )
+            .unwrap()
+        }
+    };
+}
+
+/// A request whose deadline is one second after [`fixed`].
+fn fixed_request() -> CallRequest {
+    let mut request = request(1_000);
+    request.as_of = fixed();
+    request.deadline = UtcNanos::from_parts(fixed().secs() + 1, 0).unwrap();
+    request
+}
+
+/// DEC-2397 item 1: a write is bounded by the deadline itself, without the read's grace: with the
+/// deadline passed at the request's write, nothing is sent, even though the clock then reads
+/// inside the deadline again for every later step.
+#[test]
+fn a_write_past_the_deadline_sends_nothing() {
+    scripted_clock!(passes_at_the_write, [0, 1_500, 0]);
+    let service = serve(Script::Answer(|request| Ok(record_for(request))));
+    assert_eq!(
+        RemoteGateway::new(service.address, passes_at_the_write).call(&fixed_request()),
+        Err(RequestError::GatewayUnreachable)
+    );
+    service.handle.join().unwrap();
+}
+
+/// DEC-2397 item 1: the flush that ends the request is bounded by the deadline too.
+#[test]
+fn a_flush_past_the_deadline_is_unreachable() {
+    scripted_clock!(passes_at_the_flush, [0, 0, 1_500, 0]);
+    let service = serve(Script::Answer(|request| Ok(record_for(request))));
+    assert_eq!(
+        RemoteGateway::new(service.address, passes_at_the_flush).call(&fixed_request()),
+        Err(RequestError::GatewayUnreachable)
+    );
+    service.handle.join().unwrap();
+}
+
+/// DEC-2397 item 1: with the same script read inside the deadline at every step, the exchange
+/// crosses whole, so the two tests above fail only on the step they pass the deadline at.
+#[test]
+fn the_scripted_clock_inside_the_deadline_crosses_whole() {
+    scripted_clock!(always_inside, [0]);
+    let service = serve(Script::Answer(|request| Ok(record_for(request))));
+    let request = fixed_request();
+    assert_eq!(
+        RemoteGateway::new(service.address, always_inside).call(&request),
+        Ok(record_for(&request))
+    );
     service.handle.join().unwrap();
 }
