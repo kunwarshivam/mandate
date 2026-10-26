@@ -332,11 +332,12 @@ knowledge time, so a reused ticker does not attach old news to a new company.
 
 Each item is a record: source id, allowlist version at ingestion, vendor id and version, published
 time, knowledge time, raw-bytes digest, byte length, structured fields, tags, and group key. Text is
-stored only as the raw artifact (the news reader keeps none yet: §4.2's interim, DEC-2280 item 4). Filings and XBRL facts are public and kept indefinitely. Licensed
-news text is kept as the license allows; what a thesis cited is captured as a journal artifact at
-use (DP-3), so a record survives the vendor's retention terms. Only what a thesis cited is kept for
-the six years, and a source is allowlisted only if its terms allow that copy; counsel confirms per
-vendor (DEC-433 item 20, the founder's decision).
+stored only as the raw artifact (the news reader keeps none yet: §4.2's interim, DEC-2280 item 4).
+Filings and XBRL facts are public and kept indefinitely. Licensed news text is kept as the license
+allows; what a thesis cited is captured as a journal artifact at use (DP-3), so a record survives
+the vendor's retention terms. Only what a thesis cited is kept for the six years, and a source is
+allowlisted only if its terms allow that copy; counsel confirms per vendor (DEC-433 item 20, the
+founder's decision).
 
 Amended filings (for example a 10-K/A) and restated XBRL facts are new records; the as-reported
 value stays readable as of any earlier time (DP-1).
