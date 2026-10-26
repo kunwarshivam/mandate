@@ -1416,9 +1416,10 @@ fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> 
 }
 
 /// Whether a core error on `input` is held and the process goes on (DEC-2821): the broker's
-/// answers, updates and snapshots, the quotes its feed sends, and an agent's thesis records (DEC-2823),
-/// which the restart would read again, so stopping on one would be a crash loop that also stops every exit, protective order and
-/// kill switch. Any other input's error, the hold's own included, stops the process as before.
+/// answers, updates and snapshots, the quotes its feed sends, an agent's thesis records (DEC-2823),
+/// and the connection's troubles (DEC-2832), which the restart would read or count again, so
+/// stopping on one would be a crash loop that also stops every exit, protective order and kill
+/// switch. Any other input's error, the hold's own included, stops the process as before.
 fn held_on_core_error(input: &Input) -> bool {
     matches!(
         input,
