@@ -1255,7 +1255,16 @@ pub(super) fn api_diagnosis() {
         "jsonpath={range .items[*]}{.metadata.name}{range .status.containerStatuses[*]} {.name}: {.lastState.terminated.reason} {.lastState.terminated.exitCode} restarts {.restartCount}{end}{\"\\n\"}{end}",
     ];
     let current = logs("--previous=false");
-    let previous = logs("--previous=true");
+    let restarted = [
+        "get",
+        "pods",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        selector.as_str(),
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.name}{range .status.initContainerStatuses[*]} {.name} {.restartCount}{end}{range .status.containerStatuses[*]} {.name} {.restartCount}{end}{\"\\n\"}{end}",
+    ];
     let events = [
         "get",
         "events",
@@ -1264,13 +1273,55 @@ pub(super) fn api_diagnosis() {
         "--sort-by",
         ".lastTimestamp",
     ];
-    let shown: [&[&str]; 5] = [&pods, &ended, &current, &previous, &events];
+    let shown: [&[&str]; 3] = [&pods, &ended, &current];
     for args in shown {
-        match kubectl(args) {
-            Ok(text) => eprintln!("    api diagnosis `kubectl {}`:\n{text}", args.join(" ")),
-            Err(e) => eprintln!("    api diagnosis `kubectl {}`: {e:#}", args.join(" ")),
-        }
+        diagnose(args);
     }
+    let listing = kubectl(&restarted).unwrap_or_else(|e| {
+        eprintln!("    api diagnosis `kubectl {}`: {e:#}", restarted.join(" "));
+        String::new()
+    });
+    for (pod, container) in restarted_containers(&listing) {
+        diagnose(&[
+            "logs",
+            "--namespace",
+            NAMESPACE,
+            pod.as_str(),
+            "--container",
+            container.as_str(),
+            "--previous=true",
+            "--tail",
+            "40",
+        ]);
+    }
+    diagnose(&events);
+}
+
+/// Prints what `kubectl args` answers, or why it failed, under the API's diagnosis.
+fn diagnose(args: &[&str]) {
+    match kubectl(args) {
+        Ok(text) => eprintln!("    api diagnosis `kubectl {}`:\n{text}", args.join(" ")),
+        Err(e) => eprintln!("    api diagnosis `kubectl {}`: {e:#}", args.join(" ")),
+    }
+}
+
+/// Each `(pod, container)` that has restarted, from a listing of one pod a line, its name then
+/// `<container> <restarts>` pairs, init containers first. Only those have logs from a run before: `kubectl logs
+/// --previous` over every container of a selector fails outright on the first one that has none,
+/// an init container among them, which hid the API's own last run (main's run 40254976469).
+fn restarted_containers(listing: &str) -> Vec<(String, String)> {
+    listing
+        .lines()
+        .flat_map(|line| {
+            let mut words = line.split_whitespace();
+            let pod = words.next().unwrap_or_default().to_owned();
+            let rest: Vec<&str> = words.collect();
+            rest.chunks(2)
+                .filter(|pair| pair.len() == 2 && pair[1] != "0")
+                .map(|pair| (pod.clone(), pair[0].to_owned()))
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 /// `cargo xtask cell down`: delete the cluster and everything in it.
@@ -5674,6 +5725,20 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    /// The API's diagnosis asks for the logs of a run before only of the containers that restarted.
+    #[test]
+    fn only_restarted_containers_are_asked_for_their_previous_logs() {
+        let listing = "api-1 api 5\nconnect-finish-1 credentials 0 finish 0\npending-1\napi-2 api 0 sidecar 2\n";
+        assert_eq!(
+            restarted_containers(listing),
+            vec![
+                ("api-1".to_owned(), "api".to_owned()),
+                ("api-2".to_owned(), "sidecar".to_owned()),
+            ]
+        );
+        assert!(restarted_containers("").is_empty());
+    }
 
     /// The fixture's client secret is written at the client secret's own path in the `mandate`
     /// mount, from stdin alone: the root token is read as its first line and the value is the

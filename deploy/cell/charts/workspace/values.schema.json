@@ -355,26 +355,38 @@
       }
     },
     "data": {
-      "description": "The data process's recorded series (mandate-datad): the deployed instrument, its asset id, and the series' anchor, `<YYYY-MM-DD>=<close>`; a recording, so only the local cell's values set it",
+      "description": "The data process's recorded series (mandate-datad): each instrument it stores, with its asset id, which the closes object names, and its series' anchor, `<YYYY-MM-DD>=<close>`; a recording, so only the local cell's values list any",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "symbol",
-        "assetId",
-        "anchor"
+        "instruments"
       ],
       "properties": {
-        "symbol": {
-          "type": "string",
-          "pattern": "^$|^[A-Z][A-Z0-9.]{0,9}$"
-        },
-        "assetId": {
-          "type": "string",
-          "pattern": "^$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-        },
-        "anchor": {
-          "type": "string",
-          "pattern": "^$|^[0-9]{4}-[0-9]{2}-[0-9]{2}=[0-9]{1,9}(\\.[0-9]{1,9})?$"
+        "instruments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "symbol",
+              "assetId",
+              "anchor"
+            ],
+            "properties": {
+              "symbol": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9.]{0,9}$"
+              },
+              "assetId": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "anchor": {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}=[0-9]{1,9}(\\.[0-9]{1,9})?$"
+              }
+            }
+          }
         }
       }
     },
