@@ -241,8 +241,9 @@ and the deployment manager at it (`helm upgrade --reuse-values --set api.workspa
 second deployment manager and the model gateway at its research workspace, the same ULID with `r`
 (`deployManager.researchWorkspace`, `modelGateway.workspace`;
 [DEC-2070](../../docs/project/decisions/DEC-2070.md)), and waits for each to roll out, so every
-step, through the CLI, the API or `web/`, acts on one workspace (DEC-2010). Step 2 registers, before any version, the reviewed configuration every agent trades
-under (`deploy/cell/demo/rule-set.json`, `fee-config.json` and `trading-calendar.json`, the
+step, through the CLI, the API or `web/`, acts on one workspace (DEC-2010). Step 2 registers,
+before any version, the reviewed configuration every agent trades under
+(`deploy/cell/demo/rule-set.json`, `fee-config.json` and `trading-calendar.json`, the
 shell's tracer configuration): the gate's rule set is the one `rule_set` snapshot of the control
 stream, which the runtime's gate and the executor's binding gate both read as the latest of its
 kind, so nothing registers that kind again. Step 5 runs `mandate-backtest-runner` on its committed
@@ -251,7 +252,9 @@ the scenario runs the executor's connect check on its fixture broker for a fresh
 (`01KDEA<run id>000000000A`), as the `executor` drill does; step 2 records that connection, so the
 deployment is version 2 and the manager starts the account's executor and the agent's runtime
 ([DEC-2379](../../docs/project/decisions/DEC-2379.md)). It runs a second for the research
-workspace's own account (`01KDER<run id>000000000A`), which step 3 records there.
+workspace's own connection, `conn_demo_research_paper_01`, which the research agent's mandate names,
+on an account of its own (`01KDER<run id>000000000A`), and step 3 records it there (DEC-2070 item
+2).
 
 The run's own report is the up-to-date list; on 2026-10-26, with DEC-2379, it reads:
 
