@@ -378,10 +378,8 @@ fn ny_day(secs: i64) -> i64 {
 
 /// The fuzz: the offers and cancels of `steps`, with the core's triggers at `cap` runs a day and
 /// `debounce_s`, against the oracle's own count at 2 a day and [`DEBOUNCE_S`]. The first offer the
-/// two disagree on, or `None`.
-/// `None` when the core starts a run on exactly the offers the oracle predicts with a cap of 2 and
-/// the file's debounce, given the core `cap`, `debounce_s`, and, when `forgets`, every offer under
-/// a name of its own, as a core that never remembers an item would see them.
+/// two disagree on, or `None`. When `forgets`, the core sees every offer under a name of its own,
+/// as a core that never remembers an item would.
 fn disagreement(steps: &[Step], cap: u32, debounce_s: u32, forgets: bool) -> Option<String> {
     let (ids, plan, view) = (TestIds, FixedPlan::silent(), universe(&[]));
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -593,9 +591,9 @@ fn an_agent_in_exits_only_still_starts_an_event_run() {
     )));
 }
 
-/// A restart: a fresh research state folded from the journal alone, with a scheduled run's
-/// observation folded between, refuses the same item again, refuses another inside the debounce,
-/// and starts one after it, exactly as the process that wrote the journal would.
+/// A restart: a fresh research state folded from the journal alone refuses another item inside the
+/// debounce, refuses the same item again after it, and starts the other item, exactly as the
+/// process that wrote the journal would.
 #[test]
 fn a_restart_folds_the_debounce_the_day_and_the_items_back_from_the_journal() {
     let (ids, plan, view) = (TestIds, FixedPlan::silent(), universe(&[]));
