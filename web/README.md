@@ -176,7 +176,14 @@ Approving a request is step-up by `cli_confirm` (DEC-2104, DEC-2103 item 7): App
 Its Approve then sends the grant with that challenge's evidence, and the screen says what the server answered
 (`step_up_missing` while the host has not confirmed). A code's five minutes are counted from when it
 was shown, never against this device's clock; paper only, and Skip still carries no step-up. The
-mock API stands in for the host's confirmation. Stop works over the API too (DEC-2408): the sheet lists the agents the API serves, each with its kill
+mock API stands in for the host's confirmation. Connections lists every connection
+`GET /connections` serves with its state, and the owner connects Alpaca paper trading there (DEC-2623): the
+screen shows the token-breadth disclosure in DEC-2622's version 1 wording, asks for a code of kind
+`connection` bound to that version (DEC-2621 item 4) with the `mandate step-up confirm-connect` line
+(DEC-2125), then sends `POST /connections/oauth/start` and the browser to the authorization page it
+answers, an `https` page only. Alpaca returns the browser to the API's callback, which redirects to
+`/connections/{id}`, read until it settles. Stop-all and Close-all take only an established connection
+as their scope, and the workspace scope when none is. Stop works over the API too (DEC-2408): the sheet lists the agents the API serves, each with its kill
 switch, and the record screens build from the API's view, with open orders and per-agent positions
 shown as not reported, never as none. Release is not offered there. `/demo` always reads the fixtures. With sign-in on, the browser first opens an API session with
 `POST /v1/sessions` from its Supabase access token and refreshes it every four minutes, one tab at a

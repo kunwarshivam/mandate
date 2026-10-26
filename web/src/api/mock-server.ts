@@ -18,6 +18,8 @@
  * is the fixture's served `backtest` member under the mock's own envelope (DEC-2400).
  */
 import { CSRF_HEADER, OPERATIONS, SESSION_ROUTE, STEP_UP_CHALLENGE_ROUTE, isIdempotencyKey, type Fetch } from "./client";
+import { CONNECT_START_ROUTE } from "./connect";
+import { CONNECT_DISCLOSURE, connectStepUpDigest } from "./step-up";
 import type { Watermark } from "./types";
 import { servedBacktestFixture } from "@/fixtures/backtests";
 import { buildWorkspace } from "@/fixtures/workspace";
@@ -52,7 +54,12 @@ export interface MockServer {
   servedDigests(): string[];
   /** Every step-up challenge the mock has issued, in order. */
   challenges(): IssuedChallenge[];
+  /** The connects the mock has started, by key, in order. */
+  started(): Array<{ idempotency_key: string; connection_id: string }>;
 }
+
+/** Where the mock's start sends the browser: no real authorization server is ever named. */
+export const MOCK_AUTHORIZATION_ORIGIN = "https://paper-oauth.mock.invalid";
 
 export interface IssuedChallenge {
   challenge_id: string;
@@ -114,6 +121,8 @@ const ROUTES = Object.entries(OPERATIONS).map(([operation, route]) => ({
 export function createMockServer(options: MockServerOptions): MockServer {
   const { workspaceId, scenario = "normal", hostConfirms = true } = options;
   const issued: IssuedChallenge[] = [];
+  /** Connects started, each read `connecting` once and `established` after, as a completed paper connect would be. */
+  const connects: Array<{ idempotency_key: string; body: string; connection_id: string; reads: number }> = [];
   const workspace = structuredClone(buildWorkspace(scenario));
   const prefix = `/v1/workspaces/${workspaceId}`;
   const commands: RecordedCommand[] = [];
@@ -193,7 +202,12 @@ export function createMockServer(options: MockServerOptions): MockServer {
     if ([...query.keys()].some((name) => !(route === "/approvals" && name === "state"))) return problem(404, "not_found", "none");
     if (route === "/health") return read(healthBody(workspace.health, servedAt));
     if (route === "/agents") return read({ agents: workspace.agents.map(agentRow) });
-    if (route === "/connections") return read({ connections: [{ connection_id: workspace.connection.connection_id, environment: workspace.environment }] });
+    if (route === "/connections") return read({ connections: connectionRows() });
+    const oneConnection = route.match(/^\/connections\/([^/]+)$/);
+    if (oneConnection) {
+      const row = connectionRows().find((c) => c.connection_id === decodeURIComponent(oneConnection[1]));
+      return row ? read({ connection: row }) : problem(404, "not_found", "none");
+    }
     if (route === "/approvals") {
       const state = query.get("state");
       if (state !== "pending" && state !== "resolved") return problem(422, "invalid", "none");
@@ -307,9 +321,47 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return respond(201, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: [], challenge_id: c.challenge_id, webauthn_challenge: entry.bytes, action: { kind: c.kind, digest: c.digest }, issued_at: c.issued_at, expires_at: c.expires_at });
   }
 
+  /** `read-models/connections`' rows: the fixture's established connection, then each connect started here. */
+  function connectionRows() {
+    const row = (connection_id: string, state: string) => ({ connection_id, broker: "alpaca", environment: workspace.environment === "live" ? "live" : "paper", state, scopes: state === "established" ? ["account:write", "trading"] : null, since: servedAt, refusal: null, revoked_reason: null, agents: [] as string[] });
+    return [row(workspace.connection.connection_id, "established"), ...connects.map((c) => row(c.connection_id, c.reads++ === 0 ? "connecting" : "established"))];
+  }
+
+  /**
+   * `POST /connections/oauth/start` (DEC-2623 item 6's order after the session and body): live is
+   * refused, a disclosure other than the current one is `invalid`, then the step-up for the connect
+   * digest; a retry with the same key and body answers the same start (item 8).
+   */
+  function startConnect(headers: Headers, body: string): Response {
+    const key = headers.get("Idempotency-Key") ?? "";
+    if (!isIdempotencyKey(key)) return problem(422, "invalid", "none");
+    const earlier = connects.find((c) => c.idempotency_key === key);
+    if (earlier && earlier.body !== body) return problem(409, "idempotency_conflict", "none");
+    let members: Record<string, unknown> = {};
+    try {
+      members = JSON.parse(body) as Record<string, unknown>;
+    } catch {
+      return problem(422, "invalid", "none");
+    }
+    if (members.broker !== "alpaca" || (members.environment !== "paper" && members.environment !== "live")) return problem(422, "invalid", "none");
+    if (workspace.environment === "live" || members.environment === "live") return problem(403, "live_unavailable", "none");
+    const disclosure = members.disclosure as { document?: unknown; version?: unknown } | undefined;
+    if (disclosure?.document !== CONNECT_DISCLOSURE.document || disclosure.version !== CONNECT_DISCLOSURE.version) return problem(422, "invalid", "none");
+    if (!earlier) {
+      const refused = judgeCliConfirm(members.step_up, "connection", connectStepUpDigest(workspaceId));
+      if (refused) return problem(401, refused, "none");
+    }
+    const entry = earlier ?? { idempotency_key: key, body, connection_id: `conn_${eventId(`${workspaceId}\nconnect\n${key}`)}`, reads: 0 };
+    if (!earlier) connects.push(entry);
+    const state = sha256Hex(`state\n${key}`);
+    const expires = canonical(new Date(Date.parse(workspace.now) + 600_000).toISOString());
+    return respond(201, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: asOf(), authorization_url: `${MOCK_AUTHORIZATION_ORIGIN}/oauth/authorize?state=${state}`, expires_at: expires, connection_id: entry.connection_id });
+  }
+
   function post(route: string, headers: Headers, body: string): Response {
     if (headers.get(CSRF_HEADER) !== "1") return problem(403, "forbidden", "none");
     if (route === STEP_UP_CHALLENGE_ROUTE) return challenge(headers, body);
+    if (route === CONNECT_START_ROUTE) return startConnect(headers, body);
     const match = ROUTES.find((r) => r.pattern.test(route));
     if (!match) return problem(404, "not_found", "none");
     const key = headers.get("Idempotency-Key") ?? "";
@@ -368,5 +420,5 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return problem(404, "not_found", "none");
   };
 
-  return { fetch, recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], challenges: () => issued.map((c) => ({ ...c })) };
+  return { fetch, recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], challenges: () => issued.map((c) => ({ ...c })), started: () => connects.map(({ idempotency_key, connection_id }) => ({ idempotency_key, connection_id })) };
 }

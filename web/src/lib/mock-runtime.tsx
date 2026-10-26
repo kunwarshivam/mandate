@@ -11,6 +11,7 @@ import { backtestOfVersion, servedBacktestFixture } from "@/fixtures/backtests";
 import type { ApiView } from "@/api/read-models";
 import type { Applies, Classification } from "@/api/confirm";
 import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-up";
+import type { ConnectionDetail } from "@/api/connect";
 
 /**
  * A stand-in for the workspace deployment. Commands and approval responses are held in memory
@@ -181,6 +182,8 @@ export interface Runtime {
   respond: (approvalId: string, response: "approve" | "skip", record: ApprovalRecord, challenge?: StepUpChallenge | null) => void;
   /** Asks the deployment for a `cli_confirm` challenge (DEC-2103, DEC-2104); `null` over the fixtures, whose step-up is the passkey stand-in. */
   stepUp: ((action: StepUpAction) => Promise<ChallengeAnswer>) | null;
+  /** The Alpaca paper connect over the API (§4.5, DEC-2623); `null` over the fixtures, which connect nothing. */
+  connect: ConnectPort | null;
   setUps: SetUp[];
   /** Step 1: `POST /mandate-drafts/{id}/versions`. */
   createVersion: (request: NewAgent) => SetUp;
@@ -197,6 +200,22 @@ export interface Runtime {
 
 /** A challenge to show, with what the host command names; or why there is none, and nothing was asked of the host. */
 export type ChallengeAnswer = { ok: true; shown: ShownChallenge; workspaceId: string; principalId: string } | { ok: false; reason: string };
+
+/** Where the start sends the browser, or why it does not, with whether anything may have been recorded. */
+export type StartAnswer = { ok: true; authorizationUrl: string; connectionId: string } | { ok: false; reason: string; effect: "none" | "recorded" | "unknown" };
+
+export type ConnectionAnswer = { ok: true; connection: ConnectionDetail } | { ok: false; reason: string };
+
+export interface ConnectPort {
+  /** A `cli_confirm` challenge of kind `connection`, bound to this workspace and the disclosure shown (DEC-2621 item 4, DEC-2125). */
+  challenge: () => Promise<ChallengeAnswer>;
+  /** `POST /connections/oauth/start` with the confirmed challenge's evidence, retried with the same key while its answer is lost (DEC-2623 item 8). */
+  start: (challenge: StepUpChallenge) => Promise<StartAnswer>;
+  /** `GET /connections/{id}` (DEC-2620). */
+  read: (connectionId: string) => Promise<ConnectionAnswer>;
+  /** `GET /connections`. */
+  list: () => Promise<{ ok: true; connections: ConnectionDetail[] } | { ok: false; reason: string }>;
+}
 
 export const RuntimeContext = createContext<Runtime | null>(null);
 
@@ -590,7 +609,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
