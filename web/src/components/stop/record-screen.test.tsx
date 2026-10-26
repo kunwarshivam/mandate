@@ -376,6 +376,8 @@ describe("once confirmed, the record screen sends once and never shows it done e
     const activate = within(confirmDialog()!).getByRole("button", { name: "Activate" });
     fireEvent.click(activate);
     fireEvent.click(activate);
+    expect(screen.queryByRole("button", { name: "Activate" }), "no second Activate is left to press").toBeNull();
+    expect(within(page()).queryByRole("button", { name: c.activate }), "nor the screen's own action").toBeNull();
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
     expect(entries(page())).toHaveLength(1);
     expect(recordedCount()).toBe(1);

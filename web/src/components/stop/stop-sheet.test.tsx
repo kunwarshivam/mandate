@@ -172,7 +172,8 @@ describe("the kill switch and release open their record screens", () => {
     const sheet = openSheet();
     const link = within(sheet).getByRole("link", { name: l.choice });
     expect(link).toHaveAttribute("href", recordHref(l.kind, l.target()));
-    expect(link).toHaveTextContent("Opens the full list to confirm with your passkey.");
+    expect(link).toHaveTextContent(l.kind === "release" ? "Opens the full list to confirm with your passkey." : "Opens the full list to confirm. No passkey needed.");
+    if (l.kind !== "release") expect(link).not.toHaveTextContent(/with your passkey/);
     fireEvent.click(link);
     expect(stepUpDialog()).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();

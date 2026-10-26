@@ -891,7 +891,8 @@ kill switch. Needs a line in the runtime brief or the mandate spec.
 *Spec line:* mandate spec §6.1, "Owner controls and step-up" (DEC-173). The kill switch is as
 DEC-158 option (c) leaves it: without valid step-up it still stops the agent and flattens as an
 automated flatten does, and only its privileges beyond the stop (selling equities outside the regular
-session at a confirmed bid) need step-up. The web kill switch inherits the same rule.
+session at a confirmed bid) need step-up. The web kill switch inherits the same rule. Its D10 confirm
+is one press with no step-up (DEC-2410); "the same check as the kill switch" above predates that.
 
 **PX-5. What the owner sees while reconciliation holds an agent.**
 (a) "Paused: reconciliation mismatch" and a resume button. (b) The difference (ledger against broker,
