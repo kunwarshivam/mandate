@@ -5512,13 +5512,6 @@ number order after the members' types:
      (`payload.trigger.cause`), so an approval is explained once and an owner question answered by
      one run. A stream rule: `append` reads the stream's earlier records, and
      a range judges it from the stream's start; rules 174 to 183 are stream rules too.
-271. Agent stream ([DEC-2392](../project/decisions/DEC-2392.md)): a `RunStarted` whose
-     `trigger.kind` is `event` names as `trigger.cause` an `ObservationRecorded` earlier in the same
-     `append` batch (`payload.trigger.cause`) whose `instrument_id` is not `null`
-     (`payload.trigger.cause`), and no earlier `RunStarted` of the stream names the same cause
-     (`payload.trigger.cause`); the first that fails. So an event run's trigger is journaled before
-     the run, in its starting batch, and one item starts at most one run (agent harness spec §5.3).
-     Numbered after rule 270, it is checked with rule 173's stream rules.
 174. Agent stream: a `ToolCallRecorded`, `ToolResultRecorded`, `RunSummaryRecorded`, or `RunEnded`
      has the `correlation_id` of an earlier `RunStarted` (`correlation_id`), and no `RunEnded` of
      that run precedes it (`correlation_id`); a second `RunSummaryRecorded` of a run is refused
@@ -5566,6 +5559,15 @@ number order after the members' types:
      `verdicts` is empty (`correlation_id`). A late reply to a cancelled run is so still journaled,
      and rule 175 keeps any tool call of it out (no tool call follows a `RunEnded`, rule 174), as
      agent harness spec §5.3 says. Every other §9.19 rule is unchanged.
+271. Agent stream ([DEC-2392](../project/decisions/DEC-2392.md)): a `RunStarted` whose
+     `trigger.kind` is `event` names as `trigger.cause` an earlier `ObservationRecorded` of the
+     stream with the same `correlation_id` (`payload.trigger.cause`) and a non-null
+     `instrument_id` (`payload.trigger.cause`), whose `data_ref` no earlier `RunStarted` with
+     `trigger.kind` `event` names through its own cause (`payload.trigger.cause`); the first that
+     fails. So an event run's trigger is journaled before it, as part of the run, and one item
+     starts at most one run (agent harness spec §5.3). A stream rule, judged after rules 173 to
+     183 in number order. That the observation is in the run's starting batch is the writer's,
+     checked by no rule, since a range has no batches.
 
 **Checked by no rule at append**, so the writer and its tests own them: that a reply has exactly as
 many `ToolCallRecorded` records as tool calls, which needs the response artifact; that every listed

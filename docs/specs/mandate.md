@@ -27,8 +27,9 @@ builder, versioning, change classification, and the records kept.
   per risk day. Absent or `null` is off, which is every version written before it, so no confirmed
   version changes meaning. A triggered run is always the agent harness's `monitor` kind, which can
   only invalidate theses (and, once declared, request exits): it never proposes a thesis, never
-  sizes or places an order (rule 4), and its spend counts against `cost_cap_usd_per_day`. Any
-  change to the field classifies as increasing (§9.2), so the owner confirms every one (rule 11).
+  sizes or places an order (rule 4), and its spend counts against `cost_cap_usd_per_day`. A change
+  that lets more items start runs classifies as increasing (§9.2), so the owner confirms it with
+  step-up (rule 11); one that lets fewer is reducing (rule 2).
 - **v0.10 ([DEC-2391](../project/decisions/DEC-2391.md), an agent reading under
   [DEC-176](../project/04-decision-log.md#decisions)):** §8.3 step 2 gains the exit a removed
   instrument lacked. When an instrument's thesis ends (invalidated, expired, or its lineage retired,
@@ -1879,7 +1880,7 @@ invalid (V-031).
 | **Unpinning** (`universe.pinned` true → false) | Increasing: it lets the platform admit instruments the owner did not choose. Needs step-up (DEC-121) |
 | `universe.asset_classes` | Increasing if any class is added; otherwise reducing |
 | `behavior.research` set from null | Increasing (the research agent may now admit); cleared to null is reducing |
-| `behavior.research.event_triggers`, any change (set, cleared, a source, `debounce_s`, `max_runs_per_day`) | Increasing ([DEC-2392](../project/decisions/DEC-2392.md)): a change to what may start a model call is the owner's to confirm (rule 11), and clearing it is listed here too rather than left to judgment; clearing `behavior.research` as a whole stays reducing |
+| `behavior.research.event_triggers` ([DEC-2392](../project/decisions/DEC-2392.md)) | Increasing when set from `null` or absent, when a source is added, when `debounce_s` is smaller, or when `max_runs_per_day` is larger: each lets more items start model calls (rule 11). Otherwise reducing: cleared, a source removed, `debounce_s` larger, `max_runs_per_day` smaller, so cutting what may start a run never needs more than reducing does (rule 2); clearing `behavior.research` as a whole stays reducing |
 | `protection.stop_limit_offset` (version 1: `crypto_stop_limit_offset`) | Increasing if newly set or larger; reducing if cleared (no asset class needs it any more) or smaller. A version-1 document is read as version 2 before the two are compared (DEC-539 items 4 and 5) |
 | `autonomy.admission` | Part of the autonomy row: reducing only if it becomes stricter (auto → ask → deny) |
 | `end_date` | Increasing if later or removed (null); reducing if earlier |
