@@ -17,8 +17,6 @@ module "runners" {
   github_app_private_key     = var.github_app_private_key
   runner_version             = "2.338.1"
   runner_sha256              = "08e9ccb3604d2462c24b5e33604dc30810296ca15cc65f23cffd4317eb144c37"
-  kubectl_version            = "1.35.9"
-  kubectl_sha256             = "3cfeaf80be482b435b0aa214aff6e0b2c312ee23c0ff20810c75517b6004c6eb"
   sysbox_version             = "0.7.1"
   sysbox_sha256              = "9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5"
   kubectl_version            = "1.35.9"

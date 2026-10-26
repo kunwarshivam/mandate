@@ -115,15 +115,6 @@ variable "runner_sha256" {
   type = string
 }
 
-variable "kubectl_version" {
-  description = "The kubectl the cell jobs need (`cell demo` reads the API through it), as GitHub's ubuntu-24.04 image ships one; pinned with infra.yml's."
-  type        = string
-}
-
-variable "kubectl_sha256" {
-  type = string
-}
-
 variable "sysbox_version" {
   type = string
 }
@@ -195,10 +186,6 @@ locals {
     echo "${var.kubectl_sha256}  /usr/local/bin/kubectl" | sha256sum --check
     chmod 0755 /usr/local/bin/kubectl
     chown -R runner:runner /home/runner
-    curl -fsSL --retry 5 --retry-all-errors -o /tmp/kubectl "https://dl.k8s.io/release/v${var.kubectl_version}/bin/linux/amd64/kubectl"
-    echo "${var.kubectl_sha256}  /tmp/kubectl" | sha256sum --check
-    install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
-    rm /tmp/kubectl
     sudo -u runner -H bash /opt/toolchain.sh
     rm -rf /var/lib/apt/lists/* /tmp/*
   BUILD
