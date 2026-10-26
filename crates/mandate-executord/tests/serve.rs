@@ -483,8 +483,10 @@ fn a_lost_credential_restricts_the_account_before_the_drain() -> Result<(), Erro
     Ok(())
 }
 
-/// Runs `journal`'s connection over `broker` for one pass at each of `offsets` (seconds after
-/// noon 2026-09-21), `before` run ahead of each pass with its index, then SIGTERM.
+/// Runs `journal`'s connection over `broker` at `offsets` (seconds after 15:00 UTC on 2026-09-21),
+/// then SIGTERM. The lease's tick at each offset runs `before` with that offset's index, and the
+/// pass that follows it steps at the next offset. The stream's copy of the establishment folds
+/// after the first step, so a later check is first due at the second step.
 fn run_at(
     journal: &Journal,
     broker: &Paper,
@@ -567,23 +569,44 @@ fn an_established_run_checks_its_permissions_at_start_and_daily() -> Result<(), 
     Ok(())
 }
 
-/// DEC-2840: a later check that fails suspends the connection (journal spec §9.8: a failed
-/// `account` check suspends with `check_failed`): the restriction first, then the state change.
-/// Here no connect-time check named the account, so the later one cannot name it and fails.
-#[test]
-fn a_failed_later_check_suspends_the_connection() -> Result<(), Error> {
+/// The account stream's connection, checked and established, with nothing proposed: an idle
+/// account, which no scheduled reconciliation reads.
+fn idle_established() -> Result<Journal, Error> {
     let journal = deployed()?;
     opened(&journal)?;
-    checked_naming(&journal, None)?;
+    checked(&journal)?;
     establish(&journal)?;
+    Ok(journal)
+}
+
+/// DEC-2840: a broker that refuses the account read on a later day says the credential no longer
+/// reaches the account, so the daily check fails, and the connection is suspended (journal spec
+/// §9.8: a failed `account` check suspends with `check_failed`): the restriction first, then the
+/// state change. The failed check names no account (rule 62).
+#[test]
+fn a_failed_later_check_suspends_the_connection() -> Result<(), Error> {
+    let journal = idle_established()?;
     let broker = Paper::new(&journal);
-    let exit = run_at(&journal, &broker, &[0, 60, 120, 180], &|_| {})?;
+    let day = 86_400;
+    let exit = run_at(
+        &journal,
+        &broker,
+        &[0, 60, 120, day, day + 60, day + 120],
+        &|pass| {
+            if pass == 2 {
+                broker.refuse_account_with(403);
+            }
+        },
+    )?;
     assert_eq!(exit, Ok(0));
-    assert_eq!(check_occasions(&journal), ["connect", "executor_start"]);
-    let failed = journal.payloads("ConnectionChecked");
     assert_eq!(
-        failed
-            .get(1)
+        check_occasions(&journal),
+        ["connect", "executor_start", "daily"]
+    );
+    let daily = journal.payloads("ConnectionChecked");
+    assert_eq!(
+        daily
+            .get(2)
             .map(|payload| member(payload, "account_pii_ref")),
         Some(String::new()),
         "an unread account names no reference (rule 62)"
@@ -602,22 +625,38 @@ fn a_failed_later_check_suspends_the_connection() -> Result<(), Error> {
 }
 
 /// DEC-2840: a check whose account read is lost cannot run, so nothing is journaled for it and it
-/// stays due; it counts toward the connection's network failures, never as passed.
+/// stays due, tried again once a probe's interval later; it counts toward the connection's
+/// network failures, never as a pass or a failure.
 #[test]
 fn a_check_whose_read_is_lost_runs_on_a_later_pass() -> Result<(), Error> {
-    let journal = connecting()?;
-    establish(&journal)?;
+    let journal = idle_established()?;
     let broker = Paper::new(&journal);
-    let exit = run_at(&journal, &broker, &[0, 60, 120, 180, 240], &|pass| {
-        if pass == 1 {
+    let exit = run_at(&journal, &broker, &[0, 30, 60, 90, 120, 180], &|pass| {
+        if pass == 0 {
             broker.lose_next_answers(1_000);
         }
-        if pass == 3 {
+        if pass == 2 {
             broker.lose_next_answers(0);
         }
     })?;
     assert_eq!(exit, Ok(0));
     assert_eq!(check_occasions(&journal), ["connect", "executor_start"]);
+    let started = journal.payloads("ConnectionChecked");
+    let clock = started.get(1).map(|payload| member(payload, "risk_clock"));
+    assert_eq!(
+        clock.as_deref(),
+        Some("2026-09-21T15:02:00.000000000Z"),
+        "the read at 15:01 was lost, so the check ran a probe's interval later"
+    );
+    let reasons: Vec<String> = journal
+        .payloads("ConnectionStateChanged")
+        .iter()
+        .map(|payload| member(payload, "reason"))
+        .collect();
+    assert!(
+        !reasons.iter().any(|reason| reason == "check_failed"),
+        "lost reads count as network failures, never as a failed check: {reasons:?}"
+    );
     Ok(())
 }
 

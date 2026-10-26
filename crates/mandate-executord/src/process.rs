@@ -49,9 +49,15 @@ pub trait Broker {
         None
     }
 
+    /// Whether the broker runs connections spec §8.1's later checks (DEC-2840). The default,
+    /// `false`, is a broker whose later checks are not built yet: the process then never reads the
+    /// account for one.
+    fn has_later_checks(&self) -> bool {
+        false
+    }
+
     /// Connections spec §8.1's later checks over `account`, the broker's answer to an account read
-    /// (DEC-2840), or `None` for a broker whose later checks are not built yet, which the process
-    /// then never runs.
+    /// (DEC-2840), or `None` for a broker whose later checks are not built yet.
     fn later_check(
         &self,
         _connection: ConnectionId,
@@ -197,10 +203,10 @@ pub struct ExecutorProcess<S, B> {
     /// core takes no other input until it is handed again, and the retry offers the journal the
     /// same bytes (journal spec §5.1). Nothing it asks of the broker leaves before it commits.
     pending: Option<(Input, UtcNanos)>,
-    /// The mark whose append is in doubt, with the time it was first written at: offered to the
-    /// journal again, the same bytes, before any other append, so a mark that committed with its
-    /// answer lost is found already committed rather than conflicting with the next (DEC-2380
-    /// item 3, journal spec §5.1).
+    /// The process's own record whose append is in doubt, a mark or a permission check (DEC-2840),
+    /// with the time it was first written at: offered to the journal again, the same bytes, before
+    /// any other append, so a record that committed with its answer lost is found already
+    /// committed rather than conflicting with the next (DEC-2380 item 3, journal spec §5.1).
     pending_mark: Option<(EventDraft, UtcNanos)>,
     /// Requests whose drafts committed and which have not been sent, in order: what an answer
     /// whose own batch went in doubt left behind (DEC-2003 item 7).
@@ -251,6 +257,9 @@ pub struct ExecutorProcess<S, B> {
     start_checked: bool,
     /// The New York date of the latest permission check this process journaled (DEC-2840).
     checked_on: Option<Date>,
+    /// When a due permission check last could not run, so it is tried again at most once every
+    /// [`PROBE_EVERY_S`], as the probe reads (DEC-2840).
+    check_tried: Option<UtcNanos>,
 }
 
 /// What one pass reads from the agents' streams: the kill switches this stream has not applied,
@@ -307,6 +316,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             probed: now,
             start_checked: false,
             checked_on: None,
+            check_tried: None,
             polled: QuotePoll::new(Duration::from_secs(
                 u64::try_from(wiring_step).unwrap_or_default(),
             )),
@@ -475,7 +485,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             self.lifecycle.observe(now, Lifecycled::Completed);
         }
         self.probe(now);
-        self.later_check(now);
+        self.later_check(now, &mut alerts);
         if !self.report_troubles(now, &mut alerts) {
             return alerts;
         }
@@ -1299,15 +1309,26 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     }
 
     /// Connections spec §8.1's checks at the process's start and once each New York day after
-    /// (DEC-2840), once the stream holds its copy of the establishment (journal spec rule 68):
-    /// the broker's account read, counted toward the connection's health, then the venue's checks
-    /// over it, journaled as `ConnectionChecked` with occasion `executor_start` or `daily`. A read
-    /// lost on the way back, or refused for its credential, means the check could not run: nothing
-    /// is journaled and it stays due. A failed check suspends the connection (`check_failed`). The
-    /// account is named by the reference the stream's latest connect-time check gave it; with none
-    /// it reads as unreadable, which fails. It runs last in a pass that went through, as the probe
-    /// does, and reads and places nothing else.
-    fn later_check(&mut self, now: UtcNanos) {
+    /// (DEC-2840), once the stream holds its copy of the establishment (journal spec rule 68), for
+    /// a broker that runs them. It reads the broker's account, counted toward the connection's
+    /// health, then runs the venue's checks over it, journaled as `ConnectionChecked` with occasion
+    /// `executor_start` or `daily`.
+    ///
+    /// - **Could not run.** A read lost on the way back, refused for its credential, never sent,
+    ///   or whose answer could not be read, means the check could not run. Nothing is journaled,
+    ///   and it is tried again at most once every [`PROBE_EVERY_S`].
+    /// - **Unreachable account.** A broker that answered and refused the account read says the
+    ///   credential no longer reaches the account, which fails check 3.
+    /// - **Journaling.** The record goes through the mark writer's path, so a refused batch is
+    ///   alerted once and never stops the process (DEC-2805), and one in doubt is offered again,
+    ///   the same bytes, first.
+    /// - **A failed check** suspends the connection (`check_failed`).
+    ///
+    /// It runs last in a pass that went through, as the probe does, and places nothing.
+    fn later_check(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) {
+        if !self.broker.has_later_checks() || self.exited() {
+            return;
+        }
         let Ok((today, _)) = new_york_date_and_hour(now) else {
             return;
         };
@@ -1318,6 +1339,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         } else {
             return;
         };
+        let retry_due = self
+            .check_tried
+            .is_none_or(|tried| now.secs().saturating_sub(tried.secs()) >= PROBE_EVERY_S);
         let Some(connection) = self
             .state
             .connection_id()
@@ -1325,11 +1349,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         else {
             return;
         };
-        if self.exited() {
+        if !retry_due {
             return;
         }
         let account = match self.call(&BrokerRequest::GetAccount) {
-            Err(ConnectorError::Unknown(_)) => return,
             Ok(BrokerOutcome::Account(_)) => match self.account_pii_ref() {
                 Some(pii_ref) => AccountRead::Read {
                     pii_ref,
@@ -1337,12 +1360,18 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 },
                 None => AccountRead::Unreadable,
             },
-            _ => AccountRead::Unreadable,
+            Ok(BrokerOutcome::Rejected(_)) => AccountRead::Unreadable,
+            _ => {
+                self.check_tried = Some(now);
+                return;
+            }
         };
         let Some(Ok(report)) = self.broker.later_check(connection, occasion, account) else {
+            self.check_tried = Some(now);
             return;
         };
         let Ok(payload) = crate::connect::checked(&report, now) else {
+            self.check_tried = Some(now);
             return;
         };
         let id = self
@@ -1357,11 +1386,13 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             causation_id: None,
             payload,
         };
-        if !matches!(self.journal(now, &[draft]), Ran::Committed) {
+        self.append_mark(now, now, draft, alerts);
+        if self.exited() {
             return;
         }
         self.start_checked = true;
         self.checked_on = Some(today);
+        self.check_tried = None;
         if !report
             .results
             .iter()

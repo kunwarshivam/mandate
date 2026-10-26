@@ -61,6 +61,10 @@ impl<T: TradingTransport + Clone> Broker for AlpacaBroker<T> {
         self.runtime.block_on(client.call(request))
     }
 
+    fn has_later_checks(&self) -> bool {
+        true
+    }
+
     /// The connect check's own §8.1 checks, at every start and daily (DEC-2840).
     fn later_check(
         &self,

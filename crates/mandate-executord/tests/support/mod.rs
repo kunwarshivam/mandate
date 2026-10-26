@@ -422,6 +422,8 @@ struct Books {
     /// answers them: a `401` as an unknown outcome, `Unauthorized` (connections spec §5.4), and any
     /// other status as a rejection.
     refuse_with: Option<(u16, usize)>,
+    /// The status every account read is refused with from now on, every other request answered.
+    refuse_account: Option<u16>,
     sequence: u64,
 }
 
@@ -549,6 +551,11 @@ impl Paper {
         self.books.borrow_mut().lose_answers = n;
     }
 
+    /// Every account read from now on is refused with `status`; every other request is answered.
+    pub fn refuse_account_with(&self, status: u16) {
+        self.books.borrow_mut().refuse_account = Some(status);
+    }
+
     /// The next `n` requests are refused with `status`, and nothing they asked takes effect.
     pub fn refuse_next_with(&self, status: u16, n: usize) {
         self.books.borrow_mut().refuse_with = Some((status, n));
@@ -581,6 +588,10 @@ impl ScriptedBroker for Paper {}
 impl Broker for Paper {
     fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
         mandate_alpaca::alpaca_profile()
+    }
+
+    fn has_later_checks(&self) -> bool {
+        true
     }
 
     /// The paper Alpaca connection's own later checks (DEC-2840), as the process's Alpaca broker
@@ -622,6 +633,14 @@ impl Broker for Paper {
             if status == 401 {
                 return Err(ConnectorError::Unknown(BrokerUnknown::Unauthorized));
             }
+            return Ok(BrokerOutcome::Rejected(BrokerReject {
+                client_order_id: None,
+                http_status: status,
+                code: None,
+                message: "refused".to_owned(),
+            }));
+        }
+        if let (Some(status), BrokerRequest::GetAccount) = (books.refuse_account, request) {
             return Ok(BrokerOutcome::Rejected(BrokerReject {
                 client_order_id: None,
                 http_status: status,
