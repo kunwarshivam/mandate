@@ -2453,7 +2453,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
-| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); the alerts read is specified (§4.7, [DEC-2141](../project/decisions/DEC-2141.md)) and served once lane EX's route lands; the ledger, risk-mark, and protection folds are planned |
+| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); and the alerts read (§4.7, [DEC-2141](../project/decisions/DEC-2141.md)); the ledger, risk-mark, and protection folds are planned |
 | Journal queries, trace, exports over the API | **Partly served** (E12-6): a stream's events page and one event (§4.8.1); trace, exports, and verification over the API are planned, their contracts in §4.8.1, served by the pure crate `mandate-audit` |
 | The backtest report (`read-models/backtest`) and `BacktestRunRecorded` | **Specified** (DEC-1000, DEC-1001; journal spec v0.45 §9.18); the run is **planned** (E4-4), the record's registration and the route **planned** (E4-5) |
 | The forward-paper evaluation (`read-models/evaluation`) and `EvaluationRunRecorded` | **Specified** (DEC-1002; journal spec v0.45 §9.18); the pure scorer **exists** (`mandate_research::score`); the harness, the record's registration, and the route **planned** (E17-8) |

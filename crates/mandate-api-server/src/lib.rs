@@ -56,6 +56,7 @@
 //! It never places, cancels, or sizes an order, and never calls a broker or a runtime (§1.4):
 //! `xtask/layers.toml` keeps it from every crate that could.
 
+pub mod alerts;
 pub mod backtests;
 pub mod challenges;
 pub mod clock;
