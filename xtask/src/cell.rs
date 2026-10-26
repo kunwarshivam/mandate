@@ -130,6 +130,11 @@ const EXECUTOR_DOCKERFILE: &str = "deploy/cell/images/executor.Dockerfile";
 const SCHEDULER_DOCKERFILE: &str = "deploy/cell/images/scheduler.Dockerfile";
 const SCHEDULER_PROCESS: &str = "scheduler";
 const SCHEDULER_PACKAGE: &str = "mandate-scheduler";
+/// The workspace notification dispatcher's image (X8, DEC-2500, DEC-2516): the single writer of
+/// the hosted workspace's notice stream, mailing only through the recorded transport.
+const DISPATCHER_DOCKERFILE: &str = "deploy/cell/images/dispatcher.Dockerfile";
+const DISPATCHER_PROCESS: &str = "dispatcher";
+const DISPATCHER_PACKAGE: &str = "mandate-dispatcher";
 /// The workspace data process's image (E21-29 lane SC): the deployed instrument's daily bars from
 /// the cell's recorded series, which the runtime reads read-only from the artifact store.
 const DATA_DOCKERFILE: &str = "deploy/cell/images/data.Dockerfile";
@@ -720,7 +725,7 @@ const RUNNER: &str = "mandate-backtest-runner";
 
 /// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
 /// them.
-const BUILT_PACKAGES: [&str; 10] = [
+const BUILT_PACKAGES: [&str; 11] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
@@ -731,6 +736,7 @@ const BUILT_PACKAGES: [&str; 10] = [
     EXCHANGE_PACKAGE,
     SCHEDULER_PACKAGE,
     DATA_PACKAGE,
+    DISPATCHER_PACKAGE,
 ];
 
 /// The token exchange's package (DEC-1175), a dev-profile build like the rest, so its cell token
@@ -743,7 +749,7 @@ const STUB_PACKAGE: &str = "mandate-stub-issuer";
 /// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
 /// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
 /// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
-pub const IMAGE_PACKAGES: [&str; 11] = [
+pub const IMAGE_PACKAGES: [&str; 12] = [
     BUILT_PACKAGES[0],
     BUILT_PACKAGES[1],
     BUILT_PACKAGES[2],
@@ -754,6 +760,7 @@ pub const IMAGE_PACKAGES: [&str; 11] = [
     BUILT_PACKAGES[7],
     BUILT_PACKAGES[8],
     BUILT_PACKAGES[9],
+    BUILT_PACKAGES[10],
     STUB_PACKAGE,
 ];
 
@@ -950,6 +957,28 @@ fn scheduler_image() -> Result<Option<String>> {
     local_tag(SCHEDULER_PROCESS, &[SCHEDULER_PACKAGE]).map(Some)
 }
 
+/// The cell's `dispatcher` image (X8, DEC-2516): this checkout's `mandate-dispatcher`. `None`
+/// where the `mandate` image is pulled, as for the runtime and executor, whose alerts it sends.
+fn dispatcher_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag(DISPATCHER_PROCESS, &[DISPATCHER_PACKAGE]).map(Some)
+}
+
+/// The dispatcher's image and its configuration's `build`, the digest of the binary it holds
+/// (DEC-2500 item 7), or nothing where the cell does not build it.
+fn dispatcher_sets() -> Result<Vec<String>> {
+    let Some(image) = dispatcher_image()? else {
+        return Ok(Vec::new());
+    };
+    let digest = sha256(&static_binary(DISPATCHER_PACKAGE))?;
+    Ok(vec![
+        format!("images.{DISPATCHER_PROCESS}={image}"),
+        format!("{DISPATCHER_PROCESS}.build=sha256:{digest}"),
+    ])
+}
+
 /// The cell's `data` image (E21-29 lane SC): this checkout's `mandate-datad`. `None` where the
 /// `mandate` image is pulled, as for the runtime, which reads what it stores.
 fn data_image() -> Result<Option<String>> {
@@ -1042,14 +1071,16 @@ fn image_sets() -> Result<Vec<String>> {
     if let Some(scheduler) = scheduler_image()? {
         sets.push(format!("images.{SCHEDULER_PROCESS}={scheduler}"));
     }
+    sets.extend(dispatcher_sets()?);
     if let Some(data) = data_image()? {
         sets.push(format!("images.{DATA_PROCESS}={data}"));
     }
     Ok(sets)
 }
 
-/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `scheduler`, `data`,
-/// `deploy-manager` and `role-provisioner` images from this checkout (never with the `live` feature), bring up the k3d
+/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `scheduler`,
+/// `dispatcher`, `data`, `deploy-manager` and `role-provisioner` images from this checkout (never
+/// with the `live` feature), bring up the k3d
 /// cluster if it is not up, install the CloudNativePG operator, the journal's Postgres and the
 /// vault, issue the vault's AppRole Secrets once the provisioner runs ([`provision_vault`]), install
 /// the workspace chart, and wait until every pod is ready and the migration Job has finished.
@@ -1065,6 +1096,7 @@ pub fn up() -> Result<()> {
     let runtime = runtime_image()?;
     let executor = executor_image()?;
     let scheduler = scheduler_image()?;
+    let dispatcher = dispatcher_image()?;
     let data = data_image()?;
     let stub = stub_image_tag()?;
     let exchange = exchange_image()?;
@@ -1085,6 +1117,9 @@ pub fn up() -> Result<()> {
     }
     if let Some(scheduler) = &scheduler {
         build_image(scheduler, SCHEDULER_DOCKERFILE, SCHEDULER_PACKAGE, &[])?;
+    }
+    if let Some(dispatcher) = &dispatcher {
+        build_image(dispatcher, DISPATCHER_DOCKERFILE, DISPATCHER_PACKAGE, &[])?;
     }
     if let Some(data) = &data {
         build_image(data, DATA_DOCKERFILE, DATA_PACKAGE, &[])?;
@@ -1129,6 +1164,7 @@ pub fn up() -> Result<()> {
         runtime.as_ref(),
         executor.as_ref(),
         scheduler.as_ref(),
+        dispatcher.as_ref(),
         data.as_ref(),
         stub.as_ref(),
         exchange.as_ref(),
@@ -6440,6 +6476,37 @@ mod tests {
         assert_eq!(process["image"], SCHEDULER_PROCESS);
         assert_eq!(process["built"], true);
         assert_eq!(process["probe"][0], "/mandate-scheduler");
+        Ok(())
+    }
+
+    /// The dispatcher's image (X8, DEC-2516): its package is built with the cell's others and is
+    /// one the cell jobs follow, its Dockerfile copies exactly that binary on an empty base as
+    /// non-root, its key is the chart's process and image name, its probe is that binary's, and it
+    /// reads the configuration file the chart mounts.
+    #[test]
+    fn the_cell_builds_the_dispatchers_image() -> Result<()> {
+        assert!(BUILT_PACKAGES.contains(&DISPATCHER_PACKAGE));
+        assert!(IMAGE_PACKAGES.contains(&DISPATCHER_PACKAGE));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dockerfile = fs::read_to_string(root.join(DISPATCHER_DOCKERFILE))?;
+        assert!(
+            dockerfile.contains("COPY mandate-dispatcher /mandate-dispatcher"),
+            "{dockerfile}"
+        );
+        assert!(
+            dockerfile.contains("FROM scratch") && dockerfile.contains("USER 65532:65532"),
+            "{dockerfile}"
+        );
+        let process = processes_in(&root)?
+            .into_iter()
+            .find(|p| p["name"] == DISPATCHER_PROCESS)
+            .context("processes.json has no dispatcher")?;
+        assert_eq!(process["image"], DISPATCHER_PROCESS);
+        assert_eq!(process["built"], true);
+        assert_eq!(process["probe"][0], "/mandate-dispatcher");
+        assert_eq!(process["db_role"], "mandate_dispatcher");
+        assert_eq!(process["egress"], json!(["postgres"]));
+        assert_eq!(process["args"][2], "/etc/mandate/dispatcher/config.json");
         Ok(())
     }
 

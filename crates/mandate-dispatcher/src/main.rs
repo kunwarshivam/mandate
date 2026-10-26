@@ -15,8 +15,8 @@
 //! the notice stream's writer epoch over Postgres (`MANDATE_JOURNAL_DSN`, its own role), and steps
 //! once a second, draining on SIGTERM and exiting with its lifecycle's status. Email goes only
 //! through the recorded transport, which keeps each message and sends nothing (DEC-2511), and web
-//! push stays off (DEC-2504). `mandate-dispatcher probe live|ready --probe <socket>` is its `exec`
-//! probe (DEC-2500 item 5). This is the one place the host clock is read.
+//! push stays off (DEC-2504). `mandate-dispatcher probe livez|readyz --probe <socket>` is its
+//! `exec` probe (DEC-2500 item 5, DEC-994 item 5). This is the one place the host clock is read.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -55,12 +55,7 @@ fn main() -> ExitCode {
     };
     match args.first().map(String::as_str) {
         Some("probe") => {
-            let asked = match args.get(1).map(String::as_str) {
-                Some("live") => Probe::parse("livez"),
-                Some("ready") => Probe::parse("readyz"),
-                _ => None,
-            };
-            let Some(asked) = asked else {
+            let Some(asked) = args.get(1).and_then(|name| Probe::parse(name)) else {
                 return ExitCode::from(2);
             };
             let answer = probe::query(&socket, asked).map_or(1, |a| a.exit_status());

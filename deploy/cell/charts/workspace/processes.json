@@ -203,6 +203,24 @@
       }
     },
     {
+      "name": "dispatcher",
+      "row": "Notification dispatcher, one per workspace: the single writer of the hosted workspace's notice stream, which turns each owner alert its agent, account and control streams record into a notice and its push attempts (E8-10, DEC-2500, DEC-2516); Postgres only. In the cell it mails only through the recorded transport, which sends nothing, and web push is off (DEC-2504, DEC-2511); its configuration file is the ConfigMap `dispatcher-config`, mounted read-only",
+      "kind": "service",
+      "image": "dispatcher",
+      "built": true,
+      "compose": false,
+      "args": ["run", "--config", "/etc/mandate/dispatcher/config.json", "--probe", "/tmp/process.sock"],
+      "probe": ["/mandate-dispatcher", "probe", "{probe}", "--probe", "/tmp/process.sock"],
+      "db_role": "mandate_dispatcher",
+      "guaranteed": false,
+      "colocate": false,
+      "egress": ["postgres"],
+      "resources": {
+        "requests": {"cpu": "100m", "memory": "128Mi"},
+        "limits": {"cpu": "250m", "memory": "256Mi"}
+      }
+    },
+    {
       "name": "model-gateway",
       "row": "Model gateway: Postgres, the vault, and allowed model providers only",
       "kind": "service",

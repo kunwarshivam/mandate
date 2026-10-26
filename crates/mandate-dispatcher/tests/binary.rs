@@ -32,6 +32,25 @@ fn an_unknown_command_or_a_missing_flag_exits_2() {
     assert_eq!(ran(&["run"]).0, Some(2));
     assert_eq!(ran(&["run", "--probe", "/tmp/x"]).0, Some(2));
     assert_eq!(ran(&["probe", "sideways", "--probe", "/tmp/x"]).0, Some(2));
+    assert_eq!(ran(&["probe", "live", "--probe", "/tmp/x"]).0, Some(2));
+}
+
+/// The chart's `exec` probes ask `livez` and `readyz` (DEC-994 item 5); with no process serving
+/// the socket, each is answered not ready (1), never refused as a usage error (2).
+#[test]
+fn the_charts_probe_names_are_asked_and_unanswered_is_not_ready() {
+    let socket = std::env::temp_dir().join(format!(
+        "mandate-dispatcher-{}-none.sock",
+        std::process::id()
+    ));
+    let socket = socket.to_string_lossy().into_owned();
+    for name in ["livez", "readyz"] {
+        assert_eq!(
+            ran(&["probe", name, "--probe", &socket]).0,
+            Some(1),
+            "{name}"
+        );
+    }
 }
 
 #[test]

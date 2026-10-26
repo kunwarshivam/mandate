@@ -56,6 +56,7 @@ SECTION_3_1 = {
     },
     "token-exchange": {("vault", "TCP", 8200), ("token-host", "TCP", 443)},
     "scheduler": {("postgres", "TCP", 5432), ("time", "UDP", 123)},
+    "dispatcher": {("postgres", "TCP", 5432)},
     "model-gateway": {
         ("postgres", "TCP", 5432),
         ("vault", "TCP", 8200),
@@ -103,6 +104,10 @@ def render(*args: str, chart: Path = CHART) -> list[dict]:
     return documents(done.stdout)
 
 
+# The one recipient the dispatcher's email channel mails, in DEC-710 item 4's form (DEC-2516).
+RECIPIENT = "demo_owner"
+
+
 def every_image() -> list[str]:
     sets = [
         f"images.{image}={PLACEHOLDER.format(image)}"
@@ -114,6 +119,7 @@ def every_image() -> list[str]:
         for i, instrument in enumerate(INSTRUMENTS)
         for key, value in instrument.items()
     ]
+    sets.append(f"dispatcher.recipient={RECIPIENT}")
     return [arg for s in sets for arg in ("--set", s)]
 
 
@@ -709,6 +715,76 @@ def test_the_scheduler_never_renders_for_no_hosted_workspace():
     done = helm(CHART, *SCHEDULER, "--set", "api.workspace=")
     assert done.returncode != 0
     assert "api.workspace" in done.stderr and "scheduler" in done.stderr
+
+
+def dispatcher_config(docs: list[dict]) -> dict:
+    """The dispatcher's configuration file, as the ConfigMap it mounts holds it."""
+    config = next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "dispatcher-config")
+    return json.loads(config["data"]["config.json"])
+
+
+def test_the_dispatcher_follows_the_hosted_workspace_and_mails_only_its_one_recipient():
+    """One dispatcher per workspace writes `ntf:{workspace_id}` (DEC-2500, DEC-2516): the hosted
+    workspace, whose control stream names the streams it follows, as its own journal role, with
+    Postgres its one destination. Its configuration file is mounted read-only and holds no secret
+    and no address: one email recipient, web push off (DEC-2504), paper, and the build its image is
+    pinned by. The expected file is written out here, not read from the chart."""
+    docs = render_all()
+    by_name = {w["metadata"]["name"]: w for w in workloads(docs)}
+    dispatcher = by_name["dispatcher"]
+    assert dispatcher["kind"] == "Deployment" and dispatcher["spec"]["replicas"] == 1
+    c = first_container(dispatcher)
+    assert c["image"] == PLACEHOLDER.format("dispatcher")
+    assert c["args"] == ["run", "--config", "/etc/mandate/dispatcher/config.json", "--probe", "/tmp/process.sock"]
+    dsn = next(e["value"] for e in c["env"] if e["name"] == "MANDATE_JOURNAL_DSN")
+    assert dsn.startswith("postgres://mandate_dispatcher@")
+    for k, asked in (("readinessProbe", "readyz"), ("livenessProbe", "livez")):
+        assert c[k]["exec"]["command"] == ["/mandate-dispatcher", "probe", asked, "--probe", "/tmp/process.sock"]
+    mount = next(m for m in c["volumeMounts"] if m["name"] == "dispatcher-config")
+    assert mount == {"name": "dispatcher-config", "mountPath": "/etc/mandate/dispatcher", "readOnly": True}
+    volumes = {v["name"]: v for v in pod_spec(dispatcher).get("volumes", [])}
+    assert volumes["dispatcher-config"]["configMap"]["name"] == "dispatcher-config"
+    assert not [v for v in volumes if "vault" in v or v == "artifacts"], volumes
+    assert dispatcher_config(docs) == {
+        "workspace": HOSTED,
+        "subjects": [],
+        "audience": [{"recipient": RECIPIENT, "channel": "email"}],
+        "app_origin": "https://localhost:4317",
+        "environment": "paper",
+        "build": "sha256:" + "0" * 64,
+        "web_push": False,
+        "push_allowlist": [],
+        "vapid_subject": None,
+    }
+    for check in (hardened, gated, default_deny, secrets_as_files, migration_first):
+        assert check(docs) == [], check.__name__
+    assert egress_exact(docs) == []
+
+
+def test_a_local_dispatcher_takes_its_binary_digest_as_its_build():
+    """A local build has no digest in its name, so `cargo xtask cell up` sets the binary's own as
+    `dispatcher.build`; the file carries that, and a local image without it fails the render."""
+    local = ("--set", "images.dispatcher=mandate.local/dispatcher:0123456789ab")
+    build = "sha256:" + "a" * 64
+    docs = render_all(*local, "--set", f"dispatcher.build={build}")
+    assert dispatcher_config(docs)["build"] == build
+    done = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), *local)
+    assert done.returncode != 0 and "dispatcher.build" in done.stderr
+
+
+def test_the_dispatcher_never_renders_for_what_it_cannot_honour():
+    """No hosted workspace, no recipient, a recipient not in DEC-710 item 4's form, no app origin,
+    or a backtest release fails the render rather than starting a dispatcher that sends nothing or
+    to no one (AGENTS.md rule 3)."""
+    base = ("-f", str(CELL / "values" / "k3d.yaml"), *every_image())
+    for why, extra in {
+        "no hosted workspace": ("--set", "api.workspace="),
+        "no recipient": ("--set", "dispatcher.recipient="),
+        "a recipient not in its form": ("--set", "dispatcher.recipient=Demo-Owner"),
+        "no app origin": ("--set", "api.appOrigin="),
+        "backtest": ("--set", "environment=backtest"),
+    }.items():
+        assert helm(CHART, *base, *extra).returncode != 0, why
 
 
 DATA = ("--set", f"images.data={PLACEHOLDER.format('data')}")
@@ -2190,7 +2266,7 @@ def test_without_the_manager_the_runtime_and_executor_are_deployments():
         d
         for d in docs
         if d["kind"] in ("ServiceAccount", "Role", "RoleBinding", "ConfigMap")
-        and d["metadata"]["name"] != "migrations"
+        and d["metadata"]["name"] not in ("migrations", "dispatcher-config")
     ]
     for check in (hardened, gated, deploy_manager_contained):
         assert check(docs) == [], check.__name__
@@ -3588,9 +3664,14 @@ def test_deployment_tier_is_set_from_values():
     hosted = CELL.parent / "hosted" / "values" / "cell1.yaml"
     api = ["--set", f"images.api={PLACEHOLDER.format('api')}"]
     images = every_image()
-    at = next(i for i in range(len(images)) if images[i : i + 2] == api)
     manager_workspace = ["--set", "api.workspace=01KDEM0000000000000000000W"]
-    without_api = images[:at] + images[at + 2 :] + manager_workspace
+    dispatcher = ["--set", f"images.dispatcher={PLACEHOLDER.format('dispatcher')}"]
+    without_api = [
+        arg
+        for pair in zip(images[0::2], images[1::2])
+        if list(pair) not in (api, dispatcher)
+        for arg in pair
+    ] + manager_workspace
     assert tiers(render(*without_api)) == {"production"}, "unset is production"
     assert tiers(render_all()) == {"ci"}, (
         "the local cell, its API server too, runs its own unsigned build as ci"
