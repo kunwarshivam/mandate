@@ -208,3 +208,32 @@ fn a_switch_without_a_scope_or_a_subject_still_stops_it() {
         );
     }
 }
+
+/// Every subject and scope a switch the executor journals can carry, against this agent: it ends
+/// stopped unless the switch is an agent-scope one on a subject that is certainly another agent,
+/// whatever the case of the spelling (D1's review of #2579).
+#[test]
+fn only_another_agents_agent_scope_switch_is_spared_in_any_spelling() {
+    let own = common::AGENT;
+    let subjects = [
+        (own.to_owned(), true),
+        (own.to_ascii_uppercase(), true),
+        ("agent-b".to_owned(), false),
+        ("AGENT-B".to_owned(), false),
+    ];
+    for scope in ["agent", "account"] {
+        for (subject, this_agent) in &subjects {
+            let state = folded("KillSwitchActivated", executor_switch(scope, subject));
+            let spared = scope == "agent" && !this_agent;
+            if spared {
+                assert_eq!(state, inert(), "{scope} {subject}");
+            } else {
+                assert_eq!(
+                    state.effective_mode(),
+                    mandate_runtime::Mode::Stopped,
+                    "{scope} {subject}"
+                );
+            }
+        }
+    }
+}

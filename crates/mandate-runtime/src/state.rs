@@ -924,11 +924,12 @@ fn retired(
 /// Whether a `KillSwitchActivated` is an agent-scope switch on another agent: the executor's
 /// account-stream record of a switch it applied to one agent reaches every runtime following that
 /// account, and is that agent's alone. A switch on the account, or one naming no subject, is never
-/// spared, so the check only ever leaves another agent's stop to that agent.
+/// spared, and the subject is compared ignoring ASCII case, as a ULID is spelt in either case, so
+/// only a subject that is certainly another agent's is spared and this agent's stop never is.
 fn another_agents_switch(state: &RuntimeState, payload: &mandate_canon::Value) -> bool {
     payload::str_of(payload, "scope") == Some("agent")
         && payload::str_of(payload, "subject")
-            .is_some_and(|subject| subject != state.deployment.agent.0)
+            .is_some_and(|subject| !subject.eq_ignore_ascii_case(&state.deployment.agent.0))
 }
 
 /// Whether an agent-scoped fact on the shared account stream is this deployment's. Mandate spec
