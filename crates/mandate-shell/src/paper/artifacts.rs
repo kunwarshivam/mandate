@@ -6,13 +6,10 @@ use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::Exchange as BrokerExchange;
-use mandate_canon::{Digest, Value};
+use mandate_canon::Digest;
 use mandate_domain::{AssetClass as DomainAssetClass, AssetId};
 use mandate_executor::{BindingGateConfigRefs, ExecutorConfig};
-use mandate_gate_inputs::{
-    CALENDAR_MEMBERS, RULE_MEMBERS, artifact_from, environment_text, fee_artifact, fees,
-    required_text, rule_set,
-};
+use mandate_gate_inputs::Reviewed;
 use mandate_num::{Qty, ShareIncrement};
 use mandate_risk::{EtpClass, Exchange as GateExchange, GateConfig};
 use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
@@ -23,12 +20,10 @@ use crate::approvers::Members;
 use crate::control::{Configuration, ConfirmedVersion, SnapshotExchange};
 use crate::error::Cause;
 
+#[cfg(test)]
 pub(super) use mandate_gate_inputs::reference;
 #[cfg(test)]
 use mandate_gate_inputs::required_positive_u64;
-
-/// One whole share, the quantity grid the instrument artifact admits.
-const WHOLE_SHARE: &str = "1";
 
 /// The reviewed E7-7 artifacts, each read once and judged on the bytes that are hashed into
 /// `config_refs`.
@@ -120,97 +115,34 @@ impl Artifacts {
         confirmed: &ConfirmedVersion,
         configuration: &Configuration,
     ) -> Result<Self, Cause> {
-        let mandate = confirmed.mandate().clone();
-        let deployed_on = confirmed.deployed_on();
-        let bindings = [
-            &configuration.model_version,
-            &configuration.fee_config,
-            &configuration.trading_calendar,
-            &configuration.rule_set,
-            &configuration.instrument_snapshot,
-        ];
-        if deployed_on.environment != mandate.environment
-            || bindings
-                .iter()
-                .any(|registered| registered.origin != *deployed_on)
-        {
-            return Err(absent(
-                "every binding journaled on the deployment's own control stream",
-            ));
-        }
-        let [pinned] = mandate.universe.pinned_instruments.as_slice() else {
-            return Err(absent("one pinned production instrument"));
-        };
-        let [model] = mandate.behavior.signal_models.as_slice() else {
-            return Err(absent("the one reviewed signal model"));
-        };
-        let registered = &configuration.model_version;
-        let content = mandate_canon::parse(&registered.bytes)
-            .map_err(|_| absent("the registered model content"))?;
-        let member = |name: &str| content.get(name).and_then(Value::as_str);
-        if model.content_hash != registered.content_hash
-            || member("kind") != Some("quant_model_content")
-            || member("model_id") != Some(model.id.as_str())
-            || member("model_version") != Some(model.version.as_str())
-        {
-            return Err(absent("the registered model"));
-        }
-        let snapshot = &configuration.instrument;
-        if pinned.asset_class != DomainAssetClass::UsEquity
-            || snapshot.instrument_id != pinned.asset_id.as_str()
-            || snapshot.symbol != pinned.symbol
-        {
-            return Err(absent("the registered instrument"));
-        }
-        let (broker_exchange, gate_exchange) = exchanges(match snapshot.exchange {
+        let reviewed = Reviewed::from_registered(confirmed, configuration)?;
+        let (broker_exchange, _) = exchanges(match reviewed.instrument.exchange {
             SnapshotExchange::Arca => "arca",
             SnapshotExchange::Nasdaq => "nasdaq",
         })?;
-        let instrument = ReviewedInstrument {
-            asset_id: pinned.asset_id.clone(),
-            symbol: InstrumentId::new(&pinned.symbol)
-                .map_err(|_| absent("the registered instrument symbol"))?,
-            asset_class: DomainAssetClass::UsEquity,
-            broker_exchange,
-            gate_exchange,
-            increment: ShareIncrement::Whole,
-            increment_qty: Qty::parse(WHOLE_SHARE)?,
-            etp: EtpClass::Plain,
-            etp_classified_at: snapshot.etp_classified_at,
-        };
-        let fee = fee_artifact(configuration.fee_config.bytes.clone())?;
-        let calendar = artifact_from(
-            configuration.trading_calendar.bytes.clone(),
-            CALENDAR_MEMBERS,
-        )?;
-        let rules = artifact_from(configuration.rule_set.bytes.clone(), RULE_MEMBERS)?;
-        let fees = fees(&fee, &calendar)?;
-        if required_text(&fee.value, "environment")? != environment_text(mandate.environment) {
-            return Err(absent("a fee schedule for the mandate's environment"));
-        }
-        let (quote_max_age, gate_config, executor_config) = rule_set(&rules)?;
-        let canonical_mandate = mandate
-            .canonical_bytes()
-            .map_err(|_| absent("the mandate's canonical artifact"))?;
-        let config_refs = BindingGateConfigRefs::complete(
-            reference(&fee.bytes),
-            reference(&calendar.bytes),
-            reference(&configuration.instrument_snapshot.bytes),
-            reference(&rules.bytes),
-            reference(&canonical_mandate),
-        );
+        let instrument = reviewed.instrument;
         Ok(Self {
-            model_id: model.id.as_str().to_owned(),
-            model_version: model.version.clone(),
-            model_hash: model.content_hash,
-            mandate,
-            fees,
-            instrument,
-            quote_max_age,
-            config_refs,
+            mandate: reviewed.mandate,
+            model_id: reviewed.model_id,
+            model_version: reviewed.model_version,
+            model_hash: reviewed.model_hash,
+            fees: reviewed.fees,
+            instrument: ReviewedInstrument {
+                asset_id: instrument.asset_id,
+                symbol: instrument.symbol,
+                asset_class: instrument.asset_class,
+                broker_exchange,
+                gate_exchange: instrument.gate_exchange,
+                increment: instrument.increment,
+                increment_qty: instrument.increment_qty,
+                etp: instrument.etp,
+                etp_classified_at: instrument.etp_classified_at,
+            },
+            quote_max_age: reviewed.quote_max_age,
+            config_refs: reviewed.config_refs,
             members: confirmed.members().clone(),
-            gate_config,
-            executor_config,
+            gate_config: reviewed.gate_config,
+            executor_config: reviewed.executor_config,
         })
     }
 

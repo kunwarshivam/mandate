@@ -25,10 +25,12 @@ pub mod approvers;
 pub mod control;
 mod error;
 mod mandate;
+mod reviewed;
 mod rules;
 
 pub use error::InputError;
 pub use mandate::reservation;
+pub use reviewed::{Reviewed, ReviewedInstrument};
 pub use rules::{
     Artifact, CALENDAR_MEMBERS, RULE_MEMBERS, artifact_from, environment_text, fee_artifact, fees,
     reference, required_positive_u64, required_text, rule_set,
