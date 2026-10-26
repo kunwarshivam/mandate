@@ -4,22 +4,22 @@
 //! workspace services, the scheduler, and the account's executor) would have committed them.
 
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::time::Duration;
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Key, Object, Value, parse};
 use mandate_daemon::models::{Evaluated, Models};
 use mandate_daemon::{ArtifactSink, Config, ModelsWiring, Refs, RuntimeProcess, Wiring, fixture};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
-use mandate_num::{Conviction, Unit};
+use mandate_num::{Conviction, Price, Qty, Unit};
 use mandate_process::{Exit, State};
 use mandate_runtime::{
-    AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment, DryRunVerdict,
-    EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest, GateDryRun, IdGen,
-    MandateView, Mode, ModelDirection, ModelOutput, OrderPlan, Proposal, RiskClock, Seq,
-    SignalInputs, WorkspaceId, WriterEpoch,
+    AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deferral, Deployment,
+    DryRunVerdict, EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest, GateDryRun,
+    IdGen, MandateView, Mode, ModelDirection, ModelOutput, OrderExecution, OrderPlan, Proposal,
+    Purpose, RiskClock, Seq, SignalInputs, TimeInForce, WorkspaceId, WriterEpoch,
 };
 use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
@@ -534,7 +534,7 @@ fn the_fixture_wiring_journals_the_owner_s_kill_switch() {
     let rig = Rig::default();
     let mut process = RuntimeProcess::start(
         rig.clone(),
-        fixture::wiring("user-owner"),
+        fixture::wiring("user-owner", AGENT_STREAM),
         &config(),
         at(NOW),
     );
@@ -554,6 +554,42 @@ fn the_fixture_wiring_journals_the_owner_s_kill_switch() {
         .and_then(Value::as_str)
         .map(str::to_owned);
     assert!(refs.is_some_and(|v| v.starts_with("sha256:")));
+}
+
+/// Lane DR's X9: two agents' runtimes on one journal, each on the binary's fixture wiring, both
+/// open their streams and are ready. The journal refuses an `event_id` another stream already
+/// holds (journal spec §3), so ids derived from the epoch, head and ordinal alone stopped the
+/// second agent's runtime at its first batch.
+#[test]
+fn two_agents_runtimes_on_one_journal_both_open_their_streams() {
+    let rig = Rig::default();
+    let other = "agent-b";
+    let other_stream = format!("agent:{WORKSPACE}:{other}");
+    let mut config_b = config();
+    config_b.deployment.agent = AgentId(other.into());
+    let first = RuntimeProcess::start(
+        rig.clone(),
+        fixture::wiring("user-owner", AGENT_STREAM),
+        &config(),
+        at(NOW),
+    );
+    let second = RuntimeProcess::start(
+        rig.clone(),
+        fixture::wiring("user-owner", &other_stream),
+        &config_b,
+        at(NOW),
+    );
+    assert_eq!(first.lifecycle().state(), State::Ready);
+    assert_eq!(second.lifecycle().state(), State::Ready);
+    let opened = |stream: &str| {
+        rig.journal
+            .rows(&StreamId::parse(stream).unwrap())
+            .unwrap_or_default()
+            .iter()
+            .filter(|row| row.event_type == "StreamOpened")
+            .count()
+    };
+    assert_eq!((opened(AGENT_STREAM), opened(&other_stream)), (1, 1));
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -716,6 +752,36 @@ fn an_account_reconciled_before_the_start_is_folded_before_the_hold_is_taken() {
     let process = start(&rig, NOW);
     assert_eq!(process.lifecycle().state(), State::Ready);
     assert_eq!(mode(&process), Mode::Normal);
+}
+
+/// The account stream as the cell's connect and record leave it (journal spec §9.8): the copy of
+/// `ConnectionEstablished` the CLI's `connection record` appends after the executor's check and
+/// reconciliation. The runtime folds it and starts ready; before, its fold refused the copy as not
+/// interpreted, and every runtime in the cell exited `cycle_failed` at its start.
+#[test]
+fn the_account_streams_copy_of_the_establishment_folds_and_the_runtime_starts() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "ConnectionEstablished",
+        &format!(
+            r#"{{"connection_id":"{CONNECTION}","broker":"alpaca","environment":"paper","scopes":[],"account_ref":"{ACCOUNT_REF}","risk_clock":"2026-09-21T15:00:00.000000000Z"}}"#
+        ),
+    );
+    let mut process = start(&rig, NOW);
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+    assert_eq!(mode(&process), Mode::Normal);
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(process.lifecycle().state(), State::Ready);
 }
 
 /// The latest establishment names the account: a reconnect to a new account is followed from the
@@ -1958,4 +2024,101 @@ fn a_tick_that_moves_on_while_an_observation_is_in_doubt_records_its_output_once
     );
     assert_eq!(risk_clock(&process), Some(NOW + 7));
     assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// A dry run that allows every opening with the halt deferred to the binding gate and no bars read.
+struct Deferring;
+impl GateDryRun for Deferring {
+    fn check(&self, _: &Proposal) -> DryRunVerdict {
+        DryRunVerdict::AllowDeferring {
+            deferred: BTreeSet::from([Deferral::Halt]),
+            liquidity: None,
+        }
+    }
+}
+
+/// A plan that opens one share of AAPL at 155 whatever its inputs, and classifies it `auto`.
+struct Opening;
+impl OrderPlan for Opening {
+    fn plan(&self, _: &MandateView, _: &SignalInputs) -> Option<Proposal> {
+        Some(Proposal {
+            instrument: InstrumentId::new("AAPL").ok()?,
+            asset_class: AssetClass::UsEquity,
+            side: Side::Buy,
+            qty: Qty::parse("1").ok()?,
+            limit: Price::parse("155").ok()?,
+            purpose: Purpose::Open,
+            exit_origin: None,
+            exit_conviction: Some(Value::Str("1".into())),
+            buy_conviction: Some(Value::Str("1".into())),
+            combined_score: Value::Str("0.5".into()),
+            outputs_used: BTreeSet::new(),
+            model_weights: BTreeMap::new(),
+            clips_applied: Vec::new(),
+            execution: Some(OrderExecution {
+                asset_class: AssetClass::UsEquity,
+                tif: TimeInForce::Day,
+                protection_required: false,
+                protection: None,
+            }),
+        })
+    }
+    fn classify(&self, _: &MandateView, _: &Proposal) -> Classified {
+        Classified {
+            autonomy: Autonomy::Auto,
+            decided_by: Some("default".into()),
+        }
+    }
+}
+
+/// DEC-2388 item 13, end to end over the journal's own append: an opening the dry run allows with
+/// a check deferred is committed as `DecisionMade` version 3 naming it, and the owner is asked;
+/// nothing is proposed to the executor.
+#[test]
+fn a_deferring_opening_is_journaled_at_version_3_and_asked_never_proposed() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"AAPL","price":"155","source":"fixture","feed":"sip","risk_clock":{NOW}}}"#
+        ),
+    );
+    let mut wiring = fixture::wiring("user-owner", AGENT_STREAM);
+    wiring.gate = Box::new(Deferring);
+    wiring.plan = Box::new(Opening);
+    wiring.view.version = format!("sha256:{}", Digest::of(b"mandate-daemon fixture").to_hex());
+    wiring.view.working_universe = BTreeSet::from([InstrumentId::new("AAPL").unwrap()]);
+    let mut process = RuntimeProcess::start(rig.clone(), wiring, &config(), at(NOW));
+    for second in 1..4 {
+        tick(&rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Ready,
+        "{:?}",
+        kinds(&rig)
+    );
+    let rows = agent_rows(&rig);
+    let decision = rows
+        .iter()
+        .find(|row| row.event_type == "DecisionMade")
+        .unwrap_or_else(|| panic!("the opening was decided: {:?}", kinds(&rig)));
+    assert_eq!(decision.schema_version, 3);
+    let body = parse(&decision.body).unwrap();
+    let named: Vec<&str> = body
+        .get("payload")
+        .and_then(|payload| payload.get("deferred_to_binding"))
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(named, vec!["halt", "liquidity_floor", "participation"]);
+    assert_eq!(count(&rig, "ApprovalRequested"), 1, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
 }

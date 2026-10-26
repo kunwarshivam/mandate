@@ -247,7 +247,7 @@ fn a_resolved_deployment_is_wired_with_the_fold_and_the_flatten_over_its_univers
     );
     let version = "sha256:19dd24280000000000000000000000000000000000000000000000000000092e6";
     let wiring = mandate_daemon::production::wired(
-        mandate_daemon::fixture::wiring("user-owner"),
+        mandate_daemon::fixture::wiring("user-owner", "agent:ws1:agent-a"),
         version,
         &document,
         (None, mandate_daemon::bars::BarsReader::default()),
@@ -291,6 +291,22 @@ fn a_resolved_deployment_is_wired_with_the_fold_and_the_flatten_over_its_univers
     };
     let (schema_version, refs) = wiring.refs.refs(&draft).unwrap();
     assert_eq!(schema_version, 1);
+    for (event_type, payload, want) in [
+        ("ApprovalRequested", r#"{"content":{"execution":null}}"#, 2),
+        ("DecisionMade", r#"{"deferred_to_binding":[]}"#, 3),
+        ("DecisionMade", r#"{"dry_run":"allow"}"#, 1),
+    ] {
+        let versioned = mandate_runtime::EventDraft {
+            event_type: event_type.to_owned(),
+            payload: mandate_canon::parse(payload.as_bytes()).unwrap(),
+            ..draft.clone()
+        };
+        assert_eq!(
+            wiring.refs.refs(&versioned).map(|(version, _)| version),
+            Some(want),
+            "{event_type} {payload}: the draft's own version (DEC-2388 item 13)"
+        );
+    }
     assert_eq!(
         refs.get("mandate_version"),
         Some(&mandate_canon::Value::Str(version.to_owned()))

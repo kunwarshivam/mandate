@@ -684,3 +684,33 @@ fn a_model_snapshot_without_its_id_version_or_hash_is_refused() {
         assert_eq!(state.facts(ASSET, FRESH), Err(Held::Unreadable));
     }
 }
+
+/// Journal spec v0.84, DEC-2131 item 4: an `AgentDeployed` version 3, its version 2's payload with
+/// a trailing `step_up`, is read as its version 2: the same mandate in force and the same facts.
+#[test]
+fn a_version_3_deployment_reads_as_its_version_2() {
+    let version_2 = deployed(AGENT, "sha256:v1")
+        .with("record_ref", text("sha256:r1"))
+        .with("connection_id", text("conn_alpaca_paper_01"));
+    let step_up = object(&[
+        ("assertion_id", text("01JAA3P0A000000000000000H1")),
+        ("authenticated_at", clock(START - 3)),
+        ("method", text("passkey")),
+    ]);
+    let version_3 = version_2.clone().with("step_up", step_up);
+    let read = |payload: &Value| {
+        let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+        on(&mut state, CLOCK, "ClockAdvanced", &tick(START));
+        on(&mut state, CONTROL, "AgentDeployed", payload);
+        acct(
+            &mut state,
+            "AccountSnapshotRecorded",
+            &snapshot("1000.75", START),
+        );
+        acct(&mut state, "MarkUpdated", &regular("189.5", START));
+        state.facts(ASSET, FRESH)
+    };
+    assert_eq!(read(&version_3), read(&version_2));
+    assert_eq!(read(&version_3), ready().facts(ASSET, FRESH));
+    assert_eq!(read(&version_3).unwrap().mandate_version, "sha256:v1");
+}

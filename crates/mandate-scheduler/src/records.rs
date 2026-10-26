@@ -2,7 +2,7 @@
 //! §3 and deterministic event ids: a retried batch re-derives the same ids, so the journal answers
 //! `AlreadyCommitted` rather than writing it twice.
 
-use mandate_canon::{Object, Value};
+use mandate_canon::{Object, Value, stream_event_id};
 use mandate_journal::Environment;
 use mandate_time::{Date, UtcNanos};
 
@@ -41,13 +41,14 @@ impl Writer {
         format!("clock:{}", self.workspace)
     }
 
-    /// The event id of the `ordinal`th draft of the batch appended at `head`: the scheduler's id
-    /// space `2`, then the epoch, the head, and the ordinal, zero-padded to 5, 14, and 6 digits
-    /// (26 characters of the ULID alphabet, journal spec §3). The agent and account streams' ids
-    /// start `0` and `1`, so the three never meet. A part too large for its digits makes a longer
-    /// id, which the journal refuses rather than truncating it into another.
+    /// The event id of the `ordinal`th draft of the batch appended at `head`: the clock stream's
+    /// [`stream_event_id`] at this writer's epoch, so two workspaces' clock streams in one journal
+    /// never share an id (journal spec §3) and a retry re-derives the same one (§5.1). A batch
+    /// holds a handful of drafts, so an ordinal past `u32::MAX` never occurs; it would read as
+    /// `u32::MAX`.
     pub fn event_id(&self, head: u64, ordinal: usize) -> String {
-        format!("2{:05}{head:014}{ordinal:06}", self.epoch)
+        let ordinal = u32::try_from(ordinal).unwrap_or(u32::MAX);
+        stream_event_id(&self.stream(), self.epoch, head, ordinal)
     }
 
     /// The drafts of `records`, appended as one batch at `head`, each with `event_time` `at`.

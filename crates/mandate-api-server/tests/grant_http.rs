@@ -666,7 +666,6 @@ fn refused(w: &World, reply: &Reply, expected: ProblemCode, case: &str) {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_confirmed_grant_commits_the_clis_answer_once_before_its_202() {
     let w = world();
     let issued = w.challenge();
@@ -718,8 +717,31 @@ fn a_confirmed_grant_commits_the_clis_answer_once_before_its_202() {
     assert!(!w.held(&issued), "the challenge is spent with the grant");
 }
 
+/// A challenge issued part-way through a second (DEC-2129 item 3): the grant journals its
+/// `authenticated_at`, and its `submitted_at`, as the whole second, truncated and never later than
+/// the instant verified, so the payload is still the CLI's for that second.
 #[test]
-#[ignore = "pending E9-4"]
+fn a_grant_authenticated_part_way_through_a_second_journals_the_second_it_began() {
+    let w = world();
+    w.clock.set_nanos(999_999_999);
+    let issued = w.challenge();
+    assert!(
+        issued.issued_at.ends_with(".999999999Z"),
+        "the challenge carries the nanoseconds: {}",
+        issued.issued_at
+    );
+    w.confirm(&issued);
+    recorded(&w, &w.respond(ALICE, KEY, &grant(&w, &issued)));
+    let answers = w.answers();
+    assert_eq!(answers.len(), 1, "exactly one response");
+    assert_eq!(
+        answers[0].get("payload"),
+        Some(&clis_grant(&w, &issued.id, T0)),
+        "the whole second, T0, never T0 + 1"
+    );
+}
+
+#[test]
 fn the_grant_is_judged_as_an_approve_bound_to_the_requests_content_hash() {
     let w = world();
     let issued = w.challenge();
@@ -865,7 +887,6 @@ const CASES: [Case; 11] = [
 ];
 
 #[test]
-#[ignore = "pending E9-4"]
 fn each_refusal_of_dec_2104_item_6_commits_nothing_and_keeps_the_challenge() {
     for case in &CASES {
         let w = world();
@@ -879,7 +900,6 @@ fn each_refusal_of_dec_2104_item_6_commits_nothing_and_keeps_the_challenge() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_hash_other_than_the_journals_is_a_mismatch_since_the_cli_confirms_the_journal() {
     let w = world();
     let issued = w.challenge_by(ALICE, &other_hash());
@@ -894,7 +914,6 @@ fn a_hash_other_than_the_journals_is_a_mismatch_since_the_cli_confirms_the_journ
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_answered_or_late_approval_is_recorded_for_the_runtime_to_refuse() {
     let w = world();
     w.append(
@@ -928,7 +947,6 @@ fn an_answered_or_late_approval_is_recorded_for_the_runtime_to_refuse() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_unknown_approval_is_404_before_the_port_is_asked() {
     let w = world();
     let issued = w.challenge();
@@ -947,7 +965,6 @@ fn an_unknown_approval_is_404_before_the_port_is_asked() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_live_workspace_is_live_unavailable_after_the_row_and_reads_no_evidence() {
     let w = world_in("live");
     let evidence = Issued {
@@ -973,7 +990,6 @@ fn a_live_workspace_is_live_unavailable_after_the_row_and_reads_no_evidence() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_repeat_under_the_key_answers_the_same_though_the_challenge_is_spent() {
     let w = world();
     let issued = w.challenge();
@@ -1027,7 +1043,6 @@ fn a_grant_without_evidence_is_still_step_up_required() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_grant_naming_a_delegation_is_invalid_and_asks_no_port() {
     let w = world();
     let issued = w.challenge();
@@ -1066,7 +1081,6 @@ fn bobs_grant(w: &World) -> (Issued, Vec<u8>) {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_principal_the_mandate_does_not_list_is_forbidden_and_appends_nothing() {
     let listed = format!("user:{ALICE}");
     let w = world_with(&Setup {
@@ -1103,7 +1117,6 @@ fn a_principal_the_mandate_does_not_list_is_forbidden_and_appends_nothing() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_approver_listed_by_user_id_is_recorded() {
     let listed = format!("user:{ALICE}");
     let w = world_with(&Setup {
@@ -1117,7 +1130,6 @@ fn an_approver_listed_by_user_id_is_recorded() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_approver_listed_by_role_is_recorded_and_a_member_without_the_role_is_not() {
     for listed in ["role:approver", "role:workspace_admin", "role:owner"] {
         let w = world_with(&Setup {
@@ -1142,7 +1154,6 @@ fn an_approver_listed_by_role_is_recorded_and_a_member_without_the_role_is_not()
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_bound_mandate_that_cannot_be_read_fails_closed_and_reads_no_evidence() {
     for bound in [
         Bound::Absent,
@@ -1171,7 +1182,6 @@ fn a_bound_mandate_that_cannot_be_read_fails_closed_and_reads_no_evidence() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_first_failing_check_in_dec_2129_item_1s_order_answers() {
     let listed = format!("user:{ALICE}");
     let only_alice = Setup {
@@ -1293,7 +1303,6 @@ fn placeholder() -> Issued {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_user_reference_matches_its_ulid_in_either_case_and_nothing_else() {
     let lower = format!("user:{}", ALICE.to_ascii_lowercase());
     let w = world_with(&Setup {

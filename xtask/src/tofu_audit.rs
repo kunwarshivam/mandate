@@ -49,10 +49,12 @@ fn credential_named(name: &str, kind: Option<&Value>) -> bool {
 const NOT_CREDENTIAL_SUFFIXES: [&str; 4] = ["_id", "_url", "_lifetime", "_header"];
 
 /// The reviewed attributes that carry a [`CREDENTIAL_PARTS`] name but hold no credential, each as
-/// `type` and dotted path: a DNS record's data value, and a node taint's value.
-const NOT_CREDENTIALS: [(&str, &str); 2] = [
+/// `type` and dotted path: a DNS record's data value, and a node taint's value, in the cluster's
+/// own pool and in a separate pool (DEC-2064 item 3).
+const NOT_CREDENTIALS: [(&str, &str); 3] = [
     ("cloudflare_dns_record", "data.value"),
     ("digitalocean_kubernetes_cluster", "node_pool.taint.value"),
+    ("digitalocean_kubernetes_node_pool", "taint.value"),
 ];
 
 /// Every `resource` and `data` type that `files` (each a path and its raw text) declare, as
