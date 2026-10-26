@@ -141,7 +141,7 @@ fn draft_rejections() {
             "config_refs.rule_set",
         ),
         (
-            edit(&m, "schema_version", Some("2")),
+            edit(&m, "schema_version", Some("3")),
             UnknownSchema,
             "payload",
         ),

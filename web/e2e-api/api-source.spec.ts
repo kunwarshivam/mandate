@@ -39,6 +39,27 @@ test("Skip on a request goes to the approval's responses route once, and shows o
   expect(post.postDataJSON()).toMatchObject({ verdict: "skipped", step_up: null, delegation: null });
 });
 
+test("Approve shows a code to confirm on the host, and the approve that follows carries that challenge's evidence (DEC-2104)", async ({ page }) => {
+  const calls = apiCalls(page);
+  await page.goto("/?scenario=approvals");
+  await page.getByRole("region", { name: /^Needs you/ }).getByRole("link").first().click();
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Confirm on the host" });
+  await expect(panel).toBeVisible();
+  const code = (await panel.locator("[data-slot=host-confirm-code]").textContent()) ?? "";
+  expect(code).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
+  await expect(panel.locator("[data-slot=host-confirm-command]")).toContainText(`mandate step-up confirm --workspace ${WS} --principal `);
+  await expect(panel.locator("[data-slot=host-confirm-command]")).toContainText(`--code ${code}`);
+  const posts = () => calls.filter((c) => c.method() === "POST");
+  expect(posts().map((c) => new URL(c.url()).pathname)).toEqual([`/v1/workspaces/${WS}/step-up/challenges`]);
+  const challenge = (await (await posts()[0].response())?.json()) as { challenge_id: string; issued_at: string };
+  await panel.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Recorded in the journal: you approved" })).toBeVisible();
+  const answer = posts().find((c) => new URL(c.url()).pathname.endsWith("/responses"));
+  expect(answer?.postDataJSON()).toMatchObject({ verdict: "approved", step_up: { assertion_id: challenge.challenge_id, authenticated_at: challenge.issued_at, method: "cli_confirm" } });
+  for (const call of calls) expect(operationFor(call.method(), call.url(), WS), `${call.method()} ${call.url()}`).not.toBeNull();
+});
+
 test("a deployment that does not answer shows unreachable, not the fixtures", async ({ page }) => {
   await page.goto("/?scenario=unreachable");
   await expect(page.getByRole("heading", { name: "Cannot reach your deployment" })).toBeVisible();

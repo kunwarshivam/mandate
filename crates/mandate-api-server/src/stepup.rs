@@ -45,13 +45,6 @@ pub struct Asserted {
 }
 
 impl Asserted {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the passkey verifier builds one once E9-4 S4.2 lands; a unit test reads it now"
-        )
-    )]
     pub(crate) fn new(
         challenge: String,
         credential: String,
@@ -92,8 +85,6 @@ pub enum Unverified {
     /// The §3.5 code of the first check that failed, or `journal_unavailable` for a read that
     /// could not answer.
     Code(ProblemCode),
-    /// The passkey binding is a stub until its story implements it (DEC-77).
-    Unimplemented { story: &'static str },
 }
 
 /// Judges evidence a call carries for one action.
