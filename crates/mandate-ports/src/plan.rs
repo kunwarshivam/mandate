@@ -290,7 +290,9 @@ fn action_order_matches(
 /// proposal: `None` for a hold. An instrument whose thesis ended (`inputs.ended_theses`, mandate
 /// spec §8.6) takes §8.3 step 2's first branch instead: the whole position sold, with
 /// `exit_origin` `removed_instrument`, reading no model output, so an output the mandate no longer
-/// pins cannot hold the exit (MI-34, DEC-2391). A pinned universe takes no such branch: the
+/// pins cannot hold the exit (MI-34, DEC-2391). The runtime's working exits in the instrument come
+/// off the position first, so an exit already working is never stacked; when they cover it, the
+/// subtraction refuses to go below zero and the branch holds. A pinned universe takes no such branch: the
 /// owner's pin is the universe, and the research agent is off (V-037).
 ///
 /// # Errors
@@ -318,11 +320,11 @@ pub fn size(
             .find(|(instrument, _)| instrument.as_str() == builder.market.instrument.as_str())
             .map_or(Qty::ZERO, |(_, qty)| *qty);
         let unsold = AccountSnapshot {
-            position_qty: if working < builder.account.position_qty {
-                builder.account.position_qty.checked_sub(working)?
-            } else {
-                Qty::ZERO
-            },
+            position_qty: builder
+                .account
+                .position_qty
+                .checked_sub(working)
+                .unwrap_or(Qty::ZERO),
             ..builder.account.clone()
         };
         let proposal = mandate_builder::propose_thesis_exit(&unsold, &builder.market)?;
