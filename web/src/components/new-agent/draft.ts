@@ -243,7 +243,7 @@ export interface Draft {
 export const LOSS_CEILING = dec("0.2");
 
 /**
- * One instrument per agent until the multi-instrument risk state lands (V-048, DEC-2804 item 8,
+ * One instrument per agent until the multi-instrument risk state lands (DEC-2804 item 8,
  * DEC-2809): the executor opens no risk fold for an agent whose mandate allows more, and the
  * deployment refuses one (`second_instrument`), so the set-up asks for one symbol and proposes one.
  */
