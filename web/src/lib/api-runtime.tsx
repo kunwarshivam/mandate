@@ -3,19 +3,21 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readBacktestFrom } from "@/api/backtest";
 import { type Fetch, createWorkspaceClient } from "@/api/client";
-import { prepareApprovalResponse, prepareConfirm, prepareOwnerCommand } from "@/api/commands";
-import { confirmAccepted } from "@/api/confirm";
+import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand } from "@/api/commands";
+import { confirmAccepted, confirmStepUpDigest } from "@/api/confirm";
+import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPasskey, browserAuthenticator, deployStepUpDigest, passkeysRead, usablePasskeys } from "@/api/passkey";
 import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
 import type { CommandPhase, Decoder, PreparedCommand } from "@/api/types";
 import { activityRead, journalPageRead } from "@/api/activity";
 import { connectStartBody, connectionRead, connectionsRead } from "@/api/connect";
-import { type StepUpAction, type StepUpChallenge, confirmCode, connectStepUpDigest } from "@/api/step-up";
+import { type PasskeyKind, type StepUpAction, type StepUpChallenge, confirmCode, connectStepUpDigest } from "@/api/step-up";
 import { prepareCreateVersion, readConfirmation, versionCreated } from "@/api/versions";
-import type { Iso, Workspace } from "@/fixtures/types";
+import type { ContentRef, Iso, Workspace } from "@/fixtures/types";
 import type { ApiSource } from "./data-source";
 import { mandateVersion } from "./fixture-journey";
+import { newAgentId } from "./ids";
 import {
   type ApprovalRecord,
   type ApprovalResponse,
@@ -79,6 +81,7 @@ export function ApiRuntimeProvider({
   retryMs = 1000,
   session,
   keepAliveMs = REFRESH_EVERY_MS,
+  authenticator,
 }: {
   source: Pick<ApiSource, "origin" | "workspaceId">;
   children: ReactNode;
@@ -89,6 +92,8 @@ export function ApiRuntimeProvider({
   /** The API session (§3.11 items 5 and 6); none in the e2e build, whose mock API reads no cookie. */
   session?: SessionKeeper;
   keepAliveMs?: number;
+  /** The WebAuthn call a passkey step-up makes; the browser's own when not given, `null` for a page with none. */
+  authenticator?: Authenticator | null;
 }) {
   /** Reads wait while a refresh rotates the cookie; commands never wait (API-7). */
   const client = useMemo(() => {
@@ -471,10 +476,31 @@ export function ApiRuntimeProvider({
   );
 
   /**
+   * Passkey step-up for one action (§3.6, DEC-2128): the member's passkeys are read first, and only
+   * when one can sign is a challenge bound to `kind` and `digest` asked for; then the authenticator
+   * signs it. Each press is its own challenge, never retried. Nothing reaches the journal here: a
+   * refusal means the command was not sent.
+   */
+  const passkeyStepUp = useCallback(
+    async (kind: PasskeyKind, digest: ContentRef): Promise<{ ok: true; value: PasskeyStepUp } | { ok: false; reason: AssertionRefusal | string }> => {
+      const held = await client.read("/passkeys", passkeysRead);
+      if (!held.ok) return { ok: false, reason: held.error.code };
+      const device = authenticator === undefined ? browserAuthenticator() : authenticator;
+      const usable = usablePasskeys(held.value.passkeys, device, nowRef.current);
+      if (!usable.ok) return usable;
+      const issued = await client.askChallenge({ kind, digest });
+      if (!issued.ok) return { ok: false, reason: issued.error.code };
+      return assertPasskey(issued.value, usable.value, device, nowRef.current);
+    },
+    [client, authenticator],
+  );
+
+  /**
    * Step 2, `POST /mandate-versions/{hash}/confirm` (§5.1, DEC-2101 item 5), bound to the
-   * confirmation the server serves now: it is read again first, since its digest can move. Step-up
-   * is `null` until E9-4 gives the browser its ceremony, so the server answers a first version's
-   * confirm `step_up_required` and records nothing (DEC-2101 item 2); the screen says so.
+   * confirmation the server serves now: it is read again first, since its digest can move. When the
+   * server says the confirm needs step-up (a first version is risk-increasing), the owner's passkey
+   * signs a `confirm_version` challenge bound to §5.1's digest, and the confirm carries its evidence
+   * and assertion (DEC-2128). The browser's `stepUp` argument is the fixtures' stand-in and is not read.
    */
   const confirmVersion = useCallback<Runtime["confirmVersion"]>(
     (setUpId, record) => {
@@ -489,7 +515,17 @@ export function ApiRuntimeProvider({
         if (!mounted.current) return;
         if (!screen.ok) return confirmed({ phase: "undelivered", reason: screen.error.code });
         const served = { screen_digest: screen.value.screen_digest, classification: screen.value.classification };
-        const delivered = await deliver(prepareConfirm(client, { version: setUp.version, agentId: null, base: null, record, served }));
+        let stepUp: PasskeyStepUp | null = null;
+        const digest = confirmStepUpDigest(setUp.version, null, null);
+        if (screen.value.step_up_required) {
+          confirmed({ awaitingPasskey: true });
+          const asserted = await passkeyStepUp("confirm_version", digest);
+          if (!mounted.current) return;
+          if (!asserted.ok) return confirmed({ phase: "undelivered", reason: asserted.reason, awaitingPasskey: false });
+          stepUp = asserted.value;
+          confirmed({ stepUp: digest, awaitingPasskey: false, sentAt: nowRef.current });
+        }
+        const delivered = await deliver(prepareConfirm(client, { version: setUp.version, agentId: null, base: null, record, served, stepUp }));
         if (!mounted.current) return;
         if (delivered.phase === "undelivered") return confirmed({ phase: "undelivered", reason: delivered.reason });
         if (delivered.phase === "unknown") return confirmed({ phase: "unknown" });
@@ -497,21 +533,40 @@ export function ApiRuntimeProvider({
         confirmed(accepted.ok ? { phase: "recorded", recordedAt: nowRef.current, classification: accepted.value.classification, applies: accepted.value.applies } : { phase: "unknown" });
       })();
     },
-    [client, deliver, patchSetUp],
+    [client, deliver, patchSetUp, passkeyStepUp],
   );
 
   /**
-   * Step 3 (`POST /agents`) is not sent: its `agent_id` must already name an agent stream, which no
-   * API route creates yet, and the server refuses every deployment without step-up until E9-4
-   * (DEC-2101 items 2 and 6). Not sent, and no agent exists.
+   * Step 3, `POST /agents` (§4.2, §3.11 item 11), to paper only, under passkey step-up of kind
+   * `deploy` bound to the canonical `{agent_id, mandate_version}` (DEC-2128). The agent's id is
+   * minted here on the set-up's first deploy and kept for its retries, since an agent id is deployed
+   * once (DEC-1173 item 1); the server checks every V-rule for the agent and the instruments before
+   * the step-up. It is recorded once the server answers with its `AgentDeployed`.
    */
   const deployVersion = useCallback<Runtime["deployVersion"]>(
     (setUpId, record) => {
-      if (!setUpsRef.current.some((s) => s.id === setUpId)) return;
-      patchSetUp(setUpId, (s) => ({ ...s, deployed: { phase: "sent", sentAt: nowRef.current, record } }));
-      window.setTimeout(() => patchSetUp(setUpId, (s) => ({ ...s, deployed: s.deployed ? { ...s.deployed, phase: "undelivered", reason: "not_sent" } : null })), 0);
+      const setUp = setUpsRef.current.find((s) => s.id === setUpId);
+      if (!setUp) return;
+      const agentId = setUp.agentId || newAgentId(Date.parse(nowRef.current));
+      const deployed = (patch: Partial<NonNullable<SetUp["deployed"]>>) =>
+        patchSetUp(setUpId, (s) => ({ ...s, deployed: s.deployed ? { ...s.deployed, ...patch } : null }));
+      const awaiting = setUp.confirmed?.phase === "recorded";
+      patchSetUp(setUpId, (s) => ({ ...s, agentId, deployed: { phase: "sent", sentAt: nowRef.current, record, awaitingPasskey: awaiting } }));
+      void (async () => {
+        if (setUp.confirmed?.phase !== "recorded") return deployed({ phase: "undelivered", reason: "not_confirmed" });
+        const asserted = await passkeyStepUp("deploy", deployStepUpDigest(agentId, setUp.version));
+        if (!mounted.current) return;
+        if (!asserted.ok) return deployed({ phase: "undelivered", reason: asserted.reason, awaitingPasskey: false });
+        deployed({ awaitingPasskey: false, sentAt: nowRef.current });
+        const delivered = await deliver(prepareDeploy(client, { agentId, version: setUp.version, record, stepUp: asserted.value }));
+        if (!mounted.current) return;
+        if (delivered.phase === "undelivered") return deployed({ phase: "undelivered", reason: delivered.reason });
+        if (delivered.phase === "unknown") return deployed({ phase: "unknown" });
+        deployed({ phase: "recorded", recordedAt: nowRef.current });
+        await refresh();
+      })();
     },
-    [patchSetUp],
+    [client, deliver, patchSetUp, passkeyStepUp, refresh],
   );
 
   /** No route lists a version's backtests (DEC-2400), so the deploy step shows none over the API. */

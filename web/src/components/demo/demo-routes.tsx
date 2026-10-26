@@ -50,7 +50,7 @@ export function demoScreen(href: string): ReactNode | null {
       if (second === undefined) return <AgentsListScreen />;
       if (second === "new" && rest.length === 0)
         return (
-          <WorkspaceGate>
+          <WorkspaceGate api>
             <NewAgentFlow />
           </WorkspaceGate>
         );

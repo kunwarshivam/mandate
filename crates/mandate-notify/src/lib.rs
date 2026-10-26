@@ -49,6 +49,7 @@ pub mod canary;
 mod delivery;
 pub mod email;
 mod kind;
+mod owner_alert;
 mod payload;
 mod provider;
 mod quiet;
@@ -56,6 +57,7 @@ mod send;
 
 pub use delivery::{Alert, Message, Pass, Read, Retry, coalesce, next_attempt, notice_keys};
 pub use kind::{Class, NoticeKind, TextKey};
+pub use owner_alert::OwnerAlertKind;
 pub use payload::{NoticeId, Notification, Origin, SecureRandom, link, payload};
 pub use provider::{FixtureProvider, Outcome, Provider, Reason, Sent};
 pub use quiet::{Offset, QuietHours, QuietVerdict, quiet_hours};

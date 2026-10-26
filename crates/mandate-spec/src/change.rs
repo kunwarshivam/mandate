@@ -21,8 +21,8 @@ use mandate_domain::AutonomyDecision;
 
 use crate::condition::{Condition, ConditionValue, Operator};
 use crate::document::{
-    Approval, Autonomy, Delegation, Goal, LadderRung, Lifts, Mandate, Pointer, Rule, ScaleAction,
-    SignalModel, Tripwire, pointer,
+    Approval, Autonomy, Delegation, EventTriggers, Goal, LadderRung, Lifts, Mandate, Pointer, Rule,
+    ScaleAction, SignalModel, Tripwire, pointer,
 };
 use crate::{SchemaDec, SpecError};
 
@@ -449,6 +449,26 @@ fn row(
         "/universe/asset_classes" => {
             membership(&o.universe.asset_classes, &n.universe.asset_classes)
         }
+        "/behavior/research/event_triggers" => maximum(
+            Some(&triggers_of(o).is_some()),
+            Some(&triggers_of(n).is_some()),
+        ),
+        "/behavior/research/event_triggers/sources" => membership(
+            &triggers_of(o)
+                .map(|t| t.sources.clone())
+                .unwrap_or_default(),
+            &triggers_of(n)
+                .map(|t| t.sources.clone())
+                .unwrap_or_default(),
+        ),
+        "/behavior/research/event_triggers/debounce_s" => minimum(
+            triggers_of(o).map(|t| &t.debounce_s),
+            triggers_of(n).map(|t| &t.debounce_s),
+        ),
+        "/behavior/research/event_triggers/max_runs_per_day" => maximum(
+            triggers_of(o).map(|t| &t.max_runs_per_day),
+            triggers_of(n).map(|t| &t.max_runs_per_day),
+        ),
         "/behavior/research" => {
             if n.behavior.research.is_some() {
                 ChangeClass::RiskIncreasing
@@ -480,6 +500,12 @@ fn row(
         }
         _ => ChangeClass::RiskIncreasing,
     })
+}
+
+/// A version's event triggers (§8.4, DEC-2392): `None` when research or the member is absent or
+/// `null`, which are all off.
+fn triggers_of(mandate: &Mandate) -> Option<&EventTriggers> {
+    mandate.behavior.research.as_ref()?.event_triggers.as_ref()
 }
 
 /// A move along an order in which `Greater` is looser: increasing, reducing, or nothing.

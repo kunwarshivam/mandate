@@ -97,6 +97,14 @@ test("a deployment that does not answer shows unreachable, not the fixtures", as
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
 });
 
+test("setting up an agent is served over the API: the conversation, read without a model, with no fixture tag", async ({ page }) => {
+  await page.goto("/agents/new?scenario=normal");
+  await expect(page.getByRole("textbox", { name: "Your answer" })).toBeVisible();
+  await expect(page.getByText("Your deployment doesn't serve a model to read your words yet")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Not available from your deployment yet" })).toHaveCount(0);
+  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
+});
+
 test("a screen the API does not serve yet says so, and shows no fixture figures", async ({ page }) => {
   await page.goto("/positions?scenario=approvals");
   await expect(page.getByRole("heading", { name: "Not available from your deployment yet" })).toBeVisible();

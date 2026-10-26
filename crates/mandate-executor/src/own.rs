@@ -209,6 +209,27 @@ pub fn recorded_fills(state: &ExecutorState, positions: &[BrokerPosition]) -> Ve
         .collect()
 }
 
+/// The fills a broker that reports no sell price implies for our own risk-reducing sells
+/// ([DEC-2300](../../../docs/project/decisions/DEC-2300.md) items 1 to 3,
+/// [DEC-2395](../../../docs/project/decisions/DEC-2395.md)): each increment of a `protective`,
+/// `risk_exit`, `owner_exit` or `discretionary_exit` sell that its broker record reported filled,
+/// booked at the order's journaled limit price, the worst price the order allowed, under the id
+/// `limit:<client order id>:<cumulative filled quantity>`, when the ledger holds the instrument long
+/// at least the increment with no unattributed fill, no other order in the instrument has an
+/// unbooked report, and the broker lists the position reduced by exactly the increment. A `day`
+/// sell is dated by its submission's New York date, a GTC sell by the New York date of the
+/// executor's clock, never earlier. Anything else derives nothing (`AGENTS.md` rule 3).
+///
+/// # Errors
+/// [`ExecutorError::Unimplemented`] until DEC-2395's implementation lands.
+pub fn limit_fills(
+    state: &ExecutorState,
+    positions: &[BrokerPosition],
+) -> Result<Vec<BrokerFill>, ExecutorError> {
+    let _ = (state, positions);
+    Err(ExecutorError::Unimplemented { story: "E7-6" })
+}
+
 /// The one fill [`recorded_fills`] reads for `order`, or `None`.
 fn recorded_fill(
     state: &ExecutorState,

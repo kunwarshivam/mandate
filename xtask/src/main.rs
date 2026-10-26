@@ -6180,8 +6180,10 @@ const READ_ENV_NAMES: &[&str] = &[
     "LINT_RESULT",
     "MANDATE_MUTANTS_PER_SHARD",
     "MANDATE_MUTANTS_PLANNED",
+    "MANDATE_CELL_DRILL",
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
+    "MANDATE_CELL_VARIANT",
     "MANDATE_DEMO_WEB_REQUIRED",
     "MANDATE_GITOPS_REQUIRED",
     "MANDATE_MUTANT_SHARD",
@@ -6298,6 +6300,14 @@ const READ_ACTIONS: &[(&str, Option<&str>)] = &[
     (
         "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
         None,
+    ),
+    (
+        "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+        Some(".github/workflows/ci.yml"),
+    ),
+    (
+        "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+        Some(".github/workflows/ci.yml"),
     ),
     (
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
@@ -17911,6 +17921,65 @@ mod tests {
         ("cell-vault", "cell"),
         ("cell-exchange", "cell"),
     ];
+
+    /// DEC-464, DEC-2641: CI's drill jobs, split into matrix shards, still run every drill of their
+    /// list in both variants: each matrix lists exactly `plain` and `seeded` and hands them to xtask,
+    /// and a job whose matrix also lists drills lists exactly the job's own and hands those on too,
+    /// with every shard run to its end.
+    #[test]
+    fn the_sharded_cell_jobs_run_every_drill_in_both_variants() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let names = |drills: &[crate::cell::Drill]| -> Vec<String> {
+            drills.iter().map(|d| d.name().to_owned()).collect()
+        };
+        for (job, drills) in [
+            ("cell-journal", names(&crate::cell::JOURNAL_DRILLS)),
+            ("cell-failover", names(&crate::cell::FAILOVER_DRILLS)),
+            ("cell-kill-switch", names(&crate::cell::KILL_SWITCH_DRILLS)),
+            ("cell-executor", names(&crate::cell::EXECUTOR_DRILLS)),
+            ("cell-vault", names(&crate::cell::VAULT_DRILLS)),
+            ("cell-exchange", names(&crate::cell::EXCHANGE_DRILLS)),
+        ] {
+            let lines = workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?;
+            let list = |key: &str| -> Option<Vec<String>> {
+                lines.iter().find_map(|line| {
+                    line.trim()
+                        .strip_prefix(&format!("{key}: ["))
+                        .and_then(|rest| rest.strip_suffix(']'))
+                        .map(|items| items.split(',').map(|i| i.trim().to_owned()).collect())
+                })
+            };
+            let has = |want: &str| lines.iter().any(|l| l.trim() == want);
+            assert_eq!(
+                list("variant"),
+                Some(vec!["plain".to_owned(), "seeded".to_owned()]),
+                "{job}'s shards take both variants"
+            );
+            assert!(
+                has("MANDATE_CELL_VARIANT: ${{ matrix.variant }}"),
+                "{job} hands on its variant"
+            );
+            assert!(
+                has("fail-fast: false"),
+                "{job}'s shards each run to the end"
+            );
+            match list("drill") {
+                None => assert!(
+                    !lines.iter().any(|l| l.contains("MANDATE_CELL_DRILL")),
+                    "{job} names no drill without a matrix of them"
+                ),
+                Some(listed) => {
+                    assert_eq!(listed, drills, "{job}'s shards name each of its drills");
+                    assert!(
+                        has("MANDATE_CELL_DRILL: ${{ matrix.drill }}"),
+                        "{job} hands on its drill"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
 
     /// DEC-1190 in `ci.yml`: `select` runs `cargo xtask ci select` into its outputs and exposes each
     /// switch the selection prints, every scoped job needs it and starts only on its own switch,

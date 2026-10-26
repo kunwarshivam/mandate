@@ -453,7 +453,7 @@ fn an_unpriced_kill_switch_close_goes_once_its_quote_is_read() -> Result<(), Err
         .any(|payload| payload.get("action").and_then(Value::as_str) == Some("exit_unpriced"));
     assert!(unpriced, "the wait is journaled");
     assert_eq!(
-        alerted.iter().filter(|key| *key == "exit_unpriced").count(),
+        alerted.iter().filter(|key| *key == "exit_stalled").count(),
         1,
         "{alerted:?}"
     );
