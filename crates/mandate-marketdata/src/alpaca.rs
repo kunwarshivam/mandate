@@ -334,8 +334,8 @@ pub(crate) fn parse_actions_for(
 
 /// The asked symbols an action of another kind concerns, read from its members whose names end in
 /// `symbol` (`symbol`, `old_symbol`, `acquirer_symbol`, ...): each asked symbol one of them names.
-/// An action with no such member, or one whose member is neither a string nor null, goes to every
-/// asked symbol, so nothing that may concern one is dropped. An action whose such members name only
+/// An action with no such member, or with any such member neither a string nor null, goes to every
+/// asked symbol, whatever its other members name, so nothing that may concern one is dropped. An action whose such members name only
 /// symbols not asked refuses the page, as a split or dividend of one does.
 fn concerned(
     asked: &BTreeSet<Symbol>,
@@ -352,17 +352,18 @@ fn concerned(
             Err(_) => unread = true,
         }
     }
+    if unread {
+        return Ok(asked.iter().cloned().collect());
+    }
     let concerned: Vec<Symbol> = asked
         .iter()
         .filter(|symbol| named.contains(symbol.as_str()))
         .cloned()
         .collect();
-    if !concerned.is_empty() {
-        return Ok(concerned);
-    }
     match named.into_iter().next() {
-        Some(other) if !unread => Err(WireError::UnexpectedSymbol(other)),
-        _ => Ok(asked.iter().cloned().collect()),
+        Some(other) if concerned.is_empty() => Err(WireError::UnexpectedSymbol(other)),
+        _ if concerned.is_empty() => Ok(asked.iter().cloned().collect()),
+        _ => Ok(concerned),
     }
 }
 

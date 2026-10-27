@@ -600,6 +600,16 @@ fn an_action_of_another_kind_goes_to_the_asked_symbols_it_names() {
         (vec!["m8".to_owned()], vec!["m8".to_owned()]),
         "an unreadable member may name an asked symbol, so an unasked one beside it refuses nothing"
     );
+    let beside = page(other(
+        "m9",
+        r#","acquirer_symbol":["QQQ"],"acquiree_symbol":"SPY""#,
+    ))
+    .unwrap();
+    assert_eq!(
+        (ids(&beside, "SPY"), ids(&beside, "QQQ")),
+        (vec!["m9".to_owned()], vec!["m9".to_owned()]),
+        "an unreadable member may name QQQ, so the action reaches it though SPY is named"
+    );
     assert_eq!(
         page(other(
             "m5",
