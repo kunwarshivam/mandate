@@ -332,7 +332,9 @@ def reduces_previous(prev, current, m):
     a document with a value the schema refuses, or one that hashes to anything else is not reducing: validation cannot
     classify against the agent's version (rule 3). The member test is `classify`'s precondition, so a partial document
     is refused without being classified; the schema test is the one that refuses a whole document with a bad value."""
-    return agents_current(prev, current) and classify(prev, m)[0] == "risk_reducing"
+    return (prev is not None and current is not None and set(SCHEMA["required"]) <= set(prev)
+            and V.is_valid(prev) and version(prev) == current
+            and classify(prev, m)[0] == "risk_reducing")
 
 
 def agents_current(prev, current):
