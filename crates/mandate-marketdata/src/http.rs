@@ -22,6 +22,13 @@ pub const SECRET_VAR: &str = "MANDATE_ALPACA_PAPER_SECRET";
 pub enum CredentialsError {
     #[error("{variable} is not set or empty")]
     Missing { variable: &'static str },
+    /// A stored key that is not one line `<key id>:<secret>`.
+    #[error("the stored key is not one line of a key id and a secret")]
+    Malformed,
+    /// A stored key whose id is not a paper key's (DEC-2277 item 4, AGENTS.md rule 8): a guard on
+    /// Alpaca's convention, not a proof.
+    #[error("the stored key is not a paper key")]
+    NotPaper,
 }
 
 impl CredentialsError {
@@ -29,12 +36,16 @@ impl CredentialsError {
     pub fn code(self) -> &'static str {
         match self {
             Self::Missing { .. } => "missing",
+            Self::Malformed => "malformed",
+            Self::NotPaper => "not_paper",
         }
     }
 }
 
-/// The paper account's market-data credentials.
-#[derive(Debug)]
+/// The prefix of an Alpaca paper key's id (DEC-2277 item 4).
+const PAPER_KEY_PREFIX: &str = "PK";
+
+/// The paper account's market-data credentials. `Debug` shows neither value.
 pub struct Credentials {
     key_id: SecretString,
     secret: SecretString,
@@ -64,6 +75,36 @@ impl Credentials {
     pub fn from_env() -> Result<Self, CredentialsError> {
         Self::from_lookup(|name| std::env::var(name).ok())
     }
+
+    /// The platform data key as the vault stores it at `platform/news-data-key`: one line
+    /// `<key id>:<secret>`, a final line break allowed (DEC-2277 item 2, DEC-2283 item 2). A key
+    /// that is not that line is [`CredentialsError::Malformed`], and one whose id is not a paper
+    /// key's [`CredentialsError::NotPaper`], keeping nothing of it. The line is judged whole before
+    /// its id, so a malformed line is `Malformed` whatever its prefix.
+    pub fn from_stored(stored: &[u8]) -> Result<Self, CredentialsError> {
+        let text = core::str::from_utf8(stored).map_err(|_| CredentialsError::Malformed)?;
+        let line = text.strip_suffix('\n').unwrap_or(text);
+        let (key_id, secret) = line.split_once(':').ok_or(CredentialsError::Malformed)?;
+        let clean = |part: &str| {
+            !part.is_empty()
+                && part
+                    .chars()
+                    .all(|c| c != ':' && !c.is_whitespace() && !c.is_control())
+        };
+        if !clean(key_id) || !clean(secret) {
+            return Err(CredentialsError::Malformed);
+        }
+        if !key_id.starts_with(PAPER_KEY_PREFIX) {
+            return Err(CredentialsError::NotPaper);
+        }
+        Ok(Self::new(key_id.to_owned(), secret.to_owned()))
+    }
+}
+
+impl core::fmt::Debug for Credentials {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("Credentials(redacted)")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -90,6 +131,9 @@ const ENDPOINTS: [&str; 7] = [
     "/v1beta3/crypto/us/quotes?",
     "/v1/corporate-actions?",
 ];
+/// The two endpoints the data process's generations read with the platform data key (DEC-2283
+/// item 2): bars, and the corporate actions that qualify them.
+const BARS_ENDPOINTS: [&str; 2] = ["/v2/stocks/bars?", "/v1/corporate-actions?"];
 const USER_AGENT: &str = concat!("mandate-marketdata/", env!("CARGO_PKG_VERSION"));
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -98,7 +142,13 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// corporate-actions endpoint, with a query of percent-encoded parameters and nothing that could
 /// change the host or the request.
 pub fn is_market_data_path(path_and_query: &str) -> bool {
-    let Some(query) = ENDPOINTS
+    permitted(&ENDPOINTS, path_and_query)
+}
+
+/// Whether `path_and_query` names one of `endpoints`, with a query of percent-encoded parameters
+/// and nothing that could change the host or the request.
+fn permitted(endpoints: &[&str], path_and_query: &str) -> bool {
+    let Some(query) = endpoints
         .iter()
         .find_map(|endpoint| path_and_query.strip_prefix(endpoint))
     else {
@@ -110,17 +160,37 @@ pub fn is_market_data_path(path_and_query: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"-._~%&=:,".contains(&b))
 }
 
-/// HTTPS to [`DATA_HOST`] with the paper credentials.
+/// HTTPS to [`DATA_HOST`] with the paper credentials, to the endpoints it was built for.
 #[derive(Debug)]
 pub struct AlpacaDataHttp {
     client: reqwest::Client,
     base: Url,
     credentials: Credentials,
+    endpoints: &'static [&'static str],
 }
 
 impl AlpacaDataHttp {
-    /// HTTPS only, no redirects, bounded timeouts, and TLS on the `ring` provider.
+    /// HTTPS only, no redirects, bounded timeouts, and TLS on the `ring` provider, to every
+    /// historical endpoint [`is_market_data_path`] names.
     pub fn new(credentials: Credentials) -> Result<Self, HttpSetupError> {
+        Self::to(credentials, &ENDPOINTS)
+    }
+
+    /// The same, to the bars and corporate-actions endpoints only: the data process's transport,
+    /// which refuses every other path before a byte is sent (DEC-2283 item 2, DP-17).
+    pub fn bars_only(credentials: Credentials) -> Result<Self, HttpSetupError> {
+        Self::to(credentials, &BARS_ENDPOINTS)
+    }
+
+    /// Whether this transport sends a request to `path_and_query`.
+    pub fn permits(&self, path_and_query: &str) -> bool {
+        permitted(self.endpoints, path_and_query)
+    }
+
+    fn to(
+        credentials: Credentials,
+        endpoints: &'static [&'static str],
+    ) -> Result<Self, HttpSetupError> {
         let _already_installed = rustls::crypto::ring::default_provider().install_default();
         let base = Url::parse(DATA_HOST).map_err(|_| HttpSetupError::Client)?;
         let client = reqwest::Client::builder()
@@ -135,11 +205,12 @@ impl AlpacaDataHttp {
             client,
             base,
             credentials,
+            endpoints,
         })
     }
 
     fn url(&self, path_and_query: &str) -> Result<Url, TransportError> {
-        if !is_market_data_path(path_and_query) {
+        if !self.permits(path_and_query) {
             return Err(TransportError::RefusedPath);
         }
         let url = Url::parse(&format!("{DATA_HOST}{path_and_query}"))
