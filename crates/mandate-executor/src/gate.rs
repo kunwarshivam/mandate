@@ -334,16 +334,6 @@ pub(crate) fn account_stream_checks(
         room
     };
     let discretionary = proposal.purpose == Purpose::DiscretionaryExit;
-    let left = if sell && discretionary {
-        left.min(holders::discretionary_room(
-            state,
-            proposal.agent,
-            proposal.instrument,
-            None,
-        )?)
-    } else {
-        left
-    };
     let exceeds = sell && room < proposal.qty;
     record(
         "sell_exceeds_available",
@@ -383,11 +373,19 @@ pub(crate) fn account_stream_checks(
         binding: None,
         config_refs: Object::new(),
     };
-    if decision.verdict == GateVerdict::Allow && sell && discretionary && left < proposal.qty {
-        if left == Qty::ZERO {
-            decision.crowded = true;
-        } else {
-            decision.sized = Some(left);
+    if decision.verdict == GateVerdict::Allow && sell && discretionary {
+        let left = left.min(holders::discretionary_room(
+            state,
+            proposal.agent,
+            proposal.instrument,
+            None,
+        )?);
+        if left < proposal.qty {
+            if left == Qty::ZERO {
+                decision.crowded = true;
+            } else {
+                decision.sized = Some(left);
+            }
         }
     }
     Ok(decision)
