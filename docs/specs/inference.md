@@ -308,6 +308,11 @@ completion time. The agent harness spec adds two for E15-8 (its §10.1 ask 3, DE
 retrieved context, as the event ids of the run's `ObservationRecorded`, and room for the
 candidates' verdicts. The run id rides in `correlation_id`.
 
+A call with purpose `evaluation` ([DEC-2216](../project/decisions/DEC-2216.md)) has no agent
+stream, and journal spec §9.19 admits no `evaluation` call record. Until a record of its own is
+added (backlog E21-62w), its record is the gate report's entry for it (§4.3), and its spend is
+journaled on the meter streams like every call's.
+
 Every journal stream has a single writer (journal spec §2), and the gateway writes none of the
 existing ones. So:
 
@@ -449,8 +454,13 @@ resolve in. The research role's probe set is `fixtures/gate/research-probe-set.j
 `ideate`, five `monitor`, and five prompt-injection runs, whose tools read a fixture corpus, never
 live data. The report holds the entry's pin, the probe set's digest, every call's request digest,
 reported identity, outcome, tokens and cost, each check's verdict, and `passed`. It is written
-create-only to the research artifact store and named by its reference. The gate stops at the
-first identity mismatch, and refuses before any call when a cap leaves less than its maximum.
+create-only to the research artifact store, which only the service writes, and named by its
+reference. The report also names the endpoint and price table it ran against. Once a gate has
+called, every end writes a report: a pass, or `passed` false with the `stopped` code
+(`identity_mismatch` at the first differing identity, `cap_refused`, `provider_failed`, or
+`checks_failed`). It refuses before any call when either cap's room is below its whole maximum,
+or when a passing report for the same entry, probe set, endpoint and price table exists. A restart
+ends a gate with no report and resumes nothing.
 
 ### 4.4 Provider deprecation
 
@@ -614,8 +624,10 @@ a settlement only for the calls that could cost money, and spend for caps folds 
 | Rate caps | Per agent: research runs only in proposal rounds no more often than `behavior.research.interval_s`, an agentic run's turns inside its one round; per workspace: a token bucket set by the plan | Calls per second |
 
 - **Evaluations** ([DEC-2216](../project/decisions/DEC-2216.md)). A call with purpose `evaluation`
-  has no agent, so the research cost cap, per-agent caps and the run ceiling do not apply. The
-  workspace's and the deployment's caps do, and the meter reserves it as any call.
+  has no agent, so the research cost cap, per-agent caps and the run ceiling do not apply. It is
+  reserved on the service's own streams, `meter:{workspace}` for the workspace the service is
+  configured for and `dmeter:{deployment}`, so that workspace's monthly cap and the deployment's
+  bind it as any call. A gate starts only when both caps' room holds its whole maximum.
 - **Reservation.** Before the first attempt, the workspace's meter writer appends a reservation of
   the maximum cost to the meter stream (§3.6). A call starts only if `spent + reserved + this reservation ≤ cap` for every cap that applies.
   On completion the reservation becomes the actual cost. If the process dies first, the reservation
