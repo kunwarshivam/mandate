@@ -880,7 +880,7 @@ mod tests {
                             prop_assert_eq!(
                                 super::rule_13_size(&stopped, &agent(a), &at).map_err(fail)?,
                                 want,
-                                "stopped, {}'s exit still goes, sized to its own lots in {}",
+                                "stopped, {}'s exit is sized the same in {}",
                                 a,
                                 i
                             );
@@ -895,8 +895,12 @@ mod tests {
     /// DEC-2849 item 7, I4, by hand: an agent's own rule-13 exit sells its own lots and no more.
     /// Its 10 beside the owner's 4 is 10, never 14; after the owner sells 4 outside Mandate it is
     /// the 6 left; beside another agent's 4, each is its own; and with 2 sold and 3 still working
-    /// from its 10, it is the 5 not yet selling. An agent stopped or killed while its stop fires is
-    /// sized the same: its exit still goes, sized to its own lots (rule 13).
+    /// from its 10, it is the 5 not yet selling. DEC-2849's worked example, 5 and 5 with the owner
+    /// selling 4 outside Mandate, is 5 for each (min(Lᵢ, N), never Sᵢ = 1); and another agent's
+    /// working sell of 3 leaves this agent's 10 the 7 not yet selling. A stopped agent is sized the
+    /// same: the size never reads the mode. Whether a stopped or killed agent's exit is held, and
+    /// how its own flatten clips its watchdog, are the watchdog's and the kill's (E7-4, the
+    /// implementation's own tests).
     #[test]
     #[ignore = "pending E7-4"]
     fn a_rule_13_exit_sells_its_own_lots_and_no_more() -> Result<(), ExecutorError> {
@@ -917,6 +921,22 @@ mod tests {
             (
                 vec![Event::Buy(0, 0, 10), Event::Sell(0, 0, 2, 3)],
                 vec![(0, 5)],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 5),
+                    Event::Buy(1, 0, 5),
+                    Event::OwnerSell(0, 4),
+                ],
+                vec![(0, 5), (1, 5)],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 10),
+                    Event::Buy(1, 0, 2),
+                    Event::Sell(1, 0, 2, 3),
+                ],
+                vec![(0, 7), (1, 0)],
             ),
         ] {
             let mut run = Run::new();
