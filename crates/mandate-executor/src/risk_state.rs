@@ -887,7 +887,7 @@ impl<'c> AccountRiskFold<'c> {
             .and_then(Value::as_str)
             .ok_or(UnreadableCause::Undecodable)?;
         let clock = whole_second(payload, "risk_clock")?;
-        if clock < self.opened_at {
+        if clock < self.opened_at || self.others(instrument) {
             return Ok(Vec::new());
         }
         self.bind(instrument)?;
@@ -928,6 +928,15 @@ impl<'c> AccountRiskFold<'c> {
             .is_some_and(|order| self.own.contains(order))
     }
 
+    /// Whether `instrument` is another than the one the fold is bound to: its mark steps nothing,
+    /// since the agent's lots hold none of it (DEC-2849 item 2, DEC-2804 item 9). An unbound fold
+    /// binds as before (DEC-2310 item 1).
+    fn others(&self, instrument: &str) -> bool {
+        self.instrument
+            .as_deref()
+            .is_some_and(|bound| bound != instrument)
+    }
+
     /// Whether a mark in `session` counts (mandate spec §5.2): any for crypto, the regular session
     /// for equities.
     fn counts(&self, session: MarketSession) -> bool {
@@ -938,7 +947,7 @@ impl<'c> AccountRiskFold<'c> {
     /// item 2). Whose a fill or fee is, and whether a mark is from before the opening instant, is
     /// decided where the row is, as a priced fold decides it: another's fill or fee and an earlier
     /// mark step nothing and are not held. A counted sane mark of the bound instrument prices the
-    /// held inputs (item 3); a mark naming another instrument is refused at once (item 4).
+    /// held inputs (item 3); a mark naming another instrument steps nothing (DEC-2849 item 2).
     fn stepped(
         &mut self,
         row: &StoredEvent,
@@ -959,8 +968,8 @@ impl<'c> AccountRiskFold<'c> {
             if whole_second(payload, "risk_clock")? < self.opened_at {
                 return Ok(Vec::new());
             }
-            if self.instrument.as_deref() != Some(instrument) {
-                return Err(UnreadableCause::RefusedToDecide);
+            if self.others(instrument) {
+                return Ok(Vec::new());
             }
             let session = payload
                 .get("session")
