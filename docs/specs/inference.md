@@ -310,8 +310,9 @@ candidates' verdicts. The run id rides in `correlation_id`.
 
 A call with purpose `evaluation` ([DEC-2216](../project/decisions/DEC-2216.md)) has no agent
 stream, and journal spec §9.19 admits no `evaluation` call record. Until a record of its own is
-added (backlog E21-62w), its record is the gate report's entry for it (§4.3), and its spend is
-journaled on the meter streams like every call's.
+added (backlog E21-62w), a gate's call is recorded in the gate's report (§4.3), the start's
+identity probe only by its spend, and every evaluation call's spend is journaled on the meter
+streams like every call's.
 
 Every journal stream has a single writer (journal spec §2), and the gateway writes none of the
 existing ones. So:
