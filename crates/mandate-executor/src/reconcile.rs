@@ -1634,7 +1634,7 @@ pub(crate) mod tests {
                         .and_then(Value::as_str)
                         .map(str::to_owned)
                 };
-                field("verdict").zip(field("reason_code"))
+                field("verdict").map(|verdict| (verdict, field("reason_code").unwrap_or_default()))
             }
             _ => None,
         })

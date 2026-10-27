@@ -54,9 +54,41 @@ pub const OTHER_AGENT: &str = "agent-b";
 pub const VERSION: &str = "sha256:5555555555555555555555555555555555555555555555555555555555555555";
 pub const ENVIRONMENT: &str = "paper";
 
+/// The configuration the test deployment registers, which every gate decision of its agent is
+/// journaled under, a binding run's or not (journal spec §9, DEC-2846).
+pub fn deployed_refs() -> BindingGateConfigRefs {
+    BindingGateConfigRefs::complete(
+        format!("sha256:{}", "1".repeat(64)),
+        format!("sha256:{}", "2".repeat(64)),
+        format!("sha256:{}", "3".repeat(64)),
+        format!("sha256:{}", "4".repeat(64)),
+        VERSION,
+    )
+}
+
+/// A deployment whose binding snapshot does not read now: its configuration still does, so a
+/// risk reduction's decision is journaled under it and goes (`AGENTS.md` rule 13).
 pub struct MissingBindingGate;
 
 impl BindingGateSource for MissingBindingGate {
+    fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
+        None
+    }
+
+    fn config_refs(
+        &self,
+        _agent: &AgentId,
+        _instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        Some(deployed_refs())
+    }
+}
+
+/// A deployment that reads nothing, not even its configuration (DEC-2846): a decision has no
+/// references to be journaled under.
+pub struct UnreadDeployment;
+
+impl BindingGateSource for UnreadDeployment {
     fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         None
     }
@@ -67,6 +99,14 @@ pub static MISSING_BINDING_GATE: MissingBindingGate = MissingBindingGate;
 pub struct AllowingBindingGate;
 
 impl BindingGateSource for AllowingBindingGate {
+    fn config_refs(
+        &self,
+        _agent: &AgentId,
+        _instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        Some(deployed_refs())
+    }
+
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         if !request.purpose.adds_risk() {
             return None;
@@ -81,6 +121,14 @@ impl BindingGateSource for AllowingBindingGate {
 pub struct BindingExits;
 
 impl BindingGateSource for BindingExits {
+    fn config_refs(
+        &self,
+        _agent: &AgentId,
+        _instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        Some(deployed_refs())
+    }
+
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         let mut input = allowing_snapshot(request)?;
         input
@@ -112,13 +160,7 @@ fn allowing_snapshot(request: &BindingGateRequest<'_>) -> Option<BindingGateInpu
     let positions = BTreeMap::new();
     let gate_agent = GateAgentId(1);
     Some(BindingGateInput {
-        config_refs: BindingGateConfigRefs::complete(
-            format!("sha256:{}", "1".repeat(64)),
-            format!("sha256:{}", "2".repeat(64)),
-            format!("sha256:{}", "3".repeat(64)),
-            format!("sha256:{}", "4".repeat(64)),
-            VERSION,
-        ),
+        config_refs: deployed_refs(),
         now: at,
         config: GateConfig {
             price_floor: Usd::parse("0.01").ok()?,

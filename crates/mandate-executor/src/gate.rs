@@ -19,7 +19,9 @@ use mandate_risk::{
 use crate::batch::config_refs;
 use crate::error::ExecutorError;
 use crate::payload::{object, text};
-use crate::ports::{BindingGateInput, BindingGateRequest, BindingGateSource, Ports};
+use crate::ports::{
+    BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource, Ports,
+};
 use crate::protection::{between_rungs, rests};
 use crate::state::ExecutorState;
 use crate::types::{
@@ -385,7 +387,31 @@ pub(crate) fn account_stream_checks(
 /// the local decision because §9.1 does not read those missing inputs for a limit denial and rule
 /// 13 forbids converting the absence into a denial, a snapshot whose references do not bind
 /// included (DEC-2034 item 2).
+///
+/// A decision no binding run bound to references, an exit's or a local denial's, is journaled
+/// under the deployment's (`BindingGateSource::config_refs`): journal spec §9 refuses a
+/// `GateDecided` without all five, and with it the batch that receives the intent (DEC-2846).
+/// Where the deployment reads none, or its mandate reference is not the agent's version in force,
+/// the decision is [`ExecutorError::BindingGateInputMissing`]: the intent is held and alerted, and
+/// decided again at the next pass, never journaled in a form the journal refuses.
 pub(crate) fn binding_checks(
+    state: &ExecutorState,
+    proposal: &Proposal<'_>,
+    pass: GatePass,
+    ports: &Ports<'_>,
+    source: Option<&dyn BindingGateSource>,
+) -> Result<PartialGateDecision, ExecutorError> {
+    let mut decision = bound_checks(state, proposal, pass, ports, source)?;
+    if decision.config_refs.is_empty() {
+        let deployed = source
+            .and_then(|source| source.config_refs(proposal.agent, proposal.instrument))
+            .ok_or(ExecutorError::BindingGateInputMissing)?;
+        decision.config_refs = agent_refs(&deployed, ports, proposal.agent)?;
+    }
+    Ok(decision)
+}
+
+fn bound_checks(
     state: &ExecutorState,
     proposal: &Proposal<'_>,
     pass: GatePass,
@@ -447,27 +473,28 @@ fn bound_refs(
     ports: &Ports<'_>,
     agent: &AgentId,
 ) -> Result<Object, ExecutorError> {
+    agent_refs(&snapshot.config_refs, ports, agent)
+}
+
+/// `refs` as a gate record's `config_refs`, every one present and the mandate's the version
+/// `agent`'s port resolves; [`ExecutorError::BindingGateInputMissing`] otherwise.
+fn agent_refs(
+    refs: &BindingGateConfigRefs,
+    ports: &Ports<'_>,
+    agent: &AgentId,
+) -> Result<Object, ExecutorError> {
     let Some(mandate_version) = ports.mandates.version(agent) else {
         return Err(ExecutorError::BindingGateInputMissing);
     };
-    if snapshot.config_refs.mandate_version.as_deref() != Some(mandate_version.0.as_str()) {
+    if refs.mandate_version.as_deref() != Some(mandate_version.0.as_str()) {
         return Err(ExecutorError::BindingGateInputMissing);
     }
     config_refs(&[
-        ("fee_config", snapshot.config_refs.fee_config.as_deref()),
-        (
-            "trading_calendar",
-            snapshot.config_refs.trading_calendar.as_deref(),
-        ),
-        (
-            "instrument_snapshot",
-            snapshot.config_refs.instrument_snapshot.as_deref(),
-        ),
-        ("rule_set", snapshot.config_refs.rule_set.as_deref()),
-        (
-            "mandate_version",
-            snapshot.config_refs.mandate_version.as_deref(),
-        ),
+        ("fee_config", refs.fee_config.as_deref()),
+        ("trading_calendar", refs.trading_calendar.as_deref()),
+        ("instrument_snapshot", refs.instrument_snapshot.as_deref()),
+        ("rule_set", refs.rule_set.as_deref()),
+        ("mandate_version", refs.mandate_version.as_deref()),
     ])
 }
 

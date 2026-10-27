@@ -355,7 +355,7 @@ fn journal_decision(
     decision: &PartialGateDecision,
     mut extra: Vec<(&'static str, Value)>,
 ) -> Result<EventId, ExecutorError> {
-    let reason = if decision.is_binding() && decision.reason_code().is_empty() {
+    let reason = if decision.reason_code().is_empty() {
         Value::Null
     } else {
         text(decision.reason_code())

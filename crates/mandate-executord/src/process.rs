@@ -242,6 +242,12 @@ pub struct ExecutorProcess<S, B> {
     journal_down: bool,
     /// Whether a refused batch was already alerted to the operator in this process (DEC-2805).
     journal_refused: bool,
+    /// The cause of the last batch the journal refused, as the record type, the journal's reason
+    /// code and the member's path, and the causes not yet alerted. Each new cause is alerted
+    /// once, so a refusal repeated on every pass is seen without flooding (DEC-2846: the cell's
+    /// lost exits were refused on every pass, and nothing said why).
+    refusal: Option<String>,
+    refusals: Vec<String>,
     /// Whether a broker input the core could not apply has alerted the operator, once a process
     /// (DEC-2821).
     input_refused: bool,
@@ -338,6 +344,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             held: BTreeSet::new(),
             journal_down: false,
             journal_refused: false,
+            refusal: None,
+            refusals: Vec::new(),
             input_refused: false,
             deployed: BTreeMap::new(),
             max_chain: config.max_chain,
@@ -455,6 +463,16 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// the pass hands the first tick it reads and `Input::Started`. Returns the alerts whose drafts
     /// committed.
     pub fn step(&mut self, now: UtcNanos) -> Vec<Alert> {
+        let mut alerts = self.stepped(now);
+        alerts.extend(self.refusals.drain(..).map(|cause| Alert {
+            key: "journal_refused_cause",
+            subject: Some(cause),
+        }));
+        alerts
+    }
+
+    /// One pass, as [`Self::step`] describes it, without the refusals' causes.
+    fn stepped(&mut self, now: UtcNanos) -> Vec<Alert> {
         let mut alerts = Vec::new();
         if self.exited() {
             return alerts;
@@ -1891,7 +1909,17 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 self.lifecycle.observe(now, Lifecycled::Fenced);
                 Ran::Stopped
             }
-            AppendOutcome::Invalid { .. } => Ran::Refused,
+            AppendOutcome::Invalid { draft, error } => {
+                let event_type = drafts
+                    .get(draft)
+                    .map_or("unknown", |refused| refused.event_type.as_str());
+                let cause = format!("{event_type}:{}:{}", error.reason.code(), error.path);
+                if self.refusal.as_ref() != Some(&cause) {
+                    self.refusals.push(cause.clone());
+                    self.refusal = Some(cause);
+                }
+                Ran::Refused
+            }
             AppendOutcome::HeadMismatch { .. } | AppendOutcome::IdempotencyConflict { .. } => {
                 self.lifecycle.observe(now, Lifecycled::Failed);
                 Ran::Stopped
