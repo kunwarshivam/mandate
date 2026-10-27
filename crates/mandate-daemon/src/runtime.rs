@@ -166,15 +166,18 @@ impl Tail {
 
 /// The streams the process reads at every pass, each read only past the head it was last read to
 /// (DEC-2852): the control and agent streams kept whole for the ports that read them so, the
-/// account stream kept as nothing but its head, and the clock stream as its latest tick, its
-/// records kept only until the production fold follows the account, which then folds every one
-/// of them in order, as a fold of the whole stream does.
+/// account stream kept as nothing but its head, and the clock stream as its latest tick. The
+/// clock is read again from its first record on the pass the production fold first follows the
+/// account, so the fold folds every one of its records in order, as a fold of the whole stream
+/// does, without the process keeping them while it waits.
 struct Tails {
     control: Tail,
     agent: Tail,
     account: Tail,
     clock: Tail,
     latest_tick: Option<UtcNanos>,
+    /// Whether the production fold has been fed the clock stream whole since it followed.
+    clock_fed: bool,
 }
 
 impl Default for Tails {
@@ -183,8 +186,9 @@ impl Default for Tails {
             control: Tail::kept(),
             agent: Tail::kept(),
             account: Tail::default(),
-            clock: Tail::kept(),
+            clock: Tail::default(),
             latest_tick: None,
+            clock_fed: false,
         }
     }
 }
@@ -515,9 +519,19 @@ impl<S: Store> RuntimeProcess<S> {
         let Some(clock) = self.clock.clone() else {
             return false;
         };
+        let following = self
+            .wiring
+            .facts
+            .as_ref()
+            .is_some_and(crate::production::Facts::following);
+        if following && !self.tails.clock_fed {
+            self.tails.clock = Tail::default();
+            self.tails.latest_tick = None;
+        }
         let Some(rows) = self.tails.clock.read(&self.store, &clock) else {
             return false;
         };
+        self.tails.clock_fed |= following;
         if self.tails.clock.replaced {
             self.tails.latest_tick = None;
         }
@@ -527,21 +541,6 @@ impl<S: Store> RuntimeProcess<S> {
             .filter_map(tick_of)
             .chain(self.tails.latest_tick)
             .max();
-        let following = self
-            .wiring
-            .facts
-            .as_ref()
-            .is_some_and(crate::production::Facts::following);
-        if self.tails.clock.keep && following {
-            let kept = std::mem::take(&mut self.tails.clock.rows);
-            self.tails.clock.keep = false;
-            self.feed(&kept);
-        } else if self.tails.clock.keep {
-            self.tails.clock.keep = self.wiring.facts.is_some();
-            if !self.tails.clock.keep {
-                self.tails.clock.rows.clear();
-            }
-        }
         self.feed(&rows);
         self.read_working_universe();
         let latest = self.tails.latest_tick;
