@@ -2166,15 +2166,17 @@ const LINK_WITHIN: Duration = Duration::from_secs(60);
 /// `cell-demo` sibling runs the same scenario and reads it): this run reads each link and the grant
 /// as `not run`, never failed, and spends none of their waits, so the web job stays inside its ten
 /// minutes by sharing the scenario's parts with its sibling rather than dropping one (DEC-464).
-pub const LOOP_ELSEWHERE_ENV: &str = "MANDATE_DEMO_LOOP_ELSEWHERE";
+const LOOP_ELSEWHERE_ENV: &str = "MANDATE_DEMO_LOOP_ELSEWHERE";
 
 /// What a run that leaves the research loop to its sibling prints for each of its parts.
 const LOOP_ELSEWHERE: &str =
     "read by this run's cell-demo job, which runs the same scenario (DEC-464)";
 
-/// Whether this run reads the research loop: unless [`LOOP_ELSEWHERE_ENV`] is set, to anything.
-pub fn loop_read_here(elsewhere: Option<&std::ffi::OsStr>) -> bool {
-    elsewhere.is_none()
+/// Whether this run reads the research loop: unless [`LOOP_ELSEWHERE_ENV`] is `1`, which CI sets
+/// only when the sibling job runs too; empty or any other value reads it here, so a selection
+/// without the sibling never leaves the loop unread.
+fn loop_read_here(elsewhere: Option<&std::ffi::OsStr>) -> bool {
+    elsewhere.is_none_or(|value| value != "1")
 }
 
 /// The variable a rehearsal sets to wait longer for each link, in whole seconds, up to
@@ -4477,11 +4479,14 @@ mod tests {
     }
 
     /// CI's `cell-demo-web` leaves the research loop to `cell-demo`, which runs the same scenario
-    /// and reads it, and `cell-demo` never does, so every link is still read in each run of the
-    /// workflow (DEC-464); unset, a run reads the loop itself.
+    /// and reads it, only when `select` starts `cell-demo` too, and `cell-demo` never does, so every
+    /// link is still read in each run of the workflow (DEC-464); unset, empty or anything but `1`,
+    /// a run reads the loop itself.
     #[test]
     fn only_the_web_job_leaves_the_research_loop_to_its_sibling() {
         assert!(loop_read_here(None));
+        assert!(loop_read_here(Some(std::ffi::OsStr::new(""))));
+        assert!(loop_read_here(Some(std::ffi::OsStr::new("0"))));
         assert!(!loop_read_here(Some(std::ffi::OsStr::new("1"))));
         let workflow = fs::read_to_string("../.github/workflows/ci.yml").unwrap();
         let job = |name: &str| -> String {
@@ -4495,12 +4500,19 @@ mod tests {
                 .join("\n")
         };
         let (web, plain) = (job("cell-demo-web"), job("cell-demo"));
-        assert!(
-            web.contains("runs-on:") && plain.contains("runs-on:"),
-            "both jobs are found"
+        for (name, body) in [("cell-demo-web", &web), ("cell-demo", &plain)] {
+            assert!(
+                body.contains("timeout-minutes:") && body.contains("steps:"),
+                "{name} is read whole"
+            );
+        }
+        let setting = format!(
+            "{LOOP_ELSEWHERE_ENV}: ${{{{ needs.select.outputs.cell == 'true' && '1' || '' }}}}"
         );
-        let setting = format!("{LOOP_ELSEWHERE_ENV}: \"1\"");
-        assert!(web.contains(&setting), "cell-demo-web sets {setting}");
+        assert!(
+            web.contains(&setting),
+            "cell-demo-web leaves the loop only when cell-demo runs: {setting}"
+        );
         assert!(
             !plain.contains(LOOP_ELSEWHERE_ENV),
             "cell-demo reads the loop itself"
