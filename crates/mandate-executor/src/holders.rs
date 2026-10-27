@@ -639,6 +639,13 @@ mod tests {
     fn check(run: &Run) -> Result<(), TestCaseError> {
         let fail = |e: ExecutorError| TestCaseError::fail(e.to_string());
         let view = &run.view;
+        prop_assert!(
+            view.closed
+                .values()
+                .chain(view.oversold.values())
+                .all(|taken| *taken > Qty::ZERO),
+            "a close or an oversell notes only what it took"
+        );
         for (i, oracle) in &run.oracles {
             let at = instrument(*i).map_err(fail)?;
             let held = holders(view, &at).map_err(fail)?;
