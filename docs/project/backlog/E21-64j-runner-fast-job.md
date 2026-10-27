@@ -1,0 +1,2 @@
+- **E21-64j (Could; review of E21-64f)** As the operator, I want a successful single-use runner that finishes between online polls treated as completed, so that a very fast job or admission refusal does not add a bootstrap-failure backoff. *Accepted when:* an exit status of zero before an observed online poll cleans up the registration without incrementing `failure-count`, while a non-zero early exit still backs off; executable tests cover both races (DEC-2078).
+<!-- section: E21 Operations and infrastructure -->
