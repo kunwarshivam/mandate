@@ -9,6 +9,7 @@ use mandate_time::Date;
 
 use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of};
 use crate::error::ExecutorError;
+use crate::holders;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::kill::{close_named, closes_with};
 use crate::payload::{
@@ -1205,12 +1206,26 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value, seq: Seq) -> Result<
         Side::Buy => (SignedQty::from(quantity), notional.negated()),
         Side::Sell => (SignedQty::from(quantity).negated(), notional),
     };
+    let named = optional_text(payload, "client_order_id");
+    let closing = state
+        .account_switch
+        .as_ref()
+        .and_then(|switch| switch.requests.get(&instrument))
+        .is_some_and(|(_, requested)| *requested < seq);
+    if named.is_none() && side == Side::Sell && closing {
+        for (agent, taken) in holders::close_takes(state, &instrument, quantity)? {
+            let closed = state
+                .closed
+                .entry((agent, instrument.clone()))
+                .or_insert(Qty::ZERO);
+            *closed = closed.checked_add(taken)?;
+        }
+    }
     let position_of = instrument.clone();
     let position = state.positions.entry(instrument).or_insert(SignedQty::ZERO);
     *position = position.checked_add(signed)?;
     state.cash_flow = state.cash_flow.checked_add(cash)?;
     state.fill_notional = state.fill_notional.checked_add(notional)?;
-    let named = optional_text(payload, "client_order_id");
     if let Some(order) = named
         .and_then(|raw| ClientOrderId::parse(raw).ok())
         .and_then(|id| state.orders.get_mut(&id))
@@ -3780,6 +3795,105 @@ mod interval_tests {
             vec![(1, Some(2)), (3, Some(5)), (5, None)]
         );
         assert!(executor.state.awaiting.is_empty());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod account_close {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_num::{Qty, SignedQty};
+
+    use super::fill_applied;
+    use crate::error::ExecutorError;
+    use crate::holders::holders;
+    use crate::ids::ClientOrderId;
+    use crate::payload::{object, text};
+    use crate::state::{AccountSwitch, ExecutorState};
+    use crate::types::{
+        AccountRef, AccountScope, AgentId, EventId, Order, OrderState, Purpose, RiskClock, Seq,
+        WorkspaceId,
+    };
+
+    /// A filled buy of `qty` AAPL by `agent`.
+    fn bought(id: &str, agent: &str, qty: &str) -> Result<Order, ExecutorError> {
+        Ok(Order {
+            client_order_id: ClientOrderId::parse(id)?,
+            intent_id: None,
+            agent: Some(AgentId(agent.to_owned())),
+            instrument: InstrumentId::new("AAPL")?,
+            side: Side::Buy,
+            qty: Qty::parse(qty)?,
+            filled_qty: Qty::parse(qty)?,
+            state: OrderState::Filled,
+            attempt: 1,
+            purpose: Purpose::Open,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        })
+    }
+
+    /// DEC-2849 I5: the fills of the account switch's close come out of the owner's positive
+    /// residual first, then the agents' lots, largest first, as each is folded. So a close that
+    /// fills in part leaves every remaining share attributed. An unattributed sell folded before
+    /// the close was requested is the owner's own, and takes nothing from an agent.
+    #[test]
+    fn an_account_close_fill_comes_out_of_the_owner_then_the_largest_lots()
+    -> Result<(), ExecutorError> {
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let aapl = InstrumentId::new("AAPL")?;
+        for order in [
+            bought("md-1-a", "agent-a", "6")?,
+            bought("md-2-b", "agent-b", "3")?,
+        ] {
+            state.orders.insert(order.client_order_id.clone(), order);
+        }
+        state
+            .positions
+            .insert(aapl.clone(), SignedQty::parse("12")?);
+        let sell = |id: &str, qty: &str| {
+            object(vec![
+                ("fill_id", text(id)),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty_gross", text(qty)),
+                ("price", text("100")),
+            ])
+        };
+        fill_applied(&mut state, &sell("f-owner", "1")?, Seq(2))?;
+        assert!(state.closed.is_empty(), "no close is outstanding");
+        state.account_switch = Some(AccountSwitch {
+            event: EventId("k-1".to_owned()),
+            seq: Seq(3),
+            reference: AccountRef("acct-1".to_owned()),
+            at: RiskClock::from_secs(0),
+            requests: BTreeMap::from([(aapl.clone(), (1, Seq(4)))]),
+            bound: BTreeSet::new(),
+        });
+        fill_applied(&mut state, &sell("f-before", "0")?, Seq(4))?;
+        fill_applied(&mut state, &sell("f-close-1", "5")?, Seq(5))?;
+        let held = holders(&state, &aapl)?;
+        assert_eq!(
+            held.lots,
+            BTreeMap::from([
+                (AgentId("agent-a".to_owned()), Qty::parse("3")?),
+                (AgentId("agent-b".to_owned()), Qty::parse("3")?),
+            ]),
+            "the owner's 2, then 3 of agent-a's 6"
+        );
+        assert_eq!(held.residual, SignedQty::ZERO);
+        fill_applied(&mut state, &sell("f-close-2", "6")?, Seq(6))?;
+        let held = holders(&state, &aapl)?;
+        assert!(held.lots.is_empty(), "a complete close leaves no lots");
+        assert_eq!((held.position, held.deficit), (Qty::ZERO, Qty::ZERO));
         Ok(())
     }
 }

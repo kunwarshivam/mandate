@@ -2267,7 +2267,10 @@ fn handed(view: &ExecutorState, sequence: &ExitSequence) -> bool {
 /// quantity — the set `gate::available` walks, and one back in `Intent` for its resubmission — and
 /// every exit received that has no order yet. Stop coverage beyond the position less this would
 /// outlast the position once they fill (#286 round 2, M1′).
-fn still_selling(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+pub(crate) fn still_selling(
+    view: &ExecutorState,
+    instrument: &InstrumentId,
+) -> Result<Qty, ExecutorError> {
     let live = view
         .orders
         .values()
@@ -2336,7 +2339,7 @@ fn protectable(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, E
 
 /// What a sell of ours has sold as [`long`] reads it: its applied fills, or, once it ended, the
 /// larger fill the broker reported for it that no fill update has applied yet.
-fn sold(view: &ExecutorState, id: &ClientOrderId, order: &Order) -> Qty {
+pub(crate) fn sold(view: &ExecutorState, id: &ClientOrderId, order: &Order) -> Qty {
     let reported = view
         .details
         .get(id)
@@ -2353,7 +2356,7 @@ fn sold(view: &ExecutorState, id: &ClientOrderId, order: &Order) -> Qty {
 /// nothing rather than an error: the fold has already taken those shares off. The result is
 /// floored at zero. A live sell's unapplied fill is left in, because [`still_selling`] counts
 /// that order's remainder from the same applied quantity, so the two cancel.
-fn long(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+pub(crate) fn long(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
     let folded = view
         .positions
         .get(instrument)

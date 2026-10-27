@@ -160,6 +160,11 @@ pub struct ExecutorState {
     /// What each agent released to the owner in each instrument, from its `PositionReleased`
     /// records (journal spec §9.27, mandate spec §3.1, DEC-2354): shares no longer its lots.
     pub(crate) released: BTreeMap<(AgentId, InstrumentId), Qty>,
+    /// What an account switch's close took from each agent's lots in each instrument (DEC-2849
+    /// I5): its fills come out of the owner's positive residual first, then the agents' lots in
+    /// coverage order, allocated as each fill is folded, so a close that fills in part leaves every
+    /// remaining share attributed and a later buy reassigns nothing.
+    pub(crate) closed: BTreeMap<(AgentId, InstrumentId), Qty>,
     /// The instruments an account-scoped kill switch closes through the broker's close-position,
     /// from its `KillSwitchActivated`: their protection is never placed again beside that close,
     /// which would sell the same shares twice (§5.4, §5.5). They all leave once the account's
@@ -479,6 +484,7 @@ impl ExecutorState {
             alerted: BTreeSet::new(),
             day_started: None,
             released: BTreeMap::new(),
+            closed: BTreeMap::new(),
             closing_all: BTreeSet::new(),
             account_switch: None,
             switch_read: None,

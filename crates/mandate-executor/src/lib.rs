@@ -83,6 +83,7 @@ mod error;
 mod fees;
 mod fold;
 mod gate;
+mod holders;
 mod ids;
 mod intent;
 mod kill;

@@ -12,6 +12,7 @@ use mandate_num::{Price, Qty, SignedQty};
 use crate::batch::Batch;
 use crate::codec::{initiator_name, mode_name, purpose_name};
 use crate::error::ExecutorError;
+use crate::holders;
 use crate::ids::{ClientOrderId, FLATTEN, IntentId};
 use crate::intent::{order_tif, received};
 use crate::payload::{int, text};
@@ -626,37 +627,16 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
     Ok(())
 }
 
-/// §5.5: exactly the agent's sub-ledger quantity, its attributed lots (§8.1: its own orders'
-/// fills, buys net of sells), less what it released to the owner (DEC-2354), capped at the long
-/// position, so another agent's, the owner's unattributed and the owner's released shares are
-/// untouched.
+/// §5.5: exactly the agent's sub-ledger quantity, min(Lᵢ, N) on DEC-2849's holders ([`holders`]):
+/// its own orders' fills, less what it released to the owner (DEC-2354) and what an account
+/// switch's close took from it, capped at the long position, so another agent's, the owner's
+/// unattributed and the owner's released shares are untouched.
 pub(crate) fn sub_ledger(
     view: &ExecutorState,
     agent: &AgentId,
     instrument: &InstrumentId,
 ) -> Result<Qty, ExecutorError> {
-    let mut lots = SignedQty::ZERO;
-    for order in view.orders.values() {
-        if &order.instrument == instrument && order.agent.as_ref() == Some(agent) {
-            let filled = SignedQty::from(order.filled_qty);
-            lots = lots.checked_add(match order.side {
-                Side::Buy => filled,
-                Side::Sell => filled.negated(),
-            })?;
-        }
-    }
-    let released = view
-        .released
-        .get(&(agent.clone(), instrument.clone()))
-        .copied()
-        .unwrap_or(Qty::ZERO);
-    let lots = lots.checked_add(SignedQty::from(released).negated())?;
-    let open = view
-        .positions
-        .get(instrument)
-        .copied()
-        .unwrap_or(SignedQty::ZERO);
-    Ok(lots.min(open).max(SignedQty::ZERO).abs())
+    holders::sub_ledger(view, agent, instrument)
 }
 
 /// The switch and close a flatten intent's id names, `k-<switch>-<n>`, or `None` for any other.
