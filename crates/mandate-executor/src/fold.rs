@@ -708,9 +708,10 @@ fn gate_decided(
             if flag(payload, "held_long") {
                 state.held_long.insert(id.clone());
             }
-            if let Some(reason) = optional_text(payload, "reason_code") {
-                state.hold_reasons.insert(id.clone(), reason.to_owned());
-            }
+            match optional_text(payload, "reason_code") {
+                Some(reason) => state.hold_reasons.insert(id.clone(), reason.to_owned()),
+                None => state.hold_reasons.remove(&id),
+            };
             state.held.insert(id);
             return Ok(());
         }

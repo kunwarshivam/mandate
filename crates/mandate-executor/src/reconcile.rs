@@ -1850,6 +1850,124 @@ pub(crate) mod tests {
         Ok(())
     }
 
+    /// A buy of 5 `instrument` by `agent-a` to open, as intent `id`.
+    fn opening_in(id: &str, instrument: &str) -> Result<Input, ExecutorError> {
+        Ok(Input::Intent(IntentHandoff {
+            intent_id: IntentId(EventId(id.to_owned())),
+            agent: AgentId("agent-a".to_owned()),
+            tif: Some(TimeInForce::Day),
+            body: IntentBody::Order {
+                instrument: InstrumentId::new(instrument)?,
+                side: Side::Buy,
+                qty: Qty::parse("5")?,
+                limit: Some(Price::parse("150")?),
+                purpose: Purpose::Open,
+                protection: None,
+            },
+            confirmation: None,
+        }))
+    }
+
+    /// A protective leg resting in `instrument` that no agent can be named for (§5.4).
+    fn ownerless_leg(
+        executor: &mut Executor,
+        id: &str,
+        instrument: &str,
+    ) -> Result<(), ExecutorError> {
+        let leg = crate::types::Order {
+            client_order_id: ClientOrderId::parse(id)?,
+            intent_id: None,
+            agent: None,
+            instrument: InstrumentId::new(instrument)?,
+            side: Side::Sell,
+            qty: Qty::parse("10")?,
+            filled_qty: Qty::ZERO,
+            state: OrderState::Accepted,
+            attempt: 1,
+            purpose: Purpose::Protective,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        };
+        executor
+            .state
+            .orders
+            .insert(leg.client_order_id.clone(), leg);
+        Ok(())
+    }
+
+    /// The kinds of the owner alerts in `effects`, each with the `GateDecided` it names.
+    fn alerted(effects: &[Effect]) -> Vec<(String, bool)> {
+        let subject = decided_id(effects).map(|id| Value::Str(id.0));
+        owner_alerts(effects)
+            .into_iter()
+            .map(|(_, _, payload)| {
+                (
+                    payload
+                        .get("kind")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned(),
+                    payload.get("subject") == subject.as_ref(),
+                )
+            })
+            .collect()
+    }
+
+    /// DEC-2855 for `protection_unattributed`, and each reason and instrument its own episode: an
+    /// ownerless leg in AAPL holds a first opening, alerted once, and a second, not alerted. A
+    /// deficit in AAPL then holds an opening `attribution_deficit`, a new episode of its own reason,
+    /// and an ownerless leg in MSFT holds an opening there, a new episode of its own instrument:
+    /// each alerted once, its alert naming its own hold.
+    #[test]
+    fn each_reason_and_instrument_is_its_own_episode() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        filled_ten(&mut executor)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        run_completed(&mut executor)?;
+        ownerless_leg(&mut executor, "md-leg-aapl", "AAPL")?;
+        let held = |reason: &str| Some(("hold".to_owned(), reason.to_owned()));
+        let unattributed = || vec![("protection_unattributed".to_owned(), true)];
+        let first = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY10", "AAPL")?, &ports)?;
+        assert_eq!(gate_decision(&first), held("protection_unattributed"));
+        assert_eq!(alerted(&first), unattributed());
+        let second = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY11", "AAPL")?, &ports)?;
+        assert_eq!(gate_decision(&second), held("protection_unattributed"));
+        assert!(alerted(&second).is_empty(), "the same episode alerts once");
+
+        owners_fill(&mut executor, "f-owner-1", "sell", "5", 0)?;
+        let deficit = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY12", "AAPL")?, &ports)?;
+        assert_eq!(gate_decision(&deficit), held("attribution_deficit"));
+        assert_eq!(
+            alerted(&deficit),
+            vec![("attribution_deficit".to_owned(), true)],
+            "another reason in the same instrument is another episode"
+        );
+
+        ownerless_leg(&mut executor, "md-leg-msft", "MSFT")?;
+        let other = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY13", "MSFT")?, &ports)?;
+        assert_eq!(gate_decision(&other), held("protection_unattributed"));
+        assert_eq!(
+            alerted(&other),
+            unattributed(),
+            "another instrument is another episode"
+        );
+        Ok(())
+    }
+
     /// The coordinator's ruling on #174 (comment 5857742391), rule 3: on a stream that has
     /// journaled an account, an opening is held, never denied, until a reconciliation has run since
     /// the process started; an exit is not held (rule 13); and once a run has completed, the first
