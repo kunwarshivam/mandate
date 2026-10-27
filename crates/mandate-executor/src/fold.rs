@@ -1948,8 +1948,9 @@ fn ids(raw: &str) -> Result<Vec<ClientOrderId>, ExecutorError> {
 /// `round(bucket, 2, ceiling)` as `mandate-accounting` charges it (trading-domain spec §6.2, §7.2,
 /// §10, DEC-104), so paper never looks richer than live. The broker's own fees, posted or
 /// unposted, are the cash slice's; until then they fold as records only. A crypto asset fee names
-/// no buy, so it lowers the position and no agent's lots: it comes out of the owner's residual
-/// (DEC-2850, a tightening of DEC-2849's Lᵢ until it names its buy).
+/// no buy, so it lowers the position and no agent's lots: it comes out of the owner's residual.
+/// That is DEC-2850's interim reading, which the journal keeps unreachable by refusing
+/// `family: crypto_asset` until the fee comes off the buying agent's lots (DEC-2849's Lᵢ).
 pub(crate) fn fees_charged(
     state: &mut ExecutorState,
     payload: &Value,

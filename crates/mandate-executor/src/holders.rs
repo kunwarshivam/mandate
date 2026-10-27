@@ -746,6 +746,29 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-2850's interim reading, pinned on its example: the owner holds 5 of their own, agent 0
+    /// buys 10 and a crypto asset fee of 1 is taken. The fee names no buy, so it comes out of the
+    /// owner's residual and agent 0 keeps 10 lots, where DEC-2849 would give it 9. The journal
+    /// admits no crypto asset fee until that is fixed (backlog row E6-15u).
+    #[test]
+    fn an_asset_fee_comes_out_of_the_owners_residual() -> Result<(), ExecutorError> {
+        let mut run = Run::new();
+        for event in [
+            Event::OwnerBuy(0, 5),
+            Event::Buy(0, 0, 10),
+            Event::AssetFee(0, 1),
+        ] {
+            run.apply(&event)?;
+        }
+        let aapl = InstrumentId::new("AAPL")?;
+        let held = holders(&run.view, &aapl)?;
+        assert_eq!(held.lots, BTreeMap::from([(agent(0), shares(10)?)]));
+        assert_eq!(held.position, shares(14)?);
+        assert_eq!(held.deficit, Qty::ZERO);
+        assert_eq!(sell_authority(&run.view, &agent(0), &aapl)?, shares(10)?);
+        Ok(())
+    }
+
     /// A sell beyond the agent's lots leaves them at zero and takes the excess from the owner, and
     /// a later buy is the agent's whole: the excess never comes out of it.
     #[test]
