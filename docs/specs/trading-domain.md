@@ -465,7 +465,8 @@ the one stop-limit (DEC-529 item 2).
      orders alone and goes whole. Nothing is done to the remainders beside it: each counts only
      what the position and the open sells leave it (§5.6 step 5), so the sell takes their room as
      it goes, and the room comes back if the sell ends unsold before a ladder sends.
-   - **A discretionary exit** is sized to what the open sells and the counted remainders leave.
+   - **A discretionary exit** is sized to what the open sells and the counted remainders leave, and
+     never beyond the agent's sell authority Sᵢ (§8.1; DEC-2849, Proposed (founder), interim).
      With nothing left, it is denied `sell_exceeds_available`, but only once it is otherwise
      releasable now: one held `session_closed`, `session_unknown` or `exit_unpriced` keeps its
      hold and is decided again when it is released. The denial is terminal: the intent is not
@@ -1033,6 +1034,7 @@ What follows from them:
 - **Sell authority.** Agent i's discretionary and new sells never exceed Sᵢ = max(0, Lᵢ − D), the
   founder's "every agent shrinks by full gap" (DEC-2849 item 6). A discretionary exit for more is
   trimmed to what Sᵢ leaves, and with nothing left is refused `sell_exceeds_available`, read on Sᵢ.
+  That reading of rule 13 is Proposed (founder) and applies meanwhile as the interim.
 - **Rule-13 sells.** A risk exit, an owner exit, an agent-scoped flatten and a triggered protective,
   watchdog or bound exit are sized min(Lᵢ, N) (§5.5), never held by a deficit. Each is clipped to
   N less the instrument's working sells, never refused while that is above 0.
@@ -1043,7 +1045,8 @@ What follows from them:
     is alerted once per episode. Working openings are not cancelled by it.
   - It ends when R ≥ 0: an owner buy, a release of any agent's lots (DEC-2354), or the account
     switch's close.
-  - A shortfall below the instrument's quantity increment is no deficit.
+  - Only this hold treats a deficit below the instrument's quantity increment as none. Sᵢ and Pᵢ
+    use D exactly.
 - **Per-agent risk.** Each agent's equity and limits are computed on its own lots (mandate spec
   §5.2), never on N or R.
 
