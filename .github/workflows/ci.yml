@@ -643,7 +643,9 @@ jobs:
   # makes a machine without them fail the run, and MANDATE_CELL_REQUIRED an API that cannot be
   # asked, rather than either reading "not run". It holds no secret. Not required, as `cell-demo`
   # is not; it starts for the cell jobs' changes and for any change under `web/`. It restores
-  # `cell-demo`'s cache and saves none of its own.
+  # `cell-demo`'s cache and saves none of its own. MANDATE_DEMO_LOOP_ELSEWHERE leaves the research
+  # loop's links, and their waits, to `cell-demo`, which runs the same scenario and reads them, so
+  # this job's web drive fits its ten minutes without dropping a part (DEC-464).
   cell-demo-web:
     needs: select
     if: needs.select.outputs.cell_web == 'true'
@@ -654,6 +656,7 @@ jobs:
     env:
       MANDATE_CELL_REQUIRED: "1"
       MANDATE_DEMO_WEB_REQUIRED: "1"
+      MANDATE_DEMO_LOOP_ELSEWHERE: "1"
       NEXT_TELEMETRY_DISABLED: "1"
       DO_NOT_TRACK: "1"
     steps:
