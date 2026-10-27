@@ -370,7 +370,8 @@ locals {
     AllowUsers debug
     SSHD
     ${local.debug_boot}
-    systemctl try-restart ssh.service || true
+    sshd -t
+    systemctl try-restart ssh.service
     install -d -m 0700 /etc/mandate-runner
     umask 077
     cat > /etc/mandate-runner/app.pem <<'PEM'

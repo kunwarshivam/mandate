@@ -189,6 +189,9 @@ each replace the droplets, so do it while `CI_RUNNER` is unset (§7).
    tofu apply
    ```
 
+   Check that the address is your own, for example against your router's page. Behind a shared or
+   carrier-grade NAT, one address is everyone behind it; use another network then.
+
    The plan adds one inbound rule (TCP 22 from your address) and replaces the three droplets.
    The window takes both variables or neither, and refuses any range wider than one address.
 2. **Wait about 30 minutes**, for the new droplets to boot and start looping, then for each
@@ -206,8 +209,9 @@ each replace the droplets, so do it while `CI_RUNNER` is unset (§7).
 3. **Paste back to the agents** the output of those commands. It holds the runner's and the
    manager's console output, which names no secret: the runner's one-job configuration is passed
    as an argument and never printed. **Never paste** anything from `/etc/mandate-runner/`
-   (`app.pem` is the App's private key), the droplets' user data, your DigitalOcean token or
-   your state passphrase. If a line ever shows a key or a token, stop and rotate it.
+   (`app.pem` is the App's private key), the droplets' user data, your DigitalOcean token, your
+   state passphrase, or the output of `docker inspect`, `docker ps --no-trunc` or `ps` with
+   arguments, which show the runner's single-use registration. If a line ever shows a key or a token, stop and rotate it.
 4. **Shut the window the same day:** run `tofu apply` again with both variables unset
    (`unset TF_VAR_debug_ssh_key TF_VAR_debug_ssh_cidr`). The plan removes the rule and replaces
    the droplets. Then revoke the token.
