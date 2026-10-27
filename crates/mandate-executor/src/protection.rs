@@ -15,6 +15,7 @@ use crate::batch::Batch;
 use crate::error::ExecutorError;
 use crate::fold::single_holder;
 use crate::gate::available;
+use crate::holders;
 use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
@@ -551,8 +552,9 @@ fn unsent(state: &ExecutorState, intent: &IntentId, ladder: Ladder) -> Result<Qt
 }
 
 /// DEC-410 item 4: what `intent`'s next rung sends, of the `left` its stepped rung left unsold:
-/// what its remainder counts now ([`remainders`]), and for a switch's flatten no more than the
-/// agent's sub-ledger now (DEC-2360 item 1). A shorter rung is journaled `ProtectionChanged
+/// what its remainder counts now ([`remainders`]), for a switch's flatten no more than the
+/// agent's sub-ledger now (DEC-2360 item 1), and for a discretionary exit no more than its agent's
+/// sell authority leaves (DEC-2849 I3, [`holders::rung_room`]). A shorter rung is journaled `ProtectionChanged
 /// rung_short`, with what it does not send and why; with nothing to send, that record ends the
 /// ladder, so it never sends later into a position bought afresh.
 fn sendable(
@@ -565,7 +567,12 @@ fn sendable(
         .into_iter()
         .find(|(owner, _)| owner == intent)
         .map_or(Qty::ZERO, |(_, counts)| counts);
-    let sends = flatten_room(&batch.view, intent, counts)?;
+    let sends = holders::rung_room(
+        &batch.view,
+        instrument,
+        intent,
+        flatten_room(&batch.view, intent, counts)?,
+    )?;
     if sends < left {
         let pairs = vec![
             ("intent_id", text(intent.0.0.clone())),
@@ -9524,17 +9531,21 @@ mod sequence_tests {
             .collect()
     }
 
-    /// `agent-b`'s passive exit of 4 placed at 0 while `agent-a`'s marketable exit of 3 still
-    /// waits on its own acknowledged opening (§5.3 rule 5): the placement is sized around the
-    /// waiting exit (4 + 3 of stop over ten shares) and hands the sequence on.
+    /// `agent-a`'s passive exit of 4 of its ten shares placed at 0 while `agent-b`'s marketable
+    /// risk exit of 3 still waits on its own acknowledged opening (§5.3 rule 5): the placement is
+    /// sized around the waiting exit (4 + 3 of stop over ten shares) and hands the sequence on. The
+    /// discretionary exit is the holder's, as DEC-2849 I3 requires.
     fn placed_around_a_waiting_exit(
         ports: &Ports<'_>,
     ) -> Result<(Executor, Vec<Effect>), ExecutorError> {
-        let mut executor = protected_with_an_opening(ports, "agent-a", true)?;
-        let passive = sell_as("agent-b", EXIT, "4", "160", Purpose::DiscretionaryExit)?;
+        let mut executor = protected_with_an_opening(ports, "agent-b", true)?;
+        let passive = sell_as("agent-a", EXIT, "4", "160", Purpose::DiscretionaryExit)?;
         let asked = executor.run(passive, ports)?;
         assert_eq!(actions(&asked), vec!["passive_start"]);
-        let waiting = executor.run(sell(SECOND, "3", "139", Purpose::RiskExit)?, ports)?;
+        let waiting = executor.run(
+            sell_as("agent-b", SECOND, "3", "139", Purpose::RiskExit)?,
+            ports,
+        )?;
         assert_eq!(cancels(&waiting), vec![BUY, OCO]);
         assert_eq!(submitted(&waiting), 0);
         let placed = executor.run(cancel_accepted(OCO), ports)?;
@@ -14963,7 +14974,7 @@ mod sequence_tests {
         let handed = [
             ("intent_id", text(EXIT)),
             ("entry", text("md-held-1")),
-            ("agent_id", text("agent-b")),
+            ("agent_id", text("agent-a")),
             ("stop", text("140")),
             ("take_profit", text("170")),
         ];
@@ -16260,8 +16271,8 @@ mod remainder_pins {
         ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
     };
     use crate::types::{
-        AccountRef, AccountScope, AgentId, Effect, EventId, Mode, Order, OrderState, Purpose,
-        RiskClock, WorkspaceId, WriterEpoch,
+        AccountRef, AccountScope, AgentId, Effect, EventId, IntentBody, Mode, Order, OrderState,
+        Purpose, RiskClock, WorkspaceId, WriterEpoch,
     };
 
     const SEQUENCE: &str = "01JABCDEFGHJKMNPQRSTV00010";
@@ -16300,7 +16311,7 @@ mod remainder_pins {
         }
     }
 
-    /// Ten AAPL held and a live risk exit of 3 by `agent-c`, beside `agent-a`'s sequence whose
+    /// Ten AAPL held, all `agent-d`'s lots, and a live risk exit of 3 by `agent-c`, beside `agent-a`'s sequence whose
     /// stepped rung left 5 unsold ([`SEQUENCE`]) and `lone_agent`'s lone ladder, parked where
     /// `parked` is set, whose stepped rung left 4 unsold ([`LONE`]). [`SEQUENCE`]'s id sorts first.
     fn two_ladders(lone_agent: &str, parked: bool) -> Result<ExecutorState, ExecutorError> {
@@ -16313,6 +16324,7 @@ mod remainder_pins {
         state
             .positions
             .insert(aapl.clone(), SignedQty::parse("10")?);
+        crate::holders::bought(&mut state, "agent-d", &aapl, "10")?;
         for order in [
             sell(SEQUENCE, "agent-a", "5", OrderState::Canceled)?,
             sell(LONE, lone_agent, "4", OrderState::Canceled)?,
@@ -16537,6 +16549,46 @@ mod remainder_pins {
                 "deny",
                 "{mode:?}: resumed, the parked 2 count again and nothing is left"
             );
+        }
+        Ok(())
+    }
+
+    /// DEC-2849 I3 on a ladder's next rung: `agent-a`'s discretionary exit stepped a rung with 5
+    /// unsold, but `agent-a` holds 3 of the 10 (`agent-d` the other 7), so the next rung sends 3,
+    /// journaled short. The same ladder as a risk exit sends its 5 (I4).
+    #[test]
+    fn a_discretionary_rung_sends_no_more_than_its_agents_authority() -> Result<(), ExecutorError> {
+        let aapl = InstrumentId::new("AAPL")?;
+        for (purpose, sent) in [(Purpose::DiscretionaryExit, "3"), (Purpose::RiskExit, "5")] {
+            let mut state = two_ladders("agent-b", false)?;
+            state
+                .orders
+                .remove(&ClientOrderId::parse("md-bought-agent-d-AAPL")?);
+            crate::holders::bought(&mut state, "agent-a", &aapl, "3")?;
+            crate::holders::bought(&mut state, "agent-d", &aapl, "7")?;
+            state.bodies.insert(
+                intent(SEQUENCE),
+                IntentBody::Order {
+                    instrument: aapl.clone(),
+                    side: Side::Sell,
+                    qty: Qty::parse("10")?,
+                    limit: None,
+                    purpose,
+                    protection: None,
+                },
+            );
+            let (sends_, short) = sends(&state, &[(SEQUENCE, "5")])?;
+            assert_eq!(
+                sends_,
+                vec![(SEQUENCE.to_owned(), Qty::parse(sent)?)],
+                "{purpose:?}"
+            );
+            let expected_short = if sent == "5" {
+                Vec::new()
+            } else {
+                vec![(SEQUENCE.to_owned(), sent.to_owned())]
+            };
+            assert_eq!(short, expected_short, "{purpose:?}");
         }
         Ok(())
     }

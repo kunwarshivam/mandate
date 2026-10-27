@@ -1660,15 +1660,44 @@ pub(crate) mod tests {
         })
     }
 
+    /// Ten AAPL bought and filled by `agent-a`'s order, so they are its lots (DEC-2849).
     fn filled_ten(executor: &mut Executor) -> Result<(), ExecutorError> {
+        executor.commit_one(
+            "OrderSubmitted",
+            object(vec![
+                ("client_order_id", Value::Str("md-ten".to_owned())),
+                ("agent", Value::Str("agent-a".to_owned())),
+                ("instrument", Value::Str("AAPL".to_owned())),
+                ("side", Value::Str("buy".to_owned())),
+                ("qty", Value::Str("10".to_owned())),
+                ("limit", Value::Str("150".to_owned())),
+                ("purpose", Value::Str("open".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
         executor.commit_one(
             "FillApplied",
             object(vec![
                 ("fill_id", Value::Str("f-0".to_owned())),
+                ("client_order_id", Value::Str("md-ten".to_owned())),
                 ("instrument", Value::Str("AAPL".to_owned())),
                 ("side", Value::Str("buy".to_owned())),
                 ("qty_gross", Value::Str("10".to_owned())),
                 ("price", Value::Str("150".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
+        executor.commit_one(
+            "OrderStateChanged",
+            object(vec![
+                ("client_order_id", Value::Str("md-ten".to_owned())),
+                ("state", Value::Str("filled".to_owned())),
                 (
                     "risk_clock",
                     crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
