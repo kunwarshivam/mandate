@@ -1364,7 +1364,7 @@ ESTABLISHED_V2 = rec(
 VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "StreamOpened"): (1,),
     ("acct", "IntentReceived"): (1, 2),
-    ("acct", "GateDecided"): (1, 2),
+    ("acct", "GateDecided"): (1, 2, 3),
     ("acct", "OrderSubmitted"): (1, 2),
     ("acct", "OrderRequestRecorded"): (1,),
     ("acct", "ProtectionChanged"): (1, 2),
@@ -1460,6 +1460,13 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "IntentReceived", 2): rec(*INTENT_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "GateDecided", 1): GATE_V1,
     ("acct", "GateDecided", 2): rec(*GATE_V1.fields, ("risk_clock", RISK_CLOCK)),
+    ("acct", "GateDecided", 3): rec(
+        *GATE_V1.fields,
+        ("sized_qty", opt(DEC)),
+        ("parked", opt(BOOL)),
+        ("held_long", opt(BOOL)),
+        ("risk_clock", RISK_CLOCK),
+    ),
     ("acct", "OrderSubmitted", 1): SUBMITTED_V1,
     ("acct", "OrderSubmitted", 2): rec(*SUBMITTED_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "OrderRequestRecorded", 1): COMPANION,
@@ -2090,6 +2097,29 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             clauses.reverse()
         wrong = next((m for m, ok in clauses if not ok), None)
         rule("245", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "GateDecided" and draft["schema_version"] == 3:
+        # Rules 313 to 315 (DEC-2848): the executor's own members, each only where it writes it.
+        sized = p["sized_qty"]
+        allow = p["verdict"] == "allow" or "rule.313.allow" in skip
+        positive = sized is None or normalize_decimal(sized) is None or Decimal(sized) > 0 or "rule.313.positive" in skip
+        rule("313", sized is None or (allow and positive), "schema", "payload.sized_qty")
+        held_long = p["held_long"]
+        rule(
+            "314",
+            held_long is None
+            or ((held_long is True or "rule.314.true" in skip) and (p["verdict"] == "hold" or "rule.314.hold" in skip)),
+            "schema",
+            "payload.held_long",
+        )
+        parked = p["parked"]
+        sessions = ("session_closed",) if "rule.315.closed_only" in skip else ("session_closed", "session_unknown")
+        parked_ok = parked is None or (
+            (parked is True or "rule.315.true" in skip)
+            and p["verdict"] == "hold"
+            and (p["reason_code"] in sessions or "rule.315.reason" in skip)
+            and (held_long is True or "rule.315.held_long" in skip)
+        )
+        rule("315", parked_ok, "schema", "payload.parked")
     if event_type == "ConnectionRequested" and draft["schema_version"] == 2:
         oauth = p["credential"] == "oauth"
         breadth = p["breadth"]

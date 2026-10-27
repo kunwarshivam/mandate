@@ -19,7 +19,9 @@ use mandate_risk::{
 use crate::batch::config_refs;
 use crate::error::ExecutorError;
 use crate::payload::{object, text};
-use crate::ports::{BindingGateInput, BindingGateRequest, BindingGateSource, Ports};
+use crate::ports::{
+    BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource, Ports,
+};
 use crate::protection::{between_rungs, rests};
 use crate::state::ExecutorState;
 use crate::types::{
@@ -385,7 +387,55 @@ pub(crate) fn account_stream_checks(
 /// the local decision because §9.1 does not read those missing inputs for a limit denial and rule
 /// 13 forbids converting the absence into a denial, a snapshot whose references do not bind
 /// included (DEC-2034 item 2).
+///
+/// A decision no binding run bound to references, an exit's or a local denial's, is journaled
+/// under the deployment's (`BindingGateSource::config_refs`): journal spec §9 refuses a
+/// `GateDecided` without all five, and with it the batch that receives the intent (DEC-2846).
+/// Where the deployment reads none, or its mandate reference is not the agent's version in force,
+/// the decision is [`ExecutorError::BindingGateInputMissing`]: the intent is held and alerted, and
+/// decided again at the next pass, never journaled in a form the journal refuses.
 pub(crate) fn binding_checks(
+    state: &ExecutorState,
+    proposal: &Proposal<'_>,
+    pass: GatePass,
+    ports: &Ports<'_>,
+    source: Option<&dyn BindingGateSource>,
+) -> Result<PartialGateDecision, ExecutorError> {
+    let mut decision = bound_checks(state, proposal, pass, ports, source)?;
+    if decision.config_refs.is_empty() {
+        decision.config_refs = deployed_refs(source, ports, proposal.agent, proposal.instrument)?;
+    }
+    Ok(decision)
+}
+
+/// The references a gate record of `agent`'s on `instrument` names when no binding run bound it:
+/// the deployment's, its mandate the version `agent`'s port resolves (DEC-2846);
+/// [`ExecutorError::BindingGateInputMissing`] when they do not read.
+pub(crate) fn deployed_refs(
+    source: Option<&dyn BindingGateSource>,
+    ports: &Ports<'_>,
+    agent: &AgentId,
+    instrument: &InstrumentId,
+) -> Result<Object, ExecutorError> {
+    let deployed = source
+        .and_then(|source| source.config_refs(agent, instrument))
+        .ok_or(ExecutorError::BindingGateInputMissing)?;
+    agent_refs(&deployed, ports, agent)
+}
+
+/// Whether a gate record of `agent`'s on `instrument` can name its references now
+/// ([`deployed_refs`]): an exit the executor raises itself waits, alerted, while they do not read,
+/// since its intent could be neither journaled nor gated (DEC-2846).
+pub(crate) fn configured(
+    source: Option<&dyn BindingGateSource>,
+    ports: &Ports<'_>,
+    agent: &AgentId,
+    instrument: &InstrumentId,
+) -> bool {
+    deployed_refs(source, ports, agent, instrument).is_ok()
+}
+
+fn bound_checks(
     state: &ExecutorState,
     proposal: &Proposal<'_>,
     pass: GatePass,
@@ -447,27 +497,28 @@ fn bound_refs(
     ports: &Ports<'_>,
     agent: &AgentId,
 ) -> Result<Object, ExecutorError> {
+    agent_refs(&snapshot.config_refs, ports, agent)
+}
+
+/// `refs` as a gate record's `config_refs`, every one present and the mandate's the version
+/// `agent`'s port resolves; [`ExecutorError::BindingGateInputMissing`] otherwise.
+fn agent_refs(
+    refs: &BindingGateConfigRefs,
+    ports: &Ports<'_>,
+    agent: &AgentId,
+) -> Result<Object, ExecutorError> {
     let Some(mandate_version) = ports.mandates.version(agent) else {
         return Err(ExecutorError::BindingGateInputMissing);
     };
-    if snapshot.config_refs.mandate_version.as_deref() != Some(mandate_version.0.as_str()) {
+    if refs.mandate_version.as_deref() != Some(mandate_version.0.as_str()) {
         return Err(ExecutorError::BindingGateInputMissing);
     }
     config_refs(&[
-        ("fee_config", snapshot.config_refs.fee_config.as_deref()),
-        (
-            "trading_calendar",
-            snapshot.config_refs.trading_calendar.as_deref(),
-        ),
-        (
-            "instrument_snapshot",
-            snapshot.config_refs.instrument_snapshot.as_deref(),
-        ),
-        ("rule_set", snapshot.config_refs.rule_set.as_deref()),
-        (
-            "mandate_version",
-            snapshot.config_refs.mandate_version.as_deref(),
-        ),
+        ("fee_config", refs.fee_config.as_deref()),
+        ("trading_calendar", refs.trading_calendar.as_deref()),
+        ("instrument_snapshot", refs.instrument_snapshot.as_deref()),
+        ("rule_set", refs.rule_set.as_deref()),
+        ("mandate_version", refs.mandate_version.as_deref()),
     ])
 }
 
@@ -556,13 +607,11 @@ fn evaluate_binding(
     partial.verdict = verdict;
     partial.held = held;
     partial.deferred = deferred;
-    partial.sized = match (
+    partial.sized = binding_size(
+        decision.verdict == Verdict::Allow,
         partial.sized,
         decision.pacing.as_ref().map(|pacing| pacing.qty),
-    ) {
-        (Some(local), Some(binding)) => Some(local.min(binding)),
-        (local, binding) => local.or(binding),
-    };
+    );
     partial.binding = Some(BindingEvidence {
         checks: decision.checks,
         data_profile: snapshot.data_profile,
@@ -573,6 +622,20 @@ fn evaluate_binding(
         paced_limit: decision.pacing.map(|pacing| pacing.limit_price),
     });
     Ok(partial)
+}
+
+/// The quantity a binding decision sizes its order to: the smaller of the local size beside the
+/// exit ladders (DEC-410 item 3) and the binding pacing's, on an allow only. A binding deny, hold
+/// or defer sizes nothing, so its record names no `sized_qty`, which journal rule 313 admits only
+/// on an allow (DEC-2848).
+fn binding_size(allowed: bool, local: Option<Qty>, paced: Option<Qty>) -> Option<Qty> {
+    if !allowed {
+        return None;
+    }
+    match (local, paced) {
+        (Some(local), Some(paced)) => Some(local.min(paced)),
+        (local, paced) => local.or(paced),
+    }
 }
 
 fn origin(purpose: Purpose) -> Origin {
@@ -1164,6 +1227,25 @@ mod remainder_tests {
                 "{mode:?}"
             );
             assert_eq!(whole.crowded_out().verdict_name(), "allow", "{mode:?}");
+        }
+        Ok(())
+    }
+
+    /// DEC-2848, the review of #2820: a binding decision sizes only an allow, to the smaller of
+    /// the local and the paced quantities; a binding deny, hold or defer of an exit the account
+    /// stream sized names no size, since journal rule 313 refuses one on any other verdict.
+    #[test]
+    fn a_binding_decision_sizes_only_an_allow() -> Result<(), ExecutorError> {
+        let (six, four) = (Qty::parse("6")?, Qty::parse("4")?);
+        for (local, paced, sized) in [
+            (Some(six), Some(four), Some(four)),
+            (Some(four), Some(six), Some(four)),
+            (Some(six), None, Some(six)),
+            (None, Some(four), Some(four)),
+            (None, None, None),
+        ] {
+            assert_eq!(super::binding_size(true, local, paced), sized);
+            assert_eq!(super::binding_size(false, local, paced), None);
         }
         Ok(())
     }

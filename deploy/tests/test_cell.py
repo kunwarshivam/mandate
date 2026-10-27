@@ -2204,17 +2204,32 @@ def test_the_second_manager_is_bound_as_the_first_for_its_own_workspace():
 
 
 @pytest.mark.parametrize("tier", ["dev", "ci", "staging", "production"])
-def test_the_second_manager_runs_only_in_a_dev_or_ci_cell(tier: str):
-    """DEC-2070 item 4: the chart renders the second manager in a dev or ci cell and refuses it at
-    any other tier."""
+def test_the_second_manager_runs_only_in_a_dev_or_ci_cell_or_staging(tier: str):
+    """DEC-2070 item 4, DEC-2080: with the model gateway named, as every image names it, the chart
+    renders the second manager in a dev, ci or staging cell and refuses it in production."""
     done = helm(
         CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
         "--set", f"deploymentTier={tier}", "--set", f"deployManager.researchWorkspace={RESEARCH_WORKSPACE}",
     )
-    if tier in ("dev", "ci"):
+    if tier in ("dev", "ci", "staging"):
         assert done.returncode == 0, done.stderr
     else:
         assert done.returncode != 0 and "runs only in a dev or ci cell" in done.stderr, done.stderr
+
+
+def test_staging_runs_the_second_manager_only_beside_the_model_gateway():
+    """DEC-2080: staging's research agent spends only through the model gateway's meter, so without
+    the gateway the chart refuses the second manager there, while a dev cell still renders it."""
+    for tier, renders in (("staging", False), ("dev", True)):
+        done = helm(
+            CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+            "--set", f"deploymentTier={tier}", "--set", f"deployManager.researchWorkspace={RESEARCH_WORKSPACE}",
+            "--set", "images.model-gateway=",
+        )
+        if renders:
+            assert done.returncode == 0, done.stderr
+        else:
+            assert done.returncode != 0 and "beside the model gateway" in done.stderr, done.stderr
 
 
 @pytest.mark.parametrize(

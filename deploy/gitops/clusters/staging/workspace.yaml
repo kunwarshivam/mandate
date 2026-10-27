@@ -45,3 +45,8 @@ spec:
     founding:
       enabled: false
       member: 01KDEM0000000000000000000F
+    # The dispatcher's one email recipient (DEC-2080): an opaque recipient id, never an address,
+    # mailed only through the recorded transport, which sends nothing while the general email
+    # footer is unresolved (DEC-2511, DEC-2516).
+    dispatcher:
+      recipient: founder

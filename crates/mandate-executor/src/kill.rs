@@ -12,6 +12,7 @@ use mandate_num::{Price, Qty, SignedQty};
 use crate::batch::Batch;
 use crate::codec::{initiator_name, mode_name, purpose_name};
 use crate::error::ExecutorError;
+use crate::holders;
 use crate::ids::{ClientOrderId, FLATTEN, IntentId};
 use crate::intent::{order_tif, received};
 use crate::payload::{int, text};
@@ -545,7 +546,10 @@ fn deferred(batch: &Batch<'_, '_>, instrument: &InstrumentId, purpose: Purpose) 
 /// `k-<switch>-<n>` (DEC-485 item 2), once nothing the switch reaches is live in the instrument
 /// any more, the session admits the sell, the agent holds lots there, and a limit can be named.
 /// One that waits only for a limit is journaled `exit_unpriced` and alerted, once per switch and
-/// instrument (DEC-2361).
+/// instrument (DEC-2361), and so is one whose intent cannot be journaled yet because its agent's
+/// mandate version or its deployment's references do not read (DEC-2846): the journal takes no
+/// other record of it. Either waits alone: the switch, its mode and its cancels are applied
+/// (`AGENTS.md` rule 13), and the close is raised at the first pass that can name it.
 /// Raised earlier, the gate would count the sells still pending their cancel and deny the flatten
 /// `sell_exceeds_available`.
 pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
@@ -590,7 +594,13 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
             ) else {
                 continue;
             };
-            let Some(limit) = limit else {
+            let configured = crate::gate::configured(
+                batch.binding_gate(),
+                batch.ports,
+                &switch.agent,
+                instrument,
+            );
+            let (Some(limit), true) = (limit, configured) else {
                 if !switch.unpriced.contains(instrument) {
                     let alerted = changed_by(
                         batch,
@@ -626,37 +636,16 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
     Ok(())
 }
 
-/// §5.5: exactly the agent's sub-ledger quantity, its attributed lots (§8.1: its own orders'
-/// fills, buys net of sells), less what it released to the owner (DEC-2354), capped at the long
-/// position, so another agent's, the owner's unattributed and the owner's released shares are
-/// untouched.
+/// §5.5: exactly the agent's sub-ledger quantity, min(Lᵢ, N) on DEC-2849's holders ([`holders`]):
+/// its own orders' fills, less what it released to the owner (DEC-2354) and what an account
+/// switch's close took from it, capped at the long position, so another agent's, the owner's
+/// unattributed and the owner's released shares are untouched.
 pub(crate) fn sub_ledger(
     view: &ExecutorState,
     agent: &AgentId,
     instrument: &InstrumentId,
 ) -> Result<Qty, ExecutorError> {
-    let mut lots = SignedQty::ZERO;
-    for order in view.orders.values() {
-        if &order.instrument == instrument && order.agent.as_ref() == Some(agent) {
-            let filled = SignedQty::from(order.filled_qty);
-            lots = lots.checked_add(match order.side {
-                Side::Buy => filled,
-                Side::Sell => filled.negated(),
-            })?;
-        }
-    }
-    let released = view
-        .released
-        .get(&(agent.clone(), instrument.clone()))
-        .copied()
-        .unwrap_or(Qty::ZERO);
-    let lots = lots.checked_add(SignedQty::from(released).negated())?;
-    let open = view
-        .positions
-        .get(instrument)
-        .copied()
-        .unwrap_or(SignedQty::ZERO);
-    Ok(lots.min(open).max(SignedQty::ZERO).abs())
+    holders::sub_ledger(view, agent, instrument)
 }
 
 /// The switch and close a flatten intent's id names, `k-<switch>-<n>`, or `None` for any other.

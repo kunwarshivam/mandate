@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.23 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md); v0.20 amendment [DEC-2302](../project/decisions/DEC-2302.md) item 7; v0.21 amendment [DEC-2807](../project/decisions/DEC-2807.md); v0.22 amendment [DEC-2815](../project/decisions/DEC-2815.md); v0.23 amendment [DEC-2824](../project/decisions/DEC-2824.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.24 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md); v0.20 amendment [DEC-2302](../project/decisions/DEC-2302.md) item 7; v0.21 amendment [DEC-2807](../project/decisions/DEC-2807.md); v0.22 amendment [DEC-2815](../project/decisions/DEC-2815.md); v0.23 amendment [DEC-2824](../project/decisions/DEC-2824.md); v0.24 amendment [DEC-2849](../project/decisions/DEC-2849.md), positions are per agent); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)); US equities on Robinhood for the founder's one live order ([DEC-529](../project/decisions/DEC-529.md)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
@@ -465,7 +465,8 @@ the one stop-limit (DEC-529 item 2).
      orders alone and goes whole. Nothing is done to the remainders beside it: each counts only
      what the position and the open sells leave it (§5.6 step 5), so the sell takes their room as
      it goes, and the room comes back if the sell ends unsold before a ladder sends.
-   - **A discretionary exit** is sized to what the open sells and the counted remainders leave.
+   - **A discretionary exit** is sized to what the open sells and the counted remainders leave, and
+     never beyond the agent's sell authority Sᵢ (§8.1; DEC-2849, the founder's).
      With nothing left, it is denied `sell_exceeds_available`, but only once it is otherwise
      releasable now: one held `session_closed`, `session_unknown` or `exit_unpriced` keeps its
      hold and is decided again when it is released. The denial is terminal: the intent is not
@@ -590,12 +591,22 @@ item 7, resolving DEC-441 item 17 for DEC-529's one order):
   `client_order_id`, never by cancel-all (§5.5). Protection for any quantity that remains is then
   re-placed as after any exit.
 
+**Shared positions** ([DEC-2849](../project/decisions/DEC-2849.md)).
+- Every share the agents hold is protected once. Each agent's resting legs cover its Pᵢ (§8.1),
+  with an OCO's legs counted once.
+- The broker-side sum of resting sell legs never exceeds N once the executor has read the change.
+  When Pᵢ falls below an agent's resting coverage, those legs are resized by cancel and re-place,
+  an unprotected interval bounded by `max_unprotected_s`.
+- A triggered stop, watchdog or bound exit is its leg's agent's exit, sized min(Lᵢ, N) (DEC-2849
+  items 7 and 8, lane X). Until then, this section's instrument-wide exit sequence stands, and it
+  re-places every other holder's protection after the exit.
+
 ### 5.5 Kill switch
 
 | Scope | Cancel | Close |
 |---|---|---|
 | Account or workspace | Broker cancel-all endpoint (`Unknown` orders included) | Broker close-position endpoint per instrument |
-| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, and any unattributed protective leg (§5.4) or unattributed watchdog exit (§2.3) in an instrument it closes, each by `client_order_id`, confirming each; never cancel-all. The agent's ladders between rungs are plans, not orders: the agent is stopped first, so a parked one counts nothing, the flatten goes whole, and any other counts only what the flatten leaves (§5.6 step 5) | Sell exactly the agent's sub-ledger quantity; never close-position (other agents' and the owner's unattributed shares are untouched) |
+| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, and any unattributed protective leg (§5.4) or unattributed watchdog exit (§2.3) in an instrument it closes, each by `client_order_id`, confirming each; never cancel-all. The agent's ladders between rungs are plans, not orders: the agent is stopped first, so a parked one counts nothing, the flatten goes whole, and any other counts only what the flatten leaves (§5.6 step 5) | Sell exactly the agent's sub-ledger quantity, min(Lᵢ, N) (§8.1), never held by a deficit; never close-position (other agents' and the owner's unattributed shares are untouched) |
 
 Sequence: apply the final mode first (`paused` for mandate limits; `stopped` for an owner kill
 switch) → cancel → confirm → close (market orders only in the regular session outside auction
@@ -1006,6 +1017,39 @@ and rounding to 12 places cannot pass B. The condition is on the rounded removal
 one: B = 0.000000000000527 reduced by 19 of 20 rounds the removal to 0.000000000001, so the new
 basis is 0, not −0.000000000000473.
 
+**Holders** ([DEC-2849](../project/decisions/DEC-2849.md); the founder's ruling: positions are
+per agent). Several agents, and the owner, may hold one instrument in one account. For one
+instrument (long-only):
+- N is the executor's position, derived from the journal and reconciled with the broker's by §11.
+- Lᵢ ≥ 0 is agent i's lots:
+  - the quantity its own orders' fills received (net of a crypto buy's asset fee);
+  - less its own sells and its releases (DEC-2354);
+  - scaled by a split;
+  - reduced by an account-scoped switch's close, after R and in Pᵢ's order, as it fills;
+  - an owner exit naming the agent comes out of its lots, one naming no agent out of R.
+- R = N − Σᵢ Lᵢ is the owner's residual.
+- The deficit is D = max(0, −R).
+
+What follows from them:
+- **Sell authority.** Agent i's discretionary and new sells never exceed Sᵢ = max(0, Lᵢ − D), the
+  founder's "every agent shrinks by full gap" (DEC-2849 item 6). A discretionary exit for more is
+  trimmed to what Sᵢ leaves, and with nothing left is refused `sell_exceeds_available`, read on Sᵢ.
+  That reading of rule 13 is the founder's (DEC-2849, confirmed 2026-10-27).
+- **Rule-13 sells.** A risk exit, an owner exit, an agent-scoped flatten and a triggered protective,
+  watchdog or bound exit are sized min(Lᵢ, N) (§5.5), never held by a deficit. Each is clipped to
+  N less the instrument's working sells, never refused while that is above 0.
+- **Protective coverage.** Pᵢ charges the deficit once, largest Lᵢ first and ties by agent id, so
+  Σᵢ Pᵢ = min(N, Σᵢ Lᵢ) (§5.4).
+- **A deficit holds openings and never an exit.**
+  - While D > 0, every opening in the instrument is held (`attribution_deficit`, §9.1), and the owner
+    is alerted once per episode. Working openings are not cancelled by it.
+  - It ends when R ≥ 0: an owner buy, a release of any agent's lots (DEC-2354), or the account
+    switch's close.
+  - Only this hold treats a deficit below the instrument's quantity increment as none. Sᵢ and Pᵢ
+    use D exactly.
+- **Per-agent risk.** Each agent's equity and limits are computed on its own lots (mandate spec
+  §5.2), never on N or R.
+
 Fees are period expenses; **net realized = gross realized − fees.** Tax lots are recorded
 separately (first-in first-out, fees included in lot basis); the broker's Form 1099-B is
 authoritative.
@@ -1100,7 +1144,10 @@ including allows, is journaled with the checks evaluated.
 4. Order constraints (§5.3, in list order), then §5.4's two checks on an opening in an instrument
    with resting protective orders: an unattributed leg holds it (`protection_unattributed`), which
    comes first as the more specific cause, then a plain risk-increasing order is denied
-   (`add_blocked_by_protective_order`)
+   (`add_blocked_by_protective_order`). An opening in an instrument with an attribution deficit
+   (§8.1) is held before either (`attribution_deficit`, [DEC-2849](../project/decisions/DEC-2849.md);
+   registering the code, like `protection_unattributed`, is Proposed (founder), and the hold applies
+   meanwhile as the conservative interim)
 5. Mark freshness and price collar (§8.2, §9.6)
 6. Market-conduct controls (§9.6, including the close window and the mandate's orders per day)
 7. Buying power (§9.5), then gross exposure (§9.3: the account at 1×, then the agent's mandate

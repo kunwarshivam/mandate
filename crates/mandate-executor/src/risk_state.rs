@@ -450,10 +450,10 @@ pub struct AccountRiskFold<'c> {
     /// crosses midnight. A mark does not move it (§5.4 starts the day at a tick).
     clock: UtcNanos,
     /// The one instrument the risk state's position is (DEC-2310 item 1): the opening's, or the first
-    /// a mark names when the opening is flat. `RiskState` holds a single position, so a row naming
-    /// another instrument is one it cannot step without moving this one's E on the other's price,
-    /// and the view becomes unreadable. Ids are compared exactly, as the journal's canonical asset
-    /// ids.
+    /// a mark names when the opening is flat. `RiskState` holds a single position, so an own fill or
+    /// fee naming another instrument is one it cannot step without moving this one's E on the other's
+    /// price, and the view becomes unreadable; another instrument's mark steps nothing (DEC-2849
+    /// item 2). Ids are compared exactly, as the journal's canonical asset ids.
     instrument: Option<String>,
     /// Each `OrderRequestRecorded` not yet named by its `OrderSubmitted`, by event id, with the
     /// agent it names (journal spec rule 45).
@@ -692,9 +692,10 @@ impl<'c> AccountRiskFold<'c> {
         }
     }
 
-    /// Binds the fold to the first instrument a row names, and refuses to decide a row naming any
-    /// other (DEC-2308 item 4), or a first one that is not a canonical asset id (DEC-2314): openings
-    /// wait, exits go on (`AGENTS.md` rule 13).
+    /// Binds the fold to the first instrument a row names, and refuses to decide a fill or fee naming
+    /// any other (DEC-2308 item 4; a bound fold's mark of another never reaches here, DEC-2849 item
+    /// 2), or a first one that is not a canonical asset id (DEC-2314): openings wait, exits go on
+    /// (`AGENTS.md` rule 13).
     fn bind(&mut self, instrument: &str) -> Result<(), UnreadableCause> {
         match &self.instrument {
             Some(bound) if bound != instrument => Err(UnreadableCause::RefusedToDecide),
@@ -887,7 +888,7 @@ impl<'c> AccountRiskFold<'c> {
             .and_then(Value::as_str)
             .ok_or(UnreadableCause::Undecodable)?;
         let clock = whole_second(payload, "risk_clock")?;
-        if clock < self.opened_at {
+        if clock < self.opened_at || self.others(instrument) {
             return Ok(Vec::new());
         }
         self.bind(instrument)?;
@@ -928,6 +929,15 @@ impl<'c> AccountRiskFold<'c> {
             .is_some_and(|order| self.own.contains(order))
     }
 
+    /// Whether `instrument` is another than the one the fold is bound to: its mark steps nothing,
+    /// since the agent's lots hold none of it (DEC-2849 item 2, DEC-2804 item 9). An unbound fold
+    /// binds as before (DEC-2310 item 1).
+    fn others(&self, instrument: &str) -> bool {
+        self.instrument
+            .as_deref()
+            .is_some_and(|bound| bound != instrument)
+    }
+
     /// Whether a mark in `session` counts (mandate spec §5.2): any for crypto, the regular session
     /// for equities.
     fn counts(&self, session: MarketSession) -> bool {
@@ -938,7 +948,7 @@ impl<'c> AccountRiskFold<'c> {
     /// item 2). Whose a fill or fee is, and whether a mark is from before the opening instant, is
     /// decided where the row is, as a priced fold decides it: another's fill or fee and an earlier
     /// mark step nothing and are not held. A counted sane mark of the bound instrument prices the
-    /// held inputs (item 3); a mark naming another instrument is refused at once (item 4).
+    /// held inputs (item 3); a mark naming another instrument steps nothing (DEC-2849 item 2).
     fn stepped(
         &mut self,
         row: &StoredEvent,
@@ -959,8 +969,8 @@ impl<'c> AccountRiskFold<'c> {
             if whole_second(payload, "risk_clock")? < self.opened_at {
                 return Ok(Vec::new());
             }
-            if self.instrument.as_deref() != Some(instrument) {
-                return Err(UnreadableCause::RefusedToDecide);
+            if self.others(instrument) {
+                return Ok(Vec::new());
             }
             let session = payload
                 .get("session")

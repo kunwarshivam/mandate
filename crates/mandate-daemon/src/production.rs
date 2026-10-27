@@ -21,6 +21,7 @@ use mandate_research::{ReplayError, Replayed, ThesisRecord, replay_theses};
 use mandate_risk::GateConfig;
 use mandate_runtime::{EventDraft, FlattenLeg, FlattenPlan, FlattenPlanner, FlattenRequest};
 use mandate_spec::document::Mandate;
+use mandate_time::UtcNanos;
 
 use crate::bars::BarsReader;
 use crate::runtime::{Refs, Wiring};
@@ -173,7 +174,9 @@ impl Facts {
     /// Folds the rows past the fold's head for their stream, in order. Nothing is folded before
     /// the account is followed. A row whose body does not parse is folded with no payload, so one
     /// of a type the fold reads holds every later opening, and one of any other type changes
-    /// nothing. The agent stream's rows are not folded: its thesis records are kept, in order, for
+    /// nothing. Each row is folded with the instant the store recorded it, which the counters an
+    /// opening on a traded account reads time its fills by, as the executor folds them (DEC-2833
+    /// item 3). The agent stream's rows are not folded: its thesis records are kept, in order, for
     /// [`Facts::replayed`], one whose body does not parse kept as unreadable.
     pub fn feed(&self, rows: &[StoredEvent]) {
         let Ok(mut fed) = self.0.try_borrow_mut() else {
@@ -210,7 +213,8 @@ impl Facts {
                 event_type: &stored.event_type,
                 payload: &payload,
             };
-            let _refused_rows_hold_every_later_opening = journaled.fold(row);
+            let recorded = UtcNanos::parse_rfc3339(&stored.recorded_at).ok();
+            let _refused_rows_hold_every_later_opening = journaled.fold_recorded(row, recorded);
         }
     }
 

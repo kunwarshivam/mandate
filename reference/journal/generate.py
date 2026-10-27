@@ -35,6 +35,7 @@ import account
 import account_activity
 import fill_applied
 import exit_intents
+import gate_v3
 import account_clock
 import news
 import account_closes
@@ -4282,6 +4283,7 @@ def render(
     account_clock_section: dict,
     news_section: dict,
     exit_intents_section: dict,
+    gate_v3_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -4347,6 +4349,7 @@ def render(
             "snapshot_prior_close": snapshots_section,
             "news_stream": news_section,
             "exit_intents": exit_intents_section,
+            "gate_v3": gate_v3_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -4443,6 +4446,7 @@ def main(argv: list[str] | None = None) -> int:
     snapshots_section = snapshots.build_section()
     news_section = news.build_section()
     exit_intents_section = exit_intents.build_section()
+    gate_v3_section = gate_v3.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -4530,6 +4534,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += fill_applied.run_mutants(fill_applied_section)
     problems += exit_intents.check_section(exit_intents_section)
     problems += exit_intents.run_mutants(exit_intents_section)
+    problems += gate_v3.check_section(gate_v3_section)
+    problems += gate_v3.run_mutants(gate_v3_section)
     problems += account_clock.check_section(account_clock_section)
     problems += account_clock.run_mutants(account_clock_section)
     problems += snapshots.check_section(snapshots_section)
@@ -4634,6 +4640,7 @@ def main(argv: list[str] | None = None) -> int:
         account_clock_section,
         news_section,
         exit_intents_section,
+        gate_v3_section,
     )
     reread = yaml.safe_load(rendered)
     canonical_self_test()
@@ -4696,6 +4703,7 @@ def main(argv: list[str] | None = None) -> int:
         or account_activity.check_section(reread["account_activity"])
         or fill_applied.check_section(reread["fill_applied"])
         or exit_intents.check_section(reread["exit_intents"])
+        or gate_v3.check_section(reread["gate_v3"])
         or account_clock.check_section(reread["account_clock"])
         or snapshots.check_section(reread["snapshot_prior_close"])
         or news.check_section(reread["news_stream"])
@@ -4821,6 +4829,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(exit_intents_section['invalid_drafts'])} invalid and {len(exit_intents_section['valid_drafts'])} valid "
         f"exit intent drafts, {len(exit_intents.VALIDATOR_MUTANTS)} validator and "
         f"{len(exit_intents.vector_mutants(exit_intents_section))} vector mutants caught; "
+        f"{len(gate_v3_section['invalid_drafts'])} invalid and {len(gate_v3_section['valid_drafts'])} valid "
+        f"version-3 GateDecided drafts, {len(gate_v3.VALIDATOR_MUTANTS)} validator and "
+        f"{len(gate_v3.vector_mutants(gate_v3_section))} vector mutants caught; "
         f"{len(account_clock_section['invalid_drafts'])} invalid and {len(account_clock_section['valid_drafts'])} valid "
         f"account ClockAdvanced drafts, {len(account_clock.VALIDATOR_MUTANTS)} validator and "
         f"{len(account_clock.vector_mutants(account_clock_section))} vector mutants caught; "
