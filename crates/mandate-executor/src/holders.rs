@@ -459,8 +459,8 @@ mod tests {
     use crate::payload::{object, text};
     use crate::state::{AccountSwitch, ExecutorState};
     use crate::types::{
-        AccountRef, AccountScope, AgentId, EventId, Order, OrderState, Purpose, RiskClock, Seq,
-        WorkspaceId,
+        AccountRef, AccountScope, AgentId, EventId, Mode, Order, OrderState, Purpose, RiskClock,
+        Seq, WorkspaceId,
     };
 
     const AGENTS: u8 = 3;
@@ -869,10 +869,20 @@ mod tests {
                         let at = instrument(*i).map_err(fail)?;
                         let left = oracle.position().saturating_sub(oracle.working);
                         for a in 0..AGENTS {
+                            let want = n(oracle.lots(a).min(oracle.position()).min(left))?;
                             prop_assert_eq!(
                                 super::rule_13_size(&run.view, &agent(a), &at).map_err(fail)?,
-                                n(oracle.lots(a).min(oracle.position()).min(left))?,
+                                want,
                                 "the rule-13 size of {} in {}",
+                                a,
+                                i
+                            );
+                            let mut stopped = run.view.clone();
+                            stopped.modes.insert(agent(a), Mode::Stopped);
+                            prop_assert_eq!(
+                                super::rule_13_size(&stopped, &agent(a), &at).map_err(fail)?,
+                                want,
+                                "stopped, {}'s exit still goes, sized to its own lots in {}",
                                 a,
                                 i
                             );
@@ -887,7 +897,8 @@ mod tests {
     /// DEC-2849 item 7, I4, by hand: an agent's own rule-13 exit sells its own lots and no more.
     /// Its 10 beside the owner's 4 is 10, never 14; after the owner sells 4 outside Mandate it is
     /// the 6 left; beside another agent's 4, each is its own; and with 2 sold and 3 still working
-    /// from its 10, it is the 5 not yet selling.
+    /// from its 10, it is the 5 not yet selling. An agent stopped or killed while its stop fires is
+    /// sized the same: its exit still goes, sized to its own lots (rule 13).
     #[test]
     #[ignore = "pending E7-watchdog-shared-position"]
     fn a_rule_13_exit_sells_its_own_lots_and_no_more() -> Result<(), ExecutorError> {
@@ -919,6 +930,13 @@ mod tests {
                     super::rule_13_size(&run.view, &agent(a), &at)?,
                     shares(size)?,
                     "{events:?}: agent {a}"
+                );
+                let mut stopped = run.view.clone();
+                stopped.modes.insert(agent(a), Mode::Stopped);
+                assert_eq!(
+                    super::rule_13_size(&stopped, &agent(a), &at)?,
+                    shares(size)?,
+                    "{events:?}: agent {a}, stopped"
                 );
             }
         }
