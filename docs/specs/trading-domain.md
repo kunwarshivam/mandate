@@ -590,23 +590,22 @@ item 7, resolving DEC-441 item 17 for DEC-529's one order):
   `client_order_id`, never by cancel-all (§5.5). Protection for any quantity that remains is then
   re-placed as after any exit.
 
-**Shared positions** ([DEC-2849](../project/decisions/DEC-2849.md)): each holder's protection and
-exits are its own, bounded by its sellable quantity Sᵢ (§8.1).
-- Each agent's resting protective legs, together with its working sells, never exceed Sᵢ, and
-  across agents never exceed N.
-- When Sᵢ falls below an agent's resting protective quantity (an owner sale outside Mandate, a
-  release, or a corporate action), the executor resizes those legs to Sᵢ, by cancel and re-place,
-  before any new protective order in the instrument.
-- A triggered stop, watchdog or bound exit on a position more than one holder holds is one exit
-  per agent holder, each sized to that agent's Sᵢ and naming it. It never sells the owner's
-  residual.
+**Shared positions** ([DEC-2849](../project/decisions/DEC-2849.md)).
+- Every share the agents hold is protected once. Each agent's resting legs cover its Pᵢ (§8.1),
+  with an OCO's legs counted once.
+- The broker-side sum of resting sell legs never exceeds N once the executor has read the change.
+  When Pᵢ falls below an agent's resting coverage, those legs are resized by cancel and re-place,
+  an unprotected interval bounded by `max_unprotected_s`.
+- A triggered stop, watchdog or bound exit is its leg's agent's exit, sized min(Lᵢ, N) (DEC-2849
+  items 7 and 8, lane X). Until then, this section's instrument-wide exit sequence stands, and it
+  re-places every other holder's protection after the exit.
 
 ### 5.5 Kill switch
 
 | Scope | Cancel | Close |
 |---|---|---|
 | Account or workspace | Broker cancel-all endpoint (`Unknown` orders included) | Broker close-position endpoint per instrument |
-| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, and any unattributed protective leg (§5.4) or unattributed watchdog exit (§2.3) in an instrument it closes, each by `client_order_id`, confirming each; never cancel-all. The agent's ladders between rungs are plans, not orders: the agent is stopped first, so a parked one counts nothing, the flatten goes whole, and any other counts only what the flatten leaves (§5.6 step 5) | Sell exactly the agent's sellable quantity Sᵢ (§8.1, its sub-ledger quantity less any deficit); never close-position (other agents' and the owner's unattributed shares are untouched) |
+| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, and any unattributed protective leg (§5.4) or unattributed watchdog exit (§2.3) in an instrument it closes, each by `client_order_id`, confirming each; never cancel-all. The agent's ladders between rungs are plans, not orders: the agent is stopped first, so a parked one counts nothing, the flatten goes whole, and any other counts only what the flatten leaves (§5.6 step 5) | Sell exactly the agent's sub-ledger quantity, min(Lᵢ, N) (§8.1), never held by a deficit; never close-position (other agents' and the owner's unattributed shares are untouched) |
 
 Sequence: apply the final mode first (`paused` for mandate limits; `stopped` for an owner kill
 switch) → cancel → confirm → close (market orders only in the regular session outside auction
@@ -1017,25 +1016,29 @@ and rounding to 12 places cannot pass B. The condition is on the rounded removal
 one: B = 0.000000000000527 reduced by 19 of 20 rounds the removal to 0.000000000001, so the new
 basis is 0, not −0.000000000000473.
 
-**Holders and sellable quantity** ([DEC-2849](../project/decisions/DEC-2849.md); the founder's
-ruling: positions are per agent). Several agents, and the owner, may hold one instrument in one
-account. The broker nets one position per instrument, N, and the executor attributes it to holders.
-- **Partition.** N = Σᵢ Lᵢ + R.
-  - Lᵢ ≥ 0 is agent i's lots: its own orders' fills (an order is the agent's its
-    `OrderRequestRecorded` names), buys net of sells, less what it released to the owner
-    (DEC-2354).
-  - R is the owner's residual: every unattributed fill (§11), every release, and every
-    corporate-action residual.
-- **Once.** Each fill and partial fill moves exactly one holder, once, by its fill id: its order's
-  agent, or else the owner's residual.
-- **Sellable quantity.** Agent i's sellable quantity is Sᵢ = max(0, Lᵢ − D), where
-  D = max(0, −R) is the **deficit**. So Σᵢ Sᵢ ≤ N, and no agent's sell can take another holder's
-  shares (§5.4, §5.5).
-- **A deficit holds openings and never an exit.** While D > 0, usually because the owner sold
-  outside Mandate shares the agents hold, every holder of the instrument has its openings in it
-  held (`attribution_deficit`, alerted once). Exits are sized by Sᵢ, and nothing is paused.
-  - Whether a deficit should instead be charged to the agents pro rata, or to the last buyer, is
-    Proposed (founder; DEC-2849 item 6).
+**Holders** ([DEC-2849](../project/decisions/DEC-2849.md); the founder's ruling: positions are
+per agent). Several agents, and the owner, may hold one instrument in one account. For one
+instrument (long-only):
+- N is the executor's position, derived from the journal and reconciled with the broker's by §11.
+- Lᵢ ≥ 0 is agent i's lots:
+  - the quantity its own orders' fills received (net of a crypto buy's asset fee);
+  - less its own sells and its releases (DEC-2354);
+  - scaled by a split;
+  - set to 0 by an account-scoped switch's close.
+- R = N − Σᵢ Lᵢ is the owner's residual.
+- The deficit is D = max(0, −R).
+
+What follows from them:
+- **Sell authority.** Agent i's discretionary and new sells never exceed Sᵢ = max(0, Lᵢ − D), the
+  founder's "every agent shrinks by full gap" (DEC-2849 item 6).
+- **Rule-13 sells.** A risk exit, an owner exit, an agent-scoped flatten and a triggered protective,
+  watchdog or bound exit are sized min(Lᵢ, N) (§5.5), never held by a deficit.
+- **Protective coverage.** Pᵢ charges the deficit once, largest Lᵢ first and ties by agent id, so
+  Σᵢ Pᵢ = min(N, Σᵢ Lᵢ) (§5.4).
+- **A deficit holds openings and never an exit.**
+  - While D > 0, every opening in the instrument is held (`attribution_deficit`, §9.1), and the owner
+    is alerted once per episode. Working openings are not cancelled by it.
+  - It ends when R ≥ 0: an owner buy, a release, or the account switch's close.
 - **Per-agent risk.** Each agent's equity and limits are computed on its own lots (mandate spec
   §5.2), never on N or R.
 

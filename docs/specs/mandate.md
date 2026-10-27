@@ -752,7 +752,8 @@ stream** fold (journal spec §2). It belongs to the agent and survives restarts 
   places). The agent sub-ledger is the account ledger filtered to the agent's orders. Several agents
   may hold the same instrument in one account (trading spec §8.1, DEC-2849). Each agent's E is
   computed on its own lots alone, and another agent's fills and fees, the owner's activity, and a
-  mark for an instrument other than the agent's own step nothing in its risk state.
+  mark for an instrument other than the one its fold is bound to step nothing in its risk state
+  (single-instrument v1).
 - **An allocation change** of Δ is applied when its version applies, **after** time has been
   settled at that instant (§5.2), with no time passing:
   1. **Rejected** if Δ > 0 while any limit is latched; if E + Δ ≤ 0; if E + Δ < the agent's gross
