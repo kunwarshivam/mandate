@@ -1,6 +1,4 @@
-# E7-2 follow-up: one latest-quote read for every marked instrument
-
-- **E7-2zq (Proposed; Alpaca connector)** As an owner, I want my agents' instruments marked
+- **E7-2zq (Proposed, M7; EX)** As an owner, I want my agents' instruments marked
   within the market-data host's request limit however many they hold, so that a large universe
   never reads its quotes too slowly to keep its marks fresh. Since DEC-2844 the executor marks
   each instrument every half of its quote staleness limit, 5 s for the reviewed 10 s, and

@@ -1106,7 +1106,8 @@ fn ticked(every: u64, spacing: u64) -> Result<Vec<String>, Error> {
 }
 
 /// DEC-2844: with a 10 s limit and ticks a second apart, marking at half the limit keeps a held
-/// instrument's mark fresh at every tick, so `stale_mark` is never set; the same ticks with marks
+/// instrument's mark fresh at every tick, so `stale_mark` is never set, nor with ticks 9 s apart,
+/// a second under the limit; the same 1 s ticks with marks
 /// 15 s apart, as before DEC-2844, set and clear it on every cycle (the rehearsal's flapping).
 #[test]
 fn marks_at_half_the_limit_never_let_a_held_instrument_go_stale() -> Result<(), Error> {
@@ -1115,6 +1116,11 @@ fn marks_at_half_the_limit_never_let_a_held_instrument_go_stale() -> Result<(), 
     assert!(
         !half.iter().any(|row| row == "no_sane_mark"),
         "marked every 5 s against a 10 s limit: {half:?}"
+    );
+    let below = ticked(5, 9)?;
+    assert!(
+        below.contains(&"mark".to_owned()) && !below.iter().any(|row| row == "no_sane_mark"),
+        "ticks 9 s apart age the mark to 9 s, under the 10 s limit: {below:?}"
     );
     let fifteen = ticked(15, 1)?;
     assert!(
