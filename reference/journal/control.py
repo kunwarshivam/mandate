@@ -32,6 +32,7 @@ from common import (
     ENVELOPE,
     LIQUIDITY_PAIR,
     ULID,
+    INTENT,
     INT,
     REF,
     STEP_UP,
@@ -1281,7 +1282,7 @@ GATE_CHECK_IDS = tuple(
     "mark_freshness collar conduct buying_power gross_exposure day_trade_budget".split()
 )
 INTENT_V1 = rec(
-    ("intent_id", ULID),
+    ("intent_id", INTENT),
     ("agent_id", IDENT_T),
     ("instrument_id", STR),
     ("side", STR),
@@ -1292,7 +1293,7 @@ INTENT_V1 = rec(
     ("purpose", STR),
 )
 GATE_V1 = rec(
-    ("intent_id", ULID),
+    ("intent_id", INTENT),
     ("verdict", STR),
     ("reason_code", opt(STR)),
     ("data_profile", STR),
@@ -1312,7 +1313,7 @@ SUBMITTED_V1 = rec(
 )
 COMPANION = rec(
     ("agent_id", IDENT_T),
-    ("intent_id", opt(ULID)),
+    ("intent_id", opt(INTENT)),
     ("purpose", one_of("open", "increase", "discretionary_exit", "risk_exit", "owner_exit", "protective", "flatten")),
     ("extended_hours", BOOL),
     ("stop_price", opt(DEC)),
@@ -1331,7 +1332,7 @@ PROTECTION_CHANGED = rec(
     ("qty", opt(DEC)),
     ("stop", opt(DEC)),
     ("take_profit", opt(DEC)),
-    ("intent_id", opt(ULID)),
+    ("intent_id", opt(INTENT)),
     ("bracket", opt(STR)),
     ("entry", opt(STR)),
     ("agent_id", opt(IDENT_T)),
