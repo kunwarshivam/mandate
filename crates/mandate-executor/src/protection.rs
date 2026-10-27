@@ -8,7 +8,7 @@ use mandate_domain::MarketSession;
 use mandate_num::{Adverse, Fraction, Price, Qty, Rounding, ShareIncrement, SignedQty, TickRule};
 
 use mandate_accounting::Side;
-use mandate_canon::Value;
+use mandate_canon::{Object, Value};
 use mandate_time::{Date, ExchangeCalendar};
 
 use crate::batch::Batch;
@@ -22,7 +22,7 @@ use crate::intent::{
 use crate::kill::{confirmed_bid, flatten_closes, flatten_room, floor_of, is_flatten, mode_holds};
 use crate::listing::query_unknown;
 use crate::orders::{StateEvidence, legal, transition};
-use crate::payload::{int, text};
+use crate::payload::{int, object, text};
 use crate::ports::Ports;
 use crate::session::{
     Venue, closed_hold, extended_hours, same_session, stops_trigger_since, venue,
@@ -1288,16 +1288,26 @@ fn park(
     if parked {
         return Ok(());
     }
+    let session = object(vec![
+        ("id", text("session")),
+        ("result", text("fail")),
+        ("inputs", Value::Object(Object::new())),
+        ("computed", Value::Object(Object::new())),
+    ])?;
     let pairs = vec![
         ("intent_id", text(intent.0.0.clone())),
         ("verdict", text("hold")),
         ("reason_code", text(reason)),
+        ("data_profile", text("account_stream_only")),
+        ("quotes_used", Value::Array(Vec::new())),
+        ("marks_used", Value::Array(Vec::new())),
+        ("checks", Value::Array(vec![session])),
         ("parked", Value::Bool(true)),
         ("held_long", Value::Bool(true)),
-        ("evaluation", text("account_stream_only")),
     ];
     let refs = crate::intent::intent_refs(batch, intent)?;
-    let decided = batch.journal_with_refs("GateDecided", None, refs, pairs)?;
+    let decided =
+        batch.journal_with_refs("GateDecided", None, refs, crate::intent::own_members(pairs))?;
     batch.notify(decided, OwnerAlertKind::ExitStalled);
     Ok(())
 }
@@ -8178,6 +8188,56 @@ mod sequence_tests {
             .map(|interval| (interval.started_at.secs(), interval.alerted))
     }
 
+    /// `draft` through the journal's own `Draft::parse` in the envelope the shell appends it in,
+    /// under a fixed ULID, its references and payload as drafted: the refusal, if any (DEC-2848).
+    pub(super) fn refused_by_the_journal(draft: &crate::types::EventDraft) -> Option<String> {
+        let body = format!(
+            r#"{{"envelope_version":1,"environment":"paper",
+            "event_id":"01J8Z3M4000000000000000001","stream_id":"acct:ws_1:ACCT1",
+            "event_type":"{}","schema_version":{},
+            "event_time":"2026-09-21T14:00:00.000000000Z","clock_source":"local",
+            "causation_id":null,"correlation_id":null,
+            "actor":{{"kind":"system","id":"executor","version":"0.1.0",
+            "build":"sha256:{}"}},"config_refs":{},"payload":{},
+            "artifact_refs":[],"pii_refs":[]}}"#,
+            draft.event_type,
+            draft.schema_version,
+            "3".repeat(64),
+            String::from_utf8_lossy(&mandate_canon::to_canonical(&Value::Object(
+                draft.config_refs.clone()
+            ))),
+            String::from_utf8_lossy(&mandate_canon::to_canonical(&own_intent_as_ulid(
+                &draft.payload
+            )))
+        );
+        mandate_journal::Draft::parse(body.as_bytes())
+            .err()
+            .map(|refusal| format!("{} at {}", refusal.reason.code(), refusal.path))
+    }
+
+    /// `payload` with the executor's own intent, `w-{event}` or `k-{switch}-{n}` (§2.3), naming a
+    /// fixed ULID for the test's event id, as the shell's ids are ULIDs and the test's are not.
+    fn own_intent_as_ulid(payload: &Value) -> Value {
+        let mut payload = payload.clone();
+        if let Value::Object(members) = &mut payload
+            && let Some(Value::Str(intent)) = members.get("intent_id").cloned()
+        {
+            let ulid = "01J8Z3M4000000000000000002";
+            let named = if intent.starts_with(crate::ids::WATCHDOG) {
+                Some(format!("{}{ulid}", crate::ids::WATCHDOG))
+            } else if let Some(rest) = intent.strip_prefix(crate::ids::FLATTEN) {
+                rest.rsplit_once('-')
+                    .map(|(_, n)| format!("{}{ulid}-{n}", crate::ids::FLATTEN))
+            } else {
+                None
+            };
+            if let (Some(named), Ok(key)) = (named, mandate_canon::Key::new("intent_id")) {
+                members.insert(key, Value::Str(named));
+            }
+        }
+        payload
+    }
+
     /// Each `OrderAbandoned` in `effects` that the journal's own `Draft::parse` refuses (X10,
     /// DEC-2803), with its refusal: none, once §9.5 closes the record.
     fn abandonments_refused(effects: &[Effect]) -> Vec<String> {
@@ -10794,6 +10854,12 @@ mod sequence_tests {
                             "{intent}'s gate record names {} references, never the five every \
                              GateDecided must (journal spec §9, DEC-2846)",
                             draft.config_refs.len()
+                        ));
+                    }
+                    if let Some(refused) = refused_by_the_journal(draft) {
+                        return Err(format!(
+                            "{intent}'s gate record is refused by the journal: {refused} \
+                             (journal spec §9.5, DEC-2848)"
                         ));
                     }
                     if draft.payload.get("parked") == Some(&Value::Bool(true)) {
@@ -13864,6 +13930,14 @@ mod sequence_tests {
                 vec![reason],
                 "journaled with its reason"
             );
+            for effect in &long {
+                if let Effect::Journal(draft) = effect
+                    && draft.event_type == "GateDecided"
+                {
+                    assert_eq!(draft.payload.get("held_long"), Some(&Value::Bool(true)));
+                    assert_eq!(refused_by_the_journal(draft), None, "{reason}: DEC-2848");
+                }
+            }
             let again = executor.run(Input::Tick(RiskClock::from_secs(start + 200)), &ports)?;
             assert!(!alerts(&again).contains(&"exit_stalled"), "once: {reason}");
             let clear = if reason == "session_closed" {

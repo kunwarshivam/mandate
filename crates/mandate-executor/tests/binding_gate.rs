@@ -286,6 +286,10 @@ fn gate_draft(draft: &EventDraft) -> Map<String, Json> {
         convert(&mandate_canon::Value::Object(draft.config_refs.clone())),
     );
     body.insert("payload".to_owned(), convert(&draft.payload));
+    body.insert(
+        "schema_version".to_owned(),
+        Json::from(draft.schema_version),
+    );
     body
 }
 
