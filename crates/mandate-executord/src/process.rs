@@ -1986,9 +1986,10 @@ fn tick_of(row: &StoredEvent) -> Option<UtcNanos> {
 /// The alert and intent for a handoff the core refused for a missing binding-gate input, which the
 /// process holds rather than stop on (DEC-2033 item 5): `opening_held` for an opening or an
 /// increase, and `exit_held` for an exit, which sounds while the agent's mandate version or its
-/// deployment's references for the instrument do not read (DEC-2846). No other input meets it: a
-/// kill switch's flatten waits for its configuration in the core, and an input's re-gates hold
-/// their intent alone. Any other refusal is `None`: it stops the process.
+/// deployment's references for the instrument do not read (DEC-2846). No other input meets it:
+/// the exits the core raises itself, a kill switch's flatten, the stop watchdog's and the bound's,
+/// wait for their configuration, alerted, with nothing of them journaled, and an input's re-gates
+/// hold their intent alone. Any other refusal is `None`: it stops the process.
 fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> {
     let (ExecutorError::BindingGateInputMissing, Input::Intent(handoff)) = (error, input) else {
         return None;

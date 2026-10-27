@@ -593,14 +593,12 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
             ) else {
                 continue;
             };
-            let configured = batch.ports.mandates.version(&switch.agent).is_some()
-                && crate::gate::deployed_refs(
-                    batch.binding_gate(),
-                    batch.ports,
-                    &switch.agent,
-                    instrument,
-                )
-                .is_ok();
+            let configured = crate::gate::configured(
+                batch.binding_gate(),
+                batch.ports,
+                &switch.agent,
+                instrument,
+            );
             let (Some(limit), true) = (limit, configured) else {
                 if !switch.unpriced.contains(instrument) {
                     let alerted = changed_by(

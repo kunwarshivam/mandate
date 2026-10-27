@@ -423,6 +423,18 @@ pub(crate) fn deployed_refs(
     agent_refs(&deployed, ports, agent)
 }
 
+/// Whether a gate record of `agent`'s on `instrument` can name its references now
+/// ([`deployed_refs`]): an exit the executor raises itself waits, alerted, while they do not read,
+/// since its intent could be neither journaled nor gated (DEC-2846).
+pub(crate) fn configured(
+    source: Option<&dyn BindingGateSource>,
+    ports: &Ports<'_>,
+    agent: &AgentId,
+    instrument: &InstrumentId,
+) -> bool {
+    deployed_refs(source, ports, agent, instrument).is_ok()
+}
+
 fn bound_checks(
     state: &ExecutorState,
     proposal: &Proposal<'_>,

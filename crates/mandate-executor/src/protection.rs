@@ -94,14 +94,16 @@ fn spent(since: RiskClock, fired: RiskClock) -> bool {
 /// a passive take-profit (#385 round 1, blocker 1). With no sane observation to take it from, the
 /// watchdog does not fire: the breach persists, the stop keeps resting and nothing is cancelled,
 /// so no exit goes and none waits, and §5.6 step 4's alert, which is for an exit at its fallback
-/// or held, has nothing to report; the next sane quote prices it. One watchdog runs per
+/// or held, has nothing to report; the next sane quote prices it. Nor does it fire while its
+/// agent's mandate version or deployment references do not read: it waits, alerted once, and
+/// fires at the first step that reads them ([`awaits_configuration`], DEC-2846). One watchdog runs per
 /// instrument at a time: none fires while a sequence runs there or a watchdog intent waits, and a
 /// breach it has fired on fires no second time. It exits what the protection still covers, never more than the long
 /// position (§5.4's "the held quantity").
 pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let now = batch.at().secs();
     let wait = batch.ports.config.stop_watchdog_s;
-    let due: Vec<InstrumentId> = batch
+    let due: Vec<(InstrumentId, RiskClock)> = batch
         .view
         .breaches
         .iter()
@@ -117,15 +119,18 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
                 && !batch.view.exiting.contains_key(*instrument)
                 && !watching(&batch.view, instrument)
         })
-        .map(|(instrument, _)| instrument.clone())
+        .map(|(instrument, since)| (instrument.clone(), *since))
         .collect();
-    for instrument in due {
+    for (instrument, since) in due {
         let held = covered(&batch.view, &instrument)?.min(long(&batch.view, &instrument)?);
         let (true, Some(limit)) = (held > Qty::ZERO, lowest_sane(&batch.view, &instrument)) else {
             continue;
         };
         let agent = single_holder(&batch.view, &instrument)
             .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
+        if awaits_configuration(batch, &instrument, &agent, since)? {
+            continue;
+        }
         let pairs = vec![
             ("agent", text(agent.0.clone())),
             ("qty", text(held.to_string())),
@@ -778,6 +783,33 @@ pub(crate) fn fallback(
     let alerted = changed(batch, instrument, "exit_unpriced", pairs)?;
     batch.notify(alerted, OwnerAlertKind::ExitStalled);
     Ok(())
+}
+
+/// DEC-2846: whether the executor's own exit of `agent`'s in `instrument` waits because its
+/// configuration does not read ([`crate::gate::configured`]). Its intent could be neither
+/// journaled nor gated, so the caller journals nothing of it, leaves what raised it unspent and
+/// decides again at the next step; every other exit, protective order and kill switch goes on
+/// (`AGENTS.md` rule 13). The owner is alerted once (`exit_unpriced`) for the breach or interval
+/// that began at `since`.
+fn awaits_configuration(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+    agent: &AgentId,
+    since: RiskClock,
+) -> Result<bool, ExecutorError> {
+    if crate::gate::configured(batch.binding_gate(), batch.ports, agent, instrument) {
+        return Ok(false);
+    }
+    if batch
+        .view
+        .unpriced
+        .get(instrument)
+        .is_none_or(|alerted| *alerted < since)
+    {
+        let alerted = changed(batch, instrument, "exit_unpriced", Vec::new())?;
+        batch.notify(alerted, OwnerAlertKind::ExitStalled);
+    }
+    Ok(true)
 }
 
 fn exits(purpose: Purpose) -> bool {
@@ -1622,6 +1654,10 @@ fn stop_after(
         return Ok(());
     }
     if past_bound(&batch.view, &instrument, entry) {
+        let since = detail.bracket_since.unwrap_or(batch.at());
+        if unprotected_waits(batch, &instrument, entry, since)? {
+            return Ok(());
+        }
         let mut ended = named;
         ended.push(("uncovered", Value::Bool(true)));
         let record = changed(batch, &instrument, "unprotected_end", ended)?;
@@ -2760,11 +2796,13 @@ fn oco(id: ClientOrderId, instrument: &InstrumentId, legs: OcoLegs) -> SubmitOrd
 /// with no OCO or bracket, an interval that names a plain entry whose stop is still not resting by
 /// then also exits the held quantity ([`flatten_unprotected`]) once the entry is terminal, so the
 /// exit covers everything it filled; an entry not yet terminal is cancelled first, and
-/// [`stop_after`] exits what it filled once it ends.
+/// [`stop_after`] exits what it filled once it ends. While that exit's configuration does not
+/// read, neither the bound nor [`stop_after`] journals anything of the interval: the exit waits,
+/// alerted once, and the first step that reads it reaches the bound ([`unprotected_waits`]).
 pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let now = batch.at().secs();
     let limit = batch.ports.config.max_unprotected_s;
-    let due: Vec<(InstrumentId, Option<ClientOrderId>)> = batch
+    let due: Vec<(InstrumentId, Option<ClientOrderId>, RiskClock)> = batch
         .view
         .unprotected
         .iter()
@@ -2773,35 +2811,42 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
                 && !interval.alerted
                 && now.saturating_sub(interval.started_at.secs()) >= limit
         })
-        .map(|interval| (interval.instrument.clone(), interval.bracket.clone()))
+        .map(|interval| {
+            (
+                interval.instrument.clone(),
+                interval.bracket.clone(),
+                interval.started_at,
+            )
+        })
         .collect();
-    for (instrument, entry) in due {
+    for (instrument, entry, since) in due {
         let exiting = batch.view.exiting.contains_key(&instrument);
+        let closing = batch.view.closing_all.contains(&instrument);
+        let plain = entry.filter(|_| !exiting && !closing).and_then(|entry| {
+            let plain = batch
+                .view
+                .details
+                .get(&entry)
+                .and_then(|detail| detail.request.as_ref())
+                .is_some_and(|request| request.bracket.is_none());
+            let state = batch.view.orders.get(&entry).filter(|_| plain)?.state;
+            Some((entry, state))
+        });
+        if let Some((entry, state)) = &plain
+            && state.is_terminal()
+            && unprotected_waits(batch, &instrument, entry, since)?
+        {
+            continue;
+        }
         if exiting {
             end_exits(batch, &instrument)?;
         }
         let alerted = changed(batch, &instrument, "interval_limit", Vec::new())?;
         batch.notify(alerted.clone(), OwnerAlertKind::Protection);
-        let closing = batch.view.closing_all.contains(&instrument);
         if closing {
             protect_at_bound(batch, &instrument)?;
         }
-        let Some(entry) = entry.filter(|_| !exiting && !closing) else {
-            continue;
-        };
-        let plain = batch
-            .view
-            .details
-            .get(&entry)
-            .and_then(|detail| detail.request.as_ref())
-            .is_some_and(|request| request.bracket.is_none());
-        let state = batch
-            .view
-            .orders
-            .get(&entry)
-            .filter(|_| plain)
-            .map(|order| order.state);
-        let Some(state) = state else {
+        let Some((entry, state)) = plain else {
             continue;
         };
         if state.is_terminal() {
@@ -2960,31 +3005,9 @@ fn flatten_unprotected(
     entry: &ClientOrderId,
     record: &EventId,
 ) -> Result<(), ExecutorError> {
-    let Some(order) = batch.view.orders.get(entry).cloned() else {
+    let Some((agent, held, limit)) = unprotected_exit(&batch.view, instrument, entry)? else {
         return Ok(());
     };
-    let stop = order
-        .intent_id
-        .as_ref()
-        .and_then(|intent| batch.view.bodies.get(intent))
-        .and_then(|body| match body {
-            IntentBody::Order { protection, .. } => protection.map(|prices| prices.stop),
-            IntentBody::Flatten(_) => None,
-        });
-    let Some(stop) = stop else {
-        return Ok(());
-    };
-    let held = long(&batch.view, instrument)?
-        .checked_sub(still_selling(&batch.view, instrument)?)
-        .unwrap_or(Qty::ZERO);
-    if held == Qty::ZERO {
-        return Ok(());
-    }
-    let limit = lowest_sane(&batch.view, instrument).unwrap_or(stop);
-    let agent = order
-        .agent
-        .clone()
-        .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
     let tif = order_tif(batch, instrument);
     received(
         batch,
@@ -3003,6 +3026,56 @@ fn flatten_unprotected(
             confirmation: None,
         },
     )
+}
+
+/// What [`flatten_unprotected`] exits for `entry`: its agent, the long position less what exits
+/// already sell, and its limit; none where the entry is unknown, carried no stop, or leaves
+/// nothing to sell.
+fn unprotected_exit(
+    view: &ExecutorState,
+    instrument: &InstrumentId,
+    entry: &ClientOrderId,
+) -> Result<Option<(AgentId, Qty, Price)>, ExecutorError> {
+    let Some(order) = view.orders.get(entry) else {
+        return Ok(None);
+    };
+    let stop = order
+        .intent_id
+        .as_ref()
+        .and_then(|intent| view.bodies.get(intent))
+        .and_then(|body| match body {
+            IntentBody::Order { protection, .. } => protection.map(|prices| prices.stop),
+            IntentBody::Flatten(_) => None,
+        });
+    let Some(stop) = stop else {
+        return Ok(None);
+    };
+    let held = long(view, instrument)?
+        .checked_sub(still_selling(view, instrument)?)
+        .unwrap_or(Qty::ZERO);
+    if held == Qty::ZERO {
+        return Ok(None);
+    }
+    let limit = lowest_sane(view, instrument).unwrap_or(stop);
+    let agent = order
+        .agent
+        .clone()
+        .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
+    Ok(Some((agent, held, limit)))
+}
+
+/// Whether `entry`'s [`flatten_unprotected`] would exit something and waits for its
+/// configuration ([`awaits_configuration`]), so the record that raises it is not journaled yet.
+fn unprotected_waits(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+    entry: &ClientOrderId,
+    since: RiskClock,
+) -> Result<bool, ExecutorError> {
+    match unprotected_exit(&batch.view, instrument, entry)? {
+        Some((agent, ..)) => awaits_configuration(batch, instrument, &agent, since),
+        None => Ok(false),
+    }
 }
 
 /// The bound's end of every exit in `instrument`, since [`settle`] re-places protection only once
@@ -4703,6 +4776,27 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// A deployment whose configuration does not read: no references for any agent's instrument
+    /// (DEC-2846). Its snapshot is the allowing one, which an exit never needs.
+    struct UnreadRefs;
+
+    impl crate::ports::BindingGateSource for UnreadRefs {
+        fn config_refs(
+            &self,
+            _agent: &AgentId,
+            _instrument: &InstrumentId,
+        ) -> Option<crate::ports::BindingGateConfigRefs> {
+            None
+        }
+
+        fn input(
+            &self,
+            request: &crate::ports::BindingGateRequest<'_>,
+        ) -> Option<crate::ports::BindingGateInput> {
+            crate::ports::AllowingBindingGate.input(request)
+        }
+    }
+
     /// The binding gate's allowing snapshot for an exit too, so its decision is binding: what an
     /// exit needs before it may go at the market (DEC-2037 item 4).
     struct BindingExit;
@@ -5626,6 +5720,52 @@ mod sequence_tests {
                 "restart {restart}"
             );
         }
+        Ok(())
+    }
+
+    /// DEC-2846, the review's round 4: a watchdog whose exit's configuration does not read
+    /// journals no watchdog record and hands itself no intent, so the breach is not spent and
+    /// nothing is cancelled; the owner is alerted once that the exit waits (`exit_unpriced`), and
+    /// neither the next tick nor the next quote alerts again. The first tick that reads the
+    /// configuration fires the watchdog as before, its intent the holder's `risk_exit` of the ten.
+    #[test]
+    fn a_watchdog_whose_configuration_does_not_read_waits_alerted_until_it_does()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        let held = executor.run_with(Input::Tick(RiskClock::from_secs(30)), &ports, &UnreadRefs)?;
+        assert!(watchdog_record(&held).is_none(), "{:?}", drafted(&held));
+        assert!(watchdog_intents(&held).is_empty(), "{:?}", drafted(&held));
+        assert!(cancels(&held).is_empty());
+        assert_eq!(
+            actions(&held),
+            vec!["exit_unpriced"],
+            "{:?}",
+            drafted(&held)
+        );
+        assert_eq!(alerts(&held), vec!["exit_stalled"]);
+        for again in [
+            Input::Tick(RiskClock::from_secs(31)),
+            observation(Some(139), None, true, 31)?,
+        ] {
+            let quiet = executor.run_with(again, &ports, &UnreadRefs)?;
+            assert!(actions(&quiet).is_empty(), "{:?}", drafted(&quiet));
+            assert!(alerts(&quiet).is_empty(), "{:?}", alerts(&quiet));
+        }
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(32)), &ports)?;
+        let record = watchdog_record(&fired).ok_or_else(|| missing("the watchdog record"))?;
+        assert_eq!(
+            watchdog_intents(&fired),
+            vec![(
+                format!("w-{record}"),
+                "agent-a".to_owned(),
+                "risk_exit".to_owned(),
+                "10".to_owned()
+            )]
+        );
+        assert_eq!(cancels(&fired), vec![OCO]);
         Ok(())
     }
 

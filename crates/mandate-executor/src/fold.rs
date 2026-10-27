@@ -1640,6 +1640,9 @@ fn protection_changed(
             state.alerted.insert(instrument.clone());
         }
         "expiry_unreplaceable" => {}
+        "exit_unpriced" if cause.is_none() => {
+            state.unpriced.insert(instrument.clone(), at);
+        }
         "exit_unpriced" | "ladder_floor" => {}
         "rung_short" if optional_qty(payload, "sent")? == Some(Qty::ZERO) => {
             let intent = required_text(payload, "intent_id")?;
