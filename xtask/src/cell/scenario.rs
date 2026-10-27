@@ -2695,8 +2695,11 @@ pub enum TradeOutcome {
     NoTools(String),
     Failed(String),
     /// The loop stopped before any approval reached `web/`, and the API, read with the owner's
-    /// session, lists no approval of the agent in any state: the runtime proposed nothing, which
-    /// waits on E15-14's composer, not on `web/`.
+    /// session, lists no approval of the agent in any state: the runtime proposed nothing, not a
+    /// fault of `web/`. The runtime proposes the agent's equity opening only in the regular
+    /// session, outside its close window, on a crossover output that has not expired
+    /// (`mandate-daemon`'s plan; the in-session loop is `runtime.rs`'s
+    /// `the_demo_envelope_decides_asks_and_proposes_once_granted_in_session`, #2637).
     Unproposed(String),
     Ran(web::TradeLoop),
 }
@@ -2878,7 +2881,9 @@ pub fn trade_verdict(outcome: &TradeOutcome, required: Required) -> (&'static st
             "pending",
             format!(
                 "no approval request reached web/ ({why}), and the API lists none of the agent's: \
-                 the runtime proposed nothing, which waits on E15-14's composer"
+                 the runtime proposed nothing. It proposes an equity opening only in the regular \
+                 session, outside its close window, on an unexpired crossover output; read the \
+                 agent's DecisionMade and GateDecided in the journal for why"
             ),
             false,
         ),
