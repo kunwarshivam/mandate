@@ -2666,9 +2666,9 @@ fn rows_from_before_the_deployment_are_not_the_agents() {
     );
 }
 
-/// The opening's own second is the agent's: a mark of another instrument there fails closed, and
-/// on a bound fold a mark before it, of the bound instrument or another, steps nothing before the
-/// instrument is checked (DEC-2804 item 3, DEC-2308 item 4). A mark in that second prices the
+/// The opening's own second is the agent's: on a bound fold a mark before it, of the bound
+/// instrument or another, steps nothing (DEC-2804 item 3), and a mark of another instrument in it
+/// steps nothing too (DEC-2849 item 2). A mark in that second prices the
 /// flat fold, and a fill and a fee there are the agent's (DEC-2834).
 #[test]
 fn the_opening_second_is_the_agents_and_a_bound_fold_skips_earlier_marks() {

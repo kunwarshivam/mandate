@@ -450,10 +450,10 @@ pub struct AccountRiskFold<'c> {
     /// crosses midnight. A mark does not move it (§5.4 starts the day at a tick).
     clock: UtcNanos,
     /// The one instrument the risk state's position is (DEC-2310 item 1): the opening's, or the first
-    /// a mark names when the opening is flat. `RiskState` holds a single position, so a row naming
-    /// another instrument is one it cannot step without moving this one's E on the other's price,
-    /// and the view becomes unreadable. Ids are compared exactly, as the journal's canonical asset
-    /// ids.
+    /// a mark names when the opening is flat. `RiskState` holds a single position, so an own fill or
+    /// fee naming another instrument is one it cannot step without moving this one's E on the other's
+    /// price, and the view becomes unreadable; another instrument's mark steps nothing (DEC-2849
+    /// item 2). Ids are compared exactly, as the journal's canonical asset ids.
     instrument: Option<String>,
     /// Each `OrderRequestRecorded` not yet named by its `OrderSubmitted`, by event id, with the
     /// agent it names (journal spec rule 45).
@@ -692,9 +692,10 @@ impl<'c> AccountRiskFold<'c> {
         }
     }
 
-    /// Binds the fold to the first instrument a row names, and refuses to decide a row naming any
-    /// other (DEC-2308 item 4), or a first one that is not a canonical asset id (DEC-2314): openings
-    /// wait, exits go on (`AGENTS.md` rule 13).
+    /// Binds the fold to the first instrument a row names, and refuses to decide a fill or fee naming
+    /// any other (DEC-2308 item 4; a bound fold's mark of another never reaches here, DEC-2849 item
+    /// 2), or a first one that is not a canonical asset id (DEC-2314): openings wait, exits go on
+    /// (`AGENTS.md` rule 13).
     fn bind(&mut self, instrument: &str) -> Result<(), UnreadableCause> {
         match &self.instrument {
             Some(bound) if bound != instrument => Err(UnreadableCause::RefusedToDecide),
