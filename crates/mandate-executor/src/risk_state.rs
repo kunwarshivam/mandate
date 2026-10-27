@@ -662,7 +662,12 @@ impl<'c> AccountRiskFold<'c> {
                 .any(|owed| owed.causation_id.as_deref() == Some(cause))
         });
         let others_mode = row.event_type == "AgentModeApplied" && !owed_cause;
-        if FOLD_RECORDS.contains(&row.event_type.as_str()) && !others_mode {
+        let others_record = payload
+            .get("agent_id")
+            .or_else(|| payload.get("agent"))
+            .and_then(Value::as_str)
+            .is_some_and(|named| named != self.agent);
+        if FOLD_RECORDS.contains(&row.event_type.as_str()) && !others_mode && !others_record {
             return match self.owed.front() {
                 Some(owed) if reproduces(owed, row, &body) => {
                     self.owed.pop_front();
