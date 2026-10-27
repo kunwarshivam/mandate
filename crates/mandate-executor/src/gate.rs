@@ -774,10 +774,6 @@ mod journal_tests {
     }
 }
 
-/// DEC-160's leg-agent rule fails closed: a broker-created protective leg no agent can be named for
-/// leaves its instrument **held** for openings, never denied, until the leg is attributed or gone;
-/// a reconciliation establishes its presence, not its owner (trading-domain spec §5.4, §9.1 check
-/// 4, before `add_blocked_by_protective_order`). Exits pass (`AGENTS.md` rule 13).
 /// DEC-2849 I6, §8.1: whether `instrument` has an attribution deficit an opening is held for, the
 /// agents' lots exceeding the position by at least the instrument's quantity increment. A deficit
 /// below one whole share of a whole-share instrument (a rounding residue) is none; on a fractional
@@ -795,6 +791,10 @@ fn attribution_deficit(
     })
 }
 
+/// DEC-160's leg-agent rule fails closed: a broker-created protective leg no agent can be named for
+/// leaves its instrument **held** for openings, never denied, until the leg is attributed or gone;
+/// a reconciliation establishes its presence, not its owner (trading-domain spec §5.4, §9.1 check
+/// 4, before `add_blocked_by_protective_order`). Exits pass (`AGENTS.md` rule 13).
 fn unattributed_opening(state: &ExecutorState, instrument: &InstrumentId, adds: bool) -> bool {
     adds && state.orders.values().any(|order| {
         order.agent.is_none()
@@ -1598,7 +1598,7 @@ mod sell_authority_tests {
     }
 
     /// One instrument snapshot of `increment`, everything else as the tests' [`Everything`].
-    struct Grid(ShareIncrement);
+    struct Grid(Option<ShareIncrement>);
 
     impl InstrumentSnapshot for Grid {
         fn asset_class(&self, _instrument: &InstrumentId) -> Option<AssetClass> {
@@ -1606,7 +1606,7 @@ mod sell_authority_tests {
         }
 
         fn increment(&self, _instrument: &InstrumentId) -> Option<ShareIncrement> {
-            Some(self.0)
+            self.0
         }
 
         fn exit_tier(&self, _instrument: &InstrumentId) -> Option<ExitTier> {
@@ -1616,6 +1616,17 @@ mod sell_authority_tests {
 
     /// An opening buy of 1 AAPL by `agent-a` on a `grid` instrument, as its reason code.
     fn opening(state: &ExecutorState, grid: ShareIncrement) -> Result<String, ExecutorError> {
+        adding(state, "agent-a", Purpose::Open, Some(grid))
+    }
+
+    /// A buy of 1 AAPL by `agent` for `purpose` on an instrument of `grid`, as its verdict and
+    /// reason code.
+    fn adding(
+        state: &ExecutorState,
+        agent: &str,
+        purpose: Purpose,
+        grid: Option<ShareIncrement>,
+    ) -> Result<String, ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
             ids: &Ids,
@@ -1627,11 +1638,11 @@ mod sell_authority_tests {
         let decision = account_stream_checks(
             state,
             &Proposal {
-                agent: &AgentId("agent-a".to_owned()),
+                agent: &AgentId(agent.to_owned()),
                 instrument: &InstrumentId::new("AAPL")?,
                 side: Side::Buy,
                 qty: Qty::parse("1")?,
-                purpose: Purpose::Open,
+                purpose,
                 protection: None,
                 limit: Some(mandate_num::Price::parse("150")?),
                 market: false,
@@ -1706,6 +1717,36 @@ mod sell_authority_tests {
             );
         }
         let deficit = holding("6", &[("agent-a", "5"), ("agent-b", "5")])?;
+        let residue = holding("9.5", &[("agent-a", "5"), ("agent-b", "5")])?;
+        for (state, agent, purpose, grid, reason) in [
+            (
+                &deficit,
+                "agent-b",
+                Purpose::Open,
+                Some(ShareIncrement::Whole),
+                "hold attribution_deficit",
+            ),
+            (
+                &deficit,
+                "agent-c",
+                Purpose::Increase,
+                Some(ShareIncrement::Whole),
+                "hold attribution_deficit",
+            ),
+            (
+                &residue,
+                "agent-a",
+                Purpose::Open,
+                None,
+                "hold attribution_deficit",
+            ),
+        ] {
+            assert_eq!(
+                adding(state, agent, purpose, grid)?,
+                reason,
+                "{agent} {purpose:?} {grid:?}: whichever agent's, and with no increment known any deficit"
+            );
+        }
         assert_eq!(
             outcome(ask(&deficit, "agent-a", "5", Purpose::RiskExit)?),
             ("allow", String::new(), None),
