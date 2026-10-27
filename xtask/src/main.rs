@@ -19479,9 +19479,9 @@ mod tests {
         ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == \
         'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}";
 
-    /// DEC-2075: `select` runs on [`RUNNER_GUARD`] and hands it on as its `runner` output, and no
-    /// other line of any workflow names `CI_RUNNER`, so every job that reaches the self-hosted
-    /// runners does so through the one guard: directly, or through `select`'s output.
+    /// DEC-2075, DEC-2076: `select` runs on GitHub's runners and hands [`RUNNER_GUARD`] on as its
+    /// `runner` output, and no other line of any workflow names `CI_RUNNER`, so every job that
+    /// reaches the self-hosted runners does so through `select`'s output of the one guard.
     #[test]
     fn only_the_fork_guard_reaches_the_self_hosted_runners() -> Result<()> {
         let root = repo_root()?;
@@ -19489,8 +19489,8 @@ mod tests {
         let select = workflow_job(&workflow, "select").context("ci.yml has a `select` job")?;
         let has = |want: String| select.iter().any(|line| line.trim() == want);
         assert!(
-            has(format!("runs-on: {RUNNER_GUARD}")),
-            "`select` runs on the guard"
+            has("runs-on: ubuntu-24.04".to_owned()),
+            "`select` runs on GitHub's runners, so no job waits on the self-hosted pool (DEC-2076)"
         );
         assert!(
             has(format!("runner: {RUNNER_GUARD}")),
@@ -19505,16 +19505,15 @@ mod tests {
                 }
                 named = named.saturating_add(1);
                 assert!(
-                    code == format!("runs-on: {RUNNER_GUARD}")
-                        || code == format!("runner: {RUNNER_GUARD}"),
+                    code == format!("runner: {RUNNER_GUARD}"),
                     "{} names CI_RUNNER outside the guard: {code}",
                     path.display()
                 );
             }
         }
         assert_eq!(
-            named, 2,
-            "the guard is written out exactly twice, both in `select`"
+            named, 1,
+            "the guard is written out exactly once, as `select`'s output"
         );
         let allowed_runs_on = [
             "ubuntu-24.04",
@@ -19524,7 +19523,6 @@ mod tests {
             "${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}",
             "${{ needs.select.outputs.runner }}",
             "${{ needs.select.outputs.runner || 'ubuntu-24.04' }}",
-            RUNNER_GUARD,
         ];
         for path in files_by_extension(&root.join(".github/workflows"), &["yml", "yaml"])? {
             for line in fs::read_to_string(&path)?.lines() {
