@@ -20,7 +20,7 @@ use crate::gitops::Environment;
 /// fills; the tests' `RELEASED_NOT_PROMOTED` names each one released but held back, with the overlay value it lacks.
 /// A binary not named here (`mandate-agentd`, `mandate-rh-sim`) is not a chart process yet, and
 /// the simulator never is. A lane that publishes a process's binary adds its row here.
-const CHART_IMAGE_FOR_BINARY: [(&str, &str); 10] = [
+const CHART_IMAGE_FOR_BINARY: [(&str, &str); 9] = [
     ("mandate", "mandate"),
     ("mandate-api-server", "api"),
     ("mandate-deployd", "deploy-manager"),
@@ -30,7 +30,6 @@ const CHART_IMAGE_FOR_BINARY: [(&str, &str); 10] = [
     ("mandate-token-exchange", "token-exchange"),
     ("mandate-scheduler", "scheduler"),
     ("mandate-dispatcher", "dispatcher"),
-    ("mandate-gatewayd", "model-gateway"),
 ];
 
 /// The charts `release.yml` publishes (`HOSTED_CHARTS`), by the name `CHARTS` lists. An overlay
@@ -295,11 +294,18 @@ mod tests {
     /// promoting the image alone would stop the whole workspace release from reconciling
     /// (DEC-2079 item 3). A process moves to [`CHART_IMAGE_FOR_BINARY`] in the change that gives the
     /// overlays its value.
-    const RELEASED_NOT_PROMOTED: [(&str, &str, &str); 1] = [(
-        "mandate-datad",
-        "data",
-        "data.instruments, a recording of closes only a dev or CI cell lists: a hosted cell needs a market-data source first",
-    )];
+    const RELEASED_NOT_PROMOTED: [(&str, &str, &str); 2] = [
+        (
+            "mandate-datad",
+            "data",
+            "data.instruments, a recording of closes only a dev or CI cell lists: a hosted cell needs a market-data source first",
+        ),
+        (
+            "mandate-gatewayd",
+            "model-gateway",
+            "platform/model-provider-key in the staging vault, which the founder's apply writes (FOUNDER-STEPS K): without it the gateway stops at start and holds the whole workspace release unready, so it is promoted in the change after that apply (DEC-2081 item 5)",
+        ),
+    ];
 
     fn digest(c: char) -> String {
         format!("sha256:{}", c.to_string().repeat(64))
@@ -459,13 +465,6 @@ mod tests {
                     format!(
                         "ghcr.io/kunwarshivam/mandate/mandate-dispatcher@{}",
                         digest('5')
-                    )
-                ),
-                (
-                    "model-gateway".to_owned(),
-                    format!(
-                        "ghcr.io/kunwarshivam/mandate/mandate-gatewayd@{}",
-                        digest('2')
                     )
                 ),
             ])

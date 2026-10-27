@@ -1,5 +1,3 @@
-# E21-54 follow-up: a paper connection and its vault role for a second workspace in a hosted cell
-
 - **E21-54h (Proposed, M8; SC; lane IAC)** As an owner, I want to connect a broker paper account to
   a second workspace in a hosted cell, such as the research workspace `<W>r` (DEC-2070), so that a
   hosted cell can run the research agent in its own workspace as the local cell does. Today:

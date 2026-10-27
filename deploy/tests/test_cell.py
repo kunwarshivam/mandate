@@ -18,8 +18,8 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import celpy
-import yaml
 import pytest
+import yaml
 from celpy import celtypes
 
 CELL = Path(__file__).resolve().parents[1] / "cell"
