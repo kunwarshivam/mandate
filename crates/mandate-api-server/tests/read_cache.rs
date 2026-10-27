@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::mem::size_of;
 use std::pin::pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Waker};
@@ -842,11 +843,13 @@ fn over_the_bound_with_one_workspace_its_other_streams_are_dropped() {
     assert_eq!(store.asked().whole, 3, "the other stream was dropped");
 }
 
-/// The store, with tail reads of one stream held until a permit is given.
+/// The store, with tail reads of one stream held until a permit is given, or answered without
+/// their first row, as a store that skipped a row would.
 struct Gated {
     store: Arc<Store>,
     stream: &'static str,
-    gate: Arc<Semaphore>,
+    gate: Option<Arc<Semaphore>>,
+    skip_first: bool,
 }
 
 impl Journal for Gated {
@@ -855,12 +858,16 @@ impl Journal for Gated {
     }
 
     fn rows_from<'a>(&'a self, stream: &'a str, start: TrustedStart) -> Rows<'a> {
-        let gated = stream == self.stream;
+        let ours = stream == self.stream;
         Box::pin(async move {
-            if gated {
-                self.gate.acquire().await.unwrap().forget();
+            if let (true, Some(gate)) = (ours, &self.gate) {
+                gate.acquire().await.unwrap().forget();
             }
-            self.store.rows_from(stream, start).await
+            let mut tail = self.store.rows_from(stream, start).await?;
+            if ours && self.skip_first && !tail.is_empty() {
+                tail.remove(0);
+            }
+            Ok(tail)
         })
     }
 
@@ -906,7 +913,8 @@ fn a_read_in_flight_when_its_workspace_is_dropped_holds_nothing_after() {
         Arc::new(Gated {
             store: Arc::clone(&store),
             stream: A_CTL,
-            gate: Arc::clone(&gate),
+            gate: Some(Arc::clone(&gate)),
+            skip_first: false,
         }),
         Arc::clone(&clock) as Arc<dyn Clock>,
         reverify_in_a_minute(),
@@ -941,5 +949,126 @@ fn a_read_in_flight_when_its_workspace_is_dropped_holds_nothing_after() {
         store.asked().whole,
         4,
         "the dropped workspace's stream is read whole"
+    );
+}
+
+#[test]
+fn the_server_holds_ten_idle_minutes_reverifies_each_minute_and_holds_256_mib() {
+    assert_eq!(
+        Limits::SERVER,
+        Limits {
+            idle: Duration::from_secs(600),
+            reverify: Duration::from_secs(60),
+            max_bytes: 268_435_456,
+        },
+        "DEC-2145 items 3 and 7 state these bounds"
+    );
+}
+
+#[test]
+fn a_tail_that_skips_its_first_row_is_never_served() {
+    let store = Arc::new(Store::default());
+    let journal = CachedJournal::new(
+        Arc::new(Gated {
+            store: Arc::clone(&store),
+            stream: A_ACCT,
+            gate: None,
+            skip_first: true,
+        }),
+        Hand::at(0) as Arc<dyn Clock>,
+        ROOMY,
+    );
+    assert_eq!(read(&journal, A_ACCT).unwrap(), Vec::new());
+    store.append(A_ACCT, 3);
+    assert_eq!(
+        read(&journal, A_ACCT).unwrap(),
+        store.whole(A_ACCT),
+        "an empty stream held, then a tail that does not start at seq 1"
+    );
+    assert_eq!(store.asked().whole, 2);
+    store.append(A_ACCT, 2);
+    assert_eq!(
+        read(&journal, A_ACCT).unwrap(),
+        store.whole(A_ACCT),
+        "rows held, then a tail that does not start at the held head row"
+    );
+    assert_eq!(store.asked().whole, 3);
+}
+
+#[test]
+fn an_empty_stream_is_held_and_read_past_like_any_other() {
+    let store = Arc::new(Store::default());
+    let journal = cache(&store, ROOMY);
+    assert_eq!(read(&journal, A_CTL).unwrap(), Vec::new());
+    assert_eq!(read(&journal, A_CTL).unwrap(), Vec::new());
+    assert_eq!(store.asked().whole, 1, "nothing new reads nothing whole");
+    store.append(A_CTL, 3);
+    assert_eq!(read(&journal, A_CTL).unwrap(), store.whole(A_CTL));
+    assert_eq!(store.asked().whole, 1, "rows past an empty head are a tail");
+}
+
+#[test]
+fn row_bytes_counts_every_string_and_body_it_owns() {
+    let store = Store::default();
+    store.append(A_ACCT, 1);
+    let row = store.whole(A_ACCT).remove(0);
+    let owned = row.stream_id.len()
+        + row.event_id.len()
+        + row.event_type.len()
+        + row.environment.len()
+        + row.recorded_at.len()
+        + row.body.len();
+    assert_eq!(row_bytes(&row), size_of::<StoredEvent>() + owned);
+}
+
+#[test]
+fn a_stream_exactly_at_the_bound_is_held_and_two_exactly_at_it_both_stay() {
+    let store = Arc::new(Store::default());
+    store.append(A_CTL, 5);
+    store.append(B_CTL, 5);
+    let one = held_by_rows(&store.whole(A_CTL));
+    let exact = cache(
+        &store,
+        Limits {
+            idle: Duration::from_secs(3_600),
+            reverify: Duration::from_secs(3_600),
+            max_bytes: one,
+        },
+    );
+    read(&exact, A_CTL).unwrap();
+    assert_eq!(exact.held_bytes(), one, "a stream at the bound is held");
+
+    let two = held_by_rows(&store.whole(B_CTL));
+    let both = cache(
+        &store,
+        Limits {
+            idle: Duration::from_secs(3_600),
+            reverify: Duration::from_secs(3_600),
+            max_bytes: one + two,
+        },
+    );
+    read(&both, A_CTL).unwrap();
+    read(&both, B_CTL).unwrap();
+    assert_eq!(
+        both.held_bytes(),
+        one + two,
+        "rows at the bound evict nothing"
+    );
+}
+
+#[test]
+fn after_a_failed_whole_read_the_workspace_is_held_again() {
+    let store = Arc::new(Store::default());
+    store.append(A_CTL, 4);
+    let journal = cache(&store, ROOMY);
+    store.set_failing(A_CTL, true);
+    assert_eq!(read(&journal, A_CTL), Err(JournalUnavailable));
+    store.set_failing(A_CTL, false);
+    read(&journal, A_CTL).unwrap();
+    read(&journal, A_CTL).unwrap();
+    assert_eq!(
+        store.asked().whole,
+        2,
+        "the read after the failure holds, and the next reads past it"
     );
 }

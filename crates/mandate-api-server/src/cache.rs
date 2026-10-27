@@ -16,7 +16,7 @@
 //!   [`Limits::reverify`] old, and until then serves the rows it verified. A clock read earlier
 //!   than a workspace's last read drops the workspace (below), so its streams are read whole.
 //! - **Exactly the stream otherwise.** A tail the store refuses, or one that does not begin with the
-//!   held head row, drops what is held and reads the stream whole. A whole read that fails drops
+//!   held head row, reads the stream whole in place of what is held. A whole read that fails drops
 //!   every stream held for that workspace and answers [`JournalUnavailable`], as the store's own read
 //!   does; nothing held is served in its place. A read already in flight answers as it would have,
 //!   but holds nothing once a failed whole read has dropped any workspace since its own store read
@@ -54,7 +54,8 @@ pub struct Limits {
 }
 
 impl Limits {
-    /// Ten idle minutes, a whole read of each stream at least once a minute, and 256 MiB of rows.
+    /// Ten idle minutes, a stream read whole again at its first read a minute after its last whole
+    /// read, and 256 MiB of rows.
     pub const SERVER: Self = Self {
         idle: Duration::from_secs(600),
         reverify: Duration::from_secs(60),
@@ -255,13 +256,6 @@ impl CachedJournal {
         }
     }
 
-    /// Drops what is held of `stream` in `workspace`.
-    fn drop_held(&self, workspace: &str, stream: &str) {
-        if let Ok(mut held) = self.held.lock() {
-            held.remove_stream(workspace, stream);
-        }
-    }
-
     /// Drops every stream held for `workspace`, and counts the drop.
     fn drop_workspace(&self, workspace: &str) {
         if let Ok(mut held) = self.held.lock() {
@@ -270,14 +264,16 @@ impl CachedJournal {
         }
     }
 
-    /// `stream` read from its first record, then held; a read that fails drops the workspace.
+    /// `stream` read from its first record, then held in place of what was held; a read that fails
+    /// drops the workspace. Rows held before it are never served after it is called: a success
+    /// replaces them, a failure drops them, and a hold refused for a drop leaves them to fail their
+    /// own head check or reverify again.
     async fn read_whole(
         &self,
         workspace: &str,
         stream: &str,
         now: UtcNanos,
     ) -> Result<Vec<StoredEvent>, JournalUnavailable> {
-        self.drop_held(workspace, stream);
         let drops = self.drops();
         let Ok(rows) = self.inner.rows(stream).await else {
             self.drop_workspace(workspace);
