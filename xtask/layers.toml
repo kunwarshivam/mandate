@@ -562,7 +562,7 @@ forbidden_internal = ["mandate-spec", "mandate-journal", "mandate-builder", "man
 layer = 9
 safety_critical = true
 pure = false
-allowed_external = ["secrecy", "thiserror"]
+allowed_external = ["secrecy", "thiserror", "tokio"]
 forbidden_internal = ["mandate-spec", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-mcp", "mandate-paper", "mandate-cli"]
 
 [crates.mandate-marketdata]

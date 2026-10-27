@@ -219,3 +219,43 @@ fn a_malformed_file_is_refused_whole() {
         );
     }
 }
+
+/// DEC-2216 item 4: an entry may name its passing gate's report by reference; absent, it names
+/// none, and a reference that is not one refuses the whole file.
+#[test]
+fn an_entry_may_name_its_gate_report() {
+    let good = entry(
+        "llm.research_sonnet",
+        "anthropic",
+        "anthropic/claude-sonnet-5.5",
+        "claude-sonnet-5-5",
+        "offered",
+    );
+    let reference = format!("sha256:{}", "a".repeat(64));
+    let named = good.replacen(
+        r#""status":"offered","#,
+        &format!(r#""status":"offered","gate_report":"{reference}","#),
+        1,
+    );
+    let entries = read_live(&file(std::slice::from_ref(&named))).unwrap();
+    assert_eq!(entries[0].gate_report.as_deref(), Some(reference.as_str()));
+    assert_eq!(read_live(&file(&[good])).unwrap()[0].gate_report, None);
+    let upper = format!("sha256:{}", "A".repeat(64));
+    let not_hex = format!("sha256:{}", "g".repeat(64));
+    let long = format!("sha256:{}", "a".repeat(65));
+    for bad in [
+        "sha256:short",
+        "a".repeat(71).as_str(),
+        "",
+        &upper,
+        &not_hex,
+        &long,
+    ] {
+        let text = named.replace(&reference, bad);
+        assert_eq!(
+            read_live(&file(&[text])).err(),
+            Some(RecordedError::Malformed("gate_report")),
+            "{bad:?}"
+        );
+    }
+}

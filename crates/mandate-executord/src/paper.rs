@@ -23,13 +23,16 @@
 //!   `canceled`; `422` for one no longer open).
 //!
 //! [`FixturePaper::new`] fills nothing: every order rests. [`FixturePaper::filling`] fills a limit
-//! order whole at its limit when it is placed, a simple order or a bracket's entry, buy or sell;
-//! the bracket's legs then rest. The submission's answer is the order as Alpaca accepts it, before
-//! the fill, which later reads report, as a marketable order's would. An OCO, a stop and a market
-//! order rest, since the fixture has no price. The serving process with no paper credential runs
-//! over [`FixturePaper::filling`], so the cell's trade loop fills (X1b-3). A fill names the broker's order id and no client order id, as Alpaca's activity does
-//! (DEC-2353), and Alpaca paper does not simulate regulatory fees (trading spec §11), so a fill
-//! moves the cash by its notional alone.
+//! order whole when it is placed, a simple order or a bracket's entry, buy or sell, as a venue
+//! would (E21-30): for one of [`ASSETS`], at the touch (its ask for a buy, its bid for a sell)
+//! when the limit reaches it, and not at all, so it rests, when it does not; for any other symbol,
+//! which the fixture has no price for, at its limit. The bracket's legs then rest. The submission's
+//! answer is the order as Alpaca accepts it, before the fill, which later reads report, as a
+//! marketable order's would. An OCO, a stop and a market order rest, since the fixture prices
+//! none. The serving process with no paper credential runs over [`FixturePaper::filling`], so the
+//! cell's trade loop fills (X1b-3). A fill names the broker's order id and no client order id, as
+//! Alpaca's activity does (DEC-2353), and Alpaca paper does not simulate regulatory fees (trading
+//! spec §11), so a fill moves the cash by its notional alone.
 //!
 //! Every other request is `404`. Ids are a counter in UUID form, so a run is deterministic.
 //!
@@ -86,6 +89,31 @@ pub struct FixtureAsset {
 /// The listed asset `symbol`, if the fixture lists it.
 fn listed(symbol: &str) -> Option<FixtureAsset> {
     ASSETS.iter().copied().find(|asset| asset.symbol == symbol)
+}
+
+/// A limit the fixture cannot read as a decimal of at most nine places, which it refuses as the
+/// request body Alpaca would not take.
+struct Unpriceable;
+
+/// What a limit `order` fills at when it is placed (E21-30), as a venue fills it: for one of
+/// [`ASSETS`], at the touch when the limit reaches it, its ask for a buy and its bid for a sell,
+/// and nothing, so it rests, when it does not; for any other symbol, which the fixture has no
+/// price for, at its limit. `None` for an order with no limit.
+fn touch_price(order: &Order) -> Result<Option<String>, Unpriceable> {
+    let Some(limit) = order.limit_price.clone() else {
+        return Ok(None);
+    };
+    let at = scaled(&limit).ok_or(Unpriceable)?;
+    let Some(asset) = listed(&order.symbol) else {
+        return Ok(Some(limit));
+    };
+    let touch = |price: &'static str| scaled(price).ok_or(Unpriceable);
+    let (price, reaches) = if order.side == "buy" {
+        (asset.ask, at >= touch(asset.ask)?)
+    } else {
+        (asset.bid, at <= touch(asset.bid)?)
+    };
+    Ok(reaches.then(|| price.to_owned()))
 }
 
 /// The clock a quote is stamped by: the reader's own, so the fixture never ages its quote.
@@ -194,11 +222,10 @@ impl Books {
             .collect()
     }
 
-    /// Fills `index`'s order whole at its limit: its status and fill, the `FILL` activity naming
+    /// Fills `index`'s order whole at `price`: its status and fill, the `FILL` activity naming
     /// its broker id, the holding, and the cash by the notional. Its legs, held until now, rest.
-    fn fill(&mut self, index: usize) -> Option<()> {
+    fn fill(&mut self, index: usize, price: String) -> Option<()> {
         let order = self.orders.get(index)?.clone();
-        let price = order.limit_price.clone()?;
         let qty = scaled(&order.qty)?;
         let notional = qty.checked_mul(scaled(&price)?)?.checked_div(SCALE)?;
         let holding = self.holdings.entry(order.symbol.clone()).or_default();
@@ -275,8 +302,9 @@ impl FixturePaper {
         listed(symbol).map(|_| false)
     }
 
-    /// A broker with an empty book whose records are stamped `at`, that fills each limit order
-    /// whole at its limit when it is placed (X1b-3): the cell's fixture once its orders fill.
+    /// A broker with an empty book whose records are stamped `at`, that fills each marketable
+    /// limit order whole at the touch when it is placed (X1b-3, E21-30): the cell's fixture once
+    /// its orders fill.
     pub fn filling(at: UtcNanos) -> Self {
         Self {
             fills: true,
@@ -455,15 +483,21 @@ impl FixturePaper {
             }
             _ => base,
         };
-        let fills = self.fills
-            && class != "oco"
-            && first.order_type == "limit"
-            && first.limit_price.is_some();
+        let price = if self.fills && class != "oco" && first.order_type == "limit" {
+            match touch_price(&first) {
+                Ok(price) => price,
+                Err(Unpriceable) => return refusal(422, 40_010_000, "request body is not valid"),
+            }
+        } else {
+            None
+        };
         books.orders.push(first);
         let index = books.orders.len().saturating_sub(1);
         books.orders.extend(legs);
         let accepted = nested(&books.group(&id), &self.at);
-        if fills && books.fill(index).is_none() {
+        if let Some(price) = price
+            && books.fill(index, price).is_none()
+        {
             return refusal(422, 40_010_000, "request body is not valid");
         }
         ok(accepted)

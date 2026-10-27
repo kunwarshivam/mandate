@@ -408,9 +408,10 @@ Research calls a real model only through staging's model-gateway service, which 
 OpenRouter key once from the vault, at `platform/model-provider-key`, and from nowhere else
 (DEC-2020, DEC-2257). No agent asks for the key, sees it or handles it. This step is yours alone.
 
-Do it once DEC-2396 records which model you chose. Until then the gateway serves only the
-recorded bundle and refuses any live start (`live_not_built`), so a key in the vault spends
-nothing.
+You chose the models with [DEC-2282](../docs/project/decisions/DEC-2282.md). The gateway's live
+start reads the key and serves the vetted entries, but offers none of them until its §4.3 gate
+has passed ([DEC-2216](../docs/project/decisions/DEC-2216.md)). So a key in the vault spends
+nothing until IAC runs the gate, which costs at most $7.56 for both models.
 
 1. In OpenRouter, create an API key for this purpose alone. In its settings, set the key's own
    credit limit to the monthly cap you accepted ($50, DEC-997), with a **monthly** reset (a limit
