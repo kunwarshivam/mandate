@@ -14,8 +14,8 @@ use support::{
     start, start_allowing,
 };
 
-const SWITCH: &str = "01JKILL00000000000000000AC";
-const EXIT: &str = "01JINTENT0000000000000000S";
+const SWITCH: &str = "01JK1MM00000000000000000AC";
+const EXIT: &str = "01J1NTENT0000000000000000S";
 
 fn held(journal: &support::Journal) -> Vec<Value> {
     journal
@@ -145,5 +145,120 @@ fn a_refused_exit_sends_nothing_and_goes_at_the_next_pass() -> Result<(), Error>
         "the exit goes: {:?}",
         broker.submitted()
     );
+    Ok(())
+}
+
+/// DEC-2846: each refusal's cause, the refused record's type and the journal's reason and path,
+/// reaches the operator, once per new cause: the cell's lost exit was refused on every pass, and
+/// the once-a-process `journal_refused` alert never said why. A refusal for the same cause again
+/// says nothing new; the cause carries no payload (`AGENTS.md` rule 6).
+#[test]
+fn a_refusals_cause_is_alerted_once_per_cause() -> Result<(), Error> {
+    let journal = deployed()?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    let causes = |alerts: &[Alert]| -> Vec<String> {
+        alerts
+            .iter()
+            .filter(|alert| alert.key == "journal_refused_cause")
+            .filter_map(|alert| alert.subject.clone())
+            .collect()
+    };
+    journal.fail_next(&[Fault::Invalid]);
+    let first = causes(&process.step(at(NOON)?));
+    assert_eq!(first.len(), 1, "{first:?}");
+    assert!(
+        first.iter().all(|cause| cause.ends_with(":schema:payload")),
+        "the record type, the reason code and the path: {first:?}"
+    );
+    journal.fail_next(&[Fault::Invalid]);
+    let again = causes(&process.step(at(NOON)?));
+    assert!(again.is_empty(), "the same cause again: {again:?}");
+    Ok(())
+}
+
+/// A deployment whose references read only once `readable` is set (DEC-2846).
+struct Readable(std::rc::Rc<std::cell::Cell<bool>>);
+
+impl mandate_executor::BindingGateSource for Readable {
+    fn input(
+        &self,
+        _request: &mandate_executor::BindingGateRequest<'_>,
+    ) -> Option<mandate_executor::BindingGateInput> {
+        None
+    }
+
+    fn config_refs(
+        &self,
+        _agent: &mandate_executor::AgentId,
+        _instrument: &mandate_accounting::InstrumentId,
+    ) -> Option<mandate_executor::BindingGateConfigRefs> {
+        self.0.get().then(support::deployed_refs)
+    }
+}
+
+/// DEC-2846 and `AGENTS.md` rule 13: the kill switch never depends on configuration reading. An
+/// owner's kill switch whose flatten cannot be journaled, because its deployment's references do
+/// not read, is applied at once: `KillSwitchActivated` and the agent's stop are journaled. Only the
+/// flatten waits, journaled `exit_unpriced` and alerted once, and it sells at the first pass that
+/// reads them. The process never stops. (The process's mandate port falls back to the version the
+/// control stream deployed, so a followed agent's version always reads here; the core's own test
+/// covers a version that does not.)
+#[test]
+fn a_kill_switch_applies_at_once_and_its_flatten_waits_for_its_configuration() -> Result<(), Error>
+{
+    for unread in ["references"] {
+        let journal = deployed()?;
+        journal.seed(ACCOUNT_STREAM, OPENED)?;
+        let broker = Paper::new(&journal);
+        broker.resting(OPENING, "AAPL", "10", "150")?;
+        broker.fill(OPENING, "150")?;
+        let references = std::rc::Rc::new(std::cell::Cell::new(false));
+        let wiring = support::wired(
+            Box::new(Readable(std::rc::Rc::clone(&references))),
+            Box::new(support::TwoPercentStop),
+        )?;
+        let mut process = support::start_wired(&journal, &broker, wiring)?;
+        process.step(at(NOON)?);
+        kill(&journal, AGENT, SWITCH)?;
+        for _ in 0..3 {
+            process.step(at(NOON)?);
+        }
+        assert!(
+            !matches!(process.lifecycle().state(), State::Exited(_)),
+            "{unread}: never stops: {:?}",
+            process.lifecycle().state()
+        );
+        assert_eq!(journal.switched(), [AGENT], "{unread}: applied at once");
+        let sells = |broker: &Paper| {
+            broker
+                .seen()
+                .iter()
+                .filter(|seen| matches!(&seen.request, mandate_executor::BrokerRequest::Submit(order) if order.side == mandate_accounting::Side::Sell))
+                .count()
+        };
+        assert_eq!(sells(&broker), 0, "{unread}: the flatten waits");
+        let waiting = journal
+            .payloads("ProtectionChanged")
+            .iter()
+            .filter(|p| p.get("action") == Some(&Value::Str("exit_unpriced".to_owned())))
+            .count();
+        assert_eq!(
+            waiting,
+            1,
+            "{unread}: journaled once: {:?}",
+            journal.types(ACCOUNT_STREAM)
+        );
+        assert!(
+            journal
+                .payloads("OwnerAlertSent")
+                .iter()
+                .any(|p| p.get("kind") == Some(&Value::Str("exit_stalled".to_owned()))),
+            "{unread}: and the owner alerted"
+        );
+        references.set(true);
+        process.step(at(NOON)?);
+        assert_eq!(sells(&broker), 1, "{unread}: sold once it reads");
+    }
     Ok(())
 }

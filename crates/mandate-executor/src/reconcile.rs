@@ -1068,7 +1068,27 @@ pub(crate) mod tests {
             ports: &Ports<'_>,
             keep: usize,
         ) -> Result<Vec<Effect>, ExecutorError> {
-            let effects = handle(&mut self.state, input, ports, &ALLOWING_BINDING_GATE)?;
+            self.run_binding(input, ports, keep, &ALLOWING_BINDING_GATE)
+        }
+
+        /// [`Self::run`] with `binding_gate` as the deployment's configuration.
+        pub(crate) fn run_with(
+            &mut self,
+            input: Input,
+            ports: &Ports<'_>,
+            binding_gate: &dyn crate::ports::BindingGateSource,
+        ) -> Result<Vec<Effect>, ExecutorError> {
+            self.run_binding(input, ports, usize::MAX, binding_gate)
+        }
+
+        fn run_binding(
+            &mut self,
+            input: Input,
+            ports: &Ports<'_>,
+            keep: usize,
+            binding_gate: &dyn crate::ports::BindingGateSource,
+        ) -> Result<Vec<Effect>, ExecutorError> {
+            let effects = handle(&mut self.state, input, ports, binding_gate)?;
             let mut kept = 0;
             for effect in &effects {
                 if let Effect::Journal(draft) = effect {
@@ -1634,7 +1654,7 @@ pub(crate) mod tests {
                         .and_then(Value::as_str)
                         .map(str::to_owned)
                 };
-                field("verdict").zip(field("reason_code"))
+                field("verdict").map(|verdict| (verdict, field("reason_code").unwrap_or_default()))
             }
             _ => None,
         })
