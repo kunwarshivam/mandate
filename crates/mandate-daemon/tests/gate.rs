@@ -99,6 +99,11 @@ fn journaled_with(account: &Account) -> Rows {
         &format!(r#"{{"agent_id":"{AGENT}","mandate_version":"sha256:{HASH}"}}"#),
     );
     rows.push(
+        CONTROL,
+        "ConnectionEstablished",
+        r#"{"connection_id":"conn-1"}"#,
+    );
+    rows.push(
         CLOCK,
         "ClockAdvanced",
         &format!(r#"{{"clock":"{REGULAR}"}}"#),
@@ -187,9 +192,10 @@ fn denied(reason: &str) -> DryRunVerdict {
     }
 }
 
-/// The twelve parts the runtime names beside the liquidity floor and participation, written out
-/// by hand: every one the dry run defers whatever the bars say.
-fn twelve() -> BTreeSet<Deferral> {
+/// The eleven parts the runtime names beside the liquidity floor and participation, written out
+/// by hand: every one the dry run defers whatever the bars say. The re-entry cooldown is not one:
+/// the dry run reads the last exit fill from the fold, as the binding gate does (mandate spec §5.3).
+fn eleven() -> BTreeSet<Deferral> {
     BTreeSet::from([
         Deferral::AccountExposure,
         Deferral::AgentEquity,
@@ -201,7 +207,6 @@ fn twelve() -> BTreeSet<Deferral> {
         Deferral::Halt,
         Deferral::OtherOrders,
         Deferral::QuoteAsk,
-        Deferral::ReentryCooldown,
         Deferral::RelatedAccounts,
     ])
 }
@@ -210,7 +215,7 @@ fn twelve() -> BTreeSet<Deferral> {
 /// with them.
 fn asked() -> DryRunVerdict {
     DryRunVerdict::AllowDeferring {
-        deferred: twelve(),
+        deferred: eleven(),
         liquidity: None,
     }
 }
@@ -229,7 +234,7 @@ fn read_of(facts: &LiquidityFacts) -> LiquidityRead {
 /// An opening the gate allows on `facts`: the twelve deferred, the liquidity checks evaluated.
 fn asked_on(facts: &LiquidityFacts) -> DryRunVerdict {
     DryRunVerdict::AllowDeferring {
-        deferred: twelve(),
+        deferred: eleven(),
         liquidity: Some(read_of(facts)),
     }
 }
@@ -258,7 +263,6 @@ fn an_opening_the_gate_allows_is_answered_with_every_deferral_named() {
             Deferred::DayTradeBudget,
             Deferred::AgentMode,
             Deferred::AgentEquity,
-            Deferred::ReentryCooldown,
             Deferred::Halt,
             Deferred::OtherOrders,
             Deferred::QuoteAsk,
@@ -267,7 +271,8 @@ fn an_opening_the_gate_allows_is_answered_with_every_deferral_named() {
             Deferred::FeeReservation,
             Deferred::AccountExposure,
         ]),
-        "DEC-2378 item 11's four and DEC-2388 item 8's ten, pinned by name"
+        "DEC-2378 item 11's four and DEC-2388 item 8's nine, pinned by name: the re-entry cooldown \
+         is read from the fold (DEC-2851)"
     );
     assert_eq!(advisory.deferred, every);
     assert!(
@@ -650,16 +655,6 @@ fn order(rows: &mut Rows, id: &str, purpose: &str, side: &str, fill: Option<(&st
 /// refuse the plan's own opening is never answered an allow with nothing deferred.
 #[test]
 fn no_unseen_fact_that_should_refuse_is_answered_an_allow_with_nothing_deferred() {
-    let filled_now = REGULAR;
-    let mut exited = journaled_with(&RICH);
-    order(&mut exited, "o1", "open", "buy", Some(("1", filled_now)));
-    order(
-        &mut exited,
-        "o2",
-        "discretionary_exit",
-        "sell",
-        Some(("1", filled_now)),
-    );
     let mut busy = journaled_with(&RICH);
     for n in 0..50 {
         order(&mut busy, &format!("c{n}"), "open", "buy", None);
@@ -679,11 +674,6 @@ fn no_unseen_fact_that_should_refuse_is_answered_an_allow_with_nothing_deferred(
         ),
     );
     for (fact, part, rows) in [
-        (
-            "the last exit fill, inside the re-entry cooldown and the opposite-fill interval",
-            Deferred::ReentryCooldown,
-            exited,
-        ),
         (
             "50 orders today, at the cap and with no fill against them",
             Deferred::ConductHistory,
@@ -726,7 +716,8 @@ fn no_unseen_fact_that_should_refuse_is_answered_an_allow_with_nothing_deferred(
 }
 
 /// R2's finding on the first review: a proposal labelled as adding risk that the gate types as an
-/// exit would defer nothing, so the dry run refuses to judge it rather than allow it.
+/// exit would defer nothing, so the dry run never allows it; with the position it would sell held,
+/// the account's opening hold refuses it first (DEC-2851).
 #[test]
 fn a_proposal_labelled_an_opening_that_the_gate_types_as_an_exit_is_denied() {
     let mut rows = journaled_with(&RICH);
@@ -736,15 +727,16 @@ fn a_proposal_labelled_an_opening_that_the_gate_types_as_an_exit_is_denied() {
         let mut sell = opening("3", "99.95");
         sell.side = Side::Sell;
         sell.purpose = purpose;
-        assert_eq!(gate.advisory(&sell), Err("gate_refused"), "{purpose:?}");
-        assert_eq!(gate.check(&sell), denied("gate_refused"), "{purpose:?}");
+        assert_eq!(gate.advisory(&sell), Err("account_traded"), "{purpose:?}");
+        assert_eq!(gate.check(&sell), denied("account_traded"), "{purpose:?}");
     }
     let mut increase = opening("1", "99.95");
     increase.purpose = Purpose::Increase;
     assert_eq!(
         gate.check(&increase),
-        asked(),
-        "a buy while holding is the gate's increase, still deferred"
+        denied("account_traded"),
+        "a buy while holding is held, as the binding gate holds every opening and increase then \
+         (DEC-2143, DEC-2851)"
     );
 }
 
@@ -801,8 +793,9 @@ fn a_held_instrument_with_no_mark_holds_the_opening() {
     );
     assert_eq!(
         gate_over(&rows, Some(config())).check(&opening("3", "99.95")),
-        denied("facts_held"),
-        "its market value cannot be counted against the caps"
+        denied("account_traded"),
+        "a held position holds the opening before its market value is counted, as the binding \
+         gate holds it (DEC-2143, DEC-2851)"
     );
 }
 
@@ -938,7 +931,7 @@ fn gate_reading_under(
 }
 
 /// DEC-2274 item 3: with the bars read, the liquidity floor and participation are evaluated,
-/// never deferred, and the other twelve stay deferred, so the opening is asked with its figures.
+/// never deferred, and the other eleven stay deferred, so the opening is asked with its figures.
 #[test]
 fn with_the_bars_read_the_floor_and_participation_are_evaluated() {
     let (gate, reads) = gate_reading(&journaled_with(&RICH), Some(liquid()));
@@ -949,8 +942,8 @@ fn with_the_bars_read_the_floor_and_participation_are_evaluated() {
     assert!(!advisory.deferred.contains(&Deferred::Participation));
     assert_eq!(
         advisory.deferred.len(),
-        12,
-        "eligibility, the day-trade budget and the ten unseen parts: {advisory:?}"
+        11,
+        "eligibility, the day-trade budget and the nine unseen parts: {advisory:?}"
     );
     assert_eq!(gate.check(&opening("3", "99.95")), asked_on(&liquid()));
 }
@@ -1223,12 +1216,12 @@ fn the_day_trade_budget_is_evaluated_once_a_snapshot_declares_it_cannot_refuse()
             !advisory.deferred.contains(&Deferred::DayTradeBudget),
             "{case}: {advisory:?}"
         );
-        let mut eleven = twelve();
-        eleven.remove(&Deferral::DayTradeBudget);
+        let mut ten = eleven();
+        ten.remove(&Deferral::DayTradeBudget);
         assert_eq!(
             gate.check(&opening("3", "99.95")),
             DryRunVerdict::AllowDeferring {
-                deferred: eleven,
+                deferred: ten,
                 liquidity: None
             },
             "{case}"
@@ -1329,4 +1322,193 @@ fn a_crypto_openings_budget_is_evaluated_without_declared_facts() {
         advisory.is_ok(),
         "the crypto opening is evaluated: {advisory:?}"
     );
+}
+
+/// Two hours after [`REGULAR`], still in the regular session: the instant the cooldown cases ask.
+const LATER: &str = "2026-10-26T17:00:00.000000000Z";
+
+/// The demo's re-entry cooldown, `reentry_cooldown_s` (mandate spec §5.3).
+const COOLDOWN_S: i64 = 3600;
+
+fn instant(stamp: &str) -> UtcNanos {
+    UtcNanos::parse(stamp).unwrap()
+}
+
+/// [`journaled_with`]'s account, ticked and marked again at [`LATER`], so its facts are fresh then.
+fn at_later(mut rows: Rows) -> Rows {
+    rows.push(CLOCK, "ClockAdvanced", &format!(r#"{{"clock":"{LATER}"}}"#));
+    rows.push(
+        ACCOUNT,
+        "AccountSnapshotRecorded",
+        &format!(
+            r#"{{"status":"ACTIVE","crypto_status":"INACTIVE","trading_blocked":false,"account_blocked":false,"trade_suspended_by_user":false,"multiplier":1,"equity":"100000","cash":"100000","buying_power":"100000","non_marginable_buying_power":"100000","risk_clock":"{LATER}"}}"#
+        ),
+    );
+    rows.push(
+        ACCOUNT,
+        "MarkUpdated",
+        &format!(
+            r#"{{"instrument_id":"{SPY}","price":"100.05","source":"quote","feed":"fixture","bid":"99.95","sane":true,"session":"regular","risk_clock":"{LATER}"}}"#
+        ),
+    );
+    rows
+}
+
+/// One order of the agent's in SPY, `side` for `qty`, filled whole at `at`, with `purpose` as the
+/// executor journals it.
+fn filled(rows: &mut Rows, order: &str, (side, qty): (&str, u32), purpose: &str, at: &str) {
+    rows.push(
+        ACCOUNT,
+        "OrderRequestRecorded",
+        &format!(r#"{{"agent_id":"{AGENT}","purpose":"{purpose}","risk_clock":"{at}"}}"#),
+    );
+    rows.push(
+        ACCOUNT,
+        "OrderSubmitted",
+        &format!(r#"{{"client_order_id":"{order}","instrument_id":"{SPY}","side":"{side}","risk_clock":"{at}"}}"#),
+    );
+    rows.push(
+        ACCOUNT,
+        "FillApplied",
+        &format!(
+            r#"{{"fill_id":"f-{order}","client_order_id":"{order}","instrument_id":"{SPY}","side":"{side}","qty_gross":"{qty}","price":"99.95","trade_date":"2026-10-26","risk_clock":"{at}","fees":[]}}"#
+        ),
+    );
+    rows.push(
+        ACCOUNT,
+        "OrderStateChanged",
+        &format!(
+            r#"{{"client_order_id":"{order}","state":"filled","replaced_by":null,"ignored":false,"risk_clock":"{at}"}}"#
+        ),
+    );
+}
+
+/// `offset` seconds after [`REGULAR`], as the journal stamps it.
+fn after_regular(offset: i64) -> String {
+    UtcNanos::from_parts(instant(REGULAR).secs() + offset, 0)
+        .unwrap()
+        .to_string()
+}
+
+/// Mandate spec §5.3, check 2: no opening until `reentry_cooldown_s` after the agent's last exit
+/// fill in the instrument. An owner exit's fill is an exit fill (lane DR's rehearsal, 2026-10-27:
+/// the runtime asked to buy back in the second its owner exit filled). The dry run reads the last
+/// exit fill from the same fold the binding gate reads it from, so it asks nothing the binding
+/// gate refuses.
+#[test]
+fn an_opening_inside_the_reentry_cooldown_after_an_owner_exit_is_denied() {
+    let late = after_regular(2 * COOLDOWN_S - 60);
+    let mut inside = journaled_with(&RICH);
+    filled(&mut inside, "o1", ("buy", 3), "open", &after_regular(60));
+    filled(&mut inside, "o2", ("sell", 3), "owner_exit", &late);
+    let inside = at_later(inside);
+    assert_eq!(
+        gate_over(&inside, Some(config())).check(&opening("3", "99.95")),
+        denied("reentry_cooldown"),
+        "a minute after the owner exit filled"
+    );
+    let mut outside = journaled_with(&RICH);
+    filled(&mut outside, "o1", ("buy", 3), "open", &after_regular(60));
+    filled(
+        &mut outside,
+        "o2",
+        ("sell", 3),
+        "owner_exit",
+        &after_regular(120),
+    );
+    let outside = at_later(outside);
+    assert_eq!(
+        gate_over(&outside, Some(config())).check(&opening("3", "99.95")),
+        asked(),
+        "the cooldown has passed"
+    );
+}
+
+/// DEC-2819 item 4, DEC-2143: once the account has traded, a research agent's every opening is
+/// held (`research_agent_traded`), as the binding gate holds it; and a pinned agent's while it
+/// still holds a position (`account_traded`). Its exits never read the hold.
+#[test]
+fn the_dry_run_holds_an_opening_as_the_binding_gate_does_once_the_account_has_traded() {
+    let mut holding = journaled_with(&RICH);
+    filled(&mut holding, "o1", ("buy", 3), "open", &after_regular(60));
+    let holding = at_later(holding);
+    assert_eq!(
+        gate_over(&holding, Some(config())).check(&opening("3", "99.95")),
+        denied("account_traded")
+    );
+    let research = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../deploy/cell/demo/research-mandate.json"
+    ))
+    .unwrap();
+    let research = Mandate::parse(&mandate_canon::parse(&research).unwrap()).unwrap();
+    let mut flat = journaled_with(&RICH);
+    filled(&mut flat, "o1", ("buy", 3), "open", &after_regular(60));
+    filled(
+        &mut flat,
+        "o2",
+        ("sell", 3),
+        "owner_exit",
+        &after_regular(120),
+    );
+    let flat = at_later(flat);
+    let facts = Facts::new(CLOCK, AGENT);
+    facts.follow(ACCOUNT);
+    facts.feed(&flat.0);
+    let gate = Gate::new(facts, (DEPLOYED, research), Some(config()), FRESH);
+    assert_eq!(
+        gate.check(&opening("1", "99.95")),
+        denied("research_agent_traded")
+    );
+    let exit = Proposal {
+        side: Side::Sell,
+        purpose: Purpose::DiscretionaryExit,
+        ..opening("1", "99.95")
+    };
+    assert_eq!(
+        gate.check(&exit),
+        DryRunVerdict::Allow,
+        "an exit never reads it"
+    );
+}
+
+proptest! {
+    /// The dry run's answer to an opening equals the spec's, computed here on its own from the
+    /// fills alone, over interleaved buys and exits at random instants: held while a position is
+    /// (DEC-2143), else denied `reentry_cooldown` within `reentry_cooldown_s` of the last sell fill
+    /// (mandate spec §5.3), else asked.
+    #[test]
+    fn the_dry_runs_reentry_answer_is_the_specs(
+        trades in prop::collection::vec((any::<bool>(), 1u32..4, 0i64..7000), 1..8)
+    ) {
+        let mut rows = journaled_with(&RICH);
+        let mut held = 0u32;
+        let mut last_sell: Option<i64> = None;
+        let mut sorted = trades.clone();
+        sorted.sort_by_key(|(_, _, at)| *at);
+        for (n, (buy, qty, at)) in sorted.into_iter().enumerate() {
+            let (side, qty, purpose) = if buy || held == 0 {
+                ("buy", qty, "open")
+            } else {
+                ("sell", qty.min(held), "owner_exit")
+            };
+            filled(&mut rows, &format!("o{n}"), (side, qty), purpose, &after_regular(at));
+            if side == "buy" {
+                held += qty;
+            } else {
+                held -= qty;
+                last_sell = Some(at);
+            }
+        }
+        let rows = at_later(rows);
+        let now = 2 * COOLDOWN_S;
+        let expected = if held > 0 {
+            denied("account_traded")
+        } else if last_sell.is_some_and(|at| now - at < COOLDOWN_S) {
+            denied("reentry_cooldown")
+        } else {
+            asked()
+        };
+        prop_assert_eq!(gate_over(&rows, Some(config())).check(&opening("3", "99.95")), expected);
+    }
 }
