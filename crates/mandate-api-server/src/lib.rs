@@ -42,6 +42,7 @@
 //! - [`connect`]: the connect start, which commits the pending connection and issues the
 //!   single-use `state` the callback redeems (DEC-2623).
 //! - [`backtests`]: the backtest and evaluation reads' folds (DEC-1001, DEC-1002, DEC-1143).
+//! - [`cache`]: the journal port with each stream read once, then only past its head (DEC-2145).
 //! - [`journal_reads`]: the journal's audit reads, a stream's events page (§4.8.1, E12-6).
 //! - [`finish`]: the connect's finish, from the open request and the executor's check to
 //!   `plan_finish`'s answer (DEC-2342), [`finish_records`], the records it appends, and
@@ -60,6 +61,7 @@
 
 pub mod alerts;
 pub mod backtests;
+pub mod cache;
 pub mod catalogue;
 pub mod challenges;
 pub mod clock;
