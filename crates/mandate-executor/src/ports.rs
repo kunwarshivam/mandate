@@ -180,6 +180,17 @@ pub struct BindingGateRequest<'a> {
 /// decision; the binding verdict is therefore not injectable.
 pub trait BindingGateSource {
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput>;
+
+    /// The configuration `agent`'s gate decision on `instrument` is journaled under when no
+    /// binding run read a snapshot: an exit's, which never reads one (`AGENTS.md` rule 13), or a
+    /// local denial's. Journal spec §9 requires every `GateDecided` to name all five references,
+    /// and a record without them is refused whole, the exit inside it with it (DEC-2846). `None`
+    /// when the deployment reads none, which holds the exit, alerted, rather than lose it.
+    fn config_refs(
+        &self,
+        agent: &AgentId,
+        instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs>;
 }
 
 #[cfg(test)]
@@ -187,6 +198,20 @@ pub(crate) struct AllowingBindingGate;
 
 #[cfg(test)]
 impl BindingGateSource for AllowingBindingGate {
+    fn config_refs(
+        &self,
+        _agent: &AgentId,
+        _instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        Some(BindingGateConfigRefs::complete(
+            format!("sha256:{}", "1".repeat(64)),
+            format!("sha256:{}", "2".repeat(64)),
+            format!("sha256:{}", "3".repeat(64)),
+            format!("sha256:{}", "4".repeat(64)),
+            format!("sha256:{}", "5".repeat(64)),
+        ))
+    }
+
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         if !request.purpose.adds_risk() {
             return None;

@@ -99,6 +99,10 @@ pub struct ExecutorState {
     /// a breach fires only if it began after, so one breach is watchdogged once (§5.4, DEC-260
     /// (11)).
     pub(crate) watchdogged: BTreeMap<InstrumentId, RiskClock>,
+    /// When an exit in each instrument was last journaled `exit_unpriced` on its own, no kill
+    /// switch its cause: the executor's own exit waiting for a price or for its configuration,
+    /// alerted once for each breach or interval that began before (DEC-2846).
+    pub(crate) unpriced: BTreeMap<InstrumentId, RiskClock>,
     pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
     pub(crate) fills: BTreeSet<FillId>,
     /// Sell fills applied with no order named (`FillApplied` with no `client_order_id`), by the
@@ -447,6 +451,7 @@ impl ExecutorState {
             trades: BTreeMap::new(),
             breaches: BTreeMap::new(),
             watchdogged: BTreeMap::new(),
+            unpriced: BTreeMap::new(),
             positions: BTreeMap::new(),
             fills: BTreeSet::new(),
             unattributed: BTreeMap::new(),

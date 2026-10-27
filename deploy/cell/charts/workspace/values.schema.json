@@ -361,7 +361,7 @@
       }
     },
     "deployManager": {
-      "description": "The local cell's second deployment manager's workspace, for the research agent alone (DEC-2070)",
+      "description": "The second deployment manager's workspace, for the research agent alone: dev or ci, or staging beside the model gateway (DEC-2070, DEC-2080)",
       "type": "object",
       "additionalProperties": false,
       "required": [
