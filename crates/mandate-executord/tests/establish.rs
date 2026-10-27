@@ -490,6 +490,14 @@ impl BindingGateSource for Asked {
         self.0.borrow_mut().push(request.purpose);
         None
     }
+
+    fn config_refs(
+        &self,
+        _agent: &mandate_executor::AgentId,
+        _instrument: &mandate_accounting::InstrumentId,
+    ) -> Option<mandate_executor::BindingGateConfigRefs> {
+        Some(support::deployed_refs())
+    }
 }
 
 /// Item 3 at the one place the gate acts: while shut it asks the wiring's source about every

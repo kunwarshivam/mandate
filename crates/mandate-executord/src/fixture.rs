@@ -7,9 +7,9 @@
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::stream_event_id;
 use mandate_executor::{
-    AccountScope, AgentId, BindingGateInput, BindingGateRequest, BindingGateSource, EventId,
-    ExecutorConfig, ExitTier, IdGen, InstrumentSnapshot, MandateVersion, MandateView,
-    ProtectionPrices, Seq, WriterEpoch,
+    AccountScope, AgentId, BindingGateConfigRefs, BindingGateInput, BindingGateRequest,
+    BindingGateSource, EventId, ExecutorConfig, ExitTier, IdGen, InstrumentSnapshot,
+    MandateVersion, MandateView, ProtectionPrices, Seq, WriterEpoch,
 };
 use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Fraction, Price, ShareIncrement};
 use mandate_time::{Date, TradingCalendar};
@@ -80,6 +80,16 @@ struct NoFacts;
 
 impl BindingGateSource for NoFacts {
     fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
+        None
+    }
+
+    /// No deployment, so no configuration: an exit is held, alerted, rather than journaled in a
+    /// form the journal refuses (DEC-2846).
+    fn config_refs(
+        &self,
+        _agent: &AgentId,
+        _instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
         None
     }
 }
@@ -153,7 +163,7 @@ mod tests {
     use super::*;
 
     /// The fixture wiring knows nothing: no mandate version, offset or covered instrument, no
-    /// instrument fact, and no binding-gate fact, so no opening can be admitted on it.
+    /// instrument fact, and no binding-gate fact or reference, so no opening can be admitted on it.
     #[test]
     fn the_fixture_wiring_knows_nothing() -> Result<(), Box<dyn std::error::Error>> {
         let wiring = wiring(&AccountScope {
@@ -179,6 +189,7 @@ mod tests {
             protection: None,
         };
         assert!(wiring.gate.input(&request).is_none());
+        assert!(wiring.gate.config_refs(&agent, &instrument).is_none());
         Ok(())
     }
 

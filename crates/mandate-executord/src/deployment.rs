@@ -33,10 +33,10 @@ use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
 use mandate_connections::record::ConnectionId;
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    AccountDeclaration, AccountFillRefs, AccountScope, AgentId, BindingGateInput,
-    BindingGateRequest, BindingGateSource, BrokerOutcome, BrokerRequest, BrokerSymbols,
-    ConnectorError, ExitTier, FillConfigRefs, InstrumentSnapshot, MandateVersion, MandateView,
-    MarketObservation, ProtectionPrices,
+    AccountDeclaration, AccountFillRefs, AccountScope, AgentId, BindingGateConfigRefs,
+    BindingGateInput, BindingGateRequest, BindingGateSource, BrokerOutcome, BrokerRequest,
+    BrokerSymbols, ConnectorError, ExitTier, FillConfigRefs, InstrumentSnapshot, MandateVersion,
+    MandateView, MarketObservation, ProtectionPrices,
 };
 use mandate_gate_context::{Freshness, Journaled, Row};
 use mandate_gate_inputs::control::{
@@ -1078,6 +1078,25 @@ impl QuoteFeed for Deployment {
 }
 
 impl BindingGateSource for Deployment {
+    /// The configuration `agent`'s decision on `instrument` is journaled under when it read no
+    /// binding snapshot, an exit's above all (DEC-2846): all five references of `agent`'s own
+    /// deployment of `instrument`, as an exit reads it (current, else last, else a research
+    /// agent's admitted instrument as it last resolved). Never another agent's deployment of the
+    /// same instrument. It reads no quote, bars or broker fact, so an exit never waits on them
+    /// (`AGENTS.md` rule 13).
+    fn config_refs(
+        &self,
+        agent: &AgentId,
+        instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        self.lasting_all()
+            .into_iter()
+            .find(|resolved| {
+                &resolved.instrument == instrument && resolved.view.version(agent).is_some()
+            })
+            .map(|resolved| resolved.gate.config_refs().clone())
+    }
+
     /// The binding gate's input for the deployed agent's opening, read now. An order that reduces
     /// risk is answered `None` before anything is read, so the core keeps its own decision
     /// (`AGENTS.md` rule 13, DEC-2274 item 6). An opening is held, `None`, while its deployment,

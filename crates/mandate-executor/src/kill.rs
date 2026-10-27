@@ -546,7 +546,10 @@ fn deferred(batch: &Batch<'_, '_>, instrument: &InstrumentId, purpose: Purpose) 
 /// `k-<switch>-<n>` (DEC-485 item 2), once nothing the switch reaches is live in the instrument
 /// any more, the session admits the sell, the agent holds lots there, and a limit can be named.
 /// One that waits only for a limit is journaled `exit_unpriced` and alerted, once per switch and
-/// instrument (DEC-2361).
+/// instrument (DEC-2361), and so is one whose intent cannot be journaled yet because its agent's
+/// mandate version or its deployment's references do not read (DEC-2846): the journal takes no
+/// other record of it. Either waits alone: the switch, its mode and its cancels are applied
+/// (`AGENTS.md` rule 13), and the close is raised at the first pass that can name it.
 /// Raised earlier, the gate would count the sells still pending their cancel and deny the flatten
 /// `sell_exceeds_available`.
 pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
@@ -591,7 +594,13 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
             ) else {
                 continue;
             };
-            let Some(limit) = limit else {
+            let configured = crate::gate::configured(
+                batch.binding_gate(),
+                batch.ports,
+                &switch.agent,
+                instrument,
+            );
+            let (Some(limit), true) = (limit, configured) else {
                 if !switch.unpriced.contains(instrument) {
                     let alerted = changed_by(
                         batch,
