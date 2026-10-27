@@ -440,7 +440,7 @@ pub(crate) fn payload(
         "ThesisProposed" | "ThesisRevised" => thesis_rules(event_type, p, config_refs)?,
         COMPANION => companion_rules(p)?,
         "IntentReceived" => intent_received_rules(p)?,
-        "GateDecided" if schema_version == 3 => gate_decided_v3_rules(p)?,
+        "GateDecided" => gate_decided_v3_rules(p)?,
         CONFIRMATION => confirmation_rules(p)?,
         CLOSE => close_rules(p, causation_id)?,
         RESTRICTION => restriction_rules(p)?,
@@ -589,7 +589,8 @@ fn intent_received_rules(p: Payload<'_>) -> Result<(), Invalid> {
 /// where the executor writes it, reported at the first that is not: `sized_qty` only on an
 /// `allow`, binding or the executor's own, and then above zero; `held_long` only `true`, on a
 /// `hold`; `parked` only `true`, on a `hold` for `session_closed` or `session_unknown` that is
-/// also `held_long`.
+/// also `held_long`. Versions 1 and 2 close their schemas without the three members, so the rules
+/// hold on them as written: an absent member reads as `null`.
 fn gate_decided_v3_rules(p: Payload<'_>) -> Result<(), Invalid> {
     let hold = p.text("verdict") == "hold";
     let allow = p.text("verdict") == "allow";
