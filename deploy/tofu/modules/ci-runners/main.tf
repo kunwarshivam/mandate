@@ -153,6 +153,28 @@ variable "base_image" {
   }
 }
 
+variable "debug_ssh_key" {
+  description = "DEC-2077's debug window: one OpenSSH public key that may log in as the `debug` user. Empty, the default, leaves the window shut."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.debug_ssh_key == "" || can(regex("^(ssh-ed25519|ecdsa-sha2-nistp256|ssh-rsa) [A-Za-z0-9+/=]+( [A-Za-z0-9@._-]+)?$", var.debug_ssh_key))
+    error_message = "The debug key is one OpenSSH public key on one line (ed25519, ecdsa-sha2-nistp256 or rsa), its comment letters, digits and @._- only."
+  }
+}
+
+variable "debug_ssh_cidr" {
+  description = "DEC-2077's debug window: the one address that may reach port 22, as a /32 or /128. Empty, the default, admits nothing."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.debug_ssh_cidr == "" || (can(cidrhost(var.debug_ssh_cidr, 0)) && (endswith(var.debug_ssh_cidr, "/32") && !strcontains(var.debug_ssh_cidr, ":") || endswith(var.debug_ssh_cidr, "/128") && strcontains(var.debug_ssh_cidr, ":")))
+    error_message = "The debug address is one host: an IPv4 /32 or an IPv6 /128."
+  }
+}
+
 variable "toolchain_ref" {
   description = "The branch of the repository whose .cursor/install.sh the image runs, so jobs start with the pinned toolchain."
   type        = string
@@ -321,12 +343,34 @@ locals {
     iptables -C INPUT -i docker0 -j REJECT 2> /dev/null || iptables -I INPUT -i docker0 -j REJECT
   FENCE
 
+  # DEC-2077's debug window: a `debug` user who may log in with the founder's one key and use
+  # sudo, only while `debug_ssh_key` is set. No password works for anyone, ever.
+  debug_boot = var.debug_ssh_key == "" ? "true" : <<-DEBUG
+    useradd --create-home --shell /bin/bash debug
+    usermod -p '*' debug
+    install -d -m 0700 -o debug -g debug /home/debug/.ssh
+    echo '${var.debug_ssh_key}' > /home/debug/.ssh/authorized_keys
+    chown debug:debug /home/debug/.ssh/authorized_keys
+    chmod 0600 /home/debug/.ssh/authorized_keys
+    echo 'debug ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/debug
+    chmod 0440 /etc/sudoers.d/debug
+  DEBUG
+
   boot = <<-BOOT
     #!/bin/bash
     # A CI runner host (DEC-2065), made by deploy/tofu/modules/ci-runners.
     set -euo pipefail
     export DEBIAN_FRONTEND=noninteractive
     passwd --lock root
+    install -d -m 0755 /etc/ssh/sshd_config.d
+    cat > /etc/ssh/sshd_config.d/10-mandate.conf <<'SSHD'
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    PermitRootLogin no
+    AllowUsers debug
+    SSHD
+    ${local.debug_boot}
+    systemctl try-restart ssh.service || true
     install -d -m 0700 /etc/mandate-runner
     umask 077
     cat > /etc/mandate-runner/app.pem <<'PEM'
@@ -424,6 +468,23 @@ resource "digitalocean_tag" "runner" {
 resource "digitalocean_firewall" "runner" {
   name = "${var.name_prefix}-runner"
   tags = [digitalocean_tag.runner.id]
+
+  dynamic "inbound_rule" {
+    for_each = var.debug_ssh_cidr == "" ? [] : [var.debug_ssh_cidr]
+
+    content {
+      protocol         = "tcp"
+      port_range       = "22"
+      source_addresses = [inbound_rule.value]
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition     = (var.debug_ssh_key == "") == (var.debug_ssh_cidr == "")
+      error_message = "The debug window takes both a key and an address, or neither (DEC-2077)."
+    }
+  }
 
   outbound_rule {
     protocol              = "tcp"

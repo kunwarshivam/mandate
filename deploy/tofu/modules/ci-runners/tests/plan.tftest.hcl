@@ -57,6 +57,76 @@ run "three_runners_plan_within_the_cap" {
   }
 }
 
+run "the_debug_window_is_shut_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(digitalocean_firewall.runner.inbound_rule) == 0
+    error_message = "With no debug variables, nothing is admitted on port 22 (DEC-2077)."
+  }
+
+  assert {
+    condition     = alltrue([for d in digitalocean_droplet.runner : !strcontains(nonsensitive(d.user_data), "/home/debug")])
+    error_message = "With no debug variables, no debug user or key is made (DEC-2077)."
+  }
+
+  assert {
+    condition     = alltrue([for d in digitalocean_droplet.runner : strcontains(nonsensitive(d.user_data), "PasswordAuthentication no") && strcontains(nonsensitive(d.user_data), "PermitRootLogin no")])
+    error_message = "sshd takes no password and no root login, window open or shut."
+  }
+}
+
+run "the_debug_window_admits_one_address_and_one_key" {
+  command = plan
+
+  variables {
+    debug_ssh_key  = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample founder@laptop"
+    debug_ssh_cidr = "203.0.113.7/32"
+  }
+
+  assert {
+    condition     = length(digitalocean_firewall.runner.inbound_rule) == 1 && alltrue([for r in digitalocean_firewall.runner.inbound_rule : r.protocol == "tcp" && r.port_range == "22" && toset(r.source_addresses) == toset(["203.0.113.7/32"])])
+    error_message = "The window admits port 22 from the one address only."
+  }
+
+  assert {
+    condition     = alltrue([for d in digitalocean_droplet.runner : strcontains(nonsensitive(d.user_data), "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample founder@laptop")])
+    error_message = "The debug user gets the one key."
+  }
+}
+
+run "refuses_a_debug_range_wider_than_one_host" {
+  command = plan
+
+  variables {
+    debug_ssh_key  = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample founder@laptop"
+    debug_ssh_cidr = "203.0.113.0/24"
+  }
+
+  expect_failures = [var.debug_ssh_cidr]
+}
+
+run "refuses_a_debug_key_without_an_address" {
+  command = plan
+
+  variables {
+    debug_ssh_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample founder@laptop"
+  }
+
+  expect_failures = [digitalocean_firewall.runner]
+}
+
+run "refuses_a_debug_key_that_could_break_its_quoting" {
+  command = plan
+
+  variables {
+    debug_ssh_key  = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample a';reboot;'"
+    debug_ssh_cidr = "203.0.113.7/32"
+  }
+
+  expect_failures = [var.debug_ssh_key]
+}
+
 run "the_firewall_admits_nothing_and_lets_out_only_what_jobs_need" {
   command = plan
 

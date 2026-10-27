@@ -173,6 +173,45 @@ hook passing. It fails closed, so a wrong guess fails jobs and never admits one.
   App's private key (or uninstall the App) and revoke the DigitalOcean token.
 - **If a runner misbehaves:** destroy it in the console; the next `tofu apply` makes a fresh one.
 
+## 8. Debug window (only when a runner misbehaves)
+
+The droplets admit nothing and no one can log in, so their logs are out of reach. When the
+runners misbehave (for example, runners registering and never going Online), open a window for
+yourself alone, read the logs, and shut it again the same day (DEC-2077). Opening and shutting it
+each replace the droplets, so do it while `CI_RUNNER` is unset (§7).
+
+1. **Make a fresh DigitalOcean token** (§2.3) and export the same variables as in §4, then add:
+
+   ```bash
+   cd deploy/tofu/environments/ci-runners
+   export TF_VAR_debug_ssh_key="$(cat ~/.ssh/id_ed25519.pub)"            # your public key, one line
+   export TF_VAR_debug_ssh_cidr="$(curl -s https://ipv4.icanhazip.com)/32" # your own address only
+   tofu apply
+   ```
+
+   The plan adds one inbound rule (TCP 22 from your address) and replaces the three droplets.
+   The window takes both variables or neither, and refuses any range wider than one address.
+2. **Wait about 30 minutes**, for the new droplets to boot and start looping, then for each
+   droplet's address (the console's **Droplets** page):
+
+   ```bash
+   ssh debug@<droplet address>
+   sudo journalctl -u mandate-runner -n 300 --no-pager
+   sudo journalctl -b --no-pager | grep -iE 'sysbox|dockerd|mandate' | tail -n 100
+   sudo docker ps -a
+   exit
+   ```
+
+   Only the `debug` user can log in, only with your key; no password works, and root cannot log in.
+3. **Paste back to the agents** the output of those commands. It holds the runner's and the
+   manager's console output, which names no secret: the runner's one-job configuration is passed
+   as an argument and never printed. **Never paste** anything from `/etc/mandate-runner/`
+   (`app.pem` is the App's private key), the droplets' user data, your DigitalOcean token or
+   your state passphrase. If a line ever shows a key or a token, stop and rotate it.
+4. **Shut the window the same day:** run `tofu apply` again with both variables unset
+   (`unset TF_VAR_debug_ssh_key TF_VAR_debug_ssh_cidr`). The plan removes the rule and replaces
+   the droplets. Then revoke the token.
+
 ## What lands where
 
 | Where | What |

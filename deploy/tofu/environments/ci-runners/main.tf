@@ -23,6 +23,8 @@ module "runners" {
   kubectl_sha256             = "3cfeaf80be482b435b0aa214aff6e0b2c312ee23c0ff20810c75517b6004c6eb"
   base_image                 = "ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac"
   toolchain_ref              = "main"
+  debug_ssh_key              = var.debug_ssh_key
+  debug_ssh_cidr             = var.debug_ssh_cidr
 }
 
 output "estimate_usd" {
