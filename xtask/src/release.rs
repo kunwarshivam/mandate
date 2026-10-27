@@ -92,8 +92,12 @@ const TARGET_CC: &str = "gcc";
 /// holds no recorded research bundle, which only the local cell's interim image carries (DEC-2246).
 /// `mandate-provisionerd` is the role provisioner a hosted cell runs, released the same way
 /// (DEC-2350), and `mandate-token-exchange` the OAuth connect's token exchange (DEC-821, DEC-1175),
-/// whose release build refuses a token URL of its own (DEC-2633 item 2).
-pub(crate) const BINARIES: [(&str, &str); 9] = [
+/// whose release build refuses a token URL of its own (DEC-2633 item 2). `mandate-scheduler`,
+/// `mandate-dispatcher`, `mandate-datad` and `mandate-gatewayd` are the scheduler, the alert
+/// dispatcher, the data process and the model gateway a hosted cell runs, released the same way so
+/// every process the chart builds has a signed digest to promote (DEC-2079); the gateway's image
+/// holds no recorded research bundle, which only the local cell's interim image carries.
+pub(crate) const BINARIES: [(&str, &str); 13] = [
     ("mandate-cli", "mandate"),
     ("mandate-agentd", "mandate-agentd"),
     ("mandate-rh-sim", "mandate-rh-sim"),
@@ -103,6 +107,10 @@ pub(crate) const BINARIES: [(&str, &str); 9] = [
     ("mandate-executord", "mandate-executord"),
     ("mandate-provisionerd", "mandate-provisionerd"),
     ("mandate-token-exchange", "mandate-token-exchange"),
+    ("mandate-scheduler", "mandate-scheduler"),
+    ("mandate-dispatcher", "mandate-dispatcher"),
+    ("mandate-datad", "mandate-datad"),
+    ("mandate-gatewayd", "mandate-gatewayd"),
 ];
 
 /// Where `release build` keeps its own target directory, apart from the workspace's, because its
@@ -1437,8 +1445,9 @@ mod tests {
     /// What a release ships, exactly: the CLI, the agent daemon, the simulator the local cell's
     /// drills run, the workspace API server, whose image a hosted cell runs as `images.api`, and
     /// the three agent processes a hosted cell runs, the deployment manager, the agent runtime and
-    /// the account executor, and the role provisioner (DEC-2350), each package building the binary
-    /// of its name but the CLI's `mandate` (DEC-971, DEC-2026).
+    /// the account executor, the role provisioner (DEC-2350), and the scheduler, the dispatcher,
+    /// the data process and the model gateway (DEC-2079), each package building the binary of its
+    /// name but the CLI's `mandate` (DEC-971, DEC-2026).
     #[test]
     fn the_release_ships_exactly_these_binaries() {
         assert_eq!(
@@ -1453,6 +1462,10 @@ mod tests {
                 ("mandate-executord", "mandate-executord"),
                 ("mandate-provisionerd", "mandate-provisionerd"),
                 ("mandate-token-exchange", "mandate-token-exchange"),
+                ("mandate-scheduler", "mandate-scheduler"),
+                ("mandate-dispatcher", "mandate-dispatcher"),
+                ("mandate-datad", "mandate-datad"),
+                ("mandate-gatewayd", "mandate-gatewayd"),
             ]
             .as_slice()
         );
