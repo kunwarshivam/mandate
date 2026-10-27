@@ -39,12 +39,17 @@ runners, and the runners' job-started hook refuses an approved fork's job before
 
 ## 2. DigitalOcean: a team, a billing alert and a token
 
-1. **A separate team for CI.** In the DigitalOcean console, **Create a team** (for example
-   `mandate-ci`) and use it for everything below. Its bill and its billing alert then cover the
-   runners alone, apart from the hosting budget; its token cannot touch staging or production; and
-   only its members can read the droplets' user data, which holds the App's key.
-2. **Billing alert at the cap.** In that team, **Billing → Billing alerts**, set an alert at
-   **150 USD** a month. No API sets this. The plan's own check also refuses a fleet over 150 USD.
+1. **A team.** Preferably a separate one for CI (**Create a team**, for example `mandate-ci`).
+   Its bill and alert then cover the runners alone, its token cannot touch staging or production,
+   and only its members can read the droplets' user data, which holds the App's key. If you have
+   only one team, as now, use it (DEC-2074). Then:
+   - the alert covers the team's whole bill, so set it at your other spend plus 150 USD;
+   - the token can reach the team's other droplets, so revoke it as soon as each apply ends;
+   - any member with Droplet read can read the App's key, so rotate it whenever a member joins
+     (§6).
+2. **Billing alert.** In that team, **Billing → Billing alerts**, set an alert at **150 USD** a
+   month, or at your other spend plus 150 USD in a shared team. No API sets this. The plan's own
+   check also refuses a fleet over 150 USD.
 3. **A personal access token**, in **API → Tokens → Generate New Token**, **Custom Scopes**, an
    expiry of 30 days (you only need it while you apply), with only:
 
