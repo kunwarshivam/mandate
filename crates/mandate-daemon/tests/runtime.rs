@@ -3269,3 +3269,66 @@ proptest! {
         prop_assert_eq!(by_head.state(), by_whole.state(), "the folded state, its risk clock and mode");
     }
 }
+
+/// The production fold's answer for an opening in SPY: `Held::Unreadable` once a row it reads did
+/// not read, as journal spec §2's clock rule makes a tick earlier than the last.
+fn fold_unreadable(facts: &mandate_daemon::production::Facts) -> bool {
+    facts
+        .read(|journaled| {
+            matches!(
+                journaled.facts(SPY, mandate_daemon::production::FRESH),
+                Err(mandate_gate_context::Held::Unreadable)
+            )
+        })
+        .unwrap_or(false)
+}
+
+/// DEC-2852, #2828's review: a clock record that goes back holds the production fold, as a fold of
+/// the whole clock stream at every pass holds it, whether the fold followed the account from the
+/// start or only after the clock had ticked, so no earlier record is left unfolded.
+#[test]
+fn a_clock_record_that_goes_back_holds_the_fold_as_a_whole_read_does() {
+    for follows_late in [false, true] {
+        let rig = Rig::default();
+        if !follows_late {
+            established(&rig, CONNECTION, ACCOUNT_REF, 2);
+        }
+        let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+        let mut process = RuntimeProcess::start(
+            rig.clone(),
+            Wiring {
+                facts: Some(facts.clone()),
+                ..wiring()
+            },
+            &config(),
+            at(NOW),
+        );
+        tick(&rig, NOW + 5);
+        tick(&rig, NOW + 3);
+        process.step(at(NOW + 6));
+        tick(&rig, NOW + 9);
+        process.step(at(NOW + 10));
+        if follows_late {
+            established(&rig, CONNECTION, ACCOUNT_REF, 2);
+            tick(&rig, NOW + 11);
+            process.step(at(NOW + 12));
+        }
+        assert!(
+            fold_unreadable(&facts),
+            "follows late: {follows_late}; the tick at +3 after +5 holds the fold"
+        );
+    }
+}
+
+/// A clock stream that cannot be read is asked once a pass, never again from its first record when
+/// no head was ever held.
+#[test]
+fn an_unreadable_clock_stream_is_asked_once_a_pass() {
+    let rig = Rig::default();
+    let mut process = start(&rig, NOW);
+    rig.clock_down.set(true);
+    rig.reads.borrow_mut().clear();
+    process.step(at(NOW + 1));
+    let asked = rig.reads.borrow().iter().filter(|s| *s == CLOCK).count();
+    assert_eq!(asked, 1, "{:?}", rig.reads.borrow());
+}

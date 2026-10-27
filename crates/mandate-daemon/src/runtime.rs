@@ -118,6 +118,9 @@ struct Tail {
     head: Option<(u64, Digest)>,
     keep: bool,
     rows: Vec<StoredEvent>,
+    /// Whether the last read was read again from the first record, so whatever was folded from
+    /// earlier reads must be folded again.
+    replaced: bool,
 }
 
 impl Tail {
@@ -139,12 +142,14 @@ impl Tail {
                 from_seq: seq.saturating_add(1),
                 prev_hash: hash,
             });
+        self.replaced = false;
         let since = match store.rows_from(stream, start) {
             Some(since) => since,
             None if self.head.is_some() => {
                 let all = store.rows_from(stream, TrustedStart::GENESIS)?;
                 self.head = None;
                 self.rows.clear();
+                self.replaced = true;
                 all
             }
             None => return None,
@@ -161,14 +166,15 @@ impl Tail {
 
 /// The streams the process reads at every pass, each read only past the head it was last read to
 /// (DEC-2852): the control and agent streams kept whole for the ports that read them so, the
-/// account and clock streams kept as nothing but their head, the clock with its latest tick and
-/// the record that gave it.
+/// account stream kept as nothing but its head, and the clock stream as its latest tick, its
+/// records kept only until the production fold follows the account, which then folds every one
+/// of them in order, as a fold of the whole stream does.
 struct Tails {
     control: Tail,
     agent: Tail,
     account: Tail,
     clock: Tail,
-    latest_tick: Option<(UtcNanos, StoredEvent)>,
+    latest_tick: Option<UtcNanos>,
 }
 
 impl Default for Tails {
@@ -177,7 +183,7 @@ impl Default for Tails {
             control: Tail::kept(),
             agent: Tail::kept(),
             account: Tail::default(),
-            clock: Tail::default(),
+            clock: Tail::kept(),
             latest_tick: None,
         }
     }
@@ -512,23 +518,33 @@ impl<S: Store> RuntimeProcess<S> {
         let Some(rows) = self.tails.clock.read(&self.store, &clock) else {
             return false;
         };
-        for row in rows.iter().filter(|r| r.event_type == "ClockAdvanced") {
-            if let Some(tick) = tick_of(row)
-                && self
-                    .tails
-                    .latest_tick
-                    .as_ref()
-                    .is_none_or(|(latest, _)| tick > *latest)
-            {
-                self.tails.latest_tick = Some((tick, row.clone()));
-            }
+        if self.tails.clock.replaced {
+            self.tails.latest_tick = None;
         }
-        if let Some((_, row)) = &self.tails.latest_tick {
-            self.feed(std::slice::from_ref(row));
+        self.tails.latest_tick = rows
+            .iter()
+            .filter(|r| r.event_type == "ClockAdvanced")
+            .filter_map(tick_of)
+            .chain(self.tails.latest_tick)
+            .max();
+        let following = self
+            .wiring
+            .facts
+            .as_ref()
+            .is_some_and(crate::production::Facts::following);
+        if self.tails.clock.keep && following {
+            let kept = std::mem::take(&mut self.tails.clock.rows);
+            self.tails.clock.keep = false;
+            self.feed(&kept);
+        } else if self.tails.clock.keep {
+            self.tails.clock.keep = self.wiring.facts.is_some();
+            if !self.tails.clock.keep {
+                self.tails.clock.rows.clear();
+            }
         }
         self.feed(&rows);
         self.read_working_universe();
-        let latest = self.tails.latest_tick.as_ref().map(|(tick, _)| *tick);
+        let latest = self.tails.latest_tick;
         match latest {
             Some(tick) => {
                 let at = RiskClock::from_secs(tick.secs());

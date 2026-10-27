@@ -82,22 +82,6 @@ impl Store for MemoryStore {
         Some(self.0.borrow().rows(stream).to_vec())
     }
 
-    fn rows_from(&self, stream: &StreamId, start: TrustedStart) -> Option<Vec<StoredEvent>> {
-        let journal = self.0.borrow();
-        let since: Vec<StoredEvent> = journal
-            .rows(stream)
-            .iter()
-            .filter(|row| row.seq >= start.from_seq)
-            .cloned()
-            .collect();
-        match since.first() {
-            Some(first) if first.seq != start.from_seq || first.prev_hash != start.prev_hash => {
-                None
-            }
-            _ => Some(since),
-        }
-    }
-
     fn append(
         &mut self,
         stream: &StreamId,

@@ -218,6 +218,11 @@ impl Facts {
         }
     }
 
+    /// Whether the fold follows an account yet: until it does, it folds nothing it is fed.
+    pub fn following(&self) -> bool {
+        self.0.try_borrow().is_ok_and(|fed| fed.journaled.is_some())
+    }
+
     /// How many held instruments a flatten has left unplanned since the last call, and resets the
     /// count: the process raises `flatten_unplanned` for each nonzero answer (DEC-2378 item 8).
     pub fn take_unplanned(&self) -> u32 {
