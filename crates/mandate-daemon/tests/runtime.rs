@@ -3424,6 +3424,53 @@ fn a_rewritten_head_fails_the_process_at_the_next_check() {
     }
 }
 
+/// DEC-2852 items 3 and 6: a check reads each stream from its first record and hands on only
+/// what follows the head, so the passes across several checks fold and tick exactly as the passes
+/// between them do: the risk clock is each pass's own tick, and the kept control stream is the
+/// stream, each record once.
+#[test]
+fn a_check_hands_on_only_what_follows_the_head() {
+    let following = Following::default();
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&following.rig, ACCOUNT);
+    let (host, closes) = (Host::default(), Closes::default());
+    let mut process = RuntimeProcess::start(
+        following.clone(),
+        Wiring {
+            models: Some(ModelsWiring {
+                models: Box::new(host.clone()),
+                artifacts: Box::new(closes),
+            }),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    for second in 1..=190 {
+        if second == 100 {
+            kill_switch(&following.rig);
+        }
+        tick(&following.rig, NOW + second);
+        process.step(at(NOW + second));
+        assert_eq!(risk_clock(&process), Some(NOW + second), "pass {second}");
+        let control: Vec<String> = following
+            .rig
+            .control
+            .borrow()
+            .iter()
+            .map(|row| row.event_id.clone())
+            .collect();
+        let handed = host
+            .handed
+            .borrow()
+            .last()
+            .cloned()
+            .map(|(control, _)| control);
+        assert_eq!(handed, Some(Some(control)), "pass {second}");
+    }
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
 /// DEC-2852 item 6: a step back in time makes the check due at once, so a clock set back
 /// never defers it by the step.
 #[test]
