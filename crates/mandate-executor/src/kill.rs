@@ -1474,6 +1474,7 @@ mod tests {
         };
         for quoted in [false, true] {
             let gone = switched_after_a_fill(&ports, quoted)?;
+            let cause = &the_switch(&gone)?.event_id;
             assert_eq!(
                 raised(&gone).len(),
                 1,
@@ -1486,7 +1487,7 @@ mod tests {
                         if draft.event_type == "ProtectionChanged"
                             && field(draft, "action").and_then(Value::as_str)
                                 == Some("exit_unpriced")
-                            && draft.causation_id.as_ref() == the_switch(&gone).ok().map(|s| &s.event_id))
+                            && draft.causation_id.as_ref() == Some(cause))
                 })
                 .count();
             let alerted = gone.iter().any(|effect| {
@@ -1498,6 +1499,80 @@ mod tests {
                 "quoted {quoted}"
             );
         }
+        Ok(())
+    }
+
+    /// DEC-2853: a close the owner's floor alone prices, with no resting stop and no mark held,
+    /// goes at the price the owner confirmed, and is not alerted as unpriced.
+    #[test]
+    fn a_flatten_the_owners_floor_alone_prices_is_not_alerted() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = bracket_entry(&ports)?;
+        for (event_type, pairs) in [
+            (
+                "OrderSubmitted",
+                vec![
+                    ("client_order_id", text("md-held")),
+                    ("agent", text("agent-a")),
+                    ("instrument", text("AAPL")),
+                    ("side", text("buy")),
+                    ("qty", text("10")),
+                    ("limit", text("150")),
+                    ("purpose", text("open")),
+                ],
+            ),
+            (
+                "FillApplied",
+                vec![
+                    ("fill_id", text("f-held")),
+                    ("client_order_id", text("md-held")),
+                    ("instrument", text("AAPL")),
+                    ("side", text("buy")),
+                    ("qty_gross", text("10")),
+                    ("price", text("150")),
+                ],
+            ),
+            (
+                "OrderStateChanged",
+                vec![
+                    ("client_order_id", text("md-held")),
+                    ("state", text("filled")),
+                ],
+            ),
+        ] {
+            commit(&mut executor, event_type, pairs)?;
+        }
+        executor.state.quotes.clear();
+        executor.state.sane_bids.clear();
+        executor.run(switch(Initiator::Owner, true)?, &ports)?;
+        let gone = executor.run(
+            Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+                client_order_id: format!("md-{ENTRY}"),
+            })),
+            &ports,
+        )?;
+        let close = draft(&gone, "IntentReceived").ok_or_else(|| missing("the close"))?;
+        assert_eq!(
+            field(close, "limit_price").and_then(Value::as_str),
+            Some("148"),
+            "the owner's floor prices it"
+        );
+        let unpriced = gone.iter().any(|effect| {
+            matches!(effect, Effect::Journal(draft)
+                if draft.event_type == "ProtectionChanged"
+                    && field(draft, "action").and_then(Value::as_str) == Some("exit_unpriced"))
+        });
+        assert!(
+            !unpriced,
+            "a floor the owner chose is a price, not unpriced"
+        );
         Ok(())
     }
 
