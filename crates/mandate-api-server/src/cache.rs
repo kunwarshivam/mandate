@@ -13,12 +13,13 @@
 //!   cuts the stream below it, are seen at the next read: the stream is read whole again. A change
 //!   to rows before the head that leaves the head row's hash as it was breaks the stored chain, so a
 //!   whole read fails; the cache sees it at its next read of the stream once its last whole read is
-//!   [`Limits::reverify`] old, or the clock reads earlier than it, and until then serves the rows it
-//!   verified.
+//!   [`Limits::reverify`] old, and until then serves the rows it verified. A clock read earlier
+//!   than a workspace's last read drops the workspace (below), so its streams are read whole.
 //! - **Exactly the stream otherwise.** A tail the store refuses, or one that does not begin with the
 //!   held head row, drops what is held and reads the stream whole. A whole read that fails drops
 //!   every stream held for that workspace and answers [`JournalUnavailable`], as the store's own read
-//!   does; nothing held is served in its place.
+//!   does; nothing held is served in its place. A read already in flight answers as it would have,
+//!   but holds nothing once any workspace has been dropped since it began.
 //! - **Tenancy.** Rows are held per stream id, under the id's second segment, the workspace for
 //!   every workspace stream (journal spec §2). A read returns only the rows held under its own
 //!   stream id, so one workspace's rows never answer another's read.
@@ -91,11 +92,13 @@ struct Held {
     streams: BTreeMap<String, Stream>,
 }
 
-/// Every workspace held, and their bytes together.
+/// Every workspace held, their bytes together, and how many workspaces a failed whole read has
+/// dropped, so a read that began before a drop does not hold its rows again after it.
 #[derive(Debug, Default)]
 struct State {
     bytes: usize,
     spaces: BTreeMap<String, Held>,
+    drops: u64,
 }
 
 impl State {
@@ -164,10 +167,17 @@ impl CachedJournal {
         self.held.lock().map_or(0, |held| held.bytes)
     }
 
+    /// The failed whole reads so far, read before a read begins and checked again by [`Self::hold`].
+    fn drops(&self) -> Option<u64> {
+        self.held.lock().ok().map(|held| held.drops)
+    }
+
     /// The held rows of `stream` in `workspace` if they were read whole within
-    /// [`Limits::reverify`], after dropping every idle workspace, or `None`.
-    fn take_held(&self, workspace: &str, stream: &str, now: UtcNanos) -> Option<Stream> {
+    /// [`Limits::reverify`], with [`Self::drops`] as it stood when they were taken, after dropping
+    /// every idle workspace, or `None`.
+    fn take_held(&self, workspace: &str, stream: &str, now: UtcNanos) -> Option<(Stream, u64)> {
         let mut held = self.held.lock().ok()?;
+        let drops = held.drops;
         let idle: Vec<String> = held
             .spaces
             .iter()
@@ -183,24 +193,21 @@ impl CachedJournal {
         if elapsed(found.whole_at, now) >= self.limits.reverify {
             return None;
         }
-        Some(found.clone())
+        Some((found.clone(), drops))
     }
 
-    /// Holds `rows`, of `bytes` by [`row_bytes`], as `stream`'s in `workspace`, then drops the least recently read other
-    /// workspaces while the bound is passed; a stream over the bound by itself is not held.
-    fn hold(
-        &self,
-        workspace: &str,
-        stream: &str,
-        rows: Arc<Vec<StoredEvent>>,
-        bytes: usize,
-        whole_at: UtcNanos,
-        now: UtcNanos,
-    ) {
+    /// Holds `rows` as `stream`'s in `workspace`, then drops the least recently read other
+    /// workspaces while the bound is passed; a stream over the bound by itself is not held, and
+    /// nothing is held when a workspace was dropped since `drops` was read.
+    fn hold(&self, workspace: &str, stream: &str, rows: Stream, now: UtcNanos, drops: u64) {
         let Ok(mut held) = self.held.lock() else {
             return;
         };
+        if held.drops != drops {
+            return;
+        }
         held.remove_stream(workspace, stream);
+        let bytes = rows.bytes;
         if bytes > self.limits.max_bytes {
             return;
         }
@@ -214,14 +221,7 @@ impl CachedJournal {
             });
         space.used = now;
         space.bytes = space.bytes.saturating_add(bytes);
-        space.streams.insert(
-            stream.to_owned(),
-            Stream {
-                rows,
-                bytes,
-                whole_at,
-            },
-        );
+        space.streams.insert(stream.to_owned(), rows);
         held.bytes = held.bytes.saturating_add(bytes);
         while held.bytes > self.limits.max_bytes {
             let oldest = held
@@ -261,10 +261,11 @@ impl CachedJournal {
         }
     }
 
-    /// Drops every stream held for `workspace`.
+    /// Drops every stream held for `workspace`, and counts the drop.
     fn drop_workspace(&self, workspace: &str) {
         if let Ok(mut held) = self.held.lock() {
             held.remove_space(workspace);
+            held.drops = held.drops.saturating_add(1);
         }
     }
 
@@ -276,12 +277,19 @@ impl CachedJournal {
         now: UtcNanos,
     ) -> Result<Vec<StoredEvent>, JournalUnavailable> {
         self.drop_held(workspace, stream);
+        let drops = self.drops();
         let Ok(rows) = self.inner.rows(stream).await else {
             self.drop_workspace(workspace);
             return Err(JournalUnavailable);
         };
-        let bytes = rows_bytes(&rows);
-        self.hold(workspace, stream, Arc::new(rows.clone()), bytes, now, now);
+        if let Some(drops) = drops {
+            let whole = Stream {
+                bytes: rows_bytes(&rows),
+                rows: Arc::new(rows.clone()),
+                whole_at: now,
+            };
+            self.hold(workspace, stream, whole, now, drops);
+        }
         Ok(rows)
     }
 
@@ -294,7 +302,7 @@ impl CachedJournal {
         let Some(now) = self.clock.now() else {
             return self.inner.rows(stream).await;
         };
-        let Some(held) = self.take_held(&workspace, stream, now) else {
+        let Some((held, drops)) = self.take_held(&workspace, stream, now) else {
             return self.read_whole(&workspace, stream, now).await;
         };
         let Ok(tail) = self
@@ -319,15 +327,12 @@ impl CachedJournal {
         rows.extend_from_slice(&held.rows);
         rows.extend_from_slice(new);
         let rows = Arc::new(rows);
-        let bytes = held.bytes.saturating_add(rows_bytes(new));
-        self.hold(
-            &workspace,
-            stream,
-            Arc::clone(&rows),
-            bytes,
-            held.whole_at,
-            now,
-        );
+        let grown = Stream {
+            rows: Arc::clone(&rows),
+            bytes: held.bytes.saturating_add(rows_bytes(new)),
+            whole_at: held.whole_at,
+        };
+        self.hold(&workspace, stream, grown, now, drops);
         Ok(rows.as_ref().clone())
     }
 }

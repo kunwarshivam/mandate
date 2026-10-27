@@ -3,7 +3,9 @@
 
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::pin::pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Waker};
 use std::time::Duration;
 
 use mandate_api_server::cache::{CachedJournal, Limits, row_bytes};
@@ -14,6 +16,7 @@ use mandate_journal::{AppendOutcome, StoredEvent, TrustedStart};
 use mandate_time::UtcNanos;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestCaseError, TestError, TestRunner};
+use tokio::sync::Semaphore;
 
 const A_CTL: &str = "ctl:ws_a";
 const A_ACCT: &str = "acct:ws_a:ref_1";
@@ -837,4 +840,106 @@ fn over_the_bound_with_one_workspace_its_other_streams_are_dropped() {
     assert_eq!(store.asked().whole, 2);
     read(&journal, A_CTL).unwrap();
     assert_eq!(store.asked().whole, 3, "the other stream was dropped");
+}
+
+/// The store, with tail reads of one stream held until a permit is given.
+struct Gated {
+    store: Arc<Store>,
+    stream: &'static str,
+    gate: Arc<Semaphore>,
+}
+
+impl Journal for Gated {
+    fn rows<'a>(&'a self, stream: &'a str) -> Rows<'a> {
+        self.store.rows(stream)
+    }
+
+    fn rows_from<'a>(&'a self, stream: &'a str, start: TrustedStart) -> Rows<'a> {
+        let gated = stream == self.stream;
+        Box::pin(async move {
+            if gated {
+                self.gate.acquire().await.unwrap().forget();
+            }
+            self.store.rows_from(stream, start).await
+        })
+    }
+
+    fn take_ownership<'a>(&'a self, stream: &'a str) -> Answer<'a, u64> {
+        self.store.take_ownership(stream)
+    }
+
+    fn head<'a>(&'a self, stream: &'a str) -> Answer<'a, u64> {
+        self.store.head(stream)
+    }
+
+    fn event<'a>(&'a self, event_id: &'a str) -> Answer<'a, Option<StoredEvent>> {
+        self.store.event(event_id)
+    }
+
+    fn append<'a>(
+        &'a self,
+        stream: &'a str,
+        expected_head: u64,
+        writer_epoch: u64,
+        recorded_at: UtcNanos,
+        drafts: &'a [&'a [u8]],
+    ) -> Answer<'a, AppendOutcome> {
+        Journal::append(
+            self.store.as_ref(),
+            stream,
+            expected_head,
+            writer_epoch,
+            recorded_at,
+            drafts,
+        )
+    }
+}
+
+#[test]
+fn a_read_in_flight_when_its_workspace_is_dropped_holds_nothing_after() {
+    let store = Arc::new(Store::default());
+    store.append(A_ACCT, 10);
+    store.append(A_CTL, 4);
+    let gate = Arc::new(Semaphore::new(0));
+    let clock = Hand::at(0);
+    let journal = CachedJournal::new(
+        Arc::new(Gated {
+            store: Arc::clone(&store),
+            stream: A_CTL,
+            gate: Arc::clone(&gate),
+        }),
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        reverify_in_a_minute(),
+    );
+    read(&journal, A_ACCT).unwrap();
+    clock.set(50 * SECOND);
+    read(&journal, A_CTL).unwrap();
+    store.append(A_CTL, 1);
+    store.tamper(A_ACCT, 4);
+    clock.set(60 * SECOND);
+
+    let mut in_flight = pin!(journal.rows(A_CTL));
+    assert!(
+        in_flight
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending(),
+        "the read of A_CTL waits at the gate, holding A_CTL's rows"
+    );
+    assert_eq!(read(&journal, A_ACCT), Err(JournalUnavailable));
+    assert_eq!(store.asked().whole, 3);
+    gate.add_permits(1);
+    assert_eq!(
+        block(in_flight).unwrap(),
+        store.whole(A_CTL),
+        "the read in flight answers as it would have"
+    );
+    assert_eq!(journal.held_bytes(), 0, "and holds nothing after the drop");
+    gate.add_permits(1);
+    assert_eq!(read(&journal, A_CTL).unwrap(), store.whole(A_CTL));
+    assert_eq!(
+        store.asked().whole,
+        4,
+        "the dropped workspace's stream is read whole"
+    );
 }
