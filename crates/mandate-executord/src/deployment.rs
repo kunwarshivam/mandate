@@ -1346,7 +1346,13 @@ mod incremental {
 
     const CLOCK: &str = "clock:ws1";
     const AGENT: &str = "agent:ws1:demo-research";
+    const CONTROL: &str = "ctl:ws1";
     const T0: i64 = 1_793_106_000;
+
+    /// The instant `secs` after the run's start.
+    fn at(secs: i64) -> Option<UtcNanos> {
+        UtcNanos::from_parts(T0.saturating_add(secs), 0).ok()
+    }
 
     /// The journal as the test appends it, and how many records every read has handed back.
     #[derive(Default)]
@@ -1355,13 +1361,17 @@ mod incremental {
         read: Cell<usize>,
         /// Refuse the next read past a held head, as a store does whose chain no longer follows it.
         refuse_next: Cell<bool>,
+        /// Refuse every read, as a store does that cannot be reached.
+        down: Cell<bool>,
+        /// How many reads were asked, answered or not.
+        calls: Cell<usize>,
     }
 
     impl Journal {
         fn append(&self, stream: &str, event_type: &str, payload: &str) {
             let mut streams = self.streams.borrow_mut();
             let rows = streams.entry(stream.to_owned()).or_default();
-            let seq = u64::try_from(rows.len()).unwrap() + 1;
+            let seq = u64::try_from(rows.len()).map_or(u64::MAX, |n| n.saturating_add(1));
             let prev_hash = rows.last().map_or(Digest::ZERO, |row| row.hash);
             let body = format!(r#"{{"event_type":"{event_type}","payload":{payload}}}"#);
             rows.push(StoredEvent {
@@ -1379,13 +1389,18 @@ mod incremental {
         }
 
         fn tick(&self, secs: i64) {
-            let clock = UtcNanos::from_parts(T0 + secs, 0).unwrap();
-            self.append(CLOCK, "ClockAdvanced", &format!(r#"{{"clock":"{clock}"}}"#));
+            if let Some(clock) = at(secs) {
+                self.append(CLOCK, "ClockAdvanced", &format!(r#"{{"clock":"{clock}"}}"#));
+            }
         }
 
         fn rows(self: &Rc<Self>) -> Rows {
             let journal = Rc::clone(self);
             Box::new(move |stream, start: TrustedStart| {
+                journal.calls.set(journal.calls.get().saturating_add(1));
+                if journal.down.get() {
+                    return None;
+                }
                 if start.from_seq > 1 && journal.refuse_next.replace(false) {
                     return None;
                 }
@@ -1405,7 +1420,9 @@ mod incremental {
                 {
                     return None;
                 }
-                journal.read.set(journal.read.get() + since.len());
+                journal
+                    .read
+                    .set(journal.read.get().saturating_add(since.len()));
                 Some(since)
             })
         }
@@ -1485,7 +1502,7 @@ mod incremental {
                 journal.append(
                     AGENT,
                     "ThesisProposed",
-                    &thesis(u64::try_from(secs).unwrap()),
+                    &thesis(u64::try_from(secs).unwrap_or_default()),
                 );
                 appended += 1;
             }
@@ -1532,6 +1549,82 @@ mod incremental {
         );
     }
 
+    #[test]
+    fn a_store_that_cannot_answer_is_asked_once_and_nothing_kept_is_read() {
+        let journal = Rc::new(Journal::default());
+        let deployment = deployment(&journal);
+        journal.down.set(true);
+        assert_eq!(deployment.now(), None);
+        assert_eq!(
+            journal.calls.get(),
+            1,
+            "no head yet, so nothing to read again from"
+        );
+        journal.down.set(false);
+        journal.tick(0);
+        journal.append(CONTROL, "AgentDeployed", "{}");
+        assert_eq!(deployment.now(), latest_tick(&journal));
+        assert_eq!(deployment.control_rows(), Some(journal.all(CONTROL)));
+        journal.tick(1);
+        journal.append(CONTROL, "AgentDeployed", "{}");
+        journal.down.set(true);
+        assert_eq!(
+            deployment.now(),
+            None,
+            "never the kept tick once a read fails"
+        );
+        assert_eq!(
+            deployment.control_rows(),
+            None,
+            "nor the kept control records"
+        );
+        assert_eq!(deployment.theses(&agent()), None);
+        journal.down.set(false);
+        journal.refuse_next.set(true);
+        assert_eq!(
+            deployment.control_rows(),
+            Some(journal.all(CONTROL)),
+            "refolded once"
+        );
+        assert_eq!(deployment.now(), latest_tick(&journal));
+    }
+
+    /// A whole-stream reader's records past a start that does not follow them are refused, as a
+    /// store refuses a read whose held head is not its chain's.
+    #[test]
+    fn reading_a_whole_stream_refuses_a_start_it_does_not_follow() -> Result<(), String> {
+        let journal = Rc::new(Journal::default());
+        journal.tick(0);
+        journal.tick(1);
+        let all = journal.all(CLOCK);
+        let whole = Rc::clone(&journal);
+        let read = super::reading(move |stream| Some(whole.all(stream.as_str())));
+        let Some(clock) = mandate_journal::StreamId::parse(CLOCK) else {
+            return Err("the clock stream's id".to_owned());
+        };
+        let after = |row: &StoredEvent| TrustedStart {
+            from_seq: row.seq + 1,
+            prev_hash: row.hash,
+        };
+        assert_eq!(read(&clock, TrustedStart::GENESIS), Some(all.clone()));
+        let (Some(first), Some(second)) = (all.first(), all.get(1)) else {
+            return Err("two ticks".to_owned());
+        };
+        assert_eq!(read(&clock, after(first)), Some(vec![second.clone()]));
+        assert_eq!(read(&clock, after(second)), Some(Vec::new()));
+        let wrong_hash = TrustedStart {
+            from_seq: 2,
+            prev_hash: Digest::of(b"another chain"),
+        };
+        assert_eq!(read(&clock, wrong_hash), None);
+        let wrong_seq = TrustedStart {
+            from_seq: 0,
+            prev_hash: Digest::ZERO,
+        };
+        assert_eq!(read(&clock, wrong_seq), None);
+        Ok(())
+    }
+
     #[derive(Debug, Clone)]
     enum Step {
         Ticks(u8),
@@ -1563,16 +1656,16 @@ mod incremental {
         fn the_incremental_fold_equals_a_fold_of_the_whole_streams(steps in prop::collection::vec(step(), 1..120)) {
             let journal = Rc::new(Journal::default());
             let deployment = deployment(&journal);
-            let mut secs = 0;
-            let mut theses = 0;
+            let mut secs: i64 = 0;
+            let mut theses: u64 = 0;
             for step in steps {
                 match step {
                     Step::Ticks(n) => for _ in 0..n {
                         journal.tick(secs);
-                        secs += 1;
+                        secs = secs.saturating_add(1);
                     },
                     Step::Thesis => {
-                        theses += 1;
+                        theses = theses.saturating_add(1);
                         journal.append(AGENT, "ThesisProposed", &thesis(theses));
                     }
                     Step::Invalidated => journal.append(AGENT, "ThesisInvalidated", &format!(r#"{{"thesis_id":"t{theses}"}}"#)),
@@ -1583,7 +1676,9 @@ mod incremental {
                         prop_assert_eq!(deployment.now(), latest_tick(&journal));
                         let kept = deployment.theses(&agent());
                         prop_assert_eq!(kept.clone(), Some(all_theses(&journal)));
-                        let at = UtcNanos::from_parts(T0 + secs, 0).unwrap();
+                        let Some(at) = at(secs) else {
+                            continue;
+                        };
                         let whole = all_theses(&journal);
                         let expected = replay_theses(whole.iter().map(|(event_type, payload)| Ok(ThesisRecord {
                             event_type: event_type.as_str(),
