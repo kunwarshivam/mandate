@@ -13,6 +13,9 @@ gateway is built and runs over recorded responses; its live path is the model-ga
 
 ## Change history
 
+- **v0.8, amended ([DEC-2217](../project/decisions/DEC-2217.md); E21-62):** §4.3 "On a
+  deployment": a gate-mode research runtime drives the probe runs through a gate-only listener,
+  and the service computes the report from what it saw, recomputing every input and result.
 - **v0.8 ([DEC-2216](../project/decisions/DEC-2216.md); E21-62):** §3.1 adds the purpose
   `evaluation`, a platform call that evaluates a registry entry, with no agent. §4.3 says how the
   gate runs on a deployment: inside the model-gateway service, over a versioned probe set, with
@@ -447,21 +450,36 @@ The gate checks mechanics and safety, never profitability. Performance claims ar
 
 The probe sets and thresholds are versioned configuration, fixed before the evaluation runs.
 
-**On a deployment** ([DEC-2216](../project/decisions/DEC-2216.md)). The gate runs inside the
-model-gateway service, the one holder of the provider key and the one writer of its meter streams,
-when an operator asks over the service's probe socket (`mandate-gatewayd gate <model_id>`). Its
-calls have purpose `evaluation`, against a registry of the gate's own that research calls never
-resolve in. The research role's probe set is `fixtures/gate/research-probe-set.json`: five
-`ideate`, five `monitor`, and five prompt-injection runs, whose tools read a fixture corpus, never
-live data. The report holds the entry's pin, the probe set's digest, every call's request digest,
-reported identity, outcome, tokens and cost, each check's verdict, and `passed`. It is written
-create-only to the research artifact store, which only the service writes, and named by its
-reference. The report also names the endpoint and price table it ran against. Once a gate has
-called, every end writes a report: a pass, or `passed` false with the `stopped` code
-(`identity_mismatch` at the first differing identity, `cap_refused`, `provider_failed`, or
-`checks_failed`). It refuses before any call when either cap's room is below its whole maximum,
-or when a passing report for the same entry, probe set, endpoint and price table exists. A restart
-ends a gate with no report and resumes nothing.
+**On a deployment** ([DEC-2216](../project/decisions/DEC-2216.md), as
+[DEC-2217](../project/decisions/DEC-2217.md) amends it).
+- **Who drives the runs.** A gate-mode research runtime, run only as a one-shot gate Job, drives
+  each probe run through the production research loop. It uses fixture readers and an in-memory
+  store, and no broker, journal or network but the gate listener.
+- **What the service does.** It is still the one holder of the provider key and the one writer of
+  its meter streams. It serves those calls on a gate-only listener that only the gate Job can reach.
+  That listener admits only `evaluation` calls, with no agent, inside an open gate session for one
+  entry; the call listener refuses `evaluation`. The session registers the entry in a registry of
+  the gate's own that research calls never resolve in, and probes its identity first.
+- **The probe set.** The research role's probe set is `fixtures/gate/research-probe-set.json`: five
+  `ideate`, five `monitor`, and five prompt-injection runs, over a fixture corpus built into both
+  images. Its tools read that corpus, never live data.
+- **The service computes the report from what it saw on the wire.**
+  - It recomputes each run's seed inputs and every tool result from the corpus. A call that differs
+    is `unmatched`.
+  - It checks identity, schema conformance, the harness's §6.5 language checks, latency, injection
+    (no evidence outside the run's corpus slice) and the cost bound itself.
+  - `passed` holds only if every run matched and every check passed, so a lying runtime can make a
+    gate fail, never pass.
+- **What the report holds.** The entry's pin, the probe set's digest, the endpoint and price table,
+  each call's request digest, reported identity, outcome, tokens, cost and `matched` verdict, each
+  check's verdict, and `passed`, with the `stopped` code when it did not pass (`identity_mismatch`,
+  `cap_refused`, `provider_failed`, or `checks_failed`).
+- **Where it is written.** Create-only, to the research artifact store, which only the service
+  writes. It is named by its reference.
+- **When a session is refused.** Before any call, when either cap's room is below its whole maximum,
+  when another session is open, or when a passing report for the same entry, probe set, endpoint and
+  price table exists.
+- **Restarts.** A restart ends a session with no report and resumes nothing.
 
 ### 4.4 Provider deprecation
 
