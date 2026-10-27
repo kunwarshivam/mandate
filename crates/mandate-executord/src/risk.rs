@@ -1,5 +1,8 @@
 //! The account's risk folds, one per deployed agent, in the executor process (DEC-2804 items 2, 4,
-//! 5 and 8, DEC-2399).
+//! 5 and 8, DEC-2399, DEC-2849 item 3). Each fold steps only its own agent's fills, fees and records
+//! (DEC-2849 I7), so the folds of several agents on one account never step each other; while
+//! DEC-2804 item 8 holds, a second running agent still opens none, until DEC-2849 item 9's decision
+//! withdraws it.
 //!
 //! The book opens each agent's `AccountRiskFold` flat at its first deployment on the account, from
 //! inputs the journal fixes as of that deployment, so a replay at any later head opens the same
@@ -138,7 +141,7 @@ impl RiskBook {
     /// fold (DEC-2804 items 2 and 8), and opens each one missing over the account stream's rows,
     /// which `account` reads only when one is and either stream grew since the last pass that
     /// left one unopened (`head` is the account stream's). No fold is open while more than one agent that has
-    /// not stopped is followed. A stopped agent's fold, and one whose agent is redeployed on
+    /// not stopped is followed (DEC-2804 item 8, until DEC-2849 item 9). A stopped agent's fold, and one whose agent is redeployed on
     /// another version, is dropped, as a replay that saw that row would never have opened it.
     pub fn follow(
         &mut self,
