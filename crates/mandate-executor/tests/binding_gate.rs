@@ -454,7 +454,7 @@ fn local_only_hold_uses_the_registered_schema_and_remains_a_denial() {
             .get("checks")
             .and_then(mandate_canon::Value::as_array)
             .map(|checks| checks.len()),
-        Some(8)
+        Some(9)
     );
     assert!(draft.payload.get("evaluation").is_none());
     let bytes = serde_json::to_vec(&Json::Object(gate_draft(&draft)))
