@@ -157130,5 +157130,3087 @@
    }
   ],
   "fuzz_seed": 2278
+ },
+ "exit_intents": {
+  "spec": "docs/specs/journal.md v0.108 §9.1's `intent` type (DEC-2845)",
+  "drafts": {
+   "received_v1": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZQA1A000000000000000E2",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+    "event_type": "IntentReceived",
+    "schema_version": 1,
+    "event_time": "2026-09-21T14:00:05.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8ZT80A000000000000000D1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    "payload": {
+     "intent_id": "01J8ZT90A000000000000000P1",
+     "agent_id": "agent_a",
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "side": "buy",
+     "type": "limit",
+     "tif": "day",
+     "qty": "10",
+     "limit_price": "150",
+     "purpose": "open"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "received_v2": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZQA1A000000000000000E2",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+    "event_type": "IntentReceived",
+    "schema_version": 2,
+    "event_time": "2026-09-21T14:00:05.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8ZT80A000000000000000D1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    "payload": {
+     "intent_id": "01J8ZT90A000000000000000P1",
+     "agent_id": "agent_a",
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "side": "buy",
+     "type": "limit",
+     "tif": "day",
+     "qty": "10",
+     "limit_price": "150",
+     "purpose": "open",
+     "risk_clock": "2026-09-21T14:00:05.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "gate_v1": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZQA3A000000000000000E4",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+    "event_type": "GateDecided",
+    "schema_version": 1,
+    "event_time": "2026-09-21T14:00:15.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8ZQA1A000000000000000E2",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "fee_config": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "trading_calendar": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+     "instrument_snapshot": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+     "rule_set": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+     "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    "payload": {
+     "intent_id": "01J8ZT90A000000000000000P1",
+     "verdict": "allow",
+     "reason_code": null,
+     "data_profile": "iex",
+     "quotes_used": [
+      {
+       "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+       "bid": "149.98",
+       "ask": "150.02",
+       "as_of": "2026-09-21T14:00:05.000000000Z",
+       "feed": "iex"
+      }
+     ],
+     "marks_used": [
+      {
+       "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+       "price": "149.98",
+       "source": "quote",
+       "kind": "risk"
+      }
+     ],
+     "checks": [
+      {
+       "id": "buying_power",
+       "result": "pass",
+       "inputs": {
+        "buying_power": "10000"
+       },
+       "computed": {
+        "order_cost": "1500"
+       }
+      },
+      {
+       "id": "day_trade_budget",
+       "result": "not_applicable",
+       "inputs": {
+        "regime": "intraday_margin"
+       },
+       "computed": {}
+      }
+     ]
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "gate_v2": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZQA3A000000000000000E4",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+    "event_type": "GateDecided",
+    "schema_version": 2,
+    "event_time": "2026-09-21T14:00:15.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8ZQA1A000000000000000E2",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "fee_config": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "trading_calendar": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+     "instrument_snapshot": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+     "rule_set": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+     "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    "payload": {
+     "intent_id": "01J8ZT90A000000000000000P1",
+     "verdict": "allow",
+     "reason_code": null,
+     "data_profile": "iex",
+     "quotes_used": [
+      {
+       "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+       "bid": "149.98",
+       "ask": "150.02",
+       "as_of": "2026-09-21T14:00:05.000000000Z",
+       "feed": "iex"
+      }
+     ],
+     "marks_used": [
+      {
+       "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+       "price": "149.98",
+       "source": "quote",
+       "kind": "risk"
+      }
+     ],
+     "checks": [
+      {
+       "id": "buying_power",
+       "result": "pass",
+       "inputs": {
+        "buying_power": "10000"
+       },
+       "computed": {
+        "order_cost": "1500"
+       }
+      },
+      {
+       "id": "day_trade_budget",
+       "result": "not_applicable",
+       "inputs": {
+        "regime": "intraday_margin"
+       },
+       "computed": {}
+      }
+     ],
+     "risk_clock": "2026-09-21T14:00:15.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "request": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZQA4A000000000000000E5",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+    "event_type": "OrderRequestRecorded",
+    "schema_version": 1,
+    "event_time": "2026-09-21T14:00:20.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "agent_id": "agent_a",
+     "intent_id": "01J8ZT90A000000000000000P1",
+     "purpose": "open",
+     "extended_hours": false,
+     "stop_price": null,
+     "order_class": "bracket",
+     "take_profit": "159",
+     "stop": "139",
+     "rung": null,
+     "at_floor": null,
+     "risk_clock": "2026-09-21T14:00:20.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "protection_v1": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZQA7A000000000000000E8",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+    "event_type": "ProtectionChanged",
+    "schema_version": 1,
+    "event_time": "2026-09-21T14:00:35.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "action": "unprotected_start",
+     "orders": [
+      "md-01J8ZT90A000000000000000P1-p1"
+     ],
+     "awaiting": [],
+     "qty": null,
+     "stop": "139",
+     "take_profit": "159",
+     "intent_id": "01J8ZT90A000000000000000P1",
+     "bracket": null,
+     "entry": "md-01J8ZT90A000000000000000P1",
+     "agent_id": "agent_a",
+     "replacing": true,
+     "created_on": null,
+     "sent": null,
+     "uncovered": null,
+     "acknowledged": null,
+     "risk_clock": "2026-09-21T14:00:35.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "protection_v2": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZQA7A000000000000000E8",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+    "event_type": "ProtectionChanged",
+    "schema_version": 2,
+    "event_time": "2026-09-21T14:00:35.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "action": "unprotected_start",
+     "orders": [
+      "md-01J8ZT90A000000000000000P1-p1"
+     ],
+     "awaiting": [],
+     "qty": null,
+     "stop": "139",
+     "take_profit": "159",
+     "intent_id": "01J8ZT90A000000000000000P1",
+     "bracket": null,
+     "entry": "md-01J8ZT90A000000000000000P1",
+     "agent_id": "agent_a",
+     "replacing": true,
+     "created_on": null,
+     "sent": null,
+     "uncovered": null,
+     "acknowledged": null,
+     "unprotected_fraction": null,
+     "risk_clock": "2026-09-21T14:00:35.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "received_v1_flatten_without_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_flatten_without_dash",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K11"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_flatten_empty_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_flatten_leading_zero",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_flatten_n_1000",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_flatten_negative_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1--1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_flatten_n_letter",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_flatten_n_not_ascii",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-٣"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_flatten_two_ns",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1-2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_flatten_upper_case_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "K-01JAE3A0A000000000000000K1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_flatten_lower_case_switch",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01jae3a0a000000000000000k1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_flatten_switch_not_a_ulid",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_watchdog_upper_case_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "W-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_watchdog_with_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_watchdog_event_not_a_ulid",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_another_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "x-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_ulid_with_suffix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "01JAE3A0A000000000000000W1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_the_order_id",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "md-k-01JAE3A0A000000000000000K1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_a_random_id",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "flatten-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_empty",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_flatten_without_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_flatten_without_dash",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K11"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_flatten_empty_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_flatten_leading_zero",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_flatten_n_1000",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_flatten_negative_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1--1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_flatten_n_letter",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_flatten_n_not_ascii",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-٣"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_flatten_two_ns",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1-2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_flatten_upper_case_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "K-01JAE3A0A000000000000000K1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_flatten_lower_case_switch",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01jae3a0a000000000000000k1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_flatten_switch_not_a_ulid",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_watchdog_upper_case_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "W-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_watchdog_with_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_watchdog_event_not_a_ulid",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_another_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "x-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_ulid_with_suffix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "01JAE3A0A000000000000000W1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_the_order_id",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "md-k-01JAE3A0A000000000000000K1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_a_random_id",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "flatten-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_empty",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_without_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_without_dash",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K11"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_empty_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_leading_zero",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_n_1000",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_negative_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1--1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_n_letter",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_n_not_ascii",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-٣"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_two_ns",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1-2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_upper_case_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "K-01JAE3A0A000000000000000K1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_lower_case_switch",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01jae3a0a000000000000000k1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_switch_not_a_ulid",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_watchdog_upper_case_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "W-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_watchdog_with_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_watchdog_event_not_a_ulid",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_another_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "x-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_ulid_with_suffix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "01JAE3A0A000000000000000W1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_the_order_id",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "md-k-01JAE3A0A000000000000000K1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_a_random_id",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "flatten-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_empty",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_without_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_without_dash",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K11"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_empty_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_leading_zero",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_n_1000",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_negative_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1--1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_n_letter",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_n_not_ascii",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-٣"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_two_ns",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1-2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_upper_case_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "K-01JAE3A0A000000000000000K1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_lower_case_switch",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01jae3a0a000000000000000k1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_switch_not_a_ulid",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_watchdog_upper_case_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "W-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_watchdog_with_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_watchdog_event_not_a_ulid",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_another_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "x-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_ulid_with_suffix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "01JAE3A0A000000000000000W1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_the_order_id",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "md-k-01JAE3A0A000000000000000K1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_a_random_id",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "flatten-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_empty",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_flatten_without_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_flatten_without_dash",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K11"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_flatten_empty_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_flatten_leading_zero",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_flatten_n_1000",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_flatten_negative_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1--1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_flatten_n_letter",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_flatten_n_not_ascii",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-٣"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_flatten_two_ns",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1-2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_flatten_upper_case_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "K-01JAE3A0A000000000000000K1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_flatten_lower_case_switch",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01jae3a0a000000000000000k1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_flatten_switch_not_a_ulid",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_watchdog_upper_case_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "W-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_watchdog_with_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_watchdog_event_not_a_ulid",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_another_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "x-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_ulid_with_suffix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "01JAE3A0A000000000000000W1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_the_order_id",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "md-k-01JAE3A0A000000000000000K1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_a_random_id",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "flatten-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_empty",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_without_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_without_dash",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K11"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_empty_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_leading_zero",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_n_1000",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_negative_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1--1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_n_letter",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_n_not_ascii",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-٣"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_two_ns",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1-2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_upper_case_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "K-01JAE3A0A000000000000000K1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_lower_case_switch",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01jae3a0a000000000000000k1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_switch_not_a_ulid",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_watchdog_upper_case_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "W-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_watchdog_with_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_watchdog_event_not_a_ulid",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_another_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "x-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_ulid_with_suffix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "01JAE3A0A000000000000000W1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_the_order_id",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "md-k-01JAE3A0A000000000000000K1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_a_random_id",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "flatten-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_empty",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_without_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_without_dash",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K11"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_empty_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_leading_zero",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_n_1000",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_negative_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1--1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_n_letter",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_n_not_ascii",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-٣"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_two_ns",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-1-2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_upper_case_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "K-01JAE3A0A000000000000000K1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_lower_case_switch",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01jae3a0a000000000000000k1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_switch_not_a_ulid",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_watchdog_upper_case_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "W-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_watchdog_with_n",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_watchdog_event_not_a_ulid",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_another_prefix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "x-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_ulid_with_suffix",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "01JAE3A0A000000000000000W1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_the_order_id",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "md-k-01JAE3A0A000000000000000K1-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_a_random_id",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "flatten-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_empty",
+    "clause": "§9.1: exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with no leading zero",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v1_a_number",
+    "clause": "§9.1: an `intent` is text",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "received_v2_a_number",
+    "clause": "§9.1: an `intent` is text",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v1_a_number",
+    "clause": "§9.1: an `intent` is text",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "gate_v2_a_number",
+    "clause": "§9.1: an `intent` is text",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "request_a_number",
+    "clause": "§9.1: an `intent` is text",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v1_a_number",
+    "clause": "§9.1: an `intent` is text",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.intent_id"
+    }
+   },
+   {
+    "name": "protection_v2_a_number",
+    "clause": "§9.1: an `intent` is text",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.intent_id"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "received_v1_watchdog",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "received_v1_flatten_first",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-0"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "received_v1_flatten_third",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "received_v1_flatten_last",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "received_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-999"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "received_v2_watchdog",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "received_v2_flatten_first",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-0"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "received_v2_flatten_third",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "received_v2_flatten_last",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "received_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-999"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "gate_v1_watchdog",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_first",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-0"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_third",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "gate_v1_flatten_last",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "gate_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-999"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "gate_v2_watchdog",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_first",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-0"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_third",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "gate_v2_flatten_last",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "gate_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-999"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "request_watchdog",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "request_flatten_first",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-0"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "request_flatten_third",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "request_flatten_last",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "request",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-999"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "protection_v1_watchdog",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_first",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-0"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_third",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "protection_v1_flatten_last",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "protection_v1",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-999"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "protection_v2_watchdog",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "w-01JAE3A0A000000000000000W1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_first",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-0"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_third",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-2"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "protection_v2_flatten_last",
+    "clause": "§9.1: an `intent` is a ULID or the executor's own exit's, trading spec §2.3",
+    "base_draft": "protection_v2",
+    "changes": [
+     {
+      "path": "payload.intent_id",
+      "value": "k-01JAE3A0A000000000000000K1-999"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
  }
 }

@@ -124,6 +124,25 @@ DIGEST = re.compile(r"^sha256:[0-9a-f]{64}\Z")
 def is_ulid(text: str) -> bool:
     return len(text) == 26 and set(text) <= ULID_ALPHABET and text[0] <= "7"
 
+
+def is_intent(text: str, skip: frozenset = frozenset()) -> bool:
+    """§9.1's `intent`: a ULID, or the executor's own exit's intent of trading spec §2.3, exactly
+    `w-{ulid}` or `k-{ulid}-{n}` with `n` a decimal from 0 to 999 and no leading zero (DEC-2845).
+    `types.intent_own` reads it as a bare ULID and `types.intent_any` as any id: the seeded bugs."""
+    if "types.intent_any" in skip:
+        return bool(IDENT.match(text))
+    if is_ulid(text):
+        return True
+    if "types.intent_own" in skip:
+        return False
+    if text.startswith("w-"):
+        return is_ulid(text[2:])
+    if not text.startswith("k-"):
+        return False
+    switch, dash, n = text[2:].partition("-")
+    bounded = n.isascii() and n.isdigit() and len(n) <= 3 and (n == "0" or not n.startswith("0"))
+    return dash == "-" and is_ulid(switch) and (bounded or "types.intent_bound" in skip)
+
 # --------------------------------------------------------------------------- field types (§9.1)
 
 
@@ -137,8 +156,8 @@ class T:
     fields: tuple[tuple[str, T], ...] = ()
 
 
-STR, ID, ULID, DEC, INT, BOOL, TS, REF = (
-    T(k) for k in ("str", "id", "ulid", "dec", "int", "bool", "ts", "ref")
+STR, ID, ULID, DEC, INT, BOOL, TS, REF, INTENT = (
+    T(k) for k in ("str", "id", "ulid", "dec", "int", "bool", "ts", "ref", "intent")
 )
 
 
@@ -250,6 +269,7 @@ def type_violations(ty: T, value, path: str, skip: frozenset[str]) -> list[Viola
         "str": lambda s: s != "" or "types.str_nonempty" in skip,
         "id": lambda s: bool(IDENT.match(s)),
         "ulid": is_ulid,
+        "intent": lambda s: is_intent(s, skip),
         "dec": lambda s: normalize_decimal(s) is not None,
         "ts": lambda s: is_timestamp(s) or "types.timestamp" in skip,
         "ref": lambda s: bool(DIGEST.match(s)),
