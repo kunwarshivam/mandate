@@ -10,7 +10,7 @@
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::{Object, Value};
-use mandate_num::{Price, Qty, SignedQty};
+use mandate_num::{Price, Qty, ShareIncrement, SignedQty};
 use mandate_risk::{
     Check as BindingCheck, CheckOutcome, GateInput, GatePass, Origin, ProposedKind, ProposedOrder,
     TimeInForce as GateTimeInForce, Verdict,
@@ -244,6 +244,7 @@ fn journal_check_id(id: &str) -> Result<&'static str, ExecutorError> {
         "session_open" => "session",
         "unknown_order_in_flight"
         | "sell_exceeds_available"
+        | "attribution"
         | "protection_attributed"
         | "protective_order" => "order_constraints",
         _ => {
@@ -338,6 +339,11 @@ pub(crate) fn account_stream_checks(
     record(
         "sell_exceeds_available",
         exceeds.then_some(("sell_exceeds_available", false)),
+    );
+    let deficit = adds && attribution_deficit(state, proposal.instrument, ports)?;
+    record(
+        "attribution",
+        deficit.then_some(("attribution_deficit", true)),
     );
     let unattributed = unattributed_opening(state, proposal.instrument, adds);
     record(
@@ -768,6 +774,23 @@ mod journal_tests {
     }
 }
 
+/// DEC-2849 I6, §8.1: whether `instrument` has an attribution deficit an opening is held for, the
+/// agents' lots exceeding the position by at least the instrument's quantity increment. A deficit
+/// below one whole share of a whole-share instrument (a rounding residue) is none; on a fractional
+/// grid, or with no increment known, any deficit holds. Sell authority and coverage read D exactly
+/// ([`holders`]); only this hold has the tolerance.
+fn attribution_deficit(
+    state: &ExecutorState,
+    instrument: &InstrumentId,
+    ports: &Ports<'_>,
+) -> Result<bool, ExecutorError> {
+    let deficit = holders::holders(state, instrument)?.deficit;
+    Ok(match ports.instruments.increment(instrument) {
+        Some(ShareIncrement::Whole) => deficit >= Qty::parse("1")?,
+        _ => deficit > Qty::ZERO,
+    })
+}
+
 /// DEC-160's leg-agent rule fails closed: a broker-created protective leg no agent can be named for
 /// leaves its instrument **held** for openings, never denied, until the leg is attributed or gone;
 /// a reconciliation establishes its presence, not its owner (trading-domain spec §5.4, §9.1 check
@@ -1001,6 +1024,7 @@ mod attribution_tests {
                 ("unknown_order_in_flight", true),
                 ("universe", true),
                 ("sell_exceeds_available", true),
+                ("attribution", true),
                 ("protection_attributed", false),
                 ("protective_order", true),
                 ("startup_reconciliation", false),
@@ -1317,15 +1341,19 @@ mod sell_authority_tests {
     use mandate_accounting::{InstrumentId, Side};
     use mandate_num::{Qty, SignedQty};
 
+    use mandate_accounting::AssetClass;
+    use mandate_num::ShareIncrement;
+
     use super::{PartialGateDecision, Proposal, account_stream_checks};
     use crate::error::ExecutorError;
     use crate::holders::bought;
     use crate::ids::{ClientOrderId, IntentId};
-    use crate::ports::Ports;
+    use crate::ports::{InstrumentSnapshot, Ports};
     use crate::reconcile::tests::{Everything, Ids, executor_config, fees};
     use crate::state::{ExecutorState, Ladder, LoneLadder};
     use crate::types::{
-        AccountRef, AccountScope, AgentId, EventId, Order, OrderState, Purpose, WorkspaceId,
+        AccountRef, AccountScope, AgentId, EventId, ExitTier, Order, OrderState, Purpose,
+        WorkspaceId,
     };
 
     /// `position` AAPL held, with each of `lots` an agent's filled buy.
@@ -1565,6 +1593,164 @@ mod sell_authority_tests {
         assert_eq!(
             outcome(ask(&state, "agent-a", "8", Purpose::DiscretionaryExit)?),
             ("allow", String::new(), qty("6")?)
+        );
+        Ok(())
+    }
+
+    /// One instrument snapshot of `increment`, everything else as the tests' [`Everything`].
+    struct Grid(Option<ShareIncrement>);
+
+    impl InstrumentSnapshot for Grid {
+        fn asset_class(&self, _instrument: &InstrumentId) -> Option<AssetClass> {
+            Some(AssetClass::UsEquity)
+        }
+
+        fn increment(&self, _instrument: &InstrumentId) -> Option<ShareIncrement> {
+            self.0
+        }
+
+        fn exit_tier(&self, _instrument: &InstrumentId) -> Option<ExitTier> {
+            None
+        }
+    }
+
+    /// An opening buy of 1 AAPL by `agent-a` on a `grid` instrument, as its reason code.
+    fn opening(state: &ExecutorState, grid: ShareIncrement) -> Result<String, ExecutorError> {
+        adding(state, "agent-a", Purpose::Open, Some(grid))
+    }
+
+    /// A buy of 1 AAPL by `agent` for `purpose` on an instrument of `grid`, as its verdict and
+    /// reason code.
+    fn adding(
+        state: &ExecutorState,
+        agent: &str,
+        purpose: Purpose,
+        grid: Option<ShareIncrement>,
+    ) -> Result<String, ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Grid(grid),
+            config: &config,
+            fees: &fees,
+        };
+        let decision = account_stream_checks(
+            state,
+            &Proposal {
+                agent: &AgentId(agent.to_owned()),
+                instrument: &InstrumentId::new("AAPL")?,
+                side: Side::Buy,
+                qty: Qty::parse("1")?,
+                purpose,
+                protection: None,
+                limit: Some(mandate_num::Price::parse("150")?),
+                market: false,
+                tif: crate::types::TimeInForce::Day,
+                flatten: false,
+                owner_confirmed_bid: None,
+            },
+            &ports,
+        )?;
+        Ok(format!(
+            "{} {}",
+            decision.verdict_name(),
+            decision.reason_code()
+        ))
+    }
+
+    /// DEC-2849 I6: while the agents' lots exceed the position, every opening in the instrument is
+    /// held `attribution_deficit`, ahead of the startup hold, and an exit is not (I4). On a
+    /// whole-share instrument a deficit below one share is a rounding residue and holds nothing;
+    /// one share holds. On a fractional grid any deficit holds. It is reported before an ownerless
+    /// leg's hold (§9.1 step 4).
+    #[test]
+    fn a_deficit_holds_openings_and_never_an_exit() -> Result<(), ExecutorError> {
+        let held = "hold attribution_deficit";
+        let unheld = "hold startup_reconciliation_pending";
+        for (position, whole, fractional) in [
+            ("6", held, held),
+            ("9", held, held),
+            ("9.5", unheld, held),
+            ("10", unheld, unheld),
+            ("12", unheld, unheld),
+        ] {
+            let state = holding(position, &[("agent-a", "5"), ("agent-b", "5")])?;
+            assert_eq!(
+                opening(&state, ShareIncrement::Whole)?,
+                whole,
+                "N = {position}, whole shares"
+            );
+            assert_eq!(
+                opening(&state, ShareIncrement::Fractional)?,
+                fractional,
+                "N = {position}, fractional"
+            );
+        }
+        for (position, reason) in [
+            ("6", "hold attribution_deficit"),
+            ("10", "hold protection_unattributed"),
+        ] {
+            let mut state = holding(position, &[("agent-a", "5"), ("agent-b", "5")])?;
+            let leg = Order {
+                client_order_id: ClientOrderId::parse("md-ownerless")?,
+                intent_id: None,
+                agent: None,
+                instrument: InstrumentId::new("AAPL")?,
+                side: Side::Sell,
+                qty: Qty::parse("1")?,
+                filled_qty: Qty::ZERO,
+                state: OrderState::Accepted,
+                attempt: 1,
+                purpose: Purpose::Protective,
+                absent_lookups: 0,
+                first_absence_at: None,
+                cancel_unconfirmed: false,
+                replaced_by: None,
+                created_on: None,
+            };
+            state.orders.insert(leg.client_order_id.clone(), leg);
+            assert_eq!(
+                opening(&state, ShareIncrement::Whole)?,
+                reason,
+                "§9.1: the deficit is reported before an ownerless leg"
+            );
+        }
+        let deficit = holding("6", &[("agent-a", "5"), ("agent-b", "5")])?;
+        let residue = holding("9.5", &[("agent-a", "5"), ("agent-b", "5")])?;
+        for (state, agent, purpose, grid, reason) in [
+            (
+                &deficit,
+                "agent-b",
+                Purpose::Open,
+                Some(ShareIncrement::Whole),
+                "hold attribution_deficit",
+            ),
+            (
+                &deficit,
+                "agent-c",
+                Purpose::Increase,
+                Some(ShareIncrement::Whole),
+                "hold attribution_deficit",
+            ),
+            (
+                &residue,
+                "agent-a",
+                Purpose::Open,
+                None,
+                "hold attribution_deficit",
+            ),
+        ] {
+            assert_eq!(
+                adding(state, agent, purpose, grid)?,
+                reason,
+                "{agent} {purpose:?} {grid:?}: whichever agent's, and with no increment known any deficit"
+            );
+        }
+        assert_eq!(
+            outcome(ask(&deficit, "agent-a", "5", Purpose::RiskExit)?),
+            ("allow", String::new(), None),
+            "a deficit never holds an exit"
         );
         Ok(())
     }
