@@ -287,8 +287,10 @@ exception to §1.3, item 3 and DP-11, accepted by the founder as a compliance ri
 Until a data license is recorded or each workspace uses its own data key (backlog E2-20), this is
 likely redistribution under Alpaca's market-data terms. The exception covers these stored IEX bars
 and the corporate actions that qualify them. Quotes, marks and every other datum still come from the
-workspace's own connection, and the shared plane stays empty of market data. Which workspaces' data
-processes may read the key is DEC-2283 item 9's to settle.
+workspace's own connection, and the shared plane stays empty of market data. The key never enters a
+customer cell: one central fetcher writes customers' generations (DEC-2284, the founder's decision,
+backlog E2-21). Until it lands, the founder's workspace's own data process is the only reader of the
+key, and customers' workspaces have no stored bars.
 
 **Instruments.** The US-equity instruments the workspace has registered: the symbol of the latest
 `instrument_snapshot` registered on the control stream for each asset id (DEC-523), the read the
