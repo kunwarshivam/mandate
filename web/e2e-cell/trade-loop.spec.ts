@@ -144,8 +144,16 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     const filled = await until(page, `/agents/${AGENT}`, FILL_MS, async () => (await orders.locator("[data-state=filled]").count()) > 0);
     if (!filled) refuse(`no filled order on the agent's screen within ${FILL_MS} ms`);
     step("order_filled");
+    const reads: string[] = [];
+    page.on("response", (r) => {
+      const path = new URL(r.url()).pathname;
+      if (r.request().method() === "GET" && (path.endsWith(`/agents/${AGENT}/positions`) || path.includes("/journal/streams/agent"))) reads.push(`${r.status()} ${path.split("/").slice(-2).join("/")}`);
+    });
     const held = await until(page, `/agents/${AGENT}`, 30_000, async () => (await positions.count()) > 0 && (await journal.getByRole("listitem").count()) > 0);
-    if (!held) refuse("the agent's screen showed the fill but no position or no journal record within 30 s");
+    if (!held) {
+      const said = async (title: string) => ((await page.getByRole("region", { name: title, exact: true }).textContent({ timeout: 2_000 }).catch(() => null)) ?? "absent").replace(/\s+/g, " ").slice(0, 240);
+      refuse(`the agent's screen showed the fill but no position or no journal record within 30 s; positions: "${await said("This agent's positions")}"; journal: "${await said("Journal")}"; reads: ${reads.slice(-6).join(", ") || "none"}`);
+    }
     step("position");
     step("journal", String(await journal.getByRole("listitem").count()));
   });
