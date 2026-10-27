@@ -37,6 +37,8 @@ WIDE = {"id": "llm.research_agent_wide", "version": "0.1.0", "content_hash": H_R
 def add_route(model, entry):
     return {"op": "add", "path": f"/behavior/signal_models/{model}/routes", "value": {"monitor": entry}}
 
+WITH_OLD = apply_patch(MB["research_equity"], [add_route(0, OLD)])
+
 # =========================================================== A. schema
 S = [
     ("MC-S01", "Base mandates are schema-valid", "btc_accumulator", [], True),
@@ -266,9 +268,13 @@ SEM += [
      [rep("/behavior/signal_models/0/id", TERRA["id"]), rep("/behavior/signal_models/0/content_hash", H_RES_TERRA)], {}),
     ("MC-V88", "A deprecated route carried unchanged from the previous version passes", "research_equity",
      [add_route(0, OLD), rep("/name", "research-equity-2")],
-     {"previous_version": apply_patch(MB["research_equity"], [add_route(0, OLD)])}),
+     {"previous_version": WITH_OLD, "current_mandate_version": version(WITH_OLD)}),
     ("MC-V89", "A deprecated route new in this version is refused", "research_equity",
-     [add_route(0, OLD)], {"previous_version": MB["research_equity"]}),
+     [add_route(0, OLD)], {"previous_version": MB["research_equity"],
+                           "current_mandate_version": version(MB["research_equity"])}),
+    ("MC-V90", "A deprecated route carried from a previous version that is not the agent's current one is refused",
+     "research_equity", [add_route(0, OLD), rep("/name", "research-equity-2")],
+     {"previous_version": WITH_OLD, "current_mandate_version": version(MB["research_equity"])}),
 ]
 STOP_LIMIT_EQUITIES = {"stop_limit_asset_classes": ["crypto", "us_equity"]}
 ALPACA_PROFILE = {"stop_limit_asset_classes": ["crypto"]}

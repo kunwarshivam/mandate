@@ -332,9 +332,14 @@ def reduces_previous(prev, current, m):
     a document with a value the schema refuses, or one that hashes to anything else is not reducing: validation cannot
     classify against the agent's version (rule 3). The member test is `classify`'s precondition, so a partial document
     is refused without being classified; the schema test is the one that refuses a whole document with a bad value."""
+    return agents_current(prev, current) and classify(prev, m)[0] == "risk_reducing"
+
+
+def agents_current(prev, current):
+    """`prev` is the agent's current version: a whole schema-valid document whose canonical hash is `current`, which
+    the platform supplies (V-047, V-048). Anything else is no previous version (rule 3)."""
     return (prev is not None and current is not None and set(SCHEMA["required"]) <= set(prev)
-            and V.is_valid(prev) and version(prev) == current
-            and classify(prev, m)[0] == "risk_reducing")
+            and V.is_valid(prev) and version(prev) == current)
 
 def research_pins(sm):
     """The admitting model's pins by run kind: its own is `ideate`, its `routes` the rest (DEC-2282)."""
@@ -342,13 +347,13 @@ def research_pins(sm):
     return dict(sm.get("routes") or {}, ideate=own)
 
 
-def pins_refused(sm, prev, reg):
-    """V-048 (DEC-2282) for the admitting model `sm`, against the previous version `prev`, if any. A pin
+def pins_refused(sm, prev, current, reg):
+    """V-048 (DEC-2282) for the admitting model `sm`, against the agent's current version `prev` (V-047's binding). A pin
     carried unchanged for its run kind skips the status test, so a deprecated or withdrawn entry never blocks
     a version; a new or changed one must be offered."""
     pins = research_pins(sm)
     carried = {}
-    for p in (prev or {}).get("behavior", {}).get("signal_models", []):
+    for p in (prev["behavior"]["signal_models"] if agents_current(prev, current) else []):
         if p.get("admits_instruments"):
             carried = research_pins(p)
     if any(kind != "ideate" and pin["id"] == sm["id"] for kind, pin in pins.items()):
@@ -486,7 +491,7 @@ def semantic(m, ctx):
         errs.add("V-036")
     if u["pinned"] and admitting:
         errs.add("V-037")
-    if any(pins_refused(s, ctx.get("previous_version"), reg) for s in admitting) \
+    if any(pins_refused(s, ctx.get("previous_version"), ctx.get("current_mandate_version"), reg) for s in admitting) \
             or any("routes" in s and not s["admits_instruments"] for s in sms):
         errs.add("V-048")
     if u["pinned"] != (len(inst) > 0):

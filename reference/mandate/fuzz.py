@@ -545,11 +545,12 @@ def fuzz_routes(n):
                 return sm["id"], table
         return None, {}
 
-    def refused(m, prev):
+    def refused(m, prev, current):
         if any("routes" in sm and not sm["admits_instruments"] for sm in m["behavior"]["signal_models"]):
             return True
         own_id, now = kinds(m)
-        _, before = kinds(prev) if prev is not None else (None, {})
+        bound = prev is not None and V.is_valid(prev) and current == version(prev)
+        _, before = kinds(prev) if bound else (None, {})
         own_entry = reg.get(own_id)
         for kind, pin in now.items():
             e = reg.get(pin["id"])
@@ -588,8 +589,9 @@ def fuzz_routes(n):
                 p0["routes"] = {"monitor": pick()}
         if not V.is_valid(m):
             continue
-        errs, _ = semantic(m, dict(base.CTX, previous_version=prev))
-        check(("V-048" in errs) == refused(m, prev), "V-048 refuses exactly a pin the registry does not offer, unless carried",
+        current = None if prev is None else rng.choice([version(prev), version(prev), version(m)])
+        errs, _ = semantic(m, dict(base.CTX, previous_version=prev, current_mandate_version=current))
+        check(("V-048" in errs) == refused(m, prev, current), "V-048 refuses exactly a pin the registry does not offer, unless carried",
               (m["behavior"]["signal_models"], prev and prev["behavior"]["signal_models"]))
 
 def fuzz_autonomy(n):
