@@ -800,6 +800,14 @@ impl BindingGateSource for UnreadConfiguration {
     fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         None
     }
+
+    fn config_refs(
+        &self,
+        _agent: &mandate_executor::AgentId,
+        _instrument: &mandate_accounting::InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        None
+    }
 }
 
 /// DEC-2846: an exit's gate decision, which reads no binding snapshot (`AGENTS.md` rule 13), is

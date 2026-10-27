@@ -4708,6 +4708,14 @@ mod sequence_tests {
     struct BindingExit;
 
     impl crate::ports::BindingGateSource for BindingExit {
+        fn config_refs(
+            &self,
+            agent: &AgentId,
+            instrument: &InstrumentId,
+        ) -> Option<crate::ports::BindingGateConfigRefs> {
+            crate::ports::AllowingBindingGate.config_refs(agent, instrument)
+        }
+
         fn input(
             &self,
             request: &crate::ports::BindingGateRequest<'_>,
@@ -4724,6 +4732,14 @@ mod sequence_tests {
     struct StaleFeed;
 
     impl crate::ports::BindingGateSource for StaleFeed {
+        fn config_refs(
+            &self,
+            agent: &AgentId,
+            instrument: &InstrumentId,
+        ) -> Option<crate::ports::BindingGateConfigRefs> {
+            crate::ports::AllowingBindingGate.config_refs(agent, instrument)
+        }
+
         fn input(
             &self,
             request: &crate::ports::BindingGateRequest<'_>,
@@ -10605,6 +10621,13 @@ mod sequence_tests {
                 ("GateDecided", _) => {
                     let verdict = field("verdict").unwrap_or_default();
                     let reason = field("reason_code").unwrap_or_default();
+                    if draft.config_refs.len() != 5 {
+                        return Err(format!(
+                            "{intent}'s gate record names {} references, never the five every \
+                             GateDecided must (journal spec §9, DEC-2846)",
+                            draft.config_refs.len()
+                        ));
+                    }
                     if draft.payload.get("parked") == Some(&Value::Bool(true)) {
                         self.parked.insert(intent.clone());
                     }
@@ -13442,15 +13465,19 @@ mod sequence_tests {
         let exit = format!("md-{EXIT}");
         executor.run(Input::Tick(RiskClock::from_secs(late + 10)), &ports)?;
         let night = executor.run(cancel_accepted(&exit), &ports)?;
-        let park = night
+        let (park, refs) = night
             .iter()
             .find_map(|effect| match effect {
                 Effect::Journal(draft) if draft.event_type == "GateDecided" => {
-                    Some(draft.event_id.clone())
+                    Some((draft.event_id.clone(), draft.config_refs.len()))
                 }
                 _ => None,
             })
             .ok_or_else(|| missing("the park"))?;
+        assert_eq!(
+            refs, 5,
+            "the park names the deployment's five references (journal spec §9, DEC-2846)"
+        );
         let mut notes: Vec<(EventId, &str)> = night
             .iter()
             .filter_map(|effect| match effect {

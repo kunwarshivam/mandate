@@ -1090,7 +1090,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     }
                     return true;
                 }
-                if !held_on_core_error(&input) && !unread_configuration(&error, &input) {
+                if !held_on_core_error(&input) {
                     self.lifecycle.observe(now, Lifecycled::Failed);
                     return false;
                 }
@@ -1986,8 +1986,9 @@ fn tick_of(row: &StoredEvent) -> Option<UtcNanos> {
 /// The alert and intent for a handoff the core refused for a missing binding-gate input, which the
 /// process holds rather than stop on (DEC-2033 item 5): `opening_held` for an opening or an
 /// increase, and `exit_held` for an exit, which sounds while the agent's mandate version or its
-/// deployment's references for the instrument do not read (DEC-2846). This one for any input but
-/// a handoff is held as a failed input ([`unread_configuration`]); any other refusal is `None`.
+/// deployment's references for the instrument do not read (DEC-2846). No other input meets it: a
+/// kill switch's flatten waits for its configuration in the core, and an input's re-gates hold
+/// their intent alone. Any other refusal is `None`: it stops the process.
 fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> {
     let (ExecutorError::BindingGateInputMissing, Input::Intent(handoff)) = (error, input) else {
         return None;
@@ -2015,22 +2016,6 @@ fn held_on_core_error(input: &Input) -> bool {
             | Input::Theses { .. }
             | Input::Connection(_)
     )
-}
-
-/// Whether `error` on `input` is configuration that does not read now, which holds the input and
-/// never stops the process (DEC-2846): an exit's gate record, a kill switch's flatten among them,
-/// cannot be journaled without its deployment's references, nor any intent without its mandate
-/// version, and a stop would be a crash loop that also stops every other exit, protective order
-/// and kill switch (`AGENTS.md` rule 13). The core folds only what commits, so the input changed
-/// nothing; it is held as a failed input, which holds every opening with the owner alerted
-/// ([`held_on_core_error`]'s path), and handed again at the next pass. An intent's is held alone
-/// (`held`). A start's is not: the restart redoes it before any trading.
-fn unread_configuration(error: &ExecutorError, input: &Input) -> bool {
-    matches!(error, ExecutorError::BindingGateInputMissing)
-        && !matches!(
-            input,
-            Input::Started(_) | Input::BatchRefused | Input::InputFailed
-        )
 }
 
 /// Whether a refusal of the batch `input` drafted is held and the process goes on (DEC-2805 item
@@ -2171,32 +2156,6 @@ mod tests {
         assert!(!held_on_refusal(&Input::Started(WriterEpoch(1))));
         assert!(held_on_refusal(&Input::Tick(RiskClock::from_secs(0))));
         assert!(held_on_refusal(&handoff(Purpose::Open)?));
-        Ok(())
-    }
-
-    /// DEC-2846: configuration that does not read holds any input but a start, a refusal's hold or
-    /// a failed input, and never stops the process; any other core error is not this one.
-    #[test]
-    fn unread_configuration_holds_every_input_but_the_start_and_the_holds() -> Result<(), Error> {
-        let missing = ExecutorError::BindingGateInputMissing;
-        for held in [
-            Input::Tick(RiskClock::from_secs(0)),
-            handoff(Purpose::OwnerExit)?,
-        ] {
-            assert!(unread_configuration(&missing, &held), "{held:?}");
-        }
-        for stops in [
-            Input::Started(WriterEpoch(1)),
-            Input::BatchRefused,
-            Input::InputFailed,
-        ] {
-            assert!(!unread_configuration(&missing, &stops), "{stops:?}");
-        }
-        let other = ExecutorError::NotStarted;
-        assert!(!unread_configuration(
-            &other,
-            &Input::Tick(RiskClock::from_secs(0))
-        ));
         Ok(())
     }
 }

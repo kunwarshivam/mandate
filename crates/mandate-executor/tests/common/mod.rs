@@ -84,16 +84,6 @@ impl BindingGateSource for MissingBindingGate {
     }
 }
 
-/// A deployment that reads nothing, not even its configuration (DEC-2846): a decision has no
-/// references to be journaled under.
-pub struct UnreadDeployment;
-
-impl BindingGateSource for UnreadDeployment {
-    fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
-        None
-    }
-}
-
 pub static MISSING_BINDING_GATE: MissingBindingGate = MissingBindingGate;
 
 pub struct AllowingBindingGate;

@@ -821,6 +821,41 @@ fn an_opening_the_deployment_does_not_cover_is_handed_no_protection() -> Result<
     Ok(())
 }
 
+/// DEC-2846: the references an exit's decision is journaled under are the agent's own deployment's
+/// of that instrument, all five of them: never another agent's deployment of the instrument, nor the
+/// agent's deployment of another.
+#[test]
+fn an_exits_references_are_the_agents_own_deployments_of_the_instrument() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    let (deployment, _) = deployment(&journal, store);
+    let refs = deployment
+        .config_refs(&agent(), &spy()?)
+        .ok_or("the deployed agent's references on SPY")?;
+    assert!(
+        [
+            &refs.fee_config,
+            &refs.trading_calendar,
+            &refs.instrument_snapshot,
+            &refs.rule_set,
+            &refs.mandate_version,
+        ]
+        .iter()
+        .all(|reference| reference.is_some()),
+        "all five: {refs:?}"
+    );
+    assert_eq!(
+        deployment.config_refs(&AgentId(OTHER_AGENT.to_owned()), &spy()?),
+        None,
+        "not another agent's"
+    );
+    assert_eq!(
+        deployment.config_refs(&agent(), &InstrumentId::new(AAPL_ID)?),
+        None,
+        "not another instrument's"
+    );
+    Ok(())
+}
+
 /// A run given the production deployment reads its ports from it in place of the fixture's, and
 /// keeps its broker's quote feed: the fixture's ports cover nothing and mark nothing, the
 /// deployed run's cover and mark the deployed instrument.

@@ -188,11 +188,9 @@ pub trait BindingGateSource {
     /// when the deployment reads none, which holds the exit, alerted, rather than lose it.
     fn config_refs(
         &self,
-        _agent: &AgentId,
-        _instrument: &InstrumentId,
-    ) -> Option<BindingGateConfigRefs> {
-        None
-    }
+        agent: &AgentId,
+        instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs>;
 }
 
 #[cfg(test)]
