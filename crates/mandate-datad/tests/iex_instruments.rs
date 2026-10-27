@@ -209,3 +209,42 @@ fn any_row_not_of_the_paper_environment_gets_nothing() {
     );
     assert_eq!(listed(&registered(&[], &objects)), pairs(&[]));
 }
+
+#[test]
+fn a_pair_symbol_is_no_us_equity_s_and_shared_symbols_never_count_against_the_cap() {
+    let mut objects = Objects::default();
+    let mut control = vec![
+        registration(1, &snapshot(&mut objects, "pair", "BTC/USD", "us_equity")),
+        registration(2, &snapshot(&mut objects, "x", "DUP", "us_equity")),
+    ];
+    for n in 0..49_u64 {
+        control.push(registration(
+            n + 3,
+            &snapshot(
+                &mut objects,
+                &format!("id{n:02}"),
+                &format!("S{n:02}"),
+                "us_equity",
+            ),
+        ));
+    }
+    control.push(registration(
+        52,
+        &snapshot(&mut objects, "late", "LATE", "us_equity"),
+    ));
+    control.push(registration(
+        53,
+        &snapshot(&mut objects, "y", "DUP", "us_equity"),
+    ));
+    let got = listed(&registered(&control, &objects));
+    assert_eq!(got.len(), 50);
+    assert!(
+        got.iter().all(|(_, s)| s != "BTC/USD" && s != "DUP"),
+        "{got:?}"
+    );
+    assert_eq!(
+        got.last().unwrap(),
+        &("late".to_owned(), "LATE".to_owned()),
+        "the shared DUP is dropped before the cap, so the fiftieth is LATE"
+    );
+}

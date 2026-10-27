@@ -41,7 +41,9 @@ struct Latest {
 }
 
 /// The instruments of the workspace whose control stream is `control`, its snapshots read from
-/// `artifacts`.
+/// `artifacts`. Symbols two asset ids share are left out before the cap is applied, so they never
+/// count against it. A registration row whose body does not read could be a snapshot, so it gives
+/// [`Registered::Unreadable`], a stricter reading than the composer's, which skips it.
 pub fn registered(control: &[StoredEvent], artifacts: &dyn ArtifactSource) -> Registered {
     if control.iter().any(|row| row.environment != "paper") {
         return Registered::NotPaper;
@@ -85,7 +87,9 @@ pub fn registered(control: &[StoredEvent], artifacts: &dyn ArtifactSource) -> Re
             if shared.contains(text) {
                 return None;
             }
-            let symbol = Symbol::parse(text).ok()?;
+            let symbol = Symbol::parse(text)
+                .ok()
+                .filter(|symbol| !symbol.is_pair())?;
             Some((
                 entry.first,
                 Instrument {

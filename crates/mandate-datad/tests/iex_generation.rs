@@ -15,7 +15,7 @@ use mandate_bars::generations::{
 };
 use mandate_bars::{closes_object, daily_dir, minute_dir, trailing_minutes, trusted_daily_closes};
 use mandate_canon::DecStr;
-use mandate_datad::iex::generation::{BarsSource, Writer};
+use mandate_datad::iex::generation::{BarsSource, RETRY_S, Writer};
 use mandate_datad::iex::instruments::Instrument;
 use mandate_datad::iex::schedule::{CONFIRM_EVERY_S, CONFIRM_S, span};
 use mandate_journal::ArtifactRef;
@@ -74,6 +74,10 @@ struct Fake {
     actions: BTreeMap<String, CorporateActions>,
     asked: RefCell<Vec<Asked>>,
     fail: bool,
+    /// Serves every bar it holds, whatever span was asked, as a source that does not check would.
+    unfiltered: bool,
+    /// A directory created when bars are asked, as another writer finishing first would leave it.
+    appears: Option<PathBuf>,
 }
 
 impl Fake {
@@ -93,6 +97,9 @@ impl BarsSource for Fake {
         if self.fail {
             return Err(FetchError::Status { status: 503 });
         }
+        if let Some(dir) = &self.appears {
+            fs::create_dir_all(dir).unwrap();
+        }
         Ok(batch
             .symbols()
             .iter()
@@ -102,7 +109,9 @@ impl BarsSource for Fake {
                     .get(s.as_str())
                     .into_iter()
                     .flatten()
-                    .filter(|b| b.start >= batch.start() && b.start < batch.end())
+                    .filter(|b| {
+                        self.unfiltered || (b.start >= batch.start() && b.start < batch.end())
+                    })
                     .cloned()
                     .collect();
                 (s.clone(), served)
@@ -446,7 +455,12 @@ fn a_failed_request_stores_nothing() {
         at(SETTLED),
     );
     assert_eq!(failed.unwrap_err().code(), "fetch");
-    let minute = writer.minute(&fake, at("2026-10-27T14:30:00Z"), &[instrument("a", "QQQ")]);
+    let minute = writer.minute(
+        &fake,
+        at("2026-10-27T14:30:00Z"),
+        &[instrument("a", "QQQ")],
+        at("2026-10-27T14:30:05Z"),
+    );
     assert_eq!(minute.unwrap_err().code(), "fetch");
     assert!(
         tree(&cell.root()).iter().all(|p| !p.contains("bars-")),
@@ -478,9 +492,11 @@ fn a_minute_generation_holds_the_trailing_window_s_complete_bars() {
             &fake,
             minute,
             &[instrument("a", "QQQ"), instrument("q", "QUIET")],
+            minute,
         )
         .unwrap();
-    assert_eq!(written, vec![symbol("QQQ"), symbol("QUIET")]);
+    assert_eq!(written.written, vec![symbol("QQQ"), symbol("QUIET")]);
+    assert!(written.refused.is_empty());
     assert_eq!(
         *fake.asked.borrow(),
         vec![Asked::Bars(
@@ -514,7 +530,7 @@ fn a_minute_generation_holds_the_trailing_window_s_complete_bars() {
     );
     fake.asked.borrow_mut().clear();
     writer
-        .minute(&fake, minute, &[instrument("a", "QQQ")])
+        .minute(&fake, minute, &[instrument("a", "QQQ")], minute)
         .unwrap();
     assert!(
         fake.asked.borrow().is_empty(),
@@ -541,6 +557,20 @@ fn the_closes_object_is_put_from_the_generation_once_and_is_the_readers_bytes() 
         .daily(&fake, &calendar(), day(SESSION), &instruments[..1], now)
         .unwrap();
     let put = writer.closes(day(SESSION), &instruments, now);
+    let written: Vec<String> = days
+        .iter()
+        .enumerate()
+        .map(|(n, d)| format!(r#"["{d}","{}"]"#, 500 + n))
+        .collect();
+    let by_hand = format!(
+        r#"{{"closes":[{}],"instrument_id":"asset-q"}}"#,
+        written.join(",")
+    );
+    assert_eq!(
+        put,
+        vec![("asset-q".to_owned(), ArtifactRef::of(by_hand.as_bytes()))],
+        "the object is the canonical closes written out by hand"
+    );
     let closes =
         trusted_daily_closes(&daily_dir_at(&cell.root(), "QQQ", now).unwrap(), "QQQ", now).unwrap();
     let bytes = closes_object(&closes, "asset-q").unwrap();
@@ -692,6 +722,368 @@ proptest::proptest! {
                     }
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn only_a_refused_platform_key_stops_the_process() {
+    use mandate_datad::iex::generation::GenerationError;
+    for (status, stops) in [
+        (401, true),
+        (403, true),
+        (429, false),
+        (503, false),
+        (404, false),
+    ] {
+        assert_eq!(
+            GenerationError::Fetch(FetchError::Status { status }).key_refused(),
+            stops,
+            "{status}"
+        );
+    }
+    assert!(!GenerationError::Early.key_refused());
+    assert!(!GenerationError::Store { what: "x" }.key_refused());
+    let shown = GenerationError::Fetch(FetchError::Wire {
+        page: 1,
+        source: mandate_marketdata::alpaca::WireError::UnexpectedSymbol("SECRETSYM".to_owned()),
+    })
+    .to_string();
+    assert!(!shown.contains("SECRETSYM"), "{shown}");
+}
+
+#[test]
+fn a_generation_is_never_written_before_its_span_has_ended() {
+    let cell = Cell::new("early");
+    let days = span(&calendar(), day(SESSION)).unwrap();
+    let fake = Fake {
+        bars: BTreeMap::from([("QQQ".to_owned(), daily_bars(&days, 500))]),
+        ..Fake::default()
+    };
+    let mut writer = cell.writer();
+    let one = [instrument("a", "QQQ")];
+    for (session, now) in [
+        (SESSION, "2026-10-27T00:14:59Z"),
+        (SESSION, "2026-10-26T19:00:00Z"),
+        ("2026-10-23", SETTLED),
+    ] {
+        assert_eq!(
+            writer
+                .daily(&fake, &calendar(), day(session), &one, at(now))
+                .unwrap_err()
+                .code(),
+            "early",
+            "{session} at {now}"
+        );
+    }
+    for (minute, now) in [
+        ("2026-10-27T14:31:00Z", "2026-10-27T14:30:59Z"),
+        ("2026-10-27T14:30:30Z", "2026-10-27T14:31:00Z"),
+    ] {
+        assert_eq!(
+            writer
+                .minute(&fake, at(minute), &one, at(now))
+                .unwrap_err()
+                .code(),
+            "early",
+            "{minute} at {now}"
+        );
+    }
+    assert!(fake.asked.borrow().is_empty(), "nothing is asked early");
+}
+
+#[test]
+fn a_refused_instrument_or_a_failed_request_is_not_asked_again_at_once() {
+    let cell = Cell::new("paced");
+    let days = span(&calendar(), day(SESSION)).unwrap();
+    let mut doubled = daily_bars(&days, 600);
+    doubled.push(doubled.last().unwrap().clone());
+    let fake = Fake {
+        bars: BTreeMap::from([("TWICE".to_owned(), doubled)]),
+        ..Fake::default()
+    };
+    let mut writer = cell.writer();
+    let one = [instrument("t", "TWICE")];
+    let start = at(SETTLED).secs();
+    let tick = |offset: i64| UtcNanos::from_parts(start + offset, 0).unwrap();
+    let first = writer
+        .daily(&fake, &calendar(), day(SESSION), &one, tick(0))
+        .unwrap();
+    assert_eq!(
+        first.refused,
+        vec![symbol("TWICE")],
+        "a bar repeated refuses the instrument"
+    );
+    let asked = fake.asked.borrow().len();
+    writer
+        .daily(
+            &fake,
+            &calendar(),
+            day(SESSION),
+            &one,
+            tick(CONFIRM_EVERY_S - 1),
+        )
+        .unwrap();
+    assert_eq!(
+        fake.asked.borrow().len(),
+        asked,
+        "not asked again within five minutes"
+    );
+    writer
+        .daily(
+            &fake,
+            &calendar(),
+            day(SESSION),
+            &one,
+            tick(CONFIRM_EVERY_S),
+        )
+        .unwrap();
+    assert!(fake.asked.borrow().len() > asked, "asked again after");
+
+    let failing = Fake {
+        fail: true,
+        ..Fake::default()
+    };
+    let mut writer = cell.writer();
+    let qqq = [instrument("a", "QQQ")];
+    assert!(
+        writer
+            .daily(&failing, &calendar(), day(SESSION), &qqq, tick(0))
+            .is_err()
+    );
+    let paused = writer
+        .daily(&failing, &calendar(), day(SESSION), &qqq, tick(RETRY_S - 1))
+        .unwrap();
+    assert!(paused.paused);
+    assert_eq!(
+        failing.asked.borrow().len(),
+        1,
+        "the failed request waits RETRY_S"
+    );
+    assert!(
+        writer
+            .daily(&failing, &calendar(), day(SESSION), &qqq, tick(RETRY_S))
+            .is_err()
+    );
+    assert_eq!(failing.asked.borrow().len(), 2);
+
+    let minute = at("2026-10-27T14:30:00Z");
+    assert!(writer.minute(&failing, minute, &qqq, minute).is_err());
+    let asked = failing.asked.borrow().len();
+    let again = writer
+        .minute(&failing, minute, &qqq, at("2026-10-27T14:30:30Z"))
+        .unwrap();
+    assert!(again.written.is_empty());
+    assert_eq!(
+        failing.asked.borrow().len(),
+        asked,
+        "a failed minute is not asked again"
+    );
+}
+
+#[test]
+fn a_minute_bar_outside_the_window_or_out_of_order_refuses_that_instrument() {
+    let cell = Cell::new("minute-checks");
+    let minute = at("2026-10-27T14:30:00Z");
+    let m = |text: &str| bar(at(text), "110", "100");
+    let fake = Fake {
+        bars: BTreeMap::from([
+            (
+                "FORMING".to_owned(),
+                vec![m("2026-10-27T14:29:00Z"), m("2026-10-27T14:30:00Z")],
+            ),
+            (
+                "EARLY".to_owned(),
+                vec![m("2026-10-27T14:24:00Z"), m("2026-10-27T14:26:00Z")],
+            ),
+            (
+                "TWICE".to_owned(),
+                vec![m("2026-10-27T14:26:00Z"), m("2026-10-27T14:26:00Z")],
+            ),
+            (
+                "BACK".to_owned(),
+                vec![m("2026-10-27T14:27:00Z"), m("2026-10-27T14:26:00Z")],
+            ),
+            (
+                "GOOD".to_owned(),
+                vec![m("2026-10-27T14:25:00Z"), m("2026-10-27T14:29:00Z")],
+            ),
+        ]),
+        unfiltered: true,
+        ..Fake::default()
+    };
+    let instruments: Vec<Instrument> = ["FORMING", "EARLY", "TWICE", "BACK", "GOOD"]
+        .iter()
+        .map(|s| instrument(s, s))
+        .collect();
+    let done = cell
+        .writer()
+        .minute(&fake, minute, &instruments, minute)
+        .unwrap();
+    assert_eq!(done.written, vec![symbol("GOOD")]);
+    assert_eq!(
+        done.refused,
+        vec![
+            symbol("BACK"),
+            symbol("EARLY"),
+            symbol("FORMING"),
+            symbol("TWICE")
+        ]
+    );
+    for refused in ["FORMING", "EARLY", "TWICE", "BACK"] {
+        assert!(
+            !minute_dir(&minute_generation(&cell.root(), minute).unwrap(), refused)
+                .unwrap()
+                .exists(),
+            "{refused}"
+        );
+    }
+}
+
+#[test]
+fn a_dataset_another_writer_put_in_place_first_is_left_as_it_is() {
+    let cell = Cell::new("raced");
+    let days = span(&calendar(), day(SESSION)).unwrap();
+    let target = daily_dir(&daily_generation(&cell.root(), day(SESSION)), "QQQ").unwrap();
+    let fake = Fake {
+        bars: BTreeMap::from([("QQQ".to_owned(), daily_bars(&days, 500))]),
+        appears: Some(target.clone()),
+        ..Fake::default()
+    };
+    let done = cell
+        .writer()
+        .daily(
+            &fake,
+            &calendar(),
+            day(SESSION),
+            &[instrument("a", "QQQ")],
+            at(SETTLED),
+        )
+        .unwrap();
+    assert!(done.written.is_empty(), "{done:?}");
+    assert!(
+        fs::read_dir(&target).unwrap().next().is_none(),
+        "the target is untouched"
+    );
+    assert!(
+        !cell.root().join(".staging").exists(),
+        "what was built is cleared"
+    );
+}
+
+#[test]
+fn the_minute_window_is_the_participation_check_s() {
+    assert_eq!(
+        mandate_datad::iex::generation::MINUTE_WINDOW_S,
+        mandate_liquidity::TRAILING_WINDOW_S
+    );
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(24))]
+
+    /// DP-16: across successive sessions, the source answering each generation afresh (a close
+    /// revised, a day late), the reader at each settled clock reads exactly the source's latest
+    /// answer for that generation's span, or refuses when it holds an empty day: a wrong answer
+    /// never outlives its generation.
+    #[test]
+    fn a_reader_reads_the_latest_answer_of_its_generation(
+        revisions in proptest::collection::vec(
+            (proptest::collection::vec(0u32..3, 32), proptest::option::weighted(0.3, 0usize..32)),
+            3,
+        ),
+    ) {
+        let cell = Cell::new(&format!("dp16-{}", revisions.len()));
+        let calendar = calendar();
+        let sessions = ["2026-10-22", "2026-10-23", "2026-10-26"];
+        let settled = ["2026-10-23T00:20:00Z", "2026-10-24T00:20:00Z", "2026-10-27T00:20:00Z"];
+        let all = span(&calendar, day("2026-10-26")).unwrap();
+        let mut first_days = span(&calendar, day("2026-10-22")).unwrap();
+        first_days.extend(all.iter().filter(|d| **d > day("2026-10-22")));
+        let mut writer = cell.writer();
+        for ((session, now), revision) in sessions.iter().zip(settled).zip(&revisions) {
+            let (bumps, gone) = revision;
+            let answered: Vec<Bar> = first_days
+                .iter()
+                .zip(bumps)
+                .enumerate()
+                .filter(|(n, (d, _))| Some(*n) != *gone || **d == day(session))
+                .map(|(_, (d, bump))| bar(new_york_midnight(*d).unwrap(), &(100 + bump).to_string(), "5"))
+                .collect();
+            let fake = Fake {
+                bars: BTreeMap::from([("QQQ".to_owned(), answered.clone())]),
+                ..Fake::default()
+            };
+            let now = at(now);
+            writer.daily(&fake, &calendar, day(session), &[instrument("a", "QQQ")], now).unwrap();
+            let window = span(&calendar, day(session)).unwrap();
+            let expected: Vec<String> = window
+                .iter()
+                .filter_map(|d| {
+                    answered
+                        .iter()
+                        .find(|b| b.start.date() == *d)
+                        .map(|b| b.close.as_str().to_owned())
+                })
+                .collect();
+            let read = trusted_daily_closes(&daily_dir_at(&cell.root(), "QQQ", now).unwrap(), "QQQ", now)
+                .map(|closes| closes.iter().map(|(_, c)| c.to_string()).collect::<Vec<_>>());
+            if expected.len() == window.len() {
+                proptest::prop_assert_eq!(read.unwrap(), expected, "{}", session);
+            } else {
+                proptest::prop_assert!(read.is_err(), "{} holds an empty day", session);
+            }
+        }
+    }
+
+    /// DP-15 for minutes: whatever the source answers, every stored minute bar is one it answered
+    /// for that instrument inside the window, each after the one before; otherwise nothing is
+    /// stored for the instrument.
+    #[test]
+    fn every_stored_minute_bar_is_one_the_source_answered_in_the_window(
+        set in proptest::collection::btree_set(-2i64..7, 0..6),
+        change in 0u8..3,
+    ) {
+        let mut offsets: Vec<i64> = set.into_iter().collect();
+        match change {
+            1 => {
+                if let Some(last) = offsets.last().copied() {
+                    offsets.push(last);
+                }
+            }
+            2 if offsets.len() > 1 => offsets.swap(0, 1),
+            _ => {}
+        }
+        let cell = Cell::new(&format!("dp15m-{}", offsets.len()));
+        let minute = at("2026-10-27T14:30:00Z");
+        let answered: Vec<Bar> = offsets
+            .iter()
+            .map(|k| bar(UtcNanos::from_parts(minute.secs() - 300 + 60 * k, 0).unwrap(), "1", "3"))
+            .collect();
+        let fake = Fake {
+            bars: BTreeMap::from([("QQQ".to_owned(), answered.clone())]),
+            unfiltered: true,
+            ..Fake::default()
+        };
+        let done = cell.writer().minute(&fake, minute, &[instrument("a", "QQQ")], minute).unwrap();
+        let valid = offsets.iter().all(|k| (0..5).contains(k))
+            && offsets.windows(2).all(|w| w[0] < w[1]);
+        proptest::prop_assert_eq!(done.written.len(), usize::from(valid));
+        let dir = minute_dir(&minute_generation(&cell.root(), minute).unwrap(), "QQQ").unwrap();
+        proptest::prop_assert_eq!(dir.exists(), valid);
+        if valid {
+            let (id, listed) = mandate_marketdata::dataset::read_manifest(&dir).unwrap();
+            let mut stored = Vec::new();
+            for listed in listed.iter().filter(|l| l.file.is_some()) {
+                let path = dir.join(mandate_marketdata::dataset::partition_name(listed.day));
+                if let mandate_marketdata::model::Records::Bars(bars) =
+                    mandate_marketdata::dataset::read(&path, id.kind()).unwrap()
+                {
+                    stored.extend(bars.into_iter().map(|b| b.start));
+                }
+            }
+            let expected: Vec<UtcNanos> = answered.iter().map(|b| b.start).collect();
+            proptest::prop_assert_eq!(stored, expected);
         }
     }
 }
