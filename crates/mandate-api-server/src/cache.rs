@@ -265,9 +265,9 @@ impl CachedJournal {
     }
 
     /// `stream` read from its first record, then held in place of what was held; a read that fails
-    /// drops the workspace. Rows held before it are never served after it is called: a success
-    /// replaces them, a failure drops them, and a hold refused for a drop leaves them to fail their
-    /// own head check or reverify again.
+    /// drops the workspace. Rows held before it are served after it only as any held rows are, once
+    /// the store's head row matches them: a success replaces them, a failure drops them, and a hold
+    /// refused for another workspace's drop leaves them to their own head check and reverify.
     async fn read_whole(
         &self,
         workspace: &str,
