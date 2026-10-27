@@ -2100,23 +2100,22 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     if event_type == "GateDecided" and draft["schema_version"] == 3:
         # Rules 313 to 315 (DEC-2848): the executor's own members, each only where it writes it.
         sized = p["sized_qty"]
-        local_allow = p["verdict"] == "allow" and (
-            p["data_profile"] == "account_stream_only" or "rule.313.profile" in skip
-        )
+        allow = p["verdict"] == "allow" or "rule.313.allow" in skip
         positive = sized is None or normalize_decimal(sized) is None or Decimal(sized) > 0 or "rule.313.positive" in skip
-        rule("313", sized is None or (local_allow and positive), "schema", "payload.sized_qty")
+        rule("313", sized is None or (allow and positive), "schema", "payload.sized_qty")
         held_long = p["held_long"]
         rule(
             "314",
-            held_long is None or ((held_long is True or "rule.314.true" in skip) and p["verdict"] == "hold"),
+            held_long is None
+            or ((held_long is True or "rule.314.true" in skip) and (p["verdict"] == "hold" or "rule.314.hold" in skip)),
             "schema",
             "payload.held_long",
         )
         parked = p["parked"]
-        sessions = ("session_closed", "session_unknown")
+        sessions = ("session_closed",) if "rule.315.closed_only" in skip else ("session_closed", "session_unknown")
         parked_ok = parked is None or (
             (parked is True or "rule.315.true" in skip)
-            and p["verdict"] == "hold"
+            and (p["verdict"] == "hold" or "rule.315.hold" in skip)
             and (p["reason_code"] in sessions or "rule.315.reason" in skip)
             and (held_long is True or "rule.315.held_long" in skip)
         )

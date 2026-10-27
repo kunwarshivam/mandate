@@ -6,7 +6,7 @@ record: a sized discretionary exit's whole batch, a parked ladder step's hold an
 record. Version 3 adds the three as nullable members, and rules 313 to 315 bind each to the decision
 it belongs to:
 
-- 313: `sized_qty` only on an allow no binding run bound (`account_stream_only`), and above zero;
+- 313: `sized_qty` only on an allow, binding or the executor's own, and above zero;
 - 314: `held_long` is `true` or `null`, and `true` only on a hold;
 - 315: `parked` is `true` or `null`, and `true` only on a hold for `session_closed` or
   `session_unknown` that is also `held_long`.
@@ -58,14 +58,18 @@ def version_3(draft: dict, **members) -> dict:
 
 def base_drafts() -> dict[str, dict]:
     """The chain's binding allow at version 3; a discretionary exit's local allow sized beside its
-    ladder's rungs; a long hold; and a ladder step parked while no session is open."""
+    ladder's rungs; a long hold; and a ladder step parked while no session is open, as the executor
+    writes a park: its own decision's members and one failed `session` check."""
     gate = next(draft_of_body(b) for b in chain_bodies() if b["event_type"] == "GateDecided")
     local = copy.deepcopy(gate)
     local["payload"].update(data_profile=LOCAL, quotes_used=[], marks_used=[])
     hold = copy.deepcopy(local)
     hold["payload"].update(verdict="hold", reason_code="exit_unpriced")
     parked = copy.deepcopy(hold)
-    parked["payload"].update(reason_code="session_closed")
+    parked["payload"].update(
+        reason_code="session_closed",
+        checks=[{"id": "session", "result": "fail", "inputs": {}, "computed": {}}],
+    )
     return {
         BINDING: version_3(gate),
         SIZED: version_3(local, sized_qty="6"),
@@ -84,6 +88,8 @@ def valid_drafts() -> list[dict]:
         ok("parked_session_unknown", "rule 315: either session reason", PARKED,
            [change(at("reason_code"), "session_unknown")]),
         ok("sized_fraction", "rule 313: any quantity above zero", SIZED, [change(at("sized_qty"), "0.5")]),
+        ok("sized_on_a_binding_allow", "rule 313: a binding allow the executor sized", BINDING,
+           [change(at("sized_qty"), "6")]),
         ok("held_long_on_any_hold_reason", "rule 314: a hold for any reason", HELD_LONG,
            [change(at("reason_code"), "mark_freshness")]),
         ok("hold_with_nothing_of_its_own", "§9.5: each member `null` when not written", HELD_LONG,
@@ -106,8 +112,9 @@ def invalid_drafts() -> list[dict]:
     return [
         bad("sized_on_a_hold", f"{rule_313}: only on an allow", HELD_LONG,
             [change(at("sized_qty"), "6")], at("sized_qty")),
-        bad("sized_on_a_binding_allow", f"{rule_313}: only on an allow no binding run bound", BINDING,
-            [change(at("sized_qty"), "6")], at("sized_qty")),
+        bad("sized_on_a_deny", f"{rule_313}: only on an allow", SIZED,
+            [change(at("verdict"), "deny"), change(at("reason_code"), "sell_exceeds_available")],
+            at("sized_qty")),
         bad("sized_zero", f"{rule_313}: above zero", SIZED, [change(at("sized_qty"), "0")], at("sized_qty")),
         bad("sized_negative", f"{rule_313}: above zero", SIZED, [change(at("sized_qty"), "-1")], at("sized_qty")),
         bad("sized_number", "§9.1: a decimal is text", SIZED, [change(at("sized_qty"), 6)], at("sized_qty")),
@@ -159,7 +166,7 @@ def found(check: str, message: str) -> str:
 
 def admits(verdict, reason, profile, sized, held_long, parked) -> bool:
     """Rules 313 to 315 read directly from the spec's sentences."""
-    sized_ok = sized is None or (verdict == "allow" and profile == LOCAL and Decimal(sized) > 0)
+    sized_ok = sized is None or (verdict == "allow" and Decimal(sized) > 0)
     held_ok = held_long is None or (held_long is True and verdict == "hold")
     parked_ok = parked is None or (parked is True and verdict == "hold" and reason in SESSIONS and held_long is True)
     return sized_ok and held_ok and parked_ok
@@ -197,15 +204,19 @@ def check_section(section: dict, skip: frozenset = frozenset()) -> list[str]:
 
 # --------------------------------------------------------------------------- seeded bugs
 
+# Rule 315's own `hold` clause seeds no mutant: a park must be `held_long`, which rule 314 admits
+# only on a hold, so dropping that clause alone changes no verdict.
 VALIDATOR_MUTANTS = (
     "rule.313",
-    "rule.313.profile",
+    "rule.313.allow",
     "rule.313.positive",
     "rule.314",
     "rule.314.true",
+    "rule.314.hold",
     "rule.315",
     "rule.315.true",
     "rule.315.reason",
+    "rule.315.closed_only",
     "rule.315.held_long",
 )
 

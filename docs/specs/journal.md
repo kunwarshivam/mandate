@@ -1844,7 +1844,7 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 |---|---|---|
 | `StreamOpened` | — | stream type, subject, environment |
 | `IntentReceived` | man | intent ID, agent, instrument, side, type, TIF, quantity, limit, purpose |
-| `GateDecided` | fee, cal, ins, rule, man | intent ID, verdict, reason code, **`checks: [{id, result, inputs, computed}]`** with IDs matching trading spec §9.1 (`account_status`, `agent_mode`, `eligibility`, `concentration`, `order_size`, `session`, `halt`, `order_constraints`, `mark_freshness`, `collar`, `conduct`, `buying_power`, `gross_exposure`, `day_trade_budget`), `quotes_used`, `marks_used`, `data_profile` |
+| `GateDecided` | fee, cal, ins, rule, man | intent ID, verdict, reason code, **`checks: [{id, result, inputs, computed}]`** with IDs matching trading spec §9.1 (`account_status`, `agent_mode`, `eligibility`, `concentration`, `order_size`, `session`, `halt`, `order_constraints`, `mark_freshness`, `collar`, `conduct`, `buying_power`, `gross_exposure`, `day_trade_budget`), `quotes_used`, `marks_used`, `data_profile`; at version 3 also `sized_qty`, `parked` and `held_long` (§9.5, [DEC-2848](../project/decisions/DEC-2848.md)) |
 | `OrderSubmitted`, `OrderAbandoned` | — | client order ID, attempt, broker status, internal state; `OrderAbandoned` closed at schema version 1 with the intent and the reason (§9.5, [DEC-2803](../project/decisions/DEC-2803.md)) |
 | `OrderStateChanged` | — | Closed at schema version 1: required `client_order_id`, `state`, and `risk_clock`; always-present nullable `attempted`, `broker_status`, `filled_qty`, `reject_code`, `replaces`, `replaced_by`, `replaced_by_broker_order_id`, and `lookup`; always-present booleans `ignored`, `cancel_requested`, `cancel_confirmed`, `cancel_overdue`, `adopted`, and `ladder_step`. `state` and non-null `attempted` use the complete executor order-state vocabulary; non-null `lookup` is `absent`; `filled_qty` is a decimal; opaque text is non-empty ([DEC-459](../project/decisions/DEC-459.md)). Version 2 adds `broker_order_id` last, closed in §9.16 ([DEC-869](../project/decisions/DEC-869.md)) |
 | `OrderRequestRecorded` | — | the exact request a version-2 `OrderSubmitted` names (DEC-360 option (c)): agent, intent, purpose, extended hours, the protective trigger and legs, and a ladder rung's; closed in §9.5 |
@@ -2728,7 +2728,8 @@ spec §8.6) follows with its own story.
 ### 9.5 Account-stream executor records ([DEC-446](../project/decisions/DEC-446.md), [DEC-447](../project/decisions/DEC-447.md))
 
 This subsection closes the payload schemas of the account stream's `IntentReceived`,
-`GateDecided`, and `OrderSubmitted` at `schema_version` 2, and of the account stream's
+`GateDecided`, and `OrderSubmitted` at `schema_version` 2, `GateDecided` also at 3 (v0.109,
+[DEC-2848](../project/decisions/DEC-2848.md)), and of the account stream's
 `OrderRequestRecorded`, `ProtectionChanged`, `OwnerConfirmationReceived`, `AccountCloseRequested`,
 `AccountRestrictionChanged`, `KillSwitchActivated`, `ExternalActivityIngested`, `RejectObserved`,
 `OrderAbandoned`, the `ClockAdvanced` copy, and (v0.102) `AccountRestrictionLifted` at `schema_version` 1, and `FillApplied` at `schema_version` 2 ([DEC-360](../project/decisions/DEC-360.md), option (c); [DEC-2040](../project/decisions/DEC-2040.md); [DEC-2337](../project/decisions/DEC-2337.md); [DEC-2808](../project/decisions/DEC-2808.md); [DEC-2812](../project/decisions/DEC-2812.md)). For these events it replaces the "Key
@@ -2831,11 +2832,16 @@ reads every version.
 
 **Consistency rules** for `GateDecided` version 3 (reason `schema`; the path is the member named):
 
-313. `sized_qty` is non-null only on an `allow` whose `data_profile` is `account_stream_only`,
-     the executor's own decision, and then above zero. A binding run's quantity is its own.
+313. `sized_qty` is non-null only on an `allow`, and then above zero: the quantity the executor
+     sized the exit to, whether or not a binding run bound the decision, which the fold applies to
+     the intent on replay.
 314. `held_long` is `true` or `null`, and `true` only on a `hold`.
 315. `parked` is `true` or `null`, and `true` only on a `hold` whose `reason_code` is
      `session_closed` or `session_unknown` and whose `held_long` is `true`.
+
+A park, which no gate run decides, carries the members every version requires as the executor's
+own decision does: `data_profile` `account_stream_only`, empty `quotes_used` and `marks_used`, and
+one `checks` entry, the `session` check `fail` with empty `inputs` and `computed`.
 
 **`OrderSubmitted`** on the account stream at `schema_version` 2: the version-1 members and
 `risk_clock`. Its `causation_id` names its `OrderRequestRecorded` (rule 45).
