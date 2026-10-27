@@ -56,12 +56,16 @@ exp = {"MC-V03": "V-002", "MC-V05": "V-003", "MC-V06": "V-005", "MC-V08": "V-006
        "MC-V49": "V-020", "MC-V50": "V-020", "MC-V51": "V-033",
        "MC-V53": "V-034", "MC-V54": "V-034", "MC-V55": "V-035", "MC-V56": "V-036", "MC-V57": "V-036",
        "MC-V58": "V-036", "MC-V59": "V-037", "MC-V61": "V-039", "MC-V62": "V-038", "MC-V63": "V-020",
-       "MC-V64": "V-022", "MC-V67": "V-020", "MC-V69": "V-047"}
+       "MC-V64": "V-022", "MC-V67": "V-020", "MC-V69": "V-047",
+       "MC-V79": "V-048", "MC-V80": "V-048", "MC-V81": "V-048", "MC-V82": "V-048", "MC-V83": "V-048",
+       "MC-V84": "V-048", "MC-V85": "V-048", "MC-V86": "V-048", "MC-V87": "V-048", "MC-V89": "V-048", "MC-V90": "V-048"}
 for cid, code in exp.items():
     req(cid, C[cid]["expect"]["violations"] == [code], f"expected exactly {code}")
 req("MC-V13", "W-003" in C["MC-V13"]["expect"]["warnings"], "W-003")
 req("MC-V46", "W-001" in C["MC-V46"]["expect"]["warnings"], "W-001")
 req("MC-V47", "W-005" in C["MC-V47"]["expect"]["warnings"], "W-005")
+req("MC-V78", C["MC-V78"]["expect"]["violations"] == [], "an offered route passes (DEC-2282)")
+req("MC-V88", C["MC-V88"]["expect"]["violations"] == [], "a deprecated route carried unchanged passes (DEC-2282)")
 req("MC-V48", len(C["MC-V48"]["expect"]["violations"]) >= 3, "multiple")
 req("MC-V60", C["MC-V60"]["expect"]["violations"] == ["V-003", "V-036"], "accumulate admits nothing, two ways")
 req("MC-V65", "W-006" in C["MC-V65"]["expect"]["warnings"], "W-006")
