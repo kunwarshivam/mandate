@@ -197,45 +197,68 @@ impl mandate_executor::BindingGateSource for Readable {
     }
 }
 
-/// DEC-2846 and `AGENTS.md` rule 13: an owner's kill switch whose flatten cannot be journaled,
-/// because its deployment's references do not read, never stops the process, which would crash
-/// loop and stop every other exit and kill switch. It is held as a failed input, every opening
-/// held with the owner alerted, and applied at the first pass that reads them, its flatten sent.
+/// DEC-2846 and `AGENTS.md` rule 13: the kill switch never depends on configuration reading. An
+/// owner's kill switch whose flatten cannot be journaled, because its deployment's references do
+/// not read, is applied at once: `KillSwitchActivated` and the agent's stop are journaled. Only the
+/// flatten waits, journaled `exit_unpriced` and alerted once, and it sells at the first pass that
+/// reads them. The process never stops. (The process's mandate port falls back to the version the
+/// control stream deployed, so a followed agent's version always reads here; the core's own test
+/// covers a version that does not.)
 #[test]
-fn a_kill_switch_whose_references_do_not_read_is_held_and_applied_once_they_do() -> Result<(), Error>
+fn a_kill_switch_applies_at_once_and_its_flatten_waits_for_its_configuration() -> Result<(), Error>
 {
-    let journal = deployed()?;
-    journal.seed(ACCOUNT_STREAM, OPENED)?;
-    let broker = Paper::new(&journal);
-    broker.resting(OPENING, "AAPL", "10", "150")?;
-    broker.fill(OPENING, "150")?;
-    let readable = std::rc::Rc::new(std::cell::Cell::new(false));
-    let wiring = support::wired(
-        Box::new(Readable(std::rc::Rc::clone(&readable))),
-        Box::new(support::TwoPercentStop),
-    )?;
-    let mut process = support::start_wired(&journal, &broker, wiring)?;
-    process.step(at(NOON)?);
-    kill(&journal, AGENT, SWITCH)?;
-    for _ in 0..3 {
+    for unread in ["references"] {
+        let journal = deployed()?;
+        journal.seed(ACCOUNT_STREAM, OPENED)?;
+        let broker = Paper::new(&journal);
+        broker.resting(OPENING, "AAPL", "10", "150")?;
+        broker.fill(OPENING, "150")?;
+        let references = std::rc::Rc::new(std::cell::Cell::new(false));
+        let wiring = support::wired(
+            Box::new(Readable(std::rc::Rc::clone(&references))),
+            Box::new(support::TwoPercentStop),
+        )?;
+        let mut process = support::start_wired(&journal, &broker, wiring)?;
         process.step(at(NOON)?);
-    }
-    assert!(
-        !matches!(process.lifecycle().state(), State::Exited(_)),
-        "never stops: {:?}",
-        process.lifecycle().state()
-    );
-    assert!(journal.switched().is_empty(), "not applied while unread");
-    assert_eq!(held(&journal).len(), 1, "openings held, the owner alerted");
-    readable.set(true);
-    process.step(at(NOON)?);
-    assert_eq!(journal.switched(), [AGENT], "applied once they read");
-    assert!(
-        broker
-            .seen()
+        kill(&journal, AGENT, SWITCH)?;
+        for _ in 0..3 {
+            process.step(at(NOON)?);
+        }
+        assert!(
+            !matches!(process.lifecycle().state(), State::Exited(_)),
+            "{unread}: never stops: {:?}",
+            process.lifecycle().state()
+        );
+        assert_eq!(journal.switched(), [AGENT], "{unread}: applied at once");
+        let sells = |broker: &Paper| {
+            broker
+                .seen()
+                .iter()
+                .filter(|seen| matches!(&seen.request, mandate_executor::BrokerRequest::Submit(order) if order.side == mandate_accounting::Side::Sell))
+                .count()
+        };
+        assert_eq!(sells(&broker), 0, "{unread}: the flatten waits");
+        let waiting = journal
+            .payloads("ProtectionChanged")
             .iter()
-            .any(|seen| matches!(&seen.request, mandate_executor::BrokerRequest::Submit(order) if order.side == mandate_accounting::Side::Sell)),
-        "and its flatten sent"
-    );
+            .filter(|p| p.get("action") == Some(&Value::Str("exit_unpriced".to_owned())))
+            .count();
+        assert_eq!(
+            waiting,
+            1,
+            "{unread}: journaled once: {:?}",
+            journal.types(ACCOUNT_STREAM)
+        );
+        assert!(
+            journal
+                .payloads("OwnerAlertSent")
+                .iter()
+                .any(|p| p.get("kind") == Some(&Value::Str("exit_stalled".to_owned()))),
+            "{unread}: and the owner alerted"
+        );
+        references.set(true);
+        process.step(at(NOON)?);
+        assert_eq!(sells(&broker), 1, "{unread}: sold once it reads");
+    }
     Ok(())
 }

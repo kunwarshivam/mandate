@@ -2173,4 +2173,30 @@ mod tests {
         assert!(held_on_refusal(&handoff(Purpose::Open)?));
         Ok(())
     }
+
+    /// DEC-2846: configuration that does not read holds any input but a start, a refusal's hold or
+    /// a failed input, and never stops the process; any other core error is not this one.
+    #[test]
+    fn unread_configuration_holds_every_input_but_the_start_and_the_holds() -> Result<(), Error> {
+        let missing = ExecutorError::BindingGateInputMissing;
+        for held in [
+            Input::Tick(RiskClock::from_secs(0)),
+            handoff(Purpose::OwnerExit)?,
+        ] {
+            assert!(unread_configuration(&missing, &held), "{held:?}");
+        }
+        for stops in [
+            Input::Started(WriterEpoch(1)),
+            Input::BatchRefused,
+            Input::InputFailed,
+        ] {
+            assert!(!unread_configuration(&missing, &stops), "{stops:?}");
+        }
+        let other = ExecutorError::NotStarted;
+        assert!(!unread_configuration(
+            &other,
+            &Input::Tick(RiskClock::from_secs(0))
+        ));
+        Ok(())
+    }
 }
