@@ -330,9 +330,13 @@ fn gate(
     let (decision, _) = decide(batch, intent, GatePass::BeforeSubmission)?;
     let verdict = decision.verdict_name();
     if verdict == ALLOW || always || decision.crowded_denial() {
+        let episode = opens_episode(batch, intent, &decision);
         let decided = journal_decision(batch, intent, &decision, Vec::new())?;
         if let UNPRICED | SESSION_UNKNOWN = decision.reason_code() {
-            batch.notify(decided, OwnerAlertKind::ExitStalled);
+            batch.notify(decided.clone(), OwnerAlertKind::ExitStalled);
+        }
+        if let Some(kind) = episode {
+            batch.notify(decided, kind);
         }
     }
     if verdict == ALLOW
@@ -347,6 +351,32 @@ fn gate(
         }
     }
     Ok((verdict, decision.is_binding()))
+}
+
+/// DEC-2855: the owner alert a hold of `intent` raises, read before the hold is journaled. An
+/// opening held `protection_unattributed` or `attribution_deficit` begins an episode, and is
+/// alerted, only when no opening of its instrument is already held for that reason, itself included
+/// (item 3): every later hold of the episode raises nothing, and a replay finds the same.
+fn opens_episode(
+    batch: &Batch<'_, '_>,
+    intent: &IntentId,
+    decision: &PartialGateDecision,
+) -> Option<OwnerAlertKind> {
+    let kind = match (decision.verdict_name(), decision.reason_code()) {
+        (HOLD, "protection_unattributed") => OwnerAlertKind::ProtectionUnattributed,
+        (HOLD, "attribution_deficit") => OwnerAlertKind::AttributionDeficit,
+        _ => return None,
+    };
+    let instrument = |id: &IntentId| match batch.view.bodies.get(id) {
+        Some(IntentBody::Order { instrument, .. }) => Some(instrument),
+        _ => None,
+    };
+    let here = instrument(intent)?;
+    let open = batch.view.held.iter().any(|held| {
+        instrument(held) == Some(here)
+            && batch.view.hold_reasons.get(held).map(String::as_str) == Some(decision.reason_code())
+    });
+    (!open).then_some(kind)
 }
 
 fn journal_decision(

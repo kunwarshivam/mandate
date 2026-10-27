@@ -38,7 +38,7 @@ pub const WITHHELD: [&str; 9] = [
 ];
 
 /// The kinds this read serves, each with its class from notifications spec §3.2.
-const SERVED: [(&str, &str); 24] = [
+const SERVED: [(&str, &str); 26] = [
     ("risk_limit", "safety"),
     ("kill_switch", "safety"),
     ("kill_switch_unapplied", "safety"),
@@ -47,6 +47,8 @@ const SERVED: [(&str, &str); 24] = [
     ("account_restriction", "safety"),
     ("connection_unavailable", "safety"),
     ("protection", "safety"),
+    ("protection_unattributed", "safety"),
+    ("attribution_deficit", "safety"),
     ("exit_stalled", "safety"),
     ("reconciliation", "safety"),
     ("external_activity", "safety"),
