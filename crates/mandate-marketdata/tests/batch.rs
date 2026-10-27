@@ -590,6 +590,16 @@ fn an_action_of_another_kind_goes_to_the_asked_symbols_it_names() {
         (vec!["m4".to_owned()], vec!["m4".to_owned()]),
         "a symbol member that is not a string cannot be read, so the action goes to every asked symbol"
     );
+    let mixed = page(other(
+        "m8",
+        r#","acquirer_symbol":["SPY"],"acquiree_symbol":"IWM""#,
+    ))
+    .unwrap();
+    assert_eq!(
+        (ids(&mixed, "SPY"), ids(&mixed, "QQQ")),
+        (vec!["m8".to_owned()], vec!["m8".to_owned()]),
+        "an unreadable member may name an asked symbol, so an unasked one beside it refuses nothing"
+    );
     assert_eq!(
         page(other(
             "m5",
@@ -670,4 +680,13 @@ async fn an_actions_batch_of_no_symbols_or_too_many_asks_nothing() {
         assert_eq!(refused.code(), "batch");
         assert!(transport.requested().is_empty());
     }
+    let fifty: BTreeSet<Symbol> = (0..50).map(|n| symbol(&format!("S{n}"))).collect();
+    let transport = FakeTransport::serving([ok(&actions_body("", None))]);
+    let client = Client::new(transport.clone(), RecordingPause::default());
+    let actions = client
+        .fetch_corporate_actions_batch(&fifty, span())
+        .await
+        .unwrap();
+    assert_eq!(actions.len(), 50);
+    assert_eq!(transport.requested().len(), 1);
 }
