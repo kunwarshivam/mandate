@@ -339,6 +339,7 @@ pub(crate) fn account_stream_checks(
             state,
             proposal.agent,
             proposal.instrument,
+            None,
         )?)
     } else {
         left
@@ -1290,12 +1291,12 @@ mod sell_authority_tests {
     use super::{PartialGateDecision, Proposal, account_stream_checks};
     use crate::error::ExecutorError;
     use crate::holders::bought;
-    use crate::ids::ClientOrderId;
+    use crate::ids::{ClientOrderId, IntentId};
     use crate::ports::Ports;
     use crate::reconcile::tests::{Everything, Ids, executor_config, fees};
-    use crate::state::ExecutorState;
+    use crate::state::{ExecutorState, Ladder, LoneLadder};
     use crate::types::{
-        AccountRef, AccountScope, AgentId, Order, OrderState, Purpose, WorkspaceId,
+        AccountRef, AccountScope, AgentId, EventId, Order, OrderState, Purpose, WorkspaceId,
     };
 
     /// `position` AAPL held, with each of `lots` an agent's filled buy.
@@ -1425,6 +1426,50 @@ mod sell_authority_tests {
             outcome(ask(&state, "agent-b", "5", Purpose::DiscretionaryExit)?),
             ("allow", String::new(), qty("1")?),
             "another agent's working sell spends none of agent-b's authority"
+        );
+        Ok(())
+    }
+
+    /// I3 beside the agent's own exit ladder: `agent-a` holds 6 of 10 (the owner 4), and its
+    /// discretionary ladder's stepped rung left 4 unsold. Those 4 are its authority's too, so a new
+    /// discretionary exit of 5 is trimmed to the 2 left, where DEC-410's room beside the rungs
+    /// alone would allow 6.
+    #[test]
+    fn the_agents_own_ladder_spends_its_authority() -> Result<(), ExecutorError> {
+        let mut state = holding("10", &[("agent-a", "6")])?;
+        let intent = IntentId(EventId("01JABCDEFGHJKMNPQRSTV00001".to_owned()));
+        let rung = Order {
+            client_order_id: ClientOrderId::for_intent(&intent)?,
+            intent_id: None,
+            agent: Some(AgentId("agent-a".to_owned())),
+            instrument: InstrumentId::new("AAPL")?,
+            side: Side::Sell,
+            qty: Qty::parse("4")?,
+            filled_qty: Qty::ZERO,
+            state: OrderState::Canceled,
+            attempt: 1,
+            purpose: Purpose::DiscretionaryExit,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        };
+        state.orders.insert(rung.client_order_id.clone(), rung);
+        state.ladders.insert(
+            (InstrumentId::new("AAPL")?, intent.clone()),
+            LoneLadder {
+                intent,
+                agent: AgentId("agent-a".to_owned()),
+                ladder: Ladder {
+                    stepping: true,
+                    ..Ladder::default()
+                },
+            },
+        );
+        assert_eq!(
+            outcome(ask(&state, "agent-a", "5", Purpose::DiscretionaryExit)?),
+            ("allow", String::new(), qty("2")?)
         );
         Ok(())
     }

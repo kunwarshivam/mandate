@@ -15,6 +15,7 @@ use crate::batch::Batch;
 use crate::error::ExecutorError;
 use crate::fold::single_holder;
 use crate::gate::available;
+use crate::holders;
 use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
@@ -551,8 +552,9 @@ fn unsent(state: &ExecutorState, intent: &IntentId, ladder: Ladder) -> Result<Qt
 }
 
 /// DEC-410 item 4: what `intent`'s next rung sends, of the `left` its stepped rung left unsold:
-/// what its remainder counts now ([`remainders`]), and for a switch's flatten no more than the
-/// agent's sub-ledger now (DEC-2360 item 1). A shorter rung is journaled `ProtectionChanged
+/// what its remainder counts now ([`remainders`]), for a switch's flatten no more than the
+/// agent's sub-ledger now (DEC-2360 item 1), and for a discretionary exit no more than its agent's
+/// sell authority leaves (DEC-2849 I3, [`holders::rung_room`]). A shorter rung is journaled `ProtectionChanged
 /// rung_short`, with what it does not send and why; with nothing to send, that record ends the
 /// ladder, so it never sends later into a position bought afresh.
 fn sendable(
@@ -565,7 +567,12 @@ fn sendable(
         .into_iter()
         .find(|(owner, _)| owner == intent)
         .map_or(Qty::ZERO, |(_, counts)| counts);
-    let sends = flatten_room(&batch.view, intent, counts)?;
+    let sends = holders::rung_room(
+        &batch.view,
+        instrument,
+        intent,
+        flatten_room(&batch.view, intent, counts)?,
+    )?;
     if sends < left {
         let pairs = vec![
             ("intent_id", text(intent.0.0.clone())),
@@ -16133,8 +16140,8 @@ mod remainder_pins {
         ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
     };
     use crate::types::{
-        AccountRef, AccountScope, AgentId, Effect, EventId, Mode, Order, OrderState, Purpose,
-        RiskClock, WorkspaceId, WriterEpoch,
+        AccountRef, AccountScope, AgentId, Effect, EventId, IntentBody, Mode, Order, OrderState,
+        Purpose, RiskClock, WorkspaceId, WriterEpoch,
     };
 
     const SEQUENCE: &str = "01JABCDEFGHJKMNPQRSTV00010";
@@ -16411,6 +16418,46 @@ mod remainder_pins {
                 "deny",
                 "{mode:?}: resumed, the parked 2 count again and nothing is left"
             );
+        }
+        Ok(())
+    }
+
+    /// DEC-2849 I3 on a ladder's next rung: `agent-a`'s discretionary exit stepped a rung with 5
+    /// unsold, but `agent-a` holds 3 of the 10 (`agent-d` the other 7), so the next rung sends 3,
+    /// journaled short. The same ladder as a risk exit sends its 5 (I4).
+    #[test]
+    fn a_discretionary_rung_sends_no_more_than_its_agents_authority() -> Result<(), ExecutorError> {
+        let aapl = InstrumentId::new("AAPL")?;
+        for (purpose, sent) in [(Purpose::DiscretionaryExit, "3"), (Purpose::RiskExit, "5")] {
+            let mut state = two_ladders("agent-b", false)?;
+            state
+                .orders
+                .remove(&ClientOrderId::parse("md-bought-agent-d-AAPL")?);
+            crate::holders::bought(&mut state, "agent-a", &aapl, "3")?;
+            crate::holders::bought(&mut state, "agent-d", &aapl, "7")?;
+            state.bodies.insert(
+                intent(SEQUENCE),
+                IntentBody::Order {
+                    instrument: aapl.clone(),
+                    side: Side::Sell,
+                    qty: Qty::parse("10")?,
+                    limit: None,
+                    purpose,
+                    protection: None,
+                },
+            );
+            let (sends_, short) = sends(&state, &[(SEQUENCE, "5")])?;
+            assert_eq!(
+                sends_,
+                vec![(SEQUENCE.to_owned(), Qty::parse(sent)?)],
+                "{purpose:?}"
+            );
+            let expected_short = if sent == "5" {
+                Vec::new()
+            } else {
+                vec![(SEQUENCE.to_owned(), sent.to_owned())]
+            };
+            assert_eq!(short, expected_short, "{purpose:?}");
         }
         Ok(())
     }
