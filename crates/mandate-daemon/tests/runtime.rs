@@ -3147,6 +3147,10 @@ fn an_owner_exit_just_filled_asks_nothing_inside_the_reentry_cooldown() {
 struct Following {
     rig: Rig,
     handed: Rc<Cell<usize>>,
+    /// Every read's first sequence number, in order.
+    starts: Rc<RefCell<Vec<u64>>>,
+    /// A read from the first record refused, as a store refuses a chain broken before the head.
+    whole_down: Rc<Cell<bool>>,
 }
 
 impl Store for Following {
@@ -3165,6 +3169,10 @@ impl Store for Following {
         stream: &StreamId,
         start: mandate_journal::TrustedStart,
     ) -> Option<Vec<StoredEvent>> {
+        self.starts.borrow_mut().push(start.from_seq);
+        if self.whole_down.get() && start == mandate_journal::TrustedStart::GENESIS {
+            return None;
+        }
         let since: Vec<StoredEvent> = self
             .rig
             .rows(stream)?
@@ -3199,10 +3207,7 @@ fn a_long_run_reads_only_what_each_pass_appended() {
         let before = following.handed.get();
         process.step(at(NOW + second));
         let read = following.handed.get() - before;
-        assert!(
-            read <= 1,
-            "pass {second} read {read} records, not only its own tick"
-        );
+        assert_read(read, rechecks(1, second), &following, second);
     }
     assert_eq!(process.lifecycle().state(), State::Ready);
 }
@@ -3357,9 +3362,109 @@ fn a_long_run_with_the_fold_following_reads_only_what_each_pass_appended() {
         let before = following.handed.get();
         process.step(at(NOW + second));
         let read = following.handed.get() - before;
+        assert_read(read, rechecks(1, second), &following, second);
+    }
+}
+
+/// Whether the pass at `NOW + second` reads every stream again from its first record, the
+/// first pass having been at `NOW + first` (DEC-2852 item 6).
+fn rechecks(first: i64, second: i64) -> bool {
+    second > first && (second - first) % 60 == 0
+}
+
+/// A pass reads its own tick and nothing else, unless it is a check, which reads each stream
+/// whole: more than its tick, and no more than every record there is.
+fn assert_read(read: usize, check: bool, following: &Following, second: i64) {
+    if check {
+        let all = following.rig.clock.borrow().len() + following.rig.control.borrow().len();
+        assert!(
+            read > 1 && read <= all + following.rig.accounts.borrow().len() + 64,
+            "check pass {second} read {read} records, not each stream whole"
+        );
+    } else {
         assert!(
             read <= 1,
             "pass {second} read {read} records, not only its own tick"
         );
     }
+}
+
+/// DEC-2852 item 6: a record at the held head that no longer reads as it did, as a rewrite
+/// that hashes its chain again leaves it, is found by the next check, at most `60` s of passes
+/// later, and the process fails rather than fold on (`AGENTS.md` rule 3). Before the check, the
+/// process reads on past the head, as a tail does.
+#[test]
+fn a_rewritten_head_fails_the_process_at_the_next_check() {
+    for stream in [CONTROL, CLOCK, ACCOUNT] {
+        let following = Following::default();
+        established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+        reconciled(&following.rig, ACCOUNT);
+        let mut process = RuntimeProcess::start(following.clone(), wiring(), &config(), at(NOW));
+        for second in 1..=10 {
+            tick(&following.rig, NOW + second);
+            process.step(at(NOW + second));
+        }
+        let rewritten = match stream {
+            CONTROL => &following.rig.control,
+            CLOCK => &following.rig.clock,
+            _ => &following.rig.accounts,
+        };
+        if let Some(head) = rewritten.borrow_mut().last_mut() {
+            head.hash = Digest::of(b"rewritten");
+        }
+        for second in 11..=60 {
+            process.step(at(NOW + second));
+            assert_eq!(
+                process.lifecycle().state(),
+                State::Ready,
+                "{stream} at {second}"
+            );
+        }
+        process.step(at(NOW + 61));
+        assert_eq!(
+            process.lifecycle().state(),
+            State::Exited(Exit::CycleFailed),
+            "{stream}"
+        );
+    }
+}
+
+/// DEC-2852 item 6: once a check is due, a stream that will not read from its first record,
+/// as a chain broken before the head will not, is read only from its first record, so nothing
+/// past the head is read on a chain not verified again, and it is asked again each pass until it
+/// reads; then the tail reads past its head again.
+#[test]
+fn a_check_that_will_not_read_reads_nothing_past_the_head_until_it_does() {
+    let following = Following::default();
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&following.rig, ACCOUNT);
+    let mut process = RuntimeProcess::start(following.clone(), wiring(), &config(), at(NOW));
+    for second in 1..=60 {
+        tick(&following.rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    following.whole_down.set(true);
+    for second in 61..=70 {
+        tick(&following.rig, NOW + second);
+        following.starts.borrow_mut().clear();
+        process.step(at(NOW + second));
+        let starts = following.starts.borrow().clone();
+        assert!(
+            !starts.is_empty() && starts.iter().all(|&from| from == 1),
+            "pass {second} read {starts:?}"
+        );
+    }
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    following.whole_down.set(false);
+    tick(&following.rig, NOW + 71);
+    process.step(at(NOW + 71));
+    tick(&following.rig, NOW + 72);
+    following.starts.borrow_mut().clear();
+    process.step(at(NOW + 72));
+    let starts = following.starts.borrow().clone();
+    assert!(
+        !starts.is_empty() && starts.iter().all(|&from| from > 1),
+        "pass 72 read {starts:?}"
+    );
+    assert_eq!(process.lifecycle().state(), State::Ready);
 }

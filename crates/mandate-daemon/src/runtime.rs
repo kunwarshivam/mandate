@@ -118,9 +118,13 @@ struct Tail {
     head: Option<(u64, Digest)>,
     keep: bool,
     rows: Vec<StoredEvent>,
-    /// Whether the last read was read again from the first record, so whatever was folded from
-    /// earlier reads must be folded again.
-    replaced: bool,
+    /// Whether the next read reads the stream again from its first record, so the store verifies
+    /// the whole chain again and the held head is checked against it (DEC-2852 item 6).
+    due: bool,
+    /// Whether a read from the first record no longer held the head this tail was read to: the
+    /// history it folded is not the stream's any more, so it reads nothing until the process starts
+    /// again (`AGENTS.md` rule 3).
+    broken: bool,
 }
 
 impl Tail {
@@ -132,37 +136,58 @@ impl Tail {
     }
 
     /// The records of `stream` that follow the head, read from `store` and kept when this tail
-    /// keeps them. A read past the head the store refuses is read again from the first record,
-    /// replacing what was kept, and every record is new again; `None` when neither reads, and
-    /// then nothing kept is read (`AGENTS.md` rule 3).
+    /// keeps them. A read past the head the store refuses, or one the periodic check makes due, is
+    /// read from the first record, which must still hold the head; `None` when nothing reads or the
+    /// head is gone, and then nothing kept is read (`AGENTS.md` rule 3).
     fn read<S: Store>(&mut self, store: &S, stream: &StreamId) -> Option<Vec<StoredEvent>> {
-        let start = self
-            .head
-            .map_or(TrustedStart::GENESIS, |(seq, hash)| TrustedStart {
-                from_seq: seq.saturating_add(1),
-                prev_hash: hash,
-            });
-        self.replaced = false;
-        let since = match store.rows_from(stream, start) {
-            Some(since) => since,
-            None if self.head.is_some() => {
-                let all = store.rows_from(stream, TrustedStart::GENESIS)?;
-                self.head = None;
-                self.rows.clear();
-                self.replaced = true;
-                all
-            }
-            None => return None,
+        if self.broken {
+            return None;
+        }
+        let Some((seq, hash)) = self.head else {
+            let all = store.rows_from(stream, TrustedStart::GENESIS)?;
+            return Some(self.take(all));
         };
+        let past = if self.due {
+            None
+        } else {
+            store.rows_from(
+                stream,
+                TrustedStart {
+                    from_seq: seq.saturating_add(1),
+                    prev_hash: hash,
+                },
+            )
+        };
+        let since = match past {
+            Some(since) => since,
+            None => {
+                let all = store.rows_from(stream, TrustedStart::GENESIS)?;
+                if !all.iter().any(|row| row.seq == seq && row.hash == hash) {
+                    self.broken = true;
+                    self.rows.clear();
+                    return None;
+                }
+                self.due = false;
+                all.into_iter().filter(|row| row.seq > seq).collect()
+            }
+        };
+        Some(self.take(since))
+    }
+
+    fn take(&mut self, since: Vec<StoredEvent>) -> Vec<StoredEvent> {
         if let Some(last) = since.last() {
             self.head = Some((last.seq, last.hash));
         }
         if self.keep {
             self.rows.extend(since.iter().cloned());
         }
-        Some(since)
+        since
     }
 }
+
+/// How often, in seconds of the injected time, every tail reads its stream again from the first
+/// record (DEC-2852 item 6), as the API's cache does (DEC-2145).
+const REVERIFY_S: i64 = 60;
 
 /// The streams the process reads at every pass, each read only past the head it was last read to
 /// (DEC-2852): the control and agent streams kept whole for the ports that read them so, the
@@ -178,6 +203,33 @@ struct Tails {
     latest_tick: Option<UtcNanos>,
     /// Whether the production fold has been fed the clock stream whole since it followed.
     clock_fed: bool,
+    /// When the tails were last made due to read from the first record, in seconds.
+    verified_at: Option<i64>,
+}
+
+impl Tails {
+    /// Makes every tail read from the first record on this pass when `REVERIFY_S` has passed
+    /// since they last were.
+    fn check(&mut self, now: UtcNanos) {
+        let at = *self.verified_at.get_or_insert(now.secs());
+        if now.secs() >= at.saturating_add(REVERIFY_S) {
+            self.verified_at = Some(now.secs());
+            for tail in [
+                &mut self.control,
+                &mut self.agent,
+                &mut self.account,
+                &mut self.clock,
+            ] {
+                tail.due = true;
+            }
+        }
+    }
+
+    fn broken(&self) -> bool {
+        [&self.control, &self.agent, &self.account, &self.clock]
+            .iter()
+            .any(|tail| tail.broken)
+    }
 }
 
 impl Default for Tails {
@@ -189,6 +241,7 @@ impl Default for Tails {
             clock: Tail::default(),
             latest_tick: None,
             clock_fed: false,
+            verified_at: None,
         }
     }
 }
@@ -357,6 +410,7 @@ impl<S: Store> RuntimeProcess<S> {
             return alerts;
         }
         self.lifecycle.observe(now, Lifecycled::Heartbeat);
+        self.tails.check(now);
         if let Some((input, at)) = self.pending.take()
             && !self.hand(now, at, input, &mut alerts)
         {
@@ -370,6 +424,10 @@ impl<S: Store> RuntimeProcess<S> {
             && self.clock_pass(now, &mut alerts)
         {
             self.research_pass(now, &mut alerts);
+        }
+        if self.tails.broken() {
+            self.lifecycle.observe(now, Lifecycled::Failed);
+            return alerts;
         }
         if self
             .wiring
@@ -532,9 +590,6 @@ impl<S: Store> RuntimeProcess<S> {
             return false;
         };
         self.tails.clock_fed |= following;
-        if self.tails.clock.replaced {
-            self.tails.latest_tick = None;
-        }
         self.tails.latest_tick = rows
             .iter()
             .filter(|r| r.event_type == "ClockAdvanced")
