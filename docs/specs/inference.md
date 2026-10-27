@@ -16,7 +16,9 @@ gateway is built and runs over recorded responses; its live path is the model-ga
 - **v0.7, amended ([DEC-2282](../project/decisions/DEC-2282.md); E21-62):** the owner picks the
   research agent's model per run kind from the offered research entries (mandate spec v0.16
   `routes`, V-048). §4.2 step 5: every offered research entry pins the same harness content. §7.2:
-  the picker shows each choice's estimated cost. §4.3 and the meter are unchanged.
+  the picker shows each choice's estimated cost. §4.1: a dateless snapshot is taken from provider
+  `anthropic` only, the reading of DEC-997 item 2 the founder accepted with DEC-2282. §4.3 and the
+  meter are unchanged.
 - **v0.6 ([DEC-2257](../project/decisions/DEC-2257.md); E21-62):** DEC-997 is Accepted (DEC-2605
   row 19). §6 names the live path: the model-gateway service alone, over `HttpsTransport` and the
   journaled meter, which refuses to start live without it. The key is read once from the vault
@@ -374,7 +376,7 @@ entries ([HLD §4](../HLD.md#global-control-plane-thin)). An entry has two parts
 |---|---|
 | `model_id`, `version` | The signal model's id and semantic version (mandate spec §8.1) |
 | `content_hash` | SHA-256 over the canonical JSON of the pinned content: `identity`, `template`, `mode`, `output`, `retrieval_plan`, `tools`, `loop_bounds`, `output_schema` (or `output_schemas`), `validation_bounds`, `params_schema`, `deadline_ms`, `max_output_tokens`, the sampling parameters, `methodology`, and `authorship`. **`endpoints` and `status` are not in it.** The mandate pins it (V-007); [mandate spec §8.1](mandate.md#81-signal-model-contract-dec-52-dec-97) gives the same definition (DEC-432 item 18) |
-| `identity` | `provider`, `model_name`, and `snapshot` (an immutable, dated version) or `weights_digest`, plus `quantization` for self-served or third-party-served open weights |
+| `identity` | `provider`, `model_name`, and `snapshot` (an immutable, dated version; for provider `anthropic`, which states that every model id is a pinned snapshot, its dateless id, [DEC-2282](../project/decisions/DEC-2282.md) item 7) or `weights_digest`, plus `quantization` for self-served or third-party-served open weights |
 | `template` | The prompt template and the input contract it renders |
 | `retrieval_plan`, `validation_bounds` | For a model whose inputs are retrieved: which reads fill the input contract and their caps, and the bounds its output is checked against (agent harness spec §6.3, §6.5). Inside the hash, so the pin covers what the model is shown (rule 11, DEC-432 item 22) |
 | `mode`, `output`, `tools`, `loop_bounds`, `output_schemas` | For the research agent: `single_call` or `agentic`; for `agentic`, `output` (`final_output` or `action_tools`), which the registry checks against the declared tools and `output_schemas` (agent harness spec §6.9) and refuses on a mismatch; for `agentic`, `output_schemas`, the output schema keyed by run kind, which replaces `output_schema` (a `monitor` run's has no `theses` member, so a monitoring thesis is `schema_invalid`); for `agentic`, the tool declarations, reads and proposals (each a name from the harness's closed set, a description, an argument schema, and result caps) and the loop's bounds (agent harness spec §6.10, §6.11). Inside the hash, so the pin covers what the model may call and how far the loop may go (rule 11, DEC-2203). Every other entry is `single_call` with no tools. **For a `single_call` entry `mode`, `output`, `tools`, `loop_bounds`, and `output_schemas` are left out of the canonical object**, so its hash, and every pin of it, is the hash it had before v0.4 |
