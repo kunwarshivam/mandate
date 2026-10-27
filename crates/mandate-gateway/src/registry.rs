@@ -2,7 +2,7 @@
 //! registered and covered by its content hash, and routing and status outside the hash, so a
 //! routing change never invalidates an owner's pin (DEC-432 item 17).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Int, Key, Object, Value, to_canonical};
 use mandate_time::Date;
@@ -16,6 +16,8 @@ pub const FAST_DEADLINE_MS: u64 = 300;
 pub const SLOW_DEADLINE_MS: u64 = 600_000;
 /// The model-id prefix of a fast decision model (mandate spec §8.1).
 const FAST_PREFIX: &str = "fast.";
+/// The one provider whose dateless model ids are pinned snapshots (DEC-2282 item 7).
+const ANTHROPIC: &str = "anthropic";
 /// Words that name a moving target rather than one model (INF-1, DEC-997 item 2).
 const FLOATING: [&str; 4] = ["latest", "auto", "default", "stable"];
 
@@ -227,6 +229,35 @@ impl PinnedContent {
         Digest::of(&to_canonical(&self.canonical()))
     }
 
+    /// The run kinds an agentic entry answers, which name its role, or `None` for a `single_call`
+    /// entry, which has no role (DEC-2282).
+    pub fn role(&self) -> Option<BTreeSet<&str>> {
+        self.agentic()
+            .map(|a| a.output_schemas.keys().map(String::as_str).collect())
+    }
+
+    /// The harness content a role's offered entries share (inference spec §4.2 step 5, DEC-2282):
+    /// the canonical pinned content without the model's own id and version, identity, sampling,
+    /// deadline, and token limit, the members in which one model's entry may differ from another's.
+    pub fn harness(&self) -> Value {
+        let mut canonical = self.canonical();
+        if let Value::Object(members) = &mut canonical {
+            for name in [
+                "deadline_ms",
+                "identity",
+                "max_output_tokens",
+                "model_id",
+                "model_version",
+                "sampling",
+            ] {
+                if let Ok(key) = Key::new(name) {
+                    members.remove(&key);
+                }
+            }
+        }
+        canonical
+    }
+
     pub fn model_ref(&self) -> ModelRef {
         ModelRef {
             model_id: self.model_id.clone(),
@@ -413,6 +444,8 @@ pub enum RegistryError {
     DuplicateEndpoint,
     #[error("a withdrawn entry never changes status again (INF-15)")]
     Withdrawn,
+    #[error("an offered entry of the same run kinds pins other harness content (DEC-2282)")]
+    HarnessMismatch,
 }
 
 /// Why a call's model resolves to nothing callable.
@@ -484,13 +517,18 @@ impl Registry {
         Ok(())
     }
 
-    /// Sets the status; `withdrawn` is final (INF-15).
+    /// Sets the status; `withdrawn` is final (INF-15). An agentic entry is offered only when its
+    /// harness content is that of every other offered entry answering any of its run kinds, so an
+    /// owner's choice among them changes the model, never what the agent may read or do
+    /// (DEC-2282).
     pub fn set_status(&mut self, model: &ModelRef, status: Status) -> Result<(), RegistryError> {
-        let entry = self.entry_mut(model)?;
-        if entry.status == Status::Withdrawn {
+        if self.entry_mut(model)?.status == Status::Withdrawn {
             return Err(RegistryError::Withdrawn);
         }
-        entry.status = status;
+        if status == Status::Offered {
+            self.check_role(model)?;
+        }
+        self.entry_mut(model)?.status = status;
         Ok(())
     }
 
@@ -542,6 +580,29 @@ impl Registry {
     /// Every entry, for the egress allowlist.
     pub fn entries(&self) -> impl Iterator<Item = &Entry> {
         self.entries.values()
+    }
+
+    fn check_role(&mut self, model: &ModelRef) -> Result<(), RegistryError> {
+        let entry = self.entry_mut(model)?;
+        let content = entry.content.clone();
+        let Some(role) = content.role() else {
+            return Ok(());
+        };
+        let harness = content.harness();
+        let differs = self.entries.values().any(|other| {
+            other.status == Status::Offered
+                && other.content_hash != model.content_hash
+                && other
+                    .content
+                    .role()
+                    .is_some_and(|kinds| !kinds.is_disjoint(&role))
+                && other.content.harness() != harness
+        });
+        if differs {
+            Err(RegistryError::HarnessMismatch)
+        } else {
+            Ok(())
+        }
     }
 
     fn entry_mut(&mut self, model: &ModelRef) -> Result<&mut Entry, RegistryError> {
@@ -597,7 +658,7 @@ fn floating(identity: &Identity) -> bool {
             .any(|s| FLOATING.contains(&s.to_ascii_lowercase().as_str()))
     };
     let undated = match &identity.snapshot {
-        Snapshot::Dated(text) => segments(text) || !has_date(text),
+        Snapshot::Dated(text) => segments(text) || !(has_date(text) || vendor_pinned(identity)),
         Snapshot::Weights(_) => false,
     };
     name.is_empty()
@@ -606,6 +667,26 @@ fn floating(identity: &Identity) -> bool {
         || name.starts_with('~')
         || segments(name)
         || undated
+}
+
+/// Whether the snapshot is a dateless model id its vendor states is a pinned snapshot: Anthropic
+/// states this of every model id, and the founder accepted that reading of DEC-997 item 2 with
+/// DEC-2282 item 7. Only provider `anthropic`, a model name under `anthropic/claude-`, and a
+/// `claude-` snapshot of lowercase letters, digits, and hyphens qualify; every other identity's
+/// snapshot needs a date (INF-1).
+fn vendor_pinned(identity: &Identity) -> bool {
+    let id_like = |rest: &str| {
+        !rest.is_empty()
+            && rest
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    };
+    let Snapshot::Dated(snapshot) = &identity.snapshot else {
+        return false;
+    };
+    identity.provider == ANTHROPIC
+        && identity.model_name.starts_with("anthropic/claude-")
+        && snapshot.strip_prefix("claude-").is_some_and(id_like)
 }
 
 /// Whether `text` holds eight digits as `YYYYMMDD` or `YYYY-MM-DD`, a plausible calendar date.

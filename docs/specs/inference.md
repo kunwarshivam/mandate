@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.7, draft ([DEC-2397](../project/decisions/DEC-2397.md)): v0.6 with the runtime calling through the model-gateway service, and the remote caller's `gateway_unreachable` in §1.2, §3.3 and §9. v0.6 ([DEC-2257](../project/decisions/DEC-2257.md)): v0.5 with DEC-997 Accepted, the live path through the model-gateway service, and §11 brought up to date. v0.5 ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
+| **Status** | v0.8, draft ([DEC-2216](../project/decisions/DEC-2216.md): the §4.3 gate runs inside the model-gateway service, its report is named in the live registry file, and the live start probes identity only); v0.7 ([DEC-2397](../project/decisions/DEC-2397.md)): v0.6 with the runtime calling through the model-gateway service, and the remote caller's `gateway_unreachable` in §1.2, §3.3 and §9. v0.6 ([DEC-2257](../project/decisions/DEC-2257.md)): v0.5 with DEC-997 Accepted, the live path through the model-gateway service, and §11 brought up to date. v0.5 ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
 | **Implements** | [HLD §9](../HLD.md#9-intelligence-layer) (model gateway, speed tiers), [HLD §10](../HLD.md#10-billing) (model tokens at cost plus margin), PRD FR-3.7, FR-3.9, FR-10.2; backlog E15 |
 | **Depends on** | [Mandate spec §7, §8](mandate.md#8-signal-models-and-the-order-builder), [journal spec §6.3, §8, §9](journal.md#9-event-catalogue), [DEC-67](../project/04-decision-log.md#decisions), [DEC-120](../project/04-decision-log.md#decisions) |
 | **Caller side** | The [agent harness spec](agent-harness.md) says when the runtime asks for a model output and how long an evaluation waits. This spec says what happens to the call |
@@ -13,6 +13,18 @@ gateway is built and runs over recorded responses; its live path is the model-ga
 
 ## Change history
 
+- **v0.8 ([DEC-2216](../project/decisions/DEC-2216.md); E21-62):** §3.1 adds the purpose
+  `evaluation`, a platform call that evaluates a registry entry, with no agent. §4.3 says how the
+  gate runs on a deployment: inside the model-gateway service, over a versioned probe set, with
+  its report written to the research artifact store. §4.2 offers an entry on the live path only
+  with a passing report named in the live registry file and a passing identity probe at start.
+  §7.3: an evaluation is bound by every cap that is not an agent's.
+- **v0.7, amended ([DEC-2282](../project/decisions/DEC-2282.md); E21-62):** the owner picks the
+  research agent's model per run kind from the offered research entries (mandate spec v0.17
+  `routes`, V-048). §4.2 step 5: every offered research entry pins the same harness content. §7.2:
+  the picker shows each choice's estimated cost. §4.1: a dateless snapshot is taken from provider
+  `anthropic` only, the reading of DEC-997 item 2 the founder accepted with DEC-2282. §4.3 and the
+  meter are unchanged.
 - **v0.6 ([DEC-2257](../project/decisions/DEC-2257.md); E21-62):** DEC-997 is Accepted (DEC-2605
   row 19). §6 names the live path: the model-gateway service alone, over `HttpsTransport` and the
   journaled meter, which refuses to start live without it. The key is read once from the vault
@@ -182,8 +194,8 @@ Each oracle must catch a seeded bug before it is trusted (`AGENTS.md`, "Independ
 | Field | Rule |
 |---|---|
 | `call_id` | ULID, unique per call. Retries reuse it with a new `attempt` number |
-| `workspace_id`, `agent_id` | `agent_id` is null only for the compiler, which acts for a user, not an agent |
-| `purpose` | `research`, `llm_signal`, `fast_signal`, `compiler`. Matches journal spec §9's `ModelInvocationRecorded` purposes (compiler, fast model, research), plus `llm_signal` |
+| `workspace_id`, `agent_id` | `agent_id` is null only for the compiler, which acts for a user, not an agent, and for an evaluation, which the platform makes |
+| `purpose` | `research`, `llm_signal`, `fast_signal`, `compiler`, `evaluation`. Matches journal spec §9's `ModelInvocationRecorded` purposes (compiler, fast model, research), plus `llm_signal`, and `evaluation`, whose records are its gate report's ([DEC-2216](../project/decisions/DEC-2216.md)) |
 | `model` | The registry reference: signal model id, version, and content hash (mandate spec §8.1), or the compiler's registry entry |
 | `inputs` | Typed inputs named by the model's contract; the gateway renders the prompt from them with the pinned template. Callers never pass free-form prompt text |
 | `as_of` | The data cut-off of the inputs (§8.2). Part of the canonical request |
@@ -296,6 +308,12 @@ completion time. The agent harness spec adds two for E15-8 (its §10.1 ask 3, DE
 retrieved context, as the event ids of the run's `ObservationRecorded`, and room for the
 candidates' verdicts. The run id rides in `correlation_id`.
 
+A call with purpose `evaluation` ([DEC-2216](../project/decisions/DEC-2216.md)) has no agent
+stream, and journal spec §9.19 admits no `evaluation` call record. Until a record of its own is
+added (backlog E21-62w), a gate's call is recorded in the gate's report (§4.3), the start's
+identity probe only by its spend, and every evaluation call's spend is journaled on the meter
+streams like every call's.
+
 Every journal stream has a single writer (journal spec §2), and the gateway writes none of the
 existing ones. So:
 
@@ -370,7 +388,7 @@ entries ([HLD §4](../HLD.md#global-control-plane-thin)). An entry has two parts
 |---|---|
 | `model_id`, `version` | The signal model's id and semantic version (mandate spec §8.1) |
 | `content_hash` | SHA-256 over the canonical JSON of the pinned content: `identity`, `template`, `mode`, `output`, `retrieval_plan`, `tools`, `loop_bounds`, `output_schema` (or `output_schemas`), `validation_bounds`, `params_schema`, `deadline_ms`, `max_output_tokens`, the sampling parameters, `methodology`, and `authorship`. **`endpoints` and `status` are not in it.** The mandate pins it (V-007); [mandate spec §8.1](mandate.md#81-signal-model-contract-dec-52-dec-97) gives the same definition (DEC-432 item 18) |
-| `identity` | `provider`, `model_name`, and `snapshot` (an immutable, dated version) or `weights_digest`, plus `quantization` for self-served or third-party-served open weights |
+| `identity` | `provider`, `model_name`, and `snapshot` (an immutable, dated version; for provider `anthropic`, which states that every model id is a pinned snapshot, its dateless id, [DEC-2282](../project/decisions/DEC-2282.md) item 7) or `weights_digest`, plus `quantization` for self-served or third-party-served open weights |
 | `template` | The prompt template and the input contract it renders |
 | `retrieval_plan`, `validation_bounds` | For a model whose inputs are retrieved: which reads fill the input contract and their caps, and the bounds its output is checked against (agent harness spec §6.3, §6.5). Inside the hash, so the pin covers what the model is shown (rule 11, DEC-432 item 22) |
 | `mode`, `output`, `tools`, `loop_bounds`, `output_schemas` | For the research agent: `single_call` or `agentic`; for `agentic`, `output` (`final_output` or `action_tools`), which the registry checks against the declared tools and `output_schemas` (agent harness spec §6.9) and refuses on a mismatch; for `agentic`, `output_schemas`, the output schema keyed by run kind, which replaces `output_schema` (a `monitor` run's has no `theses` member, so a monitoring thesis is `schema_invalid`); for `agentic`, the tool declarations, reads and proposals (each a name from the harness's closed set, a description, an argument schema, and result caps) and the loop's bounds (agent harness spec §6.10, §6.11). Inside the hash, so the pin covers what the model may call and how far the loop may go (rule 11, DEC-2203). Every other entry is `single_call` with no tools. **For a `single_call` entry `mode`, `output`, `tools`, `loop_bounds`, and `output_schemas` are left out of the canonical object**, so its hash, and every pin of it, is the hash it had before v0.4 |
@@ -390,13 +408,27 @@ included, and the reported identity is checked on every response.
 ### 4.2 How a model becomes selectable
 
 1. **Registered** with status `evaluating`: not visible in the model picker.
-2. **Evaluation gate** (§4.3) passes, recorded with the entry's content hash.
+2. **Evaluation gate** (§4.3) passes, recorded with the entry's content hash. On the live path,
+   the record is the gate's report, named in the live registry file, and the service offers the
+   entry at start only when that report names the entry's hash and the current probe set, says
+   `passed`, and the entry's endpoint answers a one-line identity probe with exactly the pinned
+   model and the endpoint's provider ([DEC-2216](../project/decisions/DEC-2216.md)). Otherwise the
+   entry stays `evaluating` and holds no endpoint.
 3. **Offered:** visible in the picker for workspaces whose policy allows its type
    (`signal_model_types`, [mandate spec §4.3](mandate.md#43-policy-hierarchy-dec-51-dec-98)) and at
    least one of its endpoints.
 4. **Pinned** by the owner as an envelope field (rule 11): id, version, content hash, parameters,
    weight, `max_output_age_s`. Adding or changing a model classifies as increasing
    ([mandate spec §9.2](mandate.md#92-classification)), so it needs confirmation.
+5. **The research role** ([DEC-2282](../project/decisions/DEC-2282.md)). The research agent's
+   pin is its `ideate` entry, and its `routes` name the entry each other run kind calls (mandate spec
+   V-048). Every offered research entry pins the same **harness content**: `template`, `mode`,
+   `output`, `tools`, `loop_bounds`, `output_schemas`, `retrieval_plan`, `validation_bounds`,
+   `params_schema`, `methodology` and `authorship`. Entries differ only in
+   `identity`, the sampling parameters, `deadline_ms`, `max_output_tokens` and, outside the hash,
+   their endpoints and prices. The registry refuses to offer a research entry whose harness content
+   differs from the role's. When a routed entry is deprecated, the owner is asked to choose again,
+   as for any pin (§4.4).
 
 ### 4.3 Evaluation gate before a model is offered
 
@@ -414,6 +446,22 @@ The gate checks mechanics and safety, never profitability. Performance claims ar
 | Data terms | The provider's terms for this endpoint are on file (§6, DEC-432 item 15) |
 
 The probe sets and thresholds are versioned configuration, fixed before the evaluation runs.
+
+**On a deployment** ([DEC-2216](../project/decisions/DEC-2216.md)). The gate runs inside the
+model-gateway service, the one holder of the provider key and the one writer of its meter streams,
+when an operator asks over the service's probe socket (`mandate-gatewayd gate <model_id>`). Its
+calls have purpose `evaluation`, against a registry of the gate's own that research calls never
+resolve in. The research role's probe set is `fixtures/gate/research-probe-set.json`: five
+`ideate`, five `monitor`, and five prompt-injection runs, whose tools read a fixture corpus, never
+live data. The report holds the entry's pin, the probe set's digest, every call's request digest,
+reported identity, outcome, tokens and cost, each check's verdict, and `passed`. It is written
+create-only to the research artifact store, which only the service writes, and named by its
+reference. The report also names the endpoint and price table it ran against. Once a gate has
+called, every end writes a report: a pass, or `passed` false with the `stopped` code
+(`identity_mismatch` at the first differing identity, `cap_refused`, `provider_failed`, or
+`checks_failed`). It refuses before any call when either cap's room is below its whole maximum,
+or when a passing report for the same entry, probe set, endpoint and price table exists. A restart
+ends a gate with no report and resumes nothing.
 
 ### 4.4 Provider deprecation
 
@@ -554,6 +602,13 @@ a settlement only for the calls that could cost money, and spend for caps folds 
 - A call's **maximum cost** is `prompt tokens × input price + max_output_tokens × output price`,
   counted before the call. Local endpoints have a price table too (zero, or an internal rate), so
   the meter is the same.
+- **The picker's estimate** ([DEC-2282](../project/decisions/DEC-2282.md)). For each offered
+  research entry, the workspace API states an estimated maximum per run: `max_turns` × a turn's
+  maximum cost (above), with the prompt bounded as agent harness spec §6.11 says. It also states the day's
+  and the month's cost at the envelope's cadence (`interval_s` and `event_triggers.max_runs_per_day`).
+  When the day's cost exceeds `cost_cap_usd_per_day`, the picker warns and states the runs a day the
+  cap buys; it does not block. The estimate is advice to the owner, never a cap: the meter (§7.3)
+  still refuses any call past a cap.
 - Provider invoices are reconciled with the meter for billing. Reconciliation never changes a
   risk day's cap accounting (§7.3).
 
@@ -569,6 +624,11 @@ a settlement only for the calls that could cost money, and spend for caps folds 
 | Run ceiling | The request's `spend_ceiling_usd`: the workspace's configured `research_run_cost_cap_usd`, less the cost of the run's earlier turns as the caller folds them from its own records ([agent harness spec §6.11](agent-harness.md#611-bounds-and-budgets), DEC-2203 item 9) | One call: its reservation must fit under the ceiling. It only refuses, and never lifts another cap |
 | Rate caps | Per agent: research runs only in proposal rounds no more often than `behavior.research.interval_s`, an agentic run's turns inside its one round; per workspace: a token bucket set by the plan | Calls per second |
 
+- **Evaluations** ([DEC-2216](../project/decisions/DEC-2216.md)). A call with purpose `evaluation`
+  has no agent, so the research cost cap, per-agent caps and the run ceiling do not apply. It is
+  reserved on the service's own streams, `meter:{workspace}` for the workspace the service is
+  configured for and `dmeter:{deployment}`, so that workspace's monthly cap and the deployment's
+  bind it as any call. A gate starts only when both caps' room holds its whole maximum.
 - **Reservation.** Before the first attempt, the workspace's meter writer appends a reservation of
   the maximum cost to the meter stream (§3.6). A call starts only if `spent + reserved + this reservation ≤ cap` for every cap that applies.
   On completion the reservation becomes the actual cost. If the process dies first, the reservation

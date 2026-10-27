@@ -367,13 +367,29 @@ fn journal_decision(
         ("checks", decision.checks_value()?),
     ];
     pairs.extend(decision.binding_journal_fields()?);
-    if !decision.is_binding()
-        && let Some(sized) = decision.sized()
-    {
-        pairs.push(("sized_qty", text(sized.to_string())));
-    }
+    let sized = decision
+        .sized()
+        .map_or(Value::Null, |sized| text(sized.to_string()));
+    pairs.push(("sized_qty", sized));
     pairs.append(&mut extra);
-    batch.journal_with_refs("GateDecided", None, decision.config_refs(), pairs)
+    batch.journal_with_refs(
+        "GateDecided",
+        None,
+        decision.config_refs(),
+        own_members(pairs),
+    )
+}
+
+/// A `GateDecided`'s members at version 3 (journal spec §9.5, DEC-2848): `pairs`, with each of
+/// the executor's own `sized_qty`, `parked` and `held_long` that `pairs` does not set given as
+/// `null`, since the schema is closed and every member present.
+pub(crate) fn own_members(mut pairs: Vec<(&'static str, Value)>) -> Vec<(&'static str, Value)> {
+    for member in ["sized_qty", "parked", "held_long"] {
+        if !pairs.iter().any(|(name, _)| *name == member) {
+            pairs.push((member, Value::Null));
+        }
+    }
+    pairs
 }
 
 /// The coordinator's ruling D2: an exit still held past `max_intent_age_s` is journaled once more,
