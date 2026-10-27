@@ -75,7 +75,7 @@ MUTANTS = {
         '        offered = carried.get(kind) == pin or', '        offered = pin in carried.values() or'),
     "V-048 carries from a previous version nobody confirmed": (
         '    for p in (prev["behavior"]["signal_models"] if agents_current(prev, current) else []):',
-        '    for p in (prev["behavior"]["signal_models"] if prev is not None else []):'),
+        '    for p in (prev["behavior"]["signal_models"] if isinstance(prev, dict) and "behavior" in prev else []):'),
     "V-048 never carries a pin": ('        offered = carried.get(kind) == pin or', '        offered = False or'),
     "V-048 ignores the shared harness": (
         '                  and own is not None and e.get("harness") == own.get("harness")):', '                  ):'),
