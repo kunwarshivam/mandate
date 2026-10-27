@@ -34,6 +34,14 @@ pub struct Parts<'a> {
     pub pass: Pass,
 }
 
+/// What the worker takes from the binary's edge: its clock, its pause between turns, and where its
+/// lines go.
+pub struct Edge<'a> {
+    pub now: &'a dyn Fn() -> UtcNanos,
+    pub pause: &'a dyn Fn(),
+    pub log: &'a mut dyn FnMut(&str),
+}
+
 /// Marks the worker stopped however the loop is left.
 struct Stopper<'a>(&'a Progress);
 
@@ -43,16 +51,9 @@ impl Drop for Stopper<'_> {
     }
 }
 
-/// Runs the worker until `terminate` or a refused key, `now` its clock, `pause` between turns,
-/// `log` each line it says.
-pub fn run(
-    mut parts: Parts<'_>,
-    terminate: &AtomicBool,
-    progress: &Progress,
-    now: &dyn Fn() -> UtcNanos,
-    pause: &dyn Fn(),
-    log: &mut dyn FnMut(&str),
-) {
+/// Runs the worker until `terminate` or a refused key, at `edge`'s clock and pace.
+pub fn run(mut parts: Parts<'_>, terminate: &AtomicBool, progress: &Progress, edge: Edge<'_>) {
+    let Edge { now, pause, log } = edge;
     let _stopper = Stopper(progress);
     let mut kept = Registrations::default();
     let mut read_at: Option<i64> = None;

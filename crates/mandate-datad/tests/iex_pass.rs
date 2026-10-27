@@ -446,7 +446,7 @@ mod worker_loop {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use mandate_datad::iex::progress::{Judged, Progress};
-    use mandate_datad::iex::worker::{ControlRows, Parts, REFRESH_S, run};
+    use mandate_datad::iex::worker::{ControlRows, Edge, Parts, REFRESH_S, run};
     use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, StoredEvent, TrustedStart};
     use mandate_time::UtcNanos;
 
@@ -491,15 +491,17 @@ mod worker_loop {
             },
             &terminate,
             &progress,
-            &|| UtcNanos::from_parts(clock.get(), 0).unwrap(),
-            &|| {
-                clock.set(clock.get() + 1);
-                paused.set(paused.get() + 1);
-                if paused.get() >= turns {
-                    terminate.store(true, Ordering::SeqCst);
-                }
+            Edge {
+                now: &|| UtcNanos::from_parts(clock.get(), 0).unwrap(),
+                pause: &|| {
+                    clock.set(clock.get() + 1);
+                    paused.set(paused.get() + 1);
+                    if paused.get() >= turns {
+                        terminate.store(true, Ordering::SeqCst);
+                    }
+                },
+                log: &mut |line| log.push(line.to_owned()),
             },
-            &mut |line| log.push(line.to_owned()),
         );
         let reads = rows.0.into_inner();
         (reads, log, progress)
@@ -586,9 +588,11 @@ mod worker_loop {
             },
             &terminate,
             &progress,
-            &|| super::at("2026-10-27T14:30:10Z"),
-            &|| paused.set(paused.get() + 1),
-            &mut |line| log.push(line.to_owned()),
+            Edge {
+                now: &|| super::at("2026-10-27T14:30:10Z"),
+                pause: &|| paused.set(paused.get() + 1),
+                log: &mut |line| log.push(line.to_owned()),
+            },
         );
         assert_eq!(
             paused.get(),
@@ -625,9 +629,11 @@ mod worker_loop {
                 },
                 &terminate,
                 &progress,
-                &|| super::at("2026-10-27T14:30:10Z"),
-                &|| panic!("the pause fails"),
-                &mut |_| {},
+                Edge {
+                    now: &|| super::at("2026-10-27T14:30:10Z"),
+                    pause: &|| panic!("the pause fails"),
+                    log: &mut |_| {},
+                },
             );
         }));
         assert!(unwound.is_err());

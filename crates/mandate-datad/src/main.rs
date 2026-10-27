@@ -36,20 +36,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use mandate_artifacts_fs::FsArtifactStore;
 use mandate_bars::generations;
-use mandate_datad::iex::generation::Writer;
 use mandate_datad::iex::key::{platform_key, vault_config};
-use mandate_datad::iex::pass::Pass;
+use mandate_datad::iex::pg::{Hosted, serve};
 use mandate_datad::iex::progress::{Judged, Progress};
-use mandate_datad::iex::schedule::Jitter;
-use mandate_datad::iex::source::ClientSource;
-use mandate_datad::iex::worker::{self, ControlRows, Parts};
+use mandate_datad::iex::worker::Edge;
 use mandate_datad::{Instrument, observation, series};
-use mandate_journal::{StoredEvent, StreamId, TrustedStart};
-use mandate_journal_pg::PgJournal;
-use mandate_marketdata::client::{Client, TokioPause};
-use mandate_marketdata::http::AlpacaDataHttp;
 use mandate_process::probe::{self, Probe, Status};
 use mandate_process::{Input, Kind, Lifecycle, State};
 use mandate_time::{ExchangeCalendar, UtcNanos};
@@ -265,70 +257,6 @@ struct IexTarget {
     dir: PathBuf,
 }
 
-/// The control stream over Postgres, each read driven to completion on `runtime`.
-struct PgRows<'a> {
-    runtime: &'a tokio::runtime::Runtime,
-    journal: &'a PgJournal,
-    stream: &'a StreamId,
-}
-
-impl ControlRows for PgRows<'_> {
-    fn rows_from(&self, start: TrustedStart) -> Result<Vec<StoredEvent>, &'static str> {
-        self.runtime
-            .block_on(self.journal.rows_from(self.stream, start))
-            .map_err(|e| e.code())
-    }
-}
-
-/// Builds the worker's parts over Postgres, the bars transport and the store, and runs
-/// [`worker::run`] until `terminate` or a refused key. A part that cannot be built marks the worker
-/// stopped, so the process fails and its restart tries again.
-fn work(
-    target: &IexTarget,
-    key: mandate_marketdata::http::Credentials,
-    terminate: &AtomicBool,
-    progress: &Progress,
-) -> Result<(), &'static str> {
-    let stream =
-        StreamId::parse(&format!("ctl:{}", target.workspace)).ok_or("workspace_invalid")?;
-    let calendar = ExchangeCalendar::us_equities().map_err(|e| e.code())?;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|_| "runtime_unavailable")?;
-    let transport = AlpacaDataHttp::bars_only(key).map_err(|e| e.code())?;
-    let source = ClientSource::new(Client::new(transport, TokioPause))?;
-    let dsn = std::env::var("MANDATE_JOURNAL_DSN").map_err(|_| "journal_dsn_missing")?;
-    let journal = runtime
-        .block_on(async { PgJournal::single_writer(&dsn) })
-        .map_err(|e| e.code())?;
-    let artifacts =
-        FsArtifactStore::open_existing(&target.artifacts).map_err(|_| "artifacts_unavailable")?;
-    let writer =
-        Writer::new(target.store.clone(), target.artifacts.clone()).map_err(|e| e.code())?;
-    let control = PgRows {
-        runtime: &runtime,
-        journal: &journal,
-        stream: &stream,
-    };
-    let parts = Parts {
-        source: &source,
-        control: &control,
-        artifacts: &artifacts,
-        calendar: &calendar,
-        pass: Pass::new(writer, Jitter::of(&target.workspace)),
-    };
-    worker::run(
-        parts,
-        terminate,
-        progress,
-        &host_now,
-        &|| thread::sleep(TICK),
-        &mut |line| eprintln!("{line}"),
-    );
-    Ok(())
-}
-
 fn run_iex(target: &IexTarget, socket: &Path) -> Result<u8, &'static str> {
     if !generations::is_generational(&target.store) {
         return Err("store_not_generations");
@@ -360,7 +288,28 @@ fn run_iex(target: &IexTarget, socket: &Path) -> Result<u8, &'static str> {
             Arc::clone(&progress),
         );
         thread::spawn(move || {
-            if let Err(code) = work(&target, key, &terminate, &progress) {
+            let hosted = Hosted {
+                workspace: target.workspace.clone(),
+                store: target.store.clone(),
+                artifacts: target.artifacts.clone(),
+            };
+            let served = std::env::var("MANDATE_JOURNAL_DSN")
+                .map_err(|_| "journal_dsn_missing")
+                .and_then(|dsn| {
+                    serve(
+                        &hosted,
+                        &dsn,
+                        key,
+                        &terminate,
+                        &progress,
+                        Edge {
+                            now: &host_now,
+                            pause: &|| thread::sleep(TICK),
+                            log: &mut |line| eprintln!("{line}"),
+                        },
+                    )
+                });
+            if let Err(code) = served {
                 eprintln!("data_worker_failed: {code}");
                 progress.stopped();
             }

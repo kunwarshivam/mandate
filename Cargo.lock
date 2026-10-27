@@ -1961,6 +1961,7 @@ dependencies = [
  "mandate-vault",
  "proptest",
  "secrecy",
+ "sqlx",
  "thiserror",
  "tokio",
 ]
