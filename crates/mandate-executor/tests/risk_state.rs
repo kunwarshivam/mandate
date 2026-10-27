@@ -2059,8 +2059,8 @@ fn a_record_the_fold_would_not_have_produced_makes_the_view_unreadable() {
 /// DEC-2849 I7, one fold per followed agent (item 3): a risk record or mode record another
 /// agent's fold owed, naming that agent, steps nothing in this one, even beside a record of this
 /// fold's from the same cause. Read anywhere, the fold's view and what it owes
-/// are those of a fold that never saw it; the same record naming this fold's agent, which it never
-/// returned, is still `not_reproduced`.
+/// are those of a fold that never saw it (a record naming this fold's agent that it never returned
+/// stays `not_reproduced`: `a_record_the_fold_would_not_have_produced_makes_the_view_unreadable`).
 #[test]
 fn another_agents_risk_record_steps_nothing() {
     let case = case("MC-R01");
