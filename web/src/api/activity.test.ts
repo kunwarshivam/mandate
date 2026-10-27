@@ -99,3 +99,61 @@ describe("a journal page, without its bodies (§4.8.1, API-15)", () => {
     expect(read).toMatchObject({ ok: true, value: { events: [{ seq: 1, event_type: "AgentDeployed" }, { seq: 2 }] } });
   });
 });
+
+/**
+ * The run that failed step 4 (2026-10-27, a363ddeef): the answers the API served the agent's screen
+ * while it held its opening, as DR's replay of that run's account stream and the reads of its agent
+ * stream gave them. The opening's own order record was adopted with no filled quantity; its mark was
+ * sane, and its bracket's stop was placed. Each must decode, so the screen lists the position and
+ * the journal rather than calling either not reported.
+ */
+describe("the agent's screen's answers from run 3's held window", () => {
+  const AGENT_3 = "agt_01KDEM00000000000000000WEB";
+  const STREAM_3 = `agent:01KDEM6526868180000000000D:${AGENT_3}`;
+  const SPY_3 = "b28f4066-5c0d-4c5e-9d8a-1f2e3d4c5b6a";
+  const envelope = { api_version: "v1", build: `sha256:${"0".repeat(64)}`, served_at: "2026-10-27T19:17:40.000000000Z", as_of: [] };
+
+  it("decodes the held position with its mark and its placed bracket", () => {
+    const served = {
+      ...envelope,
+      agent_id: AGENT_3,
+      account_ref: "01KDEA6526868180000000000A",
+      account_positions: [],
+      positions: [
+        {
+          instrument_id: SPY_3,
+          filled_qty: "1",
+          cost_basis: { qty: "1", basis: "580.11" },
+          risk_mark: { bid: "580.11", sane: true, session: "regular", marked_at: "2026-10-27T19:17:21.000000000Z" },
+          market_value: "580.11",
+          unrealized_pnl: "0",
+          protection: { orders: ["md-2T80CW59J6E5JVBDQHW89M4E1W-p60VZ48DMXV4Z41MD9T05S9JWW5"], covered_qty: "1", stop: "551.11", take_profit: "638.13", unprotected_since: null },
+        },
+      ],
+    };
+    const read = activityRead(AGENT_3).holdings(served, "");
+    expect(read).toMatchObject({ ok: true, value: { items: [{ instrument_id: SPY_3, filled_qty: "1" }] } });
+  });
+
+  it("decodes the adopted opening whose filled quantity is not served", () => {
+    const served = {
+      ...envelope,
+      agent_id: AGENT_3,
+      account_ref: "01KDEA6526868180000000000A",
+      orders: [
+        { client_order_id: "md-2T80CW59J6E5JVBDQHW89M4E1W", intent_id: "2T80CW59J6E5JVBDQHW89M4E1W", purpose: "open", instrument_id: SPY_3, side: "buy", type: "limit", tif: "gtc", qty: "1", limit_price: "580.11", stop_price: null, state: "filled", filled_qty: null, submitted_at: "2026-10-27T19:17:24.872727819Z", updated_at: "2026-10-27T19:17:24.872727819Z" },
+      ],
+    };
+    expect(activityRead(AGENT_3).orders(served, "").ok).toBe(true);
+  });
+
+  it("decodes the agent stream's nine records, whatever their kinds", () => {
+    const kinds = ["StreamOpened", "AgentModeChanged", "ObservationRecorded", "ModelOutputRecorded", "ApprovalRequested", "ApprovalDelivered", "ApprovalResponded", "ApprovalRevalidated", "IntentProposed"];
+    const events = kinds.map((event_type, i) => ({ seq: i + 1, event_id: `01KDEM0000000000000000000${i}`, event_type, recorded_at: "2026-10-27T19:17:0" + i + ".000000000Z", prev_hash: "0".repeat(64), hash: "1".repeat(64), body: "e30=" }));
+    const head = { seq: 9, hash: "1".repeat(64), recorded_at: "2026-10-27T19:17:24.000000000Z" };
+    const decode = journalPageRead(STREAM_3);
+    expect(decode({ stream_id: STREAM_3, head, events: events.slice(0, 1), next_after_seq: 1, at_head: false }, "").ok).toBe(true);
+    const page = decode({ stream_id: STREAM_3, head, events, next_after_seq: 9, at_head: true }, "");
+    expect(page.ok && page.value.events.map((e) => e.event_type)).toEqual(kinds);
+  });
+});
