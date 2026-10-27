@@ -15,7 +15,7 @@
       "entry": {
         "agentic": "v0_2",
         "deadline_ms": 120000,
-        "max_output_tokens": 2048,
+        "max_output_tokens": 2000,
         "model_id": "llm.research_sonnet",
         "model_name": "anthropic/claude-sonnet-5.5",
         "model_version": "1.0.0",
@@ -40,7 +40,7 @@
       "entry": {
         "agentic": "v0_2",
         "deadline_ms": 120000,
-        "max_output_tokens": 2048,
+        "max_output_tokens": 2000,
         "model_id": "llm.research_haiku",
         "model_name": "anthropic/claude-haiku-5.5",
         "model_version": "1.0.0",
@@ -65,7 +65,7 @@
       "entry": {
         "agentic": "v0_2",
         "deadline_ms": 120000,
-        "max_output_tokens": 2048,
+        "max_output_tokens": 2000,
         "model_id": "llm.research_terra",
         "model_name": "openai/gpt-5.6-terra",
         "model_version": "1.0.0",
