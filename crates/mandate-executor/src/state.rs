@@ -433,6 +433,27 @@ pub(crate) struct ConnectionView {
 }
 
 impl ExecutorState {
+    /// Records `observation` as the latest quote held for its instrument, and its bid and trade
+    /// as the latest sane ones where it is sane and newer, as a market input does. It runs no
+    /// step: no watchdog, no draft and no broker request, so it can neither fail nor delay
+    /// anything. The executor process hands a kill switch's flatten the marks it holds this way,
+    /// so the flatten prices from the market and the switch never waits on it (DEC-2853).
+    pub fn hold_quote(&mut self, observation: &MarketObservation) {
+        for (kept, carries) in [
+            (&mut self.sane_bids, observation.bid.is_some()),
+            (&mut self.trades, observation.last_trade.is_some()),
+        ] {
+            let newer = kept
+                .get(&observation.instrument)
+                .is_none_or(|held| held.observed_at <= observation.observed_at);
+            if observation.sane && carries && newer {
+                kept.insert(observation.instrument.clone(), observation.clone());
+            }
+        }
+        self.quotes
+            .insert(observation.instrument.clone(), observation.clone());
+    }
+
     /// An empty state for one broker account, before any event is folded. Reads nothing: there is
     /// no constructor that touches a clock, a file, or a random number.
     pub fn new(scope: AccountScope) -> Self {
