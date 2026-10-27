@@ -96,11 +96,9 @@ jobs:
   # one-line reasons `fast` and `full` print. It builds only xtask.
   select:
     if: ${{ !github.event.pull_request.draft }}
-    # DEC-2075: `select` runs where the cell jobs and the aggregates do, by the same guard written
-    # out in full (it cannot read its own output), so a run on this repository's own branches or on
-    # `main` needs no hosted runner to reach the self-hosted pool. A fork's pull request, any other
-    # event, and any run while CI_RUNNER is unset, take `ubuntu-24.04`.
-    runs-on: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # DEC-2076: on GitHub's runners, so lint and the tests, which need no self-hosted runner, never
+    # wait on the self-hosted pool being up.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
