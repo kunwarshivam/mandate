@@ -278,7 +278,10 @@ fn the_copy_is_the_originals_members_and_the_risk_clock() -> Result<(), Error> {
         draft.event_id,
         EventId("0E000005H00000005V00000000".to_owned())
     );
-    assert_eq!(draft.causation_id, Some(EventId(ESTABLISHED.to_owned())));
+    assert_eq!(
+        draft.causation_id,
+        Some(EventId(support::ulid(ESTABLISHED)))
+    );
     let mut want = due.members.clone();
     want.insert(
         Key::new("risk_clock")?,

@@ -253,8 +253,8 @@ fn a_tick_across_midnight_is_copied_and_its_day_start_follows() -> Result<(), Er
     assert_eq!(payload_member(&rows[copy], "clock"), Some(clock.clone()));
     assert_eq!(payload_member(&rows[copy], "risk_clock"), Some(clock));
     assert_eq!(
-        body_member(&rows[copy], "causation_id").as_deref(),
-        Some("t3")
+        body_member(&rows[copy], "causation_id"),
+        Some(support::ulid("t3"))
     );
     let next = rows.get(copy + 1).ok_or("the day start")?;
     assert_eq!(next.event_type, "RiskDayStarted");
@@ -619,15 +619,36 @@ fn outages(alerts: &[Alert]) -> usize {
 /// The control stream's establishment `c1` of `conn1` as account `acct1`, due to be copied.
 fn establishment() -> Result<ToCopy, Error> {
     let Value::Object(members) = support::object(vec![
-        ("account_ref", Value::Str(ACCOUNT.to_owned())),
+        ("account_ref", Value::Str(support::ulid(ACCOUNT))),
+        ("broker", Value::Str("alpaca".to_owned())),
         ("connection_id", Value::Str(CONNECTION.to_owned())),
         ("environment", Value::Str("paper".to_owned())),
+        ("margin_attestation", Value::Null),
+        (
+            "scopes",
+            Value::Array(vec![Value::Str("trading".to_owned())]),
+        ),
+        (
+            "step_up",
+            support::object(vec![
+                (
+                    "assertion_id",
+                    Value::Str("cli-d062db1a4cbb0385c71ec6d0ed8a6ac3".to_owned()),
+                ),
+                (
+                    "authenticated_at",
+                    Value::Str("2026-09-21T14:59:00.000000000Z".to_owned()),
+                ),
+                ("method", Value::Str("cli_confirm".to_owned())),
+            ])?,
+        ),
+        ("user", Value::Str("usr_1".to_owned())),
     ])?
     else {
         return Err("members".into());
     };
     Ok(ToCopy {
-        original: EventId("c1".to_owned()),
+        original: EventId(support::ulid("c1")),
         members,
     })
 }
@@ -750,6 +771,12 @@ impl mandate_executor::InstrumentSnapshot for Xyz {
     fn exit_tier(&self, instrument: &InstrumentId) -> Option<mandate_executor::ExitTier> {
         let aapl = InstrumentId::new(support::AAPL).ok()?;
         mandate_executor::InstrumentSnapshot::exit_tier(&support::Instruments, &aapl)
+            .filter(|_| instrument.as_str() == XYZ)
+    }
+
+    fn fill_refs(&self, instrument: &InstrumentId) -> Option<mandate_executor::FillConfigRefs> {
+        let aapl = InstrumentId::new(support::AAPL).ok()?;
+        mandate_executor::InstrumentSnapshot::fill_refs(&support::Instruments, &aapl)
             .filter(|_| instrument.as_str() == XYZ)
     }
 }

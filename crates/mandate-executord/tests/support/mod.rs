@@ -22,8 +22,8 @@ use mandate_executor::{
     AccountRef, AccountScope, ActivityCursor, AgentId, BindingGateConfigRefs, BindingGateInput,
     BindingGateRequest, BindingGateSource, BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome,
     BrokerPosition, BrokerReject, BrokerRequest, BrokerUnknown, ConnectorError, EventId,
-    ExecutorConfig, ExitTier, FillConfigRefs, FillId, IdGen, InstrumentSnapshot, MandateVersion, MandateView,
-    ProtectionPrices, Purpose, Seq, WorkspaceId, WriterEpoch, equity_bracket_prices,
+    ExecutorConfig, ExitTier, FillConfigRefs, FillId, IdGen, InstrumentSnapshot, MandateVersion,
+    MandateView, ProtectionPrices, Purpose, Seq, WorkspaceId, WriterEpoch, equity_bracket_prices,
 };
 use mandate_executord::marks::NoMarks;
 use mandate_executord::quotes::NoQuotes;
