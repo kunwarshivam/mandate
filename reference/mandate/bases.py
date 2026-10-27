@@ -11,6 +11,8 @@ H_MR = "sha256:" + "1" * 64
 H_MOM = "sha256:" + "2" * 64
 H_NEWS = "sha256:" + "3" * 64
 H_RES = "sha256:" + "4" * 64
+H_RES_LIGHT = "sha256:" + "5" * 64
+H_RES_TERRA = "sha256:" + "6" * 64
 
 LADDER = [
     {"at": "0.03", "action": "scale_sizes", "factor": "0.5"},
@@ -106,7 +108,11 @@ BASES = {"btc_accumulator": btc, "two_stock_swing": swing, "research_equity": re
 REGISTRY = {"quant.mean_reversion": {"version": "1.0.0", "content_hash": H_MR, "params": ["lookback_bars", "z_entry"]},
             "quant.momentum": {"version": "1.0.0", "content_hash": H_MOM, "params": ["lookback_bars"]},
             "llm.news_research": {"version": "0.3.0", "content_hash": H_NEWS, "params": []},
-            "llm.research_agent": {"version": "0.1.0", "content_hash": H_RES, "params": [], "admits_instruments": True}}
+            "llm.research_agent": {"version": "0.1.0", "content_hash": H_RES, "params": [], "admits_instruments": True},
+            "llm.research_agent_light": {"version": "0.1.0", "content_hash": H_RES_LIGHT, "params": [],
+                                         "admits_instruments": True, "status": "offered"},
+            "llm.research_agent_terra": {"version": "0.1.0", "content_hash": H_RES_TERRA, "params": [],
+                                         "admits_instruments": True, "status": "evaluating"}}
 CTX = {"account_equity_usd": "25000", "other_allocations_usd": "0", "validation_date": "2026-09-24",
        "registry": REGISTRY, "approver_users": 1, "workspace_users": 1,
        "stop_limit_asset_classes": ["crypto"]}

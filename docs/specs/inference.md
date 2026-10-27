@@ -13,6 +13,10 @@ gateway is built and runs over recorded responses; its live path is the model-ga
 
 ## Change history
 
+- **v0.7, amended ([DEC-2282](../project/decisions/DEC-2282.md); E21-62):** the owner picks the
+  research agent's model per run kind from the offered research entries (mandate spec v0.16
+  `routes`, V-048). §4.2 step 5: every offered research entry pins the same harness content. §7.2:
+  the picker shows each choice's estimated cost. §4.3 and the meter are unchanged.
 - **v0.6 ([DEC-2257](../project/decisions/DEC-2257.md); E21-62):** DEC-997 is Accepted (DEC-2605
   row 19). §6 names the live path: the model-gateway service alone, over `HttpsTransport` and the
   journaled meter, which refuses to start live without it. The key is read once from the vault
@@ -397,6 +401,14 @@ included, and the reported identity is checked on every response.
 4. **Pinned** by the owner as an envelope field (rule 11): id, version, content hash, parameters,
    weight, `max_output_age_s`. Adding or changing a model classifies as increasing
    ([mandate spec §9.2](mandate.md#92-classification)), so it needs confirmation.
+5. **The research role** ([DEC-2282](../project/decisions/DEC-2282.md)). The research agent's
+   pin is its `ideate` entry, and its `routes` name the entry each other run kind calls (mandate spec
+   V-048). Every offered research entry pins the same `template`, `mode`, `output`, `tools`,
+   `loop_bounds`, `output_schemas`, `retrieval_plan` and `validation_bounds`. Entries differ only in
+   `identity`, the sampling parameters, `deadline_ms`, `max_output_tokens` and, outside the hash,
+   their endpoints and prices. The registry refuses to offer a research entry whose harness content
+   differs from the role's. When a routed entry is deprecated, the owner is asked to choose again,
+   as for any pin (§4.4).
 
 ### 4.3 Evaluation gate before a model is offered
 
@@ -554,6 +566,13 @@ a settlement only for the calls that could cost money, and spend for caps folds 
 - A call's **maximum cost** is `prompt tokens × input price + max_output_tokens × output price`,
   counted before the call. Local endpoints have a price table too (zero, or an internal rate), so
   the meter is the same.
+- **The picker's estimate** ([DEC-2282](../project/decisions/DEC-2282.md)). For each offered
+  research entry, the workspace API states an estimated maximum per run: `max_turns` × a turn's
+  maximum cost (above), with the prompt bounded as agent harness spec §6.11 says. It also states the day's
+  and the month's cost at the envelope's cadence (`interval_s` and `event_triggers.max_runs_per_day`).
+  When the day's cost exceeds `cost_cap_usd_per_day`, the picker warns and states the runs a day the
+  cap buys; it does not block. The estimate is advice to the owner, never a cap: the meter (§7.3)
+  still refuses any call past a cap.
 - Provider invoices are reconciled with the meter for billing. Reconciliation never changes a
   risk day's cap accounting (§7.3).
 

@@ -4241,6 +4241,20 @@
    "content_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
    "params": [],
    "admits_instruments": true
+  },
+  "llm.research_agent_light": {
+   "version": "0.1.0",
+   "content_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+   "params": [],
+   "admits_instruments": true,
+   "status": "offered"
+  },
+  "llm.research_agent_terra": {
+   "version": "0.1.0",
+   "content_hash": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+   "params": [],
+   "admits_instruments": true,
+   "status": "evaluating"
   }
  },
  "validation_context_defaults": {
@@ -4273,6 +4287,20 @@
     "content_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
     "params": [],
     "admits_instruments": true
+   },
+   "llm.research_agent_light": {
+    "version": "0.1.0",
+    "content_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+    "params": [],
+    "admits_instruments": true,
+    "status": "offered"
+   },
+   "llm.research_agent_terra": {
+    "version": "0.1.0",
+    "content_hash": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+    "params": [],
+    "admits_instruments": true,
+    "status": "evaluating"
    }
   },
   "approver_users": 1,
@@ -7907,6 +7935,196 @@
     ],
     "worst_case": {
      "one_position_at_stop_usd": "850",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-V78",
+   "kind": "semantic",
+   "title": "A monitor route to another offered research entry passes V-048 (DEC-2282)",
+   "base": "research_equity",
+   "patch": [
+    {
+     "op": "add",
+     "path": "/behavior/signal_models/0/routes",
+     "value": {
+      "monitor": {
+       "id": "llm.research_agent_light",
+       "version": "0.1.0",
+       "content_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      }
+     }
+    }
+   ],
+   "context": {},
+   "expect": {
+    "violations": [],
+    "warnings": [],
+    "worst_case": {
+     "one_position_at_stop_usd": "75",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-V79",
+   "kind": "semantic",
+   "title": "A route on a model that does not admit instruments is refused",
+   "base": "research_equity",
+   "patch": [
+    {
+     "op": "add",
+     "path": "/behavior/signal_models/1/routes",
+     "value": {
+      "monitor": {
+       "id": "llm.research_agent_light",
+       "version": "0.1.0",
+       "content_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      }
+     }
+    }
+   ],
+   "context": {},
+   "expect": {
+    "violations": [
+     "V-048"
+    ],
+    "warnings": [],
+    "worst_case": {
+     "one_position_at_stop_usd": "75",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-V80",
+   "kind": "semantic",
+   "title": "A route to a research entry still evaluating is refused",
+   "base": "research_equity",
+   "patch": [
+    {
+     "op": "add",
+     "path": "/behavior/signal_models/0/routes",
+     "value": {
+      "monitor": {
+       "id": "llm.research_agent_terra",
+       "version": "0.1.0",
+       "content_hash": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      }
+     }
+    }
+   ],
+   "context": {},
+   "expect": {
+    "violations": [
+     "V-048"
+    ],
+    "warnings": [],
+    "worst_case": {
+     "one_position_at_stop_usd": "75",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-V81",
+   "kind": "semantic",
+   "title": "A route to the model's own pin is refused, so each choice has one encoding",
+   "base": "research_equity",
+   "patch": [
+    {
+     "op": "add",
+     "path": "/behavior/signal_models/0/routes",
+     "value": {
+      "monitor": {
+       "id": "llm.research_agent",
+       "version": "0.1.0",
+       "content_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+      }
+     }
+    }
+   ],
+   "context": {},
+   "expect": {
+    "violations": [
+     "V-048"
+    ],
+    "warnings": [],
+    "worst_case": {
+     "one_position_at_stop_usd": "75",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-V82",
+   "kind": "semantic",
+   "title": "A route whose content hash is not the offered entry's is refused",
+   "base": "research_equity",
+   "patch": [
+    {
+     "op": "add",
+     "path": "/behavior/signal_models/0/routes",
+     "value": {
+      "monitor": {
+       "id": "llm.research_agent_light",
+       "version": "0.1.0",
+       "content_hash": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      }
+     }
+    }
+   ],
+   "context": {},
+   "expect": {
+    "violations": [
+     "V-048"
+    ],
+    "warnings": [],
+    "worst_case": {
+     "one_position_at_stop_usd": "75",
+     "daily_loss_budget_usd": "200",
+     "flatten_trigger_loss_usd": "800",
+     "lifetime_floor_loss_usd": "1000"
+    }
+   }
+  },
+  {
+   "id": "MC-V83",
+   "kind": "semantic",
+   "title": "A route to an entry that does not admit instruments is refused",
+   "base": "research_equity",
+   "patch": [
+    {
+     "op": "add",
+     "path": "/behavior/signal_models/0/routes",
+     "value": {
+      "monitor": {
+       "id": "llm.news_research",
+       "version": "0.3.0",
+       "content_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      }
+     }
+    }
+   ],
+   "context": {},
+   "expect": {
+    "violations": [
+     "V-048"
+    ],
+    "warnings": [],
+    "worst_case": {
+     "one_position_at_stop_usd": "75",
      "daily_loss_budget_usd": "200",
      "flatten_trigger_loss_usd": "800",
      "lifetime_floor_loss_usd": "1000"

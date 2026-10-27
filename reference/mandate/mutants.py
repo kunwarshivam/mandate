@@ -58,6 +58,16 @@ MUTANTS = {
                                              "        if not breached:\n            self.acc = 0.0"),
     "additive capital base": ("self.C, self.L = H1, E01, C1, L1", "self.C, self.L = H1, E01, self.C + d, L1"),
     "hard trigger latches on one quote": ("        if quote and (t - self.hard_first[key]).total_seconds() >= self.hard_wait():", "        if True:"),
+    "V-048 lets a route name the model's own pin": (
+        '    if route["id"] == sm["id"]:\n        return False', '    if False:\n        return False'),
+    "V-048 accepts an entry still evaluating": (
+        'e.get("status") == "offered"', 'e.get("status") in ("offered", "evaluating")'),
+    "V-048 accepts an entry that does not admit": (
+        'e is not None and e.get("admits_instruments", False) and', 'e is not None and'),
+    "V-048 ignores the pinned hash": (
+        ' and e["content_hash"] == route["content_hash"])', ')'),
+    "V-048 allows routes on any model": (
+        '            or any("routes" in s and not s["admits_instruments"] for s in sms):', '            or False:'),
     "V-047 reads a stated policy's presence, not its value": (
         '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:',
         '    if "independent_approval_required" in ctx and ctx.get("workspace_users", 1) < 2:'),

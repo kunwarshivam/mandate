@@ -336,6 +336,17 @@ def reduces_previous(prev, current, m):
             and V.is_valid(prev) and version(prev) == current
             and classify(prev, m)[0] == "risk_reducing")
 
+def route_offered(sm, route, reg):
+    """V-048 (DEC-2282): a route names another research entry the registry offers, pinned exactly."""
+    if route["id"] == sm["id"]:
+        return False
+    if reg is None:
+        return True
+    e = reg.get(route["id"])
+    return (e is not None and e.get("admits_instruments", False) and e.get("status") == "offered"
+            and e["version"] == route["version"] and e["content_hash"] == route["content_hash"])
+
+
 def semantic(m, ctx):
     errs, warns = set(), set()
     u = m["universe"]
@@ -453,6 +464,9 @@ def semantic(m, ctx):
         errs.add("V-036")
     if u["pinned"] and admitting:
         errs.add("V-037")
+    if not all(route_offered(s, rt, reg) for s in sms for rt in (s.get("routes") or {}).values()) \
+            or any("routes" in s and not s["admits_instruments"] for s in sms):
+        errs.add("V-048")
     if u["pinned"] != (len(inst) > 0):
         errs.add("V-034")
     if u["max_instruments"] < len(inst):
