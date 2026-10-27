@@ -160889,21 +160889,9 @@
      "marks_used": [],
      "checks": [
       {
-       "id": "buying_power",
-       "result": "pass",
-       "inputs": {
-        "buying_power": "10000"
-       },
-       "computed": {
-        "order_cost": "1500"
-       }
-      },
-      {
-       "id": "day_trade_budget",
-       "result": "not_applicable",
-       "inputs": {
-        "regime": "intraday_margin"
-       },
+       "id": "session",
+       "result": "fail",
+       "inputs": {},
        "computed": {}
       }
      ],
@@ -160934,13 +160922,17 @@
     }
    },
    {
-    "name": "sized_on_a_binding_allow",
-    "clause": "rule 313: only on an allow no binding run bound",
-    "base_draft": "binding_allow",
+    "name": "sized_on_a_deny",
+    "clause": "rule 313: only on an allow",
+    "base_draft": "sized_allow",
     "changes": [
      {
-      "path": "payload.sized_qty",
-      "value": "6"
+      "path": "payload.verdict",
+      "value": "deny"
+     },
+     {
+      "path": "payload.reason_code",
+      "value": "sell_exceeds_available"
      }
     ],
     "expect": {
@@ -161285,6 +161277,20 @@
      {
       "path": "payload.sized_qty",
       "value": "0.5"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "sized_on_a_binding_allow",
+    "clause": "rule 313: a binding allow the executor sized",
+    "base_draft": "binding_allow",
+    "changes": [
+     {
+      "path": "payload.sized_qty",
+      "value": "6"
      }
     ],
     "expect": {
