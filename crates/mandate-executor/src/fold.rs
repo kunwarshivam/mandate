@@ -3748,7 +3748,7 @@ mod mode_layering_tests {
     /// lifted; only the switch's own `normal` lifts the stop, and then the rung still binds while
     /// it holds.
     #[test]
-    fn a_later_risk_rung_never_loosens_a_kill_switchs_stop() -> Result<(), ExecutorError> {
+    fn a_later_risk_rung_never_loosens_the_stop_of_a_kill_switch() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
             ids: &Ids,
