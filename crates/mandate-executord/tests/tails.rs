@@ -11,7 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use mandate_canon::Digest;
+use mandate_canon::{Digest, Value, parse};
 use mandate_executor::BrokerRequest;
 use mandate_executord::establish::{OpeningGate, pass};
 use mandate_executord::{Alert, ExecutorProcess};
@@ -23,7 +23,7 @@ use proptest::prelude::*;
 use support::{
     ACCOUNT_STREAM, AGENT, Allowing, CLOCK_STREAM, CONNECTION, CONTROL_STREAM, Error, Journal,
     NOON, Paper, TwoPercentStop, agent_stream, at, deployed, kill, kill_command, process_config,
-    propose, revoke, start_allowing, tick, wired,
+    propose, revoke, start_allowing, stopped, tick, wired,
 };
 
 const OPEN: &str = "01JINTENT0000000000000000A";
@@ -348,13 +348,29 @@ fn a_rewritten_head_stops_the_process_at_the_next_check_and_sends_nothing() -> R
             if n == 61 {
                 opening(&store.journal, LATER_OPEN)?;
             }
+            let before = store.journal.rows_of(ACCOUNT_STREAM).len();
             let alerts = process.step(secs(n)?);
+            if alerted(&alerts, REWRITTEN) {
+                assert_eq!(
+                    store.journal.rows_of(ACCOUNT_STREAM).len(),
+                    before,
+                    "{stream}: nothing journaled on the pass that found it"
+                );
+            }
             let code = pass(&mut process, &gate, secs(n)?);
             if alerted(&alerts, REWRITTEN) || code == Err(REWRITTEN) {
                 found = Some(n);
                 break;
             }
         }
+        let written = store.journal.rows_of(ACCOUNT_STREAM).len();
+        process.step(secs(62)?);
+        let _stopped = pass(&mut process, &gate, secs(62)?);
+        assert_eq!(
+            store.journal.rows_of(ACCOUNT_STREAM).len(),
+            written,
+            "{stream}: nothing journaled after"
+        );
         let gains = stream == ACCOUNT_STREAM;
         assert!(
             found.is_some_and(|n| n == 61 || gains),
@@ -451,6 +467,82 @@ fn a_check_that_will_not_read_holds_openings_and_no_exit_until_it_does() -> Resu
     Ok(())
 }
 
+/// DEC-2854 item 4: the pass that finds a rewritten head never completes the process, though its
+/// agent was stopped and nothing else is owed: it stops with the alert.
+#[test]
+fn a_rewrite_found_on_the_pass_that_would_complete_stops_the_process() -> Result<(), Error> {
+    let store = Following::over(deployed()?);
+    let broker = Paper::new(&store.journal);
+    let mut process = started(&store, &broker)?;
+    for n in 1..=60 {
+        ticked(&store.journal, n)?;
+        process.step(secs(n)?);
+    }
+    store.journal.rewrite_head(CLOCK_STREAM);
+    stopped(&store.journal, "c3", AGENT)?;
+    let alerts = process.step(secs(61)?);
+    assert!(alerted(&alerts, REWRITTEN), "{alerts:?}");
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Exited(Exit::CycleFailed)
+    );
+    Ok(())
+}
+
+/// DEC-2854 item 5: while an agent's stream will not read from its first record, the runtime's
+/// copy of an owner's kill switch on it is not read, as in any outage of that stream: every
+/// opening is held and the stream's alert raised, and the kill switch is applied on the pass the
+/// stream reads again. A restart would not read it sooner, since its first read of that stream is
+/// the same read from the first record.
+#[test]
+fn a_kill_on_an_agent_stream_that_will_not_verify_waits_until_it_reads() -> Result<(), Error> {
+    let store = Following::over(deployed()?);
+    let broker = Paper::new(&store.journal);
+    let mut process = started(&store, &broker)?;
+    for n in 1..=60 {
+        process.step(secs(n)?);
+    }
+    store.whole_down.borrow_mut().insert(agent_stream(AGENT));
+    kill(&store.journal, AGENT, SWITCH)?;
+    let alerts = process.step(secs(61)?);
+    assert!(alerted(&alerts, "stream_unreadable"), "{alerts:?}");
+    for n in 62..=70 {
+        process.step(secs(n)?);
+    }
+    assert_eq!(switches(&store.journal), 0);
+    assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
+    store.whole_down.borrow_mut().clear();
+    process.step(secs(71)?);
+    assert_eq!(switches(&store.journal), 1);
+    Ok(())
+}
+
+/// DEC-2854 item 4: an account stream that will not read from its first record at a check raises
+/// its alert with the next pass's, as every stream the pass reads does, besides the gate's code.
+#[test]
+fn an_account_stream_that_will_not_verify_raises_its_alert() -> Result<(), Error> {
+    let store = Following::over(deployed()?);
+    let broker = Paper::new(&store.journal);
+    let gate = OpeningGate::default();
+    let mut process = started(&store, &broker)?;
+    for n in 1..=60 {
+        process.step(secs(n)?);
+        let _connecting = pass(&mut process, &gate, secs(n)?);
+    }
+    store
+        .whole_down
+        .borrow_mut()
+        .insert(ACCOUNT_STREAM.to_owned());
+    process.step(secs(61)?);
+    assert_eq!(
+        pass(&mut process, &gate, secs(61)?),
+        Err("stream_unavailable")
+    );
+    let alerts = process.step(secs(62)?);
+    assert!(alerted(&alerts, "stream_unreadable"), "{alerts:?}");
+    Ok(())
+}
+
 /// One thing that can happen between passes.
 #[derive(Debug, Clone, Copy)]
 enum Op {
@@ -462,6 +554,8 @@ enum Op {
     Restart,
     /// A minute passes, so the next pass is a check.
     Minute,
+    /// A second tick at the same instant as the last.
+    Repeat,
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -473,12 +567,17 @@ fn op() -> impl Strategy<Value = Op> {
         1 => Just(Op::Copy),
         1 => Just(Op::Restart),
         1 => Just(Op::Minute),
+        1 => Just(Op::Repeat),
     ]
 }
 
 fn apply(journal: &Journal, op: Op, n: usize, second: i64) -> Result<(), Error> {
     match op {
         Op::Tick | Op::Minute => ticked(journal, second),
+        Op::Repeat => {
+            let clock = format!("2026-09-21T15:{:02}:{:02}Z", second / 60, second % 60);
+            tick(journal, &format!("r{n:05}"), &clock)
+        }
         Op::Open => opening(journal, &format!("01JINTENT{n:017}")),
         Op::Exit => propose(
             journal,
@@ -493,6 +592,31 @@ fn apply(journal: &Journal, op: Op, n: usize, second: i64) -> Result<(), Error> 
         Op::Copy => kill(journal, AGENT, &format!("01JKILL{n:019}")),
         Op::Restart => Ok(()),
     }
+}
+
+/// What the agent stream says, read whole and on its own: the ids of the runtime's kill-switch
+/// copies, and of the openings a later copy follows, which the executor must never send.
+fn from_rows(journal: &Journal) -> Result<(BTreeSet<String>, Vec<String>), Error> {
+    let rows = journal.rows_of(&agent_stream(AGENT));
+    let mut copies = BTreeSet::new();
+    let mut dropped = Vec::new();
+    let mut waiting = Vec::new();
+    for row in &rows {
+        let body = parse(&row.body)?;
+        let purpose = body
+            .get("payload")
+            .and_then(|payload| payload.get("purpose"))
+            .and_then(Value::as_str);
+        match row.event_type.as_str() {
+            "KillSwitchActivated" => {
+                copies.insert(row.event_id.clone());
+                dropped.append(&mut waiting);
+            }
+            "IntentProposed" if purpose == Some("open") => waiting.push(row.event_id.clone()),
+            _ => {}
+        }
+    }
+    Ok((copies, dropped))
 }
 
 /// `result`, its error as the test case's failure.
@@ -521,7 +645,11 @@ proptest! {
         let mut whole = fail(started(&by_whole, &whole_broker))?;
         let mut second = 0;
         for (n, op) in ops.iter().enumerate() {
-            second += if matches!(op, Op::Minute) { 60 } else { 1 };
+            second += match op {
+                Op::Minute => 60,
+                Op::Repeat => 0,
+                _ => 1,
+            };
             for journal in [&by_head.journal, &by_whole.0] {
                 fail(apply(journal, *op, n, second))?;
             }
@@ -546,6 +674,21 @@ proptest! {
             };
             prop_assert_eq!(bodies(&by_head.journal), bodies(&by_whole.0));
             prop_assert_eq!(head_broker.seen(), whole_broker.seen());
+            let (copies, dropped) = fail(from_rows(&by_head.journal))?;
+            let applied: BTreeSet<String> = by_head
+                .journal
+                .applications()
+                .into_iter()
+                .map(|(_, copied)| copied)
+                .collect();
+            prop_assert_eq!(&applied, &copies, "every copy applied once, by the next pass");
+            prop_assert_eq!(by_head.journal.applications().len(), copies.len());
+            let sent = head_broker.submitted();
+            prop_assert!(
+                dropped.iter().all(|id| !sent.contains(&format!("md-{id}"))),
+                "an opening a later kill switch follows is never sent: {:?}",
+                sent
+            );
         }
     }
 }

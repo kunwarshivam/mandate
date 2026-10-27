@@ -53,13 +53,18 @@ impl<S> Tail<S> {
 
     /// Folds into the state, in order with `fold`, each record of `stream` that `rows` holds past
     /// the head; `false` when nothing reads, or the stream no longer holds the head, and then the
-    /// state must not be read (`AGENTS.md` rule 3).
+    /// state must not be read (`AGENTS.md` rule 3). A tail whose stream no longer held its head
+    /// asks the store nothing more, so a port read at every ask never reads a whole stream each
+    /// time.
     pub fn follow(
         &mut self,
         rows: impl Fn(&StreamId, TrustedStart) -> Option<Vec<StoredEvent>>,
         stream: &StreamId,
         mut fold: impl FnMut(&mut S, &StoredEvent),
     ) -> bool {
+        if self.broken {
+            return false;
+        }
         let since = match self.head {
             None => self.whole(&rows, stream, None),
             Some((seq, hash)) => {

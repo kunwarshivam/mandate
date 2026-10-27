@@ -296,6 +296,10 @@ pub struct ExecutorProcess<S, B> {
     check_tried: Option<UtcNanos>,
     /// The streams each pass reads, each read only past the head it was last read to (DEC-2854).
     tails: Tails,
+    /// The alerts of reads made between passes, for the establishment, raised with the next pass's.
+    deferred: Vec<Alert>,
+    /// Whether the alert of a stream that no longer holds its head was raised, so it is raised once.
+    rewritten: bool,
     /// When the tails were last made to read their streams from the first record.
     checks: Checks,
 }
@@ -422,6 +426,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             considered: None,
             tails: Tails::default(),
             checks: Checks::default(),
+            deferred: Vec::new(),
+            rewritten: false,
         };
         if config.environment != Environment::Paper {
             this.lifecycle.observe(now, Lifecycled::Failed);
@@ -521,8 +527,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// the pass hands the first tick it reads and `Input::Started`. Returns the alerts whose drafts
     /// committed.
     pub fn step(&mut self, now: UtcNanos) -> Vec<Alert> {
-        let mut alerts = self.stepped(now);
-        if self.tails.broken() && !self.exited() {
+        let mut alerts = std::mem::take(&mut self.deferred);
+        alerts.extend(self.stepped(now));
+        if self.tails.broken() && !self.rewritten {
+            self.rewritten = true;
             alerts.push(Alert {
                 key: REWRITTEN,
                 subject: None,
@@ -637,7 +645,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         {
             return alerts;
         }
-        if nothing_read && all_read && released && self.owes_nothing() {
+        if nothing_read && all_read && released && self.owes_nothing() && !self.tails.broken() {
             self.lifecycle.observe(now, Lifecycled::Completed);
         }
         self.probe(now);
@@ -998,7 +1006,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 }
             },
         );
-        let control = self.control_rows(&mut Vec::new());
+        let mut alerts = Vec::new();
+        self.noted(&account, read, &mut alerts);
+        let control = self.control_rows(&mut alerts);
+        self.deferred.extend(alerts);
         if self.tails.broken() {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return Err(REWRITTEN);
@@ -1222,9 +1233,6 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         alerts: &mut Vec<Alert>,
         depth: usize,
     ) -> bool {
-        if self.tails.broken() {
-            return false;
-        }
         if depth > self.max_chain {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return false;
@@ -2048,9 +2056,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
 
     /// Appends `drafts` as one batch on the account stream and folds what committed into the
     /// executor's fold and the risk book, answering [`Ran::Refused`] for a batch the journal
-    /// refused as invalid.
+    /// refused as invalid. Nothing is appended once a stream no longer holds the head the process
+    /// read it to, so nothing more is journaled or sent (DEC-2854 item 4).
     fn append(&mut self, now: UtcNanos, drafts: &[EventDraft]) -> Ran {
-        let Some(account) = self.account.clone() else {
+        let Some(account) = self.account.clone().filter(|_| !self.tails.broken()) else {
             return Ran::Stopped;
         };
         let Some(bytes) = self.bytes(drafts) else {

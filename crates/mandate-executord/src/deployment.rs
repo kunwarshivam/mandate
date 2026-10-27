@@ -1533,7 +1533,8 @@ mod incremental {
 
     /// DEC-2854 item 6: a refused read past the head whose read from the first record no longer
     /// holds the head, as a rewrite that hashes the chain again leaves it, reads nothing, then or
-    /// after, so nothing the port folded is read and every opening it is read for is held.
+    /// after, so nothing the port folded is read and every opening it is read for is held; and the
+    /// store is asked nothing more, so no ask reads a whole stream.
     #[test]
     fn a_read_from_the_first_record_that_no_longer_holds_the_head_reads_nothing() {
         let journal = Rc::new(Journal::default());
@@ -1550,8 +1551,10 @@ mod incremental {
         }
         journal.tick(1);
         assert_eq!(deployment.now(), None);
+        let asked = journal.calls.get();
         journal.tick(2);
         assert_eq!(deployment.now(), None, "still nothing");
+        assert_eq!(journal.calls.get(), asked, "and the store asked nothing more");
     }
 
     #[test]
