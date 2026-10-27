@@ -4678,9 +4678,10 @@ def test_every_journal_dsn_names_the_journal_schema_in_its_options():
     DSN the chart renders sets `search_path=journal` in the connection's options, the migrator's
     and the API's included."""
     docs = render_all()
+    started = [{"spec": {"template": pod}} for pod in managed_pods(docs)]
     dsns = [
         env["value"]
-        for doc in docs
+        for doc in docs + started
         for container in _containers(doc)
         for env in container.get("env", [])
         if env.get("value", "").startswith("postgres://")

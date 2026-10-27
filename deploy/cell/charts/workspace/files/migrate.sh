@@ -4,10 +4,10 @@
 # SHA-256 in deploy.migrations in the same transaction. An applied file whose content changed stops
 # the Job, since a migration is never edited. Mirrors deploy/bootstrap.sh's loop.
 #
-# First, on every install and upgrade, it grants the journal's application group what roles.sql
-# grants each role at bootstrap, connecting to this database and using the journal schema, so a
-# role CloudNativePG's managed roles add after bootstrap, a member of the group, can connect too
-# (DEC-2083). The grants are idempotent and give the group nothing a role did not already have.
+# First, on every install and upgrade, it grants the journal's application group CONNECT on this
+# database, which roles.sql grants each role at bootstrap, so a role CloudNativePG's managed roles
+# add after bootstrap, a member of the group, can connect too; the group already uses the journal
+# schema (DEC-2083). The grant is idempotent and gives the group nothing a role did not have.
 set -euo pipefail
 
 migrations="${MANDATE_MIGRATIONS:-/migrations}"
@@ -25,14 +25,7 @@ CREATE TABLE IF NOT EXISTS deploy.migrations (
 SQL
 
 sql <<'SQL'
-DO $$
-BEGIN
-  EXECUTE format('GRANT CONNECT ON DATABASE %I TO mandate_journal_app', current_database());
-END
-$$;
-SET ROLE mandate_journal_owner;
-GRANT USAGE ON SCHEMA journal TO mandate_journal_app;
-RESET ROLE;
+SELECT format('GRANT CONNECT ON DATABASE %I TO mandate_journal_app', current_database()) \gexec
 SQL
 
 for file in "$migrations"/*.sql; do
