@@ -464,6 +464,9 @@ fn another_model(id: &str) -> PinnedContent {
     content
 }
 
+/// A harness member's name and an edit that changes it.
+type HarnessEdit = (&'static str, fn(&mut PinnedContent));
+
 fn offered(registry: &mut Registry, content: PinnedContent) -> Result<(), RegistryError> {
     let model = content.model_ref();
     registry.register(content).unwrap();
@@ -481,7 +484,7 @@ fn a_research_entry_is_offered_only_with_its_roles_harness_content() {
         Ok(()),
         "another model with the role's harness content is offered"
     );
-    let edits: [(&str, fn(&mut PinnedContent)); 9] = [
+    let edits: [HarnessEdit; 9] = [
         ("template", |c| c.template.system.push_str(" Be bold.")),
         ("retrieval plan", |c| {
             c.retrieval_plan = json(r#"{"bars":{"days":90},"filings":{"max_items":5}}"#)
