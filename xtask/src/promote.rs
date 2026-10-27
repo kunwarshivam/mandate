@@ -16,10 +16,11 @@ use anyhow::{Context, Result, bail, ensure};
 
 use crate::gitops::Environment;
 
-/// The published binaries the workspace chart runs, each with the chart's `images` key it fills.
+/// The published binaries promotion pins in a hosted cell, each with the chart's `images` key it
+/// fills; the tests' `RELEASED_NOT_PROMOTED` names each one released but held back, with the overlay value it lacks.
 /// A binary not named here (`mandate-agentd`, `mandate-rh-sim`) is not a chart process yet, and
 /// the simulator never is. A lane that publishes a process's binary adds its row here.
-const CHART_IMAGE_FOR_BINARY: [(&str, &str); 7] = [
+const CHART_IMAGE_FOR_BINARY: [(&str, &str); 8] = [
     ("mandate", "mandate"),
     ("mandate-api-server", "api"),
     ("mandate-deployd", "deploy-manager"),
@@ -27,6 +28,7 @@ const CHART_IMAGE_FOR_BINARY: [(&str, &str); 7] = [
     ("mandate-executord", "executor"),
     ("mandate-provisionerd", "role-provisioner"),
     ("mandate-token-exchange", "token-exchange"),
+    ("mandate-scheduler", "scheduler"),
 ];
 
 /// The charts `release.yml` publishes (`HOSTED_CHARTS`), by the name `CHARTS` lists. An overlay
@@ -286,6 +288,29 @@ pub(crate) fn promote(
 mod tests {
     use super::*;
 
+    /// The chart processes a release publishes but promotion does not yet pin in a hosted cell, each
+    /// with the value its overlay lacks: the chart refuses to render the process without it, so
+    /// promoting the image alone would stop the whole workspace release from reconciling
+    /// (DEC-2079 item 3). A process moves to [`CHART_IMAGE_FOR_BINARY`] in the change that gives the
+    /// overlays its value.
+    const RELEASED_NOT_PROMOTED: [(&str, &str, &str); 3] = [
+        (
+            "mandate-datad",
+            "data",
+            "data.instruments, a recording of closes only a dev or CI cell lists: a hosted cell needs a market-data source first",
+        ),
+        (
+            "mandate-dispatcher",
+            "dispatcher",
+            "dispatcher.recipient, the founder's mail address, which no committed overlay may hold (DEC-2511)",
+        ),
+        (
+            "mandate-gatewayd",
+            "model-gateway",
+            "modelGateway.workspace and modelGateway.deployment; its two monthly budgets, without which it refuses to start, are the founder's (DEC-2282)",
+        ),
+    ];
+
     fn digest(c: char) -> String {
         format!("sha256:{}", c.to_string().repeat(64))
     }
@@ -300,7 +325,11 @@ mod tests {
              ghcr.io/kunwarshivam/mandate/mandate-daemon@{}  mandate-daemon\n\
              ghcr.io/kunwarshivam/mandate/mandate-executord@{}  mandate-executord\n\
              ghcr.io/kunwarshivam/mandate/mandate-provisionerd@{}  mandate-provisionerd\n\
-             ghcr.io/kunwarshivam/mandate/mandate-token-exchange@{}  mandate-token-exchange\n",
+             ghcr.io/kunwarshivam/mandate/mandate-token-exchange@{}  mandate-token-exchange\n\
+             ghcr.io/kunwarshivam/mandate/mandate-scheduler@{}  mandate-scheduler\n\
+             ghcr.io/kunwarshivam/mandate/mandate-dispatcher@{}  mandate-dispatcher\n\
+             ghcr.io/kunwarshivam/mandate/mandate-datad@{}  mandate-datad\n\
+             ghcr.io/kunwarshivam/mandate/mandate-gatewayd@{}  mandate-gatewayd\n",
             digest('a'),
             digest('b'),
             digest('c'),
@@ -309,7 +338,11 @@ mod tests {
             digest('f'),
             digest('9'),
             digest('8'),
-            digest('7')
+            digest('7'),
+            digest('6'),
+            digest('5'),
+            digest('0'),
+            digest('2')
         )
     }
 
@@ -424,6 +457,13 @@ mod tests {
                         digest('7')
                     )
                 ),
+                (
+                    "scheduler".to_owned(),
+                    format!(
+                        "ghcr.io/kunwarshivam/mandate/mandate-scheduler@{}",
+                        digest('6')
+                    )
+                ),
             ])
         );
         assert!(chart_images(&published().replace("mandate@", "mandate:main@")).is_err());
@@ -479,6 +519,67 @@ mod tests {
                 CHART_IMAGE_FOR_BINARY.contains(&row),
                 "{row:?} is not charted"
             );
+        }
+    }
+
+    /// Every process the workspace chart builds an image for runs one this map promotes, so a hosted
+    /// cell can pin each of them to a signed digest: staging ran with only `api` and `mandate` from
+    /// 2026-10-19, because the scheduler, the dispatcher, the model gateway and the data process had
+    /// no row here and none was released. `postgres` is a third-party image the overlays pin
+    /// themselves (DEC-2017), and a process the chart does not build yet has no image to promote.
+    #[test]
+    fn every_built_chart_process_is_promoted() -> Result<()> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../deploy/cell/charts/workspace/processes.json");
+        let listed: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
+        let processes = listed["processes"]
+            .as_array()
+            .context("processes.json holds a list of processes")?;
+        let charted: Vec<&str> = CHART_IMAGE_FOR_BINARY.iter().map(|(_, key)| *key).collect();
+        let held: Vec<&str> = RELEASED_NOT_PROMOTED
+            .iter()
+            .map(|(_, key, _)| *key)
+            .collect();
+        let mut missing = Vec::new();
+        for process in processes {
+            let image = process["image"]
+                .as_str()
+                .context("a process names its image")?;
+            if process["built"] == true
+                && image != "postgres"
+                && !charted.contains(&image)
+                && !held.contains(&image)
+            {
+                missing.push(format!(
+                    "{} ({image})",
+                    process["name"].as_str().unwrap_or("?")
+                ));
+            }
+        }
+        assert!(missing.is_empty(), "built but never promoted: {missing:?}");
+        Ok(())
+    }
+
+    /// A held process is released, so its signed digest is ready the day its overlay value lands,
+    /// and is not also promoted, which would pin an image the chart refuses to render.
+    #[test]
+    fn every_held_process_is_released_and_not_promoted() {
+        let released: Vec<&str> = crate::release::BINARIES
+            .iter()
+            .map(|(_, binary)| *binary)
+            .collect();
+        for (binary, key, lacks) in RELEASED_NOT_PROMOTED {
+            assert!(
+                released.contains(&binary),
+                "{binary} ({key}) is not released"
+            );
+            assert!(
+                !CHART_IMAGE_FOR_BINARY
+                    .iter()
+                    .any(|(b, k)| *b == binary || *k == key),
+                "{binary} ({key}) is both held and promoted"
+            );
+            assert!(!lacks.is_empty(), "{binary} names no reason");
         }
     }
 

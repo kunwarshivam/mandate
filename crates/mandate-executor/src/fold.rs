@@ -1640,6 +1640,9 @@ fn protection_changed(
             state.alerted.insert(instrument.clone());
         }
         "expiry_unreplaceable" => {}
+        "exit_unpriced" if cause.is_none() => {
+            state.unpriced.insert(instrument.clone(), at);
+        }
         "exit_unpriced" | "ladder_floor" => {}
         "rung_short" if optional_qty(payload, "sent")? == Some(Qty::ZERO) => {
             let intent = required_text(payload, "intent_id")?;
@@ -3699,6 +3702,43 @@ mod interval_tests {
 
     fn action(name: &str) -> (&'static str, Value) {
         ("action", Value::Str(name.to_owned()))
+    }
+
+    /// DEC-2846: only an `exit_unpriced` no kill switch caused notes the instrument's latest own
+    /// wait, which the executor's own exits alert against; a switch's close is noted on the
+    /// switch alone, so it never silences the alert of an exit waiting beside it.
+    #[test]
+    fn only_an_uncaused_exit_unpriced_notes_the_instruments_wait() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        let aapl = mandate_accounting::InstrumentId::new("AAPL")?;
+        let switched = crate::types::FoldedEvent {
+            stream: executor.state.account_stream(),
+            seq: crate::types::Seq(executor.state.account_head().0.saturating_add(1)),
+            event_id: crate::types::EventId("j-switched".to_owned()),
+            event_type: "ProtectionChanged".to_owned(),
+            causation_id: Some(crate::types::EventId("j-switch".to_owned())),
+            payload: object(vec![
+                action("exit_unpriced"),
+                ("instrument", Value::Str("AAPL".to_owned())),
+                ("risk_clock", clock(RiskClock::from_secs(7))?),
+            ])?,
+        };
+        super::fold(&mut executor.state, &switched)?;
+        assert_eq!(executor.state.unpriced.get(&aapl), None);
+        protection_changed(&mut executor, 9, vec![action("exit_unpriced")])?;
+        assert_eq!(
+            executor.state.unpriced.get(&aapl),
+            Some(&RiskClock::from_secs(9))
+        );
+        Ok(())
     }
 
     /// DEC-367 item 4 (#468's round-4 review, m2): a sequence that ends with no prices to place
