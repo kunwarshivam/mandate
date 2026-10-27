@@ -5,11 +5,15 @@ use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+#[cfg(target_os = "linux")]
 use std::sync::mpsc;
+#[cfg(target_os = "linux")]
 use std::thread;
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
 use mandate_connections::record::ConnectionId;
+#[cfg(target_os = "linux")]
 use rustix::fs::{CWD, FileType, Mode, mknodat};
 use secrecy::ExposeSecret;
 
@@ -217,6 +221,7 @@ fn read_swapped(dir: &Path, name: &str, swap: &dyn Fn(&Path)) -> Result<String, 
     read_checked(dir, name, swap).map(|value| value.expose_secret().to_owned())
 }
 
+#[cfg(target_os = "linux")]
 fn fifo(path: &Path) {
     mknodat(CWD, path, FileType::Fifo, Mode::from_raw_mode(0o600), 0).unwrap();
 }
@@ -253,6 +258,7 @@ fn a_link_swapped_in_after_the_check_is_refused() {
 
 /// Runs `read` on another thread and fails the test if it has not answered within ten seconds,
 /// so a read that blocks on a pipe fails rather than hangs.
+#[cfg(target_os = "linux")]
 fn within_ten_seconds(
     read: impl FnOnce() -> Result<String, SourceError> + Send + 'static,
 ) -> Result<String, SourceError> {
@@ -265,6 +271,7 @@ fn within_ten_seconds(
 
 /// A pipe swapped in for the checked file is refused without waiting for a writer.
 #[test]
+#[cfg(target_os = "linux")]
 fn a_pipe_swapped_in_after_the_check_is_refused_without_blocking() {
     let dir = Fresh::new("swap-fifo");
     write(&dir.0.join("ca.crt"), "checked", 0o400);
@@ -281,6 +288,7 @@ fn a_pipe_swapped_in_after_the_check_is_refused_without_blocking() {
 
 /// An owner-only pipe at the name itself is refused, not read as empty, without blocking.
 #[test]
+#[cfg(target_os = "linux")]
 fn a_pipe_at_the_name_is_refused() {
     let dir = Fresh::new("fifo");
     fifo(&dir.0.join("ca.crt"));
