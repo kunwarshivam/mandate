@@ -1472,6 +1472,33 @@ fn the_dry_run_holds_an_opening_as_the_binding_gate_does_once_the_account_has_tr
     );
 }
 
+/// The cooldown's edge, as mandate-risk reads it: refused while `now` is before the last exit fill
+/// plus `reentry_cooldown_s`, and allowed from that instant on.
+#[test]
+fn the_reentry_cooldown_ends_exactly_reentry_cooldown_s_after_the_exit_fill() {
+    for (exit_at, expected) in [
+        (COOLDOWN_S, asked()),
+        (COOLDOWN_S + 1, denied("reentry_cooldown")),
+    ] {
+        let mut rows = journaled_with(&RICH);
+        filled(&mut rows, "o1", ("buy", 3), "open", &after_regular(60));
+        filled(
+            &mut rows,
+            "o2",
+            ("sell", 3),
+            "owner_exit",
+            &after_regular(exit_at),
+        );
+        let rows = at_later(rows);
+        assert_eq!(
+            gate_over(&rows, Some(config())).check(&opening("3", "99.95")),
+            expected,
+            "exit {exit_at} s after REGULAR, asked {} s after it",
+            2 * COOLDOWN_S
+        );
+    }
+}
+
 proptest! {
     /// The dry run's answer to an opening equals the spec's, computed here on its own from the
     /// fills alone, over interleaved buys and exits at random instants: held while a position is
