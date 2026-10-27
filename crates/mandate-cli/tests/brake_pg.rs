@@ -1,8 +1,8 @@
 //! E21-34 (OPS-4; DEC-2000): the `mandate` binary's `agent kill` and `agent pause` against the
 //! workspace's Postgres journal, with nothing else running: each scope's kill switch is one
 //! `OwnerCommandIssued` on the control stream with its one `OwnerAlertSent` right after it (E8-9k),
-//! a pause with no agent in scope commits nothing and
-//! succeeds, and a pause that cannot commit exits non-zero. Skipped without `MANDATE_PG_URL`.
+//! a pause with no agent in scope commits nothing and succeeds, and a pause that cannot commit
+//! exits non-zero. Skipped without `MANDATE_PG_URL`.
 
 #[path = "../../mandate-journal/tests/common/mod.rs"]
 mod common;
