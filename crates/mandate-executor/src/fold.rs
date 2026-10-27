@@ -3681,6 +3681,61 @@ mod protection_tests {
 }
 
 #[cfg(test)]
+mod mode_layering_tests {
+    use mandate_canon::Value;
+
+    use crate::error::ExecutorError;
+    use crate::payload::{clock, object};
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Executor, Ids, executor_config, fees};
+    use crate::types::{AgentId, Mode, RiskClock};
+
+    fn applied(to: &str, restriction: &str) -> Result<Value, ExecutorError> {
+        object(vec![
+            ("agent", Value::Str("agent-a".to_owned())),
+            ("to", Value::Str(to.to_owned())),
+            ("restriction", Value::Str(restriction.to_owned())),
+            ("originated", Value::Bool(true)),
+            ("risk_clock", clock(RiskClock::from_secs(0))?),
+        ])
+    }
+
+    /// DR's run 3 (the coordinator's safety check): a risk rung's `exits_only`, journaled after an
+    /// agent kill switch's `stopped`, layers under it and never loosens it (mandate spec §5.9, most
+    /// restrictive wins). The effective mode stays `stopped` while the rung holds and once it is
+    /// lifted; only the switch's own `normal` lifts the stop, and then the rung still binds while
+    /// it holds.
+    #[test]
+    fn a_later_risk_rung_never_loosens_a_kill_switchs_stop() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let agent = AgentId("agent-a".to_owned());
+        for lift_the_rung_first in [true, false] {
+            let mut executor = Executor::opened(&ports)?;
+            executor.commit_one("AgentModeApplied", applied("stopped", "kill_switch")?)?;
+            executor.commit_one("AgentModeApplied", applied("exits_only", "exits_only")?)?;
+            assert_eq!(executor.state.effective_mode(&agent), Mode::Stopped);
+            if lift_the_rung_first {
+                executor.commit_one("AgentModeApplied", applied("normal", "exits_only")?)?;
+                assert_eq!(executor.state.effective_mode(&agent), Mode::Stopped);
+                executor.commit_one("AgentModeApplied", applied("normal", "kill_switch")?)?;
+                assert_eq!(executor.state.effective_mode(&agent), Mode::Normal);
+            } else {
+                executor.commit_one("AgentModeApplied", applied("normal", "kill_switch")?)?;
+                assert_eq!(executor.state.effective_mode(&agent), Mode::ExitsOnly);
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
 mod interval_tests {
     use mandate_canon::Value;
 
