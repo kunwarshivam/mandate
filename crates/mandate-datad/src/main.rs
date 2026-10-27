@@ -39,15 +39,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_bars::generations;
 use mandate_datad::iex::generation::Writer;
-use mandate_datad::iex::instruments::Registered;
 use mandate_datad::iex::key::{platform_key, vault_config};
 use mandate_datad::iex::pass::Pass;
 use mandate_datad::iex::progress::{Judged, Progress};
-use mandate_datad::iex::registrations::Registrations;
 use mandate_datad::iex::schedule::Jitter;
 use mandate_datad::iex::source::ClientSource;
+use mandate_datad::iex::worker::{self, ControlRows, Parts};
 use mandate_datad::{Instrument, observation, series};
-use mandate_journal::StreamId;
+use mandate_journal::{StoredEvent, StreamId, TrustedStart};
 use mandate_journal_pg::PgJournal;
 use mandate_marketdata::client::{Client, TokioPause};
 use mandate_marketdata::http::AlpacaDataHttp;
@@ -266,13 +265,24 @@ struct IexTarget {
     dir: PathBuf,
 }
 
-/// The worker: reads the control stream incrementally every [`series::REFRESH`], and at every
-/// [`TICK`] makes one pass, telling the probe loop through `progress`, until `terminate` or a refused key. The probe loop never waits on it,
-/// so a slow fetch or journal read never misses a heartbeat.
-#[allow(
-    clippy::disallowed_methods,
-    reason = "the binary's edge reads a monotonic clock only to pace its loop (ES-05)"
-)]
+/// The control stream over Postgres, each read driven to completion on `runtime`.
+struct PgRows<'a> {
+    runtime: &'a tokio::runtime::Runtime,
+    journal: &'a PgJournal,
+    stream: &'a StreamId,
+}
+
+impl ControlRows for PgRows<'_> {
+    fn rows_from(&self, start: TrustedStart) -> Result<Vec<StoredEvent>, &'static str> {
+        self.runtime
+            .block_on(self.journal.rows_from(self.stream, start))
+            .map_err(|e| e.code())
+    }
+}
+
+/// Builds the worker's parts over Postgres, the bars transport and the store, and runs
+/// [`worker::run`] until `terminate` or a refused key. A part that cannot be built marks the worker
+/// stopped, so the process fails and its restart tries again.
 fn work(
     target: &IexTarget,
     key: mandate_marketdata::http::Credentials,
@@ -296,34 +306,26 @@ fn work(
         FsArtifactStore::open_existing(&target.artifacts).map_err(|_| "artifacts_unavailable")?;
     let writer =
         Writer::new(target.store.clone(), target.artifacts.clone()).map_err(|e| e.code())?;
-    let mut pass = Pass::new(writer, Jitter::of(&target.workspace));
-    let mut kept = Registrations::default();
-    let mut read_at: Option<Instant> = None;
-    let mut held: Option<Registered> = None;
-    while !terminate.load(Ordering::SeqCst) {
-        if series::due(read_at.map(|at| at.elapsed())) {
-            match runtime.block_on(journal.rows_from(&stream, kept.next_start())) {
-                Ok(rows) => {
-                    kept.extend(rows);
-                    held = Some(kept.registered(&artifacts));
-                }
-                Err(error) => eprintln!("registrations_not_read: {}", error.code()),
-            }
-            read_at = Some(Instant::now());
-        }
-        if let Some(registered) = &held {
-            let tick = pass.step(&source, &calendar, registered, host_now());
-            for line in &tick.log {
-                eprintln!("{line}");
-            }
-            if tick.stop {
-                progress.stopped();
-                return Ok(());
-            }
-            progress.passed(host_now());
-        }
-        thread::sleep(TICK);
-    }
+    let control = PgRows {
+        runtime: &runtime,
+        journal: &journal,
+        stream: &stream,
+    };
+    let parts = Parts {
+        source: &source,
+        control: &control,
+        artifacts: &artifacts,
+        calendar: &calendar,
+        pass: Pass::new(writer, Jitter::of(&target.workspace)),
+    };
+    worker::run(
+        parts,
+        terminate,
+        progress,
+        &host_now,
+        &|| thread::sleep(TICK),
+        &mut |line| eprintln!("{line}"),
+    );
     Ok(())
 }
 
@@ -364,7 +366,6 @@ fn run_iex(target: &IexTarget, socket: &Path) -> Result<u8, &'static str> {
             }
         })
     };
-    let mut started = false;
     loop {
         if let State::Exited(exit) = lifecycle.state() {
             status.publish(lifecycle.snapshot());
@@ -377,13 +378,11 @@ fn run_iex(target: &IexTarget, socket: &Path) -> Result<u8, &'static str> {
             lifecycle.observe(now, Input::Settled);
             continue;
         }
-        let input = match progress.judged(now, started) {
+        let input = match progress.judged(now) {
             Judged::Failed => Input::Failed,
-            Judged::Starting => Input::Heartbeat,
+            Judged::Starting | Judged::Passing => Input::Heartbeat,
             Judged::Started => Input::StartupPassed,
-            Judged::Passing => Input::Heartbeat,
         };
-        started |= input == Input::StartupPassed;
         lifecycle.observe(now, input);
         status.publish(lifecycle.snapshot());
         thread::sleep(TICK);

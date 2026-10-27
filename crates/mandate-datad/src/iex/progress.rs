@@ -18,6 +18,7 @@ pub struct Progress {
     passed_at: AtomicI64,
     started: AtomicBool,
     stop: AtomicBool,
+    counted: AtomicBool,
 }
 
 /// What the probe loop makes of the worker's progress.
@@ -25,7 +26,8 @@ pub struct Progress {
 pub enum Judged {
     /// The key was refused, the worker stopped, or it is stalled: the process fails.
     Failed,
-    /// No pass has finished yet: not ready.
+    /// No pass has finished yet: not ready. Its bound is the orchestrator's start-up probe: a
+    /// journal that never reads leaves the process here, not ready, until that probe restarts it.
     Starting,
     /// The first pass has finished: ready. A workspace that is not paper, or whose snapshots do
     /// not read, has passes that write nothing, and is ready all the same.
@@ -46,8 +48,9 @@ impl Progress {
         self.stop.store(true, Ordering::SeqCst);
     }
 
-    /// The probe loop's reading at `now`, `started` saying whether it already counted the start.
-    pub fn judged(&self, now: UtcNanos, started: bool) -> Judged {
+    /// The probe loop's reading at `now`: [`Judged::Started`] once, at the first reading after the
+    /// first pass, and [`Judged::Passing`] after.
+    pub fn judged(&self, now: UtcNanos) -> Judged {
         if self.stop.load(Ordering::SeqCst) {
             return Judged::Failed;
         }
@@ -59,7 +62,7 @@ impl Progress {
             .saturating_sub(self.passed_at.load(Ordering::SeqCst));
         if since > STALL_S {
             Judged::Failed
-        } else if started {
+        } else if self.counted.swap(true, Ordering::SeqCst) {
             Judged::Passing
         } else {
             Judged::Started

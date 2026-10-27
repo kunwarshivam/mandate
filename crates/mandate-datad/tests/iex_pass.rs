@@ -284,26 +284,30 @@ fn the_probe_loop_fails_only_a_refused_key_a_stopped_worker_or_a_stall() {
     use mandate_datad::iex::progress::{Judged, Progress, STALL_S};
     let t = |secs: i64| UtcNanos::from_parts(1_800_000_000 + secs, 0).unwrap();
     let progress = Progress::default();
-    assert_eq!(progress.judged(t(0), false), Judged::Starting);
+    assert_eq!(progress.judged(t(0)), Judged::Starting);
     assert_eq!(
-        progress.judged(t(10_000), false),
+        progress.judged(t(10_000)),
         Judged::Starting,
         "no pass yet is not ready, not failed"
     );
     progress.passed(t(0));
-    assert_eq!(progress.judged(t(1), false), Judged::Started);
-    assert_eq!(progress.judged(t(1), true), Judged::Passing);
+    assert_eq!(
+        progress.judged(t(1)),
+        Judged::Started,
+        "the start is counted once"
+    );
+    assert_eq!(progress.judged(t(1)), Judged::Passing);
     assert_eq!(STALL_S, 600);
     assert_eq!(
-        progress.judged(t(600), true),
+        progress.judged(t(600)),
         Judged::Passing,
         "a long paced fetch is not a stall"
     );
-    assert_eq!(progress.judged(t(601), true), Judged::Failed);
+    assert_eq!(progress.judged(t(601)), Judged::Failed);
     progress.passed(t(601));
-    assert_eq!(progress.judged(t(602), true), Judged::Passing);
+    assert_eq!(progress.judged(t(602)), Judged::Passing);
     progress.stopped();
-    assert_eq!(progress.judged(t(602), true), Judged::Failed);
+    assert_eq!(progress.judged(t(602)), Judged::Failed);
 }
 
 #[test]
@@ -435,4 +439,202 @@ fn registrations_are_read_from_after_the_last_row_and_objects_once() {
     store.0.borrow_mut().clear();
     assert_eq!(kept.registered(&store), first, "and kept after");
     assert_eq!(*store.1.borrow(), 1);
+}
+
+mod worker_loop {
+    use std::cell::{Cell as Counter, RefCell};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use mandate_datad::iex::progress::{Judged, Progress};
+    use mandate_datad::iex::worker::{ControlRows, Parts, REFRESH_S, run};
+    use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, StoredEvent, TrustedStart};
+    use mandate_time::UtcNanos;
+
+    use super::{Cell, Fake, calendar};
+
+    /// A control stream of no rows that records where each read started.
+    #[derive(Default)]
+    struct Rows(RefCell<Vec<TrustedStart>>);
+
+    impl ControlRows for Rows {
+        fn rows_from(&self, start: TrustedStart) -> Result<Vec<StoredEvent>, &'static str> {
+            self.0.borrow_mut().push(start);
+            Ok(Vec::new())
+        }
+    }
+
+    struct NoObjects;
+
+    impl ArtifactSource for NoObjects {
+        fn read_artifact(&self, _: &ArtifactRef) -> Result<Vec<u8>, ArtifactError> {
+            Err(ArtifactError::Missing)
+        }
+    }
+
+    /// Runs the worker over `fake`, the clock one second further at each pause, until `turns`
+    /// pauses have passed; the reads it made, its log, and the progress it left.
+    fn turns(cell: &Cell, fake: &Fake, turns: u32) -> (Vec<TrustedStart>, Vec<String>, Progress) {
+        let rows = Rows::default();
+        let calendar = calendar();
+        let clock = Counter::new(1_793_115_000_i64);
+        let paused = Counter::new(0u32);
+        let terminate = AtomicBool::new(false);
+        let progress = Progress::default();
+        let mut log = Vec::new();
+        run(
+            Parts {
+                source: fake,
+                control: &rows,
+                artifacts: &NoObjects,
+                calendar: &calendar,
+                pass: cell.pass(),
+            },
+            &terminate,
+            &progress,
+            &|| UtcNanos::from_parts(clock.get(), 0).unwrap(),
+            &|| {
+                clock.set(clock.get() + 1);
+                paused.set(paused.get() + 1);
+                if paused.get() >= turns {
+                    terminate.store(true, Ordering::SeqCst);
+                }
+            },
+            &mut |line| log.push(line.to_owned()),
+        );
+        let reads = rows.0.into_inner();
+        (reads, log, progress)
+    }
+
+    #[test]
+    fn the_worker_reads_every_minute_passes_each_turn_and_marks_its_end() {
+        let cell = Cell::new("worker");
+        let fake = Fake {
+            bars: Vec::new(),
+            status: None,
+            asked: RefCell::new(0),
+        };
+        let (reads, log, progress) = turns(&cell, &fake, 125);
+        assert_eq!(REFRESH_S, 60);
+        assert_eq!(
+            reads.len(),
+            3,
+            "at the start, a minute on and two minutes on"
+        );
+        assert!(
+            reads.iter().all(|start| *start == TrustedStart::GENESIS),
+            "no rows, so each read starts at the stream's start"
+        );
+        assert!(log.is_empty(), "{log:?}");
+        assert_eq!(
+            progress.judged(UtcNanos::from_parts(1_793_115_200, 0).unwrap()),
+            Judged::Failed,
+            "a worker that has left its loop is stopped, so the probe loop never waits on it"
+        );
+    }
+
+    #[test]
+    fn a_refused_key_ends_the_worker_at_once() {
+        let cell = Cell::new("worker-key");
+        let fake = Fake {
+            bars: Vec::new(),
+            status: Some(401),
+            asked: RefCell::new(0),
+        };
+        let calendar = calendar();
+        let terminate = AtomicBool::new(false);
+        let progress = Progress::default();
+        let mut log = Vec::new();
+        let paused = Counter::new(0u32);
+        let snapshot = br#"{"asset_class":"us_equity","instrument_id":"a","symbol":"QQQ"}"#;
+        struct One(Vec<u8>);
+        impl ArtifactSource for One {
+            fn read_artifact(&self, _: &ArtifactRef) -> Result<Vec<u8>, ArtifactError> {
+                Ok(self.0.clone())
+            }
+        }
+        struct Registering(String);
+        impl ControlRows for Registering {
+            fn rows_from(&self, start: TrustedStart) -> Result<Vec<StoredEvent>, &'static str> {
+                if start != TrustedStart::GENESIS {
+                    return Ok(Vec::new());
+                }
+                Ok(vec![StoredEvent {
+                    stream_id: "ctl:ws".to_owned(),
+                    seq: 1,
+                    event_id: "e1".to_owned(),
+                    event_type: "ConfigSnapshotRegistered".to_owned(),
+                    schema_version: 1,
+                    environment: "paper".to_owned(),
+                    recorded_at: "2026-10-27T12:00:00Z".to_owned(),
+                    prev_hash: mandate_canon::Digest::ZERO,
+                    hash: mandate_canon::Digest::ZERO,
+                    body: format!(
+                        r#"{{"payload":{{"kind":"instrument_snapshot","content_hash":"{}"}}}}"#,
+                        self.0
+                    )
+                    .into_bytes(),
+                }])
+            }
+        }
+        run(
+            Parts {
+                source: &fake,
+                control: &Registering(ArtifactRef::of(snapshot).to_string()),
+                artifacts: &One(snapshot.to_vec()),
+                calendar: &calendar,
+                pass: cell.pass(),
+            },
+            &terminate,
+            &progress,
+            &|| super::at("2026-10-27T14:30:10Z"),
+            &|| paused.set(paused.get() + 1),
+            &mut |line| log.push(line.to_owned()),
+        );
+        assert_eq!(
+            paused.get(),
+            0,
+            "the worker left at its first pass, before any pause"
+        );
+        assert_eq!(log, ["daily_not_written: fetch"]);
+        assert_eq!(
+            progress.judged(super::at("2026-10-27T14:30:11Z")),
+            Judged::Failed
+        );
+    }
+
+    #[test]
+    fn a_worker_that_panics_is_marked_stopped() {
+        let cell = Cell::new("worker-panic");
+        let fake = Fake {
+            bars: Vec::new(),
+            status: None,
+            asked: RefCell::new(0),
+        };
+        let rows = Rows::default();
+        let calendar = calendar();
+        let terminate = AtomicBool::new(false);
+        let progress = Progress::default();
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run(
+                Parts {
+                    source: &fake,
+                    control: &rows,
+                    artifacts: &NoObjects,
+                    calendar: &calendar,
+                    pass: cell.pass(),
+                },
+                &terminate,
+                &progress,
+                &|| super::at("2026-10-27T14:30:10Z"),
+                &|| panic!("the pause fails"),
+                &mut |_| {},
+            );
+        }));
+        assert!(unwound.is_err());
+        assert_eq!(
+            progress.judged(super::at("2026-10-27T14:30:11Z")),
+            Judged::Failed,
+            "a panic before any pass still fails the process rather than leaving it starting"
+        );
+    }
 }
