@@ -493,7 +493,7 @@ on without it.
    - The next staging `apply` reads them, masked at once.
    - It writes them to the staging vault at `platform/news-data-key`, on the standard input of
      `mandate vault put news-data-key`, through the secret-import identity.
-   - Only the news reader can read it there.
+   - Only the news reader and the data process's bars reader (DEC-2283) can read it there.
    - The run prints `news data key: written`. Until you add both, it prints `not set` and changes
      nothing.
 4. Dispatch `infra` with `apply` on `staging`.

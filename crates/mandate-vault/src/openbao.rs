@@ -472,6 +472,7 @@ pub fn kubernetes_login_path(
         | Identity::SecretImport
         | Identity::ModelGateway
         | Identity::NewsReader
+        | Identity::BarsReader
         | Identity::EmailSender
         | Identity::Provisioner => return Err(SourceError::Config),
     };
@@ -1154,6 +1155,7 @@ pub(crate) fn provisioned_identities(
         Identity::SecretImport,
         Identity::ModelGateway,
         Identity::NewsReader,
+        Identity::BarsReader,
         Identity::EmailSender,
     ];
     if provisioner {
