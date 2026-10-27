@@ -226,6 +226,10 @@ modelGateway:
   deployment: ""
   workspaceMonthlyUsd: ""
   deploymentMonthlyUsd: ""
+  # The live registry file (DEC-2216 item 4, DEC-2081), strict JSON: a hosted cell's alone, and
+  # staging's alone among them. Named, the gateway starts live from it and the vault; empty, it
+  # serves the recorded bundle, which only the local cell's image carries.
+  registry: ""
 
 # The broker every executor runs over (DEC-2306 item 1): `fixture`, the in-process fixture paper
 # broker, or `alpaca-paper`, Alpaca's paper trading host under the vault lease on its connection,

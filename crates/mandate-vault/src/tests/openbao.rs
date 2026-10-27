@@ -142,6 +142,7 @@ fn provisioning_covers_every_process_type_and_each_connections_two_roles() {
             Identity::SecretImport,
             Identity::ModelGateway,
             Identity::NewsReader,
+            Identity::BarsReader,
             Identity::EmailSender,
             Identity::Executor(c("c1")),
             Identity::TokenExchange(c("c1")),
@@ -149,7 +150,7 @@ fn provisioning_covers_every_process_type_and_each_connections_two_roles() {
             Identity::TokenExchange(c("c2")),
         ]
     );
-    assert_eq!(provisioned_identities(&[], false).len(), 7);
+    assert_eq!(provisioned_identities(&[], false).len(), 8);
 }
 
 /// Given the workspace's namespace, provisioning also makes the role provisioner's AppRole, after
@@ -158,10 +159,10 @@ fn provisioning_covers_every_process_type_and_each_connections_two_roles() {
 fn the_role_provisioner_is_provisioned_only_with_the_workspaces_namespace() {
     let c = |id: &str| ConnectionId::new(id).unwrap();
     let with = provisioned_identities(&[c("c1")], true);
-    assert_eq!(with.len(), 10);
-    assert_eq!(with[7], Identity::Provisioner);
+    assert_eq!(with.len(), 11);
+    assert_eq!(with[8], Identity::Provisioner);
     assert_eq!(
-        with[8..],
+        with[9..],
         [
             Identity::Executor(c("c1")),
             Identity::TokenExchange(c("c1"))
@@ -176,6 +177,7 @@ fn the_role_provisioner_is_provisioned_only_with_the_workspaces_namespace() {
             Identity::SecretImport,
             Identity::ModelGateway,
             Identity::NewsReader,
+            Identity::BarsReader,
             Identity::EmailSender,
             Identity::Provisioner,
             Identity::Executor(c("c1")),
@@ -198,12 +200,13 @@ fn a_secret_id_is_issued_to_every_identity_but_the_token_exchanges() {
             Identity::SecretImport,
             Identity::ModelGateway,
             Identity::NewsReader,
+            Identity::BarsReader,
             Identity::EmailSender,
             Identity::Executor(c("c1")),
             Identity::Executor(c("c2")),
         ]
     );
-    assert_eq!(secret_id_identities(&[], false).len(), 7);
+    assert_eq!(secret_id_identities(&[], false).len(), 8);
 }
 
 /// Provisioning a vault nobody answers for is an outage, never an empty success that would leave
@@ -251,6 +254,7 @@ async fn only_a_connections_processes_log_in_with_kubernetes_auth() {
         Identity::SecretImport,
         Identity::ModelGateway,
         Identity::NewsReader,
+        Identity::BarsReader,
         Identity::EmailSender,
         Identity::Provisioner,
     ] {

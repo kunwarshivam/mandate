@@ -18,6 +18,8 @@ export const ALERT_KINDS = {
   account_restriction: { class: "safety", label: "The broker restricted the account" },
   connection_unavailable: { class: "safety", label: "Your connection cannot be reached or used" },
   protection: { class: "safety", label: "A position's protection changed" },
+  protection_unattributed: { class: "safety", label: "New positions are held: a protective order has no owner" },
+  attribution_deficit: { class: "safety", label: "New positions are held: your agents hold more than the account" },
   exit_stalled: { class: "safety", label: "An exit is stalled" },
   reconciliation: { class: "safety", label: "The account did not reconcile" },
   external_activity: { class: "safety", label: "Activity on the account outside your agents" },

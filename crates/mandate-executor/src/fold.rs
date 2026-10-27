@@ -708,12 +708,17 @@ fn gate_decided(
             if flag(payload, "held_long") {
                 state.held_long.insert(id.clone());
             }
+            match optional_text(payload, "reason_code") {
+                Some(reason) => state.hold_reasons.insert(id.clone(), reason.to_owned()),
+                None => state.hold_reasons.remove(&id),
+            };
             state.held.insert(id);
             return Ok(());
         }
         _ => return Err(refused("verdict")),
     }
     state.held.remove(&id);
+    state.hold_reasons.remove(&id);
     Ok(())
 }
 
@@ -1190,6 +1195,7 @@ fn order_abandoned(state: &mut ExecutorState, payload: &Value) -> Result<(), Exe
         record.outcome = IntentOutcome::Abandoned;
     }
     state.held.remove(&intent);
+    state.hold_reasons.remove(&intent);
     Ok(())
 }
 

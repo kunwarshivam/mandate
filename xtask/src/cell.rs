@@ -2293,7 +2293,7 @@ const VAULT_DRILL_CONNECTIONS: [&str; 2] = ["demo-paper", "drill-other"];
 /// DEC-2020's rows) lets that role read that KV path. Written out here, not read from the crate:
 /// a connection's entries are under `x` and its id's hex (DEC-2060 item 3), `x64656d6f2d7061706572`
 /// for `demo-paper` and `x6472696c6c2d6f74686572` for `drill-other`.
-const VAULT_DRILL_READS: [(&str, &str, bool); 18] = [
+const VAULT_DRILL_READS: [(&str, &str, bool); 23] = [
     ("runtime", "connections/x64656d6f2d7061706572/token", false),
     (
         "runtime",
@@ -2347,6 +2347,15 @@ const VAULT_DRILL_READS: [(&str, &str, bool); 18] = [
         false,
     ),
     ("news-reader", "platform/alpaca-oauth-client-secret", false),
+    ("bars-reader", "platform/news-data-key", true),
+    ("bars-reader", "platform/model-provider-key", false),
+    ("bars-reader", "platform/email-credential", false),
+    ("bars-reader", "platform/alpaca-oauth-client-secret", false),
+    (
+        "bars-reader",
+        "connections/x64656d6f2d7061706572/token",
+        false,
+    ),
     (
         "executor-demo-paper",
         "connections/x64656d6f2d7061706572/code",
@@ -2355,11 +2364,11 @@ const VAULT_DRILL_READS: [(&str, &str, bool); 18] = [
 ];
 
 /// How many `mandate-*` policies the drill's scan must have read: one per process type (the API,
-/// the connection manager, the runtime, the secret import, the model gateway, the news reader and
-/// the email sender) and two per connection (its executor and its token exchange), for
+/// the connection manager, the runtime, the secret import, the model gateway, the news reader, the
+/// bars reader and the email sender) and two per connection (its executor and its token exchange), for
 /// [`VAULT_DRILL_CONNECTIONS`]. A scan that reads fewer, as one whose `bao policy list` failed,
 /// has proved nothing about wildcards.
-const VAULT_DRILL_POLICIES: usize = 11;
+const VAULT_DRILL_POLICIES: usize = 12;
 
 /// The only stanzas holding a wildcard that the vault drill admits, each in the one policy it may
 /// appear in: DEC-2349's one-segment `+` for a connection the web made after the vault was
@@ -6215,8 +6224,13 @@ mod tests {
             "news-reader platform/model-provider-key denied",
             "news-reader connections/x64656d6f2d7061706572/token denied",
             "news-reader platform/alpaca-oauth-client-secret denied",
+            "bars-reader platform/news-data-key allowed",
+            "bars-reader platform/model-provider-key denied",
+            "bars-reader platform/email-credential denied",
+            "bars-reader platform/alpaca-oauth-client-secret denied",
+            "bars-reader connections/x64656d6f2d7061706572/token denied",
             "executor-demo-paper connections/x64656d6f2d7061706572/code denied",
-            "checked 11 mandate policies",
+            "checked 12 mandate policies",
         ];
         let probe = |lines: &[&str]| -> String {
             lines
@@ -6307,23 +6321,23 @@ mod tests {
             vault_drill_problems(&missing, VAULT_DRILL_POLICIES),
             ["want `model-gateway platform/model-provider-key allowed`, got `no answer`"]
         );
-        let unscanned = held.replace("checked 11 mandate policies", "checked 0 mandate policies");
+        let unscanned = held.replace("checked 12 mandate policies", "checked 0 mandate policies");
         assert_eq!(
             vault_drill_problems(&unscanned, VAULT_DRILL_POLICIES),
-            ["want `checked 11 mandate policies`, got `checked 0 mandate policies`"]
+            ["want `checked 12 mandate policies`, got `checked 0 mandate policies`"]
         );
-        let scanned_twice = format!("{held}{}", probe(&["checked 11 mandate policies"]));
+        let scanned_twice = format!("{held}{}", probe(&["checked 12 mandate policies"]));
         assert_eq!(
             vault_drill_problems(&scanned_twice, VAULT_DRILL_POLICIES),
             [
-                "want `checked 11 mandate policies`, got `checked 11 mandate policies` and \
-                 `checked 11 mandate policies`"
+                "want `checked 12 mandate policies`, got `checked 12 mandate policies` and \
+                 `checked 12 mandate policies`"
             ]
         );
         let no_scan = probe(&expected[..expected.len() - 1]);
         assert_eq!(
             vault_drill_problems(&no_scan, VAULT_DRILL_POLICIES),
-            ["want `checked 11 mandate policies`, got `no scan`"]
+            ["want `checked 12 mandate policies`, got `no scan`"]
         );
         let errored = held.replace(
             "executor-demo-paper connections/x64656d6f2d7061706572/token allowed",
@@ -6360,11 +6374,11 @@ mod tests {
     }
 
     /// Once `cell up` provisions for the role provisioner, the drill must read its three policies
-    /// too: fourteen, and eleven is a scan that missed some.
+    /// too: fifteen, and twelve is a scan that missed some.
     #[test]
     fn the_vault_drill_counts_the_provisioned_policies() {
-        assert_eq!(vault_drill_policies(false), 11);
-        assert_eq!(vault_drill_policies(true), 14);
+        assert_eq!(vault_drill_policies(false), 12);
+        assert_eq!(vault_drill_policies(true), 15);
         let scan = |n: usize| format!("[pod/vault-drill-1-x/probe] checked {n} mandate policies\n");
         let only_scan = |logs: &str, policies: usize| -> Vec<String> {
             vault_drill_problems(logs, policies)
@@ -6373,12 +6387,12 @@ mod tests {
                 .collect()
         };
         assert_eq!(
-            only_scan(&scan(14), vault_drill_policies(true)),
+            only_scan(&scan(15), vault_drill_policies(true)),
             Vec::<String>::new()
         );
         assert_eq!(
-            only_scan(&scan(11), vault_drill_policies(true)),
-            ["want `checked 14 mandate policies`, got `checked 11 mandate policies`"]
+            only_scan(&scan(12), vault_drill_policies(true)),
+            ["want `checked 15 mandate policies`, got `checked 12 mandate policies`"]
         );
     }
 

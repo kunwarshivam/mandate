@@ -401,7 +401,7 @@ parameter as written, in that one policy, beside DEC-2349's grants. Kubernetes a
 the executors' templated policy, whose two one-segment `create` grants below the executor's own
 connection, its account and fingerprint entries (DEC-2339, DEC-2345), the drill admits whole too,
 with only the mount's accessor, which each vault names afresh, read as a placeholder. It then
-reads fourteen `mandate-*` policies, not eleven.
+reads fifteen `mandate-*` policies, not twelve.
 
 A production cell is initialized and unsealed by the founder, by hand (DEC-977 item 5):
 

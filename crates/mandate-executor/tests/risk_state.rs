@@ -2056,6 +2056,93 @@ fn a_record_the_fold_would_not_have_produced_makes_the_view_unreadable() {
     );
 }
 
+/// DEC-2849 I7, one fold per followed agent (item 3): a risk record or mode record another
+/// agent's fold owed, naming that agent, steps nothing in this one, even beside a record of this
+/// fold's from the same cause. Read anywhere, the fold's view and what it owes
+/// are those of a fold that never saw it (a record naming this fold's agent that it never returned
+/// stays `not_reproduced`: `a_record_the_fold_would_not_have_produced_makes_the_view_unreadable`).
+#[test]
+fn another_agents_risk_record_steps_nothing() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (_, rows) = mc_r01_journaled(&mandate, &calendar);
+    let mut records: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| {
+            row.event_type.starts_with("Risk") || row.event_type == "AgentModeApplied"
+        })
+        .map(|(index, _)| index)
+        .collect();
+    records.sort_by_key(|index| rows[*index].event_type.clone());
+    records.dedup_by_key(|index| rows[*index].event_type.clone());
+    assert!(
+        records
+            .iter()
+            .any(|index| rows[*index].event_type == "AgentModeApplied"),
+        "a mode record, which names its `agent`"
+    );
+    assert!(!records.is_empty(), "the walk journals records");
+    let mut checked = 0;
+    for at in 1..rows.len() {
+        for &record in &records {
+            let body = String::from_utf8(rows[record].body.clone()).unwrap();
+            let key = [r#""agent_id":""#, r#""agent":""#]
+                .into_iter()
+                .find(|key| body.contains(key))
+                .unwrap();
+            let start = body.find(key).unwrap() + key.len();
+            let end = start + body[start..].find('"').unwrap();
+            let others = format!("{}{}{}", &body[..start], "agent-other", &body[end..]);
+            let mut seen = open_case(&case, &mandate, &calendar);
+            let mut unseen = open_case(&case, &mandate, &calendar);
+            for row in &rows[..at] {
+                seen.fold(row).unwrap();
+                unseen.fold(row).unwrap();
+            }
+            let foreign = StoredEvent {
+                seq: rows[at - 1].seq + 1,
+                body: others.into_bytes(),
+                ..rows[record].clone()
+            };
+            assert_eq!(seen.fold(&foreign).unwrap(), Vec::new());
+            let mut next = unseen.clone();
+            let shifted: Vec<StoredEvent> = rows[at..]
+                .iter()
+                .map(|row| StoredEvent {
+                    seq: row.seq + 1,
+                    ..row.clone()
+                })
+                .collect();
+            for row in &shifted {
+                seen.fold(row).unwrap();
+            }
+            for row in &rows[at..] {
+                next.fold(row).unwrap();
+            }
+            let snapshot = |view: &RiskView| match view {
+                RiskView::Readable { snapshot, .. } => Some(snapshot.clone()),
+                RiskView::Unreadable { .. } => None,
+            };
+            assert!(snapshot(seen.view()).is_some(), "still readable");
+            assert_eq!(
+                (
+                    snapshot(seen.view()),
+                    seen.owed().cloned().collect::<Vec<_>>()
+                ),
+                (
+                    snapshot(next.view()),
+                    next.owed().cloned().collect::<Vec<_>>()
+                ),
+                "{} naming another agent, read after row {at}",
+                rows[record].event_type
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0);
+}
+
 /// A crash between a cause and its records leaves them owed at the head: the restarted fold reads
 /// the stream to its end and names exactly the records to append next (R3).
 #[test]
