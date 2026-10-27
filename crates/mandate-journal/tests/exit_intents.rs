@@ -86,7 +86,7 @@ fn the_section_holds_each_record_version_and_every_part() {
         .collect();
     want.sort();
     assert_eq!(versions, want);
-    for (part, at_least) in [("invalid_drafts", 147), ("valid_drafts", 28)] {
+    for (part, at_least) in [("invalid_drafts", 175), ("valid_drafts", 28)] {
         let n = list(&section, part).len();
         assert!(n >= at_least, "{n} {part}; never fewer than {at_least}");
     }
