@@ -44,9 +44,12 @@ runners, and the runners' job-started hook refuses an approved fork's job before
    and only its members can read the droplets' user data, which holds the App's key. If you have
    only one team, as now, use it (DEC-2074). Then:
    - the alert covers the team's whole bill, so set it at your other spend plus 150 USD;
-   - the token can reach the team's other droplets, so revoke it as soon as each apply ends;
-   - any member with Droplet read can read the App's key, so rotate it whenever a member joins
-     (§6).
+   - the token can delete or change any droplet, firewall or tag in the team, staging's and
+     production's cluster nodes and their firewall included, so revoke it as soon as each apply
+     ends (§4);
+   - any member with Droplet read can read the App's key, so every current member must be one you
+     trust with it, and rotate it whenever a member joins (§6);
+   - the runners sit in `sfo2`'s default VPC, likely the clusters' own (DEC-2074 item 2).
 2. **Billing alert.** In that team, **Billing → Billing alerts**, set an alert at **150 USD** a
    month, or at your other spend plus 150 USD in a shared team. No API sets this. The plan's own
    check also refuses a fleet over 150 USD.
@@ -62,8 +65,8 @@ runners, and the runners' job-started hook refuses an approved fork's job before
    | Regions | read | the plan checks the size is offered in `sfo2` |
    | Image | read | the droplets' Ubuntu 24.04 image |
 
-   If an apply fails with a 403 that names another scope, add only that one. Keep the token in
-   your password manager, or regenerate it when you next apply.
+   If an apply fails with a 403 that names another scope, add only that one. Revoke the
+   token once the apply ends (§4) and make a new one for the next apply.
 
 ## 3. GitHub: the runner App (least privilege)
 
@@ -114,6 +117,8 @@ The state is written to `ci-runners.tfstate` in that directory, encrypted with y
 Keep the passphrase: without it, later applies cannot read the state. Git ignores the state and
 `.terraform/` there, so neither is committed by accident; keep a backup of the state with the
 passphrase.
+
+**Then revoke the DigitalOcean token** (**API → Tokens**), and make a new one for the next apply.
 
 **Wait about 20 to 30 minutes.** Each droplet installs Docker and Sysbox, then builds the job image,
 which runs the repository's `.cursor/install.sh`. Then **Settings → Actions → Runners** lists one
@@ -173,7 +178,7 @@ hook passing. It fails closed, so a wrong guess fails jobs and never admits one.
 |---|---|
 | OpenTofu state (encrypted with your passphrase) | the droplets' ids, names and addresses; the firewall and tag; the cost estimate; and a SHA-1 digest of the boot script, which the DigitalOcean provider stores instead of its text. No variable is stored in state |
 | Each droplet | the App's private key at `/etc/mandate-runner/app.pem`, root only (mode 0600), and the client id, installation id and repository in `/etc/mandate-runner/env`. Jobs run in a separate container that never sees either |
-| DigitalOcean | the boot script, key included, as the droplets' user data: readable through each droplet's metadata service, and by anyone with Droplet read on the team, in the console and the API. Hence a team of the runners' own, and the 90-day rotation. The host blocks jobs from the metadata service, the host itself and every private range |
+| DigitalOcean | the boot script, key included, as the droplets' user data: readable through each droplet's metadata service, and by anyone with Droplet read on the team, in the console and the API. Hence a team of the runners' own where possible; in a shared team, rotation whenever a member joins (DEC-2074), and every 90 days. The host blocks jobs from the metadata service, the host itself and every private range |
 | GitHub | each job's one-hour installation token, revoked once its runner is registered, and the runner's single-use registration |
 
 What this does not guard, said plainly, is DEC-2065 item 6.
