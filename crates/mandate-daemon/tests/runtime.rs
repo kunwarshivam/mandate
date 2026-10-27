@@ -1514,12 +1514,16 @@ fn the_tick_runs_whatever_the_models_inputs_read() {
     assert_eq!(process.lifecycle().state(), State::Ready);
 
     rig.agent_extra.borrow_mut().clear();
+    drop(process);
+    let mut process = modelled(&rig, &host, &closes);
     tick(&rig, NOW + 11);
     process.step(at(NOW + 12));
     assert_eq!(
         count(&rig, "ModelOutputRecorded"),
         1,
-        "once readable, the output is recorded"
+        "once readable, the output is recorded: a journal that took the record away is read \
+         again whole at the next start, since a running process reads only what follows its head \
+         (DEC-2847 item 4, DEC-2852)"
     );
     assert_eq!(risk_clock(&process), Some(NOW + 11));
 }
@@ -3134,4 +3138,134 @@ fn an_owner_exit_just_filled_asks_nothing_inside_the_reentry_cooldown() {
         Some("reentry_cooldown"),
         "{payload:?}"
     );
+}
+
+/// [`Rig`] read as a journal that follows each stream from a held head (DEC-2852): its
+/// `rows_from` hands only the records at and past the asked seq, and counts every record it hands,
+/// so a test sees how much a pass reads.
+#[derive(Clone, Default)]
+struct Following {
+    rig: Rig,
+    handed: Rc<Cell<usize>>,
+}
+
+impl Store for Following {
+    fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
+        self.rig.take_ownership(stream)
+    }
+
+    fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
+        let rows = self.rig.rows(stream)?;
+        self.handed.set(self.handed.get() + rows.len());
+        Some(rows)
+    }
+
+    fn rows_from(
+        &self,
+        stream: &StreamId,
+        start: mandate_journal::TrustedStart,
+    ) -> Option<Vec<StoredEvent>> {
+        let since: Vec<StoredEvent> = self
+            .rig
+            .rows(stream)?
+            .into_iter()
+            .filter(|row| row.seq >= start.from_seq)
+            .collect();
+        self.handed.set(self.handed.get() + since.len());
+        Some(since)
+    }
+
+    fn append(
+        &mut self,
+        stream: &StreamId,
+        head: u64,
+        epoch: u64,
+        recorded_at: UtcNanos,
+        drafts: &[Vec<u8>],
+    ) -> AppendOutcome {
+        self.rig.append(stream, head, epoch, recorded_at, drafts)
+    }
+}
+
+/// DEC-2852: over a long run, a pass reads only what was appended since the last, never its
+/// streams' whole length: here the one tick each pass adds.
+#[test]
+fn a_long_run_reads_only_what_each_pass_appended() {
+    let following = Following::default();
+    let mut process = RuntimeProcess::start(following.clone(), wiring(), &config(), at(NOW));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    for second in 1..=2_000 {
+        tick(&following.rig, NOW + second);
+        let before = following.handed.get();
+        process.step(at(NOW + second));
+        let read = following.handed.get() - before;
+        assert!(
+            read <= 1,
+            "pass {second} read {read} records, not only its own tick"
+        );
+    }
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+
+    /// DEC-2852: a process that reads each stream only past its head journals exactly what one
+    /// reading every stream whole at every pass journals, whatever the interleaving of kill
+    /// switches, ticks, the executor pausing and resuming the agent, lost append answers, steps and
+    /// restarts, and folds to the same state. The whole reader is the plain
+    /// [`Rig`], whose records follow no chain, so every read of it is read again whole.
+    #[test]
+    fn reading_past_the_head_journals_what_reading_whole_streams_does(
+        ops in proptest::collection::vec((op(), any::<Option<bool>>()), 1..24),
+    ) {
+        let whole = Rig::default();
+        let following = Following::default();
+        for rig in [&whole, &following.rig] {
+            established(rig, CONNECTION, ACCOUNT_REF, 2);
+            reconciled(rig, ACCOUNT);
+        }
+        let mut second = NOW;
+        let mut by_whole = start(&whole, second);
+        let mut by_head =
+            RuntimeProcess::start(following.clone(), wiring(), &config(), at(second));
+        for (op, mode) in ops {
+            second += 1;
+            for rig in [&whole, &following.rig] {
+                if let Some(paused) = mode {
+                    let to = if paused { "paused" } else { "normal" };
+                    on_account(
+                        rig,
+                        ACCOUNT,
+                        "AgentModeApplied",
+                        &format!(r#"{{"agent":"{AGENT}","to":"{to}"}}"#),
+                    );
+                }
+                match op {
+                    Op::KillSwitch => kill_switch(rig),
+                    Op::Tick => tick(rig, second),
+                    Op::LoseAnswer => rig.lose_answers.set(1),
+                    Op::Step | Op::Restart => {}
+                }
+            }
+            match op {
+                Op::Step => {
+                    by_whole.step(at(second));
+                    by_head.step(at(second));
+                }
+                Op::Restart => {
+                    by_whole = start(&whole, second);
+                    by_head =
+                        RuntimeProcess::start(following.clone(), wiring(), &config(), at(second));
+                }
+                _ => {}
+            }
+        }
+        let bodies = |rig: &Rig| -> Vec<Vec<u8>> {
+            agent_rows(rig).into_iter().map(|row| row.body).collect()
+        };
+        prop_assert_eq!(bodies(&following.rig), bodies(&whole), "{:?}", kinds(&whole));
+        prop_assert_eq!(by_head.lifecycle().state(), by_whole.lifecycle().state());
+        prop_assert_eq!(by_head.state(), by_whole.state(), "the folded state, its risk clock and mode");
+    }
 }

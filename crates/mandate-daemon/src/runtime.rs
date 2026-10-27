@@ -13,7 +13,7 @@ use mandate_canon::{Digest, Object, parse};
 
 use crate::deployment::ApproverSource;
 use crate::production::Facts;
-use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId, TrustedStart};
 use mandate_process::{Input as Lifecycled, Kind, Lifecycle, State};
 use mandate_runtime::{
     Deployment, Effect, EventDraft, FlattenPlanner, GateDryRun, IdGen, Input, MandateView,
@@ -110,6 +110,79 @@ enum Account {
     Unfoldable,
 }
 
+/// One stream as far as the process has read it (DEC-2852): the seq and hash of the last record,
+/// so the next read asks the store only for what follows, and, where a port reads the whole
+/// stream, every record read.
+#[derive(Default)]
+struct Tail {
+    head: Option<(u64, Digest)>,
+    keep: bool,
+    rows: Vec<StoredEvent>,
+}
+
+impl Tail {
+    fn kept() -> Self {
+        Self {
+            keep: true,
+            ..Self::default()
+        }
+    }
+
+    /// The records of `stream` that follow the head, read from `store` and kept when this tail
+    /// keeps them. A read past the head the store refuses is read again from the first record,
+    /// replacing what was kept, and every record is new again; `None` when neither reads, and
+    /// then nothing kept is read (`AGENTS.md` rule 3).
+    fn read<S: Store>(&mut self, store: &S, stream: &StreamId) -> Option<Vec<StoredEvent>> {
+        let start = self
+            .head
+            .map_or(TrustedStart::GENESIS, |(seq, hash)| TrustedStart {
+                from_seq: seq.saturating_add(1),
+                prev_hash: hash,
+            });
+        let since = match store.rows_from(stream, start) {
+            Some(since) => since,
+            None if self.head.is_some() => {
+                let all = store.rows_from(stream, TrustedStart::GENESIS)?;
+                self.head = None;
+                self.rows.clear();
+                all
+            }
+            None => return None,
+        };
+        if let Some(last) = since.last() {
+            self.head = Some((last.seq, last.hash));
+        }
+        if self.keep {
+            self.rows.extend(since.iter().cloned());
+        }
+        Some(since)
+    }
+}
+
+/// The streams the process reads at every pass, each read only past the head it was last read to
+/// (DEC-2852): the control and agent streams kept whole for the ports that read them so, the
+/// account and clock streams kept as nothing but their head, the clock with its latest tick and
+/// the record that gave it.
+struct Tails {
+    control: Tail,
+    agent: Tail,
+    account: Tail,
+    clock: Tail,
+    latest_tick: Option<(UtcNanos, StoredEvent)>,
+}
+
+impl Default for Tails {
+    fn default() -> Self {
+        Self {
+            control: Tail::kept(),
+            agent: Tail::kept(),
+            account: Tail::default(),
+            clock: Tail::default(),
+            latest_tick: None,
+        }
+    }
+}
+
 /// One agent deployment's runtime process.
 pub struct RuntimeProcess<S> {
     store: S,
@@ -139,6 +212,8 @@ pub struct RuntimeProcess<S> {
     models_at: Option<i64>,
     /// The models' inputs of the latest evaluation not yet handed, in order, ahead of its tick.
     models_queue: VecDeque<Input>,
+    /// What the process has read of each stream it follows (DEC-2852).
+    tails: Tails,
 }
 
 impl<S: Store> RuntimeProcess<S> {
@@ -167,6 +242,7 @@ impl<S: Store> RuntimeProcess<S> {
             research,
             models_at: None,
             models_queue: VecDeque::new(),
+            tails: Tails::default(),
         };
         if config.environment != Environment::Paper {
             this.lifecycle.observe(now, Lifecycled::Failed);
@@ -225,7 +301,7 @@ impl<S: Store> RuntimeProcess<S> {
     /// startup hold is taken on the whole fold (DEC-1014 item 2). Whether the control stream, and
     /// the account stream it names if any, were read and folded whole.
     fn replay_account(&mut self) -> bool {
-        let Some(control) = self.control.as_ref().and_then(|c| self.store.rows(c)) else {
+        let Some(control) = self.control_rows() else {
             return false;
         };
         self.account = account_of(&control, self.state.deployment(), self.environment);
@@ -345,8 +421,7 @@ impl<S: Store> RuntimeProcess<S> {
     /// the owner's kill switch is never queued behind a tick (ES-06). The rows read, if the pass
     /// ended with nothing in doubt.
     fn control_pass(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> Option<Vec<StoredEvent>> {
-        let control = self.control.clone()?;
-        let rows = self.store.rows(&control)?;
+        let rows = self.control_rows()?;
         if let Some(source) = &self.wiring.approvers {
             self.wiring.view.approval.approvers = source.current(&rows);
         }
@@ -399,7 +474,7 @@ impl<S: Store> RuntimeProcess<S> {
     /// Folds the rows of `account` past the core's head for it. A row the core cannot fold, or one
     /// journaled for another environment, is never skipped (DEC-85, `AGENTS.md` rule 8).
     fn fold_account(&mut self, account: &StreamId) -> Account {
-        let Some(rows) = self.store.rows(account) else {
+        let Some(rows) = self.tails.account.read(&self.store, account) else {
             return Account::Unreadable;
         };
         if let Some(facts) = &self.wiring.facts {
@@ -434,16 +509,26 @@ impl<S: Store> RuntimeProcess<S> {
         let Some(clock) = self.clock.clone() else {
             return false;
         };
-        let Some(rows) = self.store.rows(&clock) else {
+        let Some(rows) = self.tails.clock.read(&self.store, &clock) else {
             return false;
         };
+        for row in rows.iter().filter(|r| r.event_type == "ClockAdvanced") {
+            if let Some(tick) = tick_of(row)
+                && self
+                    .tails
+                    .latest_tick
+                    .as_ref()
+                    .is_none_or(|(latest, _)| tick > *latest)
+            {
+                self.tails.latest_tick = Some((tick, row.clone()));
+            }
+        }
+        if let Some((_, row)) = &self.tails.latest_tick {
+            self.feed(std::slice::from_ref(row));
+        }
         self.feed(&rows);
         self.read_working_universe();
-        let latest = rows
-            .iter()
-            .filter(|r| r.event_type == "ClockAdvanced")
-            .filter_map(tick_of)
-            .max();
+        let latest = self.tails.latest_tick.as_ref().map(|(tick, _)| *tick);
         match latest {
             Some(tick) => {
                 let at = RiskClock::from_secs(tick.secs());
@@ -491,10 +576,10 @@ impl<S: Store> RuntimeProcess<S> {
     /// The inputs the pinned models' new evaluations at `at` hand, in order, each evaluation's
     /// closes stored first; nothing when the agent stream or its outputs do not read.
     fn models_inputs(&mut self, at: RiskClock) -> Vec<Input> {
-        let Some(rows) = self.agent.clone().and_then(|agent| self.store.rows(&agent)) else {
+        let Some(rows) = self.agent_rows() else {
             return Vec::new();
         };
-        let control = self.control.as_ref().and_then(|c| self.store.rows(c));
+        let control = self.control_rows();
         let streams = Streams {
             control: control.as_deref(),
             agent: &rows,
@@ -545,7 +630,7 @@ impl<S: Store> RuntimeProcess<S> {
         if facts.working_universe().is_none() {
             return;
         }
-        let rows = self.agent.clone().and_then(|agent| self.store.rows(&agent));
+        let rows = self.agent_rows();
         self.wiring.view.working_universe = match rows {
             Some(rows) => {
                 facts.feed(&rows);
@@ -553,6 +638,20 @@ impl<S: Store> RuntimeProcess<S> {
             }
             None => BTreeSet::new(),
         };
+    }
+
+    /// The control stream's records, read only past the head it was last read to (DEC-2852).
+    fn control_rows(&mut self) -> Option<Vec<StoredEvent>> {
+        let control = self.control.clone()?;
+        self.tails.control.read(&self.store, &control)?;
+        Some(self.tails.control.rows.clone())
+    }
+
+    /// The agent stream's records, read only past the head it was last read to (DEC-2852).
+    fn agent_rows(&mut self) -> Option<Vec<StoredEvent>> {
+        let agent = self.agent.clone()?;
+        self.tails.agent.read(&self.store, &agent)?;
+        Some(self.tails.agent.rows.clone())
     }
 
     /// Feeds `rows` to the production ports' fold, which takes each row once (DEC-2378 S2).

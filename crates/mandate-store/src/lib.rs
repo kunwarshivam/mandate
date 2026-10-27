@@ -34,6 +34,29 @@ pub trait Store {
     /// The stream's records, verified from its first. `None` when the store cannot answer.
     fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>>;
 
+    /// The stream's records from `start.from_seq` on, for a reader that holds the stream up to
+    /// the seq before it with that record's hash (DEC-2847): `None` when the store cannot answer
+    /// or the first of them does not follow `start`, as a reader whose held head is not this
+    /// journal's must read the whole stream again. A store that reads only whole streams answers
+    /// from [`Self::rows`], whose records are verified from their first, so a read from the first
+    /// record is that read; the journal's own stores read only what follows.
+    fn rows_from(&self, stream: &StreamId, start: TrustedStart) -> Option<Vec<StoredEvent>> {
+        if start == TrustedStart::GENESIS {
+            return self.rows(stream);
+        }
+        let since: Vec<StoredEvent> = self
+            .rows(stream)?
+            .into_iter()
+            .filter(|row| row.seq >= start.from_seq)
+            .collect();
+        match since.first() {
+            Some(first) if first.seq != start.from_seq || first.prev_hash != start.prev_hash => {
+                None
+            }
+            _ => Some(since),
+        }
+    }
+
     /// Appends `drafts` at `expected_head` under `epoch`, recorded at `recorded_at`.
     fn append(
         &mut self,
@@ -50,11 +73,16 @@ pub trait Store {
 #[derive(Debug, Clone, Default)]
 pub struct MemoryStore(pub Rc<RefCell<MemoryJournal>>);
 
-impl MemoryStore {
-    /// The stream's records from `start.from_seq` on, for a reader that holds the stream up to the
-    /// seq before it: `None` when the first of them does not follow `start`, as a reader whose
-    /// held head is not this journal's must read the whole stream again.
-    pub fn rows_from(&self, stream: &StreamId, start: TrustedStart) -> Option<Vec<StoredEvent>> {
+impl Store for MemoryStore {
+    fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
+        Some(self.0.borrow_mut().take_ownership(stream))
+    }
+
+    fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
+        Some(self.0.borrow().rows(stream).to_vec())
+    }
+
+    fn rows_from(&self, stream: &StreamId, start: TrustedStart) -> Option<Vec<StoredEvent>> {
         let journal = self.0.borrow();
         let since: Vec<StoredEvent> = journal
             .rows(stream)
@@ -68,16 +96,6 @@ impl MemoryStore {
             }
             _ => Some(since),
         }
-    }
-}
-
-impl Store for MemoryStore {
-    fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
-        Some(self.0.borrow_mut().take_ownership(stream))
-    }
-
-    fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
-        Some(self.0.borrow().rows(stream).to_vec())
     }
 
     fn append(
@@ -120,16 +138,6 @@ impl PgStore {
     }
 }
 
-impl PgStore {
-    /// The stream's records from `start.from_seq` on, their chain checked from `start`
-    /// ([`PgJournal::rows_from`]). `None` when the store cannot answer or the chain fails.
-    pub fn rows_from(&self, stream: &StreamId, start: TrustedStart) -> Option<Vec<StoredEvent>> {
-        self.runtime
-            .block_on(self.journal.rows_from(stream, start))
-            .ok()
-    }
-}
-
 impl Store for PgStore {
     fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
         self.runtime
@@ -139,6 +147,14 @@ impl Store for PgStore {
 
     fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
         self.runtime.block_on(self.journal.rows(stream)).ok()
+    }
+
+    /// The stream's records from `start.from_seq` on, their chain checked from `start`
+    /// ([`PgJournal::rows_from`]). `None` when the store cannot answer or the chain fails.
+    fn rows_from(&self, stream: &StreamId, start: TrustedStart) -> Option<Vec<StoredEvent>> {
+        self.runtime
+            .block_on(self.journal.rows_from(stream, start))
+            .ok()
     }
 
     fn append(
