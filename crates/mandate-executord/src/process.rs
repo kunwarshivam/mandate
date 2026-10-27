@@ -14,10 +14,9 @@ use mandate_executor::{
     BindingGateSource, BrokerOrder, BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate,
     Command, ConnectionTrouble, ConnectorError, Effect, EventDraft, EventId, ExecutorConfig,
     ExecutorError, ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot, IntentBody,
-    IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, MarketObservation,
-    OrderState, Ports,
-    ProtectionPrices, ReconcileReason, RiskClock, Seq, SuspendReason, ThesisRow, WriterEpoch, fold,
-    handle, limit_fills, recorded_fills,
+    IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, MarketObservation, OrderState,
+    Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, SuspendReason, ThesisRow,
+    WriterEpoch, fold, handle, limit_fills, recorded_fills,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};

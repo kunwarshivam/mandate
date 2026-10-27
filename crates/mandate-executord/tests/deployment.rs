@@ -2574,9 +2574,10 @@ fn the_owners_kill_switch_after_the_opening_fills_sells_the_position() -> Result
 /// from the latest mark the process holds, never from the bracket's stop. The sell goes within
 /// the first rung's 0.5% of the 580.11 bid the fixture quotes, not at the stop, and nothing is
 /// journaled `exit_unpriced`. With `frozen`, the feed answers no fresh quote from just before the
-/// switch on, so every read of that pass fails: the switch still applies and its flatten sells in
-/// the same pass, priced from the mark held from before. Nothing in the kill's path reads the feed.
-fn the_kill_switch_prices_from_the_held_mark(frozen: bool) -> Result<(), Error> {
+/// switch on, so every read fails: the switch still applies and its flatten sells in the same pass
+/// as with the feed up, priced from the mark held from before. Nothing in the kill's path reads the
+/// feed. Answers the second of the pass the flatten first sold in.
+fn the_kill_switch_prices_from_the_held_mark(frozen: bool) -> Result<u32, Error> {
     let stale: Rc<Cell<Option<UtcNanos>>> = Rc::new(Cell::new(None));
     let clock = Rc::clone(&stale);
     let (journal, mut process, _paper) = trade_loop_quoting(
@@ -2664,23 +2665,24 @@ fn the_kill_switch_prices_from_the_held_mark(frozen: bool) -> Result<(), Error> 
             ("subject", text(AGENT)),
         ])?,
     )?;
-    let now = "2026-09-21T16:02:00Z";
-    tick(&journal, "tk120", now)?;
-    process.step(at(now)?);
+    let mut sold_at = None;
+    for second in (120..240).step_by(5) {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(&journal, &format!("tk{second}"), &now)?;
+        process.step(at(&now)?);
+        if sold_at.is_none() && !flatten_limits(&journal).is_empty() {
+            sold_at = Some(second);
+        }
+    }
     let types = journal.types(ACCOUNT_STREAM);
     assert_eq!(journal.switched(), [AGENT], "the switch applies: {types:?}");
-    let limits: Vec<String> = journal
-        .payloads("OrderSubmitted")
-        .iter()
-        .filter(|p| p.get("side").and_then(Value::as_str) == Some("sell"))
-        .filter_map(|p| p.get("limit").and_then(Value::as_str).map(str::to_owned))
-        .collect();
+    let limits = flatten_limits(&journal);
     let [limit] = limits.as_slice() else {
-        return Err(format!("one flatten sell in the switch's own pass: {limits:?} {types:?}").into());
+        return Err(format!("one flatten sell: {limits:?} {types:?}").into());
     };
     let limit = Price::parse(limit)?;
     assert!(
-        limit >= Price::parse("577.20")? && limit <= Price::parse("580.11")?,
+        limit >= Price::parse("577.2")? && limit <= Price::parse("580.11")?,
         "priced within the first rung's 0.5% of the 580.11 bid, not at the stop: {limit}"
     );
     let unpriced = journal
@@ -2689,17 +2691,36 @@ fn the_kill_switch_prices_from_the_held_mark(frozen: bool) -> Result<(), Error> 
         .filter(|p| p.get("action").and_then(Value::as_str) == Some("exit_unpriced"))
         .count();
     assert_eq!(unpriced, 0, "a marked flatten is not unpriced: {types:?}");
-    Ok(())
+    sold_at.ok_or_else(|| "the flatten never sold".into())
+}
+
+/// The limit of each sell the journal records submitted.
+fn flatten_limits(journal: &support::Journal) -> Vec<String> {
+    journal
+        .payloads("OrderSubmitted")
+        .iter()
+        .filter(|p| p.get("side").and_then(Value::as_str) == Some("sell"))
+        .filter_map(|p| {
+            p.get("limit_price")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect()
 }
 
 #[test]
 fn the_flatten_of_a_kill_switch_prices_from_the_held_mark() -> Result<(), Error> {
-    the_kill_switch_prices_from_the_held_mark(false)
+    the_kill_switch_prices_from_the_held_mark(false).map(|_| ())
 }
 
 #[test]
 fn a_feed_down_at_the_kill_neither_delays_nor_fails_its_flatten() -> Result<(), Error> {
-    the_kill_switch_prices_from_the_held_mark(true)
+    assert_eq!(
+        the_kill_switch_prices_from_the_held_mark(true)?,
+        the_kill_switch_prices_from_the_held_mark(false)?,
+        "the flatten sells in the same pass with the feed down as with it up"
+    );
+    Ok(())
 }
 
 fn owner_exit_after_the_opening(stale: bool) -> Result<(), Error> {

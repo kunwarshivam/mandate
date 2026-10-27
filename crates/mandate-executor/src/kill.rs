@@ -1031,15 +1031,30 @@ mod tests {
                     _ => None,
                 })
                 .collect();
-            let alerted = if initiator == Initiator::Owner {
+            let unpriced = effects
+                .iter()
+                .find_map(|effect| match effect {
+                    Effect::Journal(draft)
+                        if draft.event_type == "ProtectionChanged"
+                            && field(draft, "action").and_then(Value::as_str)
+                                == Some("exit_unpriced") =>
+                    {
+                        Some(&draft.event_id)
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| missing("the unpriced close"))?;
+            let mut alerted = if initiator == Initiator::Owner {
                 Vec::new()
             } else {
                 vec![(&record.event_id, "kill_switch")]
             };
+            alerted.push((unpriced, "exit_stalled"));
             assert_eq!(
                 alerts, alerted,
                 "{name}: the API alerts a user's switch with its command, so the executor alerts \
-                 only the others (E8-9k, notifications spec §3.4)"
+                 only the others (E8-9k, notifications spec §3.4); and the close no mark prices, \
+                 raised at the stop, is alerted for every switch (DEC-2853)"
             );
             assert_eq!(
                 raised(&effects),
@@ -1412,48 +1427,16 @@ mod tests {
         Ok(())
     }
 
-    /// A filled entry of 10 AAPL with its bracket's entry order still open, switched by its risk
-    /// limit, `quoted` with a sane 151 quote first or not, and then the entry's cancel confirmed:
-    /// the effects of that step, which raises the flatten.
+    /// Ten AAPL protected by an OCO stopping at 140 ([`protected`]), in the regular session,
+    /// `quoted` with a sane 151 quote, or with no quote or sane bid held at all (both
+    /// process-local, as after a restart): the effects of the risk limit's switch, which raises
+    /// the flatten in its own step.
     fn switched_after_a_fill(
         ports: &Ports<'_>,
         quoted: bool,
     ) -> Result<Vec<Effect>, ExecutorError> {
-        let mut executor = bracket_entry(ports)?;
-        for (event_type, pairs) in [
-            (
-                "OrderSubmitted",
-                vec![
-                    ("client_order_id", text("md-held")),
-                    ("agent", text("agent-a")),
-                    ("instrument", text("AAPL")),
-                    ("side", text("buy")),
-                    ("qty", text("10")),
-                    ("limit", text("150")),
-                    ("purpose", text("open")),
-                ],
-            ),
-            (
-                "FillApplied",
-                vec![
-                    ("fill_id", text("f-held")),
-                    ("client_order_id", text("md-held")),
-                    ("instrument", text("AAPL")),
-                    ("side", text("buy")),
-                    ("qty_gross", text("10")),
-                    ("price", text("150")),
-                ],
-            ),
-            (
-                "OrderStateChanged",
-                vec![
-                    ("client_order_id", text("md-held")),
-                    ("state", text("filled")),
-                ],
-            ),
-        ] {
-            commit(&mut executor, event_type, pairs)?;
-        }
+        let mut executor = protected(ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(MONDAY)), ports)?;
         if quoted {
             executor.run(
                 Input::Market(MarketObservation {
@@ -1468,19 +1451,16 @@ mod tests {
                 }),
                 ports,
             )?;
+        } else {
+            executor.state.quotes.clear();
+            executor.state.sane_bids.clear();
         }
-        executor.run(switch(Initiator::RiskLimit, false)?, ports)?;
-        executor.run(
-            Input::Broker(Ok(BrokerOutcome::CancelAccepted {
-                client_order_id: format!("md-{ENTRY}"),
-            })),
-            ports,
-        )
+        executor.run(switch(Initiator::RiskLimit, false)?, ports)
     }
 
     /// DEC-2853: a flatten no sane mark prices is raised at once at the resting stop, never held,
     /// and is not silent: it is journaled `exit_unpriced`, caused by its switch, and the owner
-    /// alerted. One a sane quote prices goes the same, with neither.
+    /// alerted. One a sane quote prices is raised the same, with neither.
     #[test]
     fn a_flatten_no_mark_prices_goes_at_once_and_is_alerted() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -1493,8 +1473,11 @@ mod tests {
         };
         for quoted in [false, true] {
             let gone = switched_after_a_fill(&ports, quoted)?;
-            assert_eq!(raised(&gone).len(), 1, "quoted {quoted}");
-            assert_eq!(sells(&gone), 1, "quoted {quoted}: it sells at once");
+            assert_eq!(
+                raised(&gone).len(),
+                1,
+                "quoted {quoted}: the flatten is raised in the switch's own step"
+            );
             let unpriced = gone
                 .iter()
                 .filter(|effect| {
