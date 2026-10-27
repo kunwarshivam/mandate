@@ -1,6 +1,7 @@
 //! E21-34 (OPS-4; DEC-2000): the `mandate` binary's `agent kill` and `agent pause` against the
 //! workspace's Postgres journal, with nothing else running: each scope's kill switch is one
-//! `OwnerCommandIssued` on the control stream, a pause with no agent in scope commits nothing and
+//! `OwnerCommandIssued` on the control stream with its one `OwnerAlertSent` right after it (E8-9k),
+//! a pause with no agent in scope commits nothing and
 //! succeeds, and a pause that cannot commit exits non-zero. Skipped without `MANDATE_PG_URL`.
 
 #[path = "../../mandate-journal/tests/common/mod.rs"]
@@ -107,7 +108,7 @@ fn the_binary_commits_each_scope_kill_switch_and_pauses_in_postgres() {
     assert!(stderr.contains("1 pauses did not commit"), "{stderr}");
 
     let rows = read_stream(&target.journal, &ctl).unwrap();
-    let commands: Vec<Value> = rows[1..].iter().map(|r| parse(&r.body).unwrap()).collect();
+    let events: Vec<Value> = rows[1..].iter().map(|r| parse(&r.body).unwrap()).collect();
     let field = |event: &Value, name: &str| {
         event
             .get("payload")
@@ -115,21 +116,51 @@ fn the_binary_commits_each_scope_kill_switch_and_pauses_in_postgres() {
             .and_then(Value::as_str)
             .map(str::to_owned)
     };
-    assert_eq!(commands.len(), kills.len() + 1, "{commands:?}");
-    for (event, (argv, scope, subject)) in commands.iter().zip(&kills) {
+    let member =
+        |event: &Value, name: &str| event.get(name).and_then(Value::as_str).map(str::to_owned);
+    let mut expected: Vec<Option<String>> = kills
+        .iter()
+        .flat_map(|_| {
+            [
+                Some("OwnerCommandIssued".to_owned()),
+                Some("OwnerAlertSent".to_owned()),
+            ]
+        })
+        .collect();
+    expected.push(Some("OwnerCommandIssued".to_owned()));
+    assert_eq!(
+        events
+            .iter()
+            .map(|e| member(e, "event_type"))
+            .collect::<Vec<_>>(),
+        expected,
+        "each kill switch is followed by its one alert, committed with it (E8-9k, #2572), and the pause by none: {events:?}"
+    );
+    for (pair, (argv, scope, subject)) in events.chunks(2).zip(&kills) {
+        let (kill, alert) = (&pair[0], &pair[1]);
         assert_eq!(
-            field(event, "command").as_deref(),
+            field(kill, "command").as_deref(),
             Some("kill_switch"),
             "{argv:?}"
         );
-        assert_eq!(field(event, "scope").as_deref(), Some(*scope), "{argv:?}");
+        assert_eq!(field(kill, "scope").as_deref(), Some(*scope), "{argv:?}");
         assert_eq!(
-            field(event, "subject").as_deref(),
+            field(kill, "subject").as_deref(),
             Some(*subject),
             "{argv:?}"
         );
+        let command = member(kill, "event_id");
+        assert!(command.is_some(), "{argv:?}");
+        assert_eq!(
+            field(alert, "kind").as_deref(),
+            Some("kill_switch"),
+            "{argv:?}"
+        );
+        assert_eq!(field(alert, "owner_command"), command, "{argv:?}");
+        assert_eq!(field(alert, "subject"), command, "{argv:?}");
+        assert_eq!(member(alert, "causation_id"), command, "{argv:?}");
     }
-    let pause = &commands[kills.len()];
+    let pause = &events[2 * kills.len()];
     assert_eq!(field(pause, "command").as_deref(), Some("pause"));
     assert_eq!(field(pause, "subject").as_deref(), Some("agent-b"));
     std::fs::remove_dir_all(store).ok();
