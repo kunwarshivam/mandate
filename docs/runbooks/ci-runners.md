@@ -88,7 +88,7 @@ on every droplet as a long-lived bearer token tied to your account.
    - **Where can this GitHub App be installed?** Only on this account.
 2. **Create**, then on the App's page note the **Client ID**, and under **Private keys** click
    **Generate a private key**. Your browser downloads a `.pem`; keep it in your password manager
-   and delete the download after step 4.
+   and delete the download after step 5.
 3. **Install App → Only select repositories → `mandate`.** The installation's settings page
    address ends in its **installation id** (`.../settings/installations/<number>`); note the
    number.
@@ -97,6 +97,10 @@ on every droplet as a long-lived bearer token tied to your account.
 
 You need OpenTofu `1.13.1` (`bash .cursor/install.sh` installs it, or its GitHub release) and a
 checkout of `main`. In a shell, so no value lands in your history or a file:
+
+Before a retry, use step 7 to destroy any failed fleet still in state. Confirm `CI_RUNNER` is
+absent and **Settings → Actions → Runners** has no stale `mandate-ci-do` registration. Delete a
+stale offline registration there; never delete an unrelated self-hosted runner.
 
 ```bash
 cd deploy/tofu/environments/ci-runners
@@ -107,12 +111,13 @@ read -r TF_VAR_github_app_installation_id && export TF_VAR_github_app_installati
 TF_VAR_github_app_private_key="$(cat ~/Downloads/mandate-ci-runners.*.private-key.pem)"
 export TF_VAR_github_app_private_key
 tofu init
-tofu apply
+tofu apply -var runner_count=1
 ```
 
-The plan should create exactly: one `digitalocean_tag`, one `digitalocean_firewall`, three
-`digitalocean_droplet`s, and the budget's `terraform_data`, with `estimate_usd = 144`. The boot
-script shows as `(sensitive value)`. Type `yes`.
+From empty state, the canary plan should create exactly: one `digitalocean_tag`, one
+`digitalocean_firewall`, one `digitalocean_droplet`, and the budget's `terraform_data`, with
+`estimate_usd = 48`. The boot script shows as `(sensitive value)`. Type `yes`. Keep the App key
+until step 5 passes.
 
 The state is written to `ci-runners.tfstate` in that directory, encrypted with your passphrase.
 Keep the passphrase: without it, later applies cannot read the state. Git ignores the state and
@@ -121,17 +126,42 @@ passphrase.
 
 **Then revoke the DigitalOcean token** (**API → Tokens**), and make a new one for the next apply.
 
-**Wait about 20 to 30 minutes.** Each droplet installs Docker and Sysbox, then builds the job image,
-which runs the repository's `.cursor/install.sh`. Then **Settings → Actions → Runners** lists one
-idle runner per droplet, named `mandate-ci-runner-<n>-<time>`, with the label `mandate-ci-do`. A
-new one appears after every job; finished ones remove themselves. If none appears within 40 minutes, check step 1
-again: a host registers no runner while the setting reads anything but
-`all_external_contributors`.
+**Wait about 20 to 30 minutes.** The canary installs Docker and Sysbox, builds the job image,
+runs that image through a Sysbox, nested-Docker, DNS and GitHub HTTPS preflight, and only then
+registers. **Settings → Actions → Runners** must list one idle runner named
+`mandate-ci-runner-1-<time>`, with the label `mandate-ci-do`. If none is idle within 40 minutes,
+check step 1, keep `CI_RUNNER` absent, run `tofu destroy -var runner_count=1`, and stop. Do not
+reapply the same commit.
 
-## 5. Switch the cell jobs over
+## 5. Smoke, scale, then switch the cell jobs over
 
-**Settings → Secrets and variables → Actions → Variables → New repository variable:**
-name `CI_RUNNER`, value `mandate-ci-do`.
+With the one runner idle, dispatch **Actions → runner-smoke → Run workflow** on `main`, or:
+
+```bash
+gh workflow run runner-smoke.yml --ref main
+```
+
+Its three jobs run in sequence on the canary. Each gets a fresh ephemeral registration and proves
+the admission hook, non-root job user with passwordless `sudo`, nested Docker, k3d, kubectl, helm,
+and the metadata fence. All three must pass. If one fails, keep `CI_RUNNER` absent, destroy the
+canary, and stop.
+
+Scale only after that green run:
+
+```bash
+tofu apply
+```
+
+The plan should add two droplets, destroy nothing and change the estimate from 48 to 144 USD.
+Type `yes`, wait until three `mandate-ci-do` runners are idle, then dispatch `runner-smoke` again.
+Its three matrix jobs should run in parallel and all pass. A replacement registration appears
+after each job; completed registrations remove themselves.
+
+Only after the three-job fleet smoke is green, create the repository variable:
+
+```bash
+gh variable set CI_RUNNER --repo kunwarshivam/mandate --body mandate-ci-do
+```
 
 From the next run on, the cell jobs, `fast` and `full` of a pull request from this repository,
 and of `main`, run there. In a cell job's log, **Set up job** names the runner, and the runner's job-started hook
@@ -139,18 +169,20 @@ runs first and passes. Every other job stays on GitHub's runners, and still need
 jobs all fail with "This runner takes only kunwarshivam/mandate's own jobs", roll back (step 7)
 and tell lane RN: the hook refuses whatever it cannot read.
 
-**The first run is the hook's smoke test.** No agent can run a real runner, so the hook's inputs
-(the event's name, its payload and the ref) are untested until then. On the first pull request
-after the switch, and on the first run on `main`, check that a cell job's **Set up job** shows the
-hook passing. It fails closed, so a wrong guess fails jobs and never admits one.
+The dedicated smoke is the hook's first live proof. On the first pull request after the switch,
+and on the first run on `main`, also check that a cell job's **Set up job** names a
+`mandate-ci-runner` and shows the hook passing. It fails closed, so a wrong input fails jobs and
+never admits one. After both runs pass, save the App key in the password manager and delete the
+downloaded copy.
 
 ## 6. Day to day
 
 - **Nothing to do.** A droplet rebuilds the job image from `main`'s `.cursor/install.sh` once the
   image is a day old, before its next job, so new tool pins arrive by themselves; a job installs
-  any pin it still lacks itself. If a rebuild fails, the droplet keeps the old image. Ubuntu's
-  unattended upgrades may restart Docker on a droplet now and then; the job it was running fails
-  and can be re-run.
+  any pin it still lacks itself. Each new image passes the runtime preflight before it may
+  register. If a rebuild fails, the droplet keeps the old image. A failed listener's registration
+  is deleted before a bounded retry. Ubuntu's unattended upgrades may restart Docker on a droplet
+  now and then; the job it was running fails and can be re-run.
 - **A change to the fleet, the runner version or the base image** is a pull request to
   `deploy/tofu/`, then `tofu apply` as in step 4. Changing the boot script replaces the droplets.
 - **Rotating the App key, every 90 days:** generate a new key on the App's page, apply with it
@@ -165,11 +197,11 @@ hook passing. It fails closed, so a wrong guess fails jobs and never admits one.
 - **Back to GitHub's runners:** delete the `CI_RUNNER` variable (or set it empty). The next run
   uses `ubuntu-24.04` everywhere. A job already queued for `mandate-ci-do` waits for a runner:
   cancel that run and re-run it.
-- **Before approving a fork's workflow run:** delete `CI_RUNNER` and power the three droplets off
+- **Before approving a fork's workflow run:** delete `CI_RUNNER` and power every runner droplet off
   in the console (**Droplets → each → Power → Turn off**); power them on again after the run.
   A powered-off droplet still bills.
 - **Stop paying:** after the rollback, run `tofu destroy` in the same directory with the same
-  variables, or delete the three droplets, the firewall and the tag in the console. Then delete the
+  variables, or delete the runner droplets, the firewall and the tag in the console. Then delete the
   App's private key (or uninstall the App) and revoke the DigitalOcean token.
 - **If a runner misbehaves:** destroy it in the console; the next `tofu apply` makes a fresh one.
 

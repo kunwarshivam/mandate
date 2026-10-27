@@ -1431,6 +1431,10 @@ fn tofu_checks() -> Result<()> {
     if !unchecked.is_empty() {
         bail!("tofu:\n  {}", unchecked.join("\n  "));
     }
+    sh(
+        "python3",
+        &["deploy/tofu/modules/ci-runners/tests/manager_test.py"],
+    )?;
     Ok(())
 }
 
@@ -6759,8 +6763,9 @@ const READ_LINES: &[(&str, &str)] = &[
 
 /// The repository scripts a workflow may run, by the exact command word that runs them, each only
 /// while its whole text, comments included, holds no cargo word, no `.cargo` and no `CARGO_`
-/// (DEC-873 item 2). `ci.yml` runs the first four and the credential guard (DEC-964), `merge.yml`
-/// the fifth, and `release.yml`'s `release-signing` job the release signer (DEC-2024).
+/// (DEC-873 item 2). `ci.yml` runs the documentation and service scripts and the credential guard
+/// (DEC-964), `merge.yml` runs the merge guard, `release.yml` runs the release signer (DEC-2024),
+/// and `runner-smoke.yml` runs the runner smoke script (DEC-2078).
 const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/docs-only.sh",
     ".github/scripts/docs-checks.sh",
@@ -6769,6 +6774,7 @@ const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/start-minio.sh",
     ".github/scripts/merge-approved.sh",
     ".github/scripts/release-sign.sh",
+    ".github/scripts/runner-smoke.sh",
     CREDENTIAL_GUARD,
 ];
 
@@ -19479,11 +19485,17 @@ mod tests {
         ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == \
         'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}";
 
+    /// DEC-2078's canary reaches the runner label before `CI_RUNNER` is set, but only from the
+    /// founder-dispatched smoke on `main`; every other ref fails closed on a hosted runner.
+    const SMOKE_RUNNER_GUARD: &str = "${{ github.event_name == 'workflow_dispatch' && github.ref == \
+        'refs/heads/main' && 'mandate-ci-do' || 'ubuntu-24.04' }}";
+
     /// DEC-2075, DEC-2076: `select` runs on GitHub's runners and hands [`RUNNER_GUARD`] on as its
     /// `runner` output, and no other line of any workflow names `CI_RUNNER`, so every job that
-    /// reaches the self-hosted runners does so through `select`'s output of the one guard.
+    /// reaches the self-hosted runners does so through `select`'s output or DEC-2078's one
+    /// dispatch-only canary guard.
     #[test]
-    fn only_the_fork_guard_reaches_the_self_hosted_runners() -> Result<()> {
+    fn only_the_event_guards_reach_the_self_hosted_runners() -> Result<()> {
         let root = repo_root()?;
         let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))?;
         let select = workflow_job(&workflow, "select").context("ci.yml has a `select` job")?;
@@ -19523,7 +19535,10 @@ mod tests {
             "${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}",
             "${{ needs.select.outputs.runner }}",
             "${{ needs.select.outputs.runner || 'ubuntu-24.04' }}",
+            SMOKE_RUNNER_GUARD,
         ];
+        let smoke_path = root.join(".github/workflows/runner-smoke.yml");
+        let mut smoke_guards = 0_usize;
         for path in files_by_extension(&root.join(".github/workflows"), &["yml", "yaml"])? {
             for line in fs::read_to_string(&path)?.lines() {
                 let code = line.split(" #").next().unwrap_or(line).trim();
@@ -19546,13 +19561,26 @@ mod tests {
                         path.display()
                     );
                 }
-                assert!(
-                    !code.contains("self-hosted") && !code.contains("mandate-ci-do"),
-                    "{}: names the self-hosted runners' labels directly: {code}",
-                    path.display()
-                );
+                if code.contains("self-hosted") || code.contains("mandate-ci-do") {
+                    assert_eq!(
+                        path,
+                        smoke_path,
+                        "{} names a self-hosted label outside the smoke workflow: {code}",
+                        path.display()
+                    );
+                    assert_eq!(
+                        code,
+                        format!("runs-on: {SMOKE_RUNNER_GUARD}"),
+                        "the smoke workflow names the label only through DEC-2078's event guard"
+                    );
+                    smoke_guards = smoke_guards.saturating_add(1);
+                }
             }
         }
+        assert_eq!(
+            smoke_guards, 1,
+            "the dispatch-only smoke guard is written out exactly once"
+        );
         for job in workflow_jobs(&workflow) {
             let lines = workflow_job(&workflow, job).context("a listed job")?;
             for line in lines.iter().map(|l| l.trim()) {

@@ -39,3 +39,14 @@ variable "debug_ssh_cidr" {
   type        = string
   default     = ""
 }
+
+variable "runner_count" {
+  description = "One for the founder's canary; three for the approved fleet."
+  type        = number
+  default     = 3
+
+  validation {
+    condition     = floor(var.runner_count) == var.runner_count && var.runner_count >= 1 && var.runner_count <= 3
+    error_message = "The runner count is one canary through the approved three-runner fleet."
+  }
+}
