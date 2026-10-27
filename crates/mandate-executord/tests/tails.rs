@@ -22,8 +22,8 @@ use mandate_time::UtcNanos;
 use proptest::prelude::*;
 use support::{
     ACCOUNT_STREAM, AGENT, Allowing, CLOCK_STREAM, CONNECTION, CONTROL_STREAM, Error, Journal,
-    NOON, Paper, TwoPercentStop, agent_stream, at, deployed, kill, kill_command, process_config,
-    propose, revoke, start_allowing, stopped, tick, wired,
+    NOON, OTHER_AGENT, Paper, TwoPercentStop, agent_stream, at, deploy, deployed, kill,
+    kill_command, process_config, propose, revoke, start_allowing, stopped, tick, wired,
 };
 
 const OPEN: &str = "01JINTENT0000000000000000A";
@@ -427,42 +427,57 @@ fn a_kill_after_a_rewritten_control_stream_reaches_the_account_through_the_resta
 
 /// DEC-2854 item 4: once a check is due, a stream that will not read from its first record holds
 /// every opening, and never an exit, with the stream's alert raised, until it reads; then the
-/// opening goes. Nothing past its head is read meanwhile. The exit's account holds the position the
-/// journal does not, so it is not ready and takes no opening: an exit goes while it is not.
+/// opening goes. Nothing past its head is read meanwhile. So it is for the clock stream, the
+/// account stream the establishment reads, and another agent's stream. The exit's account holds
+/// the position the journal does not, so it is not ready and takes no opening: an exit goes while
+/// it is not.
 #[test]
 fn a_check_that_will_not_read_holds_openings_and_no_exit_until_it_does() -> Result<(), Error> {
-    for proposed in [OPEN, EXIT] {
+    let other = agent_stream(OTHER_AGENT);
+    for refused in [CLOCK_STREAM, ACCOUNT_STREAM, other.as_str(), "exit"] {
         let store = Following::over(deployed()?);
+        deploy(&store.journal, "c3", OTHER_AGENT, CONNECTION)?;
         let broker = Paper::new(&store.journal);
-        if proposed == EXIT {
+        let gate = OpeningGate::default();
+        if refused == "exit" {
             broker.holding("AAPL", "10")?;
         }
         let mut process = started(&store, &broker)?;
         for n in 1..=60 {
             process.step(secs(n)?);
+            let _connecting = pass(&mut process, &gate, secs(n)?);
         }
-        store
-            .whole_down
-            .borrow_mut()
-            .insert(CLOCK_STREAM.to_owned());
-        if proposed == EXIT {
+        let stream = if refused == "exit" {
+            CLOCK_STREAM
+        } else {
+            refused
+        };
+        store.whole_down.borrow_mut().insert(stream.to_owned());
+        if refused == "exit" {
             exit(&store.journal, EXIT)?;
             let alerts = process.step(secs(61)?);
             assert!(alerted(&alerts, "stream_unreadable"), "{alerts:?}");
             assert_eq!(store.journal.received(), [EXIT]);
             continue;
         }
+        let mut alerts = process.step(secs(61)?);
+        let _held = pass(&mut process, &gate, secs(61)?);
         opening(&store.journal, OPEN)?;
-        let alerts = process.step(secs(61)?);
-        assert!(alerted(&alerts, "stream_unreadable"), "{alerts:?}");
         for n in 62..=70 {
-            process.step(secs(n)?);
+            alerts.extend(process.step(secs(n)?));
+            let _held = pass(&mut process, &gate, secs(n)?);
         }
-        assert!(process.ready());
-        assert!(store.journal.received().is_empty());
+        assert!(
+            alerted(&alerts, "stream_unreadable"),
+            "{refused}: {alerts:?}"
+        );
+        assert!(process.ready(), "{refused}");
+        assert!(store.journal.received().is_empty(), "{refused}");
         store.whole_down.borrow_mut().clear();
         process.step(secs(71)?);
-        assert_eq!(store.journal.received(), [OPEN]);
+        let _open = pass(&mut process, &gate, secs(71)?);
+        process.step(secs(72)?);
+        assert_eq!(store.journal.received(), [OPEN], "{refused}");
     }
     Ok(())
 }

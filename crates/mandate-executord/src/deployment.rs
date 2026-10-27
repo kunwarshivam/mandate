@@ -1554,7 +1554,11 @@ mod incremental {
         let asked = journal.calls.get();
         journal.tick(2);
         assert_eq!(deployment.now(), None, "still nothing");
-        assert_eq!(journal.calls.get(), asked, "and the store asked nothing more");
+        assert_eq!(
+            journal.calls.get(),
+            asked,
+            "and the store asked nothing more"
+        );
     }
 
     #[test]

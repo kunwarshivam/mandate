@@ -292,3 +292,43 @@ impl GateReport {
         changed
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use mandate_canon::Digest;
+
+    use super::*;
+
+    fn of(event_type: &str) -> StoredEvent {
+        StoredEvent {
+            stream_id: "acct:ws1:acct1".to_owned(),
+            seq: 1,
+            event_id: "e1".to_owned(),
+            event_type: event_type.to_owned(),
+            schema_version: 1,
+            environment: "paper".to_owned(),
+            recorded_at: "2026-10-27T14:00:00Z".to_owned(),
+            prev_hash: Digest::ZERO,
+            hash: Digest::ZERO,
+            body: Vec::new(),
+        }
+    }
+
+    /// DEC-2854 item 2: the account stream's tail keeps the records [`establishment`] reads of it,
+    /// and no other.
+    #[test]
+    fn the_account_tail_keeps_only_what_the_establishment_reads() {
+        let kept: Vec<bool> = [
+            ESTABLISHED,
+            "ConnectionChecked",
+            REFUSED,
+            REVOKED,
+            "OrderSubmitted",
+            "ClockAdvanced",
+        ]
+        .into_iter()
+        .map(|event_type| establishing(&of(event_type)))
+        .collect();
+        assert_eq!(kept, [true, true, false, false, false, false]);
+    }
+}
