@@ -248,9 +248,9 @@ pub fn parse_corporate_actions(
 
 /// Parses one page of corporate actions requested for the symbols `asked`, each symbol's actions
 /// apart, every asked symbol answered, and the page's next token. Splits and cash dividends must
-/// name an asked symbol. Any other kind goes to each asked symbol one of its `*symbol` members
-/// names, or to every asked symbol when it names none, so no action that may concern a symbol is
-/// dropped. An action ID listed twice on the page is an error.
+/// name an asked symbol; any other kind goes where [`concerned`] says. Its members are read as raw
+/// text, so a member the parse does not use never fails the page. An action ID listed twice on the
+/// page is an error.
 pub(crate) fn parse_actions_for(
     asked: &BTreeSet<Symbol>,
     body: &[u8],
@@ -307,32 +307,20 @@ pub(crate) fn parse_actions_for(
                 }
             }
             _ => {
-                let wire: Vec<WireOther> = serde_json::from_str(raw.get()).map_err(json)?;
-                for w in wire {
-                    first_listing(&w.id)?;
+                let wire: Vec<BTreeMap<String, &RawValue>> =
+                    serde_json::from_str(raw.get()).map_err(json)?;
+                for members in wire {
+                    let id: String = required(&members, "id")?;
+                    first_listing(&id)?;
+                    let ex_date: Option<String> = optional(&members, "ex_date")?;
+                    let process_date: String = required(&members, "process_date")?;
                     let action = OtherAction {
-                        id: w.id,
+                        id,
                         kind: member.clone(),
-                        ex_date: optional_date("ex_date", w.ex_date)?,
-                        process_date: date("process_date", &w.process_date)?,
+                        ex_date: optional_date("ex_date", ex_date)?,
+                        process_date: date("process_date", &process_date)?,
                     };
-                    let mentioned: BTreeSet<&str> = w
-                        .fields
-                        .iter()
-                        .filter(|(name, _)| name.ends_with("symbol"))
-                        .filter_map(|(_, value)| value.as_str())
-                        .collect();
-                    let concerned: Vec<Symbol> = asked
-                        .iter()
-                        .filter(|symbol| mentioned.contains(symbol.as_str()))
-                        .cloned()
-                        .collect();
-                    let concerned = if concerned.is_empty() {
-                        asked.iter().cloned().collect()
-                    } else {
-                        concerned
-                    };
-                    for symbol in concerned {
+                    for symbol in concerned(asked, &members)? {
                         if let Some(actions) = by_symbol.get_mut(&symbol) {
                             actions.other.push(action.clone());
                         }
@@ -342,6 +330,62 @@ pub(crate) fn parse_actions_for(
         }
     }
     Ok((by_symbol, next_page_token))
+}
+
+/// The asked symbols an action of another kind concerns, read from its members whose names end in
+/// `symbol` (`symbol`, `old_symbol`, `acquirer_symbol`, ...): each asked symbol one of them names.
+/// An action with no such member, or one whose member is neither a string nor null, goes to every
+/// asked symbol, so nothing that may concern one is dropped. An action whose such members name only
+/// symbols not asked refuses the page, as a split or dividend of one does.
+fn concerned(
+    asked: &BTreeSet<Symbol>,
+    members: &BTreeMap<String, &RawValue>,
+) -> Result<Vec<Symbol>, WireError> {
+    let mut named = BTreeSet::new();
+    let mut unread = false;
+    for (_, raw) in members.iter().filter(|(name, _)| name.ends_with("symbol")) {
+        match serde_json::from_str::<Option<String>>(raw.get()) {
+            Ok(Some(text)) => {
+                named.insert(text);
+            }
+            Ok(None) => {}
+            Err(_) => unread = true,
+        }
+    }
+    let concerned: Vec<Symbol> = asked
+        .iter()
+        .filter(|symbol| named.contains(symbol.as_str()))
+        .cloned()
+        .collect();
+    if !concerned.is_empty() {
+        return Ok(concerned);
+    }
+    match named.into_iter().next() {
+        Some(other) if !unread => Err(WireError::UnexpectedSymbol(other)),
+        _ => Ok(asked.iter().cloned().collect()),
+    }
+}
+
+/// The member `name` of an action, read as `T`; absent is a malformed record, as a missing field of
+/// a split or dividend is.
+fn required<T: serde::de::DeserializeOwned>(
+    members: &BTreeMap<String, &RawValue>,
+    name: &'static str,
+) -> Result<T, WireError> {
+    let raw = members
+        .get(name)
+        .ok_or_else(|| WireError::Json(format!("missing field `{name}`")))?;
+    serde_json::from_str(raw.get()).map_err(json)
+}
+
+/// The member `name` of an action, read as `T`; absent or null is `None`.
+fn optional<T: serde::de::DeserializeOwned>(
+    members: &BTreeMap<String, &RawValue>,
+    name: &'static str,
+) -> Result<Option<T>, WireError> {
+    members.get(name).map_or(Ok(None), |raw| {
+        serde_json::from_str(raw.get()).map_err(json)
+    })
 }
 
 /// The actions of the asked symbol `got` names, or the page refused for naming one not asked.
@@ -412,15 +456,6 @@ struct WireDividend<'a> {
     rate: &'a RawValue,
     special: bool,
     foreign: bool,
-}
-
-#[derive(Deserialize)]
-struct WireOther {
-    id: String,
-    ex_date: Option<String>,
-    process_date: String,
-    #[serde(flatten)]
-    fields: BTreeMap<String, serde_json::Value>,
 }
 
 pub(crate) fn json(e: serde_json::Error) -> WireError {

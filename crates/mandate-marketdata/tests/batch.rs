@@ -537,3 +537,137 @@ proptest! {
         prop_assert_eq!(got, expected);
     }
 }
+
+fn other(id: &str, members: &str) -> String {
+    format!(r#"{{"id":"{id}","process_date":"2026-09-10"{members}}}"#)
+}
+
+#[test]
+fn an_action_of_another_kind_goes_to_the_asked_symbols_it_names() {
+    let asked = symbols(&["SPY", "QQQ"]);
+    let page = |action: String| {
+        parse_actions_page(
+            &asked,
+            &actions_body(&format!(r#""mergers":[{action}]"#), None),
+        )
+    };
+    let ids = |page: &mandate_marketdata::batch::ActionsPage, sym: &str| {
+        page.actions[&symbol(sym)]
+            .ids()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let both = page(other(
+        "m1",
+        r#","acquirer_symbol":"SPY","acquiree_symbol":"QQQ""#,
+    ))
+    .unwrap();
+    assert_eq!(
+        (ids(&both, "SPY"), ids(&both, "QQQ")),
+        (vec!["m1".to_owned()], vec!["m1".to_owned()])
+    );
+    let one = page(other(
+        "m2",
+        r#","acquirer_symbol":"IWM","acquiree_symbol":"QQQ""#,
+    ))
+    .unwrap();
+    assert_eq!(
+        (ids(&one, "SPY"), ids(&one, "QQQ")),
+        (vec![], vec!["m2".to_owned()])
+    );
+    let nulled = page(other(
+        "m3",
+        r#","acquirer_symbol":null,"acquiree_symbol":"SPY""#,
+    ))
+    .unwrap();
+    assert_eq!(
+        (ids(&nulled, "SPY"), ids(&nulled, "QQQ")),
+        (vec!["m3".to_owned()], vec![])
+    );
+    let unread = page(other("m4", r#","acquirer_symbol":["IWM"]"#)).unwrap();
+    assert_eq!(
+        (ids(&unread, "SPY"), ids(&unread, "QQQ")),
+        (vec!["m4".to_owned()], vec!["m4".to_owned()]),
+        "a symbol member that is not a string cannot be read, so the action goes to every asked symbol"
+    );
+    assert_eq!(
+        page(other(
+            "m5",
+            r#","acquirer_symbol":"IWM","acquiree_symbol":"DIA""#
+        ))
+        .unwrap_err(),
+        WireError::UnexpectedSymbol("DIA".to_owned())
+    );
+    assert_eq!(
+        page(other("m6", r#","old_symbol":"spy""#)).unwrap_err(),
+        WireError::UnexpectedSymbol("spy".to_owned()),
+        "symbols are matched exactly"
+    );
+    let unused = page(other(
+        "m7",
+        r#","symbol":"SPY","cash":1e999,"terms":{"a":[1,2]}"#,
+    ))
+    .unwrap();
+    assert_eq!(
+        ids(&unused, "SPY"),
+        ["m7"],
+        "a member the parse does not use never fails the page"
+    );
+}
+
+#[test]
+fn every_batch_path_is_one_the_bars_transport_permits_and_nothing_near_it_is() {
+    let http = AlpacaDataHttp::bars_only(Credentials::from_stored(b"PKTEST:s").unwrap()).unwrap();
+    let fifty: BTreeSet<Symbol> = (0..50).map(|n| symbol(&format!("S{n}"))).collect();
+    let wide = BarsBatch::new(
+        fifty.clone(),
+        daily(),
+        at("2026-09-01T00:00:00Z"),
+        at("2026-10-01T00:00:00Z"),
+    )
+    .unwrap();
+    assert!(http.permits(&bars_path(&wide, 10_000, Some("a/b+c=="))));
+    assert!(http.permits(&actions_path(&fifty, span(), 1000, Some("t+/=")).unwrap()));
+    let slashed = BarsBatch::new(
+        symbols(&["BRK/B"]),
+        daily(),
+        at("2026-09-01T00:00:00Z"),
+        at("2026-10-01T00:00:00Z"),
+    )
+    .unwrap();
+    let path = bars_path(&slashed, 10, None);
+    assert!(
+        path.starts_with("/v2/stocks/bars?symbols=BRK%2FB&"),
+        "{path}"
+    );
+    assert!(http.permits(&path));
+    for refused in [
+        "/v2/stocks/barsX?symbols=SPY",
+        "/v2/stocks/bars",
+        "/v2/stocks/bars/..?symbols=SPY",
+        "/v2/stocks/bars?symbols=SPY QQQ",
+        "/v2/stocks/bars?symbols=SPY@evil",
+        "/v1/corporate-actionsX?symbols=SPY",
+    ] {
+        assert!(!http.permits(refused), "{refused}");
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_actions_batch_of_no_symbols_or_too_many_asks_nothing() {
+    let many: BTreeSet<Symbol> = (0..51).map(|n| symbol(&format!("S{n}"))).collect();
+    for (asked, code) in [
+        (BTreeSet::new(), BatchError::NoSymbols),
+        (many, BatchError::TooManySymbols),
+    ] {
+        let transport = FakeTransport::default();
+        let client = Client::new(transport.clone(), RecordingPause::default());
+        let refused = client
+            .fetch_corporate_actions_batch(&asked, span())
+            .await
+            .unwrap_err();
+        assert_eq!(refused, FetchError::Batch(code));
+        assert_eq!(refused.code(), "batch");
+        assert!(transport.requested().is_empty());
+    }
+}

@@ -46,7 +46,8 @@ impl BatchError {
 }
 
 /// The US-equity `iex` bars of `timeframe` that start from `start` up to, not including, `end`,
-/// for every symbol in `symbols`.
+/// for every symbol in `symbols`. Alpaca's `end` is inclusive, so a bar starting exactly at `end`
+/// is asked for and then dropped on receipt: it belongs to the next span.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BarsBatch {
     symbols: BTreeSet<Symbol>,

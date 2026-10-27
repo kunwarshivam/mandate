@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 use mandate_time::{Date, UtcNanos};
 
 use crate::alpaca::{self, WireError};
-use crate::batch::{self, BarsBatch};
+use crate::batch::{self, BarsBatch, BatchError, MAX_BATCH_SYMBOLS};
 use crate::model::{Bar, CorporateActions, DatasetId, DayRange, Records, Symbol};
 use crate::rate::Pacer;
 pub use crate::rate::RatePolicy;
@@ -151,6 +151,8 @@ pub enum FetchError {
     OutOfOrder { time: UtcNanos },
     #[error("building the request: {0}")]
     Request(TimestampError),
+    #[error("the batch cannot be asked: {0}")]
+    Batch(BatchError),
 }
 
 impl FetchError {
@@ -164,6 +166,7 @@ impl FetchError {
             Self::RepeatedPageToken { .. } => "repeated_page_token",
             Self::OutOfOrder { .. } => "out_of_order",
             Self::Request(_) => "request",
+            Self::Batch(_) => "batch",
         }
     }
 }
@@ -330,6 +333,12 @@ impl<T: Transport, P: Pause> Client<T, P> {
         symbols: &BTreeSet<Symbol>,
         ex_dates: DayRange,
     ) -> Result<BTreeMap<Symbol, CorporateActions>, FetchError> {
+        if symbols.is_empty() {
+            return Err(FetchError::Batch(BatchError::NoSymbols));
+        }
+        if symbols.len() > MAX_BATCH_SYMBOLS {
+            return Err(FetchError::Batch(BatchError::TooManySymbols));
+        }
         let limit = self.page_limit.min(alpaca::MAX_CORPORATE_ACTIONS_LIMIT);
         let mut actions: BTreeMap<Symbol, CorporateActions> = symbols
             .iter()
