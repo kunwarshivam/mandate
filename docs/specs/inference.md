@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.8, draft ([DEC-2216](../project/decisions/DEC-2216.md): the §4.3 gate runs inside the model-gateway service, its report is named in the live registry file, and the live start probes identity only); v0.7 ([DEC-2397](../project/decisions/DEC-2397.md)): v0.6 with the runtime calling through the model-gateway service, and the remote caller's `gateway_unreachable` in §1.2, §3.3 and §9. v0.6 ([DEC-2257](../project/decisions/DEC-2257.md)): v0.5 with DEC-997 Accepted, the live path through the model-gateway service, and §11 brought up to date. v0.5 ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
+| **Status** | v0.8, draft ([DEC-2216](../project/decisions/DEC-2216.md) and [DEC-2217](../project/decisions/DEC-2217.md): the §4.3 gate is driven by a gate-mode runtime through the model-gateway service's gate-only listener, which computes its report, the report is named in the live registry file, and the live start probes identity only); v0.7 ([DEC-2397](../project/decisions/DEC-2397.md)): v0.6 with the runtime calling through the model-gateway service, and the remote caller's `gateway_unreachable` in §1.2, §3.3 and §9. v0.6 ([DEC-2257](../project/decisions/DEC-2257.md)): v0.5 with DEC-997 Accepted, the live path through the model-gateway service, and §11 brought up to date. v0.5 ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
 | **Implements** | [HLD §9](../HLD.md#9-intelligence-layer) (model gateway, speed tiers), [HLD §10](../HLD.md#10-billing) (model tokens at cost plus margin), PRD FR-3.7, FR-3.9, FR-10.2; backlog E15 |
 | **Depends on** | [Mandate spec §7, §8](mandate.md#8-signal-models-and-the-order-builder), [journal spec §6.3, §8, §9](journal.md#9-event-catalogue), [DEC-67](../project/04-decision-log.md#decisions), [DEC-120](../project/04-decision-log.md#decisions) |
 | **Caller side** | The [agent harness spec](agent-harness.md) says when the runtime asks for a model output and how long an evaluation waits. This spec says what happens to the call |
@@ -13,6 +13,9 @@ gateway is built and runs over recorded responses; its live path is the model-ga
 
 ## Change history
 
+- **v0.8, amended ([DEC-2217](../project/decisions/DEC-2217.md); E21-62):** §4.3 "On a
+  deployment": a gate-mode research runtime drives the probe runs through a gate-only listener,
+  and the service computes the report from what it saw, recomputing every input and result.
 - **v0.8 ([DEC-2216](../project/decisions/DEC-2216.md); E21-62):** §3.1 adds the purpose
   `evaluation`, a platform call that evaluates a registry entry, with no agent. §4.3 says how the
   gate runs on a deployment: inside the model-gateway service, over a versioned probe set, with
@@ -447,21 +450,43 @@ The gate checks mechanics and safety, never profitability. Performance claims ar
 
 The probe sets and thresholds are versioned configuration, fixed before the evaluation runs.
 
-**On a deployment** ([DEC-2216](../project/decisions/DEC-2216.md)). The gate runs inside the
-model-gateway service, the one holder of the provider key and the one writer of its meter streams,
-when an operator asks over the service's probe socket (`mandate-gatewayd gate <model_id>`). Its
-calls have purpose `evaluation`, against a registry of the gate's own that research calls never
-resolve in. The research role's probe set is `fixtures/gate/research-probe-set.json`: five
-`ideate`, five `monitor`, and five prompt-injection runs, whose tools read a fixture corpus, never
-live data. The report holds the entry's pin, the probe set's digest, every call's request digest,
-reported identity, outcome, tokens and cost, each check's verdict, and `passed`. It is written
-create-only to the research artifact store, which only the service writes, and named by its
-reference. The report also names the endpoint and price table it ran against. Once a gate has
-called, every end writes a report: a pass, or `passed` false with the `stopped` code
-(`identity_mismatch` at the first differing identity, `cap_refused`, `provider_failed`, or
-`checks_failed`). It refuses before any call when either cap's room is below its whole maximum,
-or when a passing report for the same entry, probe set, endpoint and price table exists. A restart
-ends a gate with no report and resumes nothing.
+**On a deployment** ([DEC-2216](../project/decisions/DEC-2216.md), as
+[DEC-2217](../project/decisions/DEC-2217.md) amends it).
+- **Who drives the runs.** A gate-mode research runtime, run only as a one-shot gate Job, drives
+  each probe run through the production research loop. It uses fixture readers and an in-memory
+  store, and no broker, journal or network but the gate listener.
+- **What the service does.** It is still the one holder of the provider key and the one writer of
+  its meter streams. It serves those calls on a gate-only listener that only the gate Job can reach.
+  That listener admits only `evaluation` calls, with no agent, inside an open gate session for one
+  entry; the call listener refuses `evaluation`. The session registers the entry in a registry of
+  the gate's own that research calls never resolve in, and probes its identity first.
+- **The probe set.** The research role's probe set is `fixtures/gate/research-probe-set.json`: five
+  `ideate`, five `monitor`, and five prompt-injection runs, over a fixture corpus built into both
+  images. Its tools read that corpus, never live data.
+- **The service computes the report from what it saw on the wire.**
+  - Each call must fit the session's shape: a new run in the probe set's order, or exactly the
+    next turn of the current one. Anything else ends the session `unmatched`, unreserved, so the
+    first reply to each turn binds.
+  - Every member of each call is checked against the service's own record: the run's kind,
+    cut-off and seed inputs, recomputed from the corpus; each earlier turn's response, equal to the
+    service's own reply; each earlier turn's results, the service's own dispatch over the corpus;
+    and the harness's menu for the turn.
+  - The service checks identity, schema conformance, the harness's §6.5 checks, latency,
+    injection (no evidence outside the run's corpus slice) and the cost bound itself.
+  - `passed` holds only if all 15 runs ended in order and every check passed. A lying runtime can
+    end a session early, never pass it.
+- **What the report holds.** The entry's pin, the probe set's digest, the endpoint and price table,
+  each call's request digest, reported identity, outcome, tokens and cost, each run's verdict, each
+  check's verdict, and `passed`, with the `stopped` code when it did not pass (`identity_mismatch`,
+  `cap_refused`, `provider_failed`, `checks_failed`, `unmatched`, `incomplete`, `aborted`, or
+  `timed_out`). A session belongs to the one connection that opened it, naming the probe set's
+  digest, and ends when that connection drops.
+- **Where it is written.** Create-only, to the research artifact store, which only the service
+  writes. It is named by its reference.
+- **When a session is refused.** Before any call, when the probe set's digest differs from the
+  service's, when either cap's room is below its whole maximum, when another session is open, or
+  when a passing report for the same entry, probe set, endpoint and price table exists.
+- **Restarts.** A restart ends a session with no report and resumes nothing.
 
 ### 4.4 Provider deprecation
 
@@ -628,7 +653,8 @@ a settlement only for the calls that could cost money, and spend for caps folds 
   has no agent, so the research cost cap, per-agent caps and the run ceiling do not apply. It is
   reserved on the service's own streams, `meter:{workspace}` for the workspace the service is
   configured for and `dmeter:{deployment}`, so that workspace's monthly cap and the deployment's
-  bind it as any call. A gate starts only when both caps' room holds its whole maximum.
+  bind it as any call. A gate session opens only when both caps' room holds its whole maximum,
+  and a call outside the session's shape is refused unreserved ([DEC-2217](../project/decisions/DEC-2217.md)).
 - **Reservation.** Before the first attempt, the workspace's meter writer appends a reservation of
   the maximum cost to the meter stream (§3.6). A call starts only if `spent + reserved + this reservation ≤ cap` for every cap that applies.
   On completion the reservation becomes the actual cost. If the process dies first, the reservation
