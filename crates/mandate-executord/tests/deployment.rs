@@ -1613,12 +1613,20 @@ type LoopProcess = mandate_executord::ExecutorProcess<
 /// `variant`'s deployment; a process over the deployed fixture run, started at
 /// `MONDAY`; and the fixture it trades on.
 fn trade_loop(variant: Variant) -> Result<(Journal, LoopProcess, FixturePaper), Error> {
+    trade_loop_quoting(variant, wall_clock)
+}
+
+/// [`trade_loop`] with the fixture quoting at `clock`'s instant.
+fn trade_loop_quoting(
+    variant: Variant,
+    clock: impl Fn() -> UtcNanos + 'static,
+) -> Result<(Journal, LoopProcess, FixturePaper), Error> {
     let (journal, store, _) = deployed_as(variant)?;
     journaled(&journal)?;
     if variant.research {
         thesis(&journal, "th-1", SPY, None, "2026-09-21T20:00:00Z")?;
     }
-    let paper = mandate_executord::paper::FixturePaper::filling(at(MONDAY)?).quoting(wall_clock);
+    let paper = mandate_executord::paper::FixturePaper::filling(at(MONDAY)?).quoting(clock);
     let broker = mandate_executord::alpaca::AlpacaBroker::new(paper.clone())?;
     let rows = journal.clone();
     let run = mandate_executord::run::fixture(broker, &scope())?.deployed(
@@ -2375,10 +2383,27 @@ fn a_cold_start_resolves_the_same_with_every_research_object_gone_or_corrupted()
 /// owner's exit of the position at the market, unconfirmed, is received and sold, never lost.
 #[test]
 fn an_owner_exit_at_the_market_after_the_opening_fills_is_received_and_sold() -> Result<(), Error> {
-    let (journal, mut process, _paper) = trade_loop(Variant {
-        demo: true,
-        ..Variant::default()
-    })?;
+    owner_exit_after_the_opening(false)
+}
+
+/// `AGENTS.md` rule 13, lane DR's rehearsal of 2026-10-27: the same, with the quote feed gone quiet
+/// before the owner's exit, so the instrument is restricted `stale_mark` and no sane mark prices
+/// the exit: it is received and sold all the same, at the latest once a quote returns, never lost.
+#[test]
+fn an_owner_exit_at_the_market_while_the_mark_is_stale_is_received_and_sold() -> Result<(), Error> {
+    owner_exit_after_the_opening(true)
+}
+
+fn owner_exit_after_the_opening(stale: bool) -> Result<(), Error> {
+    let frozen: Rc<Cell<Option<UtcNanos>>> = Rc::new(Cell::new(None));
+    let clock = Rc::clone(&frozen);
+    let (journal, mut process, _paper) = trade_loop_quoting(
+        Variant {
+            demo: true,
+            ..Variant::default()
+        },
+        move || clock.get().unwrap_or_else(wall_clock),
+    )?;
     for second in (5..120).step_by(5) {
         let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
         tick(&journal, &format!("tl{second}"), &now)?;
@@ -2421,10 +2446,28 @@ fn an_owner_exit_at_the_market_after_the_opening_fills_is_received_and_sold() ->
     let mut alerts = Vec::new();
     for second in (120..240).step_by(5) {
         let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        let quiet = stale && second < 200;
+        frozen.set(
+            quiet
+                .then(|| UtcNanos::from_parts(wall_clock().secs() - 3_600, 0))
+                .transpose()?,
+        );
         tick(&journal, &format!("tx{second}"), &now)?;
         alerts.extend(process.step(at(&now)?));
     }
     let types = journal.types(ACCOUNT_STREAM);
+    if stale {
+        assert!(
+            journal
+                .payloads("InstrumentRestrictionChanged")
+                .iter()
+                .any(|p| {
+                    p.get("restriction").and_then(Value::as_str) == Some("stale_mark")
+                        && p.get("active") == Some(&Value::Bool(true))
+                }),
+            "the mark went stale: {types:?}"
+        );
+    }
     let received: Vec<_> = journal
         .payloads("IntentReceived")
         .into_iter()
