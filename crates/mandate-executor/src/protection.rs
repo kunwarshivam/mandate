@@ -790,7 +790,8 @@ pub(crate) fn fallback(
 /// journaled nor gated, so the caller journals nothing of it, leaves what raised it unspent and
 /// decides again at the next step; every other exit, protective order and kill switch goes on
 /// (`AGENTS.md` rule 13). The owner is alerted once (`exit_unpriced`) for the breach or interval
-/// that began at `since`.
+/// that began at `since`: not again while one journaled after that second stands, since that one
+/// was its own; one journaled at that second or before was an earlier wait's.
 fn awaits_configuration(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
@@ -804,7 +805,7 @@ fn awaits_configuration(
         .view
         .unpriced
         .get(instrument)
-        .is_none_or(|alerted| *alerted < since)
+        .is_none_or(|alerted| *alerted <= since)
     {
         let alerted = changed(batch, instrument, "exit_unpriced", Vec::new())?;
         batch.notify(alerted, OwnerAlertKind::ExitStalled);
@@ -5766,6 +5767,33 @@ mod sequence_tests {
             )]
         );
         assert_eq!(cancels(&fired), vec![OCO]);
+        Ok(())
+    }
+
+    /// DEC-2846: a breach that began at 10 alerts its wait unless the instrument's last own wait
+    /// was journaled after 10. One at 5 or at 10 itself belonged to an earlier wait, so the new
+    /// breach alerts; one at 11 was this breach's own, so it does not.
+    #[test]
+    fn a_wait_is_alerted_unless_this_breach_already_alerted_it() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        for (last, alerts_again) in [(5, true), (10, true), (11, false)] {
+            let mut executor = protected(&ports)?;
+            executor.run(observation(Some(139), None, true, 10)?, &ports)?;
+            executor
+                .state
+                .unpriced
+                .insert(aapl()?, RiskClock::from_secs(last));
+            let held =
+                executor.run_with(Input::Tick(RiskClock::from_secs(40)), &ports, &UnreadRefs)?;
+            assert!(watchdog_record(&held).is_none(), "{:?}", drafted(&held));
+            assert_eq!(
+                alerts(&held) == vec!["exit_stalled"],
+                alerts_again,
+                "last wait at {last}: {:?}",
+                alerts(&held)
+            );
+        }
         Ok(())
     }
 

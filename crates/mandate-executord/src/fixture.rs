@@ -163,7 +163,7 @@ mod tests {
     use super::*;
 
     /// The fixture wiring knows nothing: no mandate version, offset or covered instrument, no
-    /// instrument fact, and no binding-gate fact, so no opening can be admitted on it.
+    /// instrument fact, and no binding-gate fact or reference, so no opening can be admitted on it.
     #[test]
     fn the_fixture_wiring_knows_nothing() -> Result<(), Box<dyn std::error::Error>> {
         let wiring = wiring(&AccountScope {
@@ -189,6 +189,7 @@ mod tests {
             protection: None,
         };
         assert!(wiring.gate.input(&request).is_none());
+        assert!(wiring.gate.config_refs(&agent, &instrument).is_none());
         Ok(())
     }
 
