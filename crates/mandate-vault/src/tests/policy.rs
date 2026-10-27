@@ -418,3 +418,48 @@ fn only_the_executors_create_reaches_the_personal_data_vault() {
         "{executor}"
     );
 }
+
+/// DEC-2283 item 2: the bars reader reads the platform data key and nothing else. Over every path
+/// kind and every access, the one triple allowed is reading that key; its OpenBao policy is that
+/// one path's `read` and no other block. The oracle is the triple and the path written out here.
+#[test]
+fn the_bars_reader_reads_the_data_key_and_nothing_else() {
+    let mut every = paths();
+    every.extend([
+        SecretPath::Platform(PlatformSecret::ModelProviderKey),
+        SecretPath::Platform(PlatformSecret::EmailCredential),
+        SecretPath::Platform(PlatformSecret::NewsDataKey),
+        SecretPath::Fingerprint(c("c1"), a(1)),
+        SecretPath::Claims,
+        SecretPath::Rotating,
+    ]);
+    let key = SecretPath::Platform(PlatformSecret::NewsDataKey);
+    for access in [
+        Access::Read,
+        Access::Write,
+        Access::Delete,
+        Access::Take,
+        Access::Create,
+    ] {
+        for path in &every {
+            assert_eq!(
+                allows(&Identity::BarsReader, access, path),
+                access == Access::Read && *path == key,
+                "{access:?} {path:?}"
+            );
+        }
+    }
+    let hcl = openbao_policy(&Identity::BarsReader, &[c("c1")], &Mounts::default());
+    assert_eq!(
+        blocks(&hcl),
+        vec![(
+            "mandate/data/platform/news-data-key".to_owned(),
+            "read".to_owned()
+        )],
+        "{hcl}"
+    );
+    assert!(
+        allows(&Identity::NewsReader, Access::Read, &key),
+        "the news reader keeps its read"
+    );
+}

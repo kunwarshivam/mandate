@@ -2293,7 +2293,7 @@ const VAULT_DRILL_CONNECTIONS: [&str; 2] = ["demo-paper", "drill-other"];
 /// DEC-2020's rows) lets that role read that KV path. Written out here, not read from the crate:
 /// a connection's entries are under `x` and its id's hex (DEC-2060 item 3), `x64656d6f2d7061706572`
 /// for `demo-paper` and `x6472696c6c2d6f74686572` for `drill-other`.
-const VAULT_DRILL_READS: [(&str, &str, bool); 18] = [
+const VAULT_DRILL_READS: [(&str, &str, bool); 23] = [
     ("runtime", "connections/x64656d6f2d7061706572/token", false),
     (
         "runtime",
@@ -2347,6 +2347,15 @@ const VAULT_DRILL_READS: [(&str, &str, bool); 18] = [
         false,
     ),
     ("news-reader", "platform/alpaca-oauth-client-secret", false),
+    ("bars-reader", "platform/news-data-key", true),
+    ("bars-reader", "platform/model-provider-key", false),
+    ("bars-reader", "platform/email-credential", false),
+    ("bars-reader", "platform/alpaca-oauth-client-secret", false),
+    (
+        "bars-reader",
+        "connections/x64656d6f2d7061706572/token",
+        false,
+    ),
     (
         "executor-demo-paper",
         "connections/x64656d6f2d7061706572/code",
@@ -6215,6 +6224,11 @@ mod tests {
             "news-reader platform/model-provider-key denied",
             "news-reader connections/x64656d6f2d7061706572/token denied",
             "news-reader platform/alpaca-oauth-client-secret denied",
+            "bars-reader platform/news-data-key allowed",
+            "bars-reader platform/model-provider-key denied",
+            "bars-reader platform/email-credential denied",
+            "bars-reader platform/alpaca-oauth-client-secret denied",
+            "bars-reader connections/x64656d6f2d7061706572/token denied",
             "executor-demo-paper connections/x64656d6f2d7061706572/code denied",
             "checked 12 mandate policies",
         ];
@@ -6360,7 +6374,7 @@ mod tests {
     }
 
     /// Once `cell up` provisions for the role provisioner, the drill must read its three policies
-    /// too: fourteen, and eleven is a scan that missed some.
+    /// too: fifteen, and twelve is a scan that missed some.
     #[test]
     fn the_vault_drill_counts_the_provisioned_policies() {
         assert_eq!(vault_drill_policies(false), 12);

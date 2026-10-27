@@ -12,9 +12,11 @@
 //! | Secret import | — | the client secret, the platform's own secrets | — |
 //! | Model gateway | the model provider's key | — | — |
 //! | News reader | the news data key | — | — |
+//! | Bars reader | the news data key | — | — |
 //! | Email sender | the email credential | — | — |
 //!
-//! The platform's own secrets ([`PlatformSecret`], DEC-2020) are each read by one identity and
+//! The platform's own secrets ([`PlatformSecret`], DEC-2020) are each read by one identity, but
+//! the data key, which the news reader and the bars reader both read (DEC-2283 item 2), and are
 //! written only by the secret import; none is ever deleted, and a rotation writes over it.
 
 use mandate_connections::record::{AccountRef, ConnectionId};

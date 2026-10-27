@@ -468,24 +468,25 @@ pub async fn no_debug_or_refusal_shows_a_platform_secret<H: Harness>(h: &H) {
     for s in PlatformSecret::ALL {
         let path = SecretPath::Platform(s);
         import.put(&path, &secret(CANARY)).await.unwrap();
-        let first = platform_holders(s).reads.into_iter().next().unwrap();
-        let reader = h.source(first, now).await;
-        let held = reader.read(&path).await.unwrap().unwrap();
-        assert_eq!(text(&held), CANARY);
-        let refusals = [
-            import.read(&path).await.map(|v| v.is_some()).unwrap_err(),
-            reader.put(&path, &secret(CANARY)).await.unwrap_err(),
-            h.source(Identity::Runtime, now)
-                .await
-                .read(&path)
-                .await
-                .map(|v| v.is_some())
-                .unwrap_err(),
-        ];
-        outputs.push(format!("{reader:?}"));
-        outputs.push(format!("{held:?}"));
-        outputs.push(format!("{refusals:?}"));
-        outputs.extend(refusals.iter().map(ToString::to_string));
+        for holder in platform_holders(s).reads {
+            let reader = h.source(holder, now).await;
+            let held = reader.read(&path).await.unwrap().unwrap();
+            assert_eq!(text(&held), CANARY);
+            let refusals = [
+                import.read(&path).await.map(|v| v.is_some()).unwrap_err(),
+                reader.put(&path, &secret(CANARY)).await.unwrap_err(),
+                h.source(Identity::Runtime, now)
+                    .await
+                    .read(&path)
+                    .await
+                    .map(|v| v.is_some())
+                    .unwrap_err(),
+            ];
+            outputs.push(format!("{reader:?}"));
+            outputs.push(format!("{held:?}"));
+            outputs.push(format!("{refusals:?}"));
+            outputs.extend(refusals.iter().map(ToString::to_string));
+        }
     }
     for output in outputs {
         assert!(!output.contains(&CANARY[..16]), "{output}");
