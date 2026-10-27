@@ -166,18 +166,23 @@ fn floating_aliases_variants_and_undated_snapshots_are_refused_at_registration()
             "{snapshot:?}"
         );
     }
-    for (provider, snapshot) in [
-        ("openai", "gpt-5.6-terra"),
-        ("google", "gemini-3-pro"),
-        ("openai", "claude-sonnet-5-5"),
+    for (provider, name, snapshot) in [
+        ("openai", "openai/gpt-5.6-terra", "gpt-5.6-terra"),
+        ("google", "google/gemini-3-pro", "gemini-3-pro"),
+        ("openai", SLUG, "claude-sonnet-5-5"),
+        ("anthropic", "openai/gpt-5.6-terra", "claude-sonnet-5-5"),
+        ("anthropic", SLUG, "claude-Sonnet-5-5"),
+        ("anthropic", SLUG, "claude-sonnet_5_5"),
+        ("anthropic", SLUG, "sonnet-5-5"),
     ] {
         let mut c = content();
         c.identity.provider = provider.to_owned();
+        c.identity.model_name = name.to_owned();
         c.identity.snapshot = Snapshot::Dated(snapshot.to_owned());
         assert_eq!(
             Registry::new().register(c).err(),
             Some(RegistryError::FloatingAlias),
-            "{provider} states no dateless id is pinned, so {snapshot:?} is refused"
+            "{provider} {name} {snapshot:?}: only an Anthropic `claude-` id is pinned undated"
         );
     }
     for snapshot in ["claude-sonnet-5-5", "claude-haiku-5-5"] {
@@ -484,7 +489,8 @@ fn a_research_entry_is_offered_only_with_its_roles_harness_content() {
         Ok(()),
         "another model with the role's harness content is offered"
     );
-    let edits: [HarnessEdit; 9] = [
+    let edits: [HarnessEdit; 10] = [
+        ("output schema", |c| c.output_schema = monitor_schema()),
         ("template", |c| c.template.system.push_str(" Be bold.")),
         ("retrieval plan", |c| {
             c.retrieval_plan = json(r#"{"bars":{"days":90},"filings":{"max_items":5}}"#)
@@ -531,6 +537,61 @@ fn a_research_entry_is_offered_only_with_its_roles_harness_content() {
             "a refused offer leaves the entry evaluating, so no pin may name it ({member})"
         );
     }
+}
+
+/// Only an offered entry sets its role's harness: an evaluating or deprecated one with other harness
+/// content blocks nothing, and a withdrawn entry refuses `withdrawn` before any harness check.
+#[test]
+fn only_offered_entries_bind_the_role() {
+    let (mut registry, research) = agentic_registry();
+    let retires_on = Date::new(2027, 1, 1).unwrap();
+    registry
+        .set_status(&research, Status::Deprecated { retires_on })
+        .unwrap();
+    let mut evaluating = another_model("llm.research_eval");
+    evaluating.methodology.push_str(" Another harness.");
+    registry.register(evaluating).unwrap();
+    assert_eq!(
+        offered(&mut registry, another_model("llm.research_light")),
+        Ok(()),
+        "neither a deprecated nor an evaluating entry binds the role"
+    );
+    let mut withdrawn = another_model("llm.research_gone");
+    withdrawn.methodology.push_str(" Yet another.");
+    let gone = withdrawn.model_ref();
+    registry.register(withdrawn).unwrap();
+    registry.set_status(&gone, Status::Withdrawn).unwrap();
+    assert_eq!(
+        registry.set_status(&gone, Status::Offered),
+        Err(RegistryError::Withdrawn)
+    );
+}
+
+/// Single-call entries have no role, so two with other content are both offered; and roles that
+/// share a run kind share their harness, so an `ideate`-only entry cannot differ from the offered
+/// research role's.
+#[test]
+fn roles_that_share_a_run_kind_share_a_harness_and_single_calls_have_none() {
+    let (mut registry, _) = agentic_registry();
+    let mut single = content();
+    single.model_id = "llm.news_single".to_owned();
+    single.methodology.push_str(" Other.");
+    assert_eq!(offered(&mut registry, single), Ok(()));
+    let mut other = content();
+    other.model_id = "llm.base_single".to_owned();
+    assert_eq!(offered(&mut registry, other), Ok(()));
+    let mut ideate_only = another_model("llm.research_ideate");
+    if let Mode::Agentic(a) = &mut ideate_only.mode {
+        a.output_schemas.remove("monitor");
+        for tool in &mut a.tools {
+            tool.menu.retain(|kind| kind == "ideate");
+        }
+    }
+    assert_eq!(
+        offered(&mut registry, ideate_only),
+        Err(RegistryError::HarnessMismatch),
+        "an entry answering `ideate` alone is held to the role that answers `ideate`"
+    );
 }
 
 /// The check binds among entries offered for the same run kinds only: a single-call model, and an

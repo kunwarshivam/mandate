@@ -3,7 +3,7 @@
 //! gateway's registry decides what is offered: an entry it refuses (an undated snapshot from a
 //! provider that dates none, INF-1), one whose endpoint fails the identity probe (inference spec
 //! §4.3), and one whose harness content differs from the role's (DEC-2282 item 2) are each listed as
-//! refused, and stay out of every pin's reach, while the rest are offered.
+//! refused and hold no endpoint, so no call reaches them, while the rest are offered.
 
 use mandate_canon::Value;
 use mandate_gateway::registry::{
@@ -63,11 +63,13 @@ pub fn read_live(file: &Value) -> Result<Vec<LiveEntry>, RecordedError> {
         .collect()
 }
 
-/// The registry of `entries`: each registered, its endpoint added after `probe` answers for it (an
-/// entry the registry refuses is never probed, so a live probe spends nothing on it), and
-/// offered when the file asks. An entry the registry refuses at any step is listed with the error,
-/// once, and taken no further, so it is unknown, or held `evaluating` with no endpoint; nothing
-/// refused is ever offered.
+/// The registry of `entries`. Each is registered. One the file offers is then offered, which the
+/// registry refuses for another role's harness content, and only then probed through `probe`, and
+/// given its endpoint when the probe answers for it; a failed probe puts it back to `evaluating`.
+/// So an entry holds an endpoint, and a call can reach it, only when it is offered and its probe
+/// passed. One the file holds `evaluating` is registered with no endpoint. Every refusal is listed
+/// with its error, once; an entry the registry refuses to register is never probed, so a live probe
+/// spends nothing on it.
 pub fn live_registry(
     entries: &[LiveEntry],
     probe: &mut dyn FnMut(&Endpoint, &PinnedContent) -> Vec<Reported>,
@@ -77,19 +79,19 @@ pub fn live_registry(
     for live in entries {
         let content = live.entry.content();
         let pin = content.model_ref();
-        let taken = registry
-            .register(content.clone())
-            .and_then(|_| {
-                let reported = probe(&live.endpoint, &content);
-                registry.add_endpoint(&pin, live.endpoint.clone(), &reported)
-            })
-            .and_then(|()| {
-                if live.offered {
-                    registry.set_status(&pin, Status::Offered)
-                } else {
-                    Ok(())
-                }
-            });
+        let taken = registry.register(content.clone()).and_then(|_| {
+            if !live.offered {
+                return Ok(());
+            }
+            registry.set_status(&pin, Status::Offered)?;
+            let reported = probe(&live.endpoint, &content);
+            registry
+                .add_endpoint(&pin, live.endpoint.clone(), &reported)
+                .or_else(|error| {
+                    registry.set_status(&pin, Status::Evaluating)?;
+                    Err(error)
+                })
+        });
         if let Err(error) = taken {
             refused.push(Refused {
                 model_id: pin.model_id,

@@ -518,17 +518,16 @@ impl Registry {
     }
 
     /// Sets the status; `withdrawn` is final (INF-15). An agentic entry is offered only when its
-    /// harness content is that of every other entry offered for the same run kinds, so an owner's
+    /// harness content is that of every other offered entry answering any of its run kinds, so an owner's
     /// choice among them changes the model, never what the agent may read or do (DEC-2282).
     pub fn set_status(&mut self, model: &ModelRef, status: Status) -> Result<(), RegistryError> {
+        if self.entry_mut(model)?.status == Status::Withdrawn {
+            return Err(RegistryError::Withdrawn);
+        }
         if status == Status::Offered {
             self.check_role(model)?;
         }
-        let entry = self.entry_mut(model)?;
-        if entry.status == Status::Withdrawn {
-            return Err(RegistryError::Withdrawn);
-        }
-        entry.status = status;
+        self.entry_mut(model)?.status = status;
         Ok(())
     }
 
@@ -592,7 +591,10 @@ impl Registry {
         let differs = self.entries.values().any(|other| {
             other.status == Status::Offered
                 && other.content_hash != model.content_hash
-                && other.content.role().as_ref() == Some(&role)
+                && other
+                    .content
+                    .role()
+                    .is_some_and(|kinds| !kinds.is_disjoint(&role))
                 && other.content.harness() != harness
         });
         if differs {
@@ -655,9 +657,7 @@ fn floating(identity: &Identity) -> bool {
             .any(|s| FLOATING.contains(&s.to_ascii_lowercase().as_str()))
     };
     let undated = match &identity.snapshot {
-        Snapshot::Dated(text) => {
-            segments(text) || !(has_date(text) || vendor_pinned(&identity.provider, text))
-        }
+        Snapshot::Dated(text) => segments(text) || !(has_date(text) || vendor_pinned(identity)),
         Snapshot::Weights(_) => false,
     };
     name.is_empty()
@@ -668,18 +668,24 @@ fn floating(identity: &Identity) -> bool {
         || undated
 }
 
-/// Whether `snapshot` is a dateless model id its vendor states is a pinned snapshot: Anthropic
+/// Whether the snapshot is a dateless model id its vendor states is a pinned snapshot: Anthropic
 /// states this of every model id, and the founder accepted that reading of DEC-997 item 2 with
-/// DEC-2282 item 7. Only a `claude-` id of lowercase letters, digits, and hyphens qualifies; every
-/// other provider's snapshot needs a date (INF-1).
-fn vendor_pinned(provider: &str, snapshot: &str) -> bool {
-    provider == ANTHROPIC
-        && snapshot.strip_prefix("claude-").is_some_and(|rest| {
-            !rest.is_empty()
-                && rest
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        })
+/// DEC-2282 item 7. Only provider `anthropic`, a model name under `anthropic/claude-`, and a
+/// `claude-` snapshot of lowercase letters, digits, and hyphens qualify; every other identity's
+/// snapshot needs a date (INF-1).
+fn vendor_pinned(identity: &Identity) -> bool {
+    let id_like = |rest: &str| {
+        !rest.is_empty()
+            && rest
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    };
+    let Snapshot::Dated(snapshot) = &identity.snapshot else {
+        return false;
+    };
+    identity.provider == ANTHROPIC
+        && identity.model_name.starts_with("anthropic/claude-")
+        && snapshot.strip_prefix("claude-").is_some_and(id_like)
 }
 
 /// Whether `text` holds eight digits as `YYYYMMDD` or `YYYY-MM-DD`, a plausible calendar date.

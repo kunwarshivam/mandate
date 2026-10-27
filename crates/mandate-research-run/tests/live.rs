@@ -114,7 +114,7 @@ fn an_endpoint_that_fails_its_probe_leaves_its_entry_unoffered() {
     assert_eq!(
         held.status(),
         Status::Evaluating,
-        "a failed probe offers nothing"
+        "a failed probe puts the entry back to evaluating"
     );
     assert_eq!(held.endpoints().count(), 0, "and adds no endpoint");
     let sonnet = entries[0].entry.content().model_ref();
@@ -139,9 +139,49 @@ fn an_entry_the_file_holds_evaluating_is_registered_but_not_offered() {
     });
     assert!(refused.is_empty());
     let pin = entries[0].entry.content().model_ref();
+    let held = registry.resolve(&pin).unwrap();
+    assert_eq!(held.status(), Status::Evaluating);
     assert_eq!(
-        registry.resolve(&pin).map(|e| e.status()),
-        Ok(Status::Evaluating)
+        held.endpoints().count(),
+        0,
+        "an entry not offered holds no endpoint, so no call reaches it"
+    );
+}
+
+#[test]
+fn an_entry_with_other_harness_content_is_refused_and_holds_no_endpoint() {
+    let mut entries = read_live(&vetted()).unwrap();
+    entries.truncate(2);
+    let mut wide = entries[1].clone();
+    wide.entry.model_id = "llm.research_wide".to_owned();
+    if let Some(bounds) = wide.entry.agentic.as_mut() {
+        bounds.max_turns = 20;
+    }
+    entries.push(wide);
+    let mut probed = Vec::new();
+    let (registry, refused) = live_registry(&entries, &mut |endpoint, content| {
+        probed.push(content.model_id.clone());
+        honest(endpoint, &content.identity.model_name)
+    });
+    assert_eq!(
+        refused,
+        vec![Refused {
+            model_id: "llm.research_wide".to_owned(),
+            error: RegistryError::HarnessMismatch,
+        }]
+    );
+    let held = registry
+        .resolve(&entries[2].entry.content().model_ref())
+        .unwrap();
+    assert_eq!(held.status(), Status::Evaluating);
+    assert_eq!(
+        held.endpoints().count(),
+        0,
+        "a refused offer adds no endpoint"
+    );
+    assert!(
+        !probed.iter().any(|id| id == "llm.research_wide"),
+        "and spends no probe"
     );
 }
 
