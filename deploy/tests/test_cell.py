@@ -4671,3 +4671,26 @@ def test_the_journal_reaches_the_kubernetes_api_by_ipv4_hosts_only():
         assert skipped.returncode != 0 and "Kubernetes API" in skipped.stderr, cidrs
     unknown = helm(JOURNAL_CHART, *k3d)
     assert unknown.returncode != 0 and "Kubernetes API" in unknown.stderr
+
+
+def test_every_journal_dsn_names_the_journal_schema_in_its_options():
+    """DEC-2083: a role CloudNativePG adds after bootstrap has no per-role search path, so every
+    DSN the chart renders sets `search_path=journal` in the connection's options, the migrator's
+    and the API's included."""
+    docs = render_all()
+    dsns = [
+        env["value"]
+        for doc in docs
+        for container in _containers(doc)
+        for env in container.get("env", [])
+        if env.get("value", "").startswith("postgres://")
+    ]
+    assert dsns, "the render names no journal DSN"
+    for dsn in dsns:
+        assert dsn.endswith("&options=-c%20search_path%3Djournal"), dsn
+
+
+def _containers(doc: dict) -> list[dict]:
+    spec = doc.get("spec", {})
+    pod = spec.get("template", {}).get("spec", spec.get("jobTemplate", {}).get("spec", {}).get("template", {}).get("spec", {}))
+    return list(pod.get("initContainers", [])) + list(pod.get("containers", []))
