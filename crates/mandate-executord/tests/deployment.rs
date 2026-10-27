@@ -429,7 +429,9 @@ fn deployment(journal: &Journal, store: Artifacts) -> (Deployment, Rc<Cell<u32>>
     let reads = Rc::new(Cell::new(0));
     let rows = journal.clone();
     let sources = Sources {
-        rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+        rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+            mandate_store::Store::rows(&rows, stream)
+        }),
         artifacts: Box::new(store),
         quotes: Box::new(Quoting),
         liquidity: Box::new(Bars(Rc::clone(&reads))),
@@ -794,7 +796,9 @@ fn an_unread_fact_holds_the_opening() -> Result<(), Error> {
     let unread = Deployment::new(
         &scope(),
         Sources {
-            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+                mandate_store::Store::rows(&rows, stream)
+            }),
             artifacts: Box::new(store),
             quotes: Box::new(Quoting),
             liquidity: Box::new(mandate_executord::deployment::Unread),
@@ -840,7 +844,9 @@ fn a_deployed_run_reads_its_ports_from_the_deployment() -> Result<(), Error> {
     let run = mandate_executord::run::fixture(broker()?, &scope())?.deployed(
         &scope(),
         mandate_executord::deployment::Production {
-            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+                mandate_store::Store::rows(&rows, stream)
+            }),
             artifacts: Box::new(store),
             liquidity: Box::new(mandate_executord::deployment::Unread),
         },
@@ -888,7 +894,9 @@ fn a_deployed_runs_gate_reads_the_runs_own_broker_facts() -> Result<(), Error> {
     let run = run.deployed(
         &scope(),
         mandate_executord::deployment::Production {
-            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+                mandate_store::Store::rows(&rows, stream)
+            }),
             artifacts: Box::new(store),
             liquidity: Box::new(Bars(Rc::new(Cell::new(0)))),
         },
@@ -963,7 +971,9 @@ fn counted(journal: &Journal, store: Artifacts) -> (Deployment, Rc<Cell<u32>>, R
     let deployment = Deployment::new(
         &scope(),
         Sources {
-            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+                mandate_store::Store::rows(&rows, stream)
+            }),
             artifacts: Box::new(Counted {
                 store,
                 reads: Rc::clone(&reads),
@@ -1087,7 +1097,9 @@ fn a_quote_not_sane_holds_the_opening() -> Result<(), Error> {
         let deployment = Deployment::new(
             &scope(),
             Sources {
-                rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+                rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+                    mandate_store::Store::rows(&rows, stream)
+                }),
                 artifacts: Box::new(store),
                 quotes: Box::new(Insane(one_sided)),
                 liquidity: Box::new(Bars(Rc::new(Cell::new(0)))),
@@ -1239,7 +1251,9 @@ fn the_wired_gate_reads_the_deployment() -> Result<(), Error> {
     let (wiring, _) = Deployment::wired(
         fixture,
         &scope(),
-        Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+        mandate_executord::deployment::reading(move |stream: &StreamId| {
+            mandate_store::Store::rows(&rows, stream)
+        }),
         Box::new(store),
         (
             Box::new(Bars(Rc::new(Cell::new(0)))),
@@ -1273,7 +1287,7 @@ fn the_wired_gate_reads_the_deployment() -> Result<(), Error> {
 #[test]
 fn production_reads_the_mounted_store() -> Result<(), Error> {
     let none = || -> Result<mandate_executord::deployment::Rows, &'static str> {
-        Ok(Box::new(|_: &StreamId| None))
+        Ok(Box::new(|_: &StreamId, _| None))
     };
     let unset = mandate_executord::deployment::production(|_| None, none)?;
     assert!(unset.is_none());
@@ -1630,7 +1644,9 @@ fn trade_loop(variant: Variant) -> Result<(Journal, LoopProcess, FixturePaper), 
     let run = mandate_executord::run::fixture(broker, &scope())?.deployed(
         &scope(),
         mandate_executord::deployment::Production {
-            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+                mandate_store::Store::rows(&rows, stream)
+            }),
             artifacts: Box::new(store),
             liquidity: Box::new(Bars(Rc::new(Cell::new(0)))),
         },
@@ -1676,7 +1692,9 @@ fn a_deployed_runs_broker_answers_by_asset_id() -> Result<(), Error> {
     let run = mandate_executord::run::fixture(inner, &scope())?.deployed(
         &scope(),
         mandate_executord::deployment::Production {
-            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+                mandate_store::Store::rows(&rows, stream)
+            }),
             artifacts: Box::new(store),
             liquidity: Box::new(mandate_executord::deployment::Unread),
         },
@@ -2358,7 +2376,7 @@ fn a_cold_start_resolves_the_same_with_every_research_object_gone_or_corrupted()
     mandate_artifacts_fs::FsArtifactStore::open(&dir)?;
     let root = dir.to_string_lossy().into_owned();
     let none = || -> Result<mandate_executord::deployment::Rows, &'static str> {
-        Ok(Box::new(|_: &StreamId| None))
+        Ok(Box::new(|_: &StreamId, _| None))
     };
     let production = mandate_executord::deployment::production(
         |name| {

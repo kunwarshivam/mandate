@@ -20,7 +20,7 @@ pub mod meter;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId, TrustedStart};
 use mandate_journal_pg::PgJournal;
 use mandate_time::UtcNanos;
 use tokio::runtime::Runtime;
@@ -49,6 +49,27 @@ pub trait Store {
 /// for one stream.
 #[derive(Debug, Clone, Default)]
 pub struct MemoryStore(pub Rc<RefCell<MemoryJournal>>);
+
+impl MemoryStore {
+    /// The stream's records from `start.from_seq` on, for a reader that holds the stream up to the
+    /// seq before it: `None` when the first of them does not follow `start`, as a reader whose
+    /// held head is not this journal's must read the whole stream again.
+    pub fn rows_from(&self, stream: &StreamId, start: TrustedStart) -> Option<Vec<StoredEvent>> {
+        let journal = self.0.borrow();
+        let since: Vec<StoredEvent> = journal
+            .rows(stream)
+            .iter()
+            .filter(|row| row.seq >= start.from_seq)
+            .cloned()
+            .collect();
+        match since.first() {
+            Some(first) if first.seq != start.from_seq || first.prev_hash != start.prev_hash => {
+                None
+            }
+            _ => Some(since),
+        }
+    }
+}
 
 impl Store for MemoryStore {
     fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
@@ -96,6 +117,16 @@ impl PgStore {
             PgJournal::single_writer(dsn).map_err(|e| e.code())?
         };
         Ok(Self { journal, runtime })
+    }
+}
+
+impl PgStore {
+    /// The stream's records from `start.from_seq` on, their chain checked from `start`
+    /// ([`PgJournal::rows_from`]). `None` when the store cannot answer or the chain fails.
+    pub fn rows_from(&self, stream: &StreamId, start: TrustedStart) -> Option<Vec<StoredEvent>> {
+        self.runtime
+            .block_on(self.journal.rows_from(stream, start))
+            .ok()
     }
 }
 

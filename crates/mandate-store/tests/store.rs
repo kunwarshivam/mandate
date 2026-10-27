@@ -135,3 +135,47 @@ fn the_envelope_lists_every_digest_the_payload_names_once_in_order() {
         Some(&Value::Str(build))
     );
 }
+
+/// A reader past a head it holds reads only the records appended since, and none when its held
+/// head is not the journal's: it must read the whole stream again rather than fold a fork.
+#[test]
+fn rows_from_a_held_head_read_only_what_follows_it() {
+    let mut store = MemoryStore::default();
+    let epoch = store.take_ownership(&stream()).unwrap();
+    let committed = store.append(
+        &stream(),
+        0,
+        epoch,
+        UtcNanos::from_parts(T, 0).unwrap(),
+        &[opened(epoch)],
+    );
+    assert!(
+        matches!(committed, AppendOutcome::Committed(_)),
+        "{committed:?}"
+    );
+    let all = store.rows(&stream()).unwrap();
+    let head = all.last().unwrap();
+    let past = mandate_journal::TrustedStart {
+        from_seq: head.seq + 1,
+        prev_hash: head.hash,
+    };
+    assert_eq!(store.rows_from(&stream(), past), Some(Vec::new()));
+    assert_eq!(
+        store.rows_from(&stream(), mandate_journal::TrustedStart::GENESIS),
+        Some(all.clone())
+    );
+    let forked = mandate_journal::TrustedStart {
+        from_seq: 1,
+        prev_hash: Digest::of(b"another chain"),
+    };
+    assert_eq!(store.rows_from(&stream(), forked), None);
+    let skipped = mandate_journal::TrustedStart {
+        from_seq: 0,
+        prev_hash: Digest::ZERO,
+    };
+    assert_eq!(
+        store.rows_from(&stream(), skipped),
+        None,
+        "a seq the stream never held"
+    );
+}
