@@ -1800,7 +1800,12 @@ pub(crate) mod tests {
         })?;
         let raised = owner_alerts(&first);
         assert_eq!(raised.len(), 1, "one alert for the episode's first hold");
-        let (_, cause, payload) = &raised[0];
+        let (_, cause, payload) = raised
+            .first()
+            .ok_or_else(|| ExecutorError::NotInterpreted {
+                what: "no alert".to_owned(),
+                story: "E6-15",
+            })?;
         assert_eq!(
             cause.as_ref(),
             Some(&subject),
