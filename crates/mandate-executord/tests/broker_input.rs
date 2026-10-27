@@ -14,7 +14,7 @@ use support::{
     ACCOUNT_STREAM, AGENT, Error, OPENED, OPENING, Paper, at, deployed, kill, start_allowing,
 };
 
-const SWITCH: &str = "01JKILL00000000000000000AD";
+const SWITCH: &str = "01JK1MM00000000000000000AD";
 /// A fill whose quantity times price is past what a decimal holds: the fold cannot book it.
 const HUGE: &str = "1000000000000000";
 

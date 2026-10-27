@@ -10,9 +10,9 @@ use support::{
     revoke, start, start_allowing, tick,
 };
 
-const COPY: &str = "01JKILL00000000000000000AA";
-const OPEN: &str = "01JINTENT0000000000000000A";
-const EXIT: &str = "01JINTENT0000000000000000C";
+const COPY: &str = "01JK1MM00000000000000000AA";
+const OPEN: &str = "01J1NTENT0000000000000000A";
+const EXIT: &str = "01J1NTENT0000000000000000C";
 
 fn deployed_stepped_up() -> Result<Journal, Error> {
     let journal = Journal::default();

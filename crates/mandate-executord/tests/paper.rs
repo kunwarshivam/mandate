@@ -68,7 +68,7 @@ fn the_account_is_active_with_the_fixtures_cash_and_holds_nothing() -> Result<()
 #[test]
 fn an_order_rests_is_found_by_its_id_and_cancels() -> Result<(), Error> {
     let mut broker = broker()?;
-    let id = "md-01JINTENT0000000000000000A";
+    let id = "md-01J1NTENT0000000000000000A";
     let BrokerOutcome::Submitted(order) = broker.call(&opening(id)?)? else {
         return Err("a submission".into());
     };
@@ -107,8 +107,8 @@ fn an_order_rests_is_found_by_its_id_and_cancels() -> Result<(), Error> {
 #[test]
 fn a_cancel_touches_only_its_own_order() -> Result<(), Error> {
     let mut broker = broker()?;
-    let first = "md-01JINTENT0000000000000000A";
-    let second = "md-01JINTENT0000000000000000C";
+    let first = "md-01J1NTENT0000000000000000A";
+    let second = "md-01J1NTENT0000000000000000C";
     let BrokerOutcome::Submitted(a) = broker.call(&opening(first)?)? else {
         return Err("a submission".into());
     };
@@ -145,7 +145,7 @@ fn a_cancel_touches_only_its_own_order() -> Result<(), Error> {
 #[test]
 fn an_order_it_never_took_is_absent() -> Result<(), Error> {
     let mut broker = broker()?;
-    let id = "md-01JINTENT0000000000000000B";
+    let id = "md-01J1NTENT0000000000000000B";
     let lookup = BrokerRequest::GetOrderByClientId(ClientOrderId::parse(id)?);
     assert!(matches!(
         broker.call(&lookup)?,

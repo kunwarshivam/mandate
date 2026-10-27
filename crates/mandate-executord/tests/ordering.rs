@@ -11,10 +11,10 @@ mod support;
 use mandate_executor::{BrokerRequest, ClientOrderId};
 use support::{AGENT, Error, NOON, Paper, Seen, at, deployed, kill, propose, start_allowing};
 
-const FIRST: &str = "01JINTENT0000000000000000A";
-const SECOND: &str = "01JINTENT0000000000000000B";
-const LOST: &str = "01JINTENT0000000000000000D";
-const SWITCH: &str = "01JKILL00000000000000000AA";
+const FIRST: &str = "01J1NTENT0000000000000000A";
+const SECOND: &str = "01J1NTENT0000000000000000B";
+const LOST: &str = "01J1NTENT0000000000000000D";
+const SWITCH: &str = "01JK1MM00000000000000000AA";
 
 fn opening(journal: &support::Journal, id: &str) -> Result<(), Error> {
     propose(journal, AGENT, id, "buy", "5", "150", "open")

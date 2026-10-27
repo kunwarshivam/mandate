@@ -22,9 +22,9 @@ use support::{
     wired,
 };
 
-const CHECK: &str = "e1h1o1";
+const CHECK: &str = "0E000001H00000001V00000001";
 const ESTABLISHED: &str = "c9";
-const OPENING: &str = "md-01JINTENT0000000000000000A";
+const OPENING: &str = "md-01J1NTENT0000000000000000A";
 
 fn text(s: &str) -> Value {
     Value::Str(s.to_owned())
@@ -39,7 +39,7 @@ fn connecting() -> Result<Journal, Error> {
     propose(
         &journal,
         AGENT,
-        "01JINTENT0000000000000000A",
+        "01J1NTENT0000000000000000A",
         "buy",
         "10",
         "150",

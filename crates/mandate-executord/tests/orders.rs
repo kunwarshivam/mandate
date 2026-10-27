@@ -16,11 +16,11 @@ use support::{
     propose_market_exit, propose_owner_market_exit, start, start_allowing, start_wired, wired,
 };
 
-const OPEN: &str = "01JINTENT0000000000000000A";
-const OTHER_EXIT: &str = "01JINTENT0000000000000000B";
-const EXIT: &str = "01JINTENT0000000000000000C";
-const SWITCH: &str = "01JKILL00000000000000000AA";
-const OWNER: &str = "01JOWNER0000000000000000AA";
+const OPEN: &str = "01J1NTENT0000000000000000A";
+const OTHER_EXIT: &str = "01J1NTENT0000000000000000B";
+const EXIT: &str = "01J1NTENT0000000000000000C";
+const SWITCH: &str = "01JK1MM00000000000000000AA";
+const OWNER: &str = "01J0WNER0000000000000000AA";
 
 fn exit(journal: &Journal, agent: &str, id: &str) -> Result<(), Error> {
     propose(journal, agent, id, "sell", "10", "150", "risk_exit")

@@ -32,10 +32,10 @@ use support::{
 const SWITCH: &str = "01JCMD000000000000000000AB";
 const MSFT: &str = "MSFT";
 /// The agent's opening in MSFT, which waits on no exit price.
-const OPENING_MSFT: &str = "01JINTENT0000000000000000M";
-const EXIT: &str = "01JINTENT0000000000000000C";
+const OPENING_MSFT: &str = "01J1NTENT0000000000000000M";
+const EXIT: &str = "01J1NTENT0000000000000000C";
 /// The recorded opening's protective order, as its journaled leg names it.
-const PROTECTION: &str = "md-01JINTENT0000000000000000A-pe1h11o8";
+const PROTECTION: &str = "md-01J1NTENT0000000000000000A-p0E000001H00000011V00000008";
 
 /// A canonical string value.
 fn string(value: &str) -> Value {

@@ -22,7 +22,7 @@ use mandate_executor::{
     AccountRef, AccountScope, ActivityCursor, AgentId, BindingGateConfigRefs, BindingGateInput,
     BindingGateRequest, BindingGateSource, BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome,
     BrokerPosition, BrokerReject, BrokerRequest, BrokerUnknown, ConnectorError, EventId,
-    ExecutorConfig, ExitTier, FillId, IdGen, InstrumentSnapshot, MandateVersion, MandateView,
+    ExecutorConfig, ExitTier, FillConfigRefs, FillId, IdGen, InstrumentSnapshot, MandateVersion, MandateView,
     ProtectionPrices, Purpose, Seq, WorkspaceId, WriterEpoch, equity_bracket_prices,
 };
 use mandate_executord::marks::NoMarks;
@@ -62,7 +62,7 @@ pub const NOON: &str = "2026-09-21T15:00:00Z";
 /// the gate's allow, the request, the submission, and the broker's acceptance.
 pub const OPENED: &str = include_str!("../fixtures/opened.jsonl");
 /// The client order id the recorded opening was submitted under.
-pub const OPENING: &str = "md-01JINTENT0000000000000000A";
+pub const OPENING: &str = "md-01J1NTENT0000000000000000A";
 
 pub type Error = Box<dyn std::error::Error>;
 
@@ -105,6 +105,11 @@ struct Rows {
     /// After this many appends the journal answers nothing more, as a process that crashed would
     /// find it: every append `Unavailable` and every read refused.
     crash_after: Option<usize>,
+    /// The journal's own rules, judging every batch appended to a stream whose rows all came
+    /// through [`Store::append`]: the executor's account stream from its `StreamOpened`. A stream a
+    /// test wrote or seeded by hand is not judged, since its rows were never drafts.
+    rules: mandate_journal::MemoryJournal,
+    judged: BTreeMap<String, u64>,
 }
 
 /// One journal shared by every process and the test, so two processes can contend for a stream.
@@ -130,7 +135,9 @@ impl Journal {
 
     /// Keeps the first `len` rows of `stream`, as a crash that lost the rest would have left it.
     pub fn truncate(&self, stream: &str, len: usize) {
-        if let Some(rows) = self.0.borrow_mut().streams.get_mut(stream) {
+        let mut rows = self.0.borrow_mut();
+        rows.judged.remove(stream);
+        if let Some(rows) = rows.streams.get_mut(stream) {
             rows.truncate(len);
         }
     }
@@ -232,6 +239,7 @@ impl Journal {
     /// Stores `bodies` on `stream_id` as an earlier executor wrote them, for a process to replay.
     pub fn seed(&self, stream_id: &str, bodies: &str) -> Result<(), Error> {
         let mut rows = self.0.borrow_mut();
+        rows.judged.remove(stream_id);
         let stored = rows.streams.entry(stream_id.to_owned()).or_default();
         for body in bodies.lines().filter(|line| !line.is_empty()) {
             let row = sealed(stream_id, stored.len(), body.as_bytes()).ok_or("seal")?;
@@ -260,13 +268,15 @@ impl Journal {
             version: "0",
             event_time: at(NOON)?,
         };
+        let event_id = ulid(event_id);
+        let causation_id = causation_id.map(ulid);
         let bytes = draft_bytes(
             &envelope,
             &Fields {
-                event_id,
+                event_id: &event_id,
                 event_type,
                 schema_version,
-                causation_id,
+                causation_id: causation_id.as_deref(),
                 correlation_id: None,
                 config_refs: &Object::new(),
                 payload: &payload,
@@ -274,10 +284,82 @@ impl Journal {
         )
         .ok_or("draft")?;
         let mut rows = self.0.borrow_mut();
+        rows.judged.remove(stream_id);
         let stored = rows.streams.entry(stream_id.to_owned()).or_default();
         let row = sealed(stream_id, stored.len(), &bytes).ok_or("seal")?;
         stored.push(row);
         Ok(())
+    }
+}
+
+/// An artifact source that holds nothing: no account-stream record reads one (journal spec §9.1's
+/// artifact checks are the agent stream's).
+struct NoArtifacts;
+
+impl mandate_journal::ArtifactSource for NoArtifacts {
+    fn read_artifact(
+        &self,
+        _reference: &mandate_journal::ArtifactRef,
+    ) -> Result<Vec<u8>, mandate_journal::ArtifactError> {
+        Err(mandate_journal::ArtifactError::Missing)
+    }
+}
+
+impl Rows {
+    /// Judges `drafts`, appended at `before` rows, by the journal's own rules, as the Postgres and
+    /// in-memory journals do: the refusal they would answer, or `None` when they would commit it
+    /// or the stream is not judged. The executor's tests otherwise accept any bytes, so a batch
+    /// the real journal refuses, and the exit inside it, passed every test while it was lost in
+    /// the cell (DEC-2845).
+    fn judge(
+        &mut self,
+        stream: &StreamId,
+        before: usize,
+        recorded_at: UtcNanos,
+        drafts: &[Vec<u8>],
+    ) -> Option<AppendOutcome> {
+        let name = stream.as_str().to_owned();
+        if before == 0 && !self.judged.contains_key(&name) {
+            let epoch = self.rules.take_ownership(stream);
+            self.judged.insert(name.clone(), epoch);
+        }
+        let epoch = *self.judged.get(&name)?;
+        let head = self.rules.head(stream).seq;
+        let slices: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
+        match self.rules.append_with_config_artifacts(
+            stream,
+            head,
+            epoch,
+            recorded_at,
+            &slices,
+            &NoArtifacts,
+        ) {
+            AppendOutcome::Committed(_) | AppendOutcome::AlreadyCommitted(_) => None,
+            refused => {
+                if let AppendOutcome::Invalid { draft, error } = &refused {
+                    let kind = drafts
+                        .get(*draft)
+                        .and_then(|d| parse(d).ok())
+                        .and_then(|v| {
+                            v.get("event_type")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned)
+                        });
+                    let at = drafts.get(*draft).and_then(|d| parse(d).ok()).map(|v| {
+                        let mut node = Some(v);
+                        for part in error.path.split('.') {
+                            node = node.and_then(|n| n.get(part).cloned());
+                        }
+                        format!("{node:?}")
+                    });
+                    eprintln!(
+                        "JUDGED {:?} {} {:?} {:?}",
+                        error.reason, error.path, kind, at
+                    );
+                }
+                Some(refused)
+            }
+        }
     }
 }
 
@@ -319,7 +401,7 @@ impl Store for Journal {
         stream: &StreamId,
         expected_head: u64,
         epoch: u64,
-        _recorded_at: UtcNanos,
+        recorded_at: UtcNanos,
         drafts: &[Vec<u8>],
     ) -> AppendOutcome {
         if self.crashed() {
@@ -389,6 +471,11 @@ impl Store for Journal {
                 actual_hash: Digest::ZERO,
             };
         }
+        let before = stored.len();
+        if let Some(refused) = rows.judge(stream, before, recorded_at, drafts) {
+            return refused;
+        }
+        let stored = rows.streams.entry(stream.as_str().to_owned()).or_default();
         let mut committed = Vec::new();
         for draft in drafts {
             let Some(row) = sealed(stream.as_str(), stored.len(), draft) else {
@@ -823,9 +910,35 @@ fn account() -> Result<BrokerAccount, Error> {
 /// Event ids derived from `(epoch, head, ordinal)`, alphanumeric as a ULID is.
 pub struct Ids;
 
+/// `id` as an event id the journal takes (journal spec §3): itself when it is a canonical ULID,
+/// otherwise a ULID derived from it, the same every time, so a test may name a record `t1` and
+/// find it again as `ulid("t1")`.
+pub fn ulid(id: &str) -> String {
+    const ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    let canonical = id.len() == 26
+        && id.bytes().all(|b| ALPHABET.contains(&b))
+        && id.bytes().next().is_some_and(|b| b <= b'7');
+    if canonical {
+        return id.to_owned();
+    }
+    let digest = Digest::of(id.as_bytes()).to_hex();
+    let tail: String = digest
+        .bytes()
+        .take(24)
+        .map(|b| char::from(ALPHABET[usize::from(b) % ALPHABET.len()]))
+        .collect();
+    format!("7T{tail}")
+}
+
+/// The test writer's event id for `epoch`, `head` and `ordinal`, readable and a canonical ULID
+/// (journal spec §3), so the journal's own rules take every record the executor drafts with it.
+pub fn event_id(epoch: u64, head: u64, ordinal: u32) -> String {
+    format!("0E{epoch:06}H{head:08}V{ordinal:08}")
+}
+
 impl IdGen for Ids {
     fn event_id(&self, epoch: WriterEpoch, head: Seq, ordinal: u32) -> EventId {
-        EventId(format!("e{}h{}o{}", epoch.0, head.0, ordinal))
+        EventId(event_id(epoch.0, head.0, ordinal))
     }
 }
 
@@ -863,6 +976,18 @@ impl InstrumentSnapshot for Instruments {
             max_exit_offset: Fraction::parse("0.03").ok()?,
         })
     }
+
+    /// AAPL's fill configuration, the test deployment's (journal spec §9: a fill of an order of
+    /// ours names all four, rule 300), the same objects its gate decisions name.
+    fn fill_refs(&self, instrument: &InstrumentId) -> Option<FillConfigRefs> {
+        let hash = |digit: &str| format!("sha256:{}", digit.repeat(64));
+        (instrument.as_str() == AAPL).then(|| FillConfigRefs {
+            fee_config: hash("1"),
+            trading_calendar: hash("2"),
+            settlement_calendar: hash("2"),
+            instrument_snapshot: hash("3"),
+        })
+    }
 }
 
 /// The binding gate's facts for no order: every lookup is unavailable, so the core can admit no
@@ -873,6 +998,21 @@ impl BindingGateSource for NoFacts {
     fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         None
     }
+
+    fn config_refs(
+        &self,
+        _agent: &AgentId,
+        _instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        Some(deployed_refs())
+    }
+}
+
+/// The configuration the test deployment registers, which every gate decision of its agent is
+/// journaled under, a binding run's or not (journal spec §9, DEC-2846).
+pub fn deployed_refs() -> BindingGateConfigRefs {
+    let hash = |digit: &str| format!("sha256:{}", digit.repeat(64));
+    BindingGateConfigRefs::complete(hash("1"), hash("2"), hash("3"), hash("4"), VERSION)
 }
 
 pub fn config() -> ExecutorConfig {
@@ -1368,6 +1508,14 @@ pub fn propose(
 pub struct Allowing;
 
 impl BindingGateSource for Allowing {
+    fn config_refs(
+        &self,
+        _agent: &AgentId,
+        _instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        Some(deployed_refs())
+    }
+
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         if !request.purpose.adds_risk() {
             return None;
@@ -1380,15 +1528,8 @@ impl BindingGateSource for Allowing {
         let one = Fraction::parse("1").ok()?;
         let half = Fraction::parse("0.5").ok()?;
         let gate_agent = GateAgentId(1);
-        let hash = |digit: &str| format!("sha256:{}", digit.repeat(64));
         Some(BindingGateInput {
-            config_refs: BindingGateConfigRefs::complete(
-                hash("1"),
-                hash("2"),
-                hash("3"),
-                hash("4"),
-                VERSION,
-            ),
+            config_refs: deployed_refs(),
             now,
             config: GateConfig {
                 price_floor: Usd::parse("0.01").ok()?,
@@ -1517,6 +1658,14 @@ impl BindingGateSource for Allowing {
 pub struct ExitFacts;
 
 impl BindingGateSource for ExitFacts {
+    fn config_refs(
+        &self,
+        _agent: &AgentId,
+        _instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        Some(deployed_refs())
+    }
+
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         Allowing.input(&BindingGateRequest {
             agent: request.agent,

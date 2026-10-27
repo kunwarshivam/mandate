@@ -64,9 +64,9 @@ fn run(ops: &[Op]) -> Result<(Journal, Paper, Vec<&'static str>), Error> {
             Op::LoseBrokerAnswer => broker.lose_next_answers(1),
             Op::Kill(other) => {
                 let (agent, id) = if *other {
-                    (OTHER_AGENT, "01JKILL00000000000000000AB")
+                    (OTHER_AGENT, "01JK1MM00000000000000000AB")
                 } else {
-                    (AGENT, "01JKILL00000000000000000AA")
+                    (AGENT, "01JK1MM00000000000000000AA")
                 };
                 if !killed.contains(&agent) {
                     kill(&journal, agent, id)?;

@@ -14,8 +14,8 @@ use support::{
     start, start_allowing,
 };
 
-const SWITCH: &str = "01JKILL00000000000000000AC";
-const EXIT: &str = "01JINTENT0000000000000000S";
+const SWITCH: &str = "01JK1MM00000000000000000AC";
+const EXIT: &str = "01J1NTENT0000000000000000S";
 
 fn held(journal: &support::Journal) -> Vec<Value> {
     journal

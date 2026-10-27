@@ -87,7 +87,7 @@ impl InstrumentSnapshot for WithCrypto {
 const BTC: &str = "BTCUSD";
 
 /// The agent's risk exit.
-const EXIT: &str = "01JINTENT0000000000000000C";
+const EXIT: &str = "01J1NTENT0000000000000000C";
 
 impl QuoteFeed for Quoting {
     fn observe(

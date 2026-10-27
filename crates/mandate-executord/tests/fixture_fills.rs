@@ -27,7 +27,7 @@ use support::{
     TwoPercentStop, at, config, deployed, fees, process_config, propose,
 };
 
-const OPEN: &str = "01JINTENT0000000000000000A";
+const OPEN: &str = "01J1NTENT0000000000000000A";
 const REF: &str = "sha256:6666666666666666666666666666666666666666666666666666666666666666";
 
 fn broker() -> Result<AlpacaBroker<FixturePaper>, Error> {
@@ -121,14 +121,14 @@ fn a_limit_opening_fills_whole_at_its_limit() -> Result<(), Error> {
     let mut broker = broker()?;
     let placed = submit(
         &mut broker,
-        order("md-01JINTENT0000000000000000A", Side::Buy, "10", "150")?,
+        order("md-01J1NTENT0000000000000000A", Side::Buy, "10", "150")?,
     )?;
     assert_eq!(
         (placed.status.as_str(), placed.filled_qty),
         ("new", Qty::ZERO)
     );
     let lookup =
-        BrokerRequest::GetOrderByClientId(ClientOrderId::parse("md-01JINTENT0000000000000000A")?);
+        BrokerRequest::GetOrderByClientId(ClientOrderId::parse("md-01J1NTENT0000000000000000A")?);
     let BrokerOutcome::Order(found) = broker.call(&lookup)? else {
         return Err("the opening".into());
     };
@@ -166,7 +166,7 @@ fn a_limit_opening_fills_whole_at_its_limit() -> Result<(), Error> {
 #[test]
 fn a_brackets_legs_rest_under_its_filled_entry() -> Result<(), Error> {
     let mut broker = broker()?;
-    let id = "md-01JINTENT0000000000000000A";
+    let id = "md-01J1NTENT0000000000000000A";
     let mut entry = order(id, Side::Buy, "10", "150")?;
     entry.bracket = Some(BracketLegs {
         stop: Price::parse("147")?,
@@ -215,11 +215,11 @@ fn a_sell_limit_fills_and_reduces_the_position() -> Result<(), Error> {
     let mut broker = broker()?;
     submit(
         &mut broker,
-        order("md-01JINTENT0000000000000000A", Side::Buy, "10", "150")?,
+        order("md-01J1NTENT0000000000000000A", Side::Buy, "10", "150")?,
     )?;
     let sold = submit(
         &mut broker,
-        order("md-01JINTENT0000000000000000C", Side::Sell, "4", "155")?,
+        order("md-01J1NTENT0000000000000000C", Side::Sell, "4", "155")?,
     )?;
     assert_eq!(sold.status, "new", "the answer is the order as accepted");
     assert_eq!(fills(&mut broker, "")?.0.len(), 2);
@@ -241,10 +241,10 @@ fn protection_rests_unfilled() -> Result<(), Error> {
     let mut broker = broker()?;
     submit(
         &mut broker,
-        order("md-01JINTENT0000000000000000A", Side::Buy, "10", "150")?,
+        order("md-01J1NTENT0000000000000000A", Side::Buy, "10", "150")?,
     )?;
     let mut oco = order(
-        "md-01JINTENT0000000000000000A-p1",
+        "md-01J1NTENT0000000000000000A-p1",
         Side::Sell,
         "10",
         "157.5",
@@ -263,13 +263,13 @@ fn protection_rests_unfilled() -> Result<(), Error> {
         ("new", Qty::ZERO)
     );
     let cancel = BrokerRequest::Cancel {
-        client_order_id: ClientOrderId::parse("md-01JINTENT0000000000000000A-p1")?,
+        client_order_id: ClientOrderId::parse("md-01J1NTENT0000000000000000A-p1")?,
     };
     assert!(
         matches!(broker.call(&cancel)?, BrokerOutcome::CancelAccepted { .. }),
         "the OCO cancels"
     );
-    let mut stop = order("md-01JINTENT0000000000000000A-p2", Side::Sell, "10", "146")?;
+    let mut stop = order("md-01J1NTENT0000000000000000A-p2", Side::Sell, "10", "146")?;
     stop.purpose = Purpose::Protective;
     stop.order_type = OrderType::StopLimit;
     stop.stop_price = Some(Price::parse("147")?);
@@ -288,7 +288,7 @@ fn protection_rests_unfilled() -> Result<(), Error> {
 #[test]
 fn a_filled_order_does_not_cancel() -> Result<(), Error> {
     let mut broker = broker()?;
-    let id = "md-01JINTENT0000000000000000A";
+    let id = "md-01J1NTENT0000000000000000A";
     submit(&mut broker, order(id, Side::Buy, "10", "150")?)?;
     let cancel = BrokerRequest::Cancel {
         client_order_id: ClientOrderId::parse(id)?,
@@ -310,7 +310,7 @@ fn a_filled_order_does_not_cancel() -> Result<(), Error> {
 #[test]
 fn a_duplicate_client_order_id_is_refused() -> Result<(), Error> {
     let mut broker = broker()?;
-    let id = "md-01JINTENT0000000000000000A";
+    let id = "md-01J1NTENT0000000000000000A";
     submit(&mut broker, order(id, Side::Buy, "10", "150")?)?;
     let again = broker.call(&BrokerRequest::Submit(order(id, Side::Buy, "10", "150")?))?;
     assert!(
@@ -339,7 +339,7 @@ fn a_sell_beyond_the_position_is_refused() -> Result<(), Error> {
         _ => false,
     };
     let naked = broker.call(&BrokerRequest::Submit(order(
-        "md-01JINTENT0000000000000000S",
+        "md-01J1NTENT0000000000000000S",
         Side::Sell,
         "1",
         "150",
@@ -353,10 +353,10 @@ fn a_sell_beyond_the_position_is_refused() -> Result<(), Error> {
     assert!(held(&mut broker)?.is_empty(), "no position is made");
     submit(
         &mut broker,
-        order("md-01JINTENT0000000000000000A", Side::Buy, "10", "150")?,
+        order("md-01J1NTENT0000000000000000A", Side::Buy, "10", "150")?,
     )?;
     let beyond = broker.call(&BrokerRequest::Submit(order(
-        "md-01JINTENT0000000000000000B",
+        "md-01J1NTENT0000000000000000B",
         Side::Sell,
         "11",
         "150",
@@ -367,12 +367,12 @@ fn a_sell_beyond_the_position_is_refused() -> Result<(), Error> {
         Vec::<String>::new(),
         "no order is added"
     );
-    let mut resting = order("md-01JINTENT0000000000000000C", Side::Sell, "6", "160")?;
+    let mut resting = order("md-01J1NTENT0000000000000000C", Side::Sell, "6", "160")?;
     resting.order_type = OrderType::StopLimit;
     resting.stop_price = Some(Price::parse("161")?);
     let resting = submit(&mut broker, resting)?;
     let held_for_orders = broker.call(&BrokerRequest::Submit(order(
-        "md-01JINTENT0000000000000000D",
+        "md-01J1NTENT0000000000000000D",
         Side::Sell,
         "5",
         "150",
@@ -638,7 +638,7 @@ fn nothing_working_is_never_reconciled_on_schedule() -> Result<(), Error> {
 #[test]
 fn an_asset_id_symbol_is_answered_by_its_ticker() -> Result<(), Error> {
     let mut broker = broker()?;
-    let mut by_id = order("md-01JINTENT0000000000000000A", Side::Buy, "1", "580.13")?;
+    let mut by_id = order("md-01J1NTENT0000000000000000A", Side::Buy, "1", "580.13")?;
     by_id.instrument = InstrumentId::new("b28f4066-5c6d-479b-a2af-85dc1a8f16fb")?;
     let placed = submit(&mut broker, by_id)?;
     assert_eq!(placed.instrument.as_str(), "SPY");
@@ -654,7 +654,7 @@ fn an_asset_id_symbol_is_answered_by_its_ticker() -> Result<(), Error> {
         held(&mut broker)?,
         [("SPY".to_owned(), "1".to_owned(), "580.13".to_owned())]
     );
-    let mut unknown = order("md-01JINTENT0000000000000000B", Side::Buy, "1", "10")?;
+    let mut unknown = order("md-01J1NTENT0000000000000000B", Side::Buy, "1", "10")?;
     unknown.instrument = InstrumentId::new("AAPL")?;
     assert_eq!(submit(&mut broker, unknown)?.instrument.as_str(), "AAPL");
     Ok(())

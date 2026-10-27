@@ -149,7 +149,7 @@ fn a_bad_lease_or_a_failed_source_creates_and_journals_nothing() -> Result<(), E
 /// connection, for every id form.
 #[test]
 fn the_subject_account_reads_back_as_its_connection() -> Result<(), Error> {
-    for id in ["c1", "conn1", "01J8Z2CONN0000000000000001", "a_b-C"] {
+    for id in ["c1", "conn1", "01J8Z2C0NN0000000000000001", "a_b-C"] {
         let hex: String = id.bytes().map(|b| format!("{b:02x}")).collect();
         assert_eq!(
             subject_connection(Some(hex))?,

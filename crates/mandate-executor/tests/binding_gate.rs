@@ -49,6 +49,14 @@ impl BindingGateSource for GateFixture {
     fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         self.input.clone()
     }
+
+    fn config_refs(
+        &self,
+        _agent: &mandate_executor::AgentId,
+        _instrument: &mandate_accounting::InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        Some(input(AccountState::Active, false).config_refs)
+    }
 }
 
 fn decimal<T>(raw: &str, parse: impl FnOnce(&str) -> Result<T, mandate_num::NumError>) -> T {

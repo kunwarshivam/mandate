@@ -1631,7 +1631,7 @@ fn trade_loop(variant: Variant) -> Result<(Journal, LoopProcess, FixturePaper), 
     );
     journal.write(
         &support::agent_stream(AGENT),
-        "01JINTENT0000000000000000A",
+        "01J1NTENT0000000000000000A",
         "IntentProposed",
         1,
         Some("decision"),
@@ -2038,7 +2038,7 @@ fn a_research_agent_opens_once_then_holds_and_its_thesis_exit_sells() -> Result<
     assert_eq!(buys.len(), 1, "{:?}", journal.types(ACCOUNT_STREAM));
     proposed(
         &journal,
-        "01JINTENT0000000000000000B",
+        "01J1NTENT0000000000000000B",
         "buy",
         "580.13",
         "open",
@@ -2046,7 +2046,7 @@ fn a_research_agent_opens_once_then_holds_and_its_thesis_exit_sells() -> Result<
     let alerts = passes(&journal, &mut process, (60, 120))?;
     assert!(
         alerts.iter().any(|alert| alert.key == "opening_held"
-            && alert.subject.as_deref() == Some("01JINTENT0000000000000000B")),
+            && alert.subject.as_deref() == Some("01J1NTENT0000000000000000B")),
         "the second opening is held, named: {alerts:?}"
     );
     journal.write(
@@ -2059,7 +2059,7 @@ fn a_research_agent_opens_once_then_holds_and_its_thesis_exit_sells() -> Result<
     )?;
     proposed(
         &journal,
-        "01JINTENT0000000000000000C",
+        "01J1NTENT0000000000000000C",
         "sell",
         "580.11",
         "discretionary_exit",

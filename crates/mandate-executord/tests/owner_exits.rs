@@ -58,7 +58,7 @@ fn check(exits: &[Exit]) -> Result<(), Error> {
     let mut limits = Vec::new();
     let mut floors = Vec::new();
     for (n, exit) in exits.iter().enumerate() {
-        let intent = format!("01JOWNEXIT{n:016}");
+        let intent = format!("01J0WNEX1T{n:016}");
         match exit {
             Exit::Limit(limit) => {
                 propose(

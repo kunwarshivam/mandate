@@ -31,10 +31,10 @@ use support::{
     opened, propose, start_wired, wired,
 };
 
-const CHECK: &str = "e1h1o1";
+const CHECK: &str = "0E000001H00000001V00000001";
 const ESTABLISHED: &str = "c9";
-const OWNER: &str = "01JOWNER0000000000000000AA";
-const OWNER_EXIT: &str = "01JINTENT0000000000000000D";
+const OWNER: &str = "01J0WNER0000000000000000AA";
+const OWNER_EXIT: &str = "01J1NTENT0000000000000000D";
 
 fn text(s: &str) -> Value {
     Value::Str(s.to_owned())
@@ -148,7 +148,7 @@ fn to_copy(original: &str) -> Result<Establishment, Error> {
         return Err("members".into());
     };
     Ok(Establishment::ToCopy(ToCopy {
-        original: EventId(original.to_owned()),
+        original: EventId(support::ulid(original)),
         members,
     }))
 }
@@ -231,7 +231,7 @@ fn a_copy_establishes_and_an_unreadable_record_refuses() -> Result<(), Error> {
     check(&journal, CHECK, CONNECTION, "connect", "passed")?;
     journal.write(
         ACCOUNT_STREAM,
-        "e2h2o0",
+        "0E000002H00000002V00000000",
         "ConnectionEstablished",
         2,
         Some(ESTABLISHED),
@@ -269,12 +269,15 @@ fn the_copy_is_the_originals_members_and_the_risk_clock() -> Result<(), Error> {
     };
     let draft = copy_draft(
         &due,
-        EventId("e5h5o0".to_owned()),
+        EventId("0E000005H00000005V00000000".to_owned()),
         at("2026-09-21T15:00:07.9Z")?,
     )?;
     assert_eq!(draft.event_type, "ConnectionEstablished");
     assert_eq!(draft.schema_version, 2);
-    assert_eq!(draft.event_id, EventId("e5h5o0".to_owned()));
+    assert_eq!(
+        draft.event_id,
+        EventId("0E000005H00000005V00000000".to_owned())
+    );
     assert_eq!(draft.causation_id, Some(EventId(ESTABLISHED.to_owned())));
     let mut want = due.members.clone();
     want.insert(
@@ -307,7 +310,7 @@ fn a_shut_gate_withholds_only_openings() -> Result<(), Error> {
     propose(
         &journal,
         AGENT,
-        "01JINTENT0000000000000000A",
+        "01J1NTENT0000000000000000A",
         "buy",
         "10",
         "150",
@@ -329,7 +332,7 @@ fn a_shut_gate_withholds_only_openings() -> Result<(), Error> {
     propose(
         &journal,
         AGENT,
-        "01JINTENT0000000000000000B",
+        "01J1NTENT0000000000000000B",
         "buy",
         "10",
         "150",
@@ -355,7 +358,7 @@ fn a_shut_gate_holds_every_opening_and_lets_every_exit_go() -> Result<(), Error>
     propose(
         &journal,
         AGENT,
-        "01JINTENT0000000000000000A",
+        "01J1NTENT0000000000000000A",
         "buy",
         "10",
         "150",
@@ -364,7 +367,7 @@ fn a_shut_gate_holds_every_opening_and_lets_every_exit_go() -> Result<(), Error>
     propose(
         &journal,
         AGENT,
-        "01JINTENT0000000000000000C",
+        "01J1NTENT0000000000000000C",
         "sell",
         "10",
         "150",
@@ -374,7 +377,7 @@ fn a_shut_gate_holds_every_opening_and_lets_every_exit_go() -> Result<(), Error>
         process.step(at(NOON)?);
     }
     assert!(!gate.is_open());
-    assert_eq!(journal.received(), ["01JINTENT0000000000000000C"]);
+    assert_eq!(journal.received(), ["01J1NTENT0000000000000000C"]);
     Ok(())
 }
 
@@ -393,7 +396,7 @@ fn holding() -> Result<(Journal, Paper), Error> {
     propose(
         &journal,
         AGENT,
-        "01JINTENT0000000000000000A",
+        "01J1NTENT0000000000000000A",
         "buy",
         "10",
         "150",
@@ -426,7 +429,7 @@ fn reduced(action: &str, open: bool) -> Result<(Vec<String>, Vec<String>), Error
         propose(
             &journal,
             AGENT,
-            "01JINTENT0000000000000000C",
+            "01J1NTENT0000000000000000C",
             "sell",
             "5",
             "150",
@@ -438,7 +441,7 @@ fn reduced(action: &str, open: bool) -> Result<(Vec<String>, Vec<String>), Error
             support::owner_exit(&journal, AGENT, OWNER, Some("149"))?;
             support::propose_owner_market_exit(&journal, AGENT, OWNER_EXIT, OWNER)?;
         }
-        "kill_switch" => support::kill(&journal, AGENT, "01JKILL00000000000000000AA")?,
+        "kill_switch" => support::kill(&journal, AGENT, "01JK1MM00000000000000000AA")?,
         purpose => exit(purpose)?,
     }
     for _ in 0..3 {
@@ -458,9 +461,9 @@ fn reduced(action: &str, open: bool) -> Result<(Vec<String>, Vec<String>), Error
 #[test]
 fn every_risk_reduction_goes_alike_under_a_shut_and_an_open_gate() -> Result<(), Error> {
     for (action, acted) in [
-        ("risk_exit", "md-01JINTENT0000000000000000C"),
-        ("discretionary_exit", "md-01JINTENT0000000000000000C"),
-        ("owner_exit", "md-01JINTENT0000000000000000D"),
+        ("risk_exit", "md-01J1NTENT0000000000000000C"),
+        ("discretionary_exit", "md-01J1NTENT0000000000000000C"),
+        ("owner_exit", "md-01J1NTENT0000000000000000D"),
         ("kill_switch", "KillSwitchActivated"),
     ] {
         let shut = reduced(action, false)?;
@@ -489,6 +492,14 @@ impl BindingGateSource for Asked {
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         self.0.borrow_mut().push(request.purpose);
         None
+    }
+
+    fn config_refs(
+        &self,
+        _agent: &mandate_executor::AgentId,
+        _instrument: &mandate_accounting::InstrumentId,
+    ) -> Option<mandate_executor::BindingGateConfigRefs> {
+        Some(support::deployed_refs())
     }
 }
 
@@ -551,7 +562,7 @@ fn an_increase_is_held_while_shut_and_decided_once_open() -> Result<(), Error> {
     propose(
         &journal,
         AGENT,
-        "01JINTENT0000000000000000D",
+        "01J1NTENT0000000000000000D",
         "buy",
         "5",
         "150",
@@ -560,7 +571,7 @@ fn an_increase_is_held_while_shut_and_decided_once_open() -> Result<(), Error> {
     for _ in 0..5 {
         process.step(at(NOON)?);
     }
-    assert_eq!(journal.received(), ["01JINTENT0000000000000000A"]);
+    assert_eq!(journal.received(), ["01J1NTENT0000000000000000A"]);
     let decided = |journal: &Journal| {
         journal
             .types(ACCOUNT_STREAM)
@@ -573,7 +584,7 @@ fn an_increase_is_held_while_shut_and_decided_once_open() -> Result<(), Error> {
     process.step(at(NOON)?);
     assert_eq!(
         journal.received(),
-        ["01JINTENT0000000000000000A", "01JINTENT0000000000000000D"]
+        ["01J1NTENT0000000000000000A", "01J1NTENT0000000000000000D"]
     );
     assert_eq!(decided(&journal), before + 1);
     Ok(())
@@ -684,7 +695,7 @@ fn a_connecting_executor_opens_nothing_and_still_exits() -> Result<(), Error> {
     propose(
         &journal,
         AGENT,
-        "01JINTENT0000000000000000A",
+        "01J1NTENT0000000000000000A",
         "buy",
         "10",
         "150",
@@ -693,7 +704,7 @@ fn a_connecting_executor_opens_nothing_and_still_exits() -> Result<(), Error> {
     propose(
         &journal,
         AGENT,
-        "01JINTENT0000000000000000C",
+        "01J1NTENT0000000000000000C",
         "sell",
         "10",
         "150",
@@ -707,7 +718,7 @@ fn a_connecting_executor_opens_nothing_and_still_exits() -> Result<(), Error> {
         process.step(at(NOON)?);
     }
     assert!(!gate.is_open());
-    assert_eq!(journal.received(), ["01JINTENT0000000000000000C"]);
+    assert_eq!(journal.received(), ["01J1NTENT0000000000000000C"]);
     assert!(
         !journal
             .types(ACCOUNT_STREAM)
@@ -833,7 +844,7 @@ fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
         propose(
             &journal,
             AGENT,
-            "01JINTENT0000000000000000A",
+            "01J1NTENT0000000000000000A",
             "buy",
             "10",
             "150",
@@ -842,7 +853,7 @@ fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
         propose(
             &journal,
             AGENT,
-            "01JINTENT0000000000000000C",
+            "01J1NTENT0000000000000000C",
             "sell",
             "10",
             "150",
@@ -863,7 +874,7 @@ fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
         );
         assert_eq!(
             journal.received(),
-            ["01JINTENT0000000000000000C"],
+            ["01J1NTENT0000000000000000C"],
             "{event_type}"
         );
     }
@@ -897,7 +908,7 @@ fn an_unreadable_record_keeps_the_gate_shut_and_every_exit_going() -> Result<(),
     propose(
         &journal,
         AGENT,
-        "01JINTENT0000000000000000A",
+        "01J1NTENT0000000000000000A",
         "buy",
         "10",
         "150",
@@ -906,7 +917,7 @@ fn an_unreadable_record_keeps_the_gate_shut_and_every_exit_going() -> Result<(),
     propose(
         &journal,
         AGENT,
-        "01JINTENT0000000000000000C",
+        "01J1NTENT0000000000000000C",
         "sell",
         "10",
         "150",
@@ -925,7 +936,7 @@ fn an_unreadable_record_keeps_the_gate_shut_and_every_exit_going() -> Result<(),
             .types(ACCOUNT_STREAM)
             .contains(&"ConnectionEstablished".to_owned())
     );
-    assert_eq!(journal.received(), ["01JINTENT0000000000000000C"]);
+    assert_eq!(journal.received(), ["01J1NTENT0000000000000000C"]);
     Ok(())
 }
 

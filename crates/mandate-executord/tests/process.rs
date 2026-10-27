@@ -14,8 +14,8 @@ use support::{
     kill, kill_by, kill_scoped, mode_applied, object, opened, process_config, start, tick, wiring,
 };
 
-const SWITCH: &str = "01JKILL00000000000000000AA";
-const OTHER_SWITCH: &str = "01JKILL00000000000000000AB";
+const SWITCH: &str = "01JK1MM00000000000000000AA";
+const OTHER_SWITCH: &str = "01JK1MM00000000000000000AB";
 
 /// Paper only (DEC-2003 item 9): any other environment is refused before the account stream is
 /// taken, and the refused process takes no input after, so nothing is journaled and nothing is

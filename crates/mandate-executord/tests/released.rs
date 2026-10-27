@@ -53,7 +53,7 @@ fn released(qty: &str, switched: bool) -> Result<(support::Journal, Paper), Erro
             "e9r0l0",
             "PositionReleased",
             1,
-            Some("01JRELEASE0000000000000000"),
+            Some("01JREMEASE0000000000000000"),
             object(vec![
                 ("agent_id", text(AGENT)),
                 ("canceled_order_ids", Value::Array(vec![text(&leg)])),

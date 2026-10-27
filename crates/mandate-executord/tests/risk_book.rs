@@ -551,7 +551,7 @@ fn the_kill_switch_applies_while_the_books_records_cannot_be_appended() -> Resul
     refused.step(at(NOON)?);
     tick(&journal, "t3", TUESDAY)?;
     journal.fail_next_of("RiskDayStarted", &[support::Fault::Invalid]);
-    support::kill(&journal, AGENT, "01JKILL00000000000000000AA")?;
+    support::kill(&journal, AGENT, "01JK1MM00000000000000000AA")?;
     refused.step(at(TUESDAY)?);
     assert_eq!(
         journal.switched(),
@@ -565,7 +565,7 @@ fn the_kill_switch_applies_while_the_books_records_cannot_be_appended() -> Resul
     doubted.step(at(NOON)?);
     tick(&journal, "t3", TUESDAY)?;
     journal.fail_next_of("RiskDayStarted", &[support::Fault::Unavailable]);
-    support::kill(&journal, AGENT, "01JKILL00000000000000000AA")?;
+    support::kill(&journal, AGENT, "01JK1MM00000000000000000AA")?;
     doubted.step(at(TUESDAY)?);
     let later = "2026-09-22T04:00:06Z";
     tick(&journal, "t4", later)?;
@@ -893,7 +893,7 @@ fn holding(
     wiring.marked = Box::new(quotes.clone());
     let mut process = start_wired(journal, broker, wiring)?;
     process.step(at(NOON)?);
-    open_xyz(journal, "01JINTENT0000000000000000Q")?;
+    open_xyz(journal, "01J1NTENT0000000000000000Q")?;
     tick(journal, "t3", "2026-09-21T15:01:00Z")?;
     process.step(at("2026-09-21T15:01:00Z")?);
     let submitted = broker.submitted();

@@ -42,10 +42,10 @@ use support::{
 /// The agentic account the connector is recorded on, typed by the founder in the real run and
 /// made up here.
 const ACCOUNT_NUMBER: &str = "5QR00001";
-const OPEN: &str = "01JINTENT0000000000000000A";
-const OPENING: &str = "md-01JINTENT0000000000000000A";
+const OPEN: &str = "01J1NTENT0000000000000000A";
+const OPENING: &str = "md-01J1NTENT0000000000000000A";
 /// A risk exit's key, for the broker-level sell.
-const EXIT: &str = "md-01JINTENT0000000000000000B";
+const EXIT: &str = "md-01J1NTENT0000000000000000B";
 const REF: &str = "sha256:6666666666666666666666666666666666666666666666666666666666666666";
 /// The account's cash before the opening.
 const CASH: &str = "100000";

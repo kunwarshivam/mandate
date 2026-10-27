@@ -14,7 +14,7 @@ use support::{
     start_allowing,
 };
 
-const EXIT: &str = "01JINTENT0000000000000000C";
+const EXIT: &str = "01J1NTENT0000000000000000C";
 /// More failed appends than any test here makes: the journal stays down until it is cleared.
 const DOWN: usize = 64;
 
@@ -138,7 +138,7 @@ fn the_hold_raises_its_alert_once_an_outage() -> Result<(), Error> {
     propose(
         &journal,
         AGENT,
-        "01JINTENT0000000000000000D",
+        "01J1NTENT0000000000000000D",
         "sell",
         "1",
         "149",

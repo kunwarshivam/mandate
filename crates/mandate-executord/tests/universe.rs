@@ -75,7 +75,7 @@ fn an_admitted_thesis_is_copied_once_across_passes_and_a_restart() -> Result<(),
     Ok(())
 }
 
-const EXIT: &str = "01JINTENT0000000000000000E";
+const EXIT: &str = "01J1NTENT0000000000000000E";
 
 fn thesis_row(journal: &support::Journal, revision: Option<i64>) -> Result<(), Error> {
     let mut members = vec![

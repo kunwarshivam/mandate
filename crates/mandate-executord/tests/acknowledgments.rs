@@ -13,8 +13,8 @@ use support::{
     object, opened, propose, start, start_allowing,
 };
 
-const OPEN: &str = "01JINTENT0000000000000000A";
-const EXIT: &str = "01JINTENT0000000000000000C";
+const OPEN: &str = "01J1NTENT0000000000000000A";
+const EXIT: &str = "01J1NTENT0000000000000000C";
 
 const HOLD: &str = "01JBHD00001000000000000000";
 const ACK: &str = "01JBAK00001000000000000000";

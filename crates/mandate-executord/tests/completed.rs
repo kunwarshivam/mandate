@@ -16,7 +16,7 @@ use support::{
 };
 
 const COMMAND: &str = "01JCMD000000000000000000AA";
-const SWITCH: &str = "01JKILL00000000000000000AA";
+const SWITCH: &str = "01JK1MM00000000000000000AA";
 const COMPLETED: State = State::Exited(Exit::Completed);
 
 /// Item 3: its only agent stopped, nothing on the account, so the first pass exits `completed`,
