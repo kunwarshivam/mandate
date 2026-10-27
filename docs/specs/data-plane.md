@@ -123,7 +123,7 @@ predicate (AGENTS.md, "Getting it right the first time").
 | DP-13 | **Exits never wait on the data plane's slow parts.** No exit, protective order, or kill switch waits on news, filings, backfill, the shared plane, or the research query (rule 13) | Fault injection: with the shared plane and every news source down, the exit suites still pass |
 | DP-14 | **Backtests are reproducible.** A backtest reads one store snapshot, named by its manifest digest and recorded in `BacktestRunRecorded` ([PRD FR-4.5](../product/04-prd-v1.md#64-backtest-and-paper-trading)) | Running the same mandate version on the same snapshot twice gives identical bytes |
 | DP-15 | **Stored bars are never guessed (§3.8).** Every stored bar is one the vendor answered for that instrument, timeframe and minute or session; no bar is stored before its span has ended (and, for a daily bar, `SETTLE` after) | Property test over random vendor answers (missing, empty, late, out of span, foreign symbol): every stored bar is in the oracle's own list of answered, ended bars |
-| DP-16 | **A wrong answer does not outlive its generation.** A revised or empty vendor answer changes no stored generation and is replaced in the next | Fuzz over generations: the reader's view at each clock equals the oracle's latest answered window |
+| DP-16 | **A wrong answer does not outlive its generation.** A revised or late vendor answer changes no stored generation and is replaced in the next; a true no-bar day stays refused while in the span | Fuzz over generations: the reader's view at each clock equals the oracle's latest answered window |
 | DP-17 | **The platform key goes nowhere but the vault, memory, and the data host's two paths** | The `PK` guard, the redacted `Debug`, a transport test that refuses every other path before a byte is sent, and a log test that no key byte, symbol or price appears in the process's output |
 
 ---
@@ -270,7 +270,8 @@ process (`mandate-datad`) fills them from Alpaca's historical IEX bars
 and CI fixture only.
 
 **Scope.** Managed cells only, and paper workspaces only. A live workspace needs SIP (DEC-35) and
-reads no bars from this source; a hybrid or on-prem site never holds the platform key.
+reads no bars from this source: the process writes nothing while any control-stream row it reads
+is not of the `paper` environment. A hybrid or on-prem site never holds the platform key.
 
 **Key.** The process reads the platform's data-only paper key (`platform/news-data-key`, DEC-2277,
 widened to bars by the founder's decision F2) from the vault once at start, as its own read-only
@@ -294,7 +295,7 @@ processes may read the key is DEC-2283 item 9's to settle.
 runtime's composer makes. The executor refuses any instrument without one, so the set covers every
 pinned and working-universe instrument an agent can trade. The process reads only those
 registrations and their artifacts, and appends nothing.
-- It takes at most `BARS_INSTRUMENTS` (50), the most recently registered first. The rest get no bars,
+- It takes at most `BARS_INSTRUMENTS` (50), in order of each asset id's first registration, ties by asset id, so the set does not reshuffle when snapshots are re-registered. The rest get no bars,
   and so no signal and no opening, and the process logs the count, never a symbol.
 - Two asset ids naming one symbol both get no bars, so a reused ticker never mixes two companies.
 
@@ -311,10 +312,14 @@ generation, and a reader picks its generation from its own clock:
   minutes before. Older than that, its trailing window is empty, which refuses the opening as today.
   A generation from a minute or two before holds fewer bars of the window, which understates volume
   and errs toward the tighter cap.
-- A generation is written once and never rewritten (DP-2). A day the vendor revises, or answered
-  with no bar, is fetched again in the next generation, so a wrong or empty answer lasts one
-  generation at most. Daily generations are kept for two sessions and minute generations for ten
-  minutes. A journaled decision cites the closes object, never a generation (below), and backtests
+- Each instrument's dataset in a generation is written once and never rewritten (DP-2); an
+  instrument held back by `CONFIRM` is added to its generation later, beside the others. An
+  instrument registered after its daily generation was written gets daily bars from the next one,
+  up to a session later, and has no signal meanwhile. A day the vendor revises, or answers late, is
+  fetched again in the next generation, so such an answer lasts one generation at most; a true
+  no-bar day stays in the span, and refused, for its 30 sessions. Daily generations are kept for two sessions and minute generations for ten
+  minutes; deleting a generation past its retention is the one deletion DP-2 allows here. A
+  journaled decision cites the closes object, never a generation (below), and backtests
   read their own snapshots (DP-14). The generation's directory names when it was knowable (DP-1).
 
 **When.** The process ticks every second and works at most one generation of each kind a tick.
@@ -323,11 +328,13 @@ generation, and a reader picks its generation from its own clock:
   is written, the reader's generation is missing. That means no signal from `D`'s regular close
   until then, outside the regular session where equities cannot open anyway.
 - **An empty day.** When a fetch answers no bar for an instrument on session `D` itself, that
-  instrument's generation waits and is fetched again each minute, for at most `CONFIRM` (2 hours).
+  instrument's dataset waits and its bars alone are asked again every 5 minutes, for at most
+  `CONFIRM` (2 hours, 24 requests).
   Only then is it written with the day empty. The trust check then refuses that instrument for every
   generation whose span holds the day, which is no signal, never a guess. The process never fills,
   carries forward, interpolates or adjusts a bar.
 - **Minute generation `M`:** written at each whole minute of the regular session.
+- **Jitter.** Each workspace offsets its fetches by a fixed delay derived from its workspace id: up to 5 minutes after `SETTLE` for the daily generation, and up to 20 seconds into the minute for the minute generation, so workspaces do not all ask at once. The offset never moves a generation's span.
 - **Restarts.** A restart writes what is due, and a generation already written is skipped.
 - **Removed instruments.** An instrument no longer registered is absent from the next generation.
 
@@ -341,12 +348,13 @@ generation, and a reader picks its generation from its own clock:
 - **Pacing:** requests go through the E2-1 client's pacing: 200 a minute, `429` waits for the next
   window, server errors back off.
 - **Cost:** one workspace asks about 1 request a minute in session, plus 2 a session for daily bars,
-  whatever its instrument count. Every workspace's process shares the platform key's budget with
+  whatever its instrument count, and at most 24 more a session while an instrument's newest day is
+  being confirmed. Every workspace's process shares the platform key's budget with
   the news reader. Past about 150 workspaces in session, `429`s leave minute generations missing,
   which refuses openings, never adds risk.
 
-**Closes object.** At every tick that finds its generation present, whether or not it wrote one,
-the process puts each instrument's trusted closes object from the daily generation the readers use
+**Closes object.** At each tick that finds its generation present and an instrument's closes
+object absent from the artifact store, whether or not it wrote the generation, the process puts each instrument's trusted closes object from the daily generation the readers use
 (DEC-846 item 3, source `alpaca_iex_daily_bars`). That is byte for byte what the runtime's composer
 derives from the same generation at the same session, so the runtime's `ObservationRecorded` names
 an object that is there (DEC-2385 item 5). DP-3 holds through that event and its `data_ref`. The

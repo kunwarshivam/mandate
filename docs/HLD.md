@@ -647,7 +647,7 @@ own monitor and halt from the same installer.
   In every mode each workspace reads market data through its own broker connection; nothing is
   ingested once and shared in v1, because that would be redistribution (§12 risk 3;
   [data plane spec](specs/data-plane.md), DEC-433 items 3 and 15). One exception: on managed
-  cells each paper workspace's stored IEX daily and minute bars are fetched with the platform's
+  cells a paper workspace's stored IEX daily and minute bars are fetched with the platform's
   data key, a licensing risk the founder accepted ([DEC-2283](project/decisions/DEC-2283.md),
   data plane spec §3.8) until a license or per-workspace keys land (E2-20).
 
@@ -732,7 +732,8 @@ spike (`python/research_spike`).
    and exchange licenses. In v1, each user's market data comes through their own Alpaca
    account, so Mandate does not redistribute it; any shared data offering needs licensing first.
    The exception is the stored IEX bars of [DEC-2283](project/decisions/DEC-2283.md), fetched with
-   the platform's data key for every managed paper workspace: the founder accepted that risk on
+   the platform's data key for managed paper workspaces (customers' once DEC-2283 item 9.2 is
+   confirmed): the founder accepted that risk on
    2026-10-27, and E2-20 obtains the license or moves workspaces onto their own keys.
 4. **Custom code in v1.** Declarative specs only, or also WebAssembly plug-ins?
 5. **First connectors (decided, [DEC-23](project/04-decision-log.md#decisions), reordered by
