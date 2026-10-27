@@ -891,7 +891,10 @@ def test_the_model_gateway_serves_the_recording_and_names_no_budget_of_its_own()
     for unset in ("modelGateway.workspace=", "modelGateway.deployment="):
         done = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", unset)
         assert done.returncode != 0 and "is required with images.model-gateway" in done.stderr, unset
-    hosted = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", "localImages=false")
+    hosted = helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+        "--set", "localImages=false", "--set", "deploymentTier=staging",
+    )
     assert hosted.returncode != 0 and "a hosted model gateway starts live" in hosted.stderr, hosted.stderr
     local = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), *LIVE_REGISTRY)
     assert local.returncode != 0 and "the local cell serves the recorded bundle alone" in local.stderr, local.stderr
@@ -921,7 +924,7 @@ def test_a_hosted_gateway_starts_live_from_the_registry_and_the_vault():
     docs = documents(done.stdout)
     gateway = next(w for w in workloads(docs) if w["metadata"]["name"] == "model-gateway")
     container = first_container(gateway)
-    vault = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "model-gateway")
+    deployment = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "model-gateway")
     namespace = re.search(r"https://vault\.([^.]+)\.svc:8200", " ".join(container["args"]))
     assert namespace, container["args"]
     expected = [a.replace("{vault}", namespace.group(0)) for a in LIVE_ARGS]
@@ -929,7 +932,8 @@ def test_a_hosted_gateway_starts_live_from_the_registry_and_the_vault():
     mounts = {m["mountPath"]: m for m in container["volumeMounts"]}
     assert mounts["/run/mandate/model-gateway"]["readOnly"] is True
     assert mounts["/run/mandate/vault"]["readOnly"] is True
-    spec = vault["spec"]["template"]["spec"]
+    spec = deployment["spec"]["template"]["spec"]
+    assert deployment["spec"]["template"]["metadata"]["labels"].get("mandate.dev/egress-vault") == "true"
     copy_step = next(i for i in spec["initContainers"] if i["name"] == "vault-credentials")
     assert "/run/secrets/vault-model-gateway/model-gateway.role-id" in copy_step["command"]
     volumes = {v["name"]: v for v in spec["volumes"]}
@@ -941,9 +945,7 @@ def test_a_hosted_gateway_starts_live_from_the_registry_and_the_vault():
     assert set(GATEWAY_BUDGETS) <= set(gateway_env(docs))
     for tier in ("production", "dev"):
         refused = live_gateway("--set", f"deploymentTier={tier}")
-        assert refused.returncode != 0, tier
-    dev = live_gateway("--set", "deploymentTier=dev")
-    assert "starts the live gateway in staging alone" in dev.stderr, dev.stderr
+        assert "runs the model gateway in staging alone" in refused.stderr, (tier, refused.stderr)
 
 
 def test_a_researching_runtime_calls_the_gateway_of_its_own_workspace_alone():

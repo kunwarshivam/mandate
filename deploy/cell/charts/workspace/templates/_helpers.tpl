@@ -348,11 +348,11 @@ local cell serves the recorded bundle alone and names no registry; a hosted cell
 {{- if and .root.Values.localImages $g.registry }}
 {{- fail "modelGateway.registry is a hosted cell's: the local cell serves the recorded bundle alone and reaches no provider (DEC-2326, DEC-2081)" }}
 {{- end }}
+{{- if and (not .root.Values.localImages) (ne .root.Values.deploymentTier "staging") }}
+{{- fail (printf "a hosted cell runs the model gateway in staging alone, and deploymentTier is %q: production's model budgets are the founder's (DEC-2282, DEC-2081)" .root.Values.deploymentTier) }}
+{{- end }}
 {{- if and (not .root.Values.localImages) (not $g.registry) }}
 {{- fail "a hosted model gateway starts live, from modelGateway.registry: its released image carries no recorded bundle (DEC-2079 item 5, DEC-2081)" }}
-{{- end }}
-{{- if and $g.registry (ne .root.Values.deploymentTier "staging") }}
-{{- fail (printf "modelGateway.registry starts the live gateway in staging alone, and deploymentTier is %q: production's model budgets are the founder's (DEC-2282, DEC-2081)" .root.Values.deploymentTier) }}
 {{- end }}
 - name: MANDATE_GATEWAY_WORKSPACE
   value: {{ required "modelGateway.workspace, the one workspace the model gateway serves, is required with images.model-gateway" $g.workspace | quote }}
