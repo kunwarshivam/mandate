@@ -1622,7 +1622,6 @@ fn trade_loop_quoting(
     clock: impl Fn() -> UtcNanos + 'static,
 ) -> Result<(Journal, LoopProcess, FixturePaper), Error> {
     let (journal, store, _) = deployed_as(variant)?;
-    journaled(&journal)?;
     if variant.research {
         thesis(&journal, "th-1", SPY, None, "2026-09-21T20:00:00Z")?;
     }
@@ -2394,6 +2393,122 @@ fn an_owner_exit_at_the_market_while_the_mark_is_stale_is_received_and_sold() ->
     owner_exit_after_the_opening(true)
 }
 
+/// `AGENTS.md` rule 13 and the 2026-10-27 rehearsal: the owner's kill switch of the agent, issued
+/// on the control stream after the opening fills and copied to the agent's stream as the runtime
+/// copies it, a stop, the agent-scope `OwnerExitRequested` and the `KillSwitchActivated`, is
+/// applied on the account stream and sells the position, under the journal's own rules. In the
+/// cell its flatten's intent id, `k-{switch}-{n}`, was refused, and nothing sold (DEC-2845).
+#[test]
+fn the_owners_kill_switch_after_the_opening_fills_sells_the_position() -> Result<(), Error> {
+    let (journal, mut process, _paper) = trade_loop(Variant {
+        demo: true,
+        ..Variant::default()
+    })?;
+    for second in (5..120).step_by(5) {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(&journal, &format!("tl{second}"), &now)?;
+        process.step(at(&now)?);
+    }
+    let command = "01J0WNERCMD000000000000002";
+    journal.write(
+        CONTROL_STREAM,
+        command,
+        "OwnerCommandIssued",
+        1,
+        None,
+        object(vec![
+            ("agent", text(AGENT)),
+            ("bid", Value::Null),
+            ("bid_size", Value::Null),
+            ("command", text("kill_switch")),
+            ("floor", Value::Null),
+            ("release", Value::Null),
+            ("scope", text("agent")),
+            ("step_up", Value::Null),
+            ("subject", text(AGENT)),
+            (
+                "submitted_at",
+                Value::Int(mandate_canon::Int::new(1_790_006_520).ok_or("an int")?),
+            ),
+            ("user", text("u1")),
+            ("warning_shown", Value::Null),
+        ])?,
+    )?;
+    let agent = support::agent_stream(AGENT);
+    journal.write(
+        &agent,
+        "01J0WNERST0P000000000000002",
+        "AgentModeChanged",
+        1,
+        Some(command),
+        object(vec![
+            ("from", text("normal")),
+            ("lifecycle", text("normal")),
+            ("reason", text("kill_switch")),
+            ("to", text("stopped")),
+        ])?,
+    )?;
+    journal.write(
+        &agent,
+        "01J0WNEREX1T000000000000002",
+        "OwnerExitRequested",
+        1,
+        Some(command),
+        object(vec![
+            ("bid", Value::Null),
+            ("bid_size", Value::Null),
+            ("confirmed", Value::Bool(false)),
+            ("floor", Value::Null),
+            ("scope", text("agent")),
+            ("step_up", Value::Null),
+            ("step_up_status", text("absent")),
+            ("subject", text(AGENT)),
+            ("user", text("u1")),
+        ])?,
+    )?;
+    journal.write(
+        &agent,
+        "01J0WNERK1MM000000000000002",
+        "KillSwitchActivated",
+        1,
+        Some(command),
+        object(vec![
+            ("initiator", text("owner")),
+            ("mode_event", text("01J0WNERST0P000000000000002")),
+            ("scope", text("agent")),
+            ("subject", text(AGENT)),
+        ])?,
+    )?;
+    for second in (120..240).step_by(5) {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(&journal, &format!("tk{second}"), &now)?;
+        process.step(at(&now)?);
+    }
+    let types = journal.types(ACCOUNT_STREAM);
+    assert_eq!(
+        journal.switched(),
+        [AGENT],
+        "the switch is applied: {types:?}"
+    );
+    let sold = ["FillApplied", "LateFillApplied"].iter().any(|kind| {
+        journal
+            .payloads(kind)
+            .iter()
+            .any(|p| p.get("side").and_then(Value::as_str) == Some("sell"))
+    });
+    assert!(sold, "and its flatten sold: {types:?}");
+    let flat = journal
+        .payloads("BrokerPositionObserved")
+        .last()
+        .and_then(|p| {
+            p.get("broker_qty")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
+    assert_eq!(flat.as_deref(), Some("0"), "and nothing is left: {types:?}");
+    Ok(())
+}
+
 fn owner_exit_after_the_opening(stale: bool) -> Result<(), Error> {
     let frozen: Rc<Cell<Option<UtcNanos>>> = Rc::new(Cell::new(None));
     let clock = Rc::clone(&frozen);
@@ -2518,5 +2633,40 @@ fn owner_exit_after_the_opening(stale: bool) -> Result<(), Error> {
             .any(|p| p.get("side").and_then(Value::as_str) == Some("sell"))
     });
     assert!(sold, "and sold: {types:?}");
+    if stale {
+        let intent = support::ulid("01JOWNEXIT0000000000000001");
+        let rows: Vec<(String, Value)> = journal
+            .rows_of(ACCOUNT_STREAM)
+            .iter()
+            .filter_map(|row| {
+                let payload = mandate_canon::parse(&row.body)
+                    .ok()?
+                    .get("payload")?
+                    .clone();
+                Some((row.event_type.clone(), payload))
+            })
+            .collect();
+        let first = |found: &dyn Fn(&str, &Value) -> bool| {
+            rows.iter().position(|(kind, payload)| found(kind, payload))
+        };
+        let member = |payload: &Value, name: &str| {
+            payload.get(name).and_then(Value::as_str).map(str::to_owned)
+        };
+        let held = first(&|kind, payload| {
+            kind == "GateDecided"
+                && member(payload, "intent_id").as_deref() == Some(intent.as_str())
+                && member(payload, "verdict").as_deref() == Some("hold")
+        });
+        let alerted = first(&|kind, _| kind == "OwnerAlertSent");
+        let sent = first(&|kind, payload| {
+            kind == "OrderRequestRecorded"
+                && member(payload, "intent_id").as_deref() == Some(intent.as_str())
+        });
+        assert!(
+            held.is_some() && held < sent && alerted.is_some() && alerted < sent,
+            "the stale exit is held, journaled and alerted before it goes: held {held:?}, alerted \
+             {alerted:?}, sent {sent:?}: {types:?}"
+        );
+    }
     Ok(())
 }

@@ -335,30 +335,7 @@ impl Rows {
             &NoArtifacts,
         ) {
             AppendOutcome::Committed(_) | AppendOutcome::AlreadyCommitted(_) => None,
-            refused => {
-                if let AppendOutcome::Invalid { draft, error } = &refused {
-                    let kind = drafts
-                        .get(*draft)
-                        .and_then(|d| parse(d).ok())
-                        .and_then(|v| {
-                            v.get("event_type")
-                                .and_then(Value::as_str)
-                                .map(str::to_owned)
-                        });
-                    let at = drafts.get(*draft).and_then(|d| parse(d).ok()).map(|v| {
-                        let mut node = Some(v);
-                        for part in error.path.split('.') {
-                            node = node.and_then(|n| n.get(part).cloned());
-                        }
-                        format!("{node:?}")
-                    });
-                    eprintln!(
-                        "JUDGED {:?} {} {:?} {:?}",
-                        error.reason, error.path, kind, at
-                    );
-                }
-                Some(refused)
-            }
+            refused => Some(refused),
         }
     }
 }

@@ -147,3 +147,32 @@ fn a_refused_exit_sends_nothing_and_goes_at_the_next_pass() -> Result<(), Error>
     );
     Ok(())
 }
+
+/// DEC-2846: each refusal's cause, the refused record's type and the journal's reason and path,
+/// reaches the operator, once per new cause: the cell's lost exit was refused on every pass, and
+/// the once-a-process `journal_refused` alert never said why. A refusal for the same cause again
+/// says nothing new; the cause carries no payload (`AGENTS.md` rule 6).
+#[test]
+fn a_refusals_cause_is_alerted_once_per_cause() -> Result<(), Error> {
+    let journal = deployed()?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    let causes = |alerts: &[Alert]| -> Vec<String> {
+        alerts
+            .iter()
+            .filter(|alert| alert.key == "journal_refused_cause")
+            .filter_map(|alert| alert.subject.clone())
+            .collect()
+    };
+    journal.fail_next(&[Fault::Invalid]);
+    let first = causes(&process.step(at(NOON)?));
+    assert_eq!(first.len(), 1, "{first:?}");
+    assert!(
+        first.iter().all(|cause| cause.ends_with(":schema:payload")),
+        "the record type, the reason code and the path: {first:?}"
+    );
+    journal.fail_next(&[Fault::Invalid]);
+    let again = causes(&process.step(at(NOON)?));
+    assert!(again.is_empty(), "the same cause again: {again:?}");
+    Ok(())
+}
