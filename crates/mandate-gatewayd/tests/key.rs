@@ -227,8 +227,8 @@ fn the_key_appears_in_no_debug_error_or_code() {
     let key = held(&FakeVault::with_key(CANARY.as_bytes())).unwrap();
     assert_eq!(
         format!("{key:?}"),
-        r#"HeldKey { upstream: "anthropic", .. }"#,
-        "the held key shows its upstream and nothing of the key"
+        r#"HeldKey { upstreams: {"anthropic"}, .. }"#,
+        "the held key shows its upstreams and nothing of the key"
     );
     let mut shown = vec![
         format!("{key:?}"),
@@ -251,4 +251,17 @@ fn the_key_appears_in_no_debug_error_or_code() {
             "part of the key shows in {text:?}"
         );
     }
+}
+
+/// DEC-2216: the live registry's entries may route through more than one upstream, so the key is
+/// served for each upstream the start names and still for no other, from the one read.
+#[test]
+fn the_key_is_served_for_each_upstream_named_and_no_other() {
+    let vault = FakeVault::with_key(CANARY.as_bytes());
+    let key = held(&vault).unwrap().with_upstream("google-vertex/global");
+    for upstream in [UPSTREAM, "google-vertex/global"] {
+        assert_eq!(key.provider_key(upstream).unwrap().expose_secret(), CANARY);
+    }
+    assert_eq!(key.provider_key("azure"), Err(SecretError::Missing));
+    assert_eq!(vault.reads.get(), 1);
 }

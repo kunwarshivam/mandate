@@ -20,6 +20,10 @@ pub struct LiveEntry {
     pub endpoint: Endpoint,
     /// Whether the file asks for the entry to be offered; `false` holds it `evaluating`.
     pub offered: bool,
+    /// The reference (`sha256:` and 64 lowercase hex digits) of the gate report the file names as
+    /// this entry's pass (DEC-2216 item 4), or `None`. The service re-reads the report and its
+    /// every binding before it offers anything on its say-so.
+    pub gate_report: Option<String>,
 }
 
 /// An entry the registry did not take as the file asks, and why.
@@ -30,8 +34,8 @@ pub struct Refused {
 }
 
 /// The entries of `file`, a parsed live registry file, read strictly: `entries` is a non-empty
-/// array, and each holds an `entry` as a recording's, an `endpoint` as a recording's, and a
-/// `status` of `offered` or `evaluating`.
+/// array, and each holds an `entry` as a recording's, an `endpoint` as a recording's, a `status` of
+/// `offered` or `evaluating`, and optionally a `gate_report` reference.
 ///
 /// # Errors
 /// [`RecordedError::Malformed`] naming the first member that is missing, empty, or out of range.
@@ -54,10 +58,21 @@ pub fn read_live(file: &Value) -> Result<Vec<LiveEntry>, RecordedError> {
                 EntryError::Member(member) => RecordedError::Malformed(member),
             })?;
             let (endpoint, _) = hosted(&Field(member("endpoint")?), &entry.identity.model_name)?;
+            let gate_report = item
+                .get("gate_report")
+                .map(|reference| {
+                    reference
+                        .as_str()
+                        .filter(|text| is_reference(text))
+                        .map(str::to_owned)
+                        .ok_or(RecordedError::Malformed("gate_report"))
+                })
+                .transpose()?;
             Ok(LiveEntry {
                 entry,
                 endpoint,
                 offered,
+                gate_report,
             })
         })
         .collect()
@@ -100,4 +115,14 @@ pub fn live_registry(
         }
     }
     (registry, refused)
+}
+
+/// Whether `text` is an artifact reference: `sha256:` and 64 lowercase hexadecimal digits.
+fn is_reference(text: &str) -> bool {
+    text.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+    })
 }
