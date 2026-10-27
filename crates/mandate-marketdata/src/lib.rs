@@ -9,6 +9,7 @@
 
 pub mod actions;
 pub mod alpaca;
+pub mod batch;
 pub mod client;
 pub mod dataset;
 pub mod download;
