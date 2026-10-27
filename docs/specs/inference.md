@@ -403,8 +403,9 @@ included, and the reported identity is checked on every response.
    ([mandate spec §9.2](mandate.md#92-classification)), so it needs confirmation.
 5. **The research role** ([DEC-2282](../project/decisions/DEC-2282.md)). The research agent's
    pin is its `ideate` entry, and its `routes` name the entry each other run kind calls (mandate spec
-   V-048). Every offered research entry pins the same `template`, `mode`, `output`, `tools`,
-   `loop_bounds`, `output_schemas`, `retrieval_plan` and `validation_bounds`. Entries differ only in
+   V-048). Every offered research entry pins the same **harness content**: `template`, `mode`,
+   `output`, `tools`, `loop_bounds`, `output_schemas`, `retrieval_plan`, `validation_bounds`,
+   `params_schema`, `methodology` and `authorship`. Entries differ only in
    `identity`, the sampling parameters, `deadline_ms`, `max_output_tokens` and, outside the hash,
    their endpoints and prices. The registry refuses to offer a research entry whose harness content
    differs from the role's. When a routed entry is deprecated, the owner is asked to choose again,

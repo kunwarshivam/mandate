@@ -31,6 +31,8 @@ LIGHT = {"id": "llm.research_agent_light", "version": "0.1.0", "content_hash": H
 TERRA = {"id": "llm.research_agent_terra", "version": "0.1.0", "content_hash": H_RES_TERRA}
 OWN = {"id": "llm.research_agent", "version": "0.1.0", "content_hash": H_RES}
 NEWS = {"id": "llm.news_research", "version": "0.3.0", "content_hash": H_NEWS}
+OLD = {"id": "llm.research_agent_old", "version": "0.1.0", "content_hash": H_RES_OLD}
+WIDE = {"id": "llm.research_agent_wide", "version": "0.1.0", "content_hash": H_RES_WIDE}
 
 def add_route(model, entry):
     return {"op": "add", "path": f"/behavior/signal_models/{model}/routes", "value": {"monitor": entry}}
@@ -254,6 +256,19 @@ SEM += [
      [add_route(0, dict(LIGHT, content_hash=H_RES_TERRA))], {}),
     ("MC-V83", "A route to an entry that does not admit instruments is refused", "research_equity",
      [add_route(0, NEWS)], {}),
+    ("MC-V84", "A route whose version is not the offered entry's is refused", "research_equity",
+     [add_route(0, dict(LIGHT, version="0.2.0"))], {}),
+    ("MC-V85", "A route to an entry the registry does not hold is refused", "research_equity",
+     [add_route(0, dict(LIGHT, id="llm.research_agent_none"))], {}),
+    ("MC-V86", "A route to an offered entry with other harness content is refused", "research_equity",
+     [add_route(0, WIDE)], {}),
+    ("MC-V87", "The research model's own pin still evaluating is refused", "research_equity",
+     [rep("/behavior/signal_models/0/id", TERRA["id"]), rep("/behavior/signal_models/0/content_hash", H_RES_TERRA)], {}),
+    ("MC-V88", "A deprecated route carried unchanged from the previous version passes", "research_equity",
+     [add_route(0, OLD), rep("/name", "research-equity-2")],
+     {"previous_version": apply_patch(MB["research_equity"], [add_route(0, OLD)])}),
+    ("MC-V89", "A deprecated route new in this version is refused", "research_equity",
+     [add_route(0, OLD)], {"previous_version": MB["research_equity"]}),
 ]
 STOP_LIMIT_EQUITIES = {"stop_limit_asset_classes": ["crypto", "us_equity"]}
 ALPACA_PROFILE = {"stop_limit_asset_classes": ["crypto"]}

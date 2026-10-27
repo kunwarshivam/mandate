@@ -336,15 +336,37 @@ def reduces_previous(prev, current, m):
             and V.is_valid(prev) and version(prev) == current
             and classify(prev, m)[0] == "risk_reducing")
 
-def route_offered(sm, route, reg):
-    """V-048 (DEC-2282): a route names another research entry the registry offers, pinned exactly."""
-    if route["id"] == sm["id"]:
-        return False
-    if reg is None:
+def research_pins(sm):
+    """The admitting model's pins by run kind: its own is `ideate`, its `routes` the rest (DEC-2282)."""
+    own = {"id": sm["id"], "version": sm["version"], "content_hash": sm["content_hash"]}
+    return dict(sm.get("routes") or {}, ideate=own)
+
+
+def pins_refused(sm, prev, reg):
+    """V-048 (DEC-2282) for the admitting model `sm`, against the previous version `prev`, if any. A pin
+    carried unchanged for its run kind skips the status test, so a deprecated or withdrawn entry never blocks
+    a version; a new or changed one must be offered."""
+    pins = research_pins(sm)
+    carried = {}
+    for p in (prev or {}).get("behavior", {}).get("signal_models", []):
+        if p.get("admits_instruments"):
+            carried = research_pins(p)
+    if any(kind != "ideate" and pin["id"] == sm["id"] for kind, pin in pins.items()):
         return True
-    e = reg.get(route["id"])
-    return (e is not None and e.get("admits_instruments", False) and e.get("status") == "offered"
-            and e["version"] == route["version"] and e["content_hash"] == route["content_hash"])
+    if reg is None:
+        return False
+    own = reg.get(sm["id"])
+    for kind, pin in pins.items():
+        e = reg.get(pin["id"])
+        exact = e is not None and e["version"] == pin["version"] and e["content_hash"] == pin["content_hash"]
+        offered = carried.get(kind) == pin or (exact and e.get("status") == "offered")
+        if kind == "ideate":
+            if exact and e.get("admits_instruments", False) and not offered:
+                return True
+        elif not (exact and offered
+                  and own is not None and e.get("harness") == own.get("harness")):
+            return True
+    return False
 
 
 def semantic(m, ctx):
@@ -464,7 +486,7 @@ def semantic(m, ctx):
         errs.add("V-036")
     if u["pinned"] and admitting:
         errs.add("V-037")
-    if not all(route_offered(s, rt, reg) for s in sms for rt in (s.get("routes") or {}).values()) \
+    if any(pins_refused(s, ctx.get("previous_version"), reg) for s in admitting) \
             or any("routes" in s and not s["admits_instruments"] for s in sms):
         errs.add("V-048")
     if u["pinned"] != (len(inst) > 0):
