@@ -14,14 +14,21 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mandate_canon::{Digest, decode_ulid, parse};
+use mandate_gateway::fake::RecordedTransport;
 use mandate_gateway::kinds::{KeyOwner, Outcome, Purpose};
+use mandate_gateway::policy::EndpointPolicy;
+use mandate_gateway::provider::NoKeys;
 use mandate_gateway::provider::{IdSource, ManualClock, SequentialIds};
+use mandate_gateway::registry::Locality;
+use mandate_gateway::registry::RegistryError;
 use mandate_gateway::{CallRequest, RequestError};
 use mandate_gatewayd::cap::CapError;
 use mandate_gatewayd::config::Config;
+use mandate_gatewayd::live::{LiveStart, live_service, live_settings, read_registry, upstreams};
 use mandate_gatewayd::recorded::Replies;
+use mandate_gatewayd::recorded::{RATE_MARGIN, WORKSPACE_RATE};
 use mandate_gatewayd::run::{
-    self, ArgsError, Command, Parts, RecordedService, RunArgs, StartFailure, WriteLog,
+    self, ArgsError, Command, LiveArgs, Parts, RecordedService, RunArgs, StartFailure, WriteLog,
     answer_recorded, heartbeat, host_now, observe, opened_ids, read_recorded, recorded_service,
     started_ids,
 };
@@ -33,6 +40,8 @@ use mandate_journal::{
 };
 use mandate_process::lifecycle::{Input, Kind, Lifecycle};
 use mandate_process::probe::{self, Probe, Status};
+use mandate_research_run::agentic::LoopBounds;
+use mandate_research_run::live::{LiveEntry, Refused, read_live};
 use mandate_research_run::recorded::RecordedModel;
 use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
@@ -74,24 +83,63 @@ fn run_and_probe_read_their_flags() {
     );
 }
 
-/// DEC-2326 items 1 and 3, DEC-79: a live start is refused `live_not_built` in every form,
-/// whatever else is named, so no argument makes the binary build a provider client.
+/// DEC-2216 item 4, DEC-2326 item 3: `run --registry` starts live from the registry file, with
+/// the vault's address and mounted credentials; it never also replays a recording, and a live
+/// start missing any of its flags, or naming the registry as `--registry=`, starts nothing.
 #[test]
-fn a_live_start_is_refused_in_every_form() {
-    for text in [
-        "run --registry /r.json --listen 0.0.0.0:8080 --probe /p",
-        "run --recorded /b.json --registry /r.json --listen 0.0.0.0:8080 --probe /p",
-        "run --registry=/r.json --recorded /b.json --listen 0.0.0.0:8080 --probe /p",
-        "run --recorded /b.json --listen 0.0.0.0:8080 --probe /p --registry",
-        "probe livez --probe /p --registry /r.json",
+fn a_live_start_reads_its_registry_and_vault_flags() {
+    assert_eq!(
+        run::command(&args(
+            "run --registry /r/registry.json --listen 0.0.0.0:8080 --probe /tmp/p.sock \
+             --vault-address https://vault:8200 --vault-dir /var/run/vault"
+        )),
+        Ok(Command::Live(LiveArgs {
+            registry: PathBuf::from("/r/registry.json"),
+            listen: "0.0.0.0:8080".parse::<SocketAddr>().unwrap(),
+            probe: PathBuf::from("/tmp/p.sock"),
+            vault_address: "https://vault:8200".to_owned(),
+            vault_dir: PathBuf::from("/var/run/vault"),
+        }))
+    );
+    let vault = "--vault-address https://v:8200 --vault-dir /v";
+    for (text, refused, code) in [
+        (
+            format!(
+                "run --recorded /b.json --registry /r.json --listen 0.0.0.0:1 --probe /p {vault}"
+            ),
+            ArgsError::RecordedAndLive,
+            "recorded_and_live",
+        ),
+        (
+            format!("run --registry=/r.json --listen 0.0.0.0:1 --probe /p {vault}"),
+            ArgsError::RegistryMissing,
+            "registry_missing",
+        ),
+        (
+            format!("run --registry --listen 0.0.0.0:1 --probe /p {vault}"),
+            ArgsError::RegistryMissing,
+            "registry_missing",
+        ),
+        (
+            "run --registry /r.json --listen 0.0.0.0:1 --probe /p --vault-dir /v".to_owned(),
+            ArgsError::VaultAddressMissing,
+            "vault_address_missing",
+        ),
+        (
+            "run --registry /r.json --listen 0.0.0.0:1 --probe /p --vault-address https://v:8200"
+                .to_owned(),
+            ArgsError::VaultDirMissing,
+            "vault_dir_missing",
+        ),
+        (
+            format!("run --registry /r.json --probe /p {vault}"),
+            ArgsError::ListenMissing,
+            "listen_missing",
+        ),
     ] {
-        assert_eq!(
-            run::command(&args(text)),
-            Err(ArgsError::LiveNotBuilt),
-            "{text}"
-        );
+        assert_eq!(run::command(&args(&text)), Err(refused), "{text}");
+        assert_eq!(refused.code(), code);
     }
-    assert_eq!(ArgsError::LiveNotBuilt.code(), "live_not_built");
 }
 
 /// A flag that is missing, empty, written `--name=value`, or followed by another flag reads as
@@ -751,4 +799,211 @@ fn each_budget_is_its_own_meter_s_cap_and_binds_alone() {
             );
         }
     }
+}
+
+/// The founder's vetted list as the chart renders it (DEC-2282 item 6): A and B, and C, whose
+/// undated snapshot the registry refuses (item 7).
+fn vetted_entry(id: &str, provider: &str, slug: &str, snapshot: &str, upstream: &str) -> String {
+    format!(
+        r#"{{"status":"offered",
+            "entry":{{"deadline_ms":120000,"max_output_tokens":4096,"model_id":"{id}",
+                      "model_name":"{slug}","model_version":"1.0.0","provider":"{provider}","seed":7,
+                      "snapshot":"{snapshot}"}},
+            "endpoint":{{"cached_per_million":"0.1","host":"openrouter.ai","id":"openrouter:{id}",
+                         "input_per_million":"2","output_per_million":"10","price_table":"openrouter 2026-10-27",
+                         "region":"global","reported_provider":"Google","upstream":"{upstream}"}}}}"#
+    )
+}
+
+fn vetted_file() -> String {
+    format!(
+        r#"{{"entries":[{},{},{}]}}"#,
+        vetted_entry(
+            "llm.research_sonnet",
+            "anthropic",
+            "anthropic/claude-sonnet-5.5",
+            "claude-sonnet-5-5",
+            "google-vertex/global"
+        ),
+        vetted_entry(
+            "llm.research_haiku",
+            "anthropic",
+            "anthropic/claude-haiku-5.5",
+            "claude-haiku-5-5",
+            "google-vertex/global"
+        ),
+        vetted_entry(
+            "llm.research_terra",
+            "openai",
+            "openai/gpt-5.6-terra",
+            "gpt-5.6-terra",
+            "azure"
+        ),
+    )
+}
+
+fn vetted() -> Vec<LiveEntry> {
+    read_live(&parse(vetted_file().as_bytes()).unwrap()).unwrap()
+}
+
+fn live_request(entry: &LiveEntry, n: u128) -> CallRequest {
+    let content = entry.entry.content();
+    CallRequest {
+        model: content.model_ref(),
+        inputs: content
+            .template
+            .inputs
+            .iter()
+            .map(|name| (name.clone(), format!("live {name}")))
+            .collect(),
+        ..request(&demo(), WORKSPACE, n)
+    }
+}
+
+fn live_started(
+    store: &MemoryStore,
+    world: &World,
+    entries: &[LiveEntry],
+) -> Result<LiveStart<MemoryStore, ManualClock, RecordedTransport>, StartFailure> {
+    live_service(
+        &config("50"),
+        entries,
+        parts(store.clone(), world),
+        RecordedTransport::new(),
+        Box::new(NoKeys),
+    )
+}
+
+/// DEC-2216 item 4: the live service starts with every vetted entry the registry takes registered
+/// and none offered, since no gate has passed, and C refused while undated. A research call naming
+/// an entry is answered `policy_denied`, with nothing reserved and nothing sent, so a live start
+/// spends nothing until a gate passes.
+#[test]
+fn the_live_service_starts_offering_nothing_and_sends_nothing() {
+    let store = MemoryStore::default();
+    let world = World::default();
+    world.deploy(AGENT, &world.version("5"));
+    let entries = vetted();
+    let (mut service, refused) = live_started(&store, &world, &entries).unwrap();
+    assert_eq!(
+        refused,
+        vec![Refused {
+            model_id: "llm.research_terra".to_owned(),
+            error: RegistryError::FloatingAlias,
+        }]
+    );
+    let meter = format!("meter:{WORKSPACE}");
+    let before = stream_rows(&store, &meter).len();
+    for (n, entry) in (1..).zip(&entries[..2]) {
+        let record = service.answer(&live_request(entry, n)).unwrap();
+        assert_eq!(record.outcome, Outcome::PolicyDenied, "{record:?}");
+        assert!(record.reservation.is_none());
+    }
+    assert!(service.gateway().transport().sent().is_empty());
+    assert_eq!(
+        stream_rows(&store, &meter).len(),
+        before,
+        "nothing reserved"
+    );
+}
+
+/// DEC-2216 item 4: an entry offered on a gate report needs the report's every binding re-read and
+/// an identity probe, which the gate's build adds; until then a registry file naming a report
+/// starts nothing, rather than offer on the file's say-so.
+#[test]
+fn a_registry_naming_a_gate_report_starts_nothing_yet() {
+    let store = MemoryStore::default();
+    let world = World::default();
+    let mut entries = vetted();
+    entries[0].gate_report = Some(format!("sha256:{}", "a".repeat(64)));
+    assert_eq!(
+        live_started(&store, &world, &entries).err(),
+        Some(StartFailure::GateReportUnverifiable)
+    );
+    assert_eq!(
+        StartFailure::GateReportUnverifiable.code(),
+        "gate_report_unverifiable"
+    );
+}
+
+/// DEC-2326 item 1: the registry file is read strictly, once: one that cannot be read, or is not a
+/// live registry, starts nothing.
+#[test]
+fn the_registry_file_is_read_strictly() {
+    let dir = std::env::temp_dir().join(format!("gatewayd-registry-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    assert_eq!(
+        read_registry(&dir.join("absent.json")).err(),
+        Some(StartFailure::RegistryUnreadable)
+    );
+    let malformed = dir.join("malformed.json");
+    std::fs::write(&malformed, br#"{"entries":[]}"#).unwrap();
+    assert_eq!(
+        read_registry(&malformed).err(),
+        Some(StartFailure::RegistryMalformed)
+    );
+    let good = dir.join("registry.json");
+    std::fs::write(&good, vetted_file()).unwrap();
+    assert_eq!(read_registry(&good), Ok(vetted()));
+    assert_eq!(
+        StartFailure::RegistryUnreadable.code(),
+        "registry_unreadable"
+    );
+    assert_eq!(StartFailure::RegistryMalformed.code(), "registry_malformed");
+}
+
+/// DEC-2216 item 4, DEC-2020: the key is served for, and the endpoint policy admits, the upstreams
+/// of the entries the registry takes alone, so C's `azure` is neither keyed nor allowed while C is
+/// refused; and an agent's rate is the most turns any taken entry's run may take, plus the margin.
+#[test]
+fn the_settings_and_the_keyed_upstreams_are_the_taken_entries_alone() {
+    let mut entries = vetted();
+    assert_eq!(
+        upstreams(&entries),
+        BTreeSet::from(["google-vertex/global".to_owned()])
+    );
+    entries[1].entry.agentic = Some(LoopBounds::v0_2());
+    let settings = live_settings(WORKSPACE, &entries);
+    assert_eq!(settings.workspace_id, WORKSPACE);
+    assert_eq!(
+        settings.policy,
+        EndpointPolicy::new(
+            BTreeSet::from([Locality::Hosted]),
+            Some(BTreeSet::from(["google-vertex/global".to_owned()])),
+            None,
+        )
+    );
+    assert_eq!(settings.rate.per_workspace, WORKSPACE_RATE);
+    assert_eq!(
+        settings.rate.per_agent,
+        LoopBounds::v0_2().max_turns + RATE_MARGIN
+    );
+    entries[1].entry.agentic = None;
+    assert_eq!(
+        live_settings(WORKSPACE, &entries).rate.per_agent,
+        1 + RATE_MARGIN,
+        "single-call entries take one call a run"
+    );
+}
+
+/// DEC-2216 item 4: a registry file naming a gate report is refused as it is read, before the
+/// vault is touched or anything is built.
+#[test]
+fn a_registry_file_naming_a_gate_report_is_refused_as_it_is_read() {
+    let dir = std::env::temp_dir().join(format!("gatewayd-gated-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let named = dir.join("registry.json");
+    let text = vetted_file().replacen(
+        r#""status":"offered","#,
+        &format!(
+            r#""status":"offered","gate_report":"sha256:{}","#,
+            "a".repeat(64)
+        ),
+        1,
+    );
+    std::fs::write(&named, text).unwrap();
+    assert_eq!(
+        read_registry(&named).err(),
+        Some(StartFailure::GateReportUnverifiable)
+    );
 }
