@@ -1036,6 +1036,16 @@ impl Marked for Deployment {
             .map(|resolved| resolved.instrument.clone())
             .collect()
     }
+
+    /// Half the smallest quote staleness among them, which is also how long each risk fold lets a
+    /// held instrument go without a sane mark (DEC-2844), so a mark lands before it goes stale.
+    fn every(&self) -> Duration {
+        crate::marks::mark_every(
+            self.lasting_all()
+                .into_iter()
+                .map(|resolved| resolved.quote_max_age),
+        )
+    }
 }
 
 impl QuoteFeed for Deployment {

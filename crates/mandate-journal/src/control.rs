@@ -1444,7 +1444,7 @@ static ACCOUNT_STATE_OBSERVED: Ty = Ty::Record(&[
 /// and nothing else moved (DEC-446 item 1). The protective prices are never members, at either
 /// version: they move to the `intended` `ProtectionChanged` (DEC-446 item 5).
 static INTENT_RECEIVED_V2: Ty = Ty::Record(&[
-    ("intent_id", Ty::Ulid),
+    ("intent_id", Ty::Intent),
     ("agent_id", Ty::Ident),
     ("instrument_id", Ty::Str),
     ("side", Ty::Str),
@@ -1459,7 +1459,7 @@ static INTENT_RECEIVED_V2: Ty = Ty::Record(&[
 /// §9.5's `GateDecided` at `schema_version` 2: version 1's members with `risk_clock` last. The
 /// check id vocabulary is §9's, matching trading spec §9.1.
 static GATE_DECIDED_V2: Ty = Ty::Record(&[
-    ("intent_id", Ty::Ulid),
+    ("intent_id", Ty::Intent),
     ("verdict", Ty::Str),
     ("reason_code", Ty::Nullable(&Ty::Str)),
     ("data_profile", Ty::Str),
@@ -1633,7 +1633,7 @@ static ACCOUNT_CLOSE_REQUESTED: Ty = Ty::Record(&[
 /// and 40 say which are null.
 static ORDER_REQUEST_RECORDED: Ty = Ty::Record(&[
     ("agent_id", Ty::Ident),
-    ("intent_id", Ty::Nullable(&Ty::Ulid)),
+    ("intent_id", Ty::Nullable(&Ty::Intent)),
     (
         "purpose",
         Ty::OneOf(&[
@@ -1758,7 +1758,7 @@ static PROTECTION_CHANGED: Ty = Ty::Record(&[
     ("qty", Ty::Nullable(&Ty::Decimal)),
     ("stop", Ty::Nullable(&Ty::Decimal)),
     ("take_profit", Ty::Nullable(&Ty::Decimal)),
-    ("intent_id", Ty::Nullable(&Ty::Ulid)),
+    ("intent_id", Ty::Nullable(&Ty::Intent)),
     ("bracket", Ty::Nullable(&Ty::Str)),
     ("entry", Ty::Nullable(&Ty::Str)),
     ("agent_id", Ty::Nullable(&Ty::Ident)),
@@ -1781,7 +1781,7 @@ static PROTECTION_CHANGED_V2: Ty = Ty::Record(&[
     ("qty", Ty::Nullable(&Ty::Decimal)),
     ("stop", Ty::Nullable(&Ty::Decimal)),
     ("take_profit", Ty::Nullable(&Ty::Decimal)),
-    ("intent_id", Ty::Nullable(&Ty::Ulid)),
+    ("intent_id", Ty::Nullable(&Ty::Intent)),
     ("bracket", Ty::Nullable(&Ty::Str)),
     ("entry", Ty::Nullable(&Ty::Str)),
     ("agent_id", Ty::Nullable(&Ty::Ident)),
