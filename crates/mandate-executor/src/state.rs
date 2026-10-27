@@ -165,6 +165,10 @@ pub struct ExecutorState {
     /// coverage order, allocated as each fill is folded, so a close that fills in part leaves every
     /// remaining share attributed and a later buy reassigns nothing.
     pub(crate) closed: BTreeMap<(AgentId, InstrumentId), Qty>,
+    /// What each agent's sell fills and releases took beyond its lots in each instrument as each
+    /// was folded (DEC-2849: a sell beyond Lᵢ leaves Lᵢ at 0 and its excess comes out of R). It is
+    /// added back to the lots, so an excess never consumes a later buy.
+    pub(crate) oversold: BTreeMap<(AgentId, InstrumentId), Qty>,
     /// The instruments an account-scoped kill switch closes through the broker's close-position,
     /// from its `KillSwitchActivated`: their protection is never placed again beside that close,
     /// which would sell the same shares twice (§5.4, §5.5). They all leave once the account's
@@ -485,6 +489,7 @@ impl ExecutorState {
             day_started: None,
             released: BTreeMap::new(),
             closed: BTreeMap::new(),
+            oversold: BTreeMap::new(),
             closing_all: BTreeSet::new(),
             account_switch: None,
             switch_read: None,
@@ -826,7 +831,8 @@ impl ExecutorState {
 
     /// Whether `agent` may hold lots in any instrument the account holds (DEC-2347 item 3.6,
     /// DEC-2354): an upper bound on its lots there is above zero. The bound is its buys, net of its
-    /// sells and of what it released to the owner, capped at the position, where a buy in any
+    /// sells and of what it released to the owner, plus what those took beyond its lots
+    /// ([`ExecutorState::oversold`]), capped at the position, where a buy in any
     /// state but `Rejected` or `Abandoned` with other than its quantity applied to it counts at its
     /// whole quantity: its fill may have named no order the fold could attribute it to. The bound
     /// only ever holds the exit longer; the kill switch sells the sub-ledger, never the bound.
@@ -848,12 +854,12 @@ impl ExecutorState {
                     Side::Sell => applied.negated(),
                 })?;
             }
-            let released = self
-                .released
-                .get(&(agent.clone(), instrument.clone()))
-                .copied()
-                .unwrap_or(Qty::ZERO);
-            bound = bound.checked_add(SignedQty::from(released).negated())?;
+            let key = (agent.clone(), instrument.clone());
+            let released = self.released.get(&key).copied().unwrap_or(Qty::ZERO);
+            let oversold = self.oversold.get(&key).copied().unwrap_or(Qty::ZERO);
+            bound = bound
+                .checked_add(SignedQty::from(released).negated())?
+                .checked_add(SignedQty::from(oversold))?;
             if bound.min(*position) > SignedQty::ZERO {
                 return Ok(true);
             }
