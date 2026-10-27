@@ -2,7 +2,7 @@
 //! trades, or quotes, the corporate-actions request for one symbol, and their response pages,
 //! parsed with every number read as raw text (ADR-0001 ES-23).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use mandate_canon::DecStr;
@@ -54,6 +54,8 @@ pub enum WireError {
     Timestamp { raw: String, source: TimestampError },
     #[error("record at {time} is outside the requested day {day}")]
     OutsideDay { time: UtcNanos, day: Date },
+    #[error("record at {time} is outside the requested span")]
+    OutsideSpan { time: UtcNanos },
     #[error("field `{field}` = {raw}: {source}")]
     Date {
         field: &'static str,
@@ -78,6 +80,7 @@ impl WireError {
             Self::Negative { .. } => "negative",
             Self::Timestamp { .. } => "timestamp",
             Self::OutsideDay { .. } => "outside_day",
+            Self::OutsideSpan { .. } => "outside_span",
             Self::Date { .. } => "date",
             Self::Split { .. } => "split",
             Self::DuplicateAction(_) => "duplicate_action",
@@ -212,7 +215,7 @@ pub fn corporate_actions_path(
     Ok(path)
 }
 
-fn shift_days(day: Date, days: i64) -> Result<Date, TimestampError> {
+pub(crate) fn shift_days(day: Date, days: i64) -> Result<Date, TimestampError> {
     let offset = days
         .checked_mul(SECS_PER_DAY)
         .ok_or(TimestampError::Overflow)?;
@@ -232,6 +235,26 @@ pub fn parse_corporate_actions(
     symbol: &Symbol,
     body: &[u8],
 ) -> Result<CorporateActionsPage, WireError> {
+    let asked = BTreeSet::from([symbol.clone()]);
+    let (mut by_symbol, next_page_token) = parse_actions_for(&asked, body)?;
+    let actions = by_symbol
+        .remove(symbol)
+        .unwrap_or_else(|| CorporateActions::none(symbol.clone()));
+    Ok(CorporateActionsPage {
+        actions,
+        next_page_token,
+    })
+}
+
+/// Parses one page of corporate actions requested for the symbols `asked`, each symbol's actions
+/// apart, every asked symbol answered, and the page's next token. Splits and cash dividends must
+/// name an asked symbol; any other kind goes where [`concerned`] says. Its members are read as raw
+/// text, so a member the parse does not use never fails the page. An action ID listed twice on the
+/// page is an error.
+pub(crate) fn parse_actions_for(
+    asked: &BTreeSet<Symbol>,
+    body: &[u8],
+) -> Result<(BTreeMap<Symbol, CorporateActions>, Option<String>), WireError> {
     let envelope: ActionsEnvelope<'_> = serde_json::from_slice(body).map_err(json)?;
     let raw_actions = envelope
         .corporate_actions
@@ -243,21 +266,33 @@ pub fn parse_corporate_actions(
     let members = serde_json::from_str::<Entries<'_>>(raw_actions.get())
         .map_err(json)?
         .0;
-    let mut actions = CorporateActions::none(symbol.clone());
+    let mut by_symbol: BTreeMap<Symbol, CorporateActions> = asked
+        .iter()
+        .map(|symbol| (symbol.clone(), CorporateActions::none(symbol.clone())))
+        .collect();
+    let mut ids = BTreeSet::new();
+    let mut first_listing = |id: &str| {
+        if ids.insert(id.to_owned()) {
+            Ok(())
+        } else {
+            Err(WireError::DuplicateAction(id.to_owned()))
+        }
+    };
     for (member, raw) in members {
         match member.as_str() {
             "forward_splits" | "reverse_splits" => {
                 let wire: Vec<WireSplit<'_>> = serde_json::from_str(raw.get()).map_err(json)?;
                 for w in wire {
-                    expect_symbol(symbol, &w.symbol)?;
+                    first_listing(&w.id)?;
+                    let actions = named(&mut by_symbol, &w.symbol)?;
                     actions.splits.push(split(w)?);
                 }
             }
             "cash_dividends" => {
                 let wire: Vec<WireDividend<'_>> = serde_json::from_str(raw.get()).map_err(json)?;
                 for w in wire {
-                    expect_symbol(symbol, &w.symbol)?;
-                    actions.cash_dividends.push(CashDividend {
+                    first_listing(&w.id)?;
+                    let dividend = CashDividend {
                         id: w.id,
                         ex_date: date("ex_date", &w.ex_date)?,
                         record_date: optional_date("record_date", w.record_date)?,
@@ -265,38 +300,105 @@ pub fn parse_corporate_actions(
                         rate: amount("rate", w.rate)?,
                         special: w.special,
                         foreign: w.foreign,
-                    });
+                    };
+                    named(&mut by_symbol, &w.symbol)?
+                        .cash_dividends
+                        .push(dividend);
                 }
             }
             _ => {
-                let wire: Vec<WireOther> = serde_json::from_str(raw.get()).map_err(json)?;
-                for w in wire {
-                    actions.other.push(OtherAction {
-                        id: w.id,
+                let wire: Vec<BTreeMap<String, &RawValue>> =
+                    serde_json::from_str(raw.get()).map_err(json)?;
+                for members in wire {
+                    let id: String = required(&members, "id")?;
+                    first_listing(&id)?;
+                    let ex_date: Option<String> = optional(&members, "ex_date")?;
+                    let process_date: String = required(&members, "process_date")?;
+                    let action = OtherAction {
+                        id,
                         kind: member.clone(),
-                        ex_date: optional_date("ex_date", w.ex_date)?,
-                        process_date: date("process_date", &w.process_date)?,
-                    });
+                        ex_date: optional_date("ex_date", ex_date)?,
+                        process_date: date("process_date", &process_date)?,
+                    };
+                    for symbol in concerned(asked, &members)? {
+                        if let Some(actions) = by_symbol.get_mut(&symbol) {
+                            actions.other.push(action.clone());
+                        }
+                    }
                 }
             }
         }
     }
-    let mut ids = BTreeSet::new();
-    if let Some(repeated) = actions.ids().find(|id| !ids.insert(*id)) {
-        return Err(WireError::DuplicateAction(repeated.to_owned()));
+    Ok((by_symbol, next_page_token))
+}
+
+/// The asked symbols an action of another kind concerns, read from its members whose names end in
+/// `symbol` (`symbol`, `old_symbol`, `acquirer_symbol`, ...): each asked symbol one of them names.
+/// An action with no such member, or with any such member neither a string nor null, goes to every
+/// asked symbol, whatever its other members name, so nothing that may concern one is dropped. An action whose such members name only
+/// symbols not asked refuses the page, as a split or dividend of one does.
+fn concerned(
+    asked: &BTreeSet<Symbol>,
+    members: &BTreeMap<String, &RawValue>,
+) -> Result<Vec<Symbol>, WireError> {
+    let mut named = BTreeSet::new();
+    let mut unread = false;
+    for (_, raw) in members.iter().filter(|(name, _)| name.ends_with("symbol")) {
+        match serde_json::from_str::<Option<String>>(raw.get()) {
+            Ok(Some(text)) => {
+                named.insert(text);
+            }
+            Ok(None) => {}
+            Err(_) => unread = true,
+        }
     }
-    Ok(CorporateActionsPage {
-        actions,
-        next_page_token,
+    if unread {
+        return Ok(asked.iter().cloned().collect());
+    }
+    let concerned: Vec<Symbol> = asked
+        .iter()
+        .filter(|symbol| named.contains(symbol.as_str()))
+        .cloned()
+        .collect();
+    match named.into_iter().next() {
+        Some(other) if concerned.is_empty() => Err(WireError::UnexpectedSymbol(other)),
+        _ if concerned.is_empty() => Ok(asked.iter().cloned().collect()),
+        _ => Ok(concerned),
+    }
+}
+
+/// The member `name` of an action, read as `T`; absent is a malformed record, as a missing field of
+/// a split or dividend is.
+fn required<T: serde::de::DeserializeOwned>(
+    members: &BTreeMap<String, &RawValue>,
+    name: &'static str,
+) -> Result<T, WireError> {
+    let raw = members
+        .get(name)
+        .ok_or_else(|| WireError::Json(format!("missing field `{name}`")))?;
+    serde_json::from_str(raw.get()).map_err(json)
+}
+
+/// The member `name` of an action, read as `T`; absent or null is `None`.
+fn optional<T: serde::de::DeserializeOwned>(
+    members: &BTreeMap<String, &RawValue>,
+    name: &'static str,
+) -> Result<Option<T>, WireError> {
+    members.get(name).map_or(Ok(None), |raw| {
+        serde_json::from_str(raw.get()).map_err(json)
     })
 }
 
-fn expect_symbol(wanted: &Symbol, got: &str) -> Result<(), WireError> {
-    if got == wanted.as_str() {
-        Ok(())
-    } else {
-        Err(WireError::UnexpectedSymbol(got.to_owned()))
-    }
+/// The actions of the asked symbol `got` names, or the page refused for naming one not asked.
+fn named<'m>(
+    by_symbol: &'m mut BTreeMap<Symbol, CorporateActions>,
+    got: &str,
+) -> Result<&'m mut CorporateActions, WireError> {
+    by_symbol
+        .iter_mut()
+        .find(|(symbol, _)| symbol.as_str() == got)
+        .map(|(_, actions)| actions)
+        .ok_or_else(|| WireError::UnexpectedSymbol(got.to_owned()))
 }
 
 fn split(w: WireSplit<'_>) -> Result<Split, WireError> {
@@ -357,18 +459,11 @@ struct WireDividend<'a> {
     foreign: bool,
 }
 
-#[derive(Deserialize)]
-struct WireOther {
-    id: String,
-    ex_date: Option<String>,
-    process_date: String,
-}
-
-fn json(e: serde_json::Error) -> WireError {
+pub(crate) fn json(e: serde_json::Error) -> WireError {
     WireError::Json(e.to_string())
 }
 
-fn percent_encode(text: &str) -> String {
+pub(crate) fn percent_encode(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for b in text.bytes() {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
@@ -381,22 +476,22 @@ fn percent_encode(text: &str) -> String {
 }
 
 #[derive(Deserialize)]
-struct Envelope<'a> {
+pub(crate) struct Envelope<'a> {
     #[serde(borrow, default, deserialize_with = "present")]
-    bars: Option<&'a RawValue>,
+    pub(crate) bars: Option<&'a RawValue>,
     #[serde(borrow, default, deserialize_with = "present")]
     trades: Option<&'a RawValue>,
     #[serde(borrow, default, deserialize_with = "present")]
     quotes: Option<&'a RawValue>,
     #[serde(borrow, default, deserialize_with = "present")]
-    next_page_token: Option<&'a RawValue>,
+    pub(crate) next_page_token: Option<&'a RawValue>,
 }
 
-fn present<'de, D: Deserializer<'de>>(d: D) -> Result<Option<&'de RawValue>, D::Error> {
+pub(crate) fn present<'de, D: Deserializer<'de>>(d: D) -> Result<Option<&'de RawValue>, D::Error> {
     <&RawValue>::deserialize(d).map(Some)
 }
 
-struct Entries<'a>(Vec<(String, &'a RawValue)>);
+pub(crate) struct Entries<'a>(pub(crate) Vec<(String, &'a RawValue)>);
 
 impl<'de> Deserialize<'de> for Entries<'de> {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -422,8 +517,9 @@ impl<'de> Visitor<'de> for EntriesVisitor {
     }
 }
 
-struct Window {
-    day: Date,
+/// The span records must fall in: a UTC day, or any span a batch asks for.
+pub(crate) struct Window {
+    day: Option<Date>,
     start: UtcNanos,
     end: UtcNanos,
 }
@@ -440,7 +536,20 @@ impl Window {
             .map_err(TimestampError::Time)
             .and_then(day_start)
             .map_err(bad_day)?;
-        Ok(Self { day, start, end })
+        Ok(Self {
+            day: Some(day),
+            start,
+            end,
+        })
+    }
+
+    /// The span from `start` up to `end`.
+    pub(crate) fn span(start: UtcNanos, end: UtcNanos) -> Self {
+        Self {
+            day: None,
+            start,
+            end,
+        }
     }
 
     /// The record's time, and whether it belongs to this day rather than starting the next.
@@ -450,9 +559,9 @@ impl Window {
             source,
         })?;
         if time < self.start || time > self.end {
-            return Err(WireError::OutsideDay {
-                time,
-                day: self.day,
+            return Err(match self.day {
+                Some(day) => WireError::OutsideDay { time, day },
+                None => WireError::OutsideSpan { time },
             });
         }
         Ok((time, time < self.end))
@@ -510,7 +619,7 @@ struct WireQuote<'a> {
     z: Option<String>,
 }
 
-fn bars(raw: &RawValue, window: &Window) -> Result<Vec<Bar>, WireError> {
+pub(crate) fn bars(raw: &RawValue, window: &Window) -> Result<Vec<Bar>, WireError> {
     let wire: Vec<WireBar<'_>> = serde_json::from_str(raw.get()).map_err(json)?;
     let mut out = Vec::with_capacity(wire.len());
     for w in wire {
