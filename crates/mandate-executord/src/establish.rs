@@ -8,9 +8,11 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use mandate_accounting::InstrumentId;
 use mandate_canon::{Key, Object, Value};
 use mandate_executor::{
-    AccountScope, BindingGateInput, BindingGateRequest, BindingGateSource, EventDraft, EventId,
+    AccountScope, AgentId, BindingGateConfigRefs, BindingGateInput, BindingGateRequest,
+    BindingGateSource, EventDraft, EventId,
 };
 use mandate_journal::{Environment, StoredEvent, StreamId};
 use mandate_store::Store;
@@ -211,6 +213,16 @@ impl BindingGateSource for Guarded {
             return None;
         }
         self.inner.input(request)
+    }
+
+    /// The deployment's configuration, whether the gate is open or shut: a shut gate holds only
+    /// openings (rule 68), and an exit's decision needs it to be journaled (DEC-2846).
+    fn config_refs(
+        &self,
+        agent: &AgentId,
+        instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        self.inner.config_refs(agent, instrument)
     }
 }
 

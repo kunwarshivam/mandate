@@ -277,7 +277,11 @@ fn a_gate_code_is_said_once_per_change() -> Result<(), Error> {
         (
             Ok(0),
             6,
-            vec!["connection_closed".to_owned(), "drained".to_owned()]
+            vec![
+                "alert opening_held 01JINTENT0000000000000000A".to_owned(),
+                "connection_closed".to_owned(),
+                "drained".to_owned()
+            ]
         )
     );
     assert!(broker.submitted().is_empty());
@@ -308,7 +312,11 @@ fn a_lapsed_lease_drains_the_run() -> Result<(), Error> {
         (
             Ok(0),
             3,
-            vec!["credential_lost".to_owned(), "drained".to_owned()]
+            vec![
+                "alert opening_held 01JINTENT0000000000000000A".to_owned(),
+                "credential_lost".to_owned(),
+                "drained".to_owned()
+            ]
         )
     );
     Ok(())

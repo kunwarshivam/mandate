@@ -36,10 +36,14 @@ alone (DEC-2338). */ -}}
 {{- /* The local cell's second deployment manager (DEC-2070): the first's process entry under its own
 name, so every per-process rule (its network policy, its colocation) holds for it as for the first,
 and it signs in as the first's journal role, serving `deployManager.researchWorkspace` alone: the
-hosted workspace's ULID with `r` (DEC-2247 item 2). Only a dev or ci cell names it. */ -}}
+hosted workspace's ULID with `r` (DEC-2247 item 2). A dev or ci cell names it, and staging may once
+it runs the model gateway, whose meter's caps bind the research it does (DEC-2080); production
+never does. */ -}}
 {{- define "mandate.researchManager" -}}
-{{- if not (has .root.Values.deploymentTier (list "dev" "ci")) -}}
-{{- fail (printf "deployManager.researchWorkspace runs only in a dev or ci cell, and deploymentTier is %q (DEC-2070)" .root.Values.deploymentTier) -}}
+{{- $tier := .root.Values.deploymentTier -}}
+{{- $gateway := index .root.Values.images "model-gateway" -}}
+{{- if not (or (has $tier (list "dev" "ci")) (and (eq $tier "staging") $gateway)) -}}
+{{- fail (printf "deployManager.researchWorkspace runs only in a dev or ci cell, or in staging beside the model gateway, and deploymentTier is %q (DEC-2070, DEC-2080)" $tier) -}}
 {{- end -}}
 {{- $hosted := .root.Values.api.workspace | default "" -}}
 {{- if and $hosted (ne .root.Values.deployManager.researchWorkspace (printf "%sr" $hosted)) -}}
@@ -54,7 +58,8 @@ hosted workspace's ULID with `r` (DEC-2247 item 2). Only a dev or ci cell names 
 {{- /* The local cell's second scheduler (DEC-2071): the first's process entry under its own name,
 writing the research workspace's clock stream, `clock:<workspace>r`, whose ticks the runtime and
 executor the second manager starts read, as the first writes the hosted workspace's. It renders
-only beside the second manager, which refuses any tier but dev or ci (DEC-2070). */ -}}
+only beside the second manager, which refuses any tier but dev, ci, or staging beside the model
+gateway (DEC-2070, DEC-2080). */ -}}
 {{- define "mandate.researchScheduler" -}}
 {{- $copy := deepCopy .p -}}
 {{- $_ := set $copy "name" "scheduler-research" -}}

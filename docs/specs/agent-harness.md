@@ -16,7 +16,7 @@ else.
 
 - **v0.2, amended ([DEC-2282](../project/decisions/DEC-2282.md), E21-62):** a research call's
   `model` is its run kind's entry: the mandate's `routes` member for the run kind, else the research
-  agent's own pin (mandate spec v0.16, V-048). Every turn of a run calls one entry.
+  agent's own pin (mandate spec v0.17, V-048). Every turn of a run calls one entry.
 - **v0.2, amended ([DEC-2392](../project/decisions/DEC-2392.md), E19-12):** event triggers. With the
   mandate's `behavior.research.event_triggers` set (mandate spec v0.11 §8.4), an allowlisted news
   item or filing about an instrument with an active thesis brings a `monitor` run forward (§5.3,

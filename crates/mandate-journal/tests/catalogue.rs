@@ -128,7 +128,8 @@ const REGISTERED: &[&str] = &[
 
 /// DEC-948 item 3: `FeesCharged` version 1 is the simulated equity fee the paper executor books
 /// (trading spec §10): a record with exactly its members, refusing a family it does not book and
-/// a component that is not a decimal.
+/// a component that is not a decimal. A crypto asset fee is refused until it comes off the buying
+/// agent's lots (DEC-2850 item 3).
 #[test]
 fn fees_charged_is_closed_to_the_simulated_equity_fee() {
     let (_, refs, payload) = RISK_INPUT_PAYLOADS
@@ -142,6 +143,11 @@ fn fees_charged_is_closed_to_the_simulated_equity_fee() {
         (
             "payload.family",
             Some(r#""crypto""#),
+            InvalidReason::NonCanonical,
+        ),
+        (
+            "payload.family",
+            Some(r#""crypto_asset""#),
             InvalidReason::NonCanonical,
         ),
         ("payload.cat", Some(r#""x""#), InvalidReason::NonCanonical),

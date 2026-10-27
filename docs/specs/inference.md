@@ -14,7 +14,7 @@ gateway is built and runs over recorded responses; its live path is the model-ga
 ## Change history
 
 - **v0.7, amended ([DEC-2282](../project/decisions/DEC-2282.md); E21-62):** the owner picks the
-  research agent's model per run kind from the offered research entries (mandate spec v0.16
+  research agent's model per run kind from the offered research entries (mandate spec v0.17
   `routes`, V-048). §4.2 step 5: every offered research entry pins the same harness content. §7.2:
   the picker shows each choice's estimated cost. §4.1: a dateless snapshot is taken from provider
   `anthropic` only, the reading of DEC-997 item 2 the founder accepted with DEC-2282. §4.3 and the

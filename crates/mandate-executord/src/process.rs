@@ -242,6 +242,12 @@ pub struct ExecutorProcess<S, B> {
     journal_down: bool,
     /// Whether a refused batch was already alerted to the operator in this process (DEC-2805).
     journal_refused: bool,
+    /// The causes of the batches the journal refused in this process, each as the record type, the
+    /// journal's reason code and the member's path, and those not yet alerted. Each cause is
+    /// alerted once a process, so a refusal repeated on every pass is seen without flooding
+    /// (DEC-2846: the cell's lost exits were refused on every pass, and nothing said why).
+    refusal: BTreeSet<String>,
+    refusals: Vec<String>,
     /// Whether a broker input the core could not apply has alerted the operator, once a process
     /// (DEC-2821).
     input_refused: bool,
@@ -338,6 +344,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             held: BTreeSet::new(),
             journal_down: false,
             journal_refused: false,
+            refusal: BTreeSet::new(),
+            refusals: Vec::new(),
             input_refused: false,
             deployed: BTreeMap::new(),
             max_chain: config.max_chain,
@@ -455,6 +463,16 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// the pass hands the first tick it reads and `Input::Started`. Returns the alerts whose drafts
     /// committed.
     pub fn step(&mut self, now: UtcNanos) -> Vec<Alert> {
+        let mut alerts = self.stepped(now);
+        alerts.extend(self.refusals.drain(..).map(|cause| Alert {
+            key: "journal_refused_cause",
+            subject: Some(cause),
+        }));
+        alerts
+    }
+
+    /// One pass, as [`Self::step`] describes it, without the refusals' causes.
+    fn stepped(&mut self, now: UtcNanos) -> Vec<Alert> {
         let mut alerts = Vec::new();
         if self.exited() {
             return alerts;
@@ -1891,7 +1909,16 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 self.lifecycle.observe(now, Lifecycled::Fenced);
                 Ran::Stopped
             }
-            AppendOutcome::Invalid { .. } => Ran::Refused,
+            AppendOutcome::Invalid { draft, error } => {
+                let event_type = drafts
+                    .get(draft)
+                    .map_or("unknown", |refused| refused.event_type.as_str());
+                let cause = format!("{event_type}:{}:{}", error.reason.code(), error.path);
+                if self.refusal.insert(cause.clone()) {
+                    self.refusals.push(cause);
+                }
+                Ran::Refused
+            }
             AppendOutcome::HeadMismatch { .. } | AppendOutcome::IdempotencyConflict { .. } => {
                 self.lifecycle.observe(now, Lifecycled::Failed);
                 Ran::Stopped
@@ -1958,10 +1985,11 @@ fn tick_of(row: &StoredEvent) -> Option<UtcNanos> {
 
 /// The alert and intent for a handoff the core refused for a missing binding-gate input, which the
 /// process holds rather than stop on (DEC-2033 item 5): `opening_held` for an opening or an
-/// increase, and `exit_held` for an exit, an alarm that must never sound once the mandate port reads
-/// each followed agent's deployed version, since an exit needs no other gate fact (rule 13); the
-/// binary's fixture port reads none yet. Any other
-/// refusal, and this one for any input but a handoff, is `None`: it stops the process.
+/// increase, and `exit_held` for an exit, which sounds while the agent's mandate version or its
+/// deployment's references for the instrument do not read (DEC-2846). No other input meets it:
+/// the exits the core raises itself, a kill switch's flatten, the stop watchdog's and the bound's,
+/// wait for their configuration, alerted, with nothing of them journaled, and an input's re-gates
+/// hold their intent alone. Any other refusal is `None`: it stops the process.
 fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> {
     let (ExecutorError::BindingGateInputMissing, Input::Intent(handoff)) = (error, input) else {
         return None;

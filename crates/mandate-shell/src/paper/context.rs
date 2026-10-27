@@ -270,6 +270,16 @@ impl BindingGateSource for ReconcilingPaperContext {
     fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         None
     }
+
+    /// The registered references, for the reviewed agent's asset only (DEC-2846).
+    fn config_refs(
+        &self,
+        agent: &mandate_executor::AgentId,
+        instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        self.reviewed(agent, instrument)
+            .then(|| self.config_refs.clone())
+    }
 }
 
 /// The mandate's protection for an entry at `entry`, as the executor derives it
@@ -475,6 +485,17 @@ impl InstrumentSnapshot for TrustedPaperContext {
 }
 
 impl BindingGateSource for TrustedPaperContext {
+    /// The template's references, which every gate record of the reviewed agent's asset names
+    /// (DEC-2846); none for any other.
+    fn config_refs(
+        &self,
+        agent: &mandate_executor::AgentId,
+        instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        self.reviewed(agent, instrument)
+            .then(|| self.template.config_refs.clone())
+    }
+
     /// The template, with the quote the run last handed the gate ([`GateQuote`], DEC-943 item 2)
     /// and `mandate-accounting`'s fee reservation of the very order the executor asks about. An
     /// order it cannot price gets no input, so the gate refuses it.
