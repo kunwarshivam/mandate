@@ -253,7 +253,7 @@ pub struct ExecutorProcess<S, B> {
     /// once per `exit_step_s` (DEC-2359).
     polled: QuotePoll,
     /// When each marked instrument was last marked, so each is marked at most once per
-    /// [`MARK_EVERY`] (DEC-2380 item 3).
+    /// the wiring's [`Marked::every`] (DEC-2380 item 3, DEC-2844).
     marked_at: QuotePoll,
     /// The US-equities calendar a mark's session is read from; `None` when it cannot load, and then
     /// nothing is marked, so the gate holds (`AGENTS.md` rule 3).
@@ -666,7 +666,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     }
 
     /// Journals, at the tick `at`, a `MarkUpdated` version 2 for each instrument the wiring marks
-    /// that is due one (DEC-2380 item 3): at most once per [`MARK_EVERY`] of the risk clock, from
+    /// that is due one (DEC-2380 item 3): at most once per the wiring's [`Marked::every`] of the risk clock, from
     /// the quote the feed hands at `now`. An instrument the feed has no quote for, the snapshot no
     /// asset class for, or no session names, is not marked. `false` when the journal stopped the
     /// pass; an append in doubt raises the journal's one opaque alert, and the instruments after
@@ -679,6 +679,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             return true;
         };
         let wanted = self.wiring.marked.instruments();
+        self.marked_at.set_every(self.wiring.marked.every());
         let Ok(due) = self.marked_at.due(&wanted, instant) else {
             return true;
         };
