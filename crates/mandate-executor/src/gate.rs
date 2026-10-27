@@ -1473,4 +1473,70 @@ mod sell_authority_tests {
         );
         Ok(())
     }
+
+    /// Which of the agent's own sells spend its authority: `agent-a` bought 10 of 12 (the owner
+    /// 2) and its risk exit of 4 filled 1, so it holds 9 of 11. That exit's unfilled 3 counts; its
+    /// own sell still at `Intent` (the exit being re-checked), its protective leg and its ended
+    /// sell do not. A discretionary exit of 8 is trimmed to 6, where the room beside the live sells
+    /// alone is 8.
+    #[test]
+    fn only_the_agents_sent_live_sells_spend_its_authority() -> Result<(), ExecutorError> {
+        let mut state = holding("11", &[("agent-a", "10")])?;
+        let sell = |id: &str, qty: &str, filled: &str, at: OrderState, purpose: Purpose| {
+            Ok::<Order, ExecutorError>(Order {
+                client_order_id: ClientOrderId::parse(id)?,
+                intent_id: None,
+                agent: Some(AgentId("agent-a".to_owned())),
+                instrument: InstrumentId::new("AAPL")?,
+                side: Side::Sell,
+                qty: Qty::parse(qty)?,
+                filled_qty: Qty::parse(filled)?,
+                state: at,
+                attempt: 1,
+                purpose,
+                absent_lookups: 0,
+                first_absence_at: None,
+                cancel_unconfirmed: false,
+                replaced_by: None,
+                created_on: None,
+            })
+        };
+        for order in [
+            sell(
+                "md-risk",
+                "4",
+                "1",
+                OrderState::PartiallyFilled,
+                Purpose::RiskExit,
+            )?,
+            sell(
+                "md-asking",
+                "5",
+                "0",
+                OrderState::Intent,
+                Purpose::DiscretionaryExit,
+            )?,
+            sell(
+                "md-leg",
+                "10",
+                "0",
+                OrderState::Accepted,
+                Purpose::Protective,
+            )?,
+            sell(
+                "md-ended",
+                "2",
+                "0",
+                OrderState::Canceled,
+                Purpose::DiscretionaryExit,
+            )?,
+        ] {
+            state.orders.insert(order.client_order_id.clone(), order);
+        }
+        assert_eq!(
+            outcome(ask(&state, "agent-a", "8", Purpose::DiscretionaryExit)?),
+            ("allow", String::new(), qty("6")?)
+        );
+        Ok(())
+    }
 }
