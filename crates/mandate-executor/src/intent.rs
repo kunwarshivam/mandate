@@ -2,7 +2,7 @@
 //! confirmed absence — resubmitted under the same id or abandoned.
 
 use mandate_accounting::{AssetClass, InstrumentId};
-use mandate_canon::Value;
+use mandate_canon::{Object, Value};
 use mandate_notify::OwnerAlertKind;
 use mandate_risk::GatePass;
 
@@ -403,6 +403,19 @@ pub(crate) fn intent_of(
     let record = batch.view.intents.get(intent).ok_or_else(unknown)?;
     let body = batch.view.bodies.get(intent).ok_or_else(unknown)?;
     Ok((record.agent.clone(), body.clone()))
+}
+
+/// The references a gate record on `intent` names when no binding run bound it (DEC-2846): its
+/// agent's deployment's, for its instrument.
+pub(crate) fn intent_refs(
+    batch: &Batch<'_, '_>,
+    intent: &IntentId,
+) -> Result<Object, ExecutorError> {
+    let (agent, body) = intent_of(batch, intent)?;
+    let IntentBody::Order { instrument, .. } = &body else {
+        return Err(ExecutorError::Unimplemented { story: "E7-4" });
+    };
+    crate::gate::deployed_refs(batch.binding_gate(), batch.ports, &agent, instrument)
 }
 
 /// An order's time in force: GTC for crypto, DAY otherwise; an exit's later rungs take the same.

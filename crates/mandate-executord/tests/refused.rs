@@ -176,3 +176,66 @@ fn a_refusals_cause_is_alerted_once_per_cause() -> Result<(), Error> {
     assert!(again.is_empty(), "the same cause again: {again:?}");
     Ok(())
 }
+
+/// A deployment whose references read only once `readable` is set (DEC-2846).
+struct Readable(std::rc::Rc<std::cell::Cell<bool>>);
+
+impl mandate_executor::BindingGateSource for Readable {
+    fn input(
+        &self,
+        _request: &mandate_executor::BindingGateRequest<'_>,
+    ) -> Option<mandate_executor::BindingGateInput> {
+        None
+    }
+
+    fn config_refs(
+        &self,
+        _agent: &mandate_executor::AgentId,
+        _instrument: &mandate_accounting::InstrumentId,
+    ) -> Option<mandate_executor::BindingGateConfigRefs> {
+        self.0.get().then(support::deployed_refs)
+    }
+}
+
+/// DEC-2846 and `AGENTS.md` rule 13: an owner's kill switch whose flatten cannot be journaled,
+/// because its deployment's references do not read, never stops the process, which would crash
+/// loop and stop every other exit and kill switch. It is held as a failed input, every opening
+/// held with the owner alerted, and applied at the first pass that reads them, its flatten sent.
+#[test]
+fn a_kill_switch_whose_references_do_not_read_is_held_and_applied_once_they_do() -> Result<(), Error>
+{
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    broker.resting(OPENING, "AAPL", "10", "150")?;
+    broker.fill(OPENING, "150")?;
+    let readable = std::rc::Rc::new(std::cell::Cell::new(false));
+    let wiring = support::wired(
+        Box::new(Readable(std::rc::Rc::clone(&readable))),
+        Box::new(support::TwoPercentStop),
+    )?;
+    let mut process = support::start_wired(&journal, &broker, wiring)?;
+    process.step(at(NOON)?);
+    kill(&journal, AGENT, SWITCH)?;
+    for _ in 0..3 {
+        process.step(at(NOON)?);
+    }
+    assert!(
+        !matches!(process.lifecycle().state(), State::Exited(_)),
+        "never stops: {:?}",
+        process.lifecycle().state()
+    );
+    assert!(journal.switched().is_empty(), "not applied while unread");
+    assert_eq!(held(&journal).len(), 1, "openings held, the owner alerted");
+    readable.set(true);
+    process.step(at(NOON)?);
+    assert_eq!(journal.switched(), [AGENT], "applied once they read");
+    assert!(
+        broker
+            .seen()
+            .iter()
+            .any(|seen| matches!(&seen.request, mandate_executor::BrokerRequest::Submit(order) if order.side == mandate_accounting::Side::Sell)),
+        "and its flatten sent"
+    );
+    Ok(())
+}

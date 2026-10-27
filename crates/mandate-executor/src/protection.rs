@@ -1263,7 +1263,8 @@ fn park(
         ("held_long", Value::Bool(true)),
         ("evaluation", text("account_stream_only")),
     ];
-    let decided = batch.journal("GateDecided", None, pairs)?;
+    let refs = crate::intent::intent_refs(batch, intent)?;
+    let decided = batch.journal_with_refs("GateDecided", None, refs, pairs)?;
     batch.notify(decided, OwnerAlertKind::ExitStalled);
     Ok(())
 }

@@ -242,11 +242,11 @@ pub struct ExecutorProcess<S, B> {
     journal_down: bool,
     /// Whether a refused batch was already alerted to the operator in this process (DEC-2805).
     journal_refused: bool,
-    /// The cause of the last batch the journal refused, as the record type, the journal's reason
-    /// code and the member's path, and the causes not yet alerted. Each new cause is alerted
-    /// once, so a refusal repeated on every pass is seen without flooding (DEC-2846: the cell's
-    /// lost exits were refused on every pass, and nothing said why).
-    refusal: Option<String>,
+    /// The causes of the batches the journal refused in this process, each as the record type, the
+    /// journal's reason code and the member's path, and those not yet alerted. Each cause is
+    /// alerted once a process, so a refusal repeated on every pass is seen without flooding
+    /// (DEC-2846: the cell's lost exits were refused on every pass, and nothing said why).
+    refusal: BTreeSet<String>,
     refusals: Vec<String>,
     /// Whether a broker input the core could not apply has alerted the operator, once a process
     /// (DEC-2821).
@@ -344,7 +344,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             held: BTreeSet::new(),
             journal_down: false,
             journal_refused: false,
-            refusal: None,
+            refusal: BTreeSet::new(),
             refusals: Vec::new(),
             input_refused: false,
             deployed: BTreeMap::new(),
@@ -1090,7 +1090,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     }
                     return true;
                 }
-                if !held_on_core_error(&input) {
+                if !held_on_core_error(&input) && !unread_configuration(&error, &input) {
                     self.lifecycle.observe(now, Lifecycled::Failed);
                     return false;
                 }
@@ -1914,9 +1914,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     .get(draft)
                     .map_or("unknown", |refused| refused.event_type.as_str());
                 let cause = format!("{event_type}:{}:{}", error.reason.code(), error.path);
-                if self.refusal.as_ref() != Some(&cause) {
-                    self.refusals.push(cause.clone());
-                    self.refusal = Some(cause);
+                if self.refusal.insert(cause.clone()) {
+                    self.refusals.push(cause);
                 }
                 Ran::Refused
             }
@@ -1986,10 +1985,9 @@ fn tick_of(row: &StoredEvent) -> Option<UtcNanos> {
 
 /// The alert and intent for a handoff the core refused for a missing binding-gate input, which the
 /// process holds rather than stop on (DEC-2033 item 5): `opening_held` for an opening or an
-/// increase, and `exit_held` for an exit, an alarm that must never sound once the mandate port reads
-/// each followed agent's deployed version, since an exit needs no other gate fact (rule 13); the
-/// binary's fixture port reads none yet. Any other
-/// refusal, and this one for any input but a handoff, is `None`: it stops the process.
+/// increase, and `exit_held` for an exit, which sounds while the agent's mandate version or its
+/// deployment's references for the instrument do not read (DEC-2846). This one for any input but
+/// a handoff is held as a failed input ([`unread_configuration`]); any other refusal is `None`.
 fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> {
     let (ExecutorError::BindingGateInputMissing, Input::Intent(handoff)) = (error, input) else {
         return None;
@@ -2017,6 +2015,22 @@ fn held_on_core_error(input: &Input) -> bool {
             | Input::Theses { .. }
             | Input::Connection(_)
     )
+}
+
+/// Whether `error` on `input` is configuration that does not read now, which holds the input and
+/// never stops the process (DEC-2846): an exit's gate record, a kill switch's flatten among them,
+/// cannot be journaled without its deployment's references, nor any intent without its mandate
+/// version, and a stop would be a crash loop that also stops every other exit, protective order
+/// and kill switch (`AGENTS.md` rule 13). The core folds only what commits, so the input changed
+/// nothing; it is held as a failed input, which holds every opening with the owner alerted
+/// ([`held_on_core_error`]'s path), and handed again at the next pass. An intent's is held alone
+/// (`held`). A start's is not: the restart redoes it before any trading.
+fn unread_configuration(error: &ExecutorError, input: &Input) -> bool {
+    matches!(error, ExecutorError::BindingGateInputMissing)
+        && !matches!(
+            input,
+            Input::Started(_) | Input::BatchRefused | Input::InputFailed
+        )
 }
 
 /// Whether a refusal of the batch `input` drafted is held and the process goes on (DEC-2805 item

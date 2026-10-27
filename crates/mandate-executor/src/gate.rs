@@ -403,12 +403,24 @@ pub(crate) fn binding_checks(
 ) -> Result<PartialGateDecision, ExecutorError> {
     let mut decision = bound_checks(state, proposal, pass, ports, source)?;
     if decision.config_refs.is_empty() {
-        let deployed = source
-            .and_then(|source| source.config_refs(proposal.agent, proposal.instrument))
-            .ok_or(ExecutorError::BindingGateInputMissing)?;
-        decision.config_refs = agent_refs(&deployed, ports, proposal.agent)?;
+        decision.config_refs = deployed_refs(source, ports, proposal.agent, proposal.instrument)?;
     }
     Ok(decision)
+}
+
+/// The references a gate record of `agent`'s on `instrument` names when no binding run bound it:
+/// the deployment's, its mandate the version `agent`'s port resolves (DEC-2846);
+/// [`ExecutorError::BindingGateInputMissing`] when they do not read.
+pub(crate) fn deployed_refs(
+    source: Option<&dyn BindingGateSource>,
+    ports: &Ports<'_>,
+    agent: &AgentId,
+    instrument: &InstrumentId,
+) -> Result<Object, ExecutorError> {
+    let deployed = source
+        .and_then(|source| source.config_refs(agent, instrument))
+        .ok_or(ExecutorError::BindingGateInputMissing)?;
+    agent_refs(&deployed, ports, agent)
 }
 
 fn bound_checks(

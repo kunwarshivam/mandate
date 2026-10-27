@@ -970,18 +970,22 @@ impl QuoteFeed for Deployment {
 
 impl BindingGateSource for Deployment {
     /// The configuration `agent`'s decision on `instrument` is journaled under when it read no
-    /// binding snapshot, an exit's above all (DEC-2846): the fee configuration, calendar, rule set
-    /// and mandate version of `agent`'s deployment as an exit reads it, its current one or else its
-    /// last, and the instrument snapshot of whichever deployment holds `instrument`. It reads no
-    /// quote, bars or broker fact, so an exit never waits on them (`AGENTS.md` rule 13).
+    /// binding snapshot, an exit's above all (DEC-2846): all five references of `agent`'s own
+    /// deployment of `instrument`, as an exit reads it (current, else last, else a research
+    /// agent's admitted instrument as it last resolved). Never another agent's deployment of the
+    /// same instrument. It reads no quote, bars or broker fact, so an exit never waits on them
+    /// (`AGENTS.md` rule 13).
     fn config_refs(
         &self,
         agent: &AgentId,
         instrument: &InstrumentId,
     ) -> Option<BindingGateConfigRefs> {
-        let mut refs = self.lasting(agent)?.gate.config_refs().clone();
-        refs.instrument_snapshot = Some(self.fill_refs(instrument)?.instrument_snapshot);
-        Some(refs)
+        self.lasting_all()
+            .into_iter()
+            .find(|resolved| {
+                &resolved.instrument == instrument && resolved.view.version(agent).is_some()
+            })
+            .map(|resolved| resolved.gate.config_refs().clone())
     }
 
     /// The binding gate's input for the deployed agent's opening, read now. An order that reduces
