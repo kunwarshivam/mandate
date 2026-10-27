@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.4: v0.3 with §3.8, the workspace data process's stored bars from Alpaca IEX with the platform data key ([DEC-2283](../project/decisions/DEC-2283.md)). v0.3: v0.2 with §4.6's research query extended for the agentic research loop's tools ([DEC-2203](../project/decisions/DEC-2203.md)). v0.2: v0.1 plus the blockers and majors of the post-merge review on [#553](https://github.com/kunwarshivam/mandate/pull/553) |
+| **Status** | Draft v0.4: v0.3 with §3.8, the workspace data process's stored bars from Alpaca IEX with the platform data key ([DEC-2283](../project/decisions/DEC-2283.md)), customers' through one central fetcher ([DEC-2284](../project/decisions/DEC-2284.md)). v0.3: v0.2 with §4.6's research query extended for the agentic research loop's tools ([DEC-2203](../project/decisions/DEC-2203.md)). v0.2: v0.1 plus the blockers and majors of the post-merge review on [#553](https://github.com/kunwarshivam/mandate/pull/553) |
 | **Owner** | Engineering |
 | **Decisions** | [DEC-433](../project/decisions/DEC-433.md) (items 1 to 14 accepted by the agent; items 15 to 20 decided by the founder on 2026-10-03; items 21 and 22 Proposed for the founder) |
 | **Backlog** | E2-5 to E2-19 ([backlog](../project/06-backlog-v1.md#e2-market-data)) |
