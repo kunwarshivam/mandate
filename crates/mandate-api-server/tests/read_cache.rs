@@ -2,10 +2,11 @@
 //! serves exactly the stream a read from its first record would, for its own workspace alone.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mandate_api_server::cache::{CachedJournal, Limits};
+use mandate_api_server::cache::{CachedJournal, Limits, row_bytes};
 use mandate_api_server::clock::Clock;
 use mandate_api_server::journal::{Answer, Journal, JournalUnavailable, Rows};
 use mandate_canon::Digest;
@@ -84,6 +85,32 @@ impl Store {
         self.append(stream, gone);
     }
 
+    /// Changes the body and hash of row `seq` of `stream` without re-chaining the rows after it,
+    /// as a rewrite in the hot store would leave it.
+    fn tamper(&self, stream: &str, seq: u64) {
+        let mut streams = self.streams.lock().unwrap();
+        if let Some(row) = streams
+            .get_mut(stream)
+            .and_then(|rows| rows.iter_mut().find(|row| row.seq == seq))
+        {
+            row.body.extend_from_slice(b"|tampered");
+            row.hash = Digest::of(&row.body);
+        }
+    }
+
+    /// Whether `rows` are numbered on from `from_seq` and chain from `prev_hash`, each row's hash
+    /// its body's, as `PgJournal`'s check reads them.
+    fn chains(rows: &[StoredEvent], from_seq: u64, prev_hash: Digest) -> bool {
+        let mut expected = (from_seq, prev_hash);
+        rows.iter().all(|row| {
+            let ok = row.seq == expected.0
+                && row.prev_hash == expected.1
+                && row.hash == Digest::of(&row.body);
+            expected = (row.seq + 1, row.hash);
+            ok
+        })
+    }
+
     fn set_failing(&self, stream: &str, failing: bool) {
         let mut set = self.failing.lock().unwrap();
         set.retain(|s| s != stream);
@@ -113,10 +140,11 @@ impl Store {
 impl Journal for Store {
     fn rows<'a>(&'a self, stream: &'a str) -> Rows<'a> {
         self.asked.lock().unwrap().whole += 1;
-        let answer = if self.fails(stream) {
+        let rows = self.whole(stream);
+        let answer = if self.fails(stream) || !Self::chains(&rows, 1, Digest::ZERO) {
             Err(JournalUnavailable)
         } else {
-            Ok(self.whole(stream))
+            Ok(rows)
         };
         Box::pin(async move { answer })
     }
@@ -128,10 +156,7 @@ impl Journal for Store {
             .filter(|row| row.seq >= start.from_seq)
             .cloned()
             .collect();
-        let chains = match tail.first() {
-            Some(first) => first.prev_hash == start.prev_hash,
-            None => true,
-        };
+        let chains = Self::chains(&tail, start.from_seq, start.prev_hash);
         let answer = if self.fails(stream) || !chains {
             Err(JournalUnavailable)
         } else {
@@ -174,32 +199,49 @@ impl Journal for Store {
 }
 
 fn read(journal: &dyn Journal, stream: &str) -> Result<Vec<StoredEvent>, JournalUnavailable> {
-    tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap()
-        .block_on(journal.rows(stream))
+    block(journal.rows(stream))
 }
 
-/// A clock stopped at one instant, or one that cannot be read.
-struct Stopped(Option<UtcNanos>);
+/// A clock set by hand, in nanoseconds since the epoch, or one that cannot be read.
+struct Hand(Mutex<Option<u64>>);
 
-impl Clock for Stopped {
-    fn now(&self) -> Option<UtcNanos> {
-        self.0
+impl Hand {
+    fn at(nanos: u64) -> Arc<Self> {
+        Arc::new(Self(Mutex::new(Some(nanos))))
+    }
+
+    fn set(&self, nanos: u64) {
+        *self.0.lock().unwrap() = Some(nanos);
     }
 }
 
-fn cache_on(store: &Arc<Store>, clock: Stopped, limits: Limits) -> CachedJournal {
+impl Clock for Hand {
+    fn now(&self) -> Option<UtcNanos> {
+        let nanos = (*self.0.lock().unwrap())?;
+        UtcNanos::from_parts(
+            i64::try_from(nanos / 1_000_000_000).unwrap(),
+            u32::try_from(nanos % 1_000_000_000).unwrap(),
+        )
+        .ok()
+    }
+}
+
+fn cache_on(store: &Arc<Store>, clock: &Arc<Hand>, limits: Limits) -> CachedJournal {
     let inner: Arc<dyn Journal> = Arc::clone(store) as Arc<dyn Journal>;
-    CachedJournal::new(inner, Arc::new(clock), limits)
+    CachedJournal::new(inner, Arc::clone(clock) as Arc<dyn Clock>, limits)
 }
 
 fn cache(store: &Arc<Store>, limits: Limits) -> CachedJournal {
-    cache_on(store, Stopped(Some(UtcNanos::EPOCH)), limits)
+    cache_on(store, &Hand::at(0), limits)
+}
+
+fn held_by_rows(rows: &[StoredEvent]) -> usize {
+    rows.iter().map(row_bytes).sum()
 }
 
 const ROOMY: Limits = Limits {
     idle: Duration::from_secs(3_600),
+    reverify: Duration::from_secs(3_600),
     max_bytes: 1 << 30,
 };
 
@@ -315,6 +357,7 @@ fn memory_is_bounded_by_idle_time_and_by_bytes() {
         &store,
         Limits {
             idle: Duration::ZERO,
+            reverify: Duration::from_secs(3_600),
             max_bytes: 1 << 30,
         },
     );
@@ -323,25 +366,18 @@ fn memory_is_bounded_by_idle_time_and_by_bytes() {
     assert_eq!(store.asked().whole, 2, "an idle workspace is dropped whole");
     assert_eq!(
         idle.held_bytes(),
-        store
-            .whole(A_CTL)
-            .iter()
-            .map(|r| r.body.len())
-            .sum::<usize>()
+        store.whole(A_CTL).iter().map(row_bytes).sum::<usize>()
     );
 
     let store = Arc::new(Store::default());
     store.append(A_CTL, 20);
     store.append(B_CTL, 20);
-    let one_stream = store
-        .whole(A_CTL)
-        .iter()
-        .map(|r| r.body.len())
-        .sum::<usize>();
+    let one_stream = store.whole(A_CTL).iter().map(row_bytes).sum::<usize>();
     let tight = cache(
         &store,
         Limits {
             idle: Duration::from_secs(3_600),
+            reverify: Duration::from_secs(3_600),
             max_bytes: one_stream + one_stream / 2,
         },
     );
@@ -361,6 +397,7 @@ fn memory_is_bounded_by_idle_time_and_by_bytes() {
         &store,
         Limits {
             idle: Duration::from_secs(3_600),
+            reverify: Duration::from_secs(3_600),
             max_bytes: 10,
         },
     );
@@ -376,7 +413,7 @@ fn memory_is_bounded_by_idle_time_and_by_bytes() {
 fn a_read_while_the_clock_cannot_be_read_is_the_stores_and_holds_nothing() {
     let store = Arc::new(Store::default());
     store.append(A_ACCT, 5);
-    let journal = cache_on(&store, Stopped(None), ROOMY);
+    let journal = cache_on(&store, &Arc::new(Hand(Mutex::new(None))), ROOMY);
     assert_eq!(read(&journal, A_ACCT).unwrap(), store.whole(A_ACCT));
     assert_eq!(read(&journal, A_ACCT).unwrap(), store.whole(A_ACCT));
     assert_eq!(store.asked().whole, 2);
@@ -449,27 +486,79 @@ proptest! {
     }
 }
 
-/// A seeded bug: a cache that serves what it holds and never reads past it.
-struct Stale {
+/// The seeded bugs the oracle must catch.
+#[derive(Debug, Clone, Copy)]
+enum Bug {
+    /// Serves what it holds and never reads past it.
+    Stale,
+    /// Reads past the held head from the row after it, without reading the head row again.
+    NoHeadCheck,
+    /// Holds rows by the stream id's last segment, so two workspaces' `ref_1` share them.
+    KeyedByRef,
+}
+
+/// A cache with one seeded bug.
+struct Seeded {
+    bug: Bug,
     store: Arc<Store>,
     held: Mutex<BTreeMap<String, Vec<StoredEvent>>>,
 }
 
-impl Journal for Stale {
-    fn rows<'a>(&'a self, stream: &'a str) -> Rows<'a> {
-        let held = self.held.lock().unwrap().get(stream).cloned();
-        let answer = match held {
-            Some(rows) => Ok(rows),
-            None if self.store.fails(stream) => Err(JournalUnavailable),
-            None => {
-                let rows = self.store.whole(stream);
-                self.held
-                    .lock()
-                    .unwrap()
-                    .insert(stream.to_owned(), rows.clone());
+impl Seeded {
+    fn answer(&self, stream: &str) -> Result<Vec<StoredEvent>, JournalUnavailable> {
+        let key = match self.bug {
+            Bug::KeyedByRef => stream.rsplit(':').next().unwrap_or(stream).to_owned(),
+            Bug::Stale | Bug::NoHeadCheck => stream.to_owned(),
+        };
+        let held = self.held.lock().unwrap().get(&key).cloned();
+        let whole = || -> Result<Vec<StoredEvent>, JournalUnavailable> {
+            let rows = read(self.store.as_ref(), stream)?;
+            self.held.lock().unwrap().insert(key.clone(), rows.clone());
+            Ok(rows)
+        };
+        match (self.bug, held) {
+            (_, None) => whole(),
+            (Bug::Stale, Some(rows)) => Ok(rows),
+            (Bug::KeyedByRef, Some(rows)) => {
+                let head = rows.last().map_or(0, |row| row.seq);
+                if read_head(self.store.as_ref(), stream) == Ok(head) {
+                    Ok(rows)
+                } else {
+                    whole()
+                }
+            }
+            (Bug::NoHeadCheck, Some(mut rows)) => {
+                let start = rows
+                    .last()
+                    .map_or(TrustedStart::GENESIS, |last| TrustedStart {
+                        from_seq: last.seq + 1,
+                        prev_hash: last.hash,
+                    });
+                let Ok(tail) = block(self.store.rows_from(stream, start)) else {
+                    return whole();
+                };
+                rows.extend(tail);
+                self.held.lock().unwrap().insert(key, rows.clone());
                 Ok(rows)
             }
-        };
+        }
+    }
+}
+
+fn block<T>(future: impl Future<Output = T>) -> T {
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap()
+        .block_on(future)
+}
+
+fn read_head(journal: &dyn Journal, stream: &str) -> Result<u64, JournalUnavailable> {
+    block(journal.head(stream))
+}
+
+impl Journal for Seeded {
+    fn rows<'a>(&'a self, stream: &'a str) -> Rows<'a> {
+        let answer = self.answer(stream);
         Box::pin(async move { answer })
     }
 
@@ -509,23 +598,118 @@ impl Journal for Stale {
 }
 
 #[test]
-fn the_oracle_catches_a_cache_that_never_reads_past_its_head() {
-    let stale = |store: &Arc<Store>| -> Box<dyn Journal> {
-        Box::new(Stale {
-            store: Arc::clone(store),
-            held: Mutex::new(BTreeMap::new()),
-        })
-    };
-    let mut runner = TestRunner::new(Config {
-        cases: 300,
-        failure_persistence: None,
-        ..Config::default()
-    });
-    let found = runner.run(&prop::collection::vec(op(), 1..60), |ops| {
-        agrees(&stale, &ops)
-    });
-    assert!(
-        matches!(found, Err(TestError::Fail(..))),
-        "the oracle must fail a stale cache: {found:?}"
+fn the_oracle_catches_each_seeded_bug() {
+    for bug in [Bug::Stale, Bug::NoHeadCheck, Bug::KeyedByRef] {
+        let seeded = move |store: &Arc<Store>| -> Box<dyn Journal> {
+            Box::new(Seeded {
+                bug,
+                store: Arc::clone(store),
+                held: Mutex::new(BTreeMap::new()),
+            })
+        };
+        let mut runner = TestRunner::new(Config {
+            cases: 300,
+            failure_persistence: None,
+            ..Config::default()
+        });
+        let found = runner.run(&prop::collection::vec(op(), 1..60), |ops| {
+            agrees(&seeded, &ops)
+        });
+        assert!(
+            matches!(found, Err(TestError::Fail(..))),
+            "the oracle must fail the {bug:?} cache: {found:?}"
+        );
+    }
+}
+
+const SECOND: u64 = 1_000_000_000;
+
+#[test]
+fn a_change_below_the_held_head_is_seen_at_the_next_whole_read_within_reverify() {
+    let store = Arc::new(Store::default());
+    store.append(A_ACCT, 10);
+    let clock = Hand::at(0);
+    let journal = cache_on(
+        &store,
+        &clock,
+        Limits {
+            idle: Duration::from_secs(3_600),
+            reverify: Duration::from_secs(60),
+            max_bytes: 1 << 30,
+        },
     );
+    let verified = read(&journal, A_ACCT).unwrap();
+    store.tamper(A_ACCT, 4);
+    assert_eq!(
+        read(store.as_ref(), A_ACCT),
+        Err(JournalUnavailable),
+        "the store's own whole read fails on the broken chain"
+    );
+    clock.set(60 * SECOND - 1);
+    assert_eq!(
+        read(&journal, A_ACCT),
+        Ok(verified),
+        "within reverify the rows verified are served"
+    );
+    clock.set(60 * SECOND);
+    assert_eq!(
+        read(&journal, A_ACCT),
+        Err(JournalUnavailable),
+        "at reverify the stream is read whole, and the broken chain fails it"
+    );
+}
+
+#[test]
+fn a_change_at_the_held_head_is_seen_at_the_next_read() {
+    let store = Arc::new(Store::default());
+    store.append(A_ACCT, 10);
+    let journal = cache(&store, ROOMY);
+    let before = read(&journal, A_ACCT).unwrap();
+    store.tamper(A_ACCT, 10);
+    let after = read(&journal, A_ACCT).unwrap();
+    assert_ne!(after, before);
+    assert_eq!(after, store.whole(A_ACCT), "the changed head row is served");
+    assert_eq!(
+        store.asked().whole,
+        2,
+        "read whole again, from its first record"
+    );
+}
+
+#[test]
+fn a_workspace_is_dropped_once_idle_for_exactly_its_limit_and_not_before() {
+    let store = Arc::new(Store::default());
+    store.append(A_CTL, 3);
+    let clock = Hand::at(5 * SECOND);
+    let journal = cache_on(
+        &store,
+        &clock,
+        Limits {
+            idle: Duration::from_secs(10),
+            reverify: Duration::from_secs(3_600),
+            max_bytes: 1 << 30,
+        },
+    );
+    read(&journal, A_CTL).unwrap();
+    clock.set(15 * SECOND - 1);
+    read(&journal, A_CTL).unwrap();
+    assert_eq!(store.asked().whole, 1, "a read before the limit keeps it");
+    clock.set(25 * SECOND - 2);
+    read(&journal, A_CTL).unwrap();
+    assert_eq!(store.asked().whole, 1, "each read restarts the idle time");
+    clock.set(35 * SECOND - 2);
+    read(&journal, A_CTL).unwrap();
+    assert_eq!(
+        store.asked().whole,
+        2,
+        "idle for exactly the limit drops it"
+    );
+    clock.set(0);
+    read(&journal, A_CTL).unwrap();
+    assert_eq!(
+        store.asked().whole,
+        2,
+        "a clock that steps back drops nothing"
+    );
+    assert_eq!(journal.held_bytes(), held_by_rows(&store.whole(A_CTL)));
 }
