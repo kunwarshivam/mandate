@@ -1007,3 +1007,40 @@ fn a_registry_file_naming_a_gate_report_is_refused_as_it_is_read() {
         Some(StartFailure::GateReportUnverifiable)
     );
 }
+
+/// DEC-2282 item 6, DEC-2396 item 3, DEC-2216 item 5: the live registry file the chart renders for a
+/// hosted cell reads strictly; Sonnet 5.5 and Haiku 5.5 register, GPT-5.6 Terra is refused while its
+/// snapshot is undated, and the key is served for `google-vertex/global` alone.
+#[test]
+fn the_committed_live_registry_file_reads_and_registers_a_and_b_alone() {
+    let path = PathBuf::from("../../deploy/cell/model-gateway/registry.json");
+    let entries = read_registry(&path).unwrap();
+    let ids: Vec<&str> = entries.iter().map(|e| e.entry.model_id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [
+            "llm.research_sonnet",
+            "llm.research_haiku",
+            "llm.research_terra"
+        ]
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|e| !e.offered && e.gate_report.is_none())
+    );
+    assert_eq!(
+        upstreams(&entries),
+        BTreeSet::from(["google-vertex/global".to_owned()])
+    );
+    let store = MemoryStore::default();
+    let world = World::default();
+    let (_, refused) = live_started(&store, &world, &entries).unwrap();
+    assert_eq!(
+        refused,
+        vec![Refused {
+            model_id: "llm.research_terra".to_owned(),
+            error: RegistryError::FloatingAlias,
+        }]
+    );
+}
