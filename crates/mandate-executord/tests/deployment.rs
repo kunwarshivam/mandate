@@ -2433,6 +2433,9 @@ fn owner_exit_after_the_opening(stale: bool) -> Result<(), Error> {
             ("warning_shown", Value::Null),
         ])?,
     )?;
+    if stale {
+        frozen.set(Some(UtcNanos::from_parts(wall_clock().secs() - 3_600, 0)?));
+    }
     for second in [120, 125] {
         let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
         tick(&journal, &format!("tc{second}"), &now)?;
@@ -2473,7 +2476,7 @@ fn owner_exit_after_the_opening(stale: bool) -> Result<(), Error> {
         ])?,
     )?;
     let mut alerts = Vec::new();
-    for second in (120..240).step_by(5) {
+    for second in (130..250).step_by(5) {
         let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
         let quiet = stale && second < 200;
         frozen.set(
