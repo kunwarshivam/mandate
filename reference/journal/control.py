@@ -775,6 +775,8 @@ REQUIRED_REFS["ModelInvocationRecorded"] = ("model_version",)
 
 # §9.19 (DEC-998): the agent stream's `ModelInvocationRecorded` and the model gateway's meter stream.
 AGENT_PURPOSES = ("research", "llm_signal", "fast_signal")
+# The purposes of a call with no agent: the compiler's and an evaluation's (rule 156, DEC-2216).
+NO_AGENT_PURPOSES = ("compiler", "evaluation")
 HARNESS_RESULTS = (
     "judged",
     "unknown_instrument",
@@ -821,7 +823,7 @@ SCHEMAS[("meter", "StreamOpened")] = rec(("stream_type", one_of("meter")), ("wor
 SCHEMAS[("meter", "MeterReserved")] = rec(
     ("call_id", ULID),
     ("agent_id", opt(IDENT_T)),
-    ("purpose", one_of(*AGENT_PURPOSES, "compiler")),
+    ("purpose", one_of(*AGENT_PURPOSES, *NO_AGENT_PURPOSES)),
     ("model", MODEL_REF),
     ("endpoint", STR),
     ("key_owner", one_of("platform", "customer")),
@@ -2712,7 +2714,7 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
         rule("155", actor["kind"] == "system", "actor.kind")
     if event_type == "MeterReserved":
         (
-            rule("156.agent", (p["agent_id"] is None) == (p["purpose"] == "compiler"), "payload.agent_id")
+            rule("156.agent", (p["agent_id"] is None) == (p["purpose"] in (NO_AGENT_PURPOSES if "rule.156.evaluation" not in skip else ("compiler",))), "payload.agent_id")
             and rule("156.cost", Decimal(p["max_cost_usd"]) >= 0, "payload.max_cost_usd")
         )
     if event_type == "MeterSettled":
