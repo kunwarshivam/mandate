@@ -2,8 +2,8 @@
 //! R0's second ask, DEC-1150 items 3 to 5).
 //!
 //! While an opening the runtime proposed is still working on the account stream, a new opening or
-//! increase in that instrument is denied `working_order_limit` in the runtime's dry run, so it is
-//! never asked or proposed again. The opening is followed from the journal alone:
+//! increase in that instrument is not evaluated at all: no decision, no alert, nothing asked or
+//! proposed (DEC-2843, which amends DEC-1150 item 5's journaled `working_order_limit` deny). The opening is followed from the journal alone:
 //! `OrderRequestRecorded` names its intent, `OrderSubmitted` (its `causation_id` that request)
 //! names its order, and the opening ends on a `GateDecided` deny, an `OrderAbandoned`, or an
 //! `OrderStateChanged` of its order to `filled`, `canceled`, `rejected` or `expired`; a `replaced`
@@ -41,30 +41,14 @@ fn proposed(ran: &Ran) -> Option<EventId> {
         .map(|d| d.event_id.clone())
 }
 
-/// The evaluation's dry run and reason code.
-fn decision(ran: &Ran) -> (Option<String>, Option<String>) {
-    let made = ran
-        .drafts
-        .iter()
-        .find(|d| d.event_type == "DecisionMade")
-        .unwrap_or_else(|| panic!("the evaluation decided: {:?}", ran.draft_types()));
-    let member = |key: &str| {
-        made.payload
-            .get(key)
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-    };
-    (member("dry_run"), member("reason_code"))
-}
-
+/// Held: the evaluation journals nothing for the opening, no decision, no alert, no intent, so a
+/// working opening's wait never floods the journal or the owner (DEC-2843, amending DEC-1150 item
+/// 5's journaled deny).
 fn held(ran: &Ran) -> bool {
     proposed(ran).is_none()
         && ran.handed.is_empty()
-        && decision(ran)
-            == (
-                Some("deny".to_owned()),
-                Some("working_order_limit".to_owned()),
-            )
+        && ran.drafts.iter().all(|d| d.event_type != "DecisionMade")
+        && ran.notifications.is_empty()
 }
 
 /// The account stream as the executor writes it for one intent: what the order is named, and

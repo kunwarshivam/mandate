@@ -8,8 +8,9 @@ value below (AGENTS.md rules 7 and 8). Nothing here goes in the repository, a ch
 time. Every job gets a fresh container built from a baked image (the repository's pinned toolchain,
 Docker, the GitHub runner) and the container is deleted when the job ends. They cost **144 USD a
 month** against your cap of **150 USD** ([DEC-2065](../project/decisions/DEC-2065.md)), separate
-from the hosting budget of DEC-2011. Only ci.yml's eleven cell jobs move to them, and only for
-`main` and for pull requests from this repository's own branches.
+from the hosting budget of DEC-2011. ci.yml's eleven cell jobs, `select` and the `fast` and `full` aggregates move to them
+(DEC-2072, DEC-2075), and only for pushes and dispatches on `main` and pull requests from this
+repository's own branches. Lint, tests, mutants and the other checks stay on GitHub's runners.
 
 **The one rule.** A fork's pull request brings its own workflow files, which can ask for these
 runners by label. What stops it is the setting in step 1, and the runners refuse any job that is
@@ -39,12 +40,20 @@ runners, and the runners' job-started hook refuses an approved fork's job before
 
 ## 2. DigitalOcean: a team, a billing alert and a token
 
-1. **A separate team for CI.** In the DigitalOcean console, **Create a team** (for example
-   `mandate-ci`) and use it for everything below. Its bill and its billing alert then cover the
-   runners alone, apart from the hosting budget; its token cannot touch staging or production; and
-   only its members can read the droplets' user data, which holds the App's key.
-2. **Billing alert at the cap.** In that team, **Billing → Billing alerts**, set an alert at
-   **150 USD** a month. No API sets this. The plan's own check also refuses a fleet over 150 USD.
+1. **A team.** Preferably a separate one for CI (**Create a team**, for example `mandate-ci`).
+   Its bill and alert then cover the runners alone, its token cannot touch staging or production,
+   and only its members can read the droplets' user data, which holds the App's key. If you have
+   only one team, as now, use it (DEC-2074). Then:
+   - the alert covers the team's whole bill, so set it at your other spend plus 150 USD;
+   - the token can delete or change any droplet, firewall or tag in the team, staging's and
+     production's cluster nodes and their firewall included, so revoke it as soon as each apply
+     ends (§4);
+   - any member with Droplet read can read the App's key, so every current member must be one you
+     trust with it, and rotate it whenever a member joins (§6);
+   - the runners sit in `sfo2`'s default VPC, likely the clusters' own (DEC-2074 item 2).
+2. **Billing alert.** In that team, **Billing → Billing alerts**, set an alert at **150 USD** a
+   month, or at your other spend plus 150 USD in a shared team. No API sets this. The plan's own
+   check also refuses a fleet over 150 USD.
 3. **A personal access token**, in **API → Tokens → Generate New Token**, **Custom Scopes**, an
    expiry of 30 days (you only need it while you apply), with only:
 
@@ -57,8 +66,8 @@ runners, and the runners' job-started hook refuses an approved fork's job before
    | Regions | read | the plan checks the size is offered in `sfo2` |
    | Image | read | the droplets' Ubuntu 24.04 image |
 
-   If an apply fails with a 403 that names another scope, add only that one. Keep the token in
-   your password manager, or regenerate it when you next apply.
+   If an apply fails with a 403 that names another scope, add only that one. Revoke the
+   token once the apply ends (§4) and make a new one for the next apply.
 
 ## 3. GitHub: the runner App (least privilege)
 
@@ -110,6 +119,8 @@ Keep the passphrase: without it, later applies cannot read the state. Git ignore
 `.terraform/` there, so neither is committed by accident; keep a backup of the state with the
 passphrase.
 
+**Then revoke the DigitalOcean token** (**API → Tokens**), and make a new one for the next apply.
+
 **Wait about 20 to 30 minutes.** Each droplet installs Docker and Sysbox, then builds the job image,
 which runs the repository's `.cursor/install.sh`. Then **Settings → Actions → Runners** lists one
 idle runner per droplet, named `mandate-ci-runner-<n>-<time>`, with the label `mandate-ci-do`. A
@@ -122,9 +133,9 @@ again: a host registers no runner while the setting reads anything but
 **Settings → Secrets and variables → Actions → Variables → New repository variable:**
 name `CI_RUNNER`, value `mandate-ci-do`.
 
-From the next run on, the eleven cell jobs of a pull request from this repository, and of `main`,
-run there. In a cell job's log, **Set up job** names the runner, and the runner's job-started hook
-runs first and passes. Every other job stays on GitHub's runners. If this repository's own cell
+From the next run on, the cell jobs, `select`, `fast` and `full` of a pull request from this
+repository, and of `main`, run there. In a cell job's log, **Set up job** names the runner, and the runner's job-started hook
+runs first and passes. Every other job stays on GitHub's runners, and still needs their capacity. If this repository's own cell
 jobs all fail with "This runner takes only kunwarshivam/mandate's own jobs", roll back (step 7)
 and tell lane RN: the hook refuses whatever it cannot read.
 
@@ -168,7 +179,7 @@ hook passing. It fails closed, so a wrong guess fails jobs and never admits one.
 |---|---|
 | OpenTofu state (encrypted with your passphrase) | the droplets' ids, names and addresses; the firewall and tag; the cost estimate; and a SHA-1 digest of the boot script, which the DigitalOcean provider stores instead of its text. No variable is stored in state |
 | Each droplet | the App's private key at `/etc/mandate-runner/app.pem`, root only (mode 0600), and the client id, installation id and repository in `/etc/mandate-runner/env`. Jobs run in a separate container that never sees either |
-| DigitalOcean | the boot script, key included, as the droplets' user data: readable through each droplet's metadata service, and by anyone with Droplet read on the team, in the console and the API. Hence a team of the runners' own, and the 90-day rotation. The host blocks jobs from the metadata service, the host itself and every private range |
+| DigitalOcean | the boot script, key included, as the droplets' user data: readable through each droplet's metadata service, and by anyone with Droplet read on the team, in the console and the API. Hence a team of the runners' own where possible; in a shared team, rotation whenever a member joins (DEC-2074), and every 90 days. The host blocks jobs from the metadata service, the host itself and every private range |
 | GitHub | each job's one-hour installation token, revoked once its runner is registered, and the runner's single-use registration |
 
 What this does not guard, said plainly, is DEC-2065 item 6.

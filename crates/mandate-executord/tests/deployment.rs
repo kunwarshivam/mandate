@@ -107,6 +107,7 @@ struct Variant {
     max_order: Option<&'static str>,
     demo: bool,
     research: bool,
+    snapshot: Option<&'static str>,
 }
 
 /// The account's journal with the agent's SPY mandate registered, created, confirmed and deployed
@@ -218,7 +219,12 @@ fn deployed_as(variant: Variant) -> Result<(Journal, Artifacts, String), Error> 
         ));
     }
     let configs = if variant.demo {
-        [DEMO_FEE, DEMO_CALENDAR, DEMO_RULES, DEMO_SNAPSHOT]
+        [
+            DEMO_FEE,
+            DEMO_CALENDAR,
+            DEMO_RULES,
+            variant.snapshot.unwrap_or(DEMO_SNAPSHOT),
+        ]
     } else {
         [FEE, CALENDAR, RULES, SNAPSHOT]
     };
@@ -1437,6 +1443,68 @@ fn a_deployed_opening_fills_and_rests_its_protective_stop() -> Result<(), Error>
         max_order: Some("1000"),
         ..Variant::default()
     })
+}
+
+/// The demo's SPY snapshot as `cell demo` registers it (DEC-2073): the checked-in file with only
+/// its classification instant replaced by `classified_at`.
+fn demo_snapshot_classified_at(classified_at: &str) -> Result<&'static str, Error> {
+    let committed = json(DEMO_SNAPSHOT.trim())?;
+    let Some(Value::Str(old)) = committed.get("etp_classified_at") else {
+        return Err("the demo snapshot names its classification instant".into());
+    };
+    let member = |t: &str| format!(r#""etp_classified_at":"{t}""#);
+    let stamped = DEMO_SNAPSHOT
+        .trim()
+        .replacen(&member(old), &member(classified_at), 1);
+    if stamped == DEMO_SNAPSHOT.trim() {
+        return Err("the instant was not replaced".into());
+    }
+    Ok(Box::leak(stamped.into_boxed_str()))
+}
+
+/// The demo's opening against the real binding gate, on the demo's own rule set, whose
+/// `etp_classification_max_age_s` is seven days. Classified 22 days before the gate's clock, as the
+/// checked-in `2026-10-05T13:30:00Z` reads on 2026-10-27, SPY is denied
+/// `leveraged_etp_not_enabled`, the floor failing closed (lane GW's repro). Classified at the run's
+/// start, 20 minutes before, as DEC-2073's `cell demo` registers it, the same opening is allowed.
+/// The floor compares only the gate's clock with the classification instant, so the test moves the
+/// instant against [`MONDAY`] rather than the clock.
+#[test]
+fn the_demo_opening_passes_the_floor_only_on_a_snapshot_classified_within_its_age()
+-> Result<(), Error> {
+    let gated = |classified_at: &str| -> Result<(Verdict, Option<ReasonCode>), Error> {
+        let (journal, store, _) = deployed_as(Variant {
+            demo: true,
+            snapshot: Some(demo_snapshot_classified_at(classified_at)?),
+            ..Variant::default()
+        })?;
+        journaled(&journal)?;
+        let (deployment, _) = deployment(&journal, store);
+        let snapshot = opening(&deployment)?.ok_or("the demo's opening is answered")?;
+        assert_eq!(snapshot.now, at(MONDAY)?);
+        verdict(&snapshot)
+    };
+    assert_eq!(
+        gated("2026-08-30T13:30:00Z")?,
+        (Verdict::Deny, Some(ReasonCode::LeveragedEtpNotEnabled)),
+        "22 days old, as the checked-in instant on 2026-10-27"
+    );
+    assert_eq!(
+        gated("2026-09-21T15:40:00Z")?,
+        (Verdict::Allow, None),
+        "classified at the run's start"
+    );
+    assert_eq!(
+        gated("2026-09-14T16:00:00Z")?,
+        (Verdict::Allow, None),
+        "exactly seven days old is not older (DEC-129 item 15)"
+    );
+    assert_eq!(
+        gated("2026-09-14T15:59:59Z")?,
+        (Verdict::Deny, Some(ReasonCode::LeveragedEtpNotEnabled)),
+        "a second past seven days"
+    );
+    Ok(())
 }
 
 /// The same loop on the cell's demo deployment as it is checked in (`deploy/cell/demo`): its
