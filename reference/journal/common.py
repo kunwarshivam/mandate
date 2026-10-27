@@ -128,7 +128,8 @@ def is_ulid(text: str) -> bool:
 def is_intent(text: str, skip: frozenset = frozenset()) -> bool:
     """§9.1's `intent`: a ULID, or the executor's own exit's intent of trading spec §2.3, exactly
     `w-{ulid}` or `k-{ulid}-{n}` with `n` a decimal from 0 to 999 and no leading zero (DEC-2845).
-    `types.intent_own` reads it as a bare ULID and `types.intent_any` as any id: the seeded bugs."""
+    Each `types.intent_*` flag in `skip` seeds one bug: `own` reads it as a bare ULID, `any` as any
+    id, `bound` drops the bound of 999, `zero` admits a leading zero, and `ascii` any digit."""
     if "types.intent_any" in skip:
         return bool(IDENT.match(text))
     if is_ulid(text):
@@ -140,8 +141,11 @@ def is_intent(text: str, skip: frozenset = frozenset()) -> bool:
     if not text.startswith("k-"):
         return False
     switch, dash, n = text[2:].partition("-")
-    bounded = n.isascii() and n.isdigit() and len(n) <= 3 and (n == "0" or not n.startswith("0"))
-    return dash == "-" and is_ulid(switch) and (bounded or "types.intent_bound" in skip)
+    digits = n.isdigit() and (n.isascii() or "types.intent_ascii" in skip)
+    short = len(n) <= 3 or "types.intent_bound" in skip
+    unpadded = n == "0" or not n.startswith("0") or "types.intent_zero" in skip
+    return dash == "-" and is_ulid(switch) and digits and short and unpadded
+
 
 # --------------------------------------------------------------------------- field types (§9.1)
 
