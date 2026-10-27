@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityRead, journalPageRead } from "./activity";
+import { activityRead, holdingsRead, journalPageRead } from "./activity";
 import { createWorkspaceClient } from "./client";
 import { createMockServer } from "./mock-server";
 import { AGENT_IDS } from "@/fixtures/workspace";
@@ -111,7 +111,7 @@ describe("the agent's screen's answers from run 3's held window", () => {
   const AGENT_3 = "agt_01KDEM00000000000000000WEB";
   const STREAM_3 = `agent:01KDEM6526868180000000000D:${AGENT_3}`;
   const SPY_3 = "b28f4066-5c0d-4c5e-9d8a-1f2e3d4c5b6a";
-  const envelope = { api_version: "v1", build: `sha256:${"0".repeat(64)}`, served_at: "2026-10-27T19:17:40.000000000Z", as_of: [] };
+  const envelope = { api_version: "v1", build: `sha256:${"0".repeat(64)}`, served_at: "2026-10-27T19:17:40.000000000Z", as_of: [{ stream_id: "ctl:01KDEM6526868180000000000D", seq: 18, hash: `sha256:${"c".repeat(64)}`, recorded_at: "2026-10-27T19:17:30.000000000Z" }] };
 
   it("decodes the held position with its mark and its placed bracket", () => {
     const served = {
@@ -131,8 +131,8 @@ describe("the agent's screen's answers from run 3's held window", () => {
         },
       ],
     };
-    const read = activityRead(AGENT_3).holdings(served, "");
-    expect(read).toMatchObject({ ok: true, value: { items: [{ instrument_id: SPY_3, filled_qty: "1" }] } });
+    const read = holdingsRead(AGENT_3)(served, "");
+    expect(read).toEqual({ ok: true, value: { agent_id: AGENT_3, account_ref: "01KDEA6526868180000000000A", account_positions: [], items: served.positions } });
   });
 
   it("decodes the adopted opening whose filled quantity is not served", () => {
@@ -141,10 +141,11 @@ describe("the agent's screen's answers from run 3's held window", () => {
       agent_id: AGENT_3,
       account_ref: "01KDEA6526868180000000000A",
       orders: [
-        { client_order_id: "md-2T80CW59J6E5JVBDQHW89M4E1W", intent_id: "2T80CW59J6E5JVBDQHW89M4E1W", purpose: "open", instrument_id: SPY_3, side: "buy", type: "limit", tif: "gtc", qty: "1", limit_price: "580.11", stop_price: null, state: "filled", filled_qty: null, submitted_at: "2026-10-27T19:17:24.872727819Z", updated_at: "2026-10-27T19:17:24.872727819Z" },
+        { client_order_id: "md-2T80CW59J6E5JVBDQHW89M4E1W", intent_id: "2T80CW59J6E5JVBDQHW89M4E1W", purpose: "open", instrument_id: SPY_3, side: "buy", type: "limit", tif: "gtc", qty: "1", limit_price: "580.11", stop_price: null, state: "filled", filled_qty: null, submitted_at: "2026-10-27T19:17:24.872727819Z", updated_at: "2026-10-27T19:17:24.991204115Z" },
       ],
     };
-    expect(activityRead(AGENT_3).orders(served, "").ok).toBe(true);
+    const read = activityRead(AGENT_3).orders(served, "");
+    expect(read.ok && read.value.items[0]).toMatchObject({ state: "filled", filled_qty: null, purpose: "open" });
   });
 
   it("decodes the agent stream's nine records, whatever their kinds", () => {
