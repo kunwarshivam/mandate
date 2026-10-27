@@ -499,7 +499,7 @@ fn day_started(rig: &Rig) {
     ));
 }
 
-fn risk_clock(process: &RuntimeProcess<Rig>) -> Option<i64> {
+fn risk_clock<S: Store>(process: &RuntimeProcess<S>) -> Option<i64> {
     process.state().risk_clock().map(|clock| clock.secs())
 }
 
@@ -1522,8 +1522,8 @@ fn the_tick_runs_whatever_the_models_inputs_read() {
         count(&rig, "ModelOutputRecorded"),
         1,
         "once readable, the output is recorded: a journal that took the record away is read \
-         again whole at the next start, since a running process reads only what follows its head \
-         (DEC-2847 item 4, DEC-2852)"
+         again whole at the next start or the next check, since a running process reads only \
+         what follows its head between them (DEC-2847 item 4, DEC-2852 item 6)"
     );
     assert_eq!(risk_clock(&process), Some(NOW + 11));
 }
@@ -3391,8 +3391,8 @@ fn assert_read(read: usize, check: bool, following: &Following, second: i64) {
 
 /// DEC-2852 item 6: a record at the held head that no longer reads as it did, as a rewrite
 /// that hashes its chain again leaves it, is found by the next check, at most `60` s of passes
-/// later, and the process fails rather than fold on (`AGENTS.md` rule 3). Before the check, the
-/// process reads on past the head, as a tail does.
+/// later, and the process fails rather than fold on (`AGENTS.md` rule 3): the pass that finds it
+/// hands no tick. Before the check, the process reads on past the head, as a tail does.
 #[test]
 fn a_rewritten_head_fails_the_process_at_the_next_check() {
     for stream in [CONTROL, CLOCK, ACCOUNT] {
@@ -3404,14 +3404,7 @@ fn a_rewritten_head_fails_the_process_at_the_next_check() {
             tick(&following.rig, NOW + second);
             process.step(at(NOW + second));
         }
-        let rewritten = match stream {
-            CONTROL => &following.rig.control,
-            CLOCK => &following.rig.clock,
-            _ => &following.rig.accounts,
-        };
-        if let Some(head) = rewritten.borrow_mut().last_mut() {
-            head.hash = Digest::of(b"rewritten");
-        }
+        rewrite_head(&following.rig, stream);
         for second in 11..=60 {
             process.step(at(NOW + second));
             assert_eq!(
@@ -3420,12 +3413,72 @@ fn a_rewritten_head_fails_the_process_at_the_next_check() {
                 "{stream} at {second}"
             );
         }
+        tick(&following.rig, NOW + 61);
         process.step(at(NOW + 61));
         assert_eq!(
             process.lifecycle().state(),
             State::Exited(Exit::CycleFailed),
             "{stream}"
         );
+        assert_eq!(risk_clock(&process), Some(NOW + 10), "{stream}");
+    }
+}
+
+/// DEC-2852 item 6: a step back in time makes the check due at once, so a clock set back
+/// never defers it by the step.
+#[test]
+fn a_step_back_in_time_makes_the_check_due() {
+    let following = Following::default();
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    let mut process = RuntimeProcess::start(following.clone(), wiring(), &config(), at(NOW));
+    for second in [1, 61] {
+        tick(&following.rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    rewrite_head(&following.rig, CONTROL);
+    process.step(at(NOW + 62));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    process.step(at(NOW + 30));
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Exited(Exit::CycleFailed)
+    );
+}
+
+/// DEC-2852 items 3 and 6: a store that refuses every read past the head, as the plain [`Rig`]
+/// does, is read from the first record when a record follows the head, and that read too must
+/// hold the head, so a rewritten head fails the process on the pass a record lands after it, with
+/// no check due. The record here is the owner's kill switch: the process hands nothing, and the
+/// executor's gate holds its own kill path (DEC-2852 item 6).
+#[test]
+fn a_refused_read_past_the_head_that_no_longer_holds_it_fails_the_process() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    let mut process = RuntimeProcess::start(rig.clone(), wiring(), &config(), at(NOW));
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    rewrite_head(&rig, CONTROL);
+    kill_switch(&rig);
+    tick(&rig, NOW + 2);
+    process.step(at(NOW + 2));
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Exited(Exit::CycleFailed)
+    );
+    assert_eq!(risk_clock(&process), Some(NOW + 1));
+}
+
+/// Gives the last record of `stream` in `rig` another hash, as a rewrite that hashes the chain
+/// again leaves the record at a held head.
+fn rewrite_head(rig: &Rig, stream: &str) {
+    let rows = match stream {
+        CONTROL => &rig.control,
+        CLOCK => &rig.clock,
+        _ => &rig.accounts,
+    };
+    if let Some(head) = rows.borrow_mut().last_mut() {
+        head.hash = Digest::of(b"rewritten");
     }
 }
 

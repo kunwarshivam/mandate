@@ -122,8 +122,8 @@ struct Tail {
     /// the whole chain again and the held head is checked against it (DEC-2852 item 6).
     due: bool,
     /// Whether a read from the first record no longer held the head this tail was read to: the
-    /// history it folded is not the stream's any more, so it reads nothing until the process starts
-    /// again (`AGENTS.md` rule 3).
+    /// history it folded is not the stream's any more, so the pass hands nothing more and the
+    /// process fails (`AGENTS.md` rule 3).
     broken: bool,
 }
 
@@ -140,9 +140,6 @@ impl Tail {
     /// read from the first record, which must still hold the head; `None` when nothing reads or the
     /// head is gone, and then nothing kept is read (`AGENTS.md` rule 3).
     fn read<S: Store>(&mut self, store: &S, stream: &StreamId) -> Option<Vec<StoredEvent>> {
-        if self.broken {
-            return None;
-        }
         let Some((seq, hash)) = self.head else {
             let all = store.rows_from(stream, TrustedStart::GENESIS)?;
             return Some(self.take(all));
@@ -164,7 +161,6 @@ impl Tail {
                 let all = store.rows_from(stream, TrustedStart::GENESIS)?;
                 if !all.iter().any(|row| row.seq == seq && row.hash == hash) {
                     self.broken = true;
-                    self.rows.clear();
                     return None;
                 }
                 self.due = false;
@@ -209,10 +205,10 @@ struct Tails {
 
 impl Tails {
     /// Makes every tail read from the first record on this pass when `REVERIFY_S` has passed
-    /// since they last were.
+    /// since they last were, or when time has gone back past it, so no step back defers a check.
     fn check(&mut self, now: UtcNanos) {
         let at = *self.verified_at.get_or_insert(now.secs());
-        if now.secs() >= at.saturating_add(REVERIFY_S) {
+        if now.secs() < at || now.secs() >= at.saturating_add(REVERIFY_S) {
             self.verified_at = Some(now.secs());
             for tail in [
                 &mut self.control,
@@ -733,7 +729,12 @@ impl<S: Store> RuntimeProcess<S> {
 
     /// Hands `input` to the core and runs its effects; whether they all committed. An input whose
     /// append is in doubt is kept to be handed again; a refusal or a fence stops the process.
+    /// Nothing is handed once a tail found its stream's history rewritten, and the pass fails the
+    /// process (DEC-2852 item 6).
     fn hand(&mut self, now: UtcNanos, at: UtcNanos, input: Input, alerts: &mut Vec<Alert>) -> bool {
+        if self.tails.broken() {
+            return false;
+        }
         self.written_at = at;
         let started = matches!(input, Input::Started(_));
         let effects = match handle(&mut self.state, input.clone(), &self.wiring.ports()) {
