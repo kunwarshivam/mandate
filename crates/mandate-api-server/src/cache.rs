@@ -19,7 +19,8 @@
 //!   held head row, drops what is held and reads the stream whole. A whole read that fails drops
 //!   every stream held for that workspace and answers [`JournalUnavailable`], as the store's own read
 //!   does; nothing held is served in its place. A read already in flight answers as it would have,
-//!   but holds nothing once any workspace has been dropped since it began.
+//!   but holds nothing once a failed whole read has dropped any workspace since its own store read
+//!   began.
 //! - **Tenancy.** Rows are held per stream id, under the id's second segment, the workspace for
 //!   every workspace stream (journal spec §2). A read returns only the rows held under its own
 //!   stream id, so one workspace's rows never answer another's read.
@@ -92,8 +93,8 @@ struct Held {
     streams: BTreeMap<String, Stream>,
 }
 
-/// Every workspace held, their bytes together, and how many workspaces a failed whole read has
-/// dropped, so a read that began before a drop does not hold its rows again after it.
+/// Every workspace held, their bytes together, and how many whole reads have failed and dropped
+/// their workspace, so a read that began before such a drop does not hold its rows after it.
 #[derive(Debug, Default)]
 struct State {
     bytes: usize,
