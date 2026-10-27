@@ -283,7 +283,7 @@ fn the_wiring_s_interval_sets_how_often_an_instrument_is_marked() -> Result<(), 
     Ok(())
 }
 
-/// A pass within [`marks::MARK_EVERY`] of the last mark writes none; one at that interval or later
+/// With the default interval, a pass within [`marks::MARK_EVERY`] of the last mark writes none; one at that interval or later
 /// marks again, at its own tick.
 #[test]
 fn an_instrument_is_marked_at_most_once_an_interval() -> Result<(), Error> {
