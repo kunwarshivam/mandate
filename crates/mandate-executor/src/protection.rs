@@ -1221,7 +1221,7 @@ fn lone_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
         let paused = mode_holds(&batch.view, &lone.agent, &lone.intent);
         if let Some(reason) = closed_hold(batch.ports, &instrument, batch.at()) {
-            park(batch, &lone.intent, reason, lone.ladder.parked)?;
+            crate::intent::holds_alone(park(batch, &lone.intent, reason, lone.ladder.parked))?;
         } else if lone.ladder.parked && paused {
             continue;
         } else if rests(&batch.view, &instrument) {
@@ -1316,7 +1316,12 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
                 if left == Qty::ZERO {
                     true
                 } else if let Some(reason) = closed_hold(batch.ports, &instrument, batch.at()) {
-                    park(batch, &sequence.intent, reason, sequence.ladder.parked)?;
+                    crate::intent::holds_alone(park(
+                        batch,
+                        &sequence.intent,
+                        reason,
+                        sequence.ladder.parked,
+                    ))?;
                     true
                 } else {
                     let sends = sendable(batch, &instrument, &sequence.intent, left)?;
@@ -2129,7 +2134,7 @@ pub(crate) fn release_waiting(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorE
         cancel_openings(batch, Some(&exit.agent), Some(&exit.instrument))?;
         overtaken(batch, &exit.instrument)?;
         if !awaits_cancel(&batch.view, &exit.agent, &exit.instrument, exit.purpose) {
-            gate_and_submit(batch, &exit.intent)?;
+            crate::intent::holds_alone(gate_and_submit(batch, &exit.intent))?;
         }
     }
     Ok(())

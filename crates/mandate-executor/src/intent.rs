@@ -418,6 +418,30 @@ pub(crate) fn intent_refs(
     crate::gate::deployed_refs(batch.binding_gate(), batch.ports, &agent, instrument)
 }
 
+/// A held intent whose order the broker no longer has, gated again and sent again once allowed.
+fn gate_again(
+    batch: &mut Batch<'_, '_>,
+    intent: &IntentId,
+    id: &ClientOrderId,
+) -> Result<(), ExecutorError> {
+    if let (ALLOW, binding) = gate(batch, intent, false)? {
+        send_again(batch, id, binding)?;
+    }
+    Ok(())
+}
+
+/// `step`'s outcome for one intent among others, an input's re-gates at a tick or after an order's
+/// change: configuration that does not read for it holds that intent alone, which the next step
+/// decides again, and every other intent, protective order and kill switch of the input goes on
+/// (DEC-2846, `AGENTS.md` rule 13). The gate journals nothing before it reads the configuration
+/// ([`decide`] runs first), so nothing of the held intent is drafted.
+pub(crate) fn holds_alone(step: Result<(), ExecutorError>) -> Result<(), ExecutorError> {
+    match step {
+        Err(ExecutorError::BindingGateInputMissing) => Ok(()),
+        other => other,
+    }
+}
+
 /// An order's time in force: GTC for crypto, DAY otherwise; an exit's later rungs take the same.
 pub(crate) fn order_tif(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> TimeInForce {
     match batch.ports.instruments.asset_class(instrument) {
@@ -879,7 +903,7 @@ pub(crate) fn resume(batch: &mut Batch<'_, '_>, stale_only: bool) -> Result<(), 
         if too_old(batch, &intent) {
             abandon(batch, &intent, "intent_too_old")?;
         } else if !stale_only {
-            gate_and_submit(batch, &intent)?;
+            holds_alone(gate_and_submit(batch, &intent))?;
         }
     }
     Ok(())
@@ -893,13 +917,13 @@ pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
     let held: Vec<IntentId> = batch.view.held.iter().cloned().collect();
     for intent in held {
         let id = ClientOrderId::for_intent(&intent)?;
-        held_long(batch, &intent)?;
+        holds_alone(held_long(batch, &intent))?;
         if too_old(batch, &intent) {
             abandon(batch, &intent, "intent_too_old")?;
         } else if !batch.view.orders.contains_key(&id) {
-            begin_and_submit(batch, &intent, false)?;
-        } else if let (ALLOW, binding) = gate(batch, &intent, false)? {
-            send_again(batch, &id, binding)?;
+            holds_alone(begin_and_submit(batch, &intent, false))?;
+        } else {
+            holds_alone(gate_again(batch, &intent, &id))?;
         }
     }
     Ok(())

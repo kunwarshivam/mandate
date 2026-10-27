@@ -853,3 +853,48 @@ fn an_exit_whose_references_do_not_read_is_held_and_goes_once_they_do() {
     assert!(submitted(&ran), "and it goes once the references read");
     assert!(gate_refs(&ran).iter().all(|refs| refs == &GATE_REFS));
 }
+
+/// DEC-2846 and `AGENTS.md` rule 13: an input's re-gates hold one intent alone. A held exit whose
+/// deployment's references no longer read is left held at the next tick, and the tick, with every
+/// other exit, protective order and kill switch it carries, goes on: before, the re-gate's error
+/// failed the whole tick. Once the references read, the exit is decided again.
+#[test]
+fn a_tick_holds_alone_an_exit_whose_references_do_not_read() {
+    let (mut shell, ports) = ready_with_position();
+    let market_exit = mandate_executor::IntentBody::Order {
+        instrument: mandate_accounting::InstrumentId::new(AAPL).expect("an instrument"),
+        side: mandate_accounting::Side::Sell,
+        qty: qty("10"),
+        limit: None,
+        purpose: mandate_executor::Purpose::RiskExit,
+        protection: None,
+    };
+    let held = shell.run_with_binding(
+        handoff(INTENT, AGENT, market_exit),
+        &ports,
+        &GateFixture { input: None },
+    );
+    let verdicts: Vec<String> = held
+        .drafts
+        .iter()
+        .filter(|draft| draft.event_type == "GateDecided")
+        .filter_map(|draft| {
+            draft
+                .payload
+                .get("verdict")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(verdicts, ["hold"], "held, nothing to price from");
+    let tick = shell.step_with_binding(
+        mandate_executor::Input::Tick(mandate_executor::RiskClock::from_secs(1_790_002_900)),
+        &ports,
+        &UnreadConfiguration,
+    );
+    assert!(tick.is_ok(), "the tick goes on: {tick:?}");
+    assert!(
+        !submitted(&tick.expect("a tick")),
+        "and the exit stays held"
+    );
+}
