@@ -91,32 +91,11 @@ impl RecordedModel {
                 replayed(&Field(monitor))
             })
             .transpose()?;
-        let slug = pinned.identity.model_name.clone();
-        let reported_provider = endpoint.text("reported_provider")?;
-        let prices = PriceTable::new(
-            endpoint.per_million("input_per_million")?,
-            endpoint.per_million("output_per_million")?,
-            endpoint.per_million("cached_per_million")?,
-            Digest::of(endpoint.text("price_table")?.as_bytes()),
-        )
-        .map_err(|_| RecordedError::Malformed("cached_per_million"))?;
+        let (endpoint, probe) = hosted(&endpoint, &pinned.identity.model_name)?;
         Ok(Self {
             entry: pinned,
-            endpoint: Endpoint {
-                id: endpoint.text("id")?.to_owned(),
-                host: endpoint.text("host")?.to_owned(),
-                region: endpoint.text("region")?.to_owned(),
-                locality: Locality::Hosted,
-                route: Route {
-                    upstream: endpoint.text("upstream")?.to_owned(),
-                    reported_provider: reported_provider.to_owned(),
-                },
-                prices,
-            },
-            probe: Reported {
-                model: Some(slug),
-                provider: Some(reported_provider.to_owned()),
-            },
+            endpoint,
+            probe,
             reply: replayed(&reply)?,
             turns,
             monitor_reply,
@@ -156,11 +135,44 @@ pub fn registry(
     Ok(registry)
 }
 
+/// The hosted endpoint `endpoint` describes, and what it reports serving `slug`: the endpoint member
+/// of a recording, and of each entry of the live registry file.
+pub(crate) fn hosted(
+    endpoint: &Field<'_>,
+    slug: &str,
+) -> Result<(Endpoint, Reported), RecordedError> {
+    let reported_provider = endpoint.text("reported_provider")?;
+    let prices = PriceTable::new(
+        endpoint.per_million("input_per_million")?,
+        endpoint.per_million("output_per_million")?,
+        endpoint.per_million("cached_per_million")?,
+        Digest::of(endpoint.text("price_table")?.as_bytes()),
+    )
+    .map_err(|_| RecordedError::Malformed("cached_per_million"))?;
+    Ok((
+        Endpoint {
+            id: endpoint.text("id")?.to_owned(),
+            host: endpoint.text("host")?.to_owned(),
+            region: endpoint.text("region")?.to_owned(),
+            locality: Locality::Hosted,
+            route: Route {
+                upstream: endpoint.text("upstream")?.to_owned(),
+                reported_provider: reported_provider.to_owned(),
+            },
+            prices,
+        },
+        Reported {
+            model: Some(slug.to_owned()),
+            provider: Some(reported_provider.to_owned()),
+        },
+    ))
+}
+
 /// One member's value, read strictly.
-struct Field<'a>(&'a Value);
+pub(crate) struct Field<'a>(pub(crate) &'a Value);
 
 impl Field<'_> {
-    fn text(&self, member: &'static str) -> Result<&str, RecordedError> {
+    pub(crate) fn text(&self, member: &'static str) -> Result<&str, RecordedError> {
         self.0
             .get(member)
             .and_then(Value::as_str)

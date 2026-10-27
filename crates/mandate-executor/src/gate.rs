@@ -618,13 +618,11 @@ fn evaluate_binding(
     partial.verdict = verdict;
     partial.held = held;
     partial.deferred = deferred;
-    partial.sized = match (
+    partial.sized = binding_size(
+        decision.verdict == Verdict::Allow,
         partial.sized,
         decision.pacing.as_ref().map(|pacing| pacing.qty),
-    ) {
-        (Some(local), Some(binding)) => Some(local.min(binding)),
-        (local, binding) => local.or(binding),
-    };
+    );
     partial.binding = Some(BindingEvidence {
         checks: decision.checks,
         data_profile: snapshot.data_profile,
@@ -635,6 +633,20 @@ fn evaluate_binding(
         paced_limit: decision.pacing.map(|pacing| pacing.limit_price),
     });
     Ok(partial)
+}
+
+/// The quantity a binding decision sizes its order to: the smaller of the local size beside the
+/// exit ladders (DEC-410 item 3) and the binding pacing's, on an allow only. A binding deny, hold
+/// or defer sizes nothing, so its record names no `sized_qty`, which journal rule 313 admits only
+/// on an allow (DEC-2848).
+fn binding_size(allowed: bool, local: Option<Qty>, paced: Option<Qty>) -> Option<Qty> {
+    if !allowed {
+        return None;
+    }
+    match (local, paced) {
+        (Some(local), Some(paced)) => Some(local.min(paced)),
+        (local, paced) => local.or(paced),
+    }
 }
 
 fn origin(purpose: Purpose) -> Origin {
@@ -1227,6 +1239,25 @@ mod remainder_tests {
                 "{mode:?}"
             );
             assert_eq!(whole.crowded_out().verdict_name(), "allow", "{mode:?}");
+        }
+        Ok(())
+    }
+
+    /// DEC-2848, the review of #2820: a binding decision sizes only an allow, to the smaller of
+    /// the local and the paced quantities; a binding deny, hold or defer of an exit the account
+    /// stream sized names no size, since journal rule 313 refuses one on any other verdict.
+    #[test]
+    fn a_binding_decision_sizes_only_an_allow() -> Result<(), ExecutorError> {
+        let (six, four) = (Qty::parse("6")?, Qty::parse("4")?);
+        for (local, paced, sized) in [
+            (Some(six), Some(four), Some(four)),
+            (Some(four), Some(six), Some(four)),
+            (Some(six), None, Some(six)),
+            (None, Some(four), Some(four)),
+            (None, None, None),
+        ] {
+            assert_eq!(super::binding_size(true, local, paced), sized);
+            assert_eq!(super::binding_size(false, local, paced), None);
         }
         Ok(())
     }
