@@ -272,6 +272,27 @@ pub(crate) fn available_to_sell(
         .unwrap_or(Qty::ZERO))
 }
 
+/// I4 for the exits the executor raises for an agent itself (DEC-2849 item 7): the watchdog exit of
+/// its triggered protection, and its plain entry's bound exit. Each is that agent's own, sized
+/// min(Lᵢ, N), clipped to what is still available to sell ([`available_to_sell`]), so it never
+/// sells another holder's or the owner's shares (the founder's ruling of 2026-10-27).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "pending E7-watchdog-shared-position: the watchdog and the bound size on it"
+    )
+)]
+pub(crate) fn rule_13_size(
+    _view: &ExecutorState,
+    _agent: &AgentId,
+    _instrument: &InstrumentId,
+) -> Result<Qty, ExecutorError> {
+    Err(ExecutorError::Unimplemented {
+        story: "E7-watchdog-shared-position",
+    })
+}
+
 /// Takes `quantity` of an account switch's close in `instrument` out of its holders, for
 /// [`ExecutorState::closed`] (DEC-2849 I5): out of the owner's positive residual first, then the
 /// agents' lots in [`coverages`]' order, largest first and ties by agent id. A fill that takes the
@@ -828,6 +849,80 @@ mod tests {
                 check(&run)?;
             }
         }
+    }
+
+    /// DEC-2849 item 7, I4: over the same random events, the size of every agent's own rule-13 exit
+    /// (its watchdog's, its bound's) is the oracle's min(Lᵢ, N, N less the working sells): never more
+    /// than its own lots, never the owner's or another holder's, and never past what is left.
+    #[test]
+    #[ignore = "pending E7-watchdog-shared-position"]
+    fn rule_13_sizes_are_the_oracles() -> Result<(), String> {
+        let mut runner = proptest::test_runner::TestRunner::new(ProptestConfig::with_cases(256));
+        runner
+            .run(&proptest::collection::vec(event(), 1..60), |events| {
+                let fail = |e: ExecutorError| TestCaseError::fail(e.to_string());
+                let n = |v: i64| shares(v).map_err(fail);
+                let mut run = Run::new();
+                for event in &events {
+                    run.apply(event).map_err(fail)?;
+                    for (i, oracle) in &run.oracles {
+                        let at = instrument(*i).map_err(fail)?;
+                        let left = oracle.position().saturating_sub(oracle.working);
+                        for a in 0..AGENTS {
+                            prop_assert_eq!(
+                                super::rule_13_size(&run.view, &agent(a), &at).map_err(fail)?,
+                                n(oracle.lots(a).min(oracle.position()).min(left))?,
+                                "the rule-13 size of {} in {}",
+                                a,
+                                i
+                            );
+                        }
+                    }
+                }
+                Ok(())
+            })
+            .map_err(|e| e.to_string())
+    }
+
+    /// DEC-2849 item 7, I4, by hand: an agent's own rule-13 exit sells its own lots and no more.
+    /// Its 10 beside the owner's 4 is 10, never 14; after the owner sells 4 outside Mandate it is
+    /// the 6 left; beside another agent's 4, each is its own; and with 2 sold and 3 still working
+    /// from its 10, it is the 5 not yet selling.
+    #[test]
+    #[ignore = "pending E7-watchdog-shared-position"]
+    fn a_rule_13_exit_sells_its_own_lots_and_no_more() -> Result<(), ExecutorError> {
+        let at = instrument(0)?;
+        for (events, sizes) in [
+            (
+                vec![Event::Buy(0, 0, 10), Event::OwnerBuy(0, 4)],
+                vec![(0, 10)],
+            ),
+            (
+                vec![Event::Buy(0, 0, 10), Event::OwnerSell(0, 4)],
+                vec![(0, 6)],
+            ),
+            (
+                vec![Event::Buy(0, 0, 6), Event::Buy(1, 0, 4)],
+                vec![(0, 6), (1, 4)],
+            ),
+            (
+                vec![Event::Buy(0, 0, 10), Event::Sell(0, 0, 2, 3)],
+                vec![(0, 5)],
+            ),
+        ] {
+            let mut run = Run::new();
+            for event in &events {
+                run.apply(event)?;
+            }
+            for (a, size) in sizes {
+                assert_eq!(
+                    super::rule_13_size(&run.view, &agent(a), &at)?,
+                    shares(size)?,
+                    "{events:?}: agent {a}"
+                );
+            }
+        }
+        Ok(())
     }
 
     /// DEC-2849's worked example: A and B each hold 5, and the owner sells 4 outside Mandate.
