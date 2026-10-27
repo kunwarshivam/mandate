@@ -14,12 +14,15 @@ mandate-artifacts-fs.workspace = true
 mandate-bars.workspace = true
 mandate-canon.workspace = true
 mandate-journal.workspace = true
+mandate-journal-pg.workspace = true
 mandate-marketdata.workspace = true
 mandate-num.workspace = true
 mandate-process.workspace = true
 mandate-time.workspace = true
+mandate-vault.workspace = true
+secrecy.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt", "signal"] }
+tokio = { workspace = true, features = ["rt", "signal", "time"] }
 
 [dev-dependencies]
 mandate-liquidity.workspace = true

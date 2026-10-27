@@ -5,9 +5,15 @@
 //!
 //! - [`instruments`]: the workspace's registered US-equity instruments, at most 50.
 //! - [`schedule`]: when a daily or minute generation is due, and a workspace's own offsets.
+//! - [`key`]: the platform data key, read once through the vault as the bars reader.
+//! - [`pass`]: one pass at the clock, reporting counts and codes only.
+//! - [`source`]: the [`generation::BarsSource`] over the batched fetch and its transport.
 //! - [`generation`]: writing generations whole or not at all, `CONFIRM`, retention, and the closes
 //!   object the runtime's observation names.
 
 pub mod generation;
 pub mod instruments;
+pub mod key;
+pub mod pass;
 pub mod schedule;
+pub mod source;

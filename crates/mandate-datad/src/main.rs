@@ -19,6 +19,15 @@
 //! completes while it runs is added. Any failed write exits, fail closed, and the orchestrator
 //! restarts it. It drains on SIGTERM. `mandate-datad probe livez|readyz --probe <socket>` is its
 //! `exec` probe (DEC-994 item 5). This is the one place the host clock is read (ES-05).
+//!
+//! `mandate-datad run --source alpaca-iex --workspace <id> --store <root>/alpaca-iex --artifacts
+//! <root> --vault-address <address> --vault-dir <dir> --probe <socket>` is the hosted source
+//! (data-plane spec §3.8, DEC-2283): it reads the platform data key once as the bars reader, from
+//! the vault at `--vault-address` with the AppRole credentials and CA mounted in `--vault-dir`,
+//! and the workspace's control stream `ctl:<id>` read-only over Postgres (`MANDATE_JOURNAL_DSN`),
+//! again every [`series::REFRESH`]; at every pass it writes the generations due under `--store`
+//! and puts their closes objects in `--artifacts`. It logs counts and codes only. A refused key
+//! stops it, failed, and the orchestrator's restart reads the key again.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -27,7 +36,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use mandate_artifacts_fs::FsArtifactStore;
+use mandate_bars::generations;
+use mandate_datad::iex::generation::Writer;
+use mandate_datad::iex::instruments::{Registered, registered};
+use mandate_datad::iex::key::{platform_key, vault_config};
+use mandate_datad::iex::pass::Pass;
+use mandate_datad::iex::schedule::Jitter;
+use mandate_datad::iex::source::ClientSource;
 use mandate_datad::{Instrument, observation, series};
+use mandate_journal::StreamId;
+use mandate_journal_pg::PgJournal;
+use mandate_marketdata::client::{Client, TokioPause};
+use mandate_marketdata::http::AlpacaDataHttp;
 use mandate_process::probe::{self, Probe, Status};
 use mandate_process::{Input, Kind, Lifecycle, State};
 use mandate_time::{ExchangeCalendar, UtcNanos};
@@ -56,6 +77,36 @@ fn main() -> ExitCode {
             };
             let answer = probe::query(&socket, asked).map_or(1, |a| a.exit_status());
             ExitCode::from(answer)
+        }
+        Some("run") if flag("--source").as_deref() == Some("alpaca-iex") => {
+            let (Some(workspace), Some(store), Some(artifacts), Some(address), Some(dir)) = (
+                flag("--workspace"),
+                flag("--store"),
+                flag("--artifacts"),
+                flag("--vault-address"),
+                flag("--vault-dir"),
+            ) else {
+                eprintln!("iex_arguments_missing");
+                return ExitCode::from(2);
+            };
+            let target = IexTarget {
+                workspace,
+                store: PathBuf::from(store),
+                artifacts: PathBuf::from(artifacts),
+                address,
+                dir: PathBuf::from(dir),
+            };
+            match run_iex(&target, &socket) {
+                Ok(status) => ExitCode::from(status),
+                Err(code) => {
+                    eprintln!("data_start_failed: {code}");
+                    ExitCode::from(2)
+                }
+            }
+        }
+        Some("run") if flag("--source").is_some_and(|source| source != "recorded") => {
+            eprintln!("source_unknown");
+            ExitCode::from(2)
         }
         Some("run") => {
             let (Some(store), Some(artifacts), Some(instruments)) =
@@ -202,4 +253,103 @@ fn watch_terminate(terminate: Arc<AtomicBool>) -> std::io::Result<()> {
         terminate.store(true, Ordering::SeqCst);
     });
     Ok(())
+}
+
+/// Where the IEX source writes, for which workspace, and the vault it reads the key from.
+struct IexTarget {
+    workspace: String,
+    store: PathBuf,
+    artifacts: PathBuf,
+    address: String,
+    dir: PathBuf,
+}
+
+/// The workspace's registered instruments, read from its control stream and the artifact store.
+fn registrations(
+    runtime: &tokio::runtime::Runtime,
+    journal: &PgJournal,
+    stream: &StreamId,
+    artifacts: &Path,
+) -> Result<Registered, &'static str> {
+    let rows = runtime
+        .block_on(journal.rows(stream))
+        .map_err(|e| e.code())?;
+    let store = FsArtifactStore::open_existing(artifacts).map_err(|_| "artifacts_unavailable")?;
+    Ok(registered(&rows, &store))
+}
+
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the binary's edge reads a monotonic clock only to pace its loop (ES-05)"
+)]
+fn run_iex(target: &IexTarget, socket: &Path) -> Result<u8, &'static str> {
+    if !generations::is_generational(&target.store) {
+        return Err("store_not_generations");
+    }
+    let stream =
+        StreamId::parse(&format!("ctl:{}", target.workspace)).ok_or("workspace_invalid")?;
+    let terminate = Arc::new(AtomicBool::new(false));
+    watch_terminate(Arc::clone(&terminate)).map_err(|_| "signal_unavailable")?;
+    let calendar = ExchangeCalendar::us_equities().map_err(|e| e.code())?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| "runtime_unavailable")?;
+    let config = vault_config(&target.address, &target.dir)?;
+    let key = runtime.block_on(platform_key(&config, &target.dir, host_now()))?;
+    let transport = AlpacaDataHttp::bars_only(key).map_err(|e| e.code())?;
+    let source = ClientSource::new(Client::new(transport, TokioPause))?;
+    let dsn = std::env::var("MANDATE_JOURNAL_DSN").map_err(|_| "journal_dsn_missing")?;
+    let journal = runtime
+        .block_on(async { PgJournal::from_dsn(&dsn) })
+        .map_err(|e| e.code())?;
+    let writer =
+        Writer::new(target.store.clone(), target.artifacts.clone()).map_err(|e| e.code())?;
+    let mut pass = Pass::new(writer, Jitter::of(&target.workspace));
+    let mut lifecycle = Lifecycle::new(Kind::Service, LIVENESS, host_now());
+    let status = Status::new(lifecycle.snapshot());
+    probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
+    let mut read_at: Option<Instant> = None;
+    let mut held: Option<Registered> = None;
+    let mut started = false;
+    loop {
+        if let State::Exited(exit) = lifecycle.state() {
+            status.publish(lifecycle.snapshot());
+            eprintln!("{}", exit.code());
+            return Ok(exit.exit_status());
+        }
+        let now = host_now();
+        if terminate.load(Ordering::SeqCst) {
+            lifecycle.observe(now, Input::DrainRequested);
+            lifecycle.observe(now, Input::Settled);
+            continue;
+        }
+        if series::due(read_at.map(|at| at.elapsed())) {
+            match registrations(&runtime, &journal, &stream, &target.artifacts) {
+                Ok(registered) => held = Some(registered),
+                Err(code) => eprintln!("registrations_not_read: {code}"),
+            }
+            read_at = Some(Instant::now());
+        }
+        let input = match &held {
+            None => Input::Heartbeat,
+            Some(registered) => {
+                let tick = pass.step(&source, &calendar, registered, now);
+                for line in &tick.log {
+                    eprintln!("{line}");
+                }
+                if tick.stop {
+                    Input::Failed
+                } else if started {
+                    Input::Heartbeat
+                } else {
+                    started = true;
+                    Input::StartupPassed
+                }
+            }
+        };
+        lifecycle.observe(now, input);
+        status.publish(lifecycle.snapshot());
+        thread::sleep(TICK);
+    }
 }
