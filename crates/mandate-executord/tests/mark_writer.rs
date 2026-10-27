@@ -7,6 +7,7 @@
 mod support;
 
 use std::collections::BTreeSet;
+use std::time::Duration;
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::Value;
@@ -226,6 +227,59 @@ fn a_named_instrument_is_marked_at_the_tick() -> Result<(), Error> {
     ] {
         assert_eq!(member(payload, name).as_deref(), Some(want), "{name}");
     }
+    Ok(())
+}
+
+/// Names instruments to mark, as [`Naming`] does, at an interval of its own.
+struct NamingEvery(Vec<&'static str>, Duration);
+
+impl Marked for NamingEvery {
+    fn instruments(&self) -> BTreeSet<InstrumentId> {
+        Naming(self.0.clone()).instruments()
+    }
+
+    fn every(&self) -> Duration {
+        self.1
+    }
+}
+
+/// DEC-2844: a wiring that asks for marks every 5 s gets one at every tick 5 s apart, so a risk
+/// fold whose staleness limit is 10 s never sees its mark's age reach it at a tick.
+#[test]
+fn the_wiring_s_interval_sets_how_often_an_instrument_is_marked() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    let mut wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    wiring.quotes = Box::new(Quoting(vec![AAPL]));
+    wiring.marked = Box::new(NamingEvery(vec![AAPL], Duration::from_secs(5)));
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    let ticks = [
+        NOON,
+        "2026-09-21T15:00:04Z",
+        "2026-09-21T15:00:05Z",
+        "2026-09-21T15:00:10Z",
+        "2026-09-21T15:00:15Z",
+    ];
+    for (index, clock) in ticks.iter().enumerate() {
+        if index > 0 {
+            tick(&journal, &format!("t{}", index + 1), clock)?;
+        }
+        process.step(at(clock)?);
+    }
+    let clocks: Vec<Option<String>> = marks_of(&journal)
+        .iter()
+        .map(|(_, payload)| member(payload, "risk_clock"))
+        .collect();
+    assert_eq!(
+        clocks,
+        vec![
+            Some("2026-09-21T15:00:00.000000000Z".to_owned()),
+            Some("2026-09-21T15:00:05.000000000Z".to_owned()),
+            Some("2026-09-21T15:00:10.000000000Z".to_owned()),
+            Some("2026-09-21T15:00:15.000000000Z".to_owned()),
+        ]
+    );
     Ok(())
 }
 

@@ -679,6 +679,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             return true;
         };
         let wanted = self.wiring.marked.instruments();
+        self.marked_at.set_every(self.wiring.marked.every());
         let Ok(due) = self.marked_at.due(&wanted, instant) else {
             return true;
         };

@@ -11,6 +11,7 @@ mod support;
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+use std::time::Duration;
 
 use mandate_accounting::{AccountType, AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Value, to_canonical};
@@ -539,6 +540,11 @@ fn a_deployed_agent_is_answered_from_its_reviewed_artifacts() -> Result<(), Erro
         Ok(Some(_))
     ));
     assert_eq!(deployment.instruments(), BTreeSet::from([spy]));
+    assert_eq!(
+        Marked::every(&deployment),
+        Duration::from_secs(5),
+        "half the reviewed rule set's 10 s quote staleness (DEC-2844)"
+    );
     Ok(())
 }
 
