@@ -732,8 +732,8 @@ spike (`python/research_spike`).
    and exchange licenses. In v1, each user's market data comes through their own Alpaca
    account, so Mandate does not redistribute it; any shared data offering needs licensing first.
    The exception is the stored IEX bars of [DEC-2283](project/decisions/DEC-2283.md), fetched with
-   the platform's data key for managed paper workspaces (customers' once DEC-2283 item 9.2 is
-   confirmed): the founder accepted that risk on
+   the platform's data key for managed paper workspaces (customers' through one central fetcher,
+   [DEC-2284](project/decisions/DEC-2284.md), E2-21): the founder accepted that risk on
    2026-10-27, and E2-20 obtains the license or moves workspaces onto their own keys.
 4. **Custom code in v1.** Declarative specs only, or also WebAssembly plug-ins?
 5. **First connectors (decided, [DEC-23](project/04-decision-log.md#decisions), reordered by

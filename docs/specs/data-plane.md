@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.4: v0.3 with §3.8, the workspace data process's stored bars from Alpaca IEX with the platform data key ([DEC-2283](../project/decisions/DEC-2283.md)). v0.3: v0.2 with §4.6's research query extended for the agentic research loop's tools ([DEC-2203](../project/decisions/DEC-2203.md)). v0.2: v0.1 plus the blockers and majors of the post-merge review on [#553](https://github.com/kunwarshivam/mandate/pull/553) |
+| **Status** | Draft v0.4: v0.3 with §3.8, the workspace data process's stored bars from Alpaca IEX with the platform data key ([DEC-2283](../project/decisions/DEC-2283.md)), customers' through one central fetcher ([DEC-2284](../project/decisions/DEC-2284.md)). v0.3: v0.2 with §4.6's research query extended for the agentic research loop's tools ([DEC-2203](../project/decisions/DEC-2203.md)). v0.2: v0.1 plus the blockers and majors of the post-merge review on [#553](https://github.com/kunwarshivam/mandate/pull/553) |
 | **Owner** | Engineering |
 | **Decisions** | [DEC-433](../project/decisions/DEC-433.md) (items 1 to 14 accepted by the agent; items 15 to 20 decided by the founder on 2026-10-03; items 21 and 22 Proposed for the founder) |
 | **Backlog** | E2-5 to E2-19 ([backlog](../project/06-backlog-v1.md#e2-market-data)) |
@@ -287,8 +287,10 @@ exception to §1.3, item 3 and DP-11, accepted by the founder as a compliance ri
 Until a data license is recorded or each workspace uses its own data key (backlog E2-20), this is
 likely redistribution under Alpaca's market-data terms. The exception covers these stored IEX bars
 and the corporate actions that qualify them. Quotes, marks and every other datum still come from the
-workspace's own connection, and the shared plane stays empty of market data. Which workspaces' data
-processes may read the key is DEC-2283 item 9's to settle.
+workspace's own connection, and the shared plane stays empty of market data. The key never enters a
+customer cell: one central fetcher writes customers' generations (DEC-2284, the founder's decision,
+backlog E2-21). Until it lands, the founder's workspace's own data process is the only reader of the
+key, and customers' workspaces have no stored bars.
 
 **Instruments.** The US-equity instruments the workspace has registered: the symbol of the latest
 `instrument_snapshot` registered on the control stream for each asset id (DEC-523), the read the
