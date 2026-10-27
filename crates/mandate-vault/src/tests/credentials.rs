@@ -60,6 +60,7 @@ fn oracle_name(identity: &Identity) -> String {
         Identity::SecretImport => "secret-import".to_owned(),
         Identity::ModelGateway => "model-gateway".to_owned(),
         Identity::NewsReader => "news-reader".to_owned(),
+        Identity::BarsReader => "bars-reader".to_owned(),
         Identity::EmailSender => "email-sender".to_owned(),
         Identity::Provisioner => "provisioner".to_owned(),
     }
@@ -486,6 +487,7 @@ fn identity() -> impl Strategy<Value = Identity> {
         Just(Identity::SecretImport),
         Just(Identity::ModelGateway),
         Just(Identity::NewsReader),
+        Just(Identity::BarsReader),
         Just(Identity::EmailSender),
         Just(Identity::Provisioner),
         connection.clone().prop_map(Identity::Executor),

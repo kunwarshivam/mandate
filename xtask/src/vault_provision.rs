@@ -39,13 +39,14 @@ const MANAGED_BY: &str = "app.kubernetes.io/managed-by=mandate-vault-provision";
 /// The Secrets of the identities that are not per connection, as `mandate_vault::kube::secret_name`
 /// names them, the role provisioner's among them, which `--secrets-namespace` issues (DEC-2350). A
 /// vault provisioned before it was listed lacks it, so the next apply provisions once more.
-const PLATFORM_SECRETS: [&str; 8] = [
+const PLATFORM_SECRETS: [&str; 9] = [
     "vault-approle-api",
     "vault-approle-connection-manager",
     "vault-approle-runtime",
     "vault-approle-secret-import",
     "vault-approle-model-gateway",
     "vault-approle-news-reader",
+    "vault-approle-bars-reader",
     "vault-approle-email-sender",
     "vault-approle-provisioner",
 ];

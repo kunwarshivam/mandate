@@ -91,6 +91,7 @@ impl LocalSource {
                 | Identity::SecretImport
                 | Identity::ModelGateway
                 | Identity::NewsReader
+                | Identity::BarsReader
                 | Identity::EmailSender,
                 Some(Opened::Executor(v)),
             ) => Held::Executor(v),
