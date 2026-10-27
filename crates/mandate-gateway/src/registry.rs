@@ -518,8 +518,9 @@ impl Registry {
     }
 
     /// Sets the status; `withdrawn` is final (INF-15). An agentic entry is offered only when its
-    /// harness content is that of every other offered entry answering any of its run kinds, so an owner's
-    /// choice among them changes the model, never what the agent may read or do (DEC-2282).
+    /// harness content is that of every other offered entry answering any of its run kinds, so an
+    /// owner's choice among them changes the model, never what the agent may read or do
+    /// (DEC-2282).
     pub fn set_status(&mut self, model: &ModelRef, status: Status) -> Result<(), RegistryError> {
         if self.entry_mut(model)?.status == Status::Withdrawn {
             return Err(RegistryError::Withdrawn);
