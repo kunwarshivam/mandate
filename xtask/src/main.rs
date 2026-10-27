@@ -19516,6 +19516,45 @@ mod tests {
             named, 2,
             "the guard is written out exactly twice, both in `select`"
         );
+        let allowed_runs_on = [
+            "ubuntu-24.04",
+            "ubuntu-24.04-arm",
+            "macos-14",
+            "${{ matrix.runner }}",
+            "${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}",
+            "${{ needs.select.outputs.runner }}",
+            "${{ needs.select.outputs.runner || 'ubuntu-24.04' }}",
+            RUNNER_GUARD,
+        ];
+        for path in files_by_extension(&root.join(".github/workflows"), &["yml", "yaml"])? {
+            for line in fs::read_to_string(&path)?.lines() {
+                let code = line.split(" #").next().unwrap_or(line).trim();
+                if code.starts_with('#') {
+                    continue;
+                }
+                if let Some(value) = code.strip_prefix("runs-on:") {
+                    assert!(
+                        allowed_runs_on.contains(&value.trim()),
+                        "{}: `runs-on:{value}` is neither a hosted runner nor the guard (DEC-2075)",
+                        path.display()
+                    );
+                }
+                if let Some(value) = code.strip_prefix("runner:")
+                    && !value.contains("${{")
+                {
+                    assert!(
+                        ["ubuntu-24.04", "ubuntu-24.04-arm"].contains(&value.trim()),
+                        "{}: matrix runner `{value}` is not a hosted runner (DEC-2075)",
+                        path.display()
+                    );
+                }
+                assert!(
+                    !code.contains("self-hosted") && !code.contains("mandate-ci-do"),
+                    "{}: names the self-hosted runners' labels directly: {code}",
+                    path.display()
+                );
+            }
+        }
         for job in workflow_jobs(&workflow) {
             let lines = workflow_job(&workflow, job).context("a listed job")?;
             for line in lines.iter().map(|l| l.trim()) {
