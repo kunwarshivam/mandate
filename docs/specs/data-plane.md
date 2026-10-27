@@ -1,8 +1,8 @@
-# Data Plane Spec (v0.3, draft)
+# Data Plane Spec (v0.4, draft)
 
 | | |
 |---|---|
-| **Status** | Draft v0.3: v0.2 with §4.6's research query extended for the agentic research loop's tools ([DEC-2203](../project/decisions/DEC-2203.md)). v0.2: v0.1 plus the blockers and majors of the post-merge review on [#553](https://github.com/kunwarshivam/mandate/pull/553) |
+| **Status** | Draft v0.4: v0.3 with §3.8, the workspace data process's stored bars from Alpaca IEX with the platform data key ([DEC-2283](../project/decisions/DEC-2283.md)). v0.3: v0.2 with §4.6's research query extended for the agentic research loop's tools ([DEC-2203](../project/decisions/DEC-2203.md)). v0.2: v0.1 plus the blockers and majors of the post-merge review on [#553](https://github.com/kunwarshivam/mandate/pull/553) |
 | **Owner** | Engineering |
 | **Decisions** | [DEC-433](../project/decisions/DEC-433.md) (items 1 to 14 accepted by the agent; items 15 to 20 decided by the founder on 2026-10-03; items 21 and 22 Proposed for the founder) |
 | **Backlog** | E2-5 to E2-19 ([backlog](../project/06-backlog-v1.md#e2-market-data)) |
@@ -80,7 +80,7 @@ Equities and crypto spot only. Options, futures, and perpetual futures data are 
 
 | | Managed | Hybrid | Fully on-prem or air-gapped |
 |---|---|---|---|
-| Market data | Each workspace's own broker connection, from our cell | Each workspace's own connection, from the customer's site | Same, or none (no live trading without a quote) |
+| Market data | Each workspace's own broker connection, from our cell; stored daily bars from the platform data key (§3.8) | Each workspace's own connection, from the customer's site | Same, or none (no live trading without a quote) |
 | Shared data plane | Ours, pulled by cells | Optional subscription, pulled outbound | Optional offline bundle, or none |
 | Point-in-time store | Object storage in the cell | Customer object storage (MinIO on the edge) | Same |
 | News | Workspace's own Alpaca news access | Same | Same, or none |
@@ -257,6 +257,70 @@ artifact (DP-3).
 | ETP and ETN classification | Per the source chosen for trading spec §15 items 5 and 8 | Versioned list; older than the configured age denies ETP openings (trading spec §3.2) |
 | Corporate actions | Daily, and before the 19:45 ET preparation | Each action's knowledge time is when it was first seen; DEC-433 item 13 covers one first seen after preparation |
 | Calendars | With releases | Versioned data files with provenance |
+
+### 3.8 Stored bars: the workspace data process
+
+The signal models' daily closes and the liquidity check's daily figures are read from stored bar
+datasets (DEC-846, DEC-470 item 4, DEC-2385). On a hosted cell the workspace data process
+(`mandate-datad`) fills them from Alpaca's historical IEX bars ([DEC-2283](../project/decisions/DEC-2283.md)).
+Its local-cell recording (DEC-2385 item 4) is a dev and CI fixture only.
+
+- **Key.** The process reads the platform's data-only paper key (`platform/news-data-key`,
+  DEC-2277, widened to bars by the founder's decision F2 in DEC-2283) from the vault once at
+  start, as its own read-only identity, into memory only. The key is never in the environment, a
+  chart value, a log line, or anything an agent or a runtime reads. It places no order and reads no
+  account. Without a readable key the process stops at start and is restarted, and nothing new is
+  stored, so the trust check refuses the next session (below).
+- **Licensing exception.** Bars fetched with one platform key and served to many workspaces are an
+  exception to §1.3's own-connection rule and to item 3 and DP-11, accepted by the founder as a
+  compliance risk (DEC-2283 decision F1): until a data license is recorded or each workspace uses
+  its own data key (backlog E2-20), this is likely redistribution under Alpaca's market-data terms.
+  The exception covers these stored IEX bars only; quotes, marks and every other datum still come
+  from the workspace's own connection, and the shared plane stays empty of market data.
+- **Instruments.** Every US-equity instrument the workspace has registered: the symbol of the
+  latest `instrument_snapshot` registered on the control stream for each asset id (DEC-523), the
+  read the runtime's composer and the news reader already make (DEC-2280 item 1). The executor
+  refuses any instrument without one, so the set covers every pinned and working-universe
+  instrument an agent can trade. The process reads only those registrations and their artifacts,
+  and appends nothing. An instrument registered later is fetched at the next refresh; a stored span
+  that stops being refreshed stops at its last session, and the trust check refuses it from the next
+  session on.
+- **What is stored.** For each instrument, the US-equity `iex` dataset of daily bars (`1Day`,
+  unadjusted) in the DEC-89 layout under the root `alpaca-iex/`, from the session
+  `SESSIONS` (30) completed sessions back. No other root, feed or timeframe. Minute bars are not
+  stored (below).
+- **Settled sessions only.** A session's daily bar is fetched and stored only once that date's
+  last calendar session span, extended hours included, has ended plus `SETTLE` (15 minutes), so a
+  bar still forming is never stored. Until then the latest stored session is the one before, the
+  trust check's "ends on the last completed session" fails, and no closes are read: no signal
+  between a session's regular close and its settle time, which never adds risk (MI-10).
+- **No guessing.** A session the vendor answers with no bar for an instrument (a halt all day, no
+  IEX print) is stored as fetched and empty. The trust check then refuses the whole span ("a trading
+  day has no bar") until that day leaves the span, so the model is handed no closes and says
+  nothing. The process never fills, carries forward, interpolates, or adjusts a bar.
+- **Nothing revised (DP-2).** A stored day is never rewritten. When a later fetch of a stored day
+  differs, the stored day stays, the write is refused as `put_day` already refuses it, and the
+  process logs the code `bar_revised` with no symbol or price, and goes on. Corrections as new
+  records wait on E2-7.
+- **Batched and paced.** One request carries every instrument due for a day (`symbols=` with
+  several symbols), split by symbol on receipt; a symbol the request did not ask for, or one
+  answered twice, refuses the page. Requests go through the E2-1 client's pacing (200 a minute,
+  `429` waits for the next window, server errors back off). A first start asks one request a
+  session of the span, 30, whatever the instrument count; after that one a settled session. Every
+  workspace's process shares the platform key's budget, so a `429` only delays storing.
+- **Closes object.** After each store the process puts each instrument's trusted closes object
+  (DEC-846 item 3) with source `alpaca_iex_daily_bars`, byte for byte what the runtime's composer
+  derives, so the runtime's `ObservationRecorded` names an object that is there (DEC-2385 item 5).
+  DP-3 holds through that event and its `data_ref`. The process journals nothing of its own.
+- **Readers.** The runtime's composer wires the signal models for a bars root `alpaca-iex` with
+  that source, as it does for the recording's root. The executor's liquidity read takes the daily
+  figures from the same root through the same trust check. Its trailing five minutes of volume come
+  from the workspace's own connection at gate time, as the shell's paper path reads them
+  (`recent_minute_bars`), and are part of the gate's recorded inputs; an empty or unread window
+  refuses the opening as today.
+- **Session calendar and clock.** Sessions, early closes and the settle time come from the
+  checked-in calendar (§3.5); a date beyond its validity stores nothing. The process reads the host
+  clock only at its binary's edge.
 
 ---
 
@@ -487,6 +551,7 @@ has (trading spec §5.6).
 | **Corporate action first seen after preparation, or mid-session** | First seen later than its preparation time | Openings in the instrument (DEC-433 item 13) | Prepared, applied, and posted; or, for an action out of v1 scope, the §8.5 "anything else" rule (pause, cancel, alert) | The owner is alerted; protection stays; the instrument snapshot is refreshed |
 | **Restart** of the data service or runtime | Process start | Openings until resync (§3.2): marks folded from the journal are old, so DP-4 applies by itself | Resync completes | Backfill runs for the outage window; bars wait for it; exits use whatever mark source exists (trading spec §8.2) |
 | **Backfill fails** | The historical host refuses or times out | Signal models needing that window (output missing, MI-10) | A later successful backfill; the window stays marked as a gap in the store | `inspect` shows the gap as a true gap |
+| **Stored bars not current** (§3.8): a session not yet settled, a vendor day with no bar, the key unread, the host unreachable, or `429`s | The process stores nothing newer than the session before | Signal models' closes and the liquidity check's daily figures for the instrument: no signal (MI-10), openings held by the liquidity check; exits never read stored bars (DEC-2274 item 6) | The next store of the missing session; a day with no bar ends only when it leaves the 30-session span | At restart the process stores what is missing, idempotently; a version change does not touch it |
 | **Calendar file near its end** | 90 days before its last valid date | Nothing yet; an alert | A release with the next file | Past its end, openings are blocked (§3.5) |
 | **Shared plane down** | Bundles stop or fail verification | Nothing on the trading path | Bundles resume (operator) | §6.4 |
 | **News source down** | Fetches fail | Nothing on the trading path; fewer theses | Source returns | The drift detector sees the arrival gap |
@@ -513,6 +578,8 @@ has (trading spec §5.6).
 | **Flood** | A source sends a burst to swamp the agent or the hot path | Bounded queues with conflation (§3.6); the drift detector's arrival-rate measure; slow-tier work never blocks the hot tier | — |
 | **Careless user** | Runs live with an IEX-only plan | DEC-35: live equity agents require SIP, checked at deployment | — |
 | **Malicious insider** | Edits stored history to flatter a backtest, or alters a record | Datasets refuse different content for a stored day; snapshots are manifest digests in `BacktestRunRecorded`; journal artifacts are hash-chained and object-locked (journal spec §6.2) | The bulk store is operational, not the record; what a decision used lives in the journal |
+| **Bad daily bar** (§3.8) | A wrong IEX daily close flips a crossover | The signal is an opinion: the order builder, the gate and the owner's caps size and admit any order (rule 4); a bar is stored only once its session has settled, and never rewritten | One wrong close can drive one signal until it leaves the slow window; corrections wait on E2-7 |
+| **Shared data key** (§3.8) | One workspace's process spends the platform key's budget, or the key leaks | The key stays in the vault and process memory, read by one read-only identity; the process places no order and reads no account; a `429` only delays storing | Every workspace's stored bars wait while the budget is spent; the licensing risk stays until E2-20 |
 | **Cross-tenant leak** | Learn another workspace's universe from shared-plane traffic | Whole-dataset broadcast, pull only (§6.1); no per-workspace request reaches the shared plane (DP-10) | — |
 
 ---
@@ -528,6 +595,7 @@ As of 2026-10-03.
 | Corporate actions stored beside a dataset; split-adjusted and raw prices | **Built** (E2-4) | `crates/mandate-marketdata` |
 | Exchange calendar and sessions, with validity to 2028-12-31 | **Built** | `crates/mandate-time` |
 | Latest-quote read (`iex`, `crypto`) and asset read, refusing stale or one-sided answers | **Built** (E7-8) | `crates/mandate-alpaca` |
+| Stored IEX daily bars in the workspace data process (§3.8) | Planned (DEC-2283) | `crates/mandate-datad`, `crates/mandate-marketdata` |
 | Source allowlist type and admission checks 14 and 15 | **Built** as types and checks; no allowlist contents yet | `crates/mandate-research` |
 | Input-drift detector over observation shapes | **Built** as a pure fold; not wired to inputs (DEC-266, DEC-267) | `crates/mandate-research` |
 | A news and bars research loop | **Spike only**, outside product code (E17-0) | `python/research_spike` |
@@ -554,7 +622,7 @@ All are in [DEC-433](../project/decisions/DEC-433.md).
 |---|---|
 | 1 | This spec is a draft that adds no gate rule; where it overlaps, the trading, mandate, and journal specs win |
 | 2 | Backlog stories continue epic E2 (E2-5 onward), not a new epic |
-| 3 | No exchange market data and no licensed text in the shared plane; each workspace uses its own connection |
+| 3 | No exchange market data and no licensed text in the shared plane; each workspace uses its own connection, except §3.8's stored IEX bars (DEC-2283, founder decision F1) |
 | 4 | Two time axes, event time and knowledge time; point-in-time queries filter on knowledge time |
 | 5 | Quote age from the earlier of vendor time and receive time; future stamps beyond 1,000 ms are not sane; no fresh quote for openings while the host clock is out of tolerance |
 | 6 | A status channel that is down or not resynced is a presumed halt that also blocks openings |
