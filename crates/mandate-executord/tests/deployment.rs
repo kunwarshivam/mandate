@@ -1488,7 +1488,7 @@ fn a_deployment_not_read_in_full_is_read_again() -> Result<(), Error> {
 /// deployed SPY agent's opening, proposed on a journaled, untraded account, passes the binding gate
 /// on the deployment's reviewed artifacts, the executor's own fresh mark and the fixture's own
 /// facts, the scheduler ticking every five seconds (the cell's ticks every second); it is
-/// sent as a bracket under SPY's asset id, fills whole at its limit, and is booked as SPY's fill by
+/// sent as a bracket under SPY's asset id, fills whole at the ask it reaches, and is booked as SPY's fill by
 /// its asset id though the broker names it `SPY`. The bracket's stop rests at the broker as the
 /// position's protection, and every reconciliation after the fill is clean: nothing reads as
 /// another instrument's.
@@ -1603,7 +1603,7 @@ fn the_loop(variant: Variant) -> Result<(), Error> {
             fill.get("price").and_then(Value::as_str),
         ),
         (Some(SPY), Some("1"), Some("580.13")),
-        "SPY's fill, by its asset id, whole at the limit"
+        "SPY's fill, by its asset id, whole at the ask"
     );
     assert!(
         journal
