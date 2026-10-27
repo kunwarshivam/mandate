@@ -961,7 +961,9 @@ forbidden_internal = ["mandate-paper", "mandate-shell", "mandate-cli", "mandate-
 # connector, the executor or the runtime: it places nothing. Its hosted IEX source (DEC-2283,
 # superseding DEC-2385 item 3 for that source) reads the control stream through mandate-journal-pg
 # and the platform data key through mandate-vault (secrecy holds it), so it sits at layer 10, above
-# both, as mandate-provisionerd does; tokio also drives the batched fetch.
+# both, as mandate-provisionerd does; tokio also drives the batched fetch. PgJournal can append, so
+# what keeps the process to reading is its read-only database role (DEC-2283 item 3), which its
+# DSN must name.
 [crates.mandate-datad]
 layer = 10
 safety_critical = true

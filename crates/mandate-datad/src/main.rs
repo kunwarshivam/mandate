@@ -39,9 +39,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_bars::generations;
 use mandate_datad::iex::generation::Writer;
-use mandate_datad::iex::instruments::{Registered, registered};
+use mandate_datad::iex::instruments::Registered;
 use mandate_datad::iex::key::{platform_key, vault_config};
 use mandate_datad::iex::pass::Pass;
+use mandate_datad::iex::progress::{Judged, Progress};
+use mandate_datad::iex::registrations::Registrations;
 use mandate_datad::iex::schedule::Jitter;
 use mandate_datad::iex::source::ClientSource;
 use mandate_datad::{Instrument, observation, series};
@@ -264,53 +266,104 @@ struct IexTarget {
     dir: PathBuf,
 }
 
-/// The workspace's registered instruments, read from its control stream and the artifact store.
-fn registrations(
-    runtime: &tokio::runtime::Runtime,
-    journal: &PgJournal,
-    stream: &StreamId,
-    artifacts: &Path,
-) -> Result<Registered, &'static str> {
-    let rows = runtime
-        .block_on(journal.rows(stream))
-        .map_err(|e| e.code())?;
-    let store = FsArtifactStore::open_existing(artifacts).map_err(|_| "artifacts_unavailable")?;
-    Ok(registered(&rows, &store))
-}
-
+/// The worker: reads the control stream incrementally every [`series::REFRESH`], and at every
+/// [`TICK`] makes one pass, telling the probe loop through `progress`, until `terminate` or a refused key. The probe loop never waits on it,
+/// so a slow fetch or journal read never misses a heartbeat.
 #[allow(
     clippy::disallowed_methods,
     reason = "the binary's edge reads a monotonic clock only to pace its loop (ES-05)"
 )]
-fn run_iex(target: &IexTarget, socket: &Path) -> Result<u8, &'static str> {
-    if !generations::is_generational(&target.store) {
-        return Err("store_not_generations");
-    }
+fn work(
+    target: &IexTarget,
+    key: mandate_marketdata::http::Credentials,
+    terminate: &AtomicBool,
+    progress: &Progress,
+) -> Result<(), &'static str> {
     let stream =
         StreamId::parse(&format!("ctl:{}", target.workspace)).ok_or("workspace_invalid")?;
-    let terminate = Arc::new(AtomicBool::new(false));
-    watch_terminate(Arc::clone(&terminate)).map_err(|_| "signal_unavailable")?;
     let calendar = ExchangeCalendar::us_equities().map_err(|e| e.code())?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|_| "runtime_unavailable")?;
-    let config = vault_config(&target.address, &target.dir)?;
-    let key = runtime.block_on(platform_key(&config, &target.dir, host_now()))?;
     let transport = AlpacaDataHttp::bars_only(key).map_err(|e| e.code())?;
     let source = ClientSource::new(Client::new(transport, TokioPause))?;
     let dsn = std::env::var("MANDATE_JOURNAL_DSN").map_err(|_| "journal_dsn_missing")?;
     let journal = runtime
-        .block_on(async { PgJournal::from_dsn(&dsn) })
+        .block_on(async { PgJournal::single_writer(&dsn) })
         .map_err(|e| e.code())?;
+    let artifacts =
+        FsArtifactStore::open_existing(&target.artifacts).map_err(|_| "artifacts_unavailable")?;
     let writer =
         Writer::new(target.store.clone(), target.artifacts.clone()).map_err(|e| e.code())?;
     let mut pass = Pass::new(writer, Jitter::of(&target.workspace));
+    let mut kept = Registrations::default();
+    let mut read_at: Option<Instant> = None;
+    let mut held: Option<Registered> = None;
+    while !terminate.load(Ordering::SeqCst) {
+        if series::due(read_at.map(|at| at.elapsed())) {
+            match runtime.block_on(journal.rows_from(&stream, kept.next_start())) {
+                Ok(rows) => {
+                    kept.extend(rows);
+                    held = Some(kept.registered(&artifacts));
+                }
+                Err(error) => eprintln!("registrations_not_read: {}", error.code()),
+            }
+            read_at = Some(Instant::now());
+        }
+        if let Some(registered) = &held {
+            let tick = pass.step(&source, &calendar, registered, host_now());
+            for line in &tick.log {
+                eprintln!("{line}");
+            }
+            if tick.stop {
+                progress.stopped();
+                return Ok(());
+            }
+            progress.passed(host_now());
+        }
+        thread::sleep(TICK);
+    }
+    Ok(())
+}
+
+fn run_iex(target: &IexTarget, socket: &Path) -> Result<u8, &'static str> {
+    if !generations::is_generational(&target.store) {
+        return Err("store_not_generations");
+    }
+    let terminate = Arc::new(AtomicBool::new(false));
+    watch_terminate(Arc::clone(&terminate)).map_err(|_| "signal_unavailable")?;
+    let key = {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| "runtime_unavailable")?;
+        let config = vault_config(&target.address, &target.dir)?;
+        runtime.block_on(platform_key(&config, &target.dir, host_now()))?
+    };
     let mut lifecycle = Lifecycle::new(Kind::Service, LIVENESS, host_now());
     let status = Status::new(lifecycle.snapshot());
     probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
-    let mut read_at: Option<Instant> = None;
-    let mut held: Option<Registered> = None;
+    let progress = Arc::new(Progress::default());
+    let _worker = {
+        let (target, terminate, progress) = (
+            IexTarget {
+                workspace: target.workspace.clone(),
+                store: target.store.clone(),
+                artifacts: target.artifacts.clone(),
+                address: target.address.clone(),
+                dir: target.dir.clone(),
+            },
+            Arc::clone(&terminate),
+            Arc::clone(&progress),
+        );
+        thread::spawn(move || {
+            if let Err(code) = work(&target, key, &terminate, &progress) {
+                eprintln!("data_worker_failed: {code}");
+                progress.stopped();
+            }
+        })
+    };
     let mut started = false;
     loop {
         if let State::Exited(exit) = lifecycle.state() {
@@ -324,30 +377,13 @@ fn run_iex(target: &IexTarget, socket: &Path) -> Result<u8, &'static str> {
             lifecycle.observe(now, Input::Settled);
             continue;
         }
-        if series::due(read_at.map(|at| at.elapsed())) {
-            match registrations(&runtime, &journal, &stream, &target.artifacts) {
-                Ok(registered) => held = Some(registered),
-                Err(code) => eprintln!("registrations_not_read: {code}"),
-            }
-            read_at = Some(Instant::now());
-        }
-        let input = match &held {
-            None => Input::Heartbeat,
-            Some(registered) => {
-                let tick = pass.step(&source, &calendar, registered, now);
-                for line in &tick.log {
-                    eprintln!("{line}");
-                }
-                if tick.stop {
-                    Input::Failed
-                } else if started {
-                    Input::Heartbeat
-                } else {
-                    started = true;
-                    Input::StartupPassed
-                }
-            }
+        let input = match progress.judged(now, started) {
+            Judged::Failed => Input::Failed,
+            Judged::Starting => Input::Heartbeat,
+            Judged::Started => Input::StartupPassed,
+            Judged::Passing => Input::Heartbeat,
         };
+        started |= input == Input::StartupPassed;
         lifecycle.observe(now, input);
         status.publish(lifecycle.snapshot());
         thread::sleep(TICK);

@@ -73,7 +73,10 @@ impl Pass {
                     Err(error) => {
                         tick.log
                             .push(format!("daily_not_written: {}", error.code()));
-                        tick.stop |= error.key_refused();
+                        if error.key_refused() {
+                            tick.stop = true;
+                            return tick;
+                        }
                     }
                 }
                 for (_, reference) in self.writer.closes(session, instruments, now) {

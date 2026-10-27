@@ -278,3 +278,161 @@ fn the_client_source_is_the_batched_fetch() {
     .unwrap();
     assert!(source.actions(&symbols, range).unwrap()[&Symbol::parse("QQQ").unwrap()].is_empty());
 }
+
+#[test]
+fn the_probe_loop_fails_only_a_refused_key_a_stopped_worker_or_a_stall() {
+    use mandate_datad::iex::progress::{Judged, Progress, STALL_S};
+    let t = |secs: i64| UtcNanos::from_parts(1_800_000_000 + secs, 0).unwrap();
+    let progress = Progress::default();
+    assert_eq!(progress.judged(t(0), false), Judged::Starting);
+    assert_eq!(
+        progress.judged(t(10_000), false),
+        Judged::Starting,
+        "no pass yet is not ready, not failed"
+    );
+    progress.passed(t(0));
+    assert_eq!(progress.judged(t(1), false), Judged::Started);
+    assert_eq!(progress.judged(t(1), true), Judged::Passing);
+    assert_eq!(STALL_S, 600);
+    assert_eq!(
+        progress.judged(t(600), true),
+        Judged::Passing,
+        "a long paced fetch is not a stall"
+    );
+    assert_eq!(progress.judged(t(601), true), Judged::Failed);
+    progress.passed(t(601));
+    assert_eq!(progress.judged(t(602), true), Judged::Passing);
+    progress.stopped();
+    assert_eq!(progress.judged(t(602), true), Judged::Failed);
+}
+
+#[test]
+fn a_refused_key_on_the_minute_stops_the_process_and_minute_generations_are_pruned_once_a_minute() {
+    let cell = Cell::new("minute-key");
+    let fake = Fake {
+        bars: Vec::new(),
+        status: Some(401),
+        asked: RefCell::new(0),
+    };
+    let root = cell.0.join("datasets").join(GENERATIONS_ROOT);
+    fs::create_dir_all(root.join("minutes").join("2026-10-27T1300")).unwrap();
+    let mut pass = cell.pass();
+    let early = at("2026-10-27T14:30:10Z");
+    let tick = pass.step(
+        &fake,
+        &calendar(),
+        &Registered::Instruments(Vec::new()),
+        early,
+    );
+    assert!(!tick.stop, "no instrument, nothing asked");
+    assert!(
+        !root.join("minutes").join("2026-10-27T1300").exists(),
+        "pruned at the first pass"
+    );
+    fs::create_dir_all(root.join("minutes").join("2026-10-27T1301")).unwrap();
+    pass.step(
+        &fake,
+        &calendar(),
+        &Registered::Instruments(Vec::new()),
+        at("2026-10-27T14:30:40Z"),
+    );
+    assert!(
+        root.join("minutes").join("2026-10-27T1301").exists(),
+        "not pruned again within the minute"
+    );
+    pass.step(
+        &fake,
+        &calendar(),
+        &Registered::Instruments(Vec::new()),
+        at("2026-10-27T14:31:05Z"),
+    );
+    assert!(
+        !root.join("minutes").join("2026-10-27T1301").exists(),
+        "pruned in the next minute"
+    );
+
+    let fresh = Cell::new("minute-key-2");
+    let mut writer_pass = fresh.pass();
+    let morning = at("2026-10-27T14:30:10Z");
+    let mut daily_done = Fake {
+        bars: Vec::new(),
+        status: Some(503),
+        asked: RefCell::new(0),
+    };
+    let first = writer_pass.step(&daily_done, &calendar(), &secret(), morning);
+    assert!(!first.stop, "{:?}", first.log);
+    daily_done.status = Some(401);
+    let second = writer_pass.step(
+        &daily_done,
+        &calendar(),
+        &secret(),
+        at("2026-10-27T14:31:05Z"),
+    );
+    assert!(second.stop, "{:?}", second.log);
+    assert_eq!(
+        second.log,
+        ["minute_not_written: fetch"],
+        "the daily request waits RETRY_S, the minute is asked and refused"
+    );
+}
+
+#[test]
+fn registrations_are_read_from_after_the_last_row_and_objects_once() {
+    use mandate_datad::iex::registrations::Registrations;
+    use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, StoredEvent, TrustedStart};
+    struct Counting(RefCell<BTreeMap<String, Vec<u8>>>, RefCell<usize>);
+    impl ArtifactSource for Counting {
+        fn read_artifact(&self, reference: &ArtifactRef) -> Result<Vec<u8>, ArtifactError> {
+            *self.1.borrow_mut() += 1;
+            self.0
+                .borrow()
+                .get(&reference.to_string())
+                .cloned()
+                .ok_or(ArtifactError::Missing)
+        }
+    }
+    let object = br#"{"asset_class":"us_equity","instrument_id":"a","symbol":"QQQ"}"#;
+    let reference = ArtifactRef::of(object);
+    let store = Counting(
+        RefCell::new(BTreeMap::from([(reference.to_string(), object.to_vec())])),
+        RefCell::new(0),
+    );
+    let row = |seq: u64, hash: u8| StoredEvent {
+        stream_id: "ctl:ws".to_owned(),
+        seq,
+        event_id: format!("e{seq}"),
+        event_type: "ConfigSnapshotRegistered".to_owned(),
+        schema_version: 1,
+        environment: "paper".to_owned(),
+        recorded_at: "2026-10-27T12:00:00Z".to_owned(),
+        prev_hash: mandate_canon::Digest::ZERO,
+        hash: mandate_canon::Digest::of(&[hash]),
+        body: format!(
+            r#"{{"payload":{{"kind":"instrument_snapshot","content_hash":"{reference}"}}}}"#
+        )
+        .into_bytes(),
+    };
+    let mut kept = Registrations::default();
+    assert_eq!(kept.next_start(), TrustedStart::GENESIS);
+    kept.extend(vec![row(1, 1), row(2, 2)]);
+    assert_eq!(
+        kept.next_start(),
+        TrustedStart {
+            from_seq: 3,
+            prev_hash: mandate_canon::Digest::of(&[2])
+        }
+    );
+    let first = kept.registered(&store);
+    assert!(
+        matches!(&first, Registered::Instruments(list) if list.len() == 1),
+        "{first:?}"
+    );
+    assert_eq!(
+        *store.1.borrow(),
+        1,
+        "the object is read once for both rows naming it"
+    );
+    store.0.borrow_mut().clear();
+    assert_eq!(kept.registered(&store), first, "and kept after");
+    assert_eq!(*store.1.borrow(), 1);
+}
