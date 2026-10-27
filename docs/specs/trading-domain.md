@@ -1024,21 +1024,26 @@ instrument (long-only):
   - the quantity its own orders' fills received (net of a crypto buy's asset fee);
   - less its own sells and its releases (DEC-2354);
   - scaled by a split;
-  - set to 0 by an account-scoped switch's close.
+  - reduced by an account-scoped switch's close, after R and in Pᵢ's order, as it fills;
+  - an owner exit naming the agent comes out of its lots, one naming no agent out of R.
 - R = N − Σᵢ Lᵢ is the owner's residual.
 - The deficit is D = max(0, −R).
 
 What follows from them:
 - **Sell authority.** Agent i's discretionary and new sells never exceed Sᵢ = max(0, Lᵢ − D), the
-  founder's "every agent shrinks by full gap" (DEC-2849 item 6).
+  founder's "every agent shrinks by full gap" (DEC-2849 item 6). A discretionary exit for more is
+  trimmed to what Sᵢ leaves, and with nothing left is refused `sell_exceeds_available`, read on Sᵢ.
 - **Rule-13 sells.** A risk exit, an owner exit, an agent-scoped flatten and a triggered protective,
-  watchdog or bound exit are sized min(Lᵢ, N) (§5.5), never held by a deficit.
+  watchdog or bound exit are sized min(Lᵢ, N) (§5.5), never held by a deficit. Each is clipped to
+  N less the instrument's working sells, never refused while that is above 0.
 - **Protective coverage.** Pᵢ charges the deficit once, largest Lᵢ first and ties by agent id, so
   Σᵢ Pᵢ = min(N, Σᵢ Lᵢ) (§5.4).
 - **A deficit holds openings and never an exit.**
   - While D > 0, every opening in the instrument is held (`attribution_deficit`, §9.1), and the owner
     is alerted once per episode. Working openings are not cancelled by it.
-  - It ends when R ≥ 0: an owner buy, a release, or the account switch's close.
+  - It ends when R ≥ 0: an owner buy, a release of any agent's lots (DEC-2354), or the account
+    switch's close.
+  - A shortfall below the instrument's quantity increment is no deficit.
 - **Per-agent risk.** Each agent's equity and limits are computed on its own lots (mandate spec
   §5.2), never on N or R.
 
