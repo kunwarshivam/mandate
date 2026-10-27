@@ -1431,6 +1431,10 @@ fn tofu_checks() -> Result<()> {
     if !unchecked.is_empty() {
         bail!("tofu:\n  {}", unchecked.join("\n  "));
     }
+    sh(
+        "python3",
+        &["deploy/tofu/modules/ci-runners/tests/manager_test.py"],
+    )?;
     Ok(())
 }
 
@@ -6759,8 +6763,9 @@ const READ_LINES: &[(&str, &str)] = &[
 
 /// The repository scripts a workflow may run, by the exact command word that runs them, each only
 /// while its whole text, comments included, holds no cargo word, no `.cargo` and no `CARGO_`
-/// (DEC-873 item 2). `ci.yml` runs the first four and the credential guard (DEC-964), `merge.yml`
-/// the fifth, and `release.yml`'s `release-signing` job the release signer (DEC-2024).
+/// (DEC-873 item 2). `ci.yml` runs the documentation and service scripts and the credential guard
+/// (DEC-964), `merge.yml` runs the merge guard, `release.yml` runs the release signer (DEC-2024),
+/// and `runner-smoke.yml` runs the runner smoke script (DEC-2078).
 const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/docs-only.sh",
     ".github/scripts/docs-checks.sh",
@@ -6769,6 +6774,7 @@ const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/start-minio.sh",
     ".github/scripts/merge-approved.sh",
     ".github/scripts/release-sign.sh",
+    ".github/scripts/runner-smoke.sh",
     CREDENTIAL_GUARD,
 ];
 

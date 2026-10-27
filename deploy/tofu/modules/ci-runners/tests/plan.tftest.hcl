@@ -23,8 +23,8 @@ variables {
     not-a-key
     -----END RSA PRIVATE KEY-----
   KEY
-  runner_version             = "2.338.1"
-  runner_sha256              = "08e9ccb3604d2462c24b5e33604dc30810296ca15cc65f23cffd4317eb144c37"
+  runner_version             = "2.338.2"
+  runner_sha256              = "baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40"
   sysbox_version             = "0.7.1"
   sysbox_sha256              = "9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5"
   kubectl_version            = "1.35.9"
@@ -201,4 +201,46 @@ run "refuses_a_kubectl_checksum_that_is_not_one" {
   }
 
   expect_failures = [var.kubectl_sha256]
+}
+
+run "the_job_image_uses_the_stable_runner_release" {
+  command = plan
+
+  assert {
+    condition     = var.runner_version == "2.338.2" && var.runner_sha256 == "baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40"
+    error_message = "The job image should use GitHub's stable runner 2.338.2 release and its published SHA-256."
+  }
+}
+
+run "runtime_readiness_precedes_jit_registration" {
+  command = plan
+
+  assert {
+    condition     = length(split("runtime preflight passed", local.manager)) == 2 && strcontains(element(split("runtime preflight passed", local.manager), 1), "generate-jitconfig")
+    error_message = "The manager should prove the Sysbox runtime, nested Docker and GitHub egress before it creates a JIT registration."
+  }
+
+  assert {
+    condition     = strcontains(local.image_entry, "docker info > /dev/null 2>&1 || exit 1")
+    error_message = "The job entry should fail instead of starting the runner after nested Docker's readiness timeout."
+  }
+
+  assert {
+    condition     = strcontains(local.image_preflight, "sudo -u runner -H docker info") && strcontains(local.image_preflight, "Runner.Listener --version") && strcontains(local.image_preflight, "broker.actions.githubusercontent.com")
+    error_message = "The preflight should prove the job user's Docker and runner paths and GitHub's broker egress."
+  }
+}
+
+run "a_failed_listener_is_cleaned_up_before_a_bounded_retry" {
+  command = plan
+
+  assert {
+    condition     = strcontains(local.manager, ".runner.id") && strcontains(local.manager, "actions/runners/$runner_id") && strcontains(local.image_entry, "RUNNER_MANUALLY_TRAP_SIG=1")
+    error_message = "The manager should retain the JIT runner id, propagate listener failures and delete the registration."
+  }
+
+  assert {
+    condition     = strcontains(local.manager, "failure_count") && strcontains(local.manager, "backoff") && strcontains(local.manager, "900") && strcontains(local.manager, "trap 'unexpected_failure $?' ERR")
+    error_message = "Repeated bootstrap failures should back off to a bounded delay rather than flood GitHub with registrations."
+  }
 }

@@ -232,19 +232,48 @@ locals {
     rm -rf /tmp/mandate
   TOOLCHAIN
 
+  # Both the preflight and a job require the nested Docker daemon. A timeout is a hard failure:
+  # starting the listener without Docker would advertise capacity that cannot run a cell job.
+  image_docker = <<-DOCKER
+    #!/bin/bash
+    start_inner_docker() {
+      dockerd > /var/log/dockerd.log 2>&1 &
+      for _ in $(seq 1 60); do
+        if docker info > /dev/null 2>&1; then
+          return 0
+        fi
+        sleep 1
+      done
+      cat /var/log/dockerd.log >&2
+      return 1
+    }
+  DOCKER
+
+  # Proves the exact isolation path before the host asks GitHub for a JIT registration. The
+  # manager runs it once for each host boot and built image id.
+  image_preflight = <<-PREFLIGHT
+    #!/bin/bash
+    set -euo pipefail
+    . /usr/local/lib/mandate-runner-docker.sh
+    start_inner_docker
+    docker info > /dev/null 2>&1 || exit 1
+    sudo -u runner -H docker info > /dev/null
+    sudo -u runner -H /home/runner/actions-runner/bin/Runner.Listener --version > /dev/null
+    getent ahostsv4 api.github.com > /dev/null
+    getent ahostsv4 broker.actions.githubusercontent.com > /dev/null
+    curl -fsS --retry 3 --retry-all-errors --max-time 20 https://api.github.com/meta > /dev/null
+    curl -sS --retry 3 --retry-all-errors --max-time 20 -o /dev/null https://broker.actions.githubusercontent.com/
+  PREFLIGHT
+
   # The container's first process: its own Docker daemon, then the runner as the runner user with
   # the one-job configuration the host's loop passed in.
   image_entry = <<-ENTRY
     #!/bin/bash
     set -euo pipefail
-    dockerd > /var/log/dockerd.log 2>&1 &
-    for _ in $(seq 1 60); do
-      if docker info > /dev/null 2>&1; then
-        break
-      fi
-      sleep 1
-    done
-    exec sudo -u runner -H env ACTIONS_RUNNER_HOOK_JOB_STARTED=/usr/local/bin/mandate-runner-admit.sh PATH=/home/runner/.cargo/bin:/home/runner/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /home/runner/actions-runner/run.sh --jitconfig "$1"
+    . /usr/local/lib/mandate-runner-docker.sh
+    start_inner_docker
+    docker info > /dev/null 2>&1 || exit 1
+    exec sudo -u runner -H env ACTIONS_RUNNER_HOOK_JOB_STARTED=/usr/local/bin/mandate-runner-admit.sh ACTIONS_RUNNER_PRINT_LOG_TO_STDOUT=1 RUNNER_MANUALLY_TRAP_SIG=1 PATH=/home/runner/.cargo/bin:/home/runner/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /home/runner/actions-runner/run.sh --jitconfig "$1"
   ENTRY
 
   # The runner's job-started hook, which runs before any step of every job and fails the job
@@ -278,20 +307,32 @@ locals {
   image_dockerfile = <<-DOCKER
     FROM ${var.base_image}
     COPY build.sh toolchain.sh /opt/
+    COPY docker.sh /usr/local/lib/mandate-runner-docker.sh
+    COPY preflight.sh /usr/local/bin/mandate-runner-preflight
     COPY entry.sh /usr/local/bin/mandate-runner-entry
     COPY admit.sh /usr/local/bin/mandate-runner-admit.sh
-    RUN chmod 0755 /usr/local/bin/mandate-runner-entry /usr/local/bin/mandate-runner-admit.sh && bash /opt/build.sh && rm /opt/build.sh /opt/toolchain.sh
+    RUN chmod 0444 /usr/local/lib/mandate-runner-docker.sh && chmod 0755 /usr/local/bin/mandate-runner-preflight /usr/local/bin/mandate-runner-entry /usr/local/bin/mandate-runner-admit.sh && bash /opt/build.sh && rm /opt/build.sh /opt/toolchain.sh
   DOCKER
 
   # The host's loop, one job per run; systemd starts it again when it exits, however it exits. It
   # registers a runner only while the repository holds every outside collaborator's fork run for
   # approval, read with the App's token, and fails closed: a setting it cannot read registers none.
+  # The runtime preflight runs before registration. A registration id stays owned until the
+  # ephemeral listener exits, so a failed listener cannot leave an unbounded offline-runner flood.
   manager = <<-MANAGER
     #!/bin/bash
-    set -euo pipefail
-    . /etc/mandate-runner/env
+    set -Eeuo pipefail
+    config_dir=$${MANDATE_RUNNER_CONFIG_DIR:-/etc/mandate-runner}
+    . "$config_dir/env"
     api=https://api.github.com
     image=mandate-ci-runner:current
+    state=$${MANDATE_RUNNER_STATE_DIR:-/var/lib/mandate-runner}
+    current_runner_id_file=$state/current-runner-id
+    failure_count_file=$state/failure-count
+    preflight_image_file=$state/preflight-image
+    token=
+    name=
+    runner_id=
     b64url() {
       openssl base64 -A | tr '+/' '-_' | tr -d '='
     }
@@ -299,15 +340,81 @@ locals {
       now=$(date +%s)
       header=$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | b64url)
       claims=$(jq -cjn --arg iss "$APP_CLIENT_ID" --argjson iat "$((now - 60))" --argjson exp "$((now + 540))" '{iat: $iat, exp: $exp, iss: $iss}' | b64url)
-      signature=$(printf '%s.%s' "$header" "$claims" | openssl dgst -sha256 -sign /etc/mandate-runner/app.pem -binary | b64url)
+      signature=$(printf '%s.%s' "$header" "$claims" | openssl dgst -sha256 -sign "$config_dir/app.pem" -binary | b64url)
       printf '%s.%s.%s' "$header" "$claims" "$signature"
     }
+    installation_token() {
+      curl -fsS --retry 3 -X POST -H "Authorization: Bearer $(app_jwt)" -H "Accept: application/vnd.github+json" "$api/app/installations/$INSTALLATION_ID/access_tokens" -d "$(jq -cn --arg r "$REPOSITORY_NAME" '{repositories: [$r], permissions: {administration: "write"}}')" | jq -er .token
+    }
+    revoke_token() {
+      curl -fsS -X DELETE -H "Authorization: Bearer $1" -H "Accept: application/vnd.github+json" "$api/installation/token" || true
+    }
+    delete_runner_with_token() {
+      local runner_to_delete=$1
+      local deletion_token=$2
+      curl -fsS -X DELETE -H "Authorization: Bearer $deletion_token" -H "Accept: application/vnd.github+json" "$api/repos/$REPOSITORY/actions/runners/$runner_to_delete" || true
+    }
+    delete_runner() {
+      local runner_to_delete=$1
+      local cleanup_token
+      cleanup_token=$(installation_token)
+      delete_runner_with_token "$runner_to_delete" "$cleanup_token"
+      revoke_token "$cleanup_token"
+    }
+    fail_with_backoff() {
+      local reason=$1
+      local failure_count
+      local backoff=30
+      local backoff_step=1
+      failure_count=$(cat "$failure_count_file" 2> /dev/null || echo 0)
+      case "$failure_count" in
+        "" | *[!0-9]*) failure_count=0 ;;
+      esac
+      failure_count=$((failure_count + 1))
+      printf '%s' "$failure_count" > "$failure_count_file"
+      while [ "$backoff_step" -lt "$failure_count" ] && [ "$backoff" -lt 900 ]; do
+        backoff=$((backoff * 2))
+        backoff_step=$((backoff_step + 1))
+      done
+      if [ "$backoff" -gt 900 ]; then
+        backoff=900
+      fi
+      echo "$reason; retrying after $backoff seconds (failure $failure_count)" >&2
+      sleep "$backoff"
+      exit 1
+    }
+    best_effort_failure_cleanup() {
+      local cleanup_token
+      local runner_to_delete
+      set +e
+      cleanup_token=$token
+      if [ -z "$cleanup_token" ]; then
+        cleanup_token=$(installation_token)
+      fi
+      runner_to_delete=$runner_id
+      if [ -z "$runner_to_delete" ] && [ -n "$name" ]; then
+        runner_to_delete=$(curl -fsS -H "Authorization: Bearer $cleanup_token" -H "Accept: application/vnd.github+json" "$api/repos/$REPOSITORY/actions/runners?per_page=100" | jq -er --arg name "$name" '.runners[] | select(.name == $name) | .id' | head -n 1)
+      fi
+      if [ -n "$runner_to_delete" ]; then
+        delete_runner_with_token "$runner_to_delete" "$cleanup_token"
+      fi
+      revoke_token "$cleanup_token"
+      token=
+      set -e
+    }
+    unexpected_failure() {
+      local status=$1
+      trap - ERR
+      best_effort_failure_cleanup
+      fail_with_backoff "the runner manager failed with status $status"
+    }
+    trap 'unexpected_failure $?' ERR
     built=$(docker image inspect --format '{{.Created}}' "$image" 2> /dev/null || echo 1970-01-01T00:00:00Z)
     if [ "$(( $(date +%s) - $(date -d "$built" +%s) ))" -gt 86400 ]; then
       if docker build --no-cache --pull -t "$image" /opt/mandate-runner/image; then
         docker image prune --force
       elif [ "$built" = 1970-01-01T00:00:00Z ]; then
-        exit 1
+        fail_with_backoff "the first runner image build failed"
       else
         echo "the daily rebuild failed; keeping the image built at $built" >&2
       fi
@@ -316,19 +423,83 @@ locals {
       docker wait mandate-ci-job
     fi
     docker container prune --force
-    token=$(curl -fsS --retry 3 -X POST -H "Authorization: Bearer $(app_jwt)" -H "Accept: application/vnd.github+json" "$api/app/installations/$INSTALLATION_ID/access_tokens" -d "$(jq -cn --arg r "$REPOSITORY_NAME" '{repositories: [$r], permissions: {administration: "write"}}')" | jq -er .token)
+    if [ -s "$current_runner_id_file" ]; then
+      prior_runner_id=$(cat "$current_runner_id_file")
+      case "$prior_runner_id" in
+        *[!0-9]*)
+          rm -f "$current_runner_id_file"
+          fail_with_backoff "the prior runner id is invalid"
+          ;;
+        *) delete_runner "$prior_runner_id" ;;
+      esac
+      rm -f "$current_runner_id_file"
+    fi
+    image_id=$(docker image inspect --format '{{.Id}}' "$image")
+    boot_id=$${MANDATE_RUNNER_BOOT_ID:-}
+    if [ -z "$boot_id" ]; then
+      boot_id=$(cat /proc/sys/kernel/random/boot_id)
+    fi
+    preflight_key="$image_id:$boot_id"
+    preflight_image=$(cat "$preflight_image_file" 2> /dev/null || true)
+    if [ "$preflight_image" != "$preflight_key" ]; then
+      docker rm --force mandate-runner-preflight > /dev/null 2>&1 || true
+      if ! docker run --rm --runtime=sysbox-runc --name mandate-runner-preflight "$image" mandate-runner-preflight; then
+        fail_with_backoff "the Sysbox, nested Docker and GitHub egress preflight failed"
+      fi
+      printf '%s' "$preflight_key" > "$preflight_image_file"
+      echo "runtime preflight passed"
+    fi
+    token=$(installation_token)
     policy=$(curl -fsS --retry 3 -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$api/repos/$REPOSITORY/actions/permissions/fork-pr-contributor-approval" | jq -r '.approval_policy // ""' || true)
     if [ "$policy" != all_external_contributors ]; then
-      curl -fsS -X DELETE -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$api/installation/token" || true
-      echo "registering no runner: fork pull requests from outside collaborators are not all held for approval (DEC-2065 item 4)" >&2
-      sleep 300
-      exit 1
+      revoke_token "$token"
+      fail_with_backoff "registering no runner: fork pull requests from outside collaborators are not all held for approval (DEC-2065 item 4)"
     fi
     name="$(hostname)-$(date +%s)"
-    config=$(curl -fsS --retry 3 -X POST -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$api/repos/$REPOSITORY/actions/runners/generate-jitconfig" -d "$(jq -cn --arg n "$name" --arg l "$LABEL" '{name: $n, runner_group_id: 1, labels: ["self-hosted", "linux", "x64", $l], work_folder: "_work"}')" | jq -er .encoded_jit_config)
-    curl -fsS -X DELETE -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$api/installation/token" || true
-    unset token
-    exec docker run --rm --runtime=sysbox-runc --name mandate-ci-job --hostname "$name" "$image" mandate-runner-entry "$config"
+    jit=$(curl -fsS --retry 3 -X POST -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$api/repos/$REPOSITORY/actions/runners/generate-jitconfig" -d "$(jq -cn --arg n "$name" --arg l "$LABEL" '{name: $n, runner_group_id: 1, labels: ["self-hosted", "linux", "x64", $l], work_folder: "_work"}')")
+    runner_id=$(printf '%s' "$jit" | jq -er .runner.id)
+    config=$(printf '%s' "$jit" | jq -er .encoded_jit_config)
+    printf '%s' "$runner_id" > "$current_runner_id_file"
+    docker run --rm --runtime=sysbox-runc --name mandate-ci-job --hostname "$name" "$image" mandate-runner-entry "$config" &
+    runner_pid=$!
+    runner_online=false
+    for _ in $(seq 1 60); do
+      if ! kill -0 "$runner_pid" 2> /dev/null; then
+        break
+      fi
+      runner_state=$(curl -fsS -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$api/repos/$REPOSITORY/actions/runners/$runner_id" | jq -r '.status // ""' || true)
+      if [ "$runner_state" = online ]; then
+        runner_online=true
+        break
+      fi
+      sleep 5
+    done
+    if [ "$runner_online" != true ]; then
+      docker stop --time 30 mandate-ci-job > /dev/null 2>&1 || true
+      if wait "$runner_pid"; then
+        runner_status=0
+      else
+        runner_status=$?
+      fi
+      delete_runner_with_token "$runner_id" "$token"
+      revoke_token "$token"
+      token=
+      rm -f "$current_runner_id_file"
+      fail_with_backoff "the JIT runner listener never became online (status $runner_status)"
+    fi
+    revoke_token "$token"
+    token=
+    if wait "$runner_pid"; then
+      runner_status=0
+    else
+      runner_status=$?
+    fi
+    delete_runner "$runner_id"
+    rm -f "$current_runner_id_file"
+    if [ "$runner_status" -ne 0 ]; then
+      fail_with_backoff "the JIT runner listener exited with status $runner_status"
+    fi
+    printf '0' > "$failure_count_file"
   MANAGER
 
   # Keeps jobs off the host, the metadata service and every private range, so a job reaches no
@@ -398,6 +569,7 @@ locals {
     systemctl restart docker
     docker info --format '{{json .Runtimes}}' | grep -q sysbox-runc
     install -d -m 0755 /opt/mandate-runner/image
+    install -d -m 0700 /var/lib/mandate-runner
     base64 -d > /opt/mandate-runner/image/Dockerfile <<'B64'
     ${base64encode(local.image_dockerfile)}
     B64
@@ -406,6 +578,12 @@ locals {
     B64
     base64 -d > /opt/mandate-runner/image/toolchain.sh <<'B64'
     ${base64encode(local.image_toolchain)}
+    B64
+    base64 -d > /opt/mandate-runner/image/docker.sh <<'B64'
+    ${base64encode(local.image_docker)}
+    B64
+    base64 -d > /opt/mandate-runner/image/preflight.sh <<'B64'
+    ${base64encode(local.image_preflight)}
     B64
     base64 -d > /opt/mandate-runner/image/entry.sh <<'B64'
     ${base64encode(local.image_entry)}

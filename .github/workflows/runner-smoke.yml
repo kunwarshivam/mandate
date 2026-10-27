@@ -1,0 +1,29 @@
+# DEC-2078. A founder-dispatched proof on main before CI_RUNNER routes any required job here.
+name: runner-smoke
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: runner-smoke
+  cancel-in-progress: false
+
+jobs:
+  isolated-job:
+    runs-on: [self-hosted, mandate-ci-do]
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        slot: [1, 2, 3]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prove the isolated job image
+        run: .github/scripts/runner-smoke.sh
