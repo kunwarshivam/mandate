@@ -586,15 +586,15 @@ fn intent_received_rules(p: Payload<'_>) -> Result<(), Invalid> {
 }
 
 /// Rules 313 to 315 on `GateDecided` at `schema_version` 3 (DEC-2848), each member non-null only
-/// where the executor writes it, reported at the first that is not: `sized_qty` only on an `allow`
-/// of the executor's own (`account_stream_only`), and then above zero; `held_long` only `true`,
-/// on a `hold`; `parked` only `true`, on a `hold` for `session_closed` or `session_unknown` that
-/// is also `held_long`.
+/// where the executor writes it, reported at the first that is not: `sized_qty` only on an
+/// `allow`, binding or the executor's own, and then above zero; `held_long` only `true`, on a
+/// `hold`; `parked` only `true`, on a `hold` for `session_closed` or `session_unknown` that is
+/// also `held_long`.
 fn gate_decided_v3_rules(p: Payload<'_>) -> Result<(), Invalid> {
     let hold = p.text("verdict") == "hold";
-    let own_allow = p.text("verdict") == "allow" && p.text("data_profile") == "account_stream_only";
+    let allow = p.text("verdict") == "allow";
     ensure(
-        p.is_null("sized_qty") || own_allow && crate::scheduler::positive(p.text("sized_qty")),
+        p.is_null("sized_qty") || allow && crate::scheduler::positive(p.text("sized_qty")),
         InvalidReason::Schema,
         "payload.sized_qty",
     )?;
