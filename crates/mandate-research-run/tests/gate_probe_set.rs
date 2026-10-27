@@ -17,6 +17,9 @@ fn built_in() -> ProbeSet {
 fn the_built_in_probe_set_holds_fifteen_runs_over_its_corpus() {
     let set = built_in();
     assert_eq!(set.runs.len(), 15);
+    assert_eq!(set.allowlist_version, 1);
+    let sources: Vec<&str> = set.sources.iter().map(|s| s.as_str()).collect();
+    assert_eq!(sources, ["src.newswire", "src.wiretwo"]);
     let kinds: Vec<(RunKind, bool)> = set.runs.iter().map(|r| (r.kind, r.injection)).collect();
     assert_eq!(&kinds[..5], &[(RunKind::Ideate, false); 5]);
     assert_eq!(&kinds[5..10], &[(RunKind::Monitor, false); 5]);
@@ -51,10 +54,10 @@ fn the_built_in_probe_set_holds_fifteen_runs_over_its_corpus() {
 #[test]
 fn the_digest_is_the_canonical_bytes_hash() {
     let value = parse(PROBE_SET.as_bytes()).unwrap();
-    assert_eq!(probe_set_digest(), Digest::of(&to_canonical(&value)));
+    assert_eq!(probe_set_digest(), Some(Digest::of(&to_canonical(&value))));
     let changed = PROBE_SET.replacen("Probe item:", "Probe item, changed:", 1);
     let other = Digest::of(&to_canonical(&parse(changed.as_bytes()).unwrap()));
-    assert_ne!(other, probe_set_digest());
+    assert_ne!(Some(other), probe_set_digest());
 }
 
 /// The set is read strictly: a run naming a corpus slice the set lacks, an unknown kind, a
@@ -114,6 +117,18 @@ fn a_malformed_probe_set_is_refused_whole() {
             r#""src.wiretwo""#,
             r#""not a source!""#,
             ProbeError::Member("allowlist"),
+        ),
+        (
+            r#""symbol": "XLF",
+     "thesis_id": "th-probe-3""#,
+            r#""symbol": "SPY",
+     "thesis_id": "th-probe-3""#,
+            ProbeError::Member("theses"),
+        ),
+        (
+            r#""source": "src.wiretwo","#,
+            r#""source": "src.unlisted","#,
+            ProbeError::Member("source"),
         ),
         (
             r#""theses": [],"#,

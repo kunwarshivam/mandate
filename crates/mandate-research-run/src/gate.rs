@@ -16,12 +16,12 @@ use crate::{SourceId, Symbol};
 /// The probe set, as the repository holds it and both images build it in.
 pub const PROBE_SET: &str = include_str!("../../../fixtures/gate/research-probe-set.json");
 
-/// The built-in probe set's digest: SHA-256 over its canonical bytes, `Digest::of(b"")` if it
-/// does not parse, which no session's digest can equal.
-pub fn probe_set_digest() -> Digest {
-    parse(PROBE_SET.as_bytes())
-        .map(|value| Digest::of(&to_canonical(&value)))
-        .unwrap_or_else(|_| Digest::of(b""))
+/// The built-in probe set's digest: SHA-256 over its canonical bytes, or `None` when the built-in
+/// file does not read as a probe set, so no session can open on a set that does not exist.
+pub fn probe_set_digest() -> Option<Digest> {
+    let value = parse(PROBE_SET.as_bytes()).ok()?;
+    ProbeSet::read(&value).ok()?;
+    Some(Digest::of(&to_canonical(&value)))
 }
 
 /// Why a probe set did not read: the member missing, empty, or out of its range.
@@ -70,7 +70,8 @@ impl ProbeSet {
     /// # Errors
     /// [`ProbeError::Member`] naming the first member that is missing, empty, or out of its range:
     /// a run naming a slice the set lacks, a monitoring run with no thesis or another run with one,
-    /// or a slice that is not a plane (named by its file, `bars.json` and the like).
+    /// a thesis on a symbol outside its run's universe, a news item from a source off the set's
+    /// allowlist, or a slice that is not a plane (named by its file, `bars.json` and the like).
     pub fn read(value: &Value) -> Result<Self, ProbeError> {
         let member = |name: &'static str| value.get(name).ok_or(ProbeError::Member(name));
         let allowlist = member("allowlist")?;
@@ -108,6 +109,14 @@ impl ProbeSet {
                 Ok((name.as_str().to_owned(), plane))
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let sources: BTreeSet<SourceId> = sources;
+        if corpus
+            .values()
+            .flat_map(|plane| plane.news.iter().map(|item| &item.source))
+            .any(|source| !sources.contains(source))
+        {
+            return Err(ProbeError::Member("source"));
+        }
         let runs = member("runs")?
             .as_array()
             .filter(|runs| !runs.is_empty())
@@ -178,6 +187,7 @@ fn probe_run(
                 .ok_or(ProbeError::Member("universe"))
         })
         .collect::<Result<_, _>>()?;
+    let universe: BTreeSet<Symbol> = universe;
     let theses: Vec<ProbeThesis> = run
         .get("theses")
         .and_then(Value::as_array)
@@ -193,7 +203,11 @@ fn probe_run(
             })
         })
         .collect::<Result<_, _>>()?;
-    if theses.is_empty() == (kind == RunKind::Monitor) {
+    if theses.is_empty() == (kind == RunKind::Monitor)
+        || theses
+            .iter()
+            .any(|thesis| !universe.contains(&thesis.symbol))
+    {
         return Err(ProbeError::Member("theses"));
     }
     Ok(ProbeRun {
