@@ -14,7 +14,8 @@ use mandate_executor::{
     BindingGateSource, BrokerOrder, BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate,
     Command, ConnectionTrouble, ConnectorError, Effect, EventDraft, EventId, ExecutorConfig,
     ExecutorError, ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot, IntentBody,
-    IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, OrderState, Ports,
+    IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, MarketObservation,
+    OrderState, Ports,
     ProtectionPrices, ReconcileReason, RiskClock, Seq, SuspendReason, ThesisRow, WriterEpoch, fold,
     handle, limit_fills, recorded_fills,
 };
@@ -261,6 +262,9 @@ pub struct ExecutorProcess<S, B> {
     /// When each marked instrument was last marked, so each is marked at most once per
     /// the wiring's [`Marked::every`] (DEC-2380 item 3, DEC-2844).
     marked_at: QuotePoll,
+    /// Each instrument's latest sane observation the pass read for a mark or a waiting exit, held
+    /// so a kill switch's flatten prices from it with no read of its own (DEC-2853).
+    held_marks: BTreeMap<InstrumentId, MarketObservation>,
     /// The US-equities calendar a mark's session is read from; `None` when it cannot load, and then
     /// nothing is marked, so the gate holds (`AGENTS.md` rule 3).
     calendar: Option<ExchangeCalendar>,
@@ -359,6 +363,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 u64::try_from(wiring_step).unwrap_or_default(),
             )),
             marked_at: QuotePoll::new(MARK_EVERY),
+            held_marks: BTreeMap::new(),
             calendar: ExchangeCalendar::us_equities().ok(),
             risk: RiskBook::new(&format!("acct:{workspace}:{}", scope.account.0)),
             pending_risk: None,
@@ -676,6 +681,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             if !observation.sane {
                 continue;
             }
+            self.held_marks
+                .insert(instrument.clone(), observation.clone());
             if !self.hand(now, now, Input::Market(observation), alerts, 0) {
                 return Ok(false);
             }
@@ -709,6 +716,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             let Ok(observation) = self.wiring.quotes.observe(&instrument, now) else {
                 continue;
             };
+            if observation.sane {
+                self.held_marks
+                    .insert(instrument.clone(), observation.clone());
+            }
             let id = self
                 .wiring
                 .ids
@@ -981,6 +992,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
 
     /// Applies one switch as the core's own kill switch of that agent alone, never an account-wide
     /// one (`AGENTS.md` rule 13), naming the record it copies so the journal says it was applied.
+    /// The core is first handed every mark the process holds (`held_marks`), so the
+    /// switch's flatten prices from the market and not from the resting stop (DEC-2853). That
+    /// reads nothing: a feed that is slow or down cannot delay or fail the switch, and with no mark
+    /// held the flatten goes at the stop, alerted.
     fn apply(
         &mut self,
         now: UtcNanos,
@@ -988,6 +1003,12 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         switch: Switch,
         alerts: &mut Vec<Alert>,
     ) -> bool {
+        let held: Vec<MarketObservation> = self.held_marks.values().cloned().collect();
+        for observation in held {
+            if !self.hand(now, now, Input::Market(observation), alerts, 0) {
+                return false;
+            }
+        }
         let command = Command::KillSwitch {
             scope: KillScope::Agent(agent),
             initiator: switch.initiator,

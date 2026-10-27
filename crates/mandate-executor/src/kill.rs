@@ -549,7 +549,9 @@ fn deferred(batch: &Batch<'_, '_>, instrument: &InstrumentId, purpose: Purpose) 
 /// instrument (DEC-2361), and so is one whose intent cannot be journaled yet because its agent's
 /// mandate version or its deployment's references do not read (DEC-2846): the journal takes no
 /// other record of it. Either waits alone: the switch, its mode and its cancels are applied
-/// (`AGENTS.md` rule 13), and the close is raised at the first pass that can name it.
+/// (`AGENTS.md` rule 13), and the close is raised at the first pass that can name it. A close no
+/// sane mark prices, raised at the resting stop or the owner's floor, is never silent either: it
+/// goes at once, and is journaled `exit_unpriced` and alerted the same way (DEC-2853).
 /// Raised earlier, the gate would count the sells still pending their cancel and deny the flatten
 /// `sell_exceeds_available`.
 pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
@@ -583,7 +585,8 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
                 .get(instrument)
                 .and_then(|protection| protection.prices)
                 .map(|prices| prices.stop);
-            let limit = match (lowest_sane(&batch.view, instrument).or(stop), switch.floor) {
+            let marked = lowest_sane(&batch.view, instrument);
+            let limit = match (marked.or(stop), switch.floor) {
                 (Some(own), floor) => Some(floor.map_or(own, |floor| own.max(floor))),
                 (None, floor) => floor,
             };
@@ -613,6 +616,16 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
                 }
                 continue;
             };
+            if marked.is_none() && !switch.unpriced.contains(instrument) {
+                let alerted = changed_by(
+                    batch,
+                    instrument,
+                    "exit_unpriced",
+                    Vec::new(),
+                    Some(id.clone()),
+                )?;
+                batch.notify(alerted, OwnerAlertKind::ExitStalled);
+            }
             let tif = Some(order_tif(batch, instrument));
             received(
                 batch,
@@ -1396,6 +1409,111 @@ mod tests {
             "an unfilled entry holds the flatten back no longer"
         );
         assert_eq!(sells(&gone), 1);
+        Ok(())
+    }
+
+    /// A filled entry of 10 AAPL with its bracket's entry order still open, switched by its risk
+    /// limit, `quoted` with a sane 151 quote first or not, and then the entry's cancel confirmed:
+    /// the effects of that step, which raises the flatten.
+    fn switched_after_a_fill(
+        ports: &Ports<'_>,
+        quoted: bool,
+    ) -> Result<Vec<Effect>, ExecutorError> {
+        let mut executor = bracket_entry(ports)?;
+        for (event_type, pairs) in [
+            (
+                "OrderSubmitted",
+                vec![
+                    ("client_order_id", text("md-held")),
+                    ("agent", text("agent-a")),
+                    ("instrument", text("AAPL")),
+                    ("side", text("buy")),
+                    ("qty", text("10")),
+                    ("limit", text("150")),
+                    ("purpose", text("open")),
+                ],
+            ),
+            (
+                "FillApplied",
+                vec![
+                    ("fill_id", text("f-held")),
+                    ("client_order_id", text("md-held")),
+                    ("instrument", text("AAPL")),
+                    ("side", text("buy")),
+                    ("qty_gross", text("10")),
+                    ("price", text("150")),
+                ],
+            ),
+            (
+                "OrderStateChanged",
+                vec![
+                    ("client_order_id", text("md-held")),
+                    ("state", text("filled")),
+                ],
+            ),
+        ] {
+            commit(&mut executor, event_type, pairs)?;
+        }
+        if quoted {
+            executor.run(
+                Input::Market(MarketObservation {
+                    instrument: aapl()?,
+                    bid: Some(Price::parse("151")?),
+                    bid_size: Some(Qty::parse("100")?),
+                    ask: Some(Price::parse("151.1")?),
+                    last_trade: None,
+                    mark: Some(Price::parse("151")?),
+                    sane: true,
+                    observed_at: RiskClock::from_secs(MONDAY),
+                }),
+                ports,
+            )?;
+        }
+        executor.run(switch(Initiator::RiskLimit, false)?, ports)?;
+        executor.run(
+            Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+                client_order_id: format!("md-{ENTRY}"),
+            })),
+            ports,
+        )
+    }
+
+    /// DEC-2853: a flatten no sane mark prices is raised at once at the resting stop, never held,
+    /// and is not silent: it is journaled `exit_unpriced`, caused by its switch, and the owner
+    /// alerted. One a sane quote prices goes the same, with neither.
+    #[test]
+    fn a_flatten_no_mark_prices_goes_at_once_and_is_alerted() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        for quoted in [false, true] {
+            let gone = switched_after_a_fill(&ports, quoted)?;
+            assert_eq!(raised(&gone).len(), 1, "quoted {quoted}");
+            assert_eq!(sells(&gone), 1, "quoted {quoted}: it sells at once");
+            let unpriced = gone
+                .iter()
+                .filter(|effect| {
+                    matches!(effect, Effect::Journal(draft)
+                        if draft.event_type == "ProtectionChanged"
+                            && field(draft, "action").and_then(Value::as_str)
+                                == Some("exit_unpriced")
+                            && draft.causation_id.is_some())
+                })
+                .count();
+            let alerted = gone.iter().any(|effect| {
+                matches!(effect, Effect::Notify(note) if note.kind.key() == "exit_stalled")
+            });
+            assert_eq!(
+                (unpriced, alerted),
+                if quoted { (0, false) } else { (1, true) },
+                "quoted {quoted}"
+            );
+        }
         Ok(())
     }
 

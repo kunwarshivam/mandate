@@ -2570,6 +2570,138 @@ fn the_owners_kill_switch_after_the_opening_fills_sells_the_position() -> Result
     Ok(())
 }
 
+/// DEC-2853 (DR's cell run 3): the owner's kill switch after the opening fills prices its flatten
+/// from the latest mark the process holds, never from the bracket's stop. The sell goes within
+/// the first rung's 0.5% of the 580.11 bid the fixture quotes, not at the stop, and nothing is
+/// journaled `exit_unpriced`. With `frozen`, the feed answers no fresh quote from just before the
+/// switch on, so every read of that pass fails: the switch still applies and its flatten sells in
+/// the same pass, priced from the mark held from before. Nothing in the kill's path reads the feed.
+fn the_kill_switch_prices_from_the_held_mark(frozen: bool) -> Result<(), Error> {
+    let stale: Rc<Cell<Option<UtcNanos>>> = Rc::new(Cell::new(None));
+    let clock = Rc::clone(&stale);
+    let (journal, mut process, _paper) = trade_loop_quoting(
+        Variant {
+            demo: true,
+            ..Variant::default()
+        },
+        move || clock.get().unwrap_or_else(wall_clock),
+    )?;
+    for second in (5..120).step_by(5) {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(&journal, &format!("tl{second}"), &now)?;
+        process.step(at(&now)?);
+    }
+    if frozen {
+        stale.set(Some(at("2026-09-21T15:00:00Z")?));
+    }
+    let command = "01J0WNERCMD000000000000002";
+    journal.write(
+        CONTROL_STREAM,
+        command,
+        "OwnerCommandIssued",
+        1,
+        None,
+        object(vec![
+            ("agent", text(AGENT)),
+            ("bid", Value::Null),
+            ("bid_size", Value::Null),
+            ("command", text("kill_switch")),
+            ("floor", Value::Null),
+            ("release", Value::Null),
+            ("scope", text("agent")),
+            ("step_up", Value::Null),
+            ("subject", text(AGENT)),
+            (
+                "submitted_at",
+                Value::Int(mandate_canon::Int::new(1_790_006_520).ok_or("an int")?),
+            ),
+            ("user", text("u1")),
+            ("warning_shown", Value::Null),
+        ])?,
+    )?;
+    let agent = support::agent_stream(AGENT);
+    journal.write(
+        &agent,
+        "01J0WNERST0P000000000000002",
+        "AgentModeChanged",
+        1,
+        Some(command),
+        object(vec![
+            ("from", text("normal")),
+            ("lifecycle", text("normal")),
+            ("reason", text("kill_switch")),
+            ("to", text("stopped")),
+        ])?,
+    )?;
+    journal.write(
+        &agent,
+        "01J0WNEREX1T000000000000002",
+        "OwnerExitRequested",
+        1,
+        Some(command),
+        object(vec![
+            ("bid", Value::Null),
+            ("bid_size", Value::Null),
+            ("confirmed", Value::Bool(false)),
+            ("floor", Value::Null),
+            ("scope", text("agent")),
+            ("step_up", Value::Null),
+            ("step_up_status", text("absent")),
+            ("subject", text(AGENT)),
+            ("user", text("u1")),
+        ])?,
+    )?;
+    journal.write(
+        &agent,
+        "01J0WNERK1MM000000000000002",
+        "KillSwitchActivated",
+        1,
+        Some(command),
+        object(vec![
+            ("initiator", text("owner")),
+            ("mode_event", text("01J0WNERST0P000000000000002")),
+            ("scope", text("agent")),
+            ("subject", text(AGENT)),
+        ])?,
+    )?;
+    let now = "2026-09-21T16:02:00Z";
+    tick(&journal, "tk120", now)?;
+    process.step(at(now)?);
+    let types = journal.types(ACCOUNT_STREAM);
+    assert_eq!(journal.switched(), [AGENT], "the switch applies: {types:?}");
+    let limits: Vec<String> = journal
+        .payloads("OrderSubmitted")
+        .iter()
+        .filter(|p| p.get("side").and_then(Value::as_str) == Some("sell"))
+        .filter_map(|p| p.get("limit").and_then(Value::as_str).map(str::to_owned))
+        .collect();
+    let [limit] = limits.as_slice() else {
+        return Err(format!("one flatten sell in the switch's own pass: {limits:?} {types:?}").into());
+    };
+    let limit = Price::parse(limit)?;
+    assert!(
+        limit >= Price::parse("577.20")? && limit <= Price::parse("580.11")?,
+        "priced within the first rung's 0.5% of the 580.11 bid, not at the stop: {limit}"
+    );
+    let unpriced = journal
+        .payloads("ProtectionChanged")
+        .iter()
+        .filter(|p| p.get("action").and_then(Value::as_str) == Some("exit_unpriced"))
+        .count();
+    assert_eq!(unpriced, 0, "a marked flatten is not unpriced: {types:?}");
+    Ok(())
+}
+
+#[test]
+fn the_kill_switchs_flatten_prices_from_the_held_mark() -> Result<(), Error> {
+    the_kill_switch_prices_from_the_held_mark(false)
+}
+
+#[test]
+fn a_feed_down_at_the_kill_neither_delays_nor_fails_its_flatten() -> Result<(), Error> {
+    the_kill_switch_prices_from_the_held_mark(true)
+}
+
 fn owner_exit_after_the_opening(stale: bool) -> Result<(), Error> {
     let frozen: Rc<Cell<Option<UtcNanos>>> = Rc::new(Cell::new(None));
     let clock = Rc::clone(&frozen);
