@@ -10452,6 +10452,9 @@ mod sequence_tests {
         /// The exits laddered with no sequence of their own (DEC-260 (14)): a pause since a step
         /// was asked does not end them.
         lone: BTreeSet<String>,
+        /// The `sized_qty` each exit's allowing `GateDecided` journaled (DEC-410 item 3,
+        /// DEC-2848), as text, for the fold to read back on replay.
+        sized: BTreeMap<String, String>,
         /// The exits whose sequence is running, as the fold's `exiting` holds them: an
         /// `unprotected_start` whose trio names the exit starts one, and an `unprotected_end`
         /// ends it — a rung of a sequenced exit ends with its sequence (DEC-409), a rung of an
@@ -10864,6 +10867,9 @@ mod sequence_tests {
                     }
                     if draft.payload.get("parked") == Some(&Value::Bool(true)) {
                         self.parked.insert(intent.clone());
+                    }
+                    if let Some(sized) = field("sized_qty") {
+                        self.sized.insert(intent.clone(), sized.to_owned());
                     }
                     let priceable = self.priceable();
                     let closed = self.closed();
@@ -11318,6 +11324,7 @@ mod sequence_tests {
             between: BTreeMap::new(),
             parked: BTreeSet::new(),
             lone: BTreeSet::new(),
+            sized: BTreeMap::new(),
             sequenced: BTreeSet::new(),
             companion: None,
             sequence: None,
@@ -12880,6 +12887,56 @@ mod sequence_tests {
         let desk =
             rule_13_script_with(TEN_SECONDS_BEFORE_THE_NIGHT, From::Protected, true, &script)?;
         assert_eq!(fate(&desk, 6), ("allow".to_owned(), String::new(), Some(6)));
+        assert_eq!(
+            desk.sized
+                .get("01JABCDEFGHJKMNPQRSTV00006")
+                .map(String::as_str),
+            Some("6"),
+            "the size it went for is journaled, for the fold to read back (DEC-2848)"
+        );
+        Ok(())
+    }
+
+    /// DEC-2848: on replay the fold sizes an allowed exit to the `sized_qty` its `GateDecided`
+    /// journaled, and leaves one that names none at its received quantity.
+    #[test]
+    fn the_fold_reads_an_allowed_exits_size_back() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        for (sized, qty) in [(text("6"), "6"), (Value::Null, "8")] {
+            let mut executor = held(&ports)?;
+            committed(
+                &mut executor,
+                "IntentReceived",
+                vec![
+                    ("intent_id", text(EXIT)),
+                    ("agent", text("agent-a")),
+                    ("kind", text("order")),
+                    ("instrument", text("AAPL")),
+                    ("side", text("sell")),
+                    ("qty", text("8")),
+                    ("limit", text("150")),
+                    ("purpose", text("discretionary_exit")),
+                ],
+            )?;
+            committed(
+                &mut executor,
+                "GateDecided",
+                vec![
+                    ("intent_id", text(EXIT)),
+                    ("verdict", text("allow")),
+                    ("sized_qty", sized),
+                ],
+            )?;
+            let body = executor
+                .state
+                .bodies
+                .get(&IntentId(EventId(EXIT.to_owned())));
+            assert!(
+                matches!(body, Some(IntentBody::Order { qty: got, .. }) if *got == Qty::parse(qty)?),
+                "{body:?}"
+            );
+        }
         Ok(())
     }
 
