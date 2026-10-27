@@ -503,3 +503,20 @@ on without it.
    Alpaca only after the restart. **To stop all news reads at once**, revoke the key in Alpaca:
    every fetch then fails with no item, so research goes on without news, and no order depends on
    it.
+
+## N. Staging's research agent ([DEC-2081](../docs/project/decisions/DEC-2081.md), [DEC-2282](../docs/project/decisions/DEC-2282.md))
+
+Staging's model gateway serves the hosted workspace, so the research agent runs there, on your
+existing paper connection (section H). A second workspace for it, as the local cell's demo has,
+waits on backlog E21-54h.
+
+1. **Deploy the research agent as the only agent on that paper connection.**
+   - Until per-agent attribution lands (DEC-2849 items 3, 7 and 8), a second agent followed on the
+     same account holds every opening (DEC-2804 item 8, `second_agent_on_account`).
+   - So add the pinned demo agent only once that attribution has landed. This step will say so.
+2. **Its models** are your DEC-2282 defaults, Sonnet 5.5 for ideas and Haiku 5.5 for monitoring,
+   and you confirm them in the envelope step.
+3. **Until the gate passes, it researches nothing.** The gateway offers no model, so every research
+   call is answered `policy_denied` and nothing is spent. The agent holds no position it did not
+   already have.
+
