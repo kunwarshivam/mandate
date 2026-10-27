@@ -505,11 +505,11 @@ fn ci(job: &str) -> Result<()> {
             }
             Ok(())
         }
-        "test-nextest" => {
+        "test-nextest" | "test-python" => {
             let partition = env::var(TEST_PARTITION_ENV).ok().filter(|s| !s.is_empty());
             test_part(job, partition.as_deref())
         }
-        "test-doc" | "test-rh-sim" | "test-python" => test_part(job, None),
+        "test-doc" | "test-rh-sim" => test_part(job, None),
         "pending" => pending(),
         "portable" => portable(),
         "select" => ci_select(),
@@ -644,7 +644,8 @@ fn portable() -> Result<()> {
 }
 
 /// One of [`TEST_PARTS`], over the crates the diff selects (DEC-1190); `partition`, a `K/N`
-/// counted from 1, runs only the nextest run's `K`th of `N` slices (DEC-871).
+/// counted from 1, runs only the `K`th of `N` slices of the nextest run (DEC-871) or of the
+/// Python tests (DEC-2646).
 fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
     match part {
         "test-nextest" => {
@@ -710,7 +711,7 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
             sh("cargo", &args)
         }
         "test-rh-sim" => rh_sim_tests(),
-        "test-python" => uv_tools(&["pytest", "-q"]),
+        "test-python" => uv_tools(&pytest_args(partition)?),
         other => bail!("unknown test part: {other}"),
     }
 }
@@ -863,19 +864,42 @@ fn nextest_args(partition: Option<&str>, packages: Option<&[String]>) -> Result<
     }
     args.extend(["--locked", "--no-tests=pass"].map(String::from));
     if let Some(partition) = partition {
-        let parsed = partition.split_once('/').and_then(|(k, n)| {
-            let plain = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-            if !plain(k) || !plain(n) || k.starts_with('0') || n.starts_with('0') {
-                return None;
-            }
-            Some((k.parse::<u32>().ok()?, n.parse::<u32>().ok()?))
-        });
-        match parsed {
-            Some((k, n)) if k <= n => args.push(format!("--partition=count:{k}/{n}")),
-            _ => bail!(
-                "{TEST_PARTITION_ENV} must be K/N with 1 <= K <= N, counted from 1; got {partition:?}"
-            ),
+        let (k, n) = partition_of(partition)?;
+        args.push(format!("--partition=count:{k}/{n}"));
+    }
+    Ok(args)
+}
+
+/// A test part's shard, [`TEST_PARTITION_ENV`]'s `K/N`: plain decimals with no leading zero,
+/// `1 <= K <= N`, counted from 1 (DEC-871). The nextest run and the Python tests read it alike.
+fn partition_of(partition: &str) -> Result<(u32, u32)> {
+    let parsed = partition.split_once('/').and_then(|(k, n)| {
+        let plain = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        if !plain(k) || !plain(n) || k.starts_with('0') || n.starts_with('0') {
+            return None;
         }
+        Some((k.parse::<u32>().ok()?, n.parse::<u32>().ok()?))
+    });
+    match parsed {
+        Some((k, n)) if k <= n => Ok((k, n)),
+        _ => bail!(
+            "{TEST_PARTITION_ENV} must be K/N with 1 <= K <= N, counted from 1; got {partition:?}"
+        ),
+    }
+}
+
+/// The pytest plugin that keeps one shard of the collected tests (DEC-2646): every shard collects
+/// the same tests and keeps every `N`-th of their sorted node ids from `K-1`, reading `K/N` from
+/// [`TEST_PARTITION_ENV`] itself (`python/mandate_tools/src/mandate_tools/pytest_shard.py`).
+const PYTEST_SHARD_PLUGIN: &str = "mandate_tools.pytest_shard";
+
+/// The pytest arguments of the Python tests, or of one shard of them when `partition` is given:
+/// the shard plugin loaded, `K/N` checked here first so a malformed one fails before pytest runs.
+fn pytest_args(partition: Option<&str>) -> Result<Vec<&'static str>> {
+    let mut args = vec!["pytest", "-q"];
+    if let Some(partition) = partition {
+        partition_of(partition)?;
+        args.extend(["-p", PYTEST_SHARD_PLUGIN]);
     }
     Ok(args)
 }
@@ -14761,6 +14785,21 @@ mod tests {
         Ok(())
     }
 
+    /// The Python tests run whole with no partition, and one shard through the shard plugin with
+    /// one; a malformed `K/N` fails before pytest runs (DEC-2646).
+    #[test]
+    fn a_python_shard_loads_the_shard_plugin_and_checks_its_partition() -> Result<()> {
+        assert_eq!(super::pytest_args(None)?, ["pytest", "-q"]);
+        assert_eq!(
+            super::pytest_args(Some("3/4"))?,
+            ["pytest", "-q", "-p", "mandate_tools.pytest_shard"]
+        );
+        for bad in ["0/4", "5/4", "1/0", "01/4", "4", "a/4", "1/4/2", ""] {
+            assert!(super::pytest_args(Some(bad)).is_err(), "{bad:?}");
+        }
+        Ok(())
+    }
+
     /// A filtered nextest run runs exactly the filtered tests, and fails when they select none.
     #[test]
     fn a_filtered_nextest_run_refuses_to_select_nothing() -> Result<()> {
@@ -19253,6 +19292,39 @@ mod tests {
             "save-if: ${{ matrix.shard == '1/6' }}",
         ] {
             assert!(test.contains(&line), "`fast-test` has `{line}`");
+        }
+        let python: Vec<&str> = workflow_job(&workflow, "fast-python")
+            .context("ci.yml has `fast-python`")?
+            .iter()
+            .map(|l| l.trim())
+            .collect();
+        let shards = python
+            .iter()
+            .find_map(|l| l.strip_prefix("shard: "))
+            .context("`fast-python` has a shard matrix (DEC-2646)")?;
+        let shards: Vec<String> = serde_json::from_str(shards)?;
+        let total = shards.len();
+        assert!(total > 1, "the Python tests are split: {shards:?}");
+        let expected: Vec<String> = (1..=total).map(|k| format!("{k}/{total}")).collect();
+        assert_eq!(
+            shards, expected,
+            "the Python shards are 1/N to N/N, each once"
+        );
+        for shard in &shards {
+            assert_eq!(
+                super::pytest_args(Some(shard))?,
+                ["pytest", "-q", "-p", super::PYTEST_SHARD_PLUGIN],
+                "{shard} loads the shard plugin"
+            );
+        }
+        let first = format!("save-if: ${{{{ matrix.shard == '1/{total}' }}}}");
+        for line in [
+            "fail-fast: false",
+            partition_env.as_str(),
+            "shared-key: fast-python",
+            first.as_str(),
+        ] {
+            assert!(python.contains(&line), "`fast-python` has `{line}`");
         }
         let fast = workflow_job(&workflow, "fast").context("ci.yml has `fast`")?;
         let names: Vec<&str> = std::iter::once("select")
