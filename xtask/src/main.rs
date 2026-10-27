@@ -19470,6 +19470,108 @@ mod tests {
         Ok(())
     }
 
+    /// The one expression that may hand a job the self-hosted runners (DEC-2065, DEC-2075): their
+    /// label only for a pull request whose head is this repository, or a push or dispatch on
+    /// `main`. A fork's pull request, `pull_request_target`, a schedule, any other ref, and any run
+    /// while the variable is unset take `ubuntu-24.04`.
+    const RUNNER_GUARD: &str = "${{ ((github.event_name == 'pull_request' && \
+        github.event.pull_request.head.repo.full_name == github.repository) || \
+        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == \
+        'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}";
+
+    /// DEC-2075: `select` runs on [`RUNNER_GUARD`] and hands it on as its `runner` output, and no
+    /// other line of any workflow names `CI_RUNNER`, so every job that reaches the self-hosted
+    /// runners does so through the one guard: directly, or through `select`'s output.
+    #[test]
+    fn only_the_fork_guard_reaches_the_self_hosted_runners() -> Result<()> {
+        let root = repo_root()?;
+        let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))?;
+        let select = workflow_job(&workflow, "select").context("ci.yml has a `select` job")?;
+        let has = |want: String| select.iter().any(|line| line.trim() == want);
+        assert!(
+            has(format!("runs-on: {RUNNER_GUARD}")),
+            "`select` runs on the guard"
+        );
+        assert!(
+            has(format!("runner: {RUNNER_GUARD}")),
+            "`select` hands the guard on"
+        );
+        let mut named = 0_usize;
+        for path in files_by_extension(&root.join(".github/workflows"), &["yml", "yaml"])? {
+            for line in fs::read_to_string(&path)?.lines() {
+                let code = line.split(" #").next().unwrap_or(line).trim();
+                if code.starts_with('#') || !code.contains("CI_RUNNER") {
+                    continue;
+                }
+                named = named.saturating_add(1);
+                assert!(
+                    code == format!("runs-on: {RUNNER_GUARD}")
+                        || code == format!("runner: {RUNNER_GUARD}"),
+                    "{} names CI_RUNNER outside the guard: {code}",
+                    path.display()
+                );
+            }
+        }
+        assert_eq!(
+            named, 2,
+            "the guard is written out exactly twice, both in `select`"
+        );
+        let allowed_runs_on = [
+            "ubuntu-24.04",
+            "ubuntu-24.04-arm",
+            "macos-14",
+            "${{ matrix.runner }}",
+            "${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}",
+            "${{ needs.select.outputs.runner }}",
+            "${{ needs.select.outputs.runner || 'ubuntu-24.04' }}",
+            RUNNER_GUARD,
+        ];
+        for path in files_by_extension(&root.join(".github/workflows"), &["yml", "yaml"])? {
+            for line in fs::read_to_string(&path)?.lines() {
+                let code = line.split(" #").next().unwrap_or(line).trim();
+                if code.starts_with('#') {
+                    continue;
+                }
+                if let Some(value) = code.strip_prefix("runs-on:") {
+                    assert!(
+                        allowed_runs_on.contains(&value.trim()),
+                        "{}: `runs-on:{value}` is neither a hosted runner nor the guard (DEC-2075)",
+                        path.display()
+                    );
+                }
+                if let Some(value) = code.strip_prefix("runner:")
+                    && !value.contains("${{")
+                {
+                    assert!(
+                        ["ubuntu-24.04", "ubuntu-24.04-arm"].contains(&value.trim()),
+                        "{}: matrix runner `{value}` is not a hosted runner (DEC-2075)",
+                        path.display()
+                    );
+                }
+                assert!(
+                    !code.contains("self-hosted") && !code.contains("mandate-ci-do"),
+                    "{}: names the self-hosted runners' labels directly: {code}",
+                    path.display()
+                );
+            }
+        }
+        for job in workflow_jobs(&workflow) {
+            let lines = workflow_job(&workflow, job).context("a listed job")?;
+            for line in lines.iter().map(|l| l.trim()) {
+                if let Some(value) = line.strip_prefix("runs-on: ")
+                    && value.contains("needs.")
+                {
+                    assert!(
+                        value == "${{ needs.select.outputs.runner }}"
+                            || value == "${{ needs.select.outputs.runner || 'ubuntu-24.04' }}",
+                        "`{job}` takes its runner only from `select`: {value}"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
     const SELECT_GATES: [(&str, &str); 20] = [
         ("fast-test", "tests"),

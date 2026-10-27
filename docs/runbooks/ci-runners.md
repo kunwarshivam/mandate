@@ -8,8 +8,9 @@ value below (AGENTS.md rules 7 and 8). Nothing here goes in the repository, a ch
 time. Every job gets a fresh container built from a baked image (the repository's pinned toolchain,
 Docker, the GitHub runner) and the container is deleted when the job ends. They cost **144 USD a
 month** against your cap of **150 USD** ([DEC-2065](../project/decisions/DEC-2065.md)), separate
-from the hosting budget of DEC-2011. Only ci.yml's eleven cell jobs move to them, and only for
-`main` and for pull requests from this repository's own branches.
+from the hosting budget of DEC-2011. ci.yml's eleven cell jobs, `select` and the `fast` and `full` aggregates move to them
+(DEC-2072, DEC-2075), and only for pushes and dispatches on `main` and pull requests from this
+repository's own branches. Lint, tests, mutants and the other checks stay on GitHub's runners.
 
 **The one rule.** A fork's pull request brings its own workflow files, which can ask for these
 runners by label. What stops it is the setting in step 1, and the runners refuse any job that is
@@ -132,9 +133,9 @@ again: a host registers no runner while the setting reads anything but
 **Settings → Secrets and variables → Actions → Variables → New repository variable:**
 name `CI_RUNNER`, value `mandate-ci-do`.
 
-From the next run on, the eleven cell jobs of a pull request from this repository, and of `main`,
-run there. In a cell job's log, **Set up job** names the runner, and the runner's job-started hook
-runs first and passes. Every other job stays on GitHub's runners. If this repository's own cell
+From the next run on, the cell jobs, `select`, `fast` and `full` of a pull request from this
+repository, and of `main`, run there. In a cell job's log, **Set up job** names the runner, and the runner's job-started hook
+runs first and passes. Every other job stays on GitHub's runners, and still needs their capacity. If this repository's own cell
 jobs all fail with "This runner takes only kunwarshivam/mandate's own jobs", roll back (step 7)
 and tell lane RN: the hook refuses whatever it cannot read.
 
