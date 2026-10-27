@@ -84917,6 +84917,22 @@
     }
    },
    {
+    "name": "reserved.156.evaluation_agent",
+    "clause": "rule 156: an evaluation has no agent (DEC-2216)",
+    "base_draft": "reserved",
+    "changes": [
+     {
+      "path": "payload.purpose",
+      "value": "evaluation"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.agent_id"
+    }
+   },
+   {
     "name": "reserved.156.cost",
     "clause": "rule 156",
     "base_draft": "reserved",
@@ -86165,6 +86181,24 @@
      {
       "path": "payload.purpose",
       "value": "compiler"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "reserved.evaluation",
+    "clause": "rule 156: an evaluation's call (DEC-2216)",
+    "base_draft": "reserved",
+    "changes": [
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.purpose",
+      "value": "evaluation"
      }
     ],
     "expect": {
