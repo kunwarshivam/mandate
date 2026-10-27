@@ -26,6 +26,7 @@
 //! datasets and content-addressed objects, whose put never replaces one. It never reads a
 //! clock itself: the binary hands it the host clock's reading.
 
+pub mod iex;
 pub mod observation;
 pub mod series;
 

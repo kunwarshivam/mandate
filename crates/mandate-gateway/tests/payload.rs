@@ -118,3 +118,15 @@ fn each_result_fits_exactly_the_kinds_rule_151_allows() {
         assert_eq!(result.fits(Invalidation), invalidation, "{result:?}");
     }
 }
+
+/// An evaluation is the platform's call, with no agent (DEC-2216), so its record is no agent
+/// stream's payload either.
+#[test]
+fn an_evaluations_record_is_not_an_agent_stream_payload() {
+    let mut record = ok_record();
+    record.purpose = Purpose::Evaluation;
+    assert_eq!(
+        record.agent_payload(&[]),
+        Err(PayloadError::NoAgentOnAgentStream)
+    );
+}
