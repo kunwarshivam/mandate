@@ -550,8 +550,9 @@ fn deferred(batch: &Batch<'_, '_>, instrument: &InstrumentId, purpose: Purpose) 
 /// mandate version or its deployment's references do not read (DEC-2846): the journal takes no
 /// other record of it. Either waits alone: the switch, its mode and its cancels are applied
 /// (`AGENTS.md` rule 13), and the close is raised at the first pass that can name it. A close no
-/// sane mark prices, raised at the resting stop or the owner's floor, is never silent either: it
-/// goes at once, and is journaled `exit_unpriced` and alerted the same way (DEC-2853).
+/// sane mark prices, raised at the resting stop, is never silent either: it goes at once, and is
+/// journaled `exit_unpriced` and alerted the same way (DEC-2853). One the owner's floor alone
+/// prices goes at the price the owner chose, and is not alerted.
 /// Raised earlier, the gate would count the sells still pending their cancel and deny the flatten
 /// `sell_exceeds_available`.
 pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
@@ -616,7 +617,7 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
                 }
                 continue;
             };
-            if marked.is_none() && !switch.unpriced.contains(instrument) {
+            if marked.is_none() && stop.is_some() && !switch.unpriced.contains(instrument) {
                 let alerted = changed_by(
                     batch,
                     instrument,
@@ -1485,7 +1486,7 @@ mod tests {
                         if draft.event_type == "ProtectionChanged"
                             && field(draft, "action").and_then(Value::as_str)
                                 == Some("exit_unpriced")
-                            && draft.causation_id.is_some())
+                            && draft.causation_id.as_ref() == the_switch(&gone).ok().map(|s| &s.event_id))
                 })
                 .count();
             let alerted = gone.iter().any(|effect| {

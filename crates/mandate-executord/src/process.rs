@@ -991,10 +991,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
 
     /// Applies one switch as the core's own kill switch of that agent alone, never an account-wide
     /// one (`AGENTS.md` rule 13), naming the record it copies so the journal says it was applied.
-    /// The core is first handed every mark the process holds (`held_marks`), so the
-    /// switch's flatten prices from the market and not from the resting stop (DEC-2853). That
-    /// reads nothing: a feed that is slow or down cannot delay or fail the switch, and with no mark
-    /// held the flatten goes at the stop, alerted.
+    /// The core first holds every mark the process holds (`held_marks`, through
+    /// `ExecutorState::hold_quote`), so the switch's flatten prices from the market and not from
+    /// the resting stop (DEC-2853). That reads nothing and runs no step: no watchdog, journal write
+    /// or broker request comes before the switch, so a feed that is slow or down, or a broker that
+    /// errs, cannot delay or fail it. With no mark held the flatten goes at the stop, alerted.
     fn apply(
         &mut self,
         now: UtcNanos,
@@ -1002,11 +1003,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         switch: Switch,
         alerts: &mut Vec<Alert>,
     ) -> bool {
-        let held: Vec<MarketObservation> = self.held_marks.values().cloned().collect();
-        for observation in held {
-            if !self.hand(now, now, Input::Market(observation), alerts, 0) {
-                return false;
-            }
+        for observation in self.held_marks.values() {
+            self.state.hold_quote(observation);
         }
         let command = Command::KillSwitch {
             scope: KillScope::Agent(agent),
