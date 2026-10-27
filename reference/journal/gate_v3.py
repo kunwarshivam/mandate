@@ -205,7 +205,8 @@ def check_section(section: dict, skip: frozenset = frozenset()) -> list[str]:
 # --------------------------------------------------------------------------- seeded bugs
 
 # Rule 315's own `hold` clause seeds no mutant: a park must be `held_long`, which rule 314 admits
-# only on a hold, so dropping that clause alone changes no verdict.
+# only on a hold, so dropping that clause alone accepts or refuses nothing differently; it changes
+# only whether a refusal also names rule 315.
 VALIDATOR_MUTANTS = (
     "rule.313",
     "rule.313.allow",
