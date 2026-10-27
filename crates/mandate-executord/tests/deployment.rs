@@ -2410,6 +2410,35 @@ fn owner_exit_after_the_opening(stale: bool) -> Result<(), Error> {
         process.step(at(&now)?);
     }
     journal.write(
+        CONTROL_STREAM,
+        "01JOWNERCMD000000000000001",
+        "OwnerCommandIssued",
+        1,
+        None,
+        object(vec![
+            ("agent", text(AGENT)),
+            ("bid", Value::Null),
+            ("bid_size", Value::Null),
+            ("command", text("owner_exit")),
+            ("floor", Value::Null),
+            ("release", Value::Null),
+            ("scope", text("instrument")),
+            ("step_up", Value::Null),
+            ("subject", text(SPY)),
+            (
+                "submitted_at",
+                Value::Int(mandate_canon::Int::new(1_790_006_520).ok_or("an int")?),
+            ),
+            ("user", text("u1")),
+            ("warning_shown", Value::Null),
+        ])?,
+    )?;
+    for second in [120, 125] {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(&journal, &format!("tc{second}"), &now)?;
+        process.step(at(&now)?);
+    }
+    journal.write(
         &support::agent_stream(AGENT),
         "01JOWNEXITREQ0000000000001",
         "OwnerExitRequested",
