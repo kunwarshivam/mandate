@@ -44,9 +44,9 @@ pub fn daily_generation(root: &Path, session: Date) -> PathBuf {
 pub fn minute_generation(root: &Path, at: UtcNanos) -> Result<PathBuf, BarsError> {
     let minute = whole_minute(at)?;
     let text = minute.to_string();
-    let (date, rest) = text.split_once('T').ok_or(cannot_name())?;
-    let hour = rest.get(0..2).ok_or(cannot_name())?;
-    let min = rest.get(3..5).ok_or(cannot_name())?;
+    let (date, rest) = text.split_once('T').ok_or_else(cannot_name)?;
+    let hour = rest.get(0..2).ok_or_else(cannot_name)?;
+    let min = rest.get(3..5).ok_or_else(cannot_name)?;
     Ok(root.join("minutes").join(format!("{date}T{hour}{min}")))
 }
 
@@ -60,7 +60,7 @@ fn whole_minute(at: UtcNanos) -> Result<UtcNanos, BarsError> {
     let secs = at.secs();
     let start = secs
         .checked_sub(secs.rem_euclid(MINUTE_S))
-        .ok_or(cannot_name())?;
+        .ok_or_else(cannot_name)?;
     UtcNanos::from_parts(start, 0).map_err(|_| cannot_name())
 }
 
@@ -90,6 +90,11 @@ pub fn daily_dir_at(root: &Path, symbol: &str, now: UtcNanos) -> Result<PathBuf,
 /// symbol's dataset, or `now`'s own when none does, which then does not read; otherwise
 /// [`minute_dir`].
 ///
+/// A dataset counts as present once its manifest is a file: `Store::put_day` writes a partition
+/// before the manifest that lists it, so a manifest never lists a partition not yet written. Which
+/// generation is read depends on what the store holds as well as on `now`; a decision cites the
+/// closes and figures it read, never a generation (data-plane spec §3.8, DP-14).
+///
 /// # Errors
 /// [`BarsError::Model`] for a symbol the dataset refuses, and [`BarsError::Untrusted`] for a clock
 /// that names no generation.
@@ -103,7 +108,7 @@ pub fn minute_dir_at(root: &Path, symbol: &str, now: UtcNanos) -> Result<PathBuf
         let secs = back
             .checked_mul(MINUTE_S)
             .and_then(|offset| start.checked_sub(offset))
-            .ok_or(cannot_name())?;
+            .ok_or_else(cannot_name)?;
         let minute = UtcNanos::from_parts(secs, 0).map_err(|_| cannot_name())?;
         let dir = minute_dir(&minute_generation(root, minute)?, symbol)?;
         if dir.join(MANIFEST).is_file() {

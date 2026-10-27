@@ -128,6 +128,14 @@ fn generations_are_named_by_their_session_and_whole_minute() {
         );
     }
     assert_eq!(
+        minute_generation(&root, at("2026-10-27T00:00:00Z")).unwrap(),
+        PathBuf::from("/s/alpaca-iex/minutes/2026-10-27T0000")
+    );
+    assert_eq!(
+        minute_generation(&root, at("2026-10-26T23:59:59Z")).unwrap(),
+        PathBuf::from("/s/alpaca-iex/minutes/2026-10-26T2359")
+    );
+    assert_eq!(
         minute_generation(&root, at("2026-01-02T09:05:00Z")).unwrap(),
         PathBuf::from("/s/alpaca-iex/minutes/2026-01-02T0905")
     );
@@ -142,6 +150,9 @@ fn a_reader_reads_the_daily_generation_of_its_last_completed_session() {
         ("2026-10-26T20:00:00Z", "2026-10-26"),
         ("2026-10-24T15:00:00Z", "2026-10-23"),
         ("2026-11-27T19:00:00Z", "2026-11-27"),
+        ("2026-11-26T19:00:00Z", "2026-11-25"),
+        ("2026-11-27T17:59:59Z", "2026-11-25"),
+        ("2026-11-27T18:00:00Z", "2026-11-27"),
     ] {
         assert_eq!(
             daily_dir_at(&root, "QQQ", at(now)).unwrap(),
@@ -198,6 +209,32 @@ fn a_reader_takes_its_minute_or_failing_it_one_of_the_two_before() {
         );
         assert_eq!(minute_dir_at(&root, "QQQ", now).unwrap(), named(read));
     }
+    let exact = at("2026-10-26T19:00:00Z");
+    assert_eq!(
+        minute_dir_at(&root, "QQQ", exact).unwrap(),
+        named("2026-10-26T19:00:00Z"),
+        "a clock on the minute reads that minute's generation"
+    );
+    let unlisted = scratch("unlisted");
+    let partial = minute_dir(&minute_generation(&unlisted, now).unwrap(), "QQQ").unwrap();
+    fs::create_dir_all(&partial).unwrap();
+    fs::write(partial.join("2026-10-26.parquet"), b"not yet listed").unwrap();
+    minutes_into(
+        &minute_generation(&unlisted, at("2026-10-26T18:59:00Z")).unwrap(),
+        "QQQ",
+        "2026-10-26T18:50:00Z",
+        "2026-10-26T18:59:00Z",
+    );
+    assert_eq!(
+        minute_dir_at(&unlisted, "QQQ", now).unwrap(),
+        minute_dir(
+            &minute_generation(&unlisted, at("2026-10-26T18:59:00Z")).unwrap(),
+            "QQQ"
+        )
+        .unwrap(),
+        "a generation whose manifest is not yet written is passed over"
+    );
+    fs::remove_dir_all(unlisted.parent().unwrap()).ok();
     let older = scratch("older");
     minutes_into(
         &minute_generation(&older, at("2026-10-26T18:57:00Z")).unwrap(),
