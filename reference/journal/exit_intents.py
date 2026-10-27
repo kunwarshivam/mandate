@@ -67,6 +67,10 @@ NEAR_MISSES = {
     "the_order_id": f"md-k-{SWITCH}-1",
     "a_random_id": "flatten-1",
     "empty": "",
+    "watchdog_event_after_7": f"w-8{EVENT[1:]}",
+    "flatten_switch_after_7": f"k-8{SWITCH[1:]}-1",
+    "flatten_trailing_newline": f"k-{SWITCH}-1\n",
+    "watchdog_leading_space": f" w-{EVENT}",
 }
 
 
@@ -163,8 +167,9 @@ def candidates() -> list[str]:
     return out
 
 
-def check_section(section: dict) -> list[str]:
-    """Every failure, so seeded bugs can be shown caught."""
+def check_section(section: dict, skip: frozenset = frozenset()) -> list[str]:
+    """Every failure, so seeded bugs can be shown caught; `skip` seeds a validator bug, which the
+    oracle must then report on its own."""
     problems = []
     for name, draft in section["drafts"].items():
         got = violations(draft)
@@ -182,7 +187,7 @@ def check_section(section: dict) -> list[str]:
         for value in candidates():
             probe = copy.deepcopy(draft)
             probe["payload"][INTENT] = value
-            admitted = not violations(probe)
+            admitted = not violations(probe, skip)
             if admitted != bool(INTENT_FORM.fullmatch(value)):
                 problems.append(found("forms.oracle", f"{base} {value!r}: the validator and §9.1 disagree"))
     return problems
@@ -190,7 +195,13 @@ def check_section(section: dict) -> list[str]:
 
 # --------------------------------------------------------------------------- seeded bugs
 
-VALIDATOR_MUTANTS = ("types.intent_own", "types.intent_any", "types.intent_bound")
+VALIDATOR_MUTANTS = (
+    "types.intent_own",
+    "types.intent_any",
+    "types.intent_bound",
+    "types.intent_zero",
+    "types.intent_ascii",
+)
 
 
 def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
@@ -230,6 +241,9 @@ def run_mutants(section: dict) -> list[str]:
             caught |= bool(got) if want is None else not reported(got, want)
         if not caught:
             escaped.append(f"exit intent validator mutant {mutant}")
+        oracle = [p for p in check_section(section, skip) if check_of(p) == "forms.oracle"]
+        if not oracle:
+            escaped.append(f"exit intent validator mutant {mutant} escapes the forms oracle")
     registered = vector_mutants(section)
     for check in ORACLE_CHECKS:
         if check.endswith(".oracle"):
