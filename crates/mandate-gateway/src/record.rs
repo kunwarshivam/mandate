@@ -192,6 +192,9 @@ impl CallRecord {
         if self.purpose == Purpose::Compiler {
             return Err(PayloadError::CompilerOnAgentStream);
         }
+        if !self.purpose.names_agent() {
+            return Err(PayloadError::NoAgentOnAgentStream);
+        }
         let rejected = self.outcome == Outcome::InputRejected;
         if self.prompt_ref.is_none() != rejected
             || self.request_digest.is_none() != rejected
@@ -218,6 +221,8 @@ impl CallRecord {
 pub enum PayloadError {
     #[error("the compiler's record is on the control stream (journal spec §9.9)")]
     CompilerOnAgentStream,
+    #[error("an evaluation names no agent, so its record is on no agent stream (DEC-2216)")]
+    NoAgentOnAgentStream,
     #[error(
         "prompt_ref, request_digest and guard_rule disagree with the outcome (journal spec rule 148)"
     )]
