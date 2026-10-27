@@ -60,6 +60,34 @@ fn a_run_without_its_values_exits_with_the_first_one_s_code() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// DEC-2216 item 4: a live start reads its start-up values first, so with them unset it exits 2
+/// naming the first one missing, before it reads its registry, logs in to the vault, or builds a
+/// provider client.
+#[test]
+fn a_live_run_without_its_values_exits_with_the_first_one_s_code() {
+    let dir = std::env::temp_dir().join(format!("gatewayd-live-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let socket = dir.join("process.sock");
+    let output = gatewayd(&[
+        "run",
+        "--registry",
+        "/no/such/registry.json",
+        "--listen",
+        "127.0.0.1:0",
+        "--probe",
+        socket.to_str().unwrap(),
+        "--vault-address",
+        "https://vault.invalid:8200",
+        "--vault-dir",
+        "/no/such/vault",
+    ]);
+    assert_eq!(
+        refused(&output),
+        (Some(2), "workspace_missing\n".to_owned())
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// DEC-994 item 5: a probe of a socket no process serves fails, exit 1.
 #[test]
 fn a_probe_of_no_process_fails() {

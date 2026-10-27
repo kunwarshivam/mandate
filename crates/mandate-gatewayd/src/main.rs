@@ -161,10 +161,17 @@ fn serve_recorded(
     let mut service = recorded_service(&config, &model, parts).map_err(|e| e.code())?;
     let replies = Replies::new(&model);
     let listener = TcpListener::bind(args.listen).map_err(|_| "listen_unavailable")?;
+    let mut writer = writer;
     observe(lifecycle, status, host_now(), Input::StartupPassed);
-    serve_loop(listener, writer, |request| {
-        answer_recorded(&mut service, &replies, request)
-    })
+    server(listener).run_storing(
+        |request| answer_recorded(&mut service, &replies, &request),
+        |put| {
+            writer
+                .as_mut()
+                .map_or(Err(PutRefusal::StoreUnavailable), |writer| writer.put(put))
+        },
+    );
+    Err("listener_stopped")
 }
 
 /// The live start's steps after the probe socket (DEC-2216 item 4): the start-up values, the
@@ -187,8 +194,17 @@ fn serve_live(
         eprintln!("registry_refused {} {:?}", refusal.model_id, refusal.error);
     }
     let listener = TcpListener::bind(args.listen).map_err(|_| "listen_unavailable")?;
+    let mut writer = writer;
     observe(lifecycle, status, host_now(), Input::StartupPassed);
-    serve_loop(listener, writer, |request| service.answer(request))
+    server(listener).run_storing(
+        |request| service.answer(&request),
+        |put| {
+            writer
+                .as_mut()
+                .map_or(Err(PutRefusal::StoreUnavailable), |writer| writer.put(put))
+        },
+    );
+    Err("listener_stopped")
 }
 
 /// The provider key, read once through a vault session as the model gateway (DEC-2020 items 3
@@ -223,27 +239,14 @@ fn read_key(address: &str, dir: &Path, entries: &[LiveEntry]) -> Result<HeldKey,
     Ok(upstreams.fold(key, |key, upstream| key.with_upstream(&upstream)))
 }
 
-/// Serves `answer`'s replies and the research artifacts' puts until the listener stops.
-fn serve_loop(
-    listener: TcpListener,
-    mut writer: Option<ArtifactWriter>,
-    mut answer: impl FnMut(&mandate_gateway::CallRequest) -> mandate_gateway::wire::Reply,
-) -> Result<(), &'static str> {
-    let server = Server::new(
+/// The server over `listener`, under the service's connection limits.
+fn server(listener: TcpListener) -> Server {
+    Server::new(
         listener,
         Limits {
             io_timeout: IO_TIMEOUT,
             max_connections: MAX_CONNECTIONS,
         },
         Arc::new(WriteLog::new(std::io::stderr())),
-    );
-    server.run_storing(
-        |request| answer(&request),
-        |put| {
-            writer
-                .as_mut()
-                .map_or(Err(PutRefusal::StoreUnavailable), |writer| writer.put(put))
-        },
-    );
-    Err("listener_stopped")
+    )
 }

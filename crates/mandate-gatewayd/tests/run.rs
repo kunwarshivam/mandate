@@ -16,14 +16,17 @@ use std::time::Duration;
 use mandate_canon::{Digest, decode_ulid, parse};
 use mandate_gateway::fake::RecordedTransport;
 use mandate_gateway::kinds::{KeyOwner, Outcome, Purpose};
+use mandate_gateway::policy::EndpointPolicy;
 use mandate_gateway::provider::NoKeys;
 use mandate_gateway::provider::{IdSource, ManualClock, SequentialIds};
+use mandate_gateway::registry::Locality;
 use mandate_gateway::registry::RegistryError;
 use mandate_gateway::{CallRequest, RequestError};
 use mandate_gatewayd::cap::CapError;
 use mandate_gatewayd::config::Config;
-use mandate_gatewayd::live::{LiveStart, live_service, read_registry};
+use mandate_gatewayd::live::{LiveStart, live_service, live_settings, read_registry, upstreams};
 use mandate_gatewayd::recorded::Replies;
+use mandate_gatewayd::recorded::{RATE_MARGIN, WORKSPACE_RATE};
 use mandate_gatewayd::run::{
     self, ArgsError, Command, LiveArgs, Parts, RecordedService, RunArgs, StartFailure, WriteLog,
     answer_recorded, heartbeat, host_now, observe, opened_ids, read_recorded, recorded_service,
@@ -37,6 +40,7 @@ use mandate_journal::{
 };
 use mandate_process::lifecycle::{Input, Kind, Lifecycle};
 use mandate_process::probe::{self, Probe, Status};
+use mandate_research_run::agentic::LoopBounds;
 use mandate_research_run::live::{LiveEntry, Refused, read_live};
 use mandate_research_run::recorded::RecordedModel;
 use mandate_store::{MemoryStore, Store};
@@ -946,4 +950,60 @@ fn the_registry_file_is_read_strictly() {
         "registry_unreadable"
     );
     assert_eq!(StartFailure::RegistryMalformed.code(), "registry_malformed");
+}
+
+/// DEC-2216 item 4, DEC-2020: the key is served for, and the endpoint policy admits, the upstreams
+/// of the entries the registry takes alone, so C's `azure` is neither keyed nor allowed while C is
+/// refused; and an agent's rate is the most turns any taken entry's run may take, plus the margin.
+#[test]
+fn the_settings_and_the_keyed_upstreams_are_the_taken_entries_alone() {
+    let mut entries = vetted();
+    assert_eq!(
+        upstreams(&entries),
+        BTreeSet::from(["google-vertex/global".to_owned()])
+    );
+    entries[1].entry.agentic = Some(LoopBounds::v0_2());
+    let settings = live_settings(WORKSPACE, &entries);
+    assert_eq!(settings.workspace_id, WORKSPACE);
+    assert_eq!(
+        settings.policy,
+        EndpointPolicy::new(
+            BTreeSet::from([Locality::Hosted]),
+            Some(BTreeSet::from(["google-vertex/global".to_owned()])),
+            None,
+        )
+    );
+    assert_eq!(settings.rate.per_workspace, WORKSPACE_RATE);
+    assert_eq!(
+        settings.rate.per_agent,
+        LoopBounds::v0_2().max_turns + RATE_MARGIN
+    );
+    entries[1].entry.agentic = None;
+    assert_eq!(
+        live_settings(WORKSPACE, &entries).rate.per_agent,
+        1 + RATE_MARGIN,
+        "single-call entries take one call a run"
+    );
+}
+
+/// DEC-2216 item 4: a registry file naming a gate report is refused as it is read, before the
+/// vault is touched or anything is built.
+#[test]
+fn a_registry_file_naming_a_gate_report_is_refused_as_it_is_read() {
+    let dir = std::env::temp_dir().join(format!("gatewayd-gated-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let named = dir.join("registry.json");
+    let text = vetted_file().replacen(
+        r#""status":"offered","#,
+        &format!(
+            r#""status":"offered","gate_report":"sha256:{}","#,
+            "a".repeat(64)
+        ),
+        1,
+    );
+    std::fs::write(&named, text).unwrap();
+    assert_eq!(
+        read_registry(&named).err(),
+        Some(StartFailure::GateReportUnverifiable)
+    );
 }

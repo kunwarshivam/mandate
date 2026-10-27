@@ -240,7 +240,17 @@ fn an_entry_may_name_its_gate_report() {
     let entries = read_live(&file(std::slice::from_ref(&named))).unwrap();
     assert_eq!(entries[0].gate_report.as_deref(), Some(reference.as_str()));
     assert_eq!(read_live(&file(&[good])).unwrap()[0].gate_report, None);
-    for bad in ["sha256:short", "a".repeat(71).as_str(), ""] {
+    let upper = format!("sha256:{}", "A".repeat(64));
+    let not_hex = format!("sha256:{}", "g".repeat(64));
+    let long = format!("sha256:{}", "a".repeat(65));
+    for bad in [
+        "sha256:short",
+        "a".repeat(71).as_str(),
+        "",
+        &upper,
+        &not_hex,
+        &long,
+    ] {
         let text = named.replace(&reference, bad);
         assert_eq!(
             read_live(&file(&[text])).err(),

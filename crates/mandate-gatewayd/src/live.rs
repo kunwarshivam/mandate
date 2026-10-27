@@ -13,7 +13,7 @@ use mandate_canon::parse;
 use mandate_gateway::guard::GuardContext;
 use mandate_gateway::policy::EndpointPolicy;
 use mandate_gateway::provider::{Clock, SecretSource, Transport};
-use mandate_gateway::registry::Locality;
+use mandate_gateway::registry::{Locality, Registry};
 use mandate_gateway::{RateCaps, Settings};
 use mandate_research_run::live::{LiveEntry, Refused, live_registry, read_live};
 use mandate_store::Store;
@@ -30,21 +30,38 @@ pub type LiveService<S, C, T> = Service<T, JournalMeter<S>, C>;
 /// A live start: the service, and the entries the registry refused, each with why.
 pub type LiveStart<S, C, T> = (LiveService<S, C, T>, Vec<Refused>);
 
-/// The live registry file at `path`, read strictly, once.
+/// The live registry file at `path`, read strictly, once, and refused whole when an entry names a
+/// gate report, which this start cannot yet verify, before the vault is touched.
 ///
 /// # Errors
-/// [`StartFailure::RegistryUnreadable`] when the file cannot be read, and
-/// [`StartFailure::RegistryMalformed`] when it is not strict JSON or not a live registry.
+/// [`StartFailure::RegistryUnreadable`] when the file cannot be read,
+/// [`StartFailure::RegistryMalformed`] when it is not strict JSON or not a live registry, and
+/// [`StartFailure::GateReportUnverifiable`] when an entry names a gate report.
 pub fn read_registry(path: &Path) -> Result<Vec<LiveEntry>, StartFailure> {
     let bytes = std::fs::read(path).map_err(|_| StartFailure::RegistryUnreadable)?;
     let value = parse(&bytes).map_err(|_| StartFailure::RegistryMalformed)?;
-    read_live(&value).map_err(|_| StartFailure::RegistryMalformed)
+    let entries = read_live(&value).map_err(|_| StartFailure::RegistryMalformed)?;
+    unverified(&entries)?;
+    Ok(entries)
 }
 
-/// The upstreams `entries`' endpoints route through, each one the routing lock names.
+/// Refuses `entries` when one names a gate report (DEC-2216 item 4): offering on one needs its
+/// every binding re-read and an identity probe, which the gate's build adds.
+fn unverified(entries: &[LiveEntry]) -> Result<(), StartFailure> {
+    if entries.iter().any(|live| live.gate_report.is_some()) {
+        Err(StartFailure::GateReportUnverifiable)
+    } else {
+        Ok(())
+    }
+}
+
+/// The upstreams the endpoints of the entries the registry takes route through, so an entry it
+/// refuses, such as C while undated, neither has the key served for its upstream nor that upstream
+/// allowed (DEC-2020).
 pub fn upstreams(entries: &[LiveEntry]) -> BTreeSet<String> {
     entries
         .iter()
+        .filter(|live| Registry::new().register(live.entry.content()).is_ok())
         .map(|live| live.endpoint.route.upstream.clone())
         .collect()
 }
@@ -78,8 +95,8 @@ pub fn live_settings(workspace: &str, entries: &[LiveEntry]) -> Settings {
 /// none offered, and the entries it refuses.
 ///
 /// # Errors
-/// [`StartFailure::GateReportUnverifiable`] when an entry names a gate report, before anything is
-/// read or built; then [`metered_service`]'s.
+/// [`StartFailure::GateReportUnverifiable`] when an entry names a gate report, before its meters
+/// are opened; then [`metered_service`]'s.
 pub fn live_service<S: Store + 'static, C: Clock, T: Transport>(
     config: &Config,
     entries: &[LiveEntry],
@@ -87,9 +104,7 @@ pub fn live_service<S: Store + 'static, C: Clock, T: Transport>(
     transport: T,
     key: Box<dyn SecretSource>,
 ) -> Result<LiveStart<S, C, T>, StartFailure> {
-    if entries.iter().any(|live| live.gate_report.is_some()) {
-        return Err(StartFailure::GateReportUnverifiable);
-    }
+    unverified(entries)?;
     let held: Vec<LiveEntry> = entries
         .iter()
         .cloned()
