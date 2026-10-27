@@ -4,11 +4,13 @@
 
 mod common;
 
+use std::collections::BTreeMap;
+
 use common::*;
 use mandate_canon::Digest;
 use mandate_gateway::registry::{
-    FAST_DEADLINE_MS, Identity, Registry, RegistryError, Reported, SLOW_DEADLINE_MS, Snapshot,
-    Status, Unresolved,
+    FAST_DEADLINE_MS, Identity, Mode, PinnedContent, Registry, RegistryError, Reported,
+    SLOW_DEADLINE_MS, Snapshot, Status, Unresolved,
 };
 use mandate_time::Date;
 
@@ -144,7 +146,9 @@ fn floating_aliases_variants_and_undated_snapshots_are_refused_at_registration()
         );
     }
     let snapshots = [
-        "claude-sonnet-4-5",
+        "claude-",
+        "claude-sonnet-5.5",
+        "claude-sonnet-latest",
         "latest",
         "2025-13-40",
         "claude-20250229-latest",
@@ -160,6 +164,28 @@ fn floating_aliases_variants_and_undated_snapshots_are_refused_at_registration()
             Registry::new().register(c).err(),
             Some(RegistryError::FloatingAlias),
             "{snapshot:?}"
+        );
+    }
+    for (provider, snapshot) in [
+        ("openai", "gpt-5.6-terra"),
+        ("google", "gemini-3-pro"),
+        ("openai", "claude-sonnet-5-5"),
+    ] {
+        let mut c = content();
+        c.identity.provider = provider.to_owned();
+        c.identity.snapshot = Snapshot::Dated(snapshot.to_owned());
+        assert_eq!(
+            Registry::new().register(c).err(),
+            Some(RegistryError::FloatingAlias),
+            "{provider} states no dateless id is pinned, so {snapshot:?} is refused"
+        );
+    }
+    for snapshot in ["claude-sonnet-5-5", "claude-haiku-5-5"] {
+        let mut c = content();
+        c.identity.snapshot = Snapshot::Dated(snapshot.to_owned());
+        assert!(
+            Registry::new().register(c).is_ok(),
+            "{snapshot:?}: Anthropic states every model id is a pinned snapshot (DEC-2282 item 7)"
         );
     }
     let mut c = content();
@@ -416,5 +442,118 @@ fn open_weights_must_name_their_quantization() {
     assert_eq!(
         Registry::new().register(c).err(),
         Some(RegistryError::Quantization)
+    );
+}
+
+/// A research entry like `agentic_content`'s but for another model: its id, identity, sampling,
+/// deadline and token limit differ, which are the members a role's entries may differ in.
+fn another_model(id: &str) -> PinnedContent {
+    let mut content = agentic_content();
+    content.model_id = id.to_owned();
+    content.identity = Identity {
+        provider: "anthropic".to_owned(),
+        model_name: "anthropic/claude-haiku-5.5".to_owned(),
+        snapshot: Snapshot::Dated("claude-haiku-5-5".to_owned()),
+        quantization: None,
+    };
+    content.seed = Some(11);
+    content.top_p = None;
+    content.reasoning = None;
+    content.deadline_ms = 30_000;
+    content.max_output_tokens = 2_000;
+    content
+}
+
+fn offered(registry: &mut Registry, content: PinnedContent) -> Result<(), RegistryError> {
+    let model = content.model_ref();
+    registry.register(content).unwrap();
+    registry.set_status(&model, Status::Offered)
+}
+
+/// DEC-2282 and inference spec §4.2 step 5: the owner picks a research model per run kind, so every
+/// offered entry of one research role pins the same harness content. A choice then changes which
+/// model answers, never what the agent may read or do.
+#[test]
+fn a_research_entry_is_offered_only_with_its_roles_harness_content() {
+    let (mut registry, _) = agentic_registry();
+    assert_eq!(
+        offered(&mut registry, another_model("llm.research_light")),
+        Ok(()),
+        "another model with the role's harness content is offered"
+    );
+    let edits: [(&str, fn(&mut PinnedContent)); 9] = [
+        ("template", |c| c.template.system.push_str(" Be bold.")),
+        ("retrieval plan", |c| {
+            c.retrieval_plan = json(r#"{"bars":{"days":90},"filings":{"max_items":5}}"#)
+        }),
+        ("validation bounds", |c| {
+            c.validation_bounds = json(r#"{"max_theses":9}"#)
+        }),
+        ("params schema", |c| {
+            c.params_schema = json(r#"{"type":"object"}"#)
+        }),
+        ("methodology", |c| {
+            c.methodology.push_str(" Also reads blogs.")
+        }),
+        ("authorship", |c| c.authorship = "user".to_owned()),
+        ("tools", |c| {
+            if let Mode::Agentic(a) = &mut c.mode {
+                a.tools.pop();
+            }
+        }),
+        ("loop bounds", |c| {
+            if let Mode::Agentic(a) = &mut c.mode {
+                a.loop_bounds.max_turns = 20;
+            }
+        }),
+        ("an output schema", |c| {
+            if let Mode::Agentic(a) = &mut c.mode {
+                a.output_schemas
+                    .insert("monitor".to_owned(), output_schema());
+            }
+        }),
+    ];
+    for (index, (member, edit)) in edits.into_iter().enumerate() {
+        let mut content = another_model(&format!("llm.research_edit_{index}"));
+        edit(&mut content);
+        let model = content.model_ref();
+        assert_eq!(
+            offered(&mut registry, content),
+            Err(RegistryError::HarnessMismatch),
+            "an entry whose {member} differs from the offered role's is not offered"
+        );
+        assert_eq!(
+            registry.resolve(&model).map(|e| e.status()),
+            Ok(Status::Evaluating),
+            "a refused offer leaves the entry evaluating, so no pin may name it ({member})"
+        );
+    }
+}
+
+/// The check binds among entries offered for the same run kinds only: a single-call model, and an
+/// entry of another role, are offered beside the research role, and a role with nothing offered
+/// takes its first entry as it is.
+#[test]
+fn the_harness_check_binds_only_within_a_role() {
+    let (mut registry, research) = agentic_registry();
+    let mut desk = another_model("llm.desk");
+    if let Mode::Agentic(a) = &mut desk.mode {
+        a.output_schemas = BTreeMap::from([("owner".to_owned(), output_schema())]);
+        for tool in &mut a.tools {
+            tool.menu = vec!["owner".to_owned()];
+        }
+    }
+    assert_eq!(
+        offered(&mut registry, desk),
+        Ok(()),
+        "another role is offered"
+    );
+    registry.set_status(&research, Status::Withdrawn).unwrap();
+    let mut changed = another_model("llm.research_next");
+    changed.methodology.push_str(" A new harness.");
+    assert_eq!(
+        offered(&mut registry, changed),
+        Ok(()),
+        "with no entry of the role offered, the next one sets the role's harness"
     );
 }
