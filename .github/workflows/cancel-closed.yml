@@ -1,0 +1,53 @@
+# DEC-2646: when a pull request closes, merged or not, cancel the runs it still has queued or in
+# progress. A newer push to the same pull request already cancels its older runs, since each
+# workflow's concurrency group is keyed on the pull request's ref, but a closed one never gets a
+# newer run, so its last runs held CI's slots: on 2026-10-27 about 200 queued runs and 15 in
+# progress, from pull requests merged the day before, kept every new run waiting for hours.
+# Concurrency groups are shared across workflows, so each job here joins one workflow's group for
+# this pull request's ref with `cancel-in-progress`, which cancels that workflow's run, and then
+# does nothing. Pushes to `main` are never in these groups, so DEC-2610's post-merge runs are
+# untouched.
+name: cancel-closed
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    concurrency:
+      group: ci-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - run: echo "cancelled this pull request's ci runs"
+
+  codeql:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    concurrency:
+      group: codeql-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - run: echo "cancelled this pull request's CodeQL runs"
+
+  release-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    concurrency:
+      group: release-check-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - run: echo "cancelled this pull request's release-check runs"
+
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    concurrency:
+      group: web-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - run: echo "cancelled this pull request's web runs"
