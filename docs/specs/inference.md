@@ -476,7 +476,7 @@ The probe sets and thresholds are versioned configuration, fixed before the eval
   - `passed` holds only if all 15 runs ended in order and every check passed. A lying runtime can
     end a session early, never pass it.
 - **What the report holds.** The entry's pin, the probe set's digest, the endpoint and price table,
-  each call's request digest, reported identity, outcome, tokens, cost and `matched` verdict, each
+  each call's request digest, reported identity, outcome, tokens and cost, each run's verdict, each
   check's verdict, and `passed`, with the `stopped` code when it did not pass (`identity_mismatch`,
   `cap_refused`, `provider_failed`, `checks_failed`, `unmatched`, `incomplete`, `aborted`, or
   `timed_out`). A session belongs to the one connection that opened it, naming the probe set's
