@@ -140,3 +140,36 @@ fn a_store_holds_one_connection_however_many_calls_it_makes() {
         .unwrap();
     assert_eq!(held, 1, "the store's connections");
 }
+
+/// A reader past a head it holds reads only what follows it, checked from its hash: nothing past
+/// the head, the whole stream from genesis, and nothing at all for a hash that is not the chain's.
+#[test]
+fn rows_from_a_held_head_read_only_what_follows_it() {
+    let Some(db) = support::TestDb::new() else {
+        return;
+    };
+    let mut writer = PgStore::connect(&dsn(&db)).unwrap();
+    let epoch = writer.take_ownership(&stream()).unwrap();
+    let at = UtcNanos::from_parts(T, 0).unwrap();
+    let outcome = writer.append(&stream(), 0, epoch, at, &[opened(epoch)]);
+    assert!(
+        matches!(outcome, AppendOutcome::Committed(_)),
+        "{outcome:?}"
+    );
+    let reader = PgStore::connect(&dsn(&db)).unwrap();
+    let all = reader.rows(&stream()).unwrap();
+    assert_eq!(
+        reader.rows_from(&stream(), mandate_journal::TrustedStart::GENESIS),
+        Some(all.clone())
+    );
+    let past = mandate_journal::TrustedStart {
+        from_seq: all[0].seq + 1,
+        prev_hash: all[0].hash,
+    };
+    assert_eq!(reader.rows_from(&stream(), past), Some(Vec::new()));
+    let forked = mandate_journal::TrustedStart {
+        from_seq: 1,
+        prev_hash: mandate_canon::Digest::of(b"another chain"),
+    };
+    assert_eq!(reader.rows_from(&stream(), forked), None);
+}
