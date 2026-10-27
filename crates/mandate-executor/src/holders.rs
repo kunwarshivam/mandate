@@ -280,7 +280,7 @@ pub(crate) fn available_to_sell(
     not(test),
     expect(
         dead_code,
-        reason = "pending E7-watchdog-shared-position: the watchdog and the bound size on it"
+        reason = "pending E7-4 (DEC-2849 item 7): the watchdog and the bound size on it"
     )
 )]
 pub(crate) fn rule_13_size(
@@ -289,7 +289,7 @@ pub(crate) fn rule_13_size(
     _instrument: &InstrumentId,
 ) -> Result<Qty, ExecutorError> {
     Err(ExecutorError::Unimplemented {
-        story: "E7-watchdog-shared-position",
+        story: "E7-4",
     })
 }
 
@@ -855,7 +855,7 @@ mod tests {
     /// (its watchdog's, its bound's) is the oracle's min(Lᵢ, N, N less the working sells): never more
     /// than its own lots, never the owner's or another holder's, and never past what is left.
     #[test]
-    #[ignore = "pending E7-watchdog-shared-position"]
+    #[ignore = "pending E7-4"]
     fn rule_13_sizes_are_the_oracles() -> Result<(), String> {
         let mut runner = proptest::test_runner::TestRunner::new(ProptestConfig::with_cases(256));
         runner
@@ -900,7 +900,7 @@ mod tests {
     /// from its 10, it is the 5 not yet selling. An agent stopped or killed while its stop fires is
     /// sized the same: its exit still goes, sized to its own lots (rule 13).
     #[test]
-    #[ignore = "pending E7-watchdog-shared-position"]
+    #[ignore = "pending E7-4"]
     fn a_rule_13_exit_sells_its_own_lots_and_no_more() -> Result<(), ExecutorError> {
         let at = instrument(0)?;
         for (events, sizes) in [
