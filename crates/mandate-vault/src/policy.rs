@@ -15,9 +15,9 @@
 //! | Bars reader | the news data key | — | — |
 //! | Email sender | the email credential | — | — |
 //!
-//! The platform's own secrets ([`PlatformSecret`], DEC-2020) are each read by one identity, but
-//! the data key, which the news reader and the bars reader both read (DEC-2283 item 2), and are
-//! written only by the secret import; none is ever deleted, and a rotation writes over it.
+//! The platform's own secrets ([`PlatformSecret`], DEC-2020) are each read by one identity,
+//! except the data key, which the news reader and the bars reader both read (DEC-2283 item 2);
+//! each is written only by the secret import, none is ever deleted, and a rotation writes over it.
 
 use mandate_connections::record::{AccountRef, ConnectionId};
 
