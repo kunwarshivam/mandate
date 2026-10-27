@@ -634,8 +634,9 @@ fn nothing_working_is_never_reconciled_on_schedule() -> Result<(), Error> {
 
 /// E21-30: the fixture fills a marketable limit at the touch, as a venue does, and leaves a limit
 /// away from the touch resting. A buy of 2 SPY at 600 fills at the 580.13 ask; a sell of 1 at
-/// 551.11, a cell run's stop-priced flatten, fills at the 580.11 bid, never at 551.11; a buy at 570
-/// and a sell at 590 rest. Before, every limit filled at its own price, so that flatten booked a
+/// 551.11, a cell run's stop-priced flatten, fills at the 580.11 bid, never at 551.11; a buy at the
+/// ask itself and a sell at the bid itself fill there; a buy at 580.12, inside the spread, a buy at
+/// 570 and a sell at 590 rest, open. Before, every limit filled at its own price, so that flatten booked a
 /// loss of 29 a share no venue would have, and tripped a drawdown.
 #[test]
 fn a_marketable_limit_fills_at_the_touch_and_any_other_rests() -> Result<(), Error> {
@@ -648,11 +649,19 @@ fn a_marketable_limit_fills_at_the_touch_and_any_other_rests() -> Result<(), Err
     for (id, side, qty, limit) in [
         ("md-01JINTENT0000000000000000A", Side::Buy, "2", "600"),
         ("md-01JINTENT0000000000000000B", Side::Sell, "1", "551.11"),
-        ("md-01JINTENT0000000000000000C", Side::Buy, "1", "570"),
-        ("md-01JINTENT0000000000000000D", Side::Sell, "1", "590"),
+        ("md-01JINTENT0000000000000000C", Side::Buy, "1", "580.13"),
+        ("md-01JINTENT0000000000000000D", Side::Sell, "1", "580.11"),
+        ("md-01JINTENT0000000000000000E", Side::Buy, "1", "580.12"),
+        ("md-01JINTENT0000000000000000F", Side::Buy, "1", "570"),
+        ("md-01JINTENT0000000000000000G", Side::Sell, "1", "590"),
     ] {
         submit(&mut broker, spy(id, side, qty, limit)?)?;
     }
+    assert_eq!(
+        open_ids(&mut broker)?.len(),
+        3,
+        "the three away from the touch rest"
+    );
     let (booked, _) = fills(&mut broker, "")?;
     assert_eq!(
         booked
@@ -661,6 +670,8 @@ fn a_marketable_limit_fills_at_the_touch_and_any_other_rests() -> Result<(), Err
             .collect::<Vec<_>>(),
         [
             (Side::Buy, "2".to_owned(), "580.13".to_owned()),
+            (Side::Sell, "1".to_owned(), "580.11".to_owned()),
+            (Side::Buy, "1".to_owned(), "580.13".to_owned()),
             (Side::Sell, "1".to_owned(), "580.11".to_owned()),
         ]
     );
