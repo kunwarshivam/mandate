@@ -8,6 +8,7 @@ mod support;
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
 use mandate_canon::{Value, parse};
@@ -74,6 +75,8 @@ type Asked = Rc<std::cell::RefCell<Vec<(String, u64, String, String)>>>;
 /// Opens every agent on `research_equity_pinned` with `max_instruments`, recording each ask.
 struct Fixed {
     max_instruments: u64,
+    /// The staleness limit each fold opens with.
+    mark_max_age_s: u32,
     asked: Asked,
     opened: Rc<Cell<usize>>,
     /// The agents whose risk the book last handed the gate.
@@ -84,10 +87,17 @@ impl Fixed {
     fn new(max_instruments: u64) -> Self {
         Self {
             max_instruments,
+            mark_max_age_s: 60,
             asked: Asked::default(),
             opened: Rc::new(Cell::new(0)),
             published: Rc::default(),
         }
+    }
+
+    /// The same openings, each fold opening with a staleness limit of `mark_max_age_s`.
+    fn aged(mut self, mark_max_age_s: u32) -> Self {
+        self.mark_max_age_s = mark_max_age_s;
+        self
     }
 }
 
@@ -111,7 +121,7 @@ impl RiskOpenings for Fixed {
             instrument: XYZ.to_owned(),
             asset_class: AssetClass::UsEquity,
             inherited_loss_usd: Usd::ZERO,
-            mark_max_age_s: 60,
+            mark_max_age_s: self.mark_max_age_s,
         })
     }
 
@@ -799,13 +809,22 @@ fn open_xyz(journal: &Journal, id: &str) -> Result<(), Error> {
 }
 
 /// A feed quoting XYZ sane at its bid at the instant asked, or nothing while its bid is empty, and
-/// marking XYZ.
+/// marking XYZ once per its interval.
 #[derive(Clone)]
-struct QuotingXyz(Rc<std::cell::RefCell<&'static str>>);
+struct QuotingXyz(Rc<std::cell::RefCell<&'static str>>, Duration);
 
 impl QuotingXyz {
     fn at(bid: &'static str) -> Self {
-        Self(Rc::new(std::cell::RefCell::new(bid)))
+        Self(
+            Rc::new(std::cell::RefCell::new(bid)),
+            mandate_executord::marks::MARK_EVERY,
+        )
+    }
+
+    /// The same feed, marking XYZ once per `every`.
+    fn every(mut self, every: Duration) -> Self {
+        self.1 = every;
+        self
     }
 
     fn quote(&self, bid: &'static str) {
@@ -842,6 +861,10 @@ impl mandate_executord::quotes::QuoteFeed for QuotingXyz {
 impl mandate_executord::marks::Marked for QuotingXyz {
     fn instruments(&self) -> BTreeSet<InstrumentId> {
         InstrumentId::new(XYZ).into_iter().collect()
+    }
+
+    fn every(&self) -> Duration {
+        self.1
     }
 }
 
@@ -1042,5 +1065,80 @@ fn the_opening_equity_is_the_snapshots() -> Result<(), Error> {
         Some("20000"),
         "{equities:?}"
     );
+    Ok(())
+}
+
+/// The `stale_mark` rows (`no_sane_mark` set, `sane_mark` cleared) and marks the account stream
+/// holds after its first `from` rows, in order.
+fn staleness_after(journal: &Journal, from: usize) -> Vec<String> {
+    journal
+        .rows_of(ACCOUNT_STREAM)
+        .into_iter()
+        .skip(from)
+        .filter_map(|row| match row.event_type.as_str() {
+            "MarkUpdated" => Some("mark".to_owned()),
+            "InstrumentRestrictionChanged"
+                if payload_member(&row, "restriction").as_deref() == Some("stale_mark") =>
+            {
+                payload_member(&row, "reason")
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The agent holding XYZ in a fold whose staleness limit is 10 s, marked once per `every`, then
+/// ticked `spacing` seconds apart for two minutes from 15:05: the staleness rows and marks those
+/// ticks journaled.
+fn ticked(every: u64, spacing: u64) -> Result<Vec<String>, Error> {
+    let journal = deployed()?;
+    let broker = Paper::new(&journal);
+    let quotes = QuotingXyz::at("150").every(Duration::from_secs(every));
+    let mut process = holding(&journal, &broker, trading(Fixed::new(1).aged(10))?, &quotes)?;
+    let from = journal.rows_of(ACCOUNT_STREAM).len();
+    let start = at("2026-09-21T15:05:00Z")?.secs();
+    for step in 1..=120 / spacing {
+        let clock = mandate_time::UtcNanos::from_parts(start + i64::try_from(step * spacing)?, 0)?;
+        tick(&journal, &format!("s{step}"), &clock.to_string())?;
+        process.step(clock);
+    }
+    Ok(staleness_after(&journal, from))
+}
+
+/// DEC-2844: with a 10 s limit and ticks a second apart, marking at half the limit keeps a held
+/// instrument's mark fresh at every tick, so `stale_mark` is never set; the same ticks with marks
+/// 15 s apart, as before DEC-2844, set and clear it on every cycle (the rehearsal's flapping).
+#[test]
+fn marks_at_half_the_limit_never_let_a_held_instrument_go_stale() -> Result<(), Error> {
+    let half = ticked(5, 1)?;
+    assert!(half.contains(&"mark".to_owned()), "{half:?}");
+    assert!(
+        !half.iter().any(|row| row == "no_sane_mark"),
+        "marked every 5 s against a 10 s limit: {half:?}"
+    );
+    let fifteen = ticked(15, 1)?;
+    assert!(
+        fifteen.iter().filter(|row| *row == "no_sane_mark").count() >= 7,
+        "marked every 15 s against a 10 s limit, each cycle goes stale: {fifteen:?}"
+    );
+    Ok(())
+}
+
+/// DEC-2844's residual: ticks as far apart as the limit age the mark to it at each tick, so the
+/// instrument is set stale before that tick's mark clears it. A mark that old is never read as
+/// fresh, however often the executor asks to mark.
+#[test]
+fn ticks_as_far_apart_as_the_limit_set_the_mark_stale_at_each_tick() -> Result<(), Error> {
+    for spacing in [10, 12] {
+        let rows = ticked(5, spacing)?;
+        let ticks = usize::try_from(120 / spacing)?;
+        let expected: Vec<String> = ["no_sane_mark", "mark", "sane_mark"]
+            .iter()
+            .cycle()
+            .take(ticks * 3)
+            .map(|row| (*row).to_owned())
+            .collect();
+        assert_eq!(rows, expected, "ticks {spacing} s apart");
+    }
     Ok(())
 }
