@@ -129,6 +129,13 @@ pub fn establishment(
     })
 }
 
+/// Whether `row` is one of the account stream's records [`establishment`] reads, the only ones the
+/// process keeps of that stream (DEC-2854 item 2).
+#[must_use]
+pub fn establishing(row: &StoredEvent) -> bool {
+    matches!(row.event_type.as_str(), ESTABLISHED | "ConnectionChecked")
+}
+
 /// [`establishment`] over `store`'s account stream in `scope` and its control stream.
 ///
 /// # Errors
@@ -238,22 +245,21 @@ pub enum Connected {
     Closed,
 }
 
-/// One pass of the rule-68 gate over `process`'s journal at `now`: reads the account and control
-/// streams of `scope`, writes the establishment's copy through `process` when it is due and the
-/// process has started (until then the stream is still connecting), and opens `gate` once the
-/// stream holds it. A gate once open stays open.
+/// One pass of the rule-68 gate over `process`'s journal at `now`: reads its account and control
+/// streams ([`ExecutorProcess::establishment`]), writes the establishment's copy through `process`
+/// when it is due and the process has started (until then the stream is still connecting), and
+/// opens `gate` once the stream holds it. A gate once open stays open.
 ///
 /// # Errors
-/// [`establishment`]'s code, `stream_unavailable` when a stream cannot be read, and
+/// [`establishment`]'s code, `stream_unavailable` when a stream cannot be read,
+/// `journal_rewritten` when one no longer holds the head the process read it to, and
 /// `copy_refused` when the copy does not commit.
 pub fn pass<S: Store, B: Broker>(
     process: &mut ExecutorProcess<S, B>,
     gate: &OpeningGate,
-    scope: &AccountScope,
-    environment: Environment,
     now: UtcNanos,
 ) -> Result<Connected, &'static str> {
-    match read_establishment(process.store(), scope, environment)? {
+    match process.establishment(now)? {
         Establishment::Established => {}
         Establishment::ToCopy(_) if !process.state().started() => {
             return Ok(Connected::Connecting);

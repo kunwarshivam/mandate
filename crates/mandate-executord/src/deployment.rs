@@ -28,7 +28,7 @@ use std::time::Duration;
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_artifacts_fs::FsArtifactStore;
-use mandate_canon::{Digest, Value, parse};
+use mandate_canon::{Value, parse};
 use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
 use mandate_connections::record::ConnectionId;
 use mandate_domain::{CapabilityProfile, ProfileError};
@@ -57,6 +57,7 @@ use crate::gate::{AccountRules, AgentRisk, AssetRecord, DeployedGate, Liquidity,
 use crate::marks::Marked;
 use crate::quotes::QuoteFeed;
 use crate::risk::{GateRisk, RiskOpening, RiskOpenings};
+use crate::tail::Tail;
 use crate::{Broker, Protections, Unplanned, Wiring};
 
 /// How fresh, in risk-clock seconds, the journal's facts an opening reads must be: a mark within a
@@ -88,55 +89,6 @@ pub fn reading(read: impl Fn(&StreamId) -> Option<Vec<StoredEvent>> + 'static) -
             _ => Some(since),
         }
     })
-}
-
-/// One stream as far as it was read: what its records folded to, and the seq and hash of the last
-/// one, so the next read asks only for what follows it (DEC-2847).
-struct Tail<S> {
-    head: Option<(u64, Digest)>,
-    state: S,
-}
-
-impl<S> Tail<S> {
-    fn new(state: S) -> Self {
-        Self { head: None, state }
-    }
-
-    /// Reads what `rows` holds of `stream` past the head and folds each record into the state in
-    /// order with `fold`. A read past the head that the store refuses is read again from the first
-    /// record onto `fresh` state, so a held head that is not the stream's is never folded on;
-    /// `false` when neither reads, and then the state must not be read (`AGENTS.md` rule 3).
-    fn follow(
-        &mut self,
-        rows: &Rows,
-        stream: &StreamId,
-        fresh: impl Fn() -> S,
-        mut fold: impl FnMut(&mut S, &StoredEvent),
-    ) -> bool {
-        let start = self
-            .head
-            .map_or(TrustedStart::GENESIS, |(seq, hash)| TrustedStart {
-                from_seq: seq.saturating_add(1),
-                prev_hash: hash,
-            });
-        let since = match rows(stream, start) {
-            Some(since) => since,
-            None if self.head.is_some() => match rows(stream, TrustedStart::GENESIS) {
-                Some(all) => {
-                    self.head = None;
-                    self.state = fresh();
-                    all
-                }
-                None => return false,
-            },
-            None => return false,
-        };
-        for row in &since {
-            fold(&mut self.state, row);
-            self.head = Some((row.seq, row.hash));
-        }
-        true
-    }
 }
 
 /// A thesis record of an agent stream as [`replay_theses`] reads it: its type, and its payload, or
@@ -412,7 +364,7 @@ impl Deployment {
         let stream = self.0.control.as_ref()?;
         let mut tails = self.0.tails.try_borrow_mut().ok()?;
         let tail = tails.control.get_or_insert_with(|| Tail::new(Vec::new()));
-        tail.follow(&self.0.sources.rows, stream, Vec::new, |rows, row| {
+        tail.follow(&self.0.sources.rows, stream, |rows, row| {
             rows.push(row.clone());
         })
         .then(|| tail.state.clone())
@@ -559,10 +511,11 @@ impl Deployment {
     /// clock stream folded only past the head it was last read to.
     fn now(&self) -> Option<UtcNanos> {
         let stream = self.0.clock.as_ref()?;
-        let fresh = || Journaled::new("", stream.as_str(), "");
         let mut tails = self.0.tails.try_borrow_mut().ok()?;
-        let tail = tails.clock.get_or_insert_with(|| Tail::new(fresh()));
-        if !tail.follow(&self.0.sources.rows, stream, fresh, fold) {
+        let tail = tails
+            .clock
+            .get_or_insert_with(|| Tail::new(Journaled::new("", stream.as_str(), "")));
+        if !tail.follow(&self.0.sources.rows, stream, fold) {
             return None;
         }
         tail.state.now()
@@ -578,7 +531,7 @@ impl Deployment {
             .theses
             .entry(stream.as_str().to_owned())
             .or_insert_with(|| Tail::new(Vec::new()));
-        tail.follow(&self.0.sources.rows, &stream, Vec::new, |kept, row| {
+        tail.follow(&self.0.sources.rows, &stream, |kept, row| {
             if matches!(
                 row.event_type.as_str(),
                 "ThesisProposed" | "ThesisRevised" | "ThesisInvalidated"
@@ -1568,7 +1521,7 @@ mod incremental {
         assert_eq!(
             deployment.now(),
             latest_tick(&journal),
-            "refolded from the first record"
+            "read from the first record, which holds the head, and folded past it"
         );
         journal.refuse_next.set(true);
         assert_eq!(
@@ -1576,6 +1529,29 @@ mod incremental {
             Some(all_theses(&journal)),
             "never folded twice"
         );
+    }
+
+    /// DEC-2854 item 6: a refused read past the head whose read from the first record no longer
+    /// holds the head, as a rewrite that hashes the chain again leaves it, reads nothing, then or
+    /// after, so nothing the port folded is read and every opening it is read for is held.
+    #[test]
+    fn a_read_from_the_first_record_that_no_longer_holds_the_head_reads_nothing() {
+        let journal = Rc::new(Journal::default());
+        let deployment = deployment(&journal);
+        journal.tick(0);
+        assert_eq!(deployment.now(), latest_tick(&journal));
+        if let Some(head) = journal
+            .streams
+            .borrow_mut()
+            .get_mut(CLOCK)
+            .and_then(|rows| rows.last_mut())
+        {
+            head.hash = Digest::of(b"rewritten");
+        }
+        journal.tick(1);
+        assert_eq!(deployment.now(), None);
+        journal.tick(2);
+        assert_eq!(deployment.now(), None, "still nothing");
     }
 
     #[test]

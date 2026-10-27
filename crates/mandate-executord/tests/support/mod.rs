@@ -145,6 +145,20 @@ impl Journal {
         }
     }
 
+    /// Gives the last record of `stream` another hash, as a rewrite that hashes the chain again
+    /// leaves the record at a held head (DEC-2854 item 4).
+    pub fn rewrite_head(&self, stream: &str) {
+        if let Some(row) = self
+            .0
+            .borrow_mut()
+            .streams
+            .get_mut(stream)
+            .and_then(|rows| rows.last_mut())
+        {
+            row.hash = Digest::of(b"rewritten");
+        }
+    }
+
     pub fn rows_of(&self, stream: &str) -> Vec<StoredEvent> {
         self.0
             .borrow()

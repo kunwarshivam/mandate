@@ -210,13 +210,7 @@ fn serve_with<S: Store, B: Broker>(
         for alert in process.step(now()) {
             say(&alert_line(&alert));
         }
-        let passed = pass(
-            &mut process,
-            &gate,
-            &config.scope,
-            config.environment,
-            now(),
-        );
+        let passed = pass(&mut process, &gate, now());
         if let Some(code) = report.changed(passed) {
             say(code);
         }
