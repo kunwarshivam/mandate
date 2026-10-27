@@ -599,6 +599,8 @@ fn generations_past_their_retention_are_removed_and_nothing_else() {
         "2026-10-27T1420",
         "2026-10-27T1430",
         "junk",
+        "2026-10-27T141900",
+        "2026-10-27T14:1",
     ] {
         fs::create_dir_all(root.join("minutes").join(m)).unwrap();
     }
@@ -616,6 +618,8 @@ fn generations_past_their_retention_are_removed_and_nothing_else() {
             "daily/2026-10-26",
             "daily/notadate",
             "minutes/2026-10-27T1420",
+            "minutes/2026-10-27T141900",
+            "minutes/2026-10-27T14:1",
             "minutes/2026-10-27T1430",
             "minutes/junk",
         ]
@@ -929,6 +933,19 @@ fn a_minute_bar_outside_the_window_or_out_of_order_refuses_that_instrument() {
             symbol("FORMING"),
             symbol("TWICE")
         ]
+    );
+    fake.asked.borrow_mut().clear();
+    let mut writer = cell.writer();
+    writer.minute(&fake, minute, &instruments, minute).unwrap();
+    assert_eq!(fake.asked.borrow().len(), 1);
+    let again = writer
+        .minute(&fake, minute, &instruments, at("2026-10-27T14:30:30Z"))
+        .unwrap();
+    assert!(again.written.is_empty() && again.refused.is_empty());
+    assert_eq!(
+        fake.asked.borrow().len(),
+        1,
+        "an instrument refused for a minute is not asked again that minute"
     );
     for refused in ["FORMING", "EARLY", "TWICE", "BACK"] {
         assert!(

@@ -57,6 +57,12 @@ fn a_workspace_s_offsets_are_its_own_fixed_and_bounded() {
         );
     }
     assert_ne!(offsets[0], offsets[1], "two workspaces do not ask at once");
+    let fnv = |daily_s, minute_s| Jitter { daily_s, minute_s };
+    assert_eq!(
+        offsets,
+        [fnv(133, 5), fnv(100, 17), fnv(133, 5), fnv(137, 4)],
+        "FNV-1a of each id, reduced into each bound, as computed apart from this crate"
+    );
 }
 
 #[test]

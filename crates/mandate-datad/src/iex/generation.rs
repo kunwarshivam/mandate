@@ -149,6 +149,7 @@ pub struct Writer {
     refused: BTreeMap<(Date, Symbol), i64>,
     daily_failed: Option<(Date, i64)>,
     minute_failed: Option<i64>,
+    minute_refused: BTreeSet<(i64, Symbol)>,
     put: BTreeSet<(Date, String)>,
 }
 
@@ -190,6 +191,7 @@ impl Writer {
             refused: BTreeMap::new(),
             daily_failed: None,
             minute_failed: None,
+            minute_refused: BTreeSet::new(),
             put: BTreeSet::new(),
         })
     }
@@ -323,7 +325,7 @@ impl Writer {
     /// Writes the minute generation of the whole minute `minute` for every instrument of
     /// `instruments` not yet in it, at the clock `now`: the complete one-minute bars of the
     /// [`MINUTE_WINDOW_S`] before it, stored empty for an instrument with none. A minute whose
-    /// request failed is not asked again.
+    /// request failed is not asked again, nor an instrument refused for it.
     ///
     /// # Errors
     /// [`GenerationError::Early`] when `minute` is not a whole minute at or before `now`, and
@@ -343,6 +345,7 @@ impl Writer {
         if self.minute_failed == Some(minute.secs()) {
             return Ok(done);
         }
+        self.minute_refused.retain(|(at, _)| *at == minute.secs());
         let generation = minute_generation(&self.root, minute)
             .map_err(|_| GenerationError::Store { what: "layout" })?;
         let mut due = BTreeSet::new();
@@ -351,7 +354,10 @@ impl Writer {
                 done.refused.push(instrument.symbol.clone());
                 continue;
             };
-            if !dir.exists() {
+            let refused = self
+                .minute_refused
+                .contains(&(minute.secs(), instrument.symbol.clone()));
+            if !dir.exists() && !refused {
                 due.insert(instrument.symbol.clone());
             }
         }
@@ -376,6 +382,7 @@ impl Writer {
         for symbol in due {
             let served = bars.remove(&symbol).unwrap_or_default();
             let Some(by_day) = checked(served, start, minute, &window_days) else {
+                self.minute_refused.insert((minute.secs(), symbol.clone()));
                 done.refused.push(symbol);
                 continue;
             };
