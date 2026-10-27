@@ -18,9 +18,10 @@ fn refused(output: &Output) -> (Option<i32>, String) {
     )
 }
 
-/// DEC-2326 items 1 and 3: a live start exits 2 `live_not_built`.
+/// DEC-2216 item 4, DEC-2326 item 3: a live start missing its vault flags exits 2 with the first
+/// one's code, before it reads anything, builds a provider client, or opens a socket.
 #[test]
-fn a_live_start_exits_live_not_built() {
+fn a_live_start_without_its_vault_flags_exits_with_its_code() {
     let output = gatewayd(&[
         "run",
         "--registry",
@@ -30,7 +31,10 @@ fn a_live_start_exits_live_not_built() {
         "--probe",
         "/tmp/unused.sock",
     ]);
-    assert_eq!(refused(&output), (Some(2), "live_not_built\n".to_owned()));
+    assert_eq!(
+        refused(&output),
+        (Some(2), "vault_address_missing\n".to_owned())
+    );
 }
 
 /// DEC-2326 item 2: with its start-up values unset, `run` exits 2 naming the first one missing,

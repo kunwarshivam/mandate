@@ -26,6 +26,7 @@ pub mod cap;
 pub mod config;
 pub mod control;
 pub mod key;
+pub mod live;
 pub mod recorded;
 pub mod run;
 pub mod serve;
