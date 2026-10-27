@@ -288,9 +288,7 @@ pub(crate) fn rule_13_size(
     _agent: &AgentId,
     _instrument: &InstrumentId,
 ) -> Result<Qty, ExecutorError> {
-    Err(ExecutorError::Unimplemented {
-        story: "E7-4",
-    })
+    Err(ExecutorError::Unimplemented { story: "E7-4" })
 }
 
 /// Takes `quantity` of an account switch's close in `instrument` out of its holders, for
