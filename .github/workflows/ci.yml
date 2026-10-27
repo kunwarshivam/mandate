@@ -96,7 +96,11 @@ jobs:
   # one-line reasons `fast` and `full` print. It builds only xtask.
   select:
     if: ${{ !github.event.pull_request.draft }}
-    runs-on: ubuntu-24.04
+    # DEC-2075: `select` runs where the cell jobs and the aggregates do, by the same guard written
+    # out in full (it cannot read its own output), so a run on this repository's own branches or on
+    # `main` needs no hosted runner to reach the self-hosted pool. A fork's pull request, any other
+    # event, and any run while CI_RUNNER is unset, take `ubuntu-24.04`.
+    runs-on: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -111,11 +115,11 @@ jobs:
       cell_web: ${{ steps.select.outputs.cell_web }}
       reasons: ${{ steps.select.outputs.reasons }}
       # DEC-2065. Where the cell jobs run: the founder's self-hosted runners, named by the repository
-      # variable CI_RUNNER, but only for main's own runs and pull requests from this repository's
-      # branches. A fork's pull request, and any run while CI_RUNNER is unset, stays on GitHub's
+      # variable CI_RUNNER, but only for main's own pushes and dispatches and pull requests from this
+      # repository's branches (DEC-2075). A fork's pull request, and any run while CI_RUNNER is unset, stays on GitHub's
       # runners. A fork's pull request brings its own workflow, so this keeps honest runs off them;
       # what stops a fork is the approval setting and the runners' own job-started hook.
-      runner: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}
+      runner: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
