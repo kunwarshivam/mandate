@@ -21,11 +21,12 @@ const OPENED: &str = "StreamOpened";
 const RESERVED: &str = "MeterReserved";
 const SETTLED: &str = "MeterSettled";
 
+/// The purposes of a call with no agent: the compiler's and an evaluation's (rule 156, DEC-2216).
+const NO_AGENT_PURPOSES: [&str; 2] = ["compiler", "evaluation"];
+
 /// The outcomes of a call that reached for a provider and found its deadline passed, or the vault
 /// without its key, before the first attempt left: the only ones that may send nothing (rules 152
 /// and 157).
-/// The purposes of a call with no agent: the compiler's and an evaluation's (rule 156, DEC-2216).
-const NO_AGENT_PURPOSES: [&str; 2] = ["compiler", "evaluation"];
 const SENT_NOTHING: [&str; 2] = ["deadline_exceeded", "credential_invalid"];
 
 /// The agent harness spec §6.5 check reasons only a thesis's verdict may carry (rule 151);
