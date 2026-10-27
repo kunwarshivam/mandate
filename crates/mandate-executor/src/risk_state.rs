@@ -647,7 +647,11 @@ impl<'c> AccountRiskFold<'c> {
     }
 
     /// Reads the row after the head: its body, its type and version, and, for a tick or a
-    /// version-2 mark, the risk state's steps.
+    /// version-2 mark, the risk state's steps. A risk or mode record naming another agent, by
+    /// `agent_id` or `agent` spelled other than this fold's agent exactly, is another fold's and
+    /// steps nothing (DEC-2849 I7): it pops nothing this fold owes, so an owed record it stands in
+    /// for stays owed and is appended again, and the journal's hash chain, not this fold, answers
+    /// for a record rewritten to name someone else.
     fn read(&mut self, row: &StoredEvent) -> Result<Vec<RiskAppend>, UnreadableCause> {
         let body = parse(&row.body).map_err(|_| UnreadableCause::Undecodable)?;
         let payload = body
@@ -662,7 +666,12 @@ impl<'c> AccountRiskFold<'c> {
                 .any(|owed| owed.causation_id.as_deref() == Some(cause))
         });
         let others_mode = row.event_type == "AgentModeApplied" && !owed_cause;
-        if FOLD_RECORDS.contains(&row.event_type.as_str()) && !others_mode {
+        let others_record = payload
+            .get("agent_id")
+            .or_else(|| payload.get("agent"))
+            .and_then(Value::as_str)
+            .is_some_and(|named| named != self.agent);
+        if FOLD_RECORDS.contains(&row.event_type.as_str()) && !others_mode && !others_record {
             return match self.owed.front() {
                 Some(owed) if reproduces(owed, row, &body) => {
                     self.owed.pop_front();
