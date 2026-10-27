@@ -18,6 +18,7 @@ use mandate_risk::{
 
 use crate::batch::config_refs;
 use crate::error::ExecutorError;
+use crate::holders;
 use crate::payload::{object, text};
 use crate::ports::{
     BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource, Ports,
@@ -43,10 +44,12 @@ pub struct PartialGateDecision {
     /// since this process started (#206 review; #230 review, minor 1).
     held: bool,
     /// An allowed discretionary exit sized to what is left beside the rungs exit ladders will
-    /// still send (DEC-410 item 3): journaled as `sized_qty`, and folded into the intent's
-    /// quantity.
+    /// still send (DEC-410 item 3), and within the agent's sell authority less its own working
+    /// sells (DEC-2849 I3, [`holders::discretionary_room`]): journaled as `sized_qty`, and folded
+    /// into the intent's quantity.
     sized: Option<Qty>,
-    /// An allowed discretionary exit with nothing left beside those rungs (DEC-410 item 3): denied
+    /// An allowed discretionary exit with nothing left beside those rungs or within that authority
+    /// (DEC-410 item 3, DEC-2849 I3): denied
     /// `sell_exceeds_available` only if nothing else holds it now ([`Self::crowded_out`]), so a
     /// hold for the session or a price comes first and it is decided again at release.
     crowded: bool,
@@ -331,6 +334,15 @@ pub(crate) fn account_stream_checks(
         room
     };
     let discretionary = proposal.purpose == Purpose::DiscretionaryExit;
+    let left = if sell && discretionary {
+        left.min(holders::discretionary_room(
+            state,
+            proposal.agent,
+            proposal.instrument,
+        )?)
+    } else {
+        left
+    };
     let exceeds = sell && room < proposal.qty;
     record(
         "sell_exceeds_available",
@@ -1019,8 +1031,8 @@ mod remainder_tests {
         Seq, WorkspaceId,
     };
 
-    /// Ten AAPL held, `agent-b`'s lone ladder parked between rungs with 4 of its rung unsold, and,
-    /// where `selling` is set, a live risk exit of that many beside it.
+    /// Ten AAPL held, all `agent-a`'s lots, `agent-b`'s lone ladder parked between rungs with 4 of
+    /// its rung unsold, and, where `selling` is set, a live risk exit of that many beside it.
     fn parked(selling: Option<&str>) -> Result<ExecutorState, ExecutorError> {
         let aapl = InstrumentId::new("AAPL")?;
         let agent = AgentId("agent-b".to_owned());
@@ -1031,6 +1043,7 @@ mod remainder_tests {
         state
             .positions
             .insert(aapl.clone(), SignedQty::parse("10")?);
+        crate::holders::bought(&mut state, "agent-a", &aapl, "10")?;
         let intent = IntentId(EventId("01JABCDEFGHJKMNPQRSTV00001".to_owned()));
         let sell = |id: ClientOrderId, qty: &str, at: OrderState| -> Result<Order, ExecutorError> {
             Ok(Order {
@@ -1264,6 +1277,154 @@ mod remainder_tests {
                 buy.crowded_out().verdict_name()
             ),
             ("allow", None, "allow")
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod sell_authority_tests {
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_num::{Qty, SignedQty};
+
+    use super::{PartialGateDecision, Proposal, account_stream_checks};
+    use crate::error::ExecutorError;
+    use crate::holders::bought;
+    use crate::ids::ClientOrderId;
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Ids, executor_config, fees};
+    use crate::state::ExecutorState;
+    use crate::types::{
+        AccountRef, AccountScope, AgentId, Order, OrderState, Purpose, WorkspaceId,
+    };
+
+    /// `position` AAPL held, with each of `lots` an agent's filled buy.
+    fn holding(position: &str, lots: &[(&str, &str)]) -> Result<ExecutorState, ExecutorError> {
+        let aapl = InstrumentId::new("AAPL")?;
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state
+            .positions
+            .insert(aapl.clone(), SignedQty::parse(position)?);
+        for (agent, qty) in lots {
+            bought(&mut state, agent, &aapl, qty)?;
+        }
+        Ok(state)
+    }
+
+    fn ask(
+        state: &ExecutorState,
+        agent: &str,
+        qty: &str,
+        purpose: Purpose,
+    ) -> Result<PartialGateDecision, ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        account_stream_checks(
+            state,
+            &Proposal {
+                agent: &AgentId(agent.to_owned()),
+                instrument: &InstrumentId::new("AAPL")?,
+                side: Side::Sell,
+                qty: Qty::parse(qty)?,
+                purpose,
+                protection: None,
+                limit: Some(mandate_num::Price::parse("150")?),
+                market: false,
+                tif: crate::types::TimeInForce::Day,
+                flatten: false,
+                owner_confirmed_bid: None,
+            },
+            &ports,
+        )
+    }
+
+    fn outcome(decision: PartialGateDecision) -> (&'static str, String, Option<Qty>) {
+        let decision = decision.crowded_out();
+        (
+            decision.verdict_name(),
+            decision.reason_code().to_owned(),
+            decision.sized(),
+        )
+    }
+
+    fn qty(text: &str) -> Result<Option<Qty>, ExecutorError> {
+        Ok(Some(Qty::parse(text)?))
+    }
+
+    /// DEC-2849 I3 with an owner's residual: `agent-a` holds 10 of 15, the owner 5. Its
+    /// discretionary exit of 12 is trimmed to its 10, never the owner's shares; its risk exit of
+    /// 12 is not sized to its authority (I4), and the owner's shares are no agent's to sell.
+    #[test]
+    fn a_discretionary_exit_is_trimmed_to_the_agents_lots() -> Result<(), ExecutorError> {
+        let state = holding("15", &[("agent-a", "10")])?;
+        assert_eq!(
+            outcome(ask(&state, "agent-a", "12", Purpose::DiscretionaryExit)?),
+            ("allow", String::new(), qty("10")?)
+        );
+        assert_eq!(
+            outcome(ask(&state, "agent-a", "12", Purpose::RiskExit)?),
+            ("allow", String::new(), None)
+        );
+        assert_eq!(
+            outcome(ask(&state, "agent-b", "1", Purpose::DiscretionaryExit)?),
+            ("deny", "sell_exceeds_available".to_owned(), None),
+            "an agent with no lots has no authority"
+        );
+        Ok(())
+    }
+
+    /// DEC-2849's worked example at the gate: `agent-a` and `agent-b` hold 5 each and the owner
+    /// sold 4 outside Mandate, so D is 4 and each may sell 1. A discretionary exit of 5 is trimmed
+    /// to 1; beside its own working sell of 1 nothing is left and it is refused
+    /// `sell_exceeds_available`; a risk exit of 5 goes whole (I4).
+    #[test]
+    fn a_deficit_shrinks_every_holders_authority() -> Result<(), ExecutorError> {
+        let mut state = holding("6", &[("agent-a", "5"), ("agent-b", "5")])?;
+        assert_eq!(
+            outcome(ask(&state, "agent-a", "5", Purpose::DiscretionaryExit)?),
+            ("allow", String::new(), qty("1")?)
+        );
+        assert_eq!(
+            outcome(ask(&state, "agent-a", "5", Purpose::RiskExit)?),
+            ("allow", String::new(), None)
+        );
+        let working = Order {
+            client_order_id: ClientOrderId::parse("md-working-a")?,
+            intent_id: None,
+            agent: Some(AgentId("agent-a".to_owned())),
+            instrument: InstrumentId::new("AAPL")?,
+            side: Side::Sell,
+            qty: Qty::parse("1")?,
+            filled_qty: Qty::ZERO,
+            state: OrderState::Accepted,
+            attempt: 1,
+            purpose: Purpose::DiscretionaryExit,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        };
+        state
+            .orders
+            .insert(working.client_order_id.clone(), working);
+        assert_eq!(
+            outcome(ask(&state, "agent-a", "1", Purpose::DiscretionaryExit)?),
+            ("deny", "sell_exceeds_available".to_owned(), None)
+        );
+        assert_eq!(
+            outcome(ask(&state, "agent-b", "5", Purpose::DiscretionaryExit)?),
+            ("allow", String::new(), qty("1")?),
+            "another agent's working sell spends none of agent-b's authority"
         );
         Ok(())
     }

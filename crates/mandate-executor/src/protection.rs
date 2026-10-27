@@ -9464,17 +9464,21 @@ mod sequence_tests {
             .collect()
     }
 
-    /// `agent-b`'s passive exit of 4 placed at 0 while `agent-a`'s marketable exit of 3 still
-    /// waits on its own acknowledged opening (§5.3 rule 5): the placement is sized around the
-    /// waiting exit (4 + 3 of stop over ten shares) and hands the sequence on.
+    /// `agent-a`'s passive exit of 4 of its ten shares placed at 0 while `agent-b`'s marketable
+    /// risk exit of 3 still waits on its own acknowledged opening (§5.3 rule 5): the placement is
+    /// sized around the waiting exit (4 + 3 of stop over ten shares) and hands the sequence on. The
+    /// discretionary exit is the holder's, as DEC-2849 I3 requires.
     fn placed_around_a_waiting_exit(
         ports: &Ports<'_>,
     ) -> Result<(Executor, Vec<Effect>), ExecutorError> {
-        let mut executor = protected_with_an_opening(ports, "agent-a", true)?;
-        let passive = sell_as("agent-b", EXIT, "4", "160", Purpose::DiscretionaryExit)?;
+        let mut executor = protected_with_an_opening(ports, "agent-b", true)?;
+        let passive = sell_as("agent-a", EXIT, "4", "160", Purpose::DiscretionaryExit)?;
         let asked = executor.run(passive, ports)?;
         assert_eq!(actions(&asked), vec!["passive_start"]);
-        let waiting = executor.run(sell(SECOND, "3", "139", Purpose::RiskExit)?, ports)?;
+        let waiting = executor.run(
+            sell_as("agent-b", SECOND, "3", "139", Purpose::RiskExit)?,
+            ports,
+        )?;
         assert_eq!(cancels(&waiting), vec![BUY, OCO]);
         assert_eq!(submitted(&waiting), 0);
         let placed = executor.run(cancel_accepted(OCO), ports)?;
@@ -14832,7 +14836,7 @@ mod sequence_tests {
         let handed = [
             ("intent_id", text(EXIT)),
             ("entry", text("md-held-1")),
-            ("agent_id", text("agent-b")),
+            ("agent_id", text("agent-a")),
             ("stop", text("140")),
             ("take_profit", text("170")),
         ];
@@ -16169,7 +16173,7 @@ mod remainder_pins {
         }
     }
 
-    /// Ten AAPL held and a live risk exit of 3 by `agent-c`, beside `agent-a`'s sequence whose
+    /// Ten AAPL held, all `agent-d`'s lots, and a live risk exit of 3 by `agent-c`, beside `agent-a`'s sequence whose
     /// stepped rung left 5 unsold ([`SEQUENCE`]) and `lone_agent`'s lone ladder, parked where
     /// `parked` is set, whose stepped rung left 4 unsold ([`LONE`]). [`SEQUENCE`]'s id sorts first.
     fn two_ladders(lone_agent: &str, parked: bool) -> Result<ExecutorState, ExecutorError> {
@@ -16182,6 +16186,7 @@ mod remainder_pins {
         state
             .positions
             .insert(aapl.clone(), SignedQty::parse("10")?);
+        crate::holders::bought(&mut state, "agent-d", &aapl, "10")?;
         for order in [
             sell(SEQUENCE, "agent-a", "5", OrderState::Canceled)?,
             sell(LONE, lone_agent, "4", OrderState::Canceled)?,
