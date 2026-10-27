@@ -1366,11 +1366,10 @@ the identical weights) and item 10 (a reported identity that differs from the pi
    The entry also pins the reasoning mode and effort and `top_p`, and the request keeps §6.12's
    stable order. Answered by inference spec v0.4 (INF-5, §3.1, §3.2, §4.1, §6, §7.3).
 
-
 **The gate mode** ([DEC-2217](../project/decisions/DEC-2217.md)). The research runtime's binary
 has a `gate` mode, run only as the one-shot gate Job of inference spec §4.3. It drives each of the
 probe set's runs through this spec's research run (§6.9 to §6.11) and the worker's dispatch,
-unchanged, with these differences:
+unchanged but for its calls' purpose and their missing agent, with these differences:
 - its readers are fixture readers over the probe set's corpus;
 - its store is in memory, discarded at exit, and it writes no journal and no agent stream;
 - it has no broker and no account;
@@ -1379,6 +1378,7 @@ unchanged, with these differences:
 
 Nothing it decides is trusted: the gateway service recomputes every input, tool result and check
 before it writes the gate's report.
+
 ### 10.2 The data plane ([data-plane spec](data-plane.md))
 
 | Need | Contract |
