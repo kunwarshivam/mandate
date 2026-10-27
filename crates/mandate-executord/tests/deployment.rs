@@ -2370,3 +2370,78 @@ fn a_cold_start_resolves_the_same_with_every_research_object_gone_or_corrupted()
     std::fs::remove_dir_all(&dir).ok();
     Ok(())
 }
+
+/// `AGENTS.md` rule 13, lane DR's rehearsal of 2026-10-27: after the demo agent's opening fills, the
+/// owner's exit of the position at the market, unconfirmed, is received and sold, never lost.
+#[test]
+fn an_owner_exit_at_the_market_after_the_opening_fills_is_received_and_sold() -> Result<(), Error> {
+    let (journal, mut process, _paper) = trade_loop(Variant {
+        demo: true,
+        ..Variant::default()
+    })?;
+    for second in (5..120).step_by(5) {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(&journal, &format!("tl{second}"), &now)?;
+        process.step(at(&now)?);
+    }
+    journal.write(
+        &support::agent_stream(AGENT),
+        "01JOWNEXITREQ0000000000001",
+        "OwnerExitRequested",
+        1,
+        Some("command"),
+        object(vec![
+            ("bid", Value::Null),
+            ("bid_size", Value::Null),
+            ("confirmed", Value::Bool(false)),
+            ("floor", Value::Null),
+            ("scope", text("instrument")),
+            ("step_up", Value::Null),
+            ("step_up_status", text("absent")),
+            ("subject", text(SPY)),
+            ("user", text("u1")),
+        ])?,
+    )?;
+    journal.write(
+        &support::agent_stream(AGENT),
+        "01JOWNEXIT0000000000000001",
+        "IntentProposed",
+        1,
+        Some("01JOWNEXITREQ0000000000001"),
+        object(vec![
+            ("instrument_id", text(SPY)),
+            ("limit_price", Value::Null),
+            ("purpose", text("owner_exit")),
+            ("qty", text("1")),
+            ("side", text("sell")),
+            ("tif", text("day")),
+            ("type", text("market")),
+        ])?,
+    )?;
+    let mut alerts = Vec::new();
+    for second in (120..240).step_by(5) {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(&journal, &format!("tx{second}"), &now)?;
+        alerts.extend(process.step(at(&now)?));
+    }
+    let types = journal.types(ACCOUNT_STREAM);
+    let received: Vec<_> = journal
+        .payloads("IntentReceived")
+        .into_iter()
+        .filter(|p| p.get("purpose").and_then(Value::as_str) == Some("owner_exit"))
+        .collect();
+    assert_eq!(
+        received.len(),
+        1,
+        "the owner's exit is received: {types:?} alerts {:?}",
+        alerts.iter().map(|a| a.key).collect::<Vec<_>>()
+    );
+    let sold = ["FillApplied", "LateFillApplied"].iter().any(|kind| {
+        journal
+            .payloads(kind)
+            .iter()
+            .any(|p| p.get("side").and_then(Value::as_str) == Some("sell"))
+    });
+    assert!(sold, "and sold: {types:?}");
+    Ok(())
+}
