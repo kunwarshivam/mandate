@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   isolated-job:
-    runs-on: [self-hosted, mandate-ci-do]
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && 'mandate-ci-do' || 'ubuntu-24.04' }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
