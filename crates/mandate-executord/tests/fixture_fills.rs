@@ -632,6 +632,45 @@ fn nothing_working_is_never_reconciled_on_schedule() -> Result<(), Error> {
     Ok(())
 }
 
+/// E21-30: the fixture fills a marketable limit at the touch, as a venue does, and leaves a limit
+/// away from the touch resting. A buy of 2 SPY at 600 fills at the 580.13 ask; a sell of 1 at
+/// 551.11, a cell run's stop-priced flatten, fills at the 580.11 bid, never at 551.11; a buy at 570
+/// and a sell at 590 rest. Before, every limit filled at its own price, so that flatten booked a
+/// loss of 29 a share no venue would have, and tripped a drawdown.
+#[test]
+fn a_marketable_limit_fills_at_the_touch_and_any_other_rests() -> Result<(), Error> {
+    let mut broker = broker()?;
+    let spy = |id: &str, side: Side, qty: &str, limit: &str| -> Result<SubmitOrder, Error> {
+        let mut placed = order(id, side, qty, limit)?;
+        placed.instrument = InstrumentId::new("SPY")?;
+        Ok(placed)
+    };
+    for (id, side, qty, limit) in [
+        ("md-01JINTENT0000000000000000A", Side::Buy, "2", "600"),
+        ("md-01JINTENT0000000000000000B", Side::Sell, "1", "551.11"),
+        ("md-01JINTENT0000000000000000C", Side::Buy, "1", "570"),
+        ("md-01JINTENT0000000000000000D", Side::Sell, "1", "590"),
+    ] {
+        submit(&mut broker, spy(id, side, qty, limit)?)?;
+    }
+    let (booked, _) = fills(&mut broker, "")?;
+    assert_eq!(
+        booked
+            .iter()
+            .map(|fill| (fill.side, fill.qty.to_string(), fill.price.to_string()))
+            .collect::<Vec<_>>(),
+        [
+            (Side::Buy, "2".to_owned(), "580.13".to_owned()),
+            (Side::Sell, "1".to_owned(), "580.11".to_owned()),
+        ]
+    );
+    assert_eq!(
+        held(&mut broker)?,
+        [("SPY".to_owned(), "1".to_owned(), "580.13".to_owned())]
+    );
+    Ok(())
+}
+
 /// DEC-2813: the fixture takes one of its assets' ids as an order's `symbol`, as Alpaca does, and
 /// names that asset by its ticker in the answer, the order read back, the position and the fill;
 /// a symbol that is no asset's id stays as sent.
