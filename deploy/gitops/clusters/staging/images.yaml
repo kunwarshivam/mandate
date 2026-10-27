@@ -3,5 +3,12 @@
 # gitops promote` (DEC-2016); change it only through a promotion.
 deploymentTier: staging
 images:
-  api: ghcr.io/kunwarshivam/mandate/mandate-api-server@sha256:e64c36037963603ceceed2206fb434566ff784f45a295b00a4f313353d1fc0ca
-  mandate: ghcr.io/kunwarshivam/mandate/mandate@sha256:b5645d663d8b9e80d2b4e297148b06989337ac6824bf5ea57592499396dd9b08
+  api: ghcr.io/kunwarshivam/mandate/mandate-api-server@sha256:937bb036249bda67f2f83d23f064cfdabaf87eda8e2efdbeee88e6a46f484a70
+  deploy-manager: ghcr.io/kunwarshivam/mandate/mandate-deployd@sha256:f37170eda719c3e3e371e83c7ea28a4add1c82e0585b0cd2dc1d1e9287a74aa6
+  dispatcher: ghcr.io/kunwarshivam/mandate/mandate-dispatcher@sha256:4b0219a25c0939f6e96074e6adf61f06c027665946729f3e0adfa59a5a5d0891
+  executor: ghcr.io/kunwarshivam/mandate/mandate-executord@sha256:8bb076b51959a48a0138f1160dbdf1ee26c7364643b3cf3806bf5a914ef9700b
+  mandate: ghcr.io/kunwarshivam/mandate/mandate@sha256:5f0563d3f0e19e0717449deb7bf7352c1e95fc7e967ab898c5cf53fe6673f530
+  role-provisioner: ghcr.io/kunwarshivam/mandate/mandate-provisionerd@sha256:d97fcb89a809962fce07448c2cd0bc8bc11369965ccddaa8951e683e80d0314d
+  runtime: ghcr.io/kunwarshivam/mandate/mandate-daemon@sha256:34a970028e4f3eda58bfa130df9df09bc6c67af3bd472d650a98d96063f5b1d0
+  scheduler: ghcr.io/kunwarshivam/mandate/mandate-scheduler@sha256:a0679f5b300dffc637ceaecebfb4a266db9f9f37c5a4eca56b12ba35e9f13f30
+  token-exchange: ghcr.io/kunwarshivam/mandate/mandate-token-exchange@sha256:84608b499ef5cce0097c8d8fa75dc3a7d12876bada7b0c4d48b1ebbc5a02400a

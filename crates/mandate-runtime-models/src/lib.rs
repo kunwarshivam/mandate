@@ -40,7 +40,8 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use mandate_accounting::InstrumentId;
-use mandate_bars::{closes_object, daily_dir, trusted_daily_closes};
+use mandate_bars::generations::{GENERATIONS_ROOT, daily_dir_at};
+use mandate_bars::{closes_object, trusted_daily_closes};
 use mandate_canon::{Value, parse};
 use mandate_daemon::models::{Evaluated, Models, Streams};
 use mandate_daemon::{ArtifactSink, ModelsWiring};
@@ -83,10 +84,22 @@ pub fn registry(control: &[StoredEvent], environment: Environment) -> Option<Reg
     Some(registry)
 }
 
-/// The observation source of the closes stored under `bars`: only the cell's recording is named
-/// (DEC-2385 item 7), so any other root gives none.
+/// The observation `source` of the closes the workspace data process stores from Alpaca's IEX
+/// daily bars (DEC-846 item 3, DEC-2283 item 6).
+pub const IEX_SOURCE: &str = "alpaca_iex_daily_bars";
+
+/// The observation source of the closes stored under `bars`: the cell's recording, or the data
+/// process's IEX generations (DEC-2283 item 6, superseding DEC-2385 item 7); any other root gives
+/// none, so it wires no models.
 pub fn source(bars: &Path) -> Option<&'static str> {
-    (bars.file_name()? == OsStr::new(RECORDING)).then_some(RECORDED_SOURCE)
+    let name = bars.file_name()?;
+    if name == OsStr::new(RECORDING) {
+        Some(RECORDED_SOURCE)
+    } else if name == OsStr::new(GENERATIONS_ROOT) {
+        Some(IEX_SOURCE)
+    } else {
+        None
+    }
 }
 
 /// One pin the composer evaluates, with the symbol its daily dataset is stored under.
@@ -203,7 +216,7 @@ impl PinnedModels {
 
     /// `pinned`'s output at `now` and whether it is an exit, or none for any refusal.
     fn said(&self, pinned: &Pinned, now: UtcNanos) -> Option<(Evaluated, bool)> {
-        let dir = daily_dir(&self.bars, &pinned.symbol).ok()?;
+        let dir = daily_dir_at(&self.bars, &pinned.symbol, now).ok()?;
         let daily = DailyCloses {
             instrument_id: pinned.pin.instrument_id.clone(),
             closes: trusted_daily_closes(&dir, &pinned.symbol, now).ok()?,

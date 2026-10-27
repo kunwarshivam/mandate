@@ -8,7 +8,7 @@ use mandate_domain::MarketSession;
 use mandate_num::{Adverse, Fraction, Price, Qty, Rounding, ShareIncrement, SignedQty, TickRule};
 
 use mandate_accounting::Side;
-use mandate_canon::Value;
+use mandate_canon::{Object, Value};
 use mandate_time::{Date, ExchangeCalendar};
 
 use crate::batch::Batch;
@@ -22,7 +22,7 @@ use crate::intent::{
 use crate::kill::{confirmed_bid, flatten_closes, flatten_room, floor_of, is_flatten, mode_holds};
 use crate::listing::query_unknown;
 use crate::orders::{StateEvidence, legal, transition};
-use crate::payload::{int, text};
+use crate::payload::{int, object, text};
 use crate::ports::Ports;
 use crate::session::{
     Venue, closed_hold, extended_hours, same_session, stops_trigger_since, venue,
@@ -1288,16 +1288,26 @@ fn park(
     if parked {
         return Ok(());
     }
+    let session = object(vec![
+        ("id", text("session")),
+        ("result", text("fail")),
+        ("inputs", Value::Object(Object::new())),
+        ("computed", Value::Object(Object::new())),
+    ])?;
     let pairs = vec![
         ("intent_id", text(intent.0.0.clone())),
         ("verdict", text("hold")),
         ("reason_code", text(reason)),
+        ("data_profile", text("account_stream_only")),
+        ("quotes_used", Value::Array(Vec::new())),
+        ("marks_used", Value::Array(Vec::new())),
+        ("checks", Value::Array(vec![session])),
         ("parked", Value::Bool(true)),
         ("held_long", Value::Bool(true)),
-        ("evaluation", text("account_stream_only")),
     ];
     let refs = crate::intent::intent_refs(batch, intent)?;
-    let decided = batch.journal_with_refs("GateDecided", None, refs, pairs)?;
+    let decided =
+        batch.journal_with_refs("GateDecided", None, refs, crate::intent::own_members(pairs))?;
     batch.notify(decided, OwnerAlertKind::ExitStalled);
     Ok(())
 }
@@ -2310,7 +2320,10 @@ fn handed(view: &ExecutorState, sequence: &ExitSequence) -> bool {
 /// quantity — the set `gate::available` walks, and one back in `Intent` for its resubmission — and
 /// every exit received that has no order yet. Stop coverage beyond the position less this would
 /// outlast the position once they fill (#286 round 2, M1′).
-fn still_selling(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+pub(crate) fn still_selling(
+    view: &ExecutorState,
+    instrument: &InstrumentId,
+) -> Result<Qty, ExecutorError> {
     let live = view
         .orders
         .values()
@@ -2379,7 +2392,7 @@ fn protectable(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, E
 
 /// What a sell of ours has sold as [`long`] reads it: its applied fills, or, once it ended, the
 /// larger fill the broker reported for it that no fill update has applied yet.
-fn sold(view: &ExecutorState, id: &ClientOrderId, order: &Order) -> Qty {
+pub(crate) fn sold(view: &ExecutorState, id: &ClientOrderId, order: &Order) -> Qty {
     let reported = view
         .details
         .get(id)
@@ -2396,7 +2409,7 @@ fn sold(view: &ExecutorState, id: &ClientOrderId, order: &Order) -> Qty {
 /// nothing rather than an error: the fold has already taken those shares off. The result is
 /// floored at zero. A live sell's unapplied fill is left in, because [`still_selling`] counts
 /// that order's remainder from the same applied quantity, so the two cancel.
-fn long(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+pub(crate) fn long(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
     let folded = view
         .positions
         .get(instrument)
@@ -8178,6 +8191,56 @@ mod sequence_tests {
             .map(|interval| (interval.started_at.secs(), interval.alerted))
     }
 
+    /// `draft` through the journal's own `Draft::parse` in the envelope the shell appends it in,
+    /// under a fixed ULID, its references and payload as drafted: the refusal, if any (DEC-2848).
+    pub(super) fn refused_by_the_journal(draft: &crate::types::EventDraft) -> Option<String> {
+        let body = format!(
+            r#"{{"envelope_version":1,"environment":"paper",
+            "event_id":"01J8Z3M4000000000000000001","stream_id":"acct:ws_1:ACCT1",
+            "event_type":"{}","schema_version":{},
+            "event_time":"2026-09-21T14:00:00.000000000Z","clock_source":"local",
+            "causation_id":null,"correlation_id":null,
+            "actor":{{"kind":"system","id":"executor","version":"0.1.0",
+            "build":"sha256:{}"}},"config_refs":{},"payload":{},
+            "artifact_refs":[],"pii_refs":[]}}"#,
+            draft.event_type,
+            draft.schema_version,
+            "3".repeat(64),
+            String::from_utf8_lossy(&mandate_canon::to_canonical(&Value::Object(
+                draft.config_refs.clone()
+            ))),
+            String::from_utf8_lossy(&mandate_canon::to_canonical(&own_intent_as_ulid(
+                &draft.payload
+            )))
+        );
+        mandate_journal::Draft::parse(body.as_bytes())
+            .err()
+            .map(|refusal| format!("{} at {}", refusal.reason.code(), refusal.path))
+    }
+
+    /// `payload` with the executor's own intent, `w-{event}` or `k-{switch}-{n}` (§2.3), naming a
+    /// fixed ULID for the test's event id, as the shell's ids are ULIDs and the test's are not.
+    fn own_intent_as_ulid(payload: &Value) -> Value {
+        let mut payload = payload.clone();
+        if let Value::Object(members) = &mut payload
+            && let Some(Value::Str(intent)) = members.get("intent_id").cloned()
+        {
+            let ulid = "01J8Z3M4000000000000000002";
+            let named = if intent.starts_with(crate::ids::WATCHDOG) {
+                Some(format!("{}{ulid}", crate::ids::WATCHDOG))
+            } else if let Some(rest) = intent.strip_prefix(crate::ids::FLATTEN) {
+                rest.rsplit_once('-')
+                    .map(|(_, n)| format!("{}{ulid}-{n}", crate::ids::FLATTEN))
+            } else {
+                None
+            };
+            if let (Some(named), Ok(key)) = (named, mandate_canon::Key::new("intent_id")) {
+                members.insert(key, Value::Str(named));
+            }
+        }
+        payload
+    }
+
     /// Each `OrderAbandoned` in `effects` that the journal's own `Draft::parse` refuses (X10,
     /// DEC-2803), with its refusal: none, once §9.5 closes the record.
     fn abandonments_refused(effects: &[Effect]) -> Vec<String> {
@@ -10392,6 +10455,9 @@ mod sequence_tests {
         /// The exits laddered with no sequence of their own (DEC-260 (14)): a pause since a step
         /// was asked does not end them.
         lone: BTreeSet<String>,
+        /// The `sized_qty` each exit's allowing `GateDecided` journaled (DEC-410 item 3,
+        /// DEC-2848), as text, for the fold to read back on replay.
+        sized: BTreeMap<String, String>,
         /// The exits whose sequence is running, as the fold's `exiting` holds them: an
         /// `unprotected_start` whose trio names the exit starts one, and an `unprotected_end`
         /// ends it — a rung of a sequenced exit ends with its sequence (DEC-409), a rung of an
@@ -10796,8 +10862,17 @@ mod sequence_tests {
                             draft.config_refs.len()
                         ));
                     }
+                    if let Some(refused) = refused_by_the_journal(draft) {
+                        return Err(format!(
+                            "{intent}'s gate record is refused by the journal: {refused} \
+                             (journal spec §9.5, DEC-2848)"
+                        ));
+                    }
                     if draft.payload.get("parked") == Some(&Value::Bool(true)) {
                         self.parked.insert(intent.clone());
+                    }
+                    if let Some(sized) = field("sized_qty") {
+                        self.sized.insert(intent.clone(), sized.to_owned());
                     }
                     let priceable = self.priceable();
                     let closed = self.closed();
@@ -11252,6 +11327,7 @@ mod sequence_tests {
             between: BTreeMap::new(),
             parked: BTreeSet::new(),
             lone: BTreeSet::new(),
+            sized: BTreeMap::new(),
             sequenced: BTreeSet::new(),
             companion: None,
             sequence: None,
@@ -12814,6 +12890,56 @@ mod sequence_tests {
         let desk =
             rule_13_script_with(TEN_SECONDS_BEFORE_THE_NIGHT, From::Protected, true, &script)?;
         assert_eq!(fate(&desk, 6), ("allow".to_owned(), String::new(), Some(6)));
+        assert_eq!(
+            desk.sized
+                .get("01JABCDEFGHJKMNPQRSTV00006")
+                .map(String::as_str),
+            Some("6"),
+            "the size it went for is journaled, for the fold to read back (DEC-2848)"
+        );
+        Ok(())
+    }
+
+    /// DEC-2848: on replay the fold sizes an allowed exit to the `sized_qty` its `GateDecided`
+    /// journaled, and leaves one that names none at its received quantity.
+    #[test]
+    fn the_fold_reads_an_allowed_exits_size_back() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        for (sized, qty) in [(text("6"), "6"), (Value::Null, "8")] {
+            let mut executor = held(&ports)?;
+            committed(
+                &mut executor,
+                "IntentReceived",
+                vec![
+                    ("intent_id", text(EXIT)),
+                    ("agent", text("agent-a")),
+                    ("kind", text("order")),
+                    ("instrument", text("AAPL")),
+                    ("side", text("sell")),
+                    ("qty", text("8")),
+                    ("limit", text("150")),
+                    ("purpose", text("discretionary_exit")),
+                ],
+            )?;
+            committed(
+                &mut executor,
+                "GateDecided",
+                vec![
+                    ("intent_id", text(EXIT)),
+                    ("verdict", text("allow")),
+                    ("sized_qty", sized),
+                ],
+            )?;
+            let body = executor
+                .state
+                .bodies
+                .get(&IntentId(EventId(EXIT.to_owned())));
+            assert!(
+                matches!(body, Some(IntentBody::Order { qty: got, .. }) if *got == Qty::parse(qty)?),
+                "{body:?}"
+            );
+        }
         Ok(())
     }
 
@@ -13864,6 +13990,14 @@ mod sequence_tests {
                 vec![reason],
                 "journaled with its reason"
             );
+            for effect in &long {
+                if let Effect::Journal(draft) = effect
+                    && draft.event_type == "GateDecided"
+                {
+                    assert_eq!(draft.payload.get("held_long"), Some(&Value::Bool(true)));
+                    assert_eq!(refused_by_the_journal(draft), None, "{reason}: DEC-2848");
+                }
+            }
             let again = executor.run(Input::Tick(RiskClock::from_secs(start + 200)), &ports)?;
             assert!(!alerts(&again).contains(&"exit_stalled"), "once: {reason}");
             let clear = if reason == "session_closed" {

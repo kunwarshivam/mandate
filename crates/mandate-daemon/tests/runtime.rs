@@ -3069,3 +3069,69 @@ fn a_research_deployments_granted_opening_is_proposed_on_its_working_instrument(
     assert_eq!(member(&payload, "instrument_id"), Some(SPY), "{payload:?}");
     assert_eq!(member(&payload, "side"), Some("buy"), "{payload:?}");
 }
+
+/// Mandate spec §5.3's re-entry cooldown over the process (lane DR's rehearsal, 2026-10-27): the
+/// agent's position was sold by its owner's exit in the second the tick reads, so the opening the
+/// crossover proposes is refused `reentry_cooldown` by the runtime's own dry run, reading the
+/// exit fill from the fold as the binding gate does. The owner is never asked to buy back what
+/// they just sold.
+#[test]
+fn an_owner_exit_just_filled_asks_nothing_inside_the_reentry_cooldown() {
+    let (rig, mut process) = demo_in_session();
+    let now = at(IN_SESSION);
+    for (order, side, purpose) in [("o1", "buy", "open"), ("o2", "sell", "owner_exit")] {
+        on_account(
+            &rig,
+            ACCOUNT,
+            "OrderRequestRecorded",
+            &format!(r#"{{"agent_id":"{AGENT}","purpose":"{purpose}","risk_clock":"{now}"}}"#),
+        );
+        on_account(
+            &rig,
+            ACCOUNT,
+            "OrderSubmitted",
+            &format!(
+                r#"{{"client_order_id":"{order}","instrument_id":"{SPY}","side":"{side}","risk_clock":"{now}"}}"#
+            ),
+        );
+        on_account(
+            &rig,
+            ACCOUNT,
+            "FillApplied",
+            &format!(
+                r#"{{"fill_id":"f-{order}","client_order_id":"{order}","instrument_id":"{SPY}","side":"{side}","qty_gross":"1","price":"579.95","trade_date":"{}","risk_clock":"{now}","fees":[]}}"#,
+                now.date()
+            ),
+        );
+        on_account(
+            &rig,
+            ACCOUNT,
+            "OrderStateChanged",
+            &format!(
+                r#"{{"client_order_id":"{order}","state":"filled","replaced_by":null,"ignored":false,"risk_clock":"{now}"}}"#
+            ),
+        );
+    }
+    for second in 1..4 {
+        tick(&rig, IN_SESSION + second);
+        process.step(at(IN_SESSION + second));
+    }
+    assert_eq!(count(&rig, "ApprovalRequested"), 0, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
+    let rows = agent_rows(&rig);
+    let decided = rows
+        .iter()
+        .find(|row| row.event_type == "DecisionMade")
+        .unwrap_or_else(|| panic!("the opening is decided and refused: {:?}", kinds(&rig)));
+    let payload = parse(&decided.body)
+        .unwrap()
+        .get("payload")
+        .cloned()
+        .unwrap();
+    assert_eq!(member(&payload, "dry_run"), Some("deny"), "{payload:?}");
+    assert_eq!(
+        member(&payload, "reason_code"),
+        Some("reentry_cooldown"),
+        "{payload:?}"
+    );
+}
