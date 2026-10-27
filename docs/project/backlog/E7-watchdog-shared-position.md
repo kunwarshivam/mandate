@@ -6,8 +6,8 @@
     shares beside one agent's (trading spec §5.4, `single_holder`). Its `IntentReceived` must name a `mandate_version`
     (journal spec §9), and the executor process resolves none for `*`. Under DEC-2846 item 8 the
     exit waits, alerted once, where before the tick failed and the process stopped.
-  - **The question:** a shared position's watchdog could split into one exit per holder, each
-    under that agent's references, or journal under the account's references alone.
+  - **The founder's direction (2026-10-27):** one exit per holding agent, each sized to that
+    agent's own lots (DEC-2849's per-agent position), never the owner's or another holder's shares.
 
   *Accepted when:* the trading and journal specs say how a shared position's watchdog exit is
   journaled, the executor raises it, and judged executord tests show it sold while two agents
