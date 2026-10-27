@@ -3333,3 +3333,33 @@ fn an_unreadable_clock_stream_is_asked_once_a_pass() {
     let asked = rig.reads.borrow().iter().filter(|s| *s == CLOCK).count();
     assert_eq!(asked, 1, "{:?}", rig.reads.borrow());
 }
+
+/// DEC-2852: with the production fold wired and following the account, a pass still reads only
+/// what was appended since the last: the clock is read whole once, when the fold first follows,
+/// and never again.
+#[test]
+fn a_long_run_with_the_fold_following_reads_only_what_each_pass_appended() {
+    let following = Following::default();
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    let mut process = RuntimeProcess::start(
+        following.clone(),
+        Wiring {
+            facts: Some(mandate_daemon::production::Facts::new(CLOCK, AGENT)),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    tick(&following.rig, NOW + 1);
+    process.step(at(NOW + 1));
+    for second in 2..=1_000 {
+        tick(&following.rig, NOW + second);
+        let before = following.handed.get();
+        process.step(at(NOW + second));
+        let read = following.handed.get() - before;
+        assert!(
+            read <= 1,
+            "pass {second} read {read} records, not only its own tick"
+        );
+    }
+}
