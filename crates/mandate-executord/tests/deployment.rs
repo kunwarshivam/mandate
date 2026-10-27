@@ -2693,7 +2693,7 @@ fn the_kill_switch_prices_from_the_held_mark(frozen: bool) -> Result<(), Error> 
 }
 
 #[test]
-fn the_kill_switchs_flatten_prices_from_the_held_mark() -> Result<(), Error> {
+fn the_flatten_of_a_kill_switch_prices_from_the_held_mark() -> Result<(), Error> {
     the_kill_switch_prices_from_the_held_mark(false)
 }
 
