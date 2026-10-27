@@ -2,8 +2,9 @@
 //! only from its held head row on ([DEC-2145](../../../docs/project/decisions/DEC-2145.md)), as the
 //! executor's deployment reads its hot streams ([DEC-2847](../../../docs/project/decisions/DEC-2847.md)).
 //!
-//! Every read the server serves calls [`Journal::rows`], so this one place keeps a page's cost from
-//! growing with each stream's length. A stream read whole is held. A later read asks the store, by
+//! Every read the server serves calls [`Journal::rows`], so this one place keeps the store's read and
+//! chain check from growing with each stream's length; the rows handed to the caller are still a
+//! copy of the whole stream. A stream read whole is held. A later read asks the store, by
 //! [`Journal::rows_from`], for the rows from the held head row on, chain-checked from that row's
 //! `prev_hash`, and the first row read must be the held head row, seq and hash alike; the rows after
 //! it are appended.
@@ -11,16 +12,19 @@
 //! - **What a read past the head sees.** Appends, and any change that reaches the held head row or
 //!   cuts the stream below it, are seen at the next read: the stream is read whole again. A change
 //!   to rows before the head that leaves the head row's hash as it was breaks the stored chain, so a
-//!   whole read fails; the cache sees it at its next whole read of the stream, at most
-//!   [`Limits::reverify`] after the last one. Until then it serves the rows it verified.
+//!   whole read fails; the cache sees it at its next read of the stream once its last whole read is
+//!   [`Limits::reverify`] old, or the clock reads earlier than it, and until then serves the rows it
+//!   verified.
 //! - **Exactly the stream otherwise.** A tail the store refuses, or one that does not begin with the
-//!   held head row, drops what is held and reads the stream whole. A read that fails answers
-//!   [`JournalUnavailable`] and serves nothing held.
+//!   held head row, drops what is held and reads the stream whole. A whole read that fails drops
+//!   every stream held for that workspace and answers [`JournalUnavailable`], as the store's own read
+//!   does; nothing held is served in its place.
 //! - **Tenancy.** Rows are held per stream id, under the id's second segment, the workspace for
 //!   every workspace stream (journal spec §2). A read returns only the rows held under its own
 //!   stream id, so one workspace's rows never answer another's read.
 //! - **Bounded memory.** A workspace no read touched for [`Limits::idle`] on the server's [`Clock`]
-//!   is dropped whole at the next read, and when the rows held pass [`Limits::max_bytes`] the least
+//!   is dropped whole at the next read, as is one whose last read the clock now reads as later than
+//!   now, and when the rows held pass [`Limits::max_bytes`] the least
 //!   recently read other workspaces are dropped first; a stream larger than the bound by itself is
 //!   served and not held. A read while the clock cannot be read goes to the store and holds nothing.
 
@@ -115,7 +119,8 @@ impl State {
     }
 }
 
-/// How long after `then` it is at `now`; zero when `now` is not later.
+/// How long after `then` it is at `now`; [`Duration::MAX`] when the clock has stepped back past
+/// `then`, so a time it can no longer measure from counts as expired.
 fn elapsed(then: UtcNanos, now: UtcNanos) -> Duration {
     let nanos = |at: UtcNanos| {
         i128::from(at.secs())
@@ -123,7 +128,7 @@ fn elapsed(then: UtcNanos, now: UtcNanos) -> Duration {
             .saturating_add(i128::from(at.nanos()))
     };
     u64::try_from(nanos(now).saturating_sub(nanos(then)))
-        .map_or(Duration::ZERO, Duration::from_nanos)
+        .map_or(Duration::MAX, Duration::from_nanos)
 }
 
 /// Where a held stream's next read starts: its last held row, chained from that row's
@@ -256,7 +261,14 @@ impl CachedJournal {
         }
     }
 
-    /// `stream` read from its first record, then held.
+    /// Drops every stream held for `workspace`.
+    fn drop_workspace(&self, workspace: &str) {
+        if let Ok(mut held) = self.held.lock() {
+            held.remove_space(workspace);
+        }
+    }
+
+    /// `stream` read from its first record, then held; a read that fails drops the workspace.
     async fn read_whole(
         &self,
         workspace: &str,
@@ -264,7 +276,10 @@ impl CachedJournal {
         now: UtcNanos,
     ) -> Result<Vec<StoredEvent>, JournalUnavailable> {
         self.drop_held(workspace, stream);
-        let rows = self.inner.rows(stream).await?;
+        let Ok(rows) = self.inner.rows(stream).await else {
+            self.drop_workspace(workspace);
+            return Err(JournalUnavailable);
+        };
         let bytes = rows_bytes(&rows);
         self.hold(workspace, stream, Arc::new(rows.clone()), bytes, now, now);
         Ok(rows)
@@ -303,16 +318,17 @@ impl CachedJournal {
         let mut rows = Vec::with_capacity(held.rows.len().saturating_add(new.len()));
         rows.extend_from_slice(&held.rows);
         rows.extend_from_slice(new);
+        let rows = Arc::new(rows);
         let bytes = held.bytes.saturating_add(rows_bytes(new));
         self.hold(
             &workspace,
             stream,
-            Arc::new(rows.clone()),
+            Arc::clone(&rows),
             bytes,
             held.whole_at,
             now,
         );
-        Ok(rows)
+        Ok(rows.as_ref().clone())
     }
 }
 

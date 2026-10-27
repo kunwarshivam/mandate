@@ -708,8 +708,133 @@ fn a_workspace_is_dropped_once_idle_for_exactly_its_limit_and_not_before() {
     read(&journal, A_CTL).unwrap();
     assert_eq!(
         store.asked().whole,
-        2,
-        "a clock that steps back drops nothing"
+        3,
+        "a clock that steps back past the last read drops the workspace"
     );
     assert_eq!(journal.held_bytes(), held_by_rows(&store.whole(A_CTL)));
+}
+
+fn reverify_in_a_minute() -> Limits {
+    Limits {
+        idle: Duration::from_secs(3_600),
+        reverify: Duration::from_secs(60),
+        max_bytes: 1 << 30,
+    }
+}
+
+#[test]
+fn reverify_counts_from_the_last_whole_read_not_from_a_read_past_the_head() {
+    let store = Arc::new(Store::default());
+    store.append(A_ACCT, 10);
+    let clock = Hand::at(0);
+    let journal = cache_on(&store, &clock, reverify_in_a_minute());
+    read(&journal, A_ACCT).unwrap();
+    store.append(A_ACCT, 2);
+    clock.set(30 * SECOND);
+    read(&journal, A_ACCT).unwrap();
+    assert_eq!(store.asked().whole, 1, "grown by a read past the head");
+    store.tamper(A_ACCT, 4);
+    clock.set(60 * SECOND - 1);
+    assert!(read(&journal, A_ACCT).is_ok());
+    clock.set(60 * SECOND);
+    assert_eq!(read(&journal, A_ACCT), Err(JournalUnavailable));
+}
+
+#[test]
+fn a_clock_that_steps_back_reads_the_stream_whole() {
+    let store = Arc::new(Store::default());
+    store.append(A_ACCT, 10);
+    let clock = Hand::at(100 * SECOND);
+    let journal = cache_on(&store, &clock, reverify_in_a_minute());
+    read(&journal, A_ACCT).unwrap();
+    store.tamper(A_ACCT, 4);
+    clock.set(50 * SECOND);
+    assert_eq!(
+        read(&journal, A_ACCT),
+        Err(JournalUnavailable),
+        "a time before the last whole read cannot vouch for it"
+    );
+}
+
+#[test]
+fn a_whole_read_that_fails_drops_its_workspace_and_no_other() {
+    let store = Arc::new(Store::default());
+    store.append(A_ACCT, 10);
+    store.append(A_CTL, 4);
+    store.append(B_CTL, 4);
+    let clock = Hand::at(0);
+    let journal = cache_on(&store, &clock, reverify_in_a_minute());
+    read(&journal, A_ACCT).unwrap();
+    clock.set(50 * SECOND);
+    read(&journal, A_CTL).unwrap();
+    read(&journal, B_CTL).unwrap();
+    assert_eq!(store.asked().whole, 3);
+    store.tamper(A_ACCT, 4);
+    clock.set(60 * SECOND);
+    assert_eq!(read(&journal, A_ACCT), Err(JournalUnavailable));
+    assert_eq!(store.asked().whole, 4, "reverify read it whole, and failed");
+    assert_eq!(
+        journal.held_bytes(),
+        held_by_rows(&store.whole(B_CTL)),
+        "only the other workspace is still held"
+    );
+    assert_eq!(read(&journal, A_CTL).unwrap(), store.whole(A_CTL));
+    assert_eq!(
+        store.asked().whole,
+        5,
+        "the failed workspace's other stream is read whole"
+    );
+    assert_eq!(read(&journal, B_CTL).unwrap(), store.whole(B_CTL));
+    assert_eq!(store.asked().whole, 5, "the other workspace is kept");
+}
+
+#[test]
+fn held_bytes_are_exactly_the_rows_held_after_growth_and_rewrite() {
+    let store = Arc::new(Store::default());
+    store.append(A_ACCT, 10);
+    store.append(B_CTL, 3);
+    let journal = cache(&store, ROOMY);
+    read(&journal, A_ACCT).unwrap();
+    assert_eq!(journal.held_bytes(), held_by_rows(&store.whole(A_ACCT)));
+    store.append(A_ACCT, 5);
+    read(&journal, A_ACCT).unwrap();
+    assert_eq!(journal.held_bytes(), held_by_rows(&store.whole(A_ACCT)));
+    store.rewrite(A_ACCT, 3);
+    store.append(A_ACCT, 2);
+    read(&journal, A_ACCT).unwrap();
+    assert_eq!(journal.held_bytes(), held_by_rows(&store.whole(A_ACCT)));
+    read(&journal, B_CTL).unwrap();
+    assert_eq!(
+        journal.held_bytes(),
+        held_by_rows(&store.whole(A_ACCT)) + held_by_rows(&store.whole(B_CTL))
+    );
+    store.truncate(A_ACCT, 2);
+    read(&journal, A_ACCT).unwrap();
+    assert_eq!(
+        journal.held_bytes(),
+        held_by_rows(&store.whole(A_ACCT)) + held_by_rows(&store.whole(B_CTL))
+    );
+}
+
+#[test]
+fn over_the_bound_with_one_workspace_its_other_streams_are_dropped() {
+    let store = Arc::new(Store::default());
+    store.append(A_CTL, 20);
+    store.append(A_ACCT, 20);
+    let one = held_by_rows(&store.whole(A_ACCT));
+    let journal = cache(
+        &store,
+        Limits {
+            idle: Duration::from_secs(3_600),
+            reverify: Duration::from_secs(3_600),
+            max_bytes: one + one / 2,
+        },
+    );
+    read(&journal, A_CTL).unwrap();
+    read(&journal, A_ACCT).unwrap();
+    assert_eq!(journal.held_bytes(), one, "the stream just read is kept");
+    read(&journal, A_ACCT).unwrap();
+    assert_eq!(store.asked().whole, 2);
+    read(&journal, A_CTL).unwrap();
+    assert_eq!(store.asked().whole, 3, "the other stream was dropped");
 }
