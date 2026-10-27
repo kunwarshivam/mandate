@@ -3284,18 +3284,19 @@ fn fold_unreadable(facts: &mandate_daemon::production::Facts) -> bool {
 }
 
 /// DEC-2852, #2828's review: a clock record that goes back holds the production fold, as a fold of
-/// the whole clock stream at every pass holds it, whether the fold followed the account from the
+/// the whole clock stream at every pass holds it, over a store that reads only past the head, whether the fold followed the account from the
 /// start or only after the clock had ticked, so no earlier record is left unfolded.
 #[test]
 fn a_clock_record_that_goes_back_holds_the_fold_as_a_whole_read_does() {
     for follows_late in [false, true] {
-        let rig = Rig::default();
+        let following = Following::default();
+        let rig = following.rig.clone();
         if !follows_late {
             established(&rig, CONNECTION, ACCOUNT_REF, 2);
         }
         let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
         let mut process = RuntimeProcess::start(
-            rig.clone(),
+            following.clone(),
             Wiring {
                 facts: Some(facts.clone()),
                 ..wiring()
