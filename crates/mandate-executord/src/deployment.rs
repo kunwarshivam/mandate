@@ -28,7 +28,7 @@ use std::time::Duration;
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_artifacts_fs::FsArtifactStore;
-use mandate_canon::{Value, parse};
+use mandate_canon::{Digest, Value, parse};
 use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
 use mandate_connections::record::ConnectionId;
 use mandate_domain::{CapabilityProfile, ProfileError};
@@ -44,7 +44,7 @@ use mandate_gate_inputs::control::{
     admitted_configuration, configuration, confirmed_version,
 };
 use mandate_gate_inputs::{DeployedView, Reviewed};
-use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
+use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId, TrustedStart};
 use mandate_num::{Fraction, Price, Ratio, ShareIncrement, Usd};
 use mandate_research::{ReplayError, Replayed, ThesisRecord, replay_theses};
 use mandate_risk::{AgentMode, ConductState, DayTradeLedger, RiskSnapshot, SaneQuote};
@@ -67,9 +67,92 @@ pub const FRESH: Freshness = Freshness {
     snapshot_max_age_s: 3600,
 };
 
-/// How a port reads one stream: the store's records from its first, `None` when the store cannot
-/// answer.
-pub type Rows = Box<dyn Fn(&StreamId) -> Option<Vec<StoredEvent>>>;
+/// How a port reads one stream: the store's records from `start.from_seq` on, their chain checked
+/// from `start` (`TrustedStart::GENESIS` reads the whole stream), `None` when the store cannot
+/// answer or the first record does not follow `start`.
+pub type Rows = Box<dyn Fn(&StreamId, TrustedStart) -> Option<Vec<StoredEvent>>>;
+
+/// `read`, a reader of whole streams, as [`Rows`]: the records it gives from `start.from_seq` on,
+/// `None` when the first of them does not follow `start`. Each read still reads the whole stream;
+/// the process's own stores read only what follows (`PgStore::rows_from`).
+pub fn reading(read: impl Fn(&StreamId) -> Option<Vec<StoredEvent>> + 'static) -> Rows {
+    Box::new(move |stream, start| {
+        let since: Vec<StoredEvent> = read(stream)?
+            .into_iter()
+            .filter(|row| row.seq >= start.from_seq)
+            .collect();
+        match since.first() {
+            Some(first) if first.seq != start.from_seq || first.prev_hash != start.prev_hash => {
+                None
+            }
+            _ => Some(since),
+        }
+    })
+}
+
+/// One stream as far as it was read: what its records folded to, and the seq and hash of the last
+/// one, so the next read asks only for what follows it (DEC-2847).
+struct Tail<S> {
+    head: Option<(u64, Digest)>,
+    state: S,
+}
+
+impl<S> Tail<S> {
+    fn new(state: S) -> Self {
+        Self { head: None, state }
+    }
+
+    /// Reads what `rows` holds of `stream` past the head and folds each record into the state in
+    /// order with `fold`. A read past the head that the store refuses is read again from the first
+    /// record onto `fresh` state, so a held head that is not the stream's is never folded on;
+    /// `false` when neither reads, and then the state must not be read (`AGENTS.md` rule 3).
+    fn follow(
+        &mut self,
+        rows: &Rows,
+        stream: &StreamId,
+        fresh: impl Fn() -> S,
+        mut fold: impl FnMut(&mut S, &StoredEvent),
+    ) -> bool {
+        let start = self
+            .head
+            .map_or(TrustedStart::GENESIS, |(seq, hash)| TrustedStart {
+                from_seq: seq.saturating_add(1),
+                prev_hash: hash,
+            });
+        let since = match rows(stream, start) {
+            Some(since) => since,
+            None if self.head.is_some() => match rows(stream, TrustedStart::GENESIS) {
+                Some(all) => {
+                    self.head = None;
+                    self.state = fresh();
+                    all
+                }
+                None => return false,
+            },
+            None => return false,
+        };
+        for row in &since {
+            fold(&mut self.state, row);
+            self.head = Some((row.seq, row.hash));
+        }
+        true
+    }
+}
+
+/// A thesis record of an agent stream as [`replay_theses`] reads it: its type, and its payload, or
+/// `None` for a body that does not parse.
+type Kept = (String, Option<Value>);
+
+/// What the hot ports read of the streams, each folded only past the head it was last read to, so
+/// a pass costs what was appended since and never the streams' whole length (DEC-2847): the
+/// control stream's records, the scheduler's clock folded, and each research agent stream's thesis
+/// records. The control stream is small; the clock and agent streams keep no other record.
+#[derive(Default)]
+struct Tails {
+    control: Option<Tail<Vec<StoredEvent>>>,
+    clock: Option<Tail<Journaled>>,
+    theses: BTreeMap<String, Tail<Vec<Kept>>>,
+}
 
 /// The stored bars' liquidity for the symbol `symbol` at `now` (trading spec §9.4, §9.5;
 /// DEC-2274), `None` when it cannot be read, which holds the opening.
@@ -240,6 +323,7 @@ struct Inner {
     clock: Option<StreamId>,
     sources: Sources,
     cache: RefCell<Cache>,
+    tails: RefCell<Tails>,
     /// Each agent's risk as the process's risk book last read it (DEC-2804 item 7).
     risk: RefCell<BTreeMap<AgentId, GateRisk>>,
     /// Whether the last hand-off could not be kept: then no agent's risk is answered, so a view
@@ -263,6 +347,7 @@ impl Deployment {
             clock: StreamId::parse(&format!("clock:{workspace}")),
             sources,
             cache: RefCell::new(Cache::default()),
+            tails: RefCell::new(Tails::default()),
             risk: RefCell::new(BTreeMap::new()),
             risk_stale: Cell::new(false),
         }))
@@ -316,17 +401,26 @@ impl Deployment {
         }))
     }
 
+    /// `stream`'s whole records, read from its first: what the binding gate's fold of an opening
+    /// reads, once per opening.
     fn rows(&self, stream: Option<&StreamId>) -> Option<Vec<StoredEvent>> {
-        (self.0.sources.rows)(stream?)
+        (self.0.sources.rows)(stream?, TrustedStart::GENESIS)
+    }
+
+    /// The control stream's records, read only past the head it was last read to.
+    fn control_rows(&self) -> Option<Vec<StoredEvent>> {
+        let stream = self.0.control.as_ref()?;
+        let mut tails = self.0.tails.try_borrow_mut().ok()?;
+        let tail = tails.control.get_or_insert_with(|| Tail::new(Vec::new()));
+        tail.follow(&self.0.sources.rows, stream, Vec::new, |rows, row| {
+            rows.push(row.clone());
+        })
+        .then(|| tail.state.clone())
     }
 
     /// The trade date of the scheduler's latest tick, the date a deployment is read for.
     fn today(&self) -> Option<Date> {
-        let mut journaled = Journaled::new("", self.0.clock.as_ref()?.as_str(), "");
-        for row in self.rows(self.0.clock.as_ref())? {
-            fold(&mut journaled, &row);
-        }
-        Some(journaled.now()?.date())
+        Some(self.now()?.date())
     }
 
     /// Every agent the control stream deploys on this account whose deployment reads now, on
@@ -362,7 +456,7 @@ impl Deployment {
         BTreeMap<AgentId, Rc<Research>>,
     ) {
         let none = || (BTreeMap::new(), BTreeMap::new());
-        let Some(control) = self.rows(self.0.control.as_ref()) else {
+        let Some(control) = self.control_rows() else {
             return none();
         };
         let Ok(mut cache) = self.0.cache.try_borrow_mut() else {
@@ -461,39 +555,55 @@ impl Deployment {
         confirmed_version(records, self.0.sources.artifacts.as_ref(), &run).ok()
     }
 
-    /// The scheduler's latest tick, the instant a research agent's theses are replayed at.
+    /// The scheduler's latest tick, the instant a research agent's theses are replayed at: the
+    /// clock stream folded only past the head it was last read to.
     fn now(&self) -> Option<UtcNanos> {
-        let mut journaled = Journaled::new("", self.0.clock.as_ref()?.as_str(), "");
-        for row in self.rows(self.0.clock.as_ref())? {
-            fold(&mut journaled, &row);
+        let stream = self.0.clock.as_ref()?;
+        let fresh = || Journaled::new("", stream.as_str(), "");
+        let mut tails = self.0.tails.try_borrow_mut().ok()?;
+        let tail = tails.clock.get_or_insert_with(|| Tail::new(fresh()));
+        if !tail.follow(&self.0.sources.rows, stream, fresh, fold) {
+            return None;
         }
-        journaled.now()
+        tail.state.now()
+    }
+
+    /// `agent`'s thesis records in stream order, each with its payload, read only past the head
+    /// its stream was last read to; `None` when the stream cannot be read.
+    fn theses(&self, agent: &AgentId) -> Option<Vec<Kept>> {
+        let workspace = self.0.scope.workspace.0.as_str();
+        let stream = StreamId::parse(&format!("agent:{workspace}:{}", agent.0))?;
+        let mut tails = self.0.tails.try_borrow_mut().ok()?;
+        let tail = tails
+            .theses
+            .entry(stream.as_str().to_owned())
+            .or_insert_with(|| Tail::new(Vec::new()));
+        tail.follow(&self.0.sources.rows, &stream, Vec::new, |kept, row| {
+            if matches!(
+                row.event_type.as_str(),
+                "ThesisProposed" | "ThesisRevised" | "ThesisInvalidated"
+            ) {
+                let payload = parse(&row.body)
+                    .ok()
+                    .and_then(|body| body.get("payload").cloned());
+                kept.push((row.event_type.clone(), payload));
+            }
+        })
+        .then(|| tail.state.clone())
     }
 
     /// `agent`'s thesis records replayed at `at` ([`replay_theses`]); `None` when its stream or a
     /// record cannot be read.
     fn replayed(&self, agent: &AgentId, at: UtcNanos) -> Option<Replayed> {
-        let workspace = self.0.scope.workspace.0.as_str();
-        let stream = StreamId::parse(&format!("agent:{workspace}:{}", agent.0));
-        let rows = self.rows(stream.as_ref())?;
-        let records = rows
-            .iter()
-            .filter(|row| {
-                matches!(
-                    row.event_type.as_str(),
-                    "ThesisProposed" | "ThesisRevised" | "ThesisInvalidated"
-                )
+        let kept = self.theses(agent)?;
+        let records = kept.iter().map(|(event_type, payload)| {
+            Ok(ThesisRecord {
+                event_type: event_type.as_str(),
+                payload: payload
+                    .clone()
+                    .ok_or(ReplayError::Unreadable { member: "payload" })?,
             })
-            .map(|row| {
-                let payload = parse(&row.body)
-                    .ok()
-                    .and_then(|body| body.get("payload").cloned())
-                    .ok_or(ReplayError::Unreadable { member: "payload" })?;
-                Ok(ThesisRecord {
-                    event_type: row.event_type.as_str(),
-                    payload,
-                })
-            });
+        });
         replay_theses(records, at).ok()
     }
 
@@ -613,16 +723,15 @@ impl Deployment {
     /// record admitted, on a cold start too (`AGENTS.md` rule 13); naming one more instrument for
     /// exits adds no risk.
     fn ever_admitted(&self, agent: &AgentId) -> BTreeSet<InstrumentId> {
-        let workspace = self.0.scope.workspace.0.as_str();
-        let stream = StreamId::parse(&format!("agent:{workspace}:{}", agent.0));
-        let Some(rows) = self.rows(stream.as_ref()) else {
+        let Some(kept) = self.theses(agent) else {
             return BTreeSet::new();
         };
-        rows.iter()
-            .filter(|row| matches!(row.event_type.as_str(), "ThesisProposed" | "ThesisRevised"))
-            .filter_map(|row| {
-                let body = parse(&row.body).ok()?;
-                let payload = body.get("payload")?;
+        kept.iter()
+            .filter(|(event_type, _)| {
+                matches!(event_type.as_str(), "ThesisProposed" | "ThesisRevised")
+            })
+            .filter_map(|(_, payload)| {
+                let payload = payload.as_ref()?;
                 if payload.get("admitted") != Some(&Value::Bool(true)) {
                     return None;
                 }
@@ -1214,5 +1323,276 @@ mod tests {
         assert_eq!(agreed([Some(1), Some(1), Some(2)].into_iter()), None);
         assert_eq!(agreed([None, Some(1)].into_iter()), None);
         assert_eq!(agreed([Some(1), None].into_iter()), None);
+    }
+}
+
+/// DEC-2847: the hot ports read each stream only past the head they last read it to, and what they
+/// fold so equals a fold of the whole stream at every point.
+#[cfg(test)]
+mod incremental {
+    use std::cell::{Cell, RefCell};
+    use std::collections::BTreeMap;
+    use std::rc::Rc;
+
+    use mandate_canon::{Digest, Value, parse};
+    use mandate_executor::{AccountRef, AccountScope, AgentId, WorkspaceId};
+    use mandate_journal::{StoredEvent, TrustedStart};
+    use mandate_research::{ReplayError, ThesisRecord, replay_theses};
+    use mandate_time::UtcNanos;
+    use proptest::prelude::*;
+
+    use super::{Deployment, Rows, Sources, Unread};
+    use crate::quotes::NoQuotes;
+
+    const CLOCK: &str = "clock:ws1";
+    const AGENT: &str = "agent:ws1:demo-research";
+    const T0: i64 = 1_793_106_000;
+
+    /// The journal as the test appends it, and how many records every read has handed back.
+    #[derive(Default)]
+    struct Journal {
+        streams: RefCell<BTreeMap<String, Vec<StoredEvent>>>,
+        read: Cell<usize>,
+        /// Refuse the next read past a held head, as a store does whose chain no longer follows it.
+        refuse_next: Cell<bool>,
+    }
+
+    impl Journal {
+        fn append(&self, stream: &str, event_type: &str, payload: &str) {
+            let mut streams = self.streams.borrow_mut();
+            let rows = streams.entry(stream.to_owned()).or_default();
+            let seq = u64::try_from(rows.len()).unwrap() + 1;
+            let prev_hash = rows.last().map_or(Digest::ZERO, |row| row.hash);
+            let body = format!(r#"{{"event_type":"{event_type}","payload":{payload}}}"#);
+            rows.push(StoredEvent {
+                stream_id: stream.to_owned(),
+                seq,
+                event_id: format!("{stream}-{seq}"),
+                event_type: event_type.to_owned(),
+                schema_version: 1,
+                environment: "paper".to_owned(),
+                recorded_at: "2026-10-27T14:00:00.000000000Z".to_owned(),
+                prev_hash,
+                hash: Digest::of(format!("{stream}{seq}{body}").as_bytes()),
+                body: body.into_bytes(),
+            });
+        }
+
+        fn tick(&self, secs: i64) {
+            let clock = UtcNanos::from_parts(T0 + secs, 0).unwrap();
+            self.append(CLOCK, "ClockAdvanced", &format!(r#"{{"clock":"{clock}"}}"#));
+        }
+
+        fn rows(self: &Rc<Self>) -> Rows {
+            let journal = Rc::clone(self);
+            Box::new(move |stream, start: TrustedStart| {
+                if start.from_seq > 1 && journal.refuse_next.replace(false) {
+                    return None;
+                }
+                let streams = journal.streams.borrow();
+                let since: Vec<StoredEvent> = streams
+                    .get(stream.as_str())
+                    .map(|rows| {
+                        rows.iter()
+                            .filter(|row| row.seq >= start.from_seq)
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if since
+                    .first()
+                    .is_some_and(|first| first.prev_hash != start.prev_hash)
+                {
+                    return None;
+                }
+                journal.read.set(journal.read.get() + since.len());
+                Some(since)
+            })
+        }
+
+        fn all(&self, stream: &str) -> Vec<StoredEvent> {
+            self.streams
+                .borrow()
+                .get(stream)
+                .cloned()
+                .unwrap_or_default()
+        }
+    }
+
+    fn deployment(journal: &Rc<Journal>) -> Deployment {
+        Deployment::new(
+            &AccountScope {
+                account: AccountRef("01KDER4814371439000000000A".to_owned()),
+                workspace: WorkspaceId("ws1".to_owned()),
+            },
+            Sources {
+                rows: journal.rows(),
+                artifacts: Box::new(BTreeMap::<Digest, Vec<u8>>::new()),
+                quotes: Box::new(NoQuotes),
+                liquidity: Box::new(Unread),
+                broker: Box::new(Unread),
+            },
+        )
+    }
+
+    fn agent() -> AgentId {
+        AgentId("demo-research".to_owned())
+    }
+
+    /// The oracle of the clock: the latest tick a `ClockAdvanced` names, read from the whole stream.
+    fn latest_tick(journal: &Journal) -> Option<UtcNanos> {
+        journal.all(CLOCK).iter().rev().find_map(|row| {
+            let body = parse(&row.body).ok()?;
+            UtcNanos::parse_rfc3339(body.get("payload")?.get("clock")?.as_str()?).ok()
+        })
+    }
+
+    /// The oracle of the theses: every thesis record of the whole agent stream, in order.
+    fn all_theses(journal: &Journal) -> Vec<(String, Option<Value>)> {
+        journal
+            .all(AGENT)
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.event_type.as_str(),
+                    "ThesisProposed" | "ThesisRevised" | "ThesisInvalidated"
+                )
+            })
+            .map(|row| {
+                let payload = parse(&row.body)
+                    .ok()
+                    .and_then(|body| body.get("payload").cloned());
+                (row.event_type.clone(), payload)
+            })
+            .collect()
+    }
+
+    fn thesis(n: u64) -> String {
+        format!(
+            r#"{{"thesis_id":"t{n}","lineage_id":"t{n}","revision":0,"instrument_id":"i{n}","admitted":true,"reason":null}}"#
+        )
+    }
+
+    #[test]
+    fn a_long_run_reads_each_record_once() {
+        let journal = Rc::new(Journal::default());
+        let deployment = deployment(&journal);
+        let mut appended = 0;
+        for secs in 0..10_000 {
+            journal.tick(secs);
+            appended += 1;
+            if secs % 500 == 0 {
+                journal.append(
+                    AGENT,
+                    "ThesisProposed",
+                    &thesis(u64::try_from(secs).unwrap()),
+                );
+                appended += 1;
+            }
+            let before = journal.read.get();
+            assert_eq!(
+                deployment.now(),
+                UtcNanos::from_parts(T0 + secs, 0).ok(),
+                "at {secs}"
+            );
+            assert!(deployment.theses(&agent()).is_some());
+            assert!(
+                journal.read.get() - before <= 2,
+                "a pass reads what was appended since, not the streams' length, at {secs}"
+            );
+        }
+        assert_eq!(
+            journal.read.get(),
+            appended,
+            "every record read exactly once"
+        );
+    }
+
+    #[test]
+    fn a_refused_read_past_the_head_is_read_again_from_the_first_record() {
+        let journal = Rc::new(Journal::default());
+        let deployment = deployment(&journal);
+        journal.tick(0);
+        journal.append(AGENT, "ThesisProposed", &thesis(1));
+        assert_eq!(deployment.now(), latest_tick(&journal));
+        assert_eq!(deployment.theses(&agent()), Some(all_theses(&journal)));
+        journal.tick(1);
+        journal.append(AGENT, "ThesisProposed", &thesis(2));
+        journal.refuse_next.set(true);
+        assert_eq!(
+            deployment.now(),
+            latest_tick(&journal),
+            "refolded from the first record"
+        );
+        journal.refuse_next.set(true);
+        assert_eq!(
+            deployment.theses(&agent()),
+            Some(all_theses(&journal)),
+            "never folded twice"
+        );
+    }
+
+    #[derive(Debug, Clone)]
+    enum Step {
+        Ticks(u8),
+        Thesis,
+        Invalidated,
+        Unparsable,
+        Other,
+        Refuse,
+        Read,
+    }
+
+    fn step() -> impl Strategy<Value = Step> {
+        prop_oneof![
+            (1u8..20).prop_map(Step::Ticks),
+            Just(Step::Thesis),
+            Just(Step::Invalidated),
+            Just(Step::Unparsable),
+            Just(Step::Other),
+            Just(Step::Refuse),
+            Just(Step::Read),
+        ]
+    }
+
+    proptest! {
+        /// At every read, the incremental clock and thesis records equal a fold of the whole
+        /// streams, and the replay over them equals `replay_theses` over the whole stream, so the
+        /// research agent's working universe is the one DEC-2819 replays.
+        #[test]
+        fn the_incremental_fold_equals_a_fold_of_the_whole_streams(steps in prop::collection::vec(step(), 1..120)) {
+            let journal = Rc::new(Journal::default());
+            let deployment = deployment(&journal);
+            let mut secs = 0;
+            let mut theses = 0;
+            for step in steps {
+                match step {
+                    Step::Ticks(n) => for _ in 0..n {
+                        journal.tick(secs);
+                        secs += 1;
+                    },
+                    Step::Thesis => {
+                        theses += 1;
+                        journal.append(AGENT, "ThesisProposed", &thesis(theses));
+                    }
+                    Step::Invalidated => journal.append(AGENT, "ThesisInvalidated", &format!(r#"{{"thesis_id":"t{theses}"}}"#)),
+                    Step::Unparsable => journal.append(AGENT, "ThesisRevised", "not json"),
+                    Step::Other => journal.append(AGENT, "DecisionMade", r#"{"x":1}"#),
+                    Step::Refuse => journal.refuse_next.set(true),
+                    Step::Read => {
+                        prop_assert_eq!(deployment.now(), latest_tick(&journal));
+                        let kept = deployment.theses(&agent());
+                        prop_assert_eq!(kept.clone(), Some(all_theses(&journal)));
+                        let at = UtcNanos::from_parts(T0 + secs, 0).unwrap();
+                        let whole = all_theses(&journal);
+                        let expected = replay_theses(whole.iter().map(|(event_type, payload)| Ok(ThesisRecord {
+                            event_type: event_type.as_str(),
+                            payload: payload.clone().ok_or(ReplayError::Unreadable { member: "payload" })?,
+                        })), at).ok();
+                        prop_assert_eq!(deployment.replayed(&agent(), at), expected);
+                    }
+                }
+            }
+        }
     }
 }
