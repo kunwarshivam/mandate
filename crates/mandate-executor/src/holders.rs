@@ -8,10 +8,10 @@ use mandate_accounting::{InstrumentId, Side};
 use mandate_num::{Qty, SignedQty};
 
 use crate::error::ExecutorError;
-use crate::ids::ClientOrderId;
-use crate::protection::{long, sold, still_selling};
+use crate::ids::{ClientOrderId, IntentId};
+use crate::protection::{long, remainders, sold, still_selling};
 use crate::state::ExecutorState;
-use crate::types::AgentId;
+use crate::types::{AgentId, IntentBody, OrderState, Purpose};
 
 /// An instrument's holders (DEC-2849's definitions).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,13 +93,6 @@ pub(crate) fn sub_ledger(
 
 /// I3: `agent`'s sell authority, Sᵢ = max(0, Lᵢ − D), for its discretionary and new sells (the
 /// founder's "every agent shrinks by full gap", DEC-2849 item 6).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "lane X sizes exits and legs on it (DEC-2849 items 7 and 8)"
-    )
-)]
 pub(crate) fn sell_authority(
     view: &ExecutorState,
     agent: &AgentId,
@@ -109,6 +102,85 @@ pub(crate) fn sell_authority(
     Ok(lots_of(&holders, agent)
         .checked_sub(holders.deficit)
         .unwrap_or(Qty::ZERO))
+}
+
+/// I3: what a discretionary exit for `agent` may still sell in `instrument`: its sell authority
+/// [`sell_authority`] less its own working sells, as the gate's `available` counts sells (sent,
+/// not protective, not ended), and less what its own exit ladders' stepped rungs left to send
+/// ([`remainders`]) but `except`'s, the ladder asking, never below zero. The founder's reading
+/// (DEC-2849 I3): an exit for more is trimmed to this, and one with nothing left is refused
+/// `sell_exceeds_available`.
+pub(crate) fn discretionary_room(
+    view: &ExecutorState,
+    agent: &AgentId,
+    instrument: &InstrumentId,
+    except: Option<&IntentId>,
+) -> Result<Qty, ExecutorError> {
+    let working = view
+        .orders
+        .values()
+        .filter(|order| {
+            &order.instrument == instrument
+                && order.agent.as_ref() == Some(agent)
+                && order.side == Side::Sell
+                && order.purpose != Purpose::Protective
+                && !order.state.is_terminal()
+                && order.state != OrderState::Intent
+        })
+        .try_fold(Qty::ZERO, |total, order| {
+            total.checked_add(order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO))
+        })?;
+    let laddered = remainders(view, instrument)?
+        .into_iter()
+        .filter(|(intent, _)| {
+            Some(intent) != except && ladder_agent(view, instrument, intent) == Some(agent)
+        })
+        .try_fold(Qty::ZERO, |total, (_, left)| total.checked_add(left))?;
+    Ok(sell_authority(view, agent, instrument)?
+        .checked_sub(working.checked_add(laddered)?)
+        .unwrap_or(Qty::ZERO))
+}
+
+/// I3 for an exit ladder's next rung: `qty`, and for a discretionary exit no more than its agent's
+/// [`discretionary_room`] beside its own ladder, so a deficit that arose after the exit was gated
+/// trims each later rung too.
+pub(crate) fn rung_room(
+    view: &ExecutorState,
+    instrument: &InstrumentId,
+    intent: &IntentId,
+    qty: Qty,
+) -> Result<Qty, ExecutorError> {
+    let discretionary = matches!(
+        view.bodies.get(intent),
+        Some(IntentBody::Order {
+            purpose: Purpose::DiscretionaryExit,
+            ..
+        })
+    );
+    match ladder_agent(view, instrument, intent) {
+        Some(agent) if discretionary => {
+            Ok(qty.min(discretionary_room(view, agent, instrument, Some(intent))?))
+        }
+        _ => Ok(qty),
+    }
+}
+
+/// The agent whose exit ladder `intent` is in `instrument`: its exit sequence's, or its lone
+/// ladder's.
+fn ladder_agent<'s>(
+    view: &'s ExecutorState,
+    instrument: &InstrumentId,
+    intent: &IntentId,
+) -> Option<&'s AgentId> {
+    view.exiting
+        .get(instrument)
+        .filter(|sequence| &sequence.intent == intent)
+        .map(|sequence| &sequence.agent)
+        .or_else(|| {
+            view.ladders
+                .get(&(instrument.clone(), intent.clone()))
+                .map(|lone| &lone.agent)
+        })
 }
 
 /// I9: every holder's protective coverage Pᵢ. The deficit is charged once, largest lots first,
@@ -313,6 +385,39 @@ pub(crate) fn oversell(
 
 fn lots_of(holders: &Holders, agent: &AgentId) -> Qty {
     holders.lots.get(agent).copied().unwrap_or(Qty::ZERO)
+}
+
+/// A filled buy of `qty` by `agent` in `instrument`, so a test fixture's position is that agent's
+/// lots (DEC-2849): the position itself is the fixture's to set.
+#[cfg(test)]
+pub(crate) fn bought(
+    state: &mut ExecutorState,
+    agent: &str,
+    instrument: &InstrumentId,
+    qty: &str,
+) -> Result<(), ExecutorError> {
+    let id = ClientOrderId::parse(&format!("md-bought-{agent}-{instrument}"))?;
+    state.orders.insert(
+        id.clone(),
+        crate::types::Order {
+            client_order_id: id,
+            intent_id: None,
+            agent: Some(AgentId(agent.to_owned())),
+            instrument: instrument.clone(),
+            side: Side::Buy,
+            qty: Qty::parse(qty)?,
+            filled_qty: Qty::parse(qty)?,
+            state: OrderState::Filled,
+            attempt: 1,
+            purpose: Purpose::Open,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        },
+    );
+    Ok(())
 }
 
 #[cfg(test)]
