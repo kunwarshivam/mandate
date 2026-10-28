@@ -10,6 +10,7 @@ description = "The workspace news reader: the news stream's single writer, stori
 workspace = true
 
 [dependencies]
+mandate-artifacts-fs.workspace = true
 mandate-canon.workspace = true
 mandate-gate-context.workspace = true
 mandate-journal.workspace = true
@@ -17,10 +18,12 @@ mandate-process.workspace = true
 mandate-research.workspace = true
 mandate-research-run.workspace = true
 mandate-sources.workspace = true
+mandate-sources-http.workspace = true
 mandate-store.workspace = true
 mandate-time.workspace = true
 mandate-vault.workspace = true
 secrecy.workspace = true
+tokio = { workspace = true, features = ["rt", "signal"] }
 
 [dev-dependencies]
 mandate-connections.workspace = true

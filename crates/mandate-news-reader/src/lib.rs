@@ -42,5 +42,5 @@ pub mod tickers;
 pub mod watch;
 
 pub use follows::{Follow, parse_follows};
-pub use key::{KeyRefusal, read_key, stored_key};
+pub use key::{KeyRefusal, read_key, stored_key, vault_key};
 pub use reader::{Config, Counts, NewsReader};
