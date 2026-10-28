@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { confirmStepUpDigest } from "./confirm";
 import { ASSERTION_TIMEOUT_MS, type Authenticator, type Passkey, assertPasskey, deployStepUpDigest, fromBase64url, passkeysRead, toBase64url, usablePasskeys } from "./passkey";
 import type { StepUpChallenge } from "./step-up";
-import { coolOffWaivedFrom, refuseProductionWaiver } from "@/lib/cool-off-build";
+import { coolOffWaivedFrom, refuseWaiverOutsideDev } from "@/lib/cool-off-build";
 
 /** 32 bytes 0..31 as unpadded base64url: what a served `webauthn_challenge` looks like. */
 const CHALLENGE_BYTES = Uint8Array.from({ length: 32 }, (_, i) => i);
@@ -136,10 +136,10 @@ describe("the passkey ceremony (DEC-2108 item 7, DEC-2128)", () => {
     for (const value of [undefined, "", "0", "true", " 1", "1 ", "yes"]) expect(coolOffWaivedFrom(value)).toBe(false);
   });
 
-  it("refuses a production build that would turn the waiver on, and only that (DEC-2411 item 2)", () => {
-    expect(() => refuseProductionWaiver("production", "1")).toThrow(/production build refuses it/);
-    for (const value of [undefined, "", "0", "true"]) expect(() => refuseProductionWaiver("production", value)).not.toThrow();
-    for (const env of ["development", "test", undefined]) expect(() => refuseProductionWaiver(env, "1")).not.toThrow();
+  it("refuses any build but next dev that would turn the waiver on, and only that (DEC-2411 item 2)", () => {
+    for (const env of ["production", "test", "staging", "", undefined]) expect(() => refuseWaiverOutsideDev(env, "1"), String(env)).toThrow(/DEC-2411/);
+    for (const value of [undefined, "", "0", "true"]) expect(() => refuseWaiverOutsideDev("production", value)).not.toThrow();
+    expect(() => refuseWaiverOutsideDev("development", "1")).not.toThrow();
   });
 
   it("reports a dismissed or timed-out authenticator as canceled, and sends nothing", async () => {

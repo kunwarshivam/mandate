@@ -8,8 +8,8 @@ import { describe, expect, it } from "vitest";
  * its cool-off is set by the local cell's Playwright config alone and read by `passkey.ts` alone, and
  * any other tracked file, or a `web/.env*` on disk, that names it (a Dockerfile, a workflow, a
  * release script) is refused here. A build's own environment (a shell, Workers Builds or GitHub
- * variables) is not text this can see: there `next.config.ts` refuses a production build that
- * carries the flag (`refuseProductionWaiver`), which this checks it calls.
+ * variables) is not text this can see: there `next.config.ts` refuses any build but `next dev`
+ * that carries the flag (`refuseWaiverOutsideDev`), which this checks it calls.
  */
 const FLAG = "NEXT_PUBLIC_OWLHEAD_COOL_OFF_WAIVED";
 const ROOT = join(__dirname, "..", "..", "..");
@@ -49,10 +49,10 @@ describe("the cool-off waiver flag (DEC-2411)", () => {
     expect(config).toMatch(/OWLHEAD_CELL_COOL_OFF_WAIVED === "1"/);
   });
 
-  it("is refused by next.config.ts in a production build, before the config is made", () => {
+  it("is refused by next.config.ts in any build but next dev, before the config is made", () => {
     const config = readFileSync(join(ROOT, "web/next.config.ts"), "utf8");
-    expect(config).toContain(`refuseProductionWaiver(process.env.NODE_ENV, process.env.${FLAG});`);
-    expect(config.indexOf("refuseProductionWaiver(process.env")).toBeLessThan(config.indexOf("const nextConfig"));
+    expect(config).toContain(`refuseWaiverOutsideDev(process.env.NODE_ENV, process.env.${FLAG});`);
+    expect(config.indexOf("refuseWaiverOutsideDev(process.env")).toBeLessThan(config.indexOf("const nextConfig"));
   });
 
   it("refuses any other file that sets it, and lets the allowed ones and prose name it", () => {
