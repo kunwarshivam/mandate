@@ -503,10 +503,10 @@ impl Shadow {
                 })
             })
             .collect::<Result<_, Unmatched>>()?;
-        if let Some(kept) = &self.thesis_ids {
-            if theses.iter().map(|t| &t.thesis_id).ne(kept.iter()) {
-                return Err(Unmatched("inputs"));
-            }
+        if let Some(kept) = &self.thesis_ids
+            && theses.iter().map(|t| &t.thesis_id).ne(kept.iter())
+        {
+            return Err(Unmatched("inputs"));
         }
         Ok(theses)
     }

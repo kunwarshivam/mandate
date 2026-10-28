@@ -66,6 +66,9 @@ fn final_output() -> Answered {
     }
 }
 
+/// A member's name and an edit of a call that changes it.
+type Edit = (&'static str, fn(&mut CallRequest));
+
 fn started(index: usize) -> Shadow {
     Shadow::start(&ProbeSet::built_in().unwrap(), index, &entry(), WORKSPACE).unwrap()
 }
@@ -111,7 +114,7 @@ fn an_honest_run_fits_turn_by_turn_and_ends_on_its_final_output() {
 fn a_call_that_differs_in_any_member_is_unmatched() {
     let shadow = started(0);
     let base = honest(&shadow, &[], 1 << 90, &[]);
-    let edits: [(&str, fn(&mut CallRequest)); 11] = [
+    let edits: [Edit; 11] = [
         ("purpose", |r| r.purpose = Purpose::Research),
         ("agent_id", |r| r.agent_id = Some("agent".to_owned())),
         ("workspace_id", |r| r.workspace_id = "ws_other".to_owned()),
