@@ -828,9 +828,11 @@ per workspace deployment (item 6).
       `/agent_id`; an agent an `AgentStopped` names is `invalid` at `/agent_id` too, since an
       agent id is deployed once ([DEC-1173](../project/decisions/DEC-1173.md) item 1); a version
       whose `universe.max_instruments` is above 1 is `invalid` at `/mandate_version`, code
-      `second_instrument`: the executor's risk fold reads one agent's one instrument (an account
-      with another deployed agent that has not stopped, `second_agent_on_account` at `/agent_id`,
-      is DEC-2809 item 2's, not yet in force)
+      `second_instrument`, until the multi-instrument risk state of E6-15m lands
+      ([DEC-2849](../project/decisions/DEC-2849.md) item 3), and an account with another deployed
+      agent that has not stopped is `invalid` at `/agent_id`, code `second_agent_on_account`, until
+      DEC-2849 item 9's per-agent attribution is complete (its item 4): the executor's risk fold
+      reads one agent per account, and that agent's one instrument
       ([DEC-2809](../project/decisions/DEC-2809.md), [DEC-2804](../project/decisions/DEC-2804.md)
       item 8); every
       V-rule for the agent (V-002, V-006, and V-032 included) and the pinned instruments, else

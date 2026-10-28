@@ -41,9 +41,9 @@ use crate::routes::{
 };
 use crate::stepup::{Action, Asserted, Judged, Unverified, journaled, waiver_id};
 use crate::versions::{
-    CONFIRMED, CREATED, DEPLOYED, FIRST_VERSION, Pending, Refusal, active, check, confirm_digest,
-    deploy_digest, envelope_paths, established_v2, instruments, last_confirmed, latest, object,
-    reference, screen, stopped, stored, text,
+    CONFIRMED, CREATED, DEPLOYED, FIRST_VERSION, Pending, Refusal, active, another_on_account,
+    check, confirm_digest, deploy_digest, envelope_paths, established_v2, instruments,
+    last_confirmed, latest, object, reference, screen, stopped, stored, text,
 };
 use crate::writes::{
     Gate, appended_batch_at, derived_for, id_text, one_key, principal_text, ref_text, strict,
@@ -964,6 +964,12 @@ async fn deployed(
     }
     if stopped(control, agent) {
         return Err(Answer::schema("/agent_id", "agent_stopped"));
+    }
+    if mandate.universe.max_instruments > 1 {
+        return Err(Answer::schema("/mandate_version", "second_instrument"));
+    }
+    if another_on_account(control, mandate.connection_id.as_str(), agent) {
+        return Err(Answer::schema("/agent_id", "second_agent_on_account"));
     }
     let objects = admitted.objects.as_ref();
     let date = admitted.gate.now.date();
