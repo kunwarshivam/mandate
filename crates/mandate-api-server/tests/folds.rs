@@ -6,7 +6,8 @@ use std::sync::Mutex;
 
 use mandate_api_server::folds::{Folds, HELD};
 use mandate_api_server::reads::{
-    AccountFold, OrdersFold, PositionsFold, account_positions, agent_orders, agent_positions,
+    AccountFold, HoldingsFold, OrdersFold, PositionsFold, account_positions, agent_orders,
+    agent_positions,
 };
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_journal::StoredEvent;
@@ -428,6 +429,7 @@ proptest! {
 struct Unchecked {
     orders: Held<OrdersFold>,
     positions: Held<PositionsFold>,
+    holdings: Held<HoldingsFold>,
 }
 
 fn resume<F: AccountFold>(
@@ -461,7 +463,8 @@ impl Reads for Unchecked {
                 .map_or_else(Vec::new, |f| f.finish()),
             resume(&self.positions, rows, agent, PositionsFold::new(agent))
                 .and_then(|f| f.finish()),
-            account_positions(rows),
+            resume(&self.holdings, rows, "", HoldingsFold::default())
+                .map_or_else(Vec::new, |f| f.finish()),
         )
     }
 }

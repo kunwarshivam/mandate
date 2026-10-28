@@ -482,6 +482,7 @@ pub struct OrdersFold {
 }
 
 impl OrdersFold {
+    /// The fold of no rows for `agent_id`.
     pub fn new(agent_id: &str) -> Self {
         Self {
             agent_id: agent_id.to_owned(),
@@ -590,6 +591,7 @@ pub struct PositionsFold {
 }
 
 impl PositionsFold {
+    /// The fold of no rows for `agent_id`.
     pub fn new(agent_id: &str) -> Self {
         Self {
             agent_id: agent_id.to_owned(),
