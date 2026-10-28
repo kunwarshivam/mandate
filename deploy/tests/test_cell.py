@@ -66,10 +66,14 @@ SECTION_3_1 = {
     },
     "exporter": {("postgres", "TCP", 5432), ("object-storage", "TCP", 443), ("timestamping", "TCP", 443)},
     "data": {("market-data", "TCP", 443)},
+    "news-reader": {("postgres", "TCP", 5432), ("vault", "TCP", 8200), ("market-data", "TCP", 443)},
     "deploy-manager": {("postgres", "TCP", 5432), ("kube-api", "TCP", 6443)},
     "role-provisioner": {("postgres", "TCP", 5432), ("vault", "TCP", 8200)},
     "connect-finish": {("postgres", "TCP", 5432), ("vault", "TCP", 8200)},
 }
+# The processes that render in staging alone, so a local render holds no policy for them; the
+# staging tests check theirs (DEC-2084).
+STAGING_ONLY = {"news-reader"}
 # The API server's endpoint the tests give the deployment manager (DEC-1172), as `cargo xtask cell
 # up` gives it the cell's own; the manager is the one process that may reach it.
 KUBE_API = "192.0.2.200/32"
@@ -115,10 +119,12 @@ RECIPIENT = "demo_owner"
 
 
 def every_image() -> list[str]:
+    """Every process's image but the news reader's, which renders in staging alone and only with
+    its followed agents (DEC-2084), so the tests that need it name it with `NEWS`."""
     sets = [
         f"images.{image}={PLACEHOLDER.format(image)}"
         for image in dict.fromkeys(p["image"] for p in PROCESSES)
-        if image != "postgres"
+        if image not in ("postgres", "news-reader")
     ]
     sets += [
         f"data.instruments[{i}].{key}={value}"
@@ -214,7 +220,8 @@ def one_workload_per_process(docs: list[dict], run_process: str = "control") -> 
     templates, which it alone starts (DEC-1170), and a `one_shot` one (the token exchange) is never
     a Deployment, with or without it (DEC-1175). Of the `run` processes, only the one a run names
     renders, `control` unless it names another (DEC-2035). The connect finish renders only with
-    `api.connectFinish`, which `connect_finish` checks (DEC-2348 item 3)."""
+    `api.connectFinish`, which `connect_finish` checks (DEC-2348 item 3), and a staging-only process
+only in staging, which its own tests check (DEC-2084)."""
     kinds = {"service": "Deployment", "migration": "Job", "run": "Job", "verify": "Job"}
     manager = any(is_manager(w) for w in workloads(docs))
     problems = []
@@ -227,7 +234,7 @@ def one_workload_per_process(docs: list[dict], run_process: str = "control") -> 
             want = None
         if p["kind"] == "run" and p["name"] != run_process:
             want = None
-        if p["name"] == FINISH and not found:
+        if p["name"] in (FINISH, *STAGING_ONLY) and not found:
             want = None
         if [w["kind"] for w in found] != ([want] if want else []):
             problems.append(f"{p['name']}: {[w['kind'] for w in found]}")
@@ -338,6 +345,8 @@ def egress_exact(docs: list[dict], cidrs: dict[str, str] | None = None) -> list[
         )
     for name, column in SECTION_3_1.items():
         policy = found.get(f"egress-{name}")
+        if policy is None and name in STAGING_ONLY:
+            continue
         if policy is None:
             problems.append(f"{name}: no egress policy")
             continue
@@ -667,10 +676,12 @@ def test_each_service_starts_and_is_probed_as_its_process_list_says():
     """A service with `args` starts with them and is asked `readyz` and `livez` with its `probe`, every
     placeholder filled from the values (DEC-1013, DEC-994 item 5). Without the deployment manager, so
 the processes it starts render as Deployments of their own; its pod templates are
-`test_deploy_manager_contained`'s."""
+`test_deploy_manager_contained`'s. A staging-only process's are its staging test's (DEC-2084)."""
     docs = render_all("--set", f"images.{MANAGER}=")
     for p in PROCESSES:
         if p["kind"] != "service" or not (p.get("args") or p.get("probe")) or p.get("one_shot"):
+            continue
+        if p["name"] in STAGING_ONLY:
             continue
         w = next(w for w in workloads(docs) if w["metadata"]["name"] == p["name"])
         c = first_container(w)
@@ -1090,6 +1101,102 @@ def test_staging_stores_iex_bars_as_bars_reader_and_its_own_journal_role():
     }
     readers = [w for w in workloads(docs) + managed_pods(docs) if w["metadata"]["name"] in ("runtime", "executor")]
     assert readers and all(env_of(w)["MANDATE_BARS"].endswith("/datasets/alpaca-iex") for w in readers)
+
+
+# The news reader's image and one followed agent (DEC-2084, DEC-2281), which staging's overlay
+# names once its key is in the vault.
+NEWS = (
+    "--set", f"images.news-reader={PLACEHOLDER.format('news-reader')}",
+    "--set", "news.follows[0].agent=agent_a",
+    "--set", "news.follows[0].account=acct_1",
+)
+NEWS_ARGS = [
+    "run", "--workspace", "{workspace}", "--allowlist", "/etc/mandate/news/allowlist.toml",
+    "--artifacts", "/var/lib/mandate/artifacts", "--vault-address", "{vault}", "--vault-dir",
+    "/run/mandate/vault", "--probe", "/tmp/process.sock", "--user-agent",
+    "Mandate news reader ops@owlhead.ai", "--follow", "agent_a=acct_1",
+]
+ALLOWLIST = Path(__file__).resolve().parents[2] / "config" / "sources" / "allowlist-v3.toml"
+
+
+def test_staging_runs_the_news_reader_as_its_own_role_with_its_approle_and_the_allowlist():
+    """DEC-2084: in staging, with its image and a followed agent, the news reader runs for the
+    hosted workspace with one `--follow` per followed agent; logs in to the vault as `news-reader`
+    with the AppRole and CA copied into its vault directory and no ServiceAccount token; writes as
+    `mandate_news_reader`; reads the repository's allowlist v3 byte for byte from its ConfigMap,
+    read-only; writes the artifact store; and reaches Postgres, the vault and its data host alone."""
+    done = iex_staging("--set", "api.workspace=01KDEM0000000000000000000W", *NEWS)
+    assert done.returncode == 0, done.stderr
+    docs = documents(done.stdout)
+    reader = next(w for w in workloads(docs) if w["metadata"]["name"] == "news-reader")
+    args = first_container(reader)["args"]
+    vault = re.search(r"https://vault\.[^.]+\.svc:8200", " ".join(args))
+    assert vault, args
+    expected = [a.replace("{workspace}", "01KDEM0000000000000000000W").replace("{vault}", vault.group(0)) for a in NEWS_ARGS]
+    assert args == expected
+    c = first_container(reader)
+    for kind, asked in (("readinessProbe", "readyz"), ("livenessProbe", "livez")):
+        assert c[kind]["exec"]["command"] == ["/mandate-news-reader", "probe", asked, "--probe", "/tmp/process.sock"]
+    env = env_of(reader)
+    assert "MANDATE_JOURNAL_DSN" in env and env["MANDATE_ARTIFACTS"] == "/var/lib/mandate/artifacts"
+    spec = pod_spec(reader)
+    copy_step = next(i for i in spec["initContainers"] if i["name"] == "vault-credentials")
+    assert "/run/secrets/vault-news-reader/news-reader.role-id" in copy_step["command"]
+    assert "/run/secrets/vault-news-reader/news-reader.secret-id" in copy_step["command"]
+    secrets = [
+        source["secret"]["name"]
+        for volume in spec["volumes"] if volume["name"] == "vault-sources"
+        for source in volume["projected"]["sources"] if "secret" in source
+    ]
+    assert secrets == ["vault-approle-news-reader"]
+    assert not any("serviceAccountToken" in str(v) for v in spec["volumes"]), "no ServiceAccount token"
+    roles = next(v for v in spec["volumes"] if v["name"] == "journal-role")
+    assert roles["secret"]["secretName"] == "journal-role-mandate-news-reader"
+    mounts = {m["mountPath"]: m.get("readOnly", False) for m in first_container(reader)["volumeMounts"]}
+    assert mounts["/etc/mandate/news"] is True and mounts["/run/mandate/vault"] is True
+    assert mounts["/var/lib/mandate/artifacts"] is False, "it stores each item's typed record"
+    allowlist = next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "news-reader-allowlist")
+    assert allowlist["data"] == {"allowlist.toml": ALLOWLIST.read_text()}
+    labels = reader["spec"]["template"]["metadata"]["labels"]
+    assert {k for k, v in labels.items() if k.startswith("mandate.dev/egress-") and v == "true"} == {
+        "mandate.dev/egress-postgres", "mandate.dev/egress-vault", "mandate.dev/egress-market-data",
+    }
+    assert [p for p in egress_exact(docs) if p.startswith("news-reader")] == []
+    assert "egress-news-reader" in policies(docs), "the news reader has its egress policy"
+    assert "CREATE ROLE mandate_news_reader LOGIN IN ROLE mandate_journal_app;" in ROLES_SQL
+
+
+def test_the_news_reader_renders_in_staging_alone_on_paper_and_with_a_followed_agent():
+    """DEC-2084 items 2 and 5: no image renders no reader and no allowlist; the local cell and any
+    tier but staging are refused, since its key is the platform's paper news data key, as is any
+    environment but paper; and with no followed agent it would refuse `no_follows` and never be
+    ready, so the render is refused."""
+    docs = render_all()
+    assert not [w for w in workloads(docs) if w["metadata"]["name"] == "news-reader"]
+    assert not [d for d in docs if d["metadata"].get("name") == "news-reader-allowlist"]
+    local = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), *NEWS)
+    assert "runs the news reader in staging alone" in local.stderr, local.stderr
+
+    def reader_alone(*extra: str):
+        """A hosted render naming the news reader's image alone, so a refusal is its own."""
+        return helm(
+            CHART, "-f", str(CELL / "values" / "k3d.yaml"), "--set", "localImages=false",
+            "--set", "deploymentTier=staging", "--set", "api.workspace=01KDEM0000000000000000000W",
+            *NEWS, *extra,
+        )
+
+    assert reader_alone().returncode == 0, reader_alone().stderr
+    for tier in ("dev", "ci", "production"):
+        refused = reader_alone("--set", f"deploymentTier={tier}")
+        assert f'runs the news reader in staging alone, and deploymentTier is "{tier}"' in refused.stderr, refused.stderr
+    unfollowed = helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), "--set", "localImages=false",
+        "--set", "deploymentTier=staging", "--set", "api.workspace=01KDEM0000000000000000000W",
+        "--set", f"images.news-reader={PLACEHOLDER.format('news-reader')}",
+    )
+    assert "news.follows, the agents the news reader follows, is required" in unfollowed.stderr, unfollowed.stderr
+    backtest = reader_alone("--set", "environment=backtest")
+    assert "images.news-reader needs environment paper" in backtest.stderr, backtest.stderr
 
 
 def test_the_recorded_source_holds_no_journal_role_and_iex_is_staging_s_alone():
