@@ -1739,8 +1739,8 @@ flagged interval, and holds that a measurement no server answers is out of toler
 - **The news reader writes only news streams** (DEC-2278 item 2): its role, `mandate_news_reader`,
   is an application role, and `BEFORE INSERT` triggers on `event_ids` and `events`, and
   `BEFORE INSERT OR UPDATE` on `stream_heads`, refuse every row it writes whose `stream_id` does
-  not begin `news:`, with `insufficient_privilege` (SQLSTATE `42501`) and the message
-  `mandate_news_reader writes only news streams`. The refusal holds for the session's user as well
+  not begin `news:`, with `insufficient_privilege` (SQLSTATE `42501`) and a message that begins
+  `mandate_news_reader writes only news streams` and names the refused `stream_id`. The refusal holds for the session's user as well
   as the current one, so a `SET ROLE` does not lift it. The reader's append fails, and it stops
   (§9.37). Every other role is unaffected.
 - **No hot-store eviction in Phase 0.** Later, a separate evictor role may delete only rows with
