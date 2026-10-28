@@ -353,6 +353,9 @@ fn stepped_up(
                 Answer::from(Refused::JournalUnavailable)
             }
             Unverified::Code(code) => Answer::step_up(code),
+            Unverified::Unimplemented { story } => {
+                Answer::Invalid(vec![Unverified::unimplemented(story)])
+            }
         })
 }
 

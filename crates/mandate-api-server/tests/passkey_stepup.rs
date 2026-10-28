@@ -25,8 +25,8 @@ use mandate_api::problem::ProblemCode;
 use mandate_api::wire::{EventId, Timestamp};
 use mandate_api_server::challenges::Challenges;
 use mandate_api_server::confirm::CliConfirm;
-use mandate_api_server::methods::{Methods, Passkey};
-use mandate_api_server::stepup::{Action, Asserted, Judged, StepUp, Unverified};
+use mandate_api_server::methods::{CoolOffWaiver, Methods, Passkey};
+use mandate_api_server::stepup::{Action, Asserted, CoolOffWaived, Judged, StepUp, Unverified};
 use mandate_api_server::subject::{LinkRefusal, NamesPrincipal};
 use mandate_canon::{Digest, encode_ulid};
 use mandate_identity::MembershipState::Active;
@@ -152,6 +152,7 @@ fn world_with(signer: Signer) -> World {
             challenges: Arc::clone(&challenges),
             rp: support_passkey::rp(),
             keys: Some(Arc::new(keys)),
+            cool_off_waiver: None,
         },
         cli_confirm: CliConfirm {
             challenges: Arc::clone(&challenges),
@@ -791,4 +792,143 @@ fn a_backup_eligible_flag_the_registration_recorded_counts() {
             signed.canonical(CREDENTIAL)
         )))
     );
+}
+
+/// A first enrolment's `cool_off_ends` for the owner's passkey enrolled at `T0 - 900` (rule 249):
+/// 24 hours later, so still cooling when the step-up is judged at `ISSUED + 30`.
+const COOLING: i64 = T0 - 900 + 86_400;
+
+/// [`world`] on a server started with `waiver`, the owner's passkey still in its cool-off.
+fn cooling_in(waiver: Option<CoolOffWaiver>) -> World {
+    let mut w = world();
+    w.rows = Rows::opened();
+    enrol(
+        &mut w.rows,
+        T0 - 900,
+        enrolled(OWNER, CREDENTIAL, &w.signer, 0, Some(COOLING)),
+    );
+    w.port.passkey.cool_off_waiver = waiver;
+    w
+}
+
+/// DEC-2146 items 3 and 4: under a test cell's waiver, a passkey still cooling counts, and the
+/// waiver comes back only inside the [`Asserted`] the route journals: the enrolment's
+/// `cool_off_ends` and the tier, beside the same record members a cooled credential's step-up
+/// returns.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_waived_step_up_counts_and_carries_its_waiver_inside_the_assertion() {
+    for (waiver, tier) in [
+        (CoolOffWaiver::Ci, CoolOffWaiver::Ci),
+        (CoolOffWaiver::Dev, CoolOffWaiver::Dev),
+    ] {
+        let w = cooling_in(Some(waiver));
+        let signed = w.signed(9);
+        let mut ask = w.ask();
+        ask.assertion = Some(signed.wire(CREDENTIAL));
+        let answer = w.judge(&ask);
+        let Ok(Some(asserted)) = answer else {
+            panic!("{waiver:?}: the step-up counts, not {answer:?}");
+        };
+        assert_eq!(
+            members(&asserted),
+            (
+                CHALLENGE.to_owned(),
+                CREDENTIAL.to_owned(),
+                9,
+                signed.canonical(CREDENTIAL)
+            )
+        );
+        assert_eq!(
+            asserted.waived(),
+            Some(CoolOffWaived {
+                cool_off_ends: at(COOLING),
+                tier,
+            }),
+            "{waiver:?}"
+        );
+        assert!(!w.held(), "the challenge is taken once it counts");
+    }
+}
+
+/// DEC-2146 item 3: the waiver changes the cool-off check alone. A cooling passkey's step-up that
+/// fails any other check answers that check's code under the waiver, and takes nothing.
+#[test]
+#[ignore = "pending E9-4"]
+fn the_waiver_leaves_every_other_check_as_it_was() {
+    let w = cooling_in(Some(CoolOffWaiver::Ci));
+    let mut tampered = w.signed(9);
+    let last = tampered.signature.len() - 1;
+    tampered.signature[last] ^= 1;
+    let mut ask = w.ask();
+    ask.assertion = Some(tampered.wire(CREDENTIAL));
+    refused(&w, &ask, ProblemCode::StepUpMissing);
+
+    let mut late = w.ask();
+    late.now = ISSUED + LIFE + 1;
+    refused(&w, &late, ProblemCode::StepUpStale);
+
+    let mut unknown = w.ask();
+    unknown.evidence = evidence(UNKNOWN_CHALLENGE, StepUpMethod::Passkey);
+    refused(&w, &unknown, ProblemCode::StepUpMissing);
+
+    let mut elsewhere = w.ask();
+    elsewhere.who = OTHER;
+    refused(&w, &elsewhere, ProblemCode::StepUpMismatch);
+
+    let mut theirs = cooling_in(Some(CoolOffWaiver::Ci));
+    theirs.rows = Rows::opened();
+    enrol(
+        &mut theirs.rows,
+        T0 - 900,
+        enrolled(OTHER, CREDENTIAL, &theirs.signer, 0, Some(COOLING)),
+    );
+    refused(&theirs, &theirs.ask(), ProblemCode::StepUpMissing);
+}
+
+/// DEC-2146 item 3: with the waiver on, a step-up that carries no assertion, as an approval grant's
+/// passkey evidence does, and the port's plain `verify`, have nothing to journal the waiver
+/// beside, so a cooling passkey stays cooling: `step_up_missing`, the challenge kept.
+#[test]
+fn without_an_assertion_the_waiver_counts_nothing() {
+    let w = cooling_in(Some(CoolOffWaiver::Ci));
+    let mut bare = w.ask();
+    bare.assertion = None;
+    refused(&w, &bare, ProblemCode::StepUpMissing);
+    let tenant = context(OWNER, w.action.kind, workspace(WORKSPACE));
+    let judged = Judged {
+        tenant: &tenant,
+        control: &w.rows.rows,
+        now: at(ISSUED + 30),
+    };
+    let action = Action {
+        kind: w.action.kind,
+        digest: w.action.digest,
+    };
+    let evidence = evidence(CHALLENGE, StepUpMethod::Passkey);
+    assert_eq!(
+        w.port.verify(&evidence, &action, &judged),
+        Err(ProblemCode::StepUpMissing)
+    );
+    assert_eq!(
+        w.port.passkey.verify(&evidence, &action, &judged),
+        Err(ProblemCode::StepUpMissing)
+    );
+    assert!(w.held());
+}
+
+/// DEC-2146 items 1 and 2: without the waiver a cooling passkey is `step_up_missing`; and a step-up
+/// past its cool-off under the waiver carries no waiver, as there is none to journal.
+#[test]
+fn only_a_cooling_passkey_under_the_waiver_is_waived() {
+    let unwaived = cooling_in(None);
+    refused(&unwaived, &unwaived.ask(), ProblemCode::StepUpMissing);
+
+    let mut cooled = world();
+    cooled.port.passkey.cool_off_waiver = Some(CoolOffWaiver::Ci);
+    let answer = cooled.judge(&cooled.ask());
+    let Ok(Some(asserted)) = answer else {
+        panic!("the step-up counts, not {answer:?}");
+    };
+    assert_eq!(asserted.waived(), None);
 }
