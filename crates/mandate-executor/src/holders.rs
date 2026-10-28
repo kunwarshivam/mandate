@@ -1745,7 +1745,8 @@ mod tests {
     /// they go as well; so do they beside agent 1's own working exit of two. An exit of no agent
     /// cancels every leg. An OCO's two legs count once in what agent 1 keeps.
     #[test]
-    fn an_exit_cancels_its_own_legs_and_keeps_anothers_that_fit() -> Result<(), ExecutorError> {
+    fn an_exit_cancels_its_own_legs_and_keeps_another_holders_that_fit() -> Result<(), ExecutorError>
+    {
         let at = instrument(0)?;
         let two = || {
             vec![
