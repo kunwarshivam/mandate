@@ -212,20 +212,26 @@ runners misbehave (for example, runners registering and never going Online), ope
 yourself alone, read the logs, and shut it again the same day (DEC-2077). Opening and shutting it
 each replace the droplets, so do it while `CI_RUNNER` is unset (§7).
 
+The E21-64l diagnostic canary found cloud-init stopping at `sshd -t` because Ubuntu 24.04 had not
+created volatile `/run/sshd`; bootstrap therefore never installed Docker, Sysbox or the manager.
+The module now creates that root-owned mode-0755 directory before validation. A recurrence is a
+boot-order regression, not evidence against the GitHub App or Sysbox.
+
 1. **Make a fresh DigitalOcean token** (§2.3) and export the same variables as in §4, then add:
 
    ```bash
    cd deploy/tofu/environments/ci-runners
    export TF_VAR_debug_ssh_key="$(cat ~/.ssh/id_ed25519.pub)"            # your public key, one line
    export TF_VAR_debug_ssh_cidr="$(curl -s https://ipv4.icanhazip.com)/32" # your own address only
-   tofu apply
+   tofu apply -var runner_count=1                                        # while debugging the canary
    ```
 
    Check that the address is your own, for example against your router's page. Behind a shared or
    carrier-grade NAT, one address is everyone behind it; use another network then.
 
-   The plan adds one inbound rule (TCP 22 from your address) and replaces the three droplets.
-   The window takes both variables or neither, and refuses any range wider than one address.
+   The canary plan adds one inbound rule (TCP 22 from your address) and replaces its one droplet.
+   On an already scaled fleet, omit `-var runner_count=1`; that plan replaces all three. The
+   window takes both variables or neither, and refuses any range wider than one address.
 2. **Wait about 30 minutes**, for the new droplets to boot and start looping, then for each
    droplet's address (the console's **Droplets** page):
 
@@ -244,9 +250,11 @@ each replace the droplets, so do it while `CI_RUNNER` is unset (§7).
    (`app.pem` is the App's private key), the droplets' user data, your DigitalOcean token, your
    state passphrase, or the output of `docker inspect`, `docker ps --no-trunc` or `ps` with
    arguments, which show the runner's single-use registration. If a line ever shows a key or a token, stop and rotate it.
-4. **Shut the window the same day:** run `tofu apply` again with both variables unset
-   (`unset TF_VAR_debug_ssh_key TF_VAR_debug_ssh_cidr`). The plan removes the rule and replaces
-   the droplets. Then revoke the token.
+4. **Shut the window the same day:** unset both variables
+   (`unset TF_VAR_debug_ssh_key TF_VAR_debug_ssh_cidr`), then run
+   `tofu apply -var runner_count=1` while the fleet is still the canary. The plan removes the rule
+   and replaces that one droplet without scaling it. On an already scaled fleet, use plain
+   `tofu apply` to replace all three. Then revoke the token.
 
 ## What lands where
 
