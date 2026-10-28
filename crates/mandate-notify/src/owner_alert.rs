@@ -18,6 +18,8 @@ pub enum OwnerAlertKind {
     AccountRestriction,
     ConnectionUnavailable,
     Protection,
+    ProtectionUnattributed,
+    AttributionDeficit,
     ExitStalled,
     Reconciliation,
     ExternalActivity,
@@ -47,10 +49,11 @@ pub enum OwnerAlertKind {
 
 impl OwnerAlertKind {
     #[rustfmt::skip]
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 35] = [
         Self::RiskLimit, Self::KillSwitch, Self::KillSwitchUnapplied, Self::AgentHeld,
         Self::RetirementHeld, Self::AccountRestriction, Self::ConnectionUnavailable,
-        Self::Protection, Self::ExitStalled, Self::Reconciliation, Self::ExternalActivity,
+        Self::Protection, Self::ProtectionUnattributed, Self::AttributionDeficit,
+        Self::ExitStalled, Self::Reconciliation, Self::ExternalActivity,
         Self::AccountState, Self::DataFeedDown, Self::IntegrityIncident, Self::CredentialAdded,
         Self::NewDevice, Self::NotificationAddressChanged, Self::RecoveryUsed, Self::RoleGranted,
         Self::MemberDeactivated, Self::Deprovisioned, Self::BreakGlass,
@@ -71,6 +74,8 @@ impl OwnerAlertKind {
             Self::AccountRestriction => NoticeKind::AccountRestriction,
             Self::ConnectionUnavailable => NoticeKind::ConnectionUnavailable,
             Self::Protection => NoticeKind::Protection,
+            Self::ProtectionUnattributed => NoticeKind::ProtectionUnattributed,
+            Self::AttributionDeficit => NoticeKind::AttributionDeficit,
             Self::ExitStalled => NoticeKind::ExitStalled,
             Self::Reconciliation => NoticeKind::Reconciliation,
             Self::ExternalActivity => NoticeKind::ExternalActivity,
@@ -111,6 +116,8 @@ impl OwnerAlertKind {
             Self::AccountRestriction => "account_restriction",
             Self::ConnectionUnavailable => "connection_unavailable",
             Self::Protection => "protection",
+            Self::ProtectionUnattributed => "protection_unattributed",
+            Self::AttributionDeficit => "attribution_deficit",
             Self::ExitStalled => "exit_stalled",
             Self::Reconciliation => "reconciliation",
             Self::ExternalActivity => "external_activity",

@@ -839,6 +839,8 @@ mod bridge {
             | K::AccountRestriction
             | K::ConnectionUnavailable
             | K::Protection
+            | K::ProtectionUnattributed
+            | K::AttributionDeficit
             | K::ExitStalled
             | K::Reconciliation
             | K::ExternalActivity

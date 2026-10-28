@@ -2,13 +2,16 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.24 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md); v0.20 amendment [DEC-2302](../project/decisions/DEC-2302.md) item 7; v0.21 amendment [DEC-2807](../project/decisions/DEC-2807.md); v0.22 amendment [DEC-2815](../project/decisions/DEC-2815.md); v0.23 amendment [DEC-2824](../project/decisions/DEC-2824.md); v0.24 amendment [DEC-2849](../project/decisions/DEC-2849.md), positions are per agent); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.25 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md); v0.20 amendment [DEC-2302](../project/decisions/DEC-2302.md) item 7; v0.21 amendment [DEC-2807](../project/decisions/DEC-2807.md); v0.22 amendment [DEC-2815](../project/decisions/DEC-2815.md); v0.23 amendment [DEC-2824](../project/decisions/DEC-2824.md); v0.24 amendment [DEC-2849](../project/decisions/DEC-2849.md), positions are per agent; v0.25 amendment [DEC-2855](../project/decisions/DEC-2855.md), the hold codes registered); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)); US equities on Robinhood for the founder's one live order ([DEC-529](../project/decisions/DEC-529.md)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.25 ([DEC-2855](../project/decisions/DEC-2855.md)):** §9.1 step 4's `protection_unattributed`
+  and `attribution_deficit` are registered (the founder's ruling), and the owner is alerted once
+  per episode of openings held for either. No hold, check order or exit changes.
 - **v0.23 ([DEC-2824](../project/decisions/DEC-2824.md)):** §7.3 says how its "Lifts when" column is
   journaled. The owner acknowledges one cause's restriction, and the executor records each lift with
   its acknowledgment and evidence. The account state stays the strictest restriction in force, and
@@ -1145,9 +1148,9 @@ including allows, is journaled with the checks evaluated.
    with resting protective orders: an unattributed leg holds it (`protection_unattributed`), which
    comes first as the more specific cause, then a plain risk-increasing order is denied
    (`add_blocked_by_protective_order`). An opening in an instrument with an attribution deficit
-   (§8.1) is held before either (`attribution_deficit`, [DEC-2849](../project/decisions/DEC-2849.md);
-   registering the code, like `protection_unattributed`, is Proposed (founder), and the hold applies
-   meanwhile as the conservative interim)
+   (§8.1) is held before either (`attribution_deficit`, [DEC-2849](../project/decisions/DEC-2849.md)).
+   Both codes are registered, and the owner is alerted once per episode of openings held for either
+   ([DEC-2855](../project/decisions/DEC-2855.md), the founder's ruling)
 5. Mark freshness and price collar (§8.2, §9.6)
 6. Market-conduct controls (§9.6, including the close window and the mandate's orders per day)
 7. Buying power (§9.5), then gross exposure (§9.3: the account at 1×, then the agent's mandate

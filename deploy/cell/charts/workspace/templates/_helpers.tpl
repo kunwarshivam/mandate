@@ -14,13 +14,18 @@ tests (deploy/tests/test_cell.py) and the drills (`cargo xtask cell drill`) read
 
 {{- /* The processes of processes.json; with `api.vaultBinding` the API's egress also names the
 vault, so its pod carries the label the vault's policy admits on 8200 and an egress rule to it
-alone (DEC-2338). */ -}}
+alone (DEC-2338). With `modelGateway.registry` the model gateway starts live (DEC-2216 item 4,
+DEC-2081): it reads the registry file the chart renders, logs in to the vault as the model gateway
+with the AppRole `mandate.vaultCopy` puts in its vault directory, and never names `--recorded`. */ -}}
 {{- define "mandate.processes" -}}
 {{- $all := (fromJson (.Files.Get "processes.json")).processes -}}
 {{- $out := list -}}
 {{- range $all -}}
 {{- if and (eq .name "api") $.Values.api.vaultBinding -}}
 {{- $_ := set . "egress" (concat (list (first .egress) "vault") (rest .egress)) -}}
+{{- end -}}
+{{- if and (eq .name "model-gateway") $.Values.modelGateway.registry -}}
+{{- $_ := set . "args" (list "run" "--registry" "/run/mandate/model-gateway/registry.json" "--listen" "0.0.0.0:8080" "--probe" "/tmp/process.sock" "--vault-address" "{vault}" "--vault-dir" "/run/mandate/vault") -}}
 {{- end -}}
 {{- $out = append $out . -}}
 {{- if and (eq .name "deploy-manager") $.Values.deployManager.researchWorkspace -}}
@@ -334,11 +339,20 @@ start without them (AGENTS.md rule 3).
   value: http://oauth-fixture:8091/alpaca/v2/account
 {{- end }}
 {{- /* The model gateway's workspace and deployment, required with its image, and its two monthly
-budgets, rendered only when named, so an unnamed one stops its start with its code (DEC-2326). */}}
+budgets, rendered only when named, so an unnamed one stops its start with its code (DEC-2326). The
+local cell serves the recorded bundle alone and names no registry; a hosted cell starts live, from
+`modelGateway.registry`, and only staging names one, under the budgets the founder accepted
+(DEC-2282, DEC-2081); production's are the founder's to approve. */}}
 {{- if eq .p.name "model-gateway" }}
 {{- $g := .root.Values.modelGateway }}
-{{- if and (or $g.workspaceMonthlyUsd $g.deploymentMonthlyUsd) (not .root.Values.localImages) }}
-{{- fail "modelGateway's monthly budgets are named only by the local cell's values (localImages), over the recorded bundle; a hosted cell's budgets are the founder's (DEC-2326 item 2, DEC-2396)" }}
+{{- if and .root.Values.localImages $g.registry }}
+{{- fail "modelGateway.registry is a hosted cell's: the local cell serves the recorded bundle alone and reaches no provider (DEC-2326, DEC-2081)" }}
+{{- end }}
+{{- if and (not .root.Values.localImages) (ne .root.Values.deploymentTier "staging") }}
+{{- fail (printf "a hosted cell runs the model gateway in staging alone, and deploymentTier is %q: production's model budgets are the founder's (DEC-2282, DEC-2081)" .root.Values.deploymentTier) }}
+{{- end }}
+{{- if and (not .root.Values.localImages) (not $g.registry) }}
+{{- fail "a hosted model gateway starts live, from modelGateway.registry: its released image carries no recorded bundle (DEC-2079 item 5, DEC-2081)" }}
 {{- end }}
 - name: MANDATE_GATEWAY_WORKSPACE
   value: {{ required "modelGateway.workspace, the one workspace the model gateway serves, is required with images.model-gateway" $g.workspace | quote }}
@@ -976,6 +990,22 @@ spec:
     {{- include "mandate.selector" . | nindent 4 }}
   ports:
     - {name: calls, port: 8080, targetPort: 8080, protocol: TCP}
+{{- end -}}
+
+{{- /* The live model gateway's registry file (DEC-2216 item 4, DEC-2081): `modelGateway.registry`,
+the founder's vetted entries (DEC-2282) as the live registry's strict JSON, held in the ConfigMap
+`model-gateway-registry`, which its Deployment mounts read-only at /run/mandate/model-gateway. It
+holds no key and no secret; the gateway reads the file once, at start, and refuses it whole when
+it is not a live registry or names a gate report it cannot yet verify. */ -}}
+{{- define "mandate.modelGatewayRegistry" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-gateway-registry
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+data:
+  registry.json: {{ .root.Values.modelGateway.registry | quote }}
 {{- end -}}
 
 {{- /* A process's journal DSN, as its own role: TLS verified against the journal's CA, and the

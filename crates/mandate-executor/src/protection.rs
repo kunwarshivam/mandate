@@ -5817,6 +5817,34 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// DEC-2853, the review of #2838: a quote the executor process holds for a kill switch is
+    /// recorded as a market input records it, so an exit prices from it, but it runs no step. A
+    /// sane 139 under the resting 140 stop starts no breach, so no watchdog fires a minute later,
+    /// and nothing is drafted or sent; the same quote as a market input starts the breach the
+    /// watchdog fires on.
+    #[test]
+    fn a_held_quote_prices_but_never_runs_the_watchdog() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let Input::Market(quote) = observation(Some(139), None, true, 0)? else {
+            return Err(missing("a market observation"));
+        };
+        let mut held = protected(&ports)?;
+        held.state.hold_quote(&quote);
+        assert!(held.state.breaches.is_empty(), "{:?}", held.state.breaches);
+        assert_eq!(
+            super::lowest_sane(&held.state, &aapl()?),
+            Some(Price::parse("139")?)
+        );
+        let later = held.run(Input::Tick(RiskClock::from_secs(60)), &ports)?;
+        assert!(watchdog_record(&later).is_none(), "{:?}", drafted(&later));
+        let mut marked = protected(&ports)?;
+        marked.run(Input::Market(quote), &ports)?;
+        let fired = marked.run(Input::Tick(RiskClock::from_secs(60)), &ports)?;
+        assert!(watchdog_record(&fired).is_some(), "{:?}", drafted(&fired));
+        Ok(())
+    }
+
     /// DEC-260 (11): the watchdog's exit takes the lower of the latest mark and sane bid as its
     /// limit, so a mark above a fresh bid (139.9 against 139) never makes it a passive
     /// take-profit; it runs the marketable sequence.
