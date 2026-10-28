@@ -6386,6 +6386,103 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// DEC-2849 I4 and I5, the other half of the coordinator's edge: when the stopped mode comes from
+    /// the agent's own kill switch and its stop is breached before the switch's cancel is confirmed,
+    /// the watchdog's exit is agent-a's own and held `agent_stopped`, and the switch's flatten, which
+    /// no mode holds, still sells agent-a's ten and never agent-b's five. So a stopped agent's lots
+    /// are never left unprotected and unsold.
+    #[test]
+    fn a_stopped_agents_kill_switch_sells_its_own_lots_beside_another_holders()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text("md-held-2")),
+                ("agent", text("agent-b")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text("5")),
+                ("limit", text("150")),
+                ("purpose", text("open")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-b")),
+                ("client_order_id", text("md-held-2")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty_gross", text("5")),
+                ("price", text("150")),
+            ],
+        )?;
+        executor.run(observation(Some(145), None, true, 0)?, &ports)?;
+        let mut effects = executor.run(
+            Input::Command(Command::KillSwitch {
+                scope: KillScope::Agent(AgentId("agent-a".to_owned())),
+                initiator: Initiator::Owner,
+                confirmation: None,
+                cause: None,
+            }),
+            &ports,
+        )?;
+        assert_eq!(
+            executor
+                .state
+                .effective_mode(&AgentId("agent-a".to_owned())),
+            Mode::Stopped
+        );
+        effects.extend(executor.run(observation(Some(139), None, true, 0)?, &ports)?);
+        effects.extend(executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?);
+        effects.extend(executor.run(cancel_accepted(OCO), &ports)?);
+        effects.extend(executor.run(Input::Tick(RiskClock::from_secs(31)), &ports)?);
+        let watchdog: Vec<(String, String)> = watchdog_intents(&effects)
+            .into_iter()
+            .map(|(_, agent, purpose, qty)| (agent, format!("{purpose} {qty}")))
+            .collect();
+        assert_eq!(
+            watchdog,
+            vec![("agent-a".to_owned(), "risk_exit 10".to_owned())],
+            "the stop breached after the switch raises agent-a's own watchdog exit"
+        );
+        assert_eq!(
+            gate_reasons(&effects),
+            vec!["agent_stopped"],
+            "which the agent's stopped mode holds, as rule 13 allows"
+        );
+        let flattens: Vec<(String, String)> = effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "IntentReceived" => {
+                    let field = |name: &str| {
+                        draft
+                            .payload
+                            .get(name)
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned()
+                    };
+                    field("intent_id")
+                        .starts_with("k-")
+                        .then(|| (field("agent_id"), field("qty")))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            flattens,
+            vec![("agent-a".to_owned(), "10".to_owned())],
+            "the switch's flatten sells agent-a's own ten, never agent-b's five"
+        );
+        Ok(())
+    }
+
     /// §5.6 ladders an exit only where its instrument has an exit tier: without one the exit goes
     /// at its intent's own limit and is never cancelled to step.
     #[test]
