@@ -7,12 +7,12 @@ use mandate_connections::record::ConnectionId;
 use mandate_time::UtcNanos;
 use serde_json::{Value, json};
 
-use crate::openbao::provisioned_policy;
 use crate::openbao::{
     OpenBaoConfig, OpenBaoSource, cas_refusal, kubernetes_login_path, kubernetes_login_refusal,
     kubernetes_login_verdict, kubernetes_namespace_verdict, lost_or_denied_verdict, provision,
     provisioned_identities, refusal, role_settings, seal_verdict, secret_id_identities, taken_read,
 };
+use crate::openbao::{ProvisionError, provisioned_policy};
 use crate::openbao::{fingerprint_key_verdict, key_needs_creating, transit_mount_verdict};
 use crate::policy::{Identity, Mounts};
 use base64::Engine;
@@ -222,7 +222,8 @@ async fn provisioning_an_unreachable_vault_is_an_outage() {
     let provisioned = provision(&config, &token, &[ConnectionId::new("c1").unwrap()], None).await;
     assert_eq!(
         provisioned.map(|credentials| credentials.len()),
-        Err(SourceError::Unavailable)
+        Err(ProvisionError::from(SourceError::Unavailable)),
+        "a vault that never answered refused nothing, so no request is named"
     );
 }
 
@@ -728,4 +729,27 @@ fn only_a_missing_fingerprint_key_is_created_and_any_other_error_fails() {
             "{refusal:?}"
         );
     }
+}
+
+/// A refused request shows as its method, its path under `/v1/`, and its status, and nothing else.
+#[test]
+fn a_refused_request_shows_its_method_path_and_status() {
+    let refused = crate::openbao::Refused {
+        method: "PUT".to_owned(),
+        path: "sys/policies/acl/mandate-runtime".to_owned(),
+        status: 403,
+    };
+    assert_eq!(
+        refused.to_string(),
+        "PUT /v1/sys/policies/acl/mandate-runtime answered 403"
+    );
+    let stopped = ProvisionError {
+        error: SourceError::Denied,
+        refused: Some(refused),
+    };
+    assert_eq!(
+        stopped.to_string(),
+        "this identity's policy does not allow that",
+        "the error shows as its refusal; the caller names the request"
+    );
 }
