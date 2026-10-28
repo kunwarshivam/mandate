@@ -256,13 +256,6 @@ pub(crate) fn uncovered(
 
 /// I4's clip: N less every working sell in `instrument` as [`still_selling`] counts them, never
 /// below zero.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "lane X sizes exits and legs on it (DEC-2849 items 7 and 8)"
-    )
-)]
 pub(crate) fn available_to_sell(
     view: &ExecutorState,
     instrument: &InstrumentId,
@@ -275,20 +268,14 @@ pub(crate) fn available_to_sell(
 /// I4 for the exits the executor raises for an agent itself (DEC-2849 item 7): the watchdog exit of
 /// its triggered protection, and its plain entry's bound exit. Each is that agent's own, sized
 /// min(Lᵢ, N), clipped to what is still available to sell ([`available_to_sell`]), so it never
-/// sells another holder's or the owner's shares (the founder's ruling of 2026-10-27).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "pending E7-4 (DEC-2849 item 7): the watchdog and the bound size on it"
-    )
-)]
+/// sells another holder's or the owner's shares (the founder's ruling of 2026-10-27). The size
+/// never reads the agent's mode.
 pub(crate) fn rule_13_size(
-    _view: &ExecutorState,
-    _agent: &AgentId,
-    _instrument: &InstrumentId,
+    view: &ExecutorState,
+    agent: &AgentId,
+    instrument: &InstrumentId,
 ) -> Result<Qty, ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-4" })
+    Ok(sub_ledger(view, agent, instrument)?.min(available_to_sell(view, instrument)?))
 }
 
 /// Takes `quantity` of an account switch's close in `instrument` out of its holders, for
@@ -853,7 +840,6 @@ mod tests {
     /// (its watchdog's, its bound's) is the oracle's min(Lᵢ, N, N less the working sells): never more
     /// than its own lots, never the owner's or another holder's, and never past what is left.
     #[test]
-    #[ignore = "pending E7-4"]
     fn rule_13_sizes_are_the_oracles() -> Result<(), String> {
         let mut runner = proptest::test_runner::TestRunner::new(ProptestConfig::with_cases(256));
         runner
@@ -902,7 +888,6 @@ mod tests {
     /// how its own flatten clips its watchdog, are the watchdog's and the kill's (E7-4, the
     /// implementation's own tests).
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_rule_13_exit_sells_its_own_lots_and_no_more() -> Result<(), ExecutorError> {
         let at = instrument(0)?;
         for (events, sizes) in [
