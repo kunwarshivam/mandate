@@ -1174,7 +1174,8 @@ pub fn plan(
                 Part::WebTradeLoop(WebCheck {
                     shows: "the trade loop from web/ on the agent: its approval request \
                             shown, approved with the code the host confirms, the order filled, \
-                            the position, the journal and the positions screen shown, the \
+                            the position, the journal and the positions screen shown with the \
+                            position's market value and unrealized P&L at its risk mark, the \
                             owner's exit filled, the audit timeline shown, the agent paused \
                             from its page, then its kill switch",
                     agent: WEB_AGENT,

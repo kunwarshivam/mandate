@@ -1,14 +1,16 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Page, expect, test } from "@playwright/test";
+import { type Page, type Response, expect, test } from "@playwright/test";
 import { deferredCheckLabel } from "../src/lib/deferred-checks";
+import { signedUsd, usd } from "../src/lib/format";
 
 /**
  * The trade loop from web/, end to end in the local cell (the founder's 2026-10-27 deadline): a
  * deployed paper agent's request appears in the web app, the owner approves it in the browser with
  * the code the host confirms (`cli_confirm`, DEC-2104), the executor places and fills the order on
  * the fixture broker, the agent's screen shows the order filled, the position and the journal
- * records from the served reads (DEC-2377), the positions screen shows the agent's own position, the
+ * records from the served reads (DEC-2377), the positions screen shows the agent's own position with
+ * the market value and unrealized P&L the API served at its risk mark (DEC-2138), the
  * audit timeline shows the agent's and its account's records, the owner pauses the agent from its
  * page (`POST /agents/{id}/pause`, no step-up) and it reads paused, the browser's kill switch is
  * recorded for the paused agent, which a pause leaves available (trading spec §7.4), and the alerts screen shows that kill switch as exactly one alert (`GET /alerts`, DEC-2141).
@@ -178,6 +180,30 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     await expect(own.getByRole("columnheader", { name: "Cost basis" })).toBeVisible();
     await expect(own.getByRole("row").nth(1).getByRole("cell")).toHaveCount(8);
     step("positions_screen");
+  });
+
+  await test.step("the agent's position shows the market value and unrealized P&L the API served at its risk mark", async () => {
+    const own = page.locator(`[data-slot=agent-positions][data-agent="${AGENT}"]`);
+    const served = { value: new Set<string>(), pnl: new Set<string>() };
+    const read = async (r: Response) => {
+      if (r.request().method() !== "GET" || new URL(r.url()).pathname !== `/v1/workspaces/${WORKSPACE}/agents/${AGENT}/positions` || !r.ok()) return;
+      const body = (await r.json().catch(() => null)) as { positions?: { market_value?: string | null; unrealized_pnl?: string | null }[] } | null;
+      for (const p of body?.positions ?? []) {
+        if (p.market_value) served.value.add(usd(p.market_value));
+        if (p.unrealized_pnl) served.pnl.add(signedUsd(p.unrealized_pnl));
+      }
+    };
+    page.on("response", read);
+    const cells = own.getByRole("row").nth(1).getByRole("cell");
+    const figures = async () => [((await cells.nth(4).textContent()) ?? "").trim(), ((await cells.nth(5).textContent()) ?? "").trim()];
+    const shown = await until(page, "/positions", 60_000, async () => {
+      const [value, pnl] = await figures();
+      return served.value.has(value) && served.pnl.has(pnl);
+    });
+    page.off("response", read);
+    const [value, pnl] = await figures();
+    if (!shown) refuse(`the position showed market value "${value}" and unrealized P&L "${pnl}", not figures the API served at a sane risk mark within 60 s (served: ${[...served.pnl].join(", ") || "none"})`);
+    step("position_pnl", pnl);
   });
 
   await test.step("the owner's exit from the positions screen is recorded, and its sell fills on the agent's orders", async () => {
