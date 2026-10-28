@@ -59,6 +59,7 @@ fn app() -> App {
         challenges: Arc::default(),
         connect: None,
         reduction: Arc::default(),
+        folds: Arc::default(),
     }
 }
 

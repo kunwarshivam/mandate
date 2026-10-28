@@ -659,6 +659,17 @@
         "admits_instruments": {
           "type": "boolean",
           "description": "True for the research agent: its outputs may name instruments outside the working universe (DEC-97)."
+        },
+        "routes": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "description": "The research agent only: the registry entry each run kind other than ideate calls; a run kind with no member calls the model's own pin (mandate spec section 8.1, V-048, DEC-2282).",
+          "properties": {
+            "monitor": {
+              "$ref": "#/$defs/model_route"
+            }
+          }
         }
       }
     },
@@ -1149,6 +1160,29 @@
           "stop_distance": {
             "$ref": "#/$defs/open_fraction"
           }
+        }
+      }
+    },
+    "model_route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "content_hash"
+      ],
+      "description": "An offered research entry, pinned like a signal model (V-048).",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^llm\\.[a-z0-9_]{1,48}$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/content_ref"
         }
       }
     }

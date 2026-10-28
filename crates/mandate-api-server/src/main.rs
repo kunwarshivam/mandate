@@ -40,6 +40,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use mandate_api_server::cache::{CachedJournal, Limits};
 use mandate_api_server::challenges::Challenges;
 use mandate_api_server::clock::{Clock, SystemClock};
 use mandate_api_server::config::SessionKey;
@@ -317,9 +318,13 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         tokens: Arc::new(Issuer::new(start.issuer, start.keys)),
         links: Arc::new(subject::Fixed),
         clock: Arc::new(SystemClock),
-        journal: Arc::new(Postgres(PgJournal::from_dsn(&start.database_url).map_err(
-            |_| io::Error::other("the journal's connection settings are refused"),
-        )?)),
+        journal: Arc::new(CachedJournal::new(
+            Arc::new(Postgres(PgJournal::from_dsn(&start.database_url).map_err(
+                |_| io::Error::other("the journal's connection settings are refused"),
+            )?)),
+            Arc::new(SystemClock),
+            Limits::SERVER,
+        )),
         members: Arc::new(members::control_parser(start.hosted.workspace)),
         hosted: start.hosted,
         artifacts: start.artifacts.clone().map(|store| {
@@ -338,6 +343,7 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
             Arc::new(SystemClock),
         ),
         reduction: Arc::new(Reduction::new(start.ingress, Box::new(OsRandom::new()))),
+        folds: Arc::default(),
     };
     let api = spawn_listener(
         serve(

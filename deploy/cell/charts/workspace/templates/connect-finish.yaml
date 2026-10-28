@@ -12,7 +12,7 @@ here so the bound the finish keeps is stated.
 {{- define "mandate.connectFinishEnv" -}}
 {{- $j := .root.Values.journal -}}
 - name: MANDATE_API_DATABASE_URL
-  value: {{ printf "postgres://%s@%s:%v/%s?sslmode=verify-full&sslrootcert=/run/secrets/journal-ca/ca.crt" .p.db_role $j.host $j.port $j.database | quote }}
+  value: {{ include "mandate.journalDsn" (dict "role" .p.db_role "journal" $j) | quote }}
 - name: MANDATE_API_WORKSPACE
   value: {{ required "api.workspace, the hosted workspace whose connects the finish closes, is required with api.connectFinish" .root.Values.api.workspace | quote }}
 - name: MANDATE_FINISH_VAULT_ADDRESS

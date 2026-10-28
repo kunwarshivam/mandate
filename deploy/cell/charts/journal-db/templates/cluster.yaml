@@ -71,12 +71,19 @@ spec:
             key: roles.sql
   managed:
     roles:
+      # The read-only group (DEC-2082), made here too, so a cluster bootstrapped before it has it:
+      # roles.sql runs only at bootstrap. The workspace chart's migrate.sh grants it its reads.
+      - name: mandate_journal_reader
+        ensure: present
+        login: false
+        inherit: true
+      {{- $readers := include "journal.readers" . | fromJsonArray }}
       {{- range (include "journal.roles" . | fromJsonArray) }}
       - name: {{ . | quote }}
         ensure: present
         login: true
         inherit: true
-        inRoles: ["mandate_journal_app"]
+        inRoles: [{{ ternary "mandate_journal_reader" "mandate_journal_app" (has . $readers) | quote }}]
         passwordSecret:
           name: {{ printf "journal-role-%s" (. | replace "_" "-") | quote }}
       {{- end }}

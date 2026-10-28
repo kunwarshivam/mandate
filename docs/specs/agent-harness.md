@@ -14,6 +14,12 @@ else.
 
 ## Change history
 
+- **v0.2, amended ([DEC-2217](../project/decisions/DEC-2217.md), E21-62):** §10.1 adds the
+  runtime's `gate` mode: the probe runs over fixture readers and an in-memory store, calling the
+  gateway service's gate listener with purpose `evaluation`, its claims never trusted.
+- **v0.2, amended ([DEC-2282](../project/decisions/DEC-2282.md), E21-62):** a research call's
+  `model` is its run kind's entry: the mandate's `routes` member for the run kind, else the research
+  agent's own pin (mandate spec v0.17, V-048). Every turn of a run calls one entry.
 - **v0.2, amended ([DEC-2392](../project/decisions/DEC-2392.md), E19-12):** event triggers. With the
   mandate's `behavior.research.event_triggers` set (mandate spec v0.11 §8.4), an allowlisted news
   item or filing about an instrument with an active thesis brings a `monitor` run forward (§5.3,
@@ -1323,7 +1329,7 @@ the identical weights) and item 10 (a reported identity that differs from the pi
 | `call_id` | A ULID from the core's `IdGen` |
 | `workspace_id`, `agent_id` | The agent's |
 | `purpose` | `research` |
-| `model` | The research agent's pinned id, version, and content hash |
+| `model` | The run kind's entry: the research agent's `routes` member for that run kind, else its own pinned id, version and content hash ([DEC-2282](../project/decisions/DEC-2282.md)). Every turn of a run calls the same entry |
 | `inputs` | §6.4's typed inputs |
 | `as_of` | The run's cut-off |
 | `deadline` | `single_call`: the call's dispatch instant plus the entry's `deadline_ms`, on the wall clock (§6.2 step 3). `agentic`: the dispatch instant plus the lesser of `deadline_ms` and the run time `r` the core handed over (§6.9 step 3) |
@@ -1359,6 +1365,19 @@ the identical weights) and item 10 (a reported identity that differs from the pi
    its pinned schema, and the gateway runs none of them; anything else is `schema_invalid`.
    The entry also pins the reasoning mode and effort and `top_p`, and the request keeps §6.12's
    stable order. Answered by inference spec v0.4 (INF-5, §3.1, §3.2, §4.1, §6, §7.3).
+
+**The gate mode** ([DEC-2217](../project/decisions/DEC-2217.md)). The research runtime's binary
+has a `gate` mode, run only as the one-shot gate Job of inference spec §4.3. It drives each of the
+probe set's runs through this spec's research run (§6.9 to §6.11) and the worker's dispatch,
+unchanged but for its calls' purpose and their missing agent, with these differences:
+- its readers are fixture readers over the probe set's corpus;
+- its store is in memory, discarded at exit, and it writes no journal and no agent stream;
+- it has no broker and no account;
+- its only network is the gateway service's gate listener, where each call has purpose
+  `evaluation` and no agent.
+
+Nothing it decides is trusted: the gateway service recomputes every input, tool result and check
+before it writes the gate's report.
 
 ### 10.2 The data plane ([data-plane spec](data-plane.md))
 

@@ -38,12 +38,23 @@ spec:
     {{- $_ := set $launch "mounts" "- {name: dispatcher-config, mountPath: /etc/mandate/dispatcher, readOnly: true}" }}
     {{- $volumes = "- {name: dispatcher-config, configMap: {name: dispatcher-config, defaultMode: 292, items: [{key: config.json, path: config.json}]}}" }}
     {{- end }}
+    {{- $init := "" }}
+    {{- if and (eq .p.name "data") (eq .root.Values.data.source "alpaca-iex") }}
+    {{- $_ := set $launch "mounts" "- {name: vault, mountPath: /run/mandate/vault, readOnly: true}" }}
+    {{- $volumes = include "mandate.vaultVolumes" (dict "root" .root "role" "bars-reader") }}
+    {{- $init = include "mandate.vaultCopy" (dict "root" .root "role" "bars-reader") }}
+    {{- end }}
+    {{- if and (eq .p.name "model-gateway") .root.Values.modelGateway.registry }}
+    {{- $_ := set $launch "mounts" "- {name: model-gateway-registry, mountPath: /run/mandate/model-gateway, readOnly: true}\n- {name: vault, mountPath: /run/mandate/vault, readOnly: true}" }}
+    {{- $volumes = printf "- {name: model-gateway-registry, configMap: {name: model-gateway-registry, defaultMode: 292, items: [{key: registry.json, path: registry.json}]}}\n%s" (include "mandate.vaultVolumes" (dict "root" .root "role" "model-gateway")) }}
+    {{- $init = include "mandate.vaultCopy" (dict "root" .root "role" "model-gateway") }}
+    {{- end }}
     {{- with .p.probe }}
     {{- $probe := dict "livez" (include "mandate.fill" (dict "root" $ctx.root "words" . "probe" "livez") | fromJsonArray) "readyz" (include "mandate.fill" (dict "root" $ctx.root "words" . "probe" "readyz") | fromJsonArray) }}
     {{- $_ := set $launch "probe" $probe }}
     {{- end }}
     {{- $container := include "mandate.container" $launch }}
-    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "containers" $container "volumes" $volumes) | nindent 4 }}
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "containers" $container "initContainers" $init "volumes" $volumes) | nindent 4 }}
 {{- end -}}
 {{- $root := . }}
 {{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) }}
@@ -59,5 +70,9 @@ its ingress policy admits only the workspace's runtimes. */ -}}
 {{- if eq .name "model-gateway" }}
 ---
 {{ include "mandate.emit" (include "mandate.modelGatewayService" (dict "root" $root "p" .)) }}
+{{- if $root.Values.modelGateway.registry }}
+---
+{{ include "mandate.emit" (include "mandate.modelGatewayRegistry" (dict "root" $root "p" .)) }}
+{{- end }}
 {{- end }}
 {{- end }}

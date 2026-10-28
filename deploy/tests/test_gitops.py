@@ -912,7 +912,7 @@ FQDN_EGRESS = {
     "api": {"wyyxngmblqqokcvraflx.supabase.co"},
     "control": {"wyyxngmblqqokcvraflx.supabase.co"},
     "executor": {"paper-api.alpaca.markets", "data.alpaca.markets"},
-    "data": {"data.alpaca.markets", "stream.data.alpaca.markets"},
+    "data": {"data.alpaca.markets"},
     "model-gateway": {"openrouter.ai"},
     "token-exchange": {"api.alpaca.markets"},
 }
@@ -1038,6 +1038,7 @@ def test_each_fqdn_egress_bug_is_caught(tmp_path):
     seeds = [
         lambda: host_rule("executor")["toFQDNs"].append({"matchName": "api.alpaca.markets"}),
         lambda: host_rule("data")["toFQDNs"].append({"matchPattern": "*.alpaca.markets"}),
+        lambda: host_rule("data")["toFQDNs"].append({"matchName": "stream.data.alpaca.markets"}),
         lambda: host_rule("model-gateway")["toFQDNs"].append({"matchName": "paper-api.alpaca.markets"}),
         lambda: host_rule("executor")["toPorts"][0]["ports"].append({"port": "80", "protocol": "TCP"}),
         lambda: host_rule("executor")["toFQDNs"].append({"matchName": "stream.data.alpaca.markets"}),

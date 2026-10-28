@@ -51,9 +51,11 @@ pub mod oauth_check;
 pub mod paper;
 mod process;
 pub mod quotes;
+pub mod risk;
 pub mod robinhood;
 pub mod run;
 pub mod serve;
+mod tail;
 
 pub use process::{
     Alert, Broker, Config, ExecutorProcess, Protections, Unplanned, VERSION, Wiring,

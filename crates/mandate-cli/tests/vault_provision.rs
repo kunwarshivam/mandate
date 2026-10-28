@@ -10,10 +10,14 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
-use mandate_cli::vault::kubernetes_auth;
+use mandate_cli::vault::{
+    KV_SETTLE_PAUSE, KV_SETTLE_TRIES, kubernetes_auth, provision_settled, stopped_line,
+};
 use mandate_vault::SourceError;
 use mandate_vault::kubernetes::KubernetesAuth;
+use mandate_vault::openbao::{ProvisionError, Refused};
 
 const CANARY: &str = "canary-71c4e0aa-operator-token-do-not-print";
 /// An address no vault listens on: the discard port on the loopback.
@@ -279,6 +283,7 @@ fn provisioning_writes_each_identitys_files_and_prints_only_their_names() {
         "secret-import",
         "model-gateway",
         "news-reader",
+        "bars-reader",
         "email-sender",
         "executor-c1",
         "executor-c2",
@@ -529,5 +534,99 @@ fn kubernetes_alone_on_the_dev_server_is_refused_outside_a_pod() {
         "denied",
         &out,
         "Kubernetes auth alone outside a pod",
+    );
+}
+
+/// A provisioning the vault refused names the request it refused after the refusal and its code;
+/// one stopped otherwise reads as the refusal and its code alone (E21-32v).
+#[test]
+fn a_stopped_provisioning_names_the_request_the_vault_refused() {
+    let refused = ProvisionError {
+        error: SourceError::Denied,
+        refused: Some(Refused {
+            method: "POST".to_owned(),
+            path: "sys/mounts/mandate".to_owned(),
+            status: 403,
+        }),
+    };
+    assert_eq!(
+        stopped_line(&refused),
+        "this identity's policy does not allow that (denied): POST /v1/sys/mounts/mandate answered 403"
+    );
+    assert_eq!(
+        stopped_line(&ProvisionError::from(SourceError::Unavailable)),
+        "the vault could not be reached (unavailable)"
+    );
+}
+
+/// E21-32v: `vault provision` provisions again, after a pause, only while the vault says its KV
+/// mount is still upgrading, and at most `KV_SETTLE_TRIES` times; any other refusal stops it at
+/// once, and the last try's refusal is the one it reports.
+#[test]
+fn provisioning_waits_out_only_a_kv_mount_still_upgrading_and_only_so_long() {
+    let refused = |error: SourceError| ProvisionError {
+        error,
+        refused: Some(Refused {
+            method: "GET".to_owned(),
+            path: "mandate/config".to_owned(),
+            status: 400,
+        }),
+    };
+    let run = |answers: &mut dyn FnMut(u32) -> Result<u32, ProvisionError>| {
+        let (mut tries, mut pauses) = (0_u32, Vec::<Duration>::new());
+        let done = provision_settled(
+            || {
+                tries += 1;
+                answers(tries)
+            },
+            |pause| pauses.push(pause),
+        );
+        (done, tries, pauses)
+    };
+    let (done, tries, pauses) = run(&mut |n| {
+        if n < 3 {
+            Err(refused(SourceError::KvUpgrading))
+        } else {
+            Ok(n)
+        }
+    });
+    assert_eq!((done, tries), (Ok(3), 3));
+    assert_eq!(pauses, vec![KV_SETTLE_PAUSE; 2]);
+
+    let (done, tries, pauses) = run(&mut |_| Err(refused(SourceError::KvUpgrading)));
+    assert_eq!(done, Err(refused(SourceError::KvUpgrading)));
+    assert_eq!(tries, KV_SETTLE_TRIES);
+    assert_eq!(pauses.len(), KV_SETTLE_TRIES as usize - 1);
+    assert!(
+        KV_SETTLE_PAUSE * (KV_SETTLE_TRIES - 1) >= Duration::from_secs(55),
+        "about a minute in all"
+    );
+
+    for error in [
+        SourceError::Denied,
+        SourceError::Unavailable,
+        SourceError::Sealed,
+        SourceError::RoleMissing,
+    ] {
+        let (done, tries, pauses) = run(&mut |_| Err(refused(error.clone())));
+        assert_eq!(done, Err(refused(error.clone())), "{error:?}");
+        assert_eq!(
+            (tries, pauses.len()),
+            (1, 0),
+            "{error:?} is never waited out"
+        );
+    }
+    let (done, tries, pauses) = run(&mut |n| {
+        if n < 2 {
+            Err(refused(SourceError::KvUpgrading))
+        } else {
+            Err(refused(SourceError::Denied))
+        }
+    });
+    assert_eq!(done, Err(refused(SourceError::Denied)));
+    assert_eq!(
+        (tries, pauses.len()),
+        (2, 1),
+        "a denial after a wait still stops it"
     );
 }

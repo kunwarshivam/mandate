@@ -380,6 +380,7 @@ def meter_rule_drafts() -> list[dict]:
         invalid("settled.155.actor", "rule 155", s, [change("actor", dict(RUNTIME))], "schema", "actor.kind"),
         invalid("reserved.156.no_agent", "rule 156: an agent's call names it", r, [change("payload.agent_id", None)], "schema", "payload.agent_id"),
         invalid("reserved.156.compiler_agent", "rule 156: the compiler has no agent", r, [change("payload.purpose", "compiler")], "schema", "payload.agent_id"),
+        invalid("reserved.156.evaluation_agent", "rule 156: an evaluation has no agent (DEC-2216)", r, [change("payload.purpose", "evaluation")], "schema", "payload.agent_id"),
         invalid("reserved.156.cost", "rule 156", r, [change("payload.max_cost_usd", "-0.01")], "schema", "payload.max_cost_usd"),
         invalid("reserved.156.both", "rule 156: the first that fails", r, [change("payload.agent_id", None), change("payload.max_cost_usd", "-0.01")], "schema", "payload.agent_id"),
         invalid("settled.157.cost", "rule 157", s, [change("payload.cost_usd", "-0.01")], "schema", "payload.cost_usd"),
@@ -433,6 +434,7 @@ def valid_drafts() -> list[dict]:
         valid("call.every_harness_result", "rule 151: each result with each kind it fits, theses first", c, [change("payload.verdicts", [verdict(i, kind, result) for i, (kind, result) in enumerate(RESULTS)])]),
         valid("call.invalidations_only", "rule 151: a response of invalidations alone", c, [change("payload.verdicts", [verdict(0, "invalidation", "judged"), verdict(1, "invalidation", "unknown_thesis")])]),
         valid("reserved.compiler", "rule 156: the compiler's call", r, [change("payload.agent_id", None), change("payload.purpose", "compiler")]),
+        valid("reserved.evaluation", "rule 156: an evaluation's call (DEC-2216)", r, [change("payload.agent_id", None), change("payload.purpose", "evaluation")]),
         valid("reserved.free", "rule 156: a local endpoint priced at zero", r, [change("payload.max_cost_usd", "0")]),
         valid("reserved.customer_key", "§9.19: a customer's key", r, [change("payload.key_owner", "customer")]),
         *(
@@ -879,6 +881,7 @@ VALIDATOR_MUTANTS = (
     "rule.154",
     "rule.155",
     "rule.156.agent",
+    "rule.156.evaluation",
     "rule.156.cost",
     *(f"rule.157.{n}" for n in ("cost", "unsent", "tokens", "free", "any_outcome")),
     "rule.149.refusals_only",

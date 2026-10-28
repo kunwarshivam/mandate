@@ -84,6 +84,11 @@ impl QuotePoll {
         }
     }
 
+    /// Reads each instrument once per `every` from now on (DEC-2844).
+    pub fn set_every(&mut self, every: Duration) {
+        self.every = every;
+    }
+
     /// The wanted instruments due a read at `now`, which it records as read: one never read, or
     /// last read `every` or more before `now`. An instrument no longer wanted is forgotten, so it
     /// is read at once when it is wanted again.

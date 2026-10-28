@@ -1,0 +1,2 @@
+- **E21-64m (Could; review of E21-64l)** As the operator, I want the plan test to prove SSH validation occurs exactly once, so that an added `sshd -t` before `/run/sshd` cannot escape the boot-order oracle. *Accepted when:* the test refuses zero, duplicate or pre-prerequisite `sshd -t` commands; a planted early duplicate fails while the valid boot script passes (DEC-2078 item 7).
+<!-- section: E21 Operations and infrastructure -->

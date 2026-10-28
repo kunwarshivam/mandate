@@ -26,6 +26,7 @@ use mandate_executor::{
 use mandate_executord::follow::folded;
 use mandate_executord::marks::NoMarks;
 use mandate_executord::quotes::NoQuotes;
+use mandate_executord::risk::Unopened;
 use mandate_executord::robinhood::RobinhoodBroker;
 use mandate_executord::{Broker, ExecutorProcess, Wiring};
 use mandate_journal::Environment;
@@ -512,6 +513,7 @@ fn wiring() -> Result<Wiring, Error> {
         protections: Box::new(TwoPercentStop),
         quotes: Box::new(NoQuotes),
         marked: Box::new(NoMarks),
+        risk: Box::new(Unopened),
     })
 }
 
