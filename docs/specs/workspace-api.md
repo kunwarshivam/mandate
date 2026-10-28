@@ -827,7 +827,8 @@ per workspace deployment (item 6).
       `invalid` at `/agent_id`, code `second_agent_on_account`: the executor's risk fold reads one
       agent per account, and that agent's one instrument
       ([DEC-2809](../project/decisions/DEC-2809.md), [DEC-2804](../project/decisions/DEC-2804.md)
-      item 8); every
+      item 8), until [DEC-2849](../project/decisions/DEC-2849.md) item 9's per-agent attribution
+      is complete (its item 4); every
       V-rule for the agent (V-002, V-006, and V-032 included) and the pinned instruments, else
       `invalid` with the V-codes. V-002 reads the account's equity from the latest
       `AccountSnapshotRecorded` on the account stream of the document's connection; with
