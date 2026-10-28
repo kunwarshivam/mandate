@@ -205,9 +205,10 @@ impl Http {
         body: Option<&Value>,
     ) -> Result<Option<Value>, SourceError> {
         self.forget();
+        let asked = method.clone();
         let mut request = self
             .client
-            .request(method.clone(), format!("{}/v1/{path}", self.address));
+            .request(method, format!("{}/v1/{path}", self.address));
         if let Some(token) = token {
             request = request.header("X-Vault-Token", token.expose_secret());
         }
@@ -219,7 +220,7 @@ impl Http {
         let response = request.send().await.map_err(|_| SourceError::Unavailable)?;
         let status = response.status();
         let judged = refusal(status);
-        self.note(&method, path, status, &judged);
+        self.note(&asked, path, status, &judged);
         judged?;
         let bytes = response
             .bytes()

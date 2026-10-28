@@ -1,18 +1,18 @@
 //! A sealed vault or a dev server is refused before any login (DEC-977 items 5 and 6).
 
 use crate::SourceError;
-use reqwest::StatusCode;
+use reqwest::{Method, StatusCode};
 
 use mandate_connections::record::ConnectionId;
 use mandate_time::UtcNanos;
 use serde_json::{Value, json};
 
+use crate::openbao::{Http, ProvisionError, Refused, provisioned_policy};
 use crate::openbao::{
     OpenBaoConfig, OpenBaoSource, cas_refusal, kubernetes_login_path, kubernetes_login_refusal,
     kubernetes_login_verdict, kubernetes_namespace_verdict, lost_or_denied_verdict, provision,
     provisioned_identities, refusal, role_settings, seal_verdict, secret_id_identities, taken_read,
 };
-use crate::openbao::{ProvisionError, provisioned_policy};
 use crate::openbao::{fingerprint_key_verdict, key_needs_creating, transit_mount_verdict};
 use crate::policy::{Identity, Mounts};
 use base64::Engine;
@@ -759,8 +759,6 @@ fn a_refused_request_shows_its_method_path_and_status() {
 /// of another kind names none.
 #[test]
 fn provisioning_names_a_refusal_only_when_it_is_what_stopped_it() {
-    use crate::openbao::{Http, Refused};
-    use reqwest::{Method, StatusCode};
     let http = Http::new(&unreachable()).unwrap();
     let named = |http: &Http, error: SourceError| http.explained(error).refused;
     let mounts_get = Refused {
