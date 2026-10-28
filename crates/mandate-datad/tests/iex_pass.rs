@@ -439,6 +439,24 @@ fn registrations_are_read_from_after_the_last_row_and_objects_once() {
     store.0.borrow_mut().clear();
     assert_eq!(kept.registered(&store), first, "and kept after");
     assert_eq!(*store.1.borrow(), 1);
+
+    let mut healing = Registrations::default();
+    healing.extend(vec![row(1, 1)]);
+    store
+        .0
+        .borrow_mut()
+        .insert(reference.to_string(), b"half written".to_vec());
+    assert_eq!(healing.registered(&store), Registered::Unreadable);
+    store
+        .0
+        .borrow_mut()
+        .insert(reference.to_string(), object.to_vec());
+    assert_eq!(
+        healing.registered(&store),
+        first,
+        "a corrupt read is not kept, so the next read of the whole object heals it"
+    );
+    assert_eq!(*store.1.borrow(), 3);
 }
 
 mod worker_loop {
@@ -590,7 +608,10 @@ mod worker_loop {
             &progress,
             Edge {
                 now: &|| super::at("2026-10-27T14:30:10Z"),
-                pause: &|| paused.set(paused.get() + 1),
+                pause: &|| {
+                    paused.set(paused.get() + 1);
+                    terminate.store(true, Ordering::SeqCst);
+                },
                 log: &mut |line| log.push(line.to_owned()),
             },
         );

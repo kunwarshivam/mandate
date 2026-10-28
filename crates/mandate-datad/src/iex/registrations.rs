@@ -6,7 +6,9 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, StoredEvent, TrustedStart};
+use mandate_journal::{
+    ArtifactError, ArtifactRef, ArtifactSource, StoredEvent, TrustedStart, check_artifact,
+};
 
 use crate::iex::instruments::{Registered, registered};
 
@@ -44,7 +46,8 @@ impl Registrations {
     }
 }
 
-/// `inner`, remembering each object it hands out.
+/// `inner`, remembering each object it hands out once its bytes match their reference, so a
+/// corrupt read is refused and read again at the next use rather than kept.
 struct Cached<'a> {
     inner: &'a dyn ArtifactSource,
     objects: &'a RefCell<BTreeMap<String, Vec<u8>>>,
@@ -57,6 +60,7 @@ impl ArtifactSource for Cached<'_> {
             return Ok(bytes.clone());
         }
         let bytes = self.inner.read_artifact(reference)?;
+        check_artifact(reference, &bytes)?;
         self.objects.borrow_mut().insert(key, bytes.clone());
         Ok(bytes)
     }
