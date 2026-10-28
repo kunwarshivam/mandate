@@ -188,6 +188,72 @@ mod tests {
         assert!(health.troubles().is_empty());
     }
 
+    /// DEC-2842, R3's review of #2764: a lost answer reports no rate limit, since the transport
+    /// forgets the last one when no response comes back, so it neither degrades the headroom class
+    /// nor clears it. It counts only toward the network class, as one failure of three.
+    #[test]
+    fn a_lost_answer_neither_degrades_nor_clears_the_headroom() {
+        let left = |remaining| {
+            Some(RateLimit {
+                limit: 200,
+                remaining,
+            })
+        };
+        let lost = |health: &mut Health| {
+            health.observe(&Err(ConnectorError::Unknown(BrokerUnknown::Ambiguous)));
+            health.observe_rate_limit(None);
+        };
+        let degraded = vec![ConnectionTrouble::Degraded(DegradeReason::RateHeadroom)];
+        let mut health = Health::default();
+        lost(&mut health);
+        assert!(
+            health.troubles().is_empty(),
+            "a lost answer does not degrade the headroom"
+        );
+        health.observe_rate_limit(left(39));
+        assert_eq!(health.troubles(), degraded);
+        lost(&mut health);
+        assert_eq!(
+            health.troubles(),
+            degraded,
+            "a lost answer does not clear the headroom"
+        );
+        health.observe_rate_limit(left(40));
+        assert!(health.troubles().is_empty());
+    }
+
+    /// DEC-2842 item 6: a `429` carrying no requests left degrades the headroom at once, and the
+    /// client's reading of it as a lost answer counts one network failure of three.
+    #[test]
+    fn a_429_with_none_left_degrades_and_counts_as_lost() {
+        let mut health = Health::default();
+        for _ in 0..2 {
+            health.observe(&Err(ConnectorError::Unknown(BrokerUnknown::Ambiguous)));
+            health.observe_rate_limit(Some(RateLimit {
+                limit: 200,
+                remaining: 0,
+            }));
+        }
+        assert_eq!(
+            health.troubles(),
+            vec![ConnectionTrouble::Degraded(DegradeReason::RateHeadroom)],
+            "two 429s: headroom degraded, network at two of three"
+        );
+        health.observe(&Err(ConnectorError::Unknown(BrokerUnknown::Ambiguous)));
+        health.observe_rate_limit(Some(RateLimit {
+            limit: 200,
+            remaining: 0,
+        }));
+        assert_eq!(
+            health.troubles(),
+            vec![
+                ConnectionTrouble::Degraded(DegradeReason::NetworkErrors),
+                ConnectionTrouble::Degraded(DegradeReason::RateHeadroom),
+            ],
+            "the third counts toward the network class too"
+        );
+    }
+
     /// A one-read broker's account reads count as one answer each (DEC-2832): two refused
     /// credentials in a row suspend, and an answered read between them resets the count.
     #[test]
