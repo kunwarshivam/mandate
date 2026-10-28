@@ -447,11 +447,17 @@ export function RuntimeProvider({
   children,
   recordAfterMs = 1600,
   tick = true,
+  offline = false,
 }: {
   initial: Workspace;
   children: ReactNode;
   recordAfterMs?: number;
   tick?: boolean;
+  /**
+   * Holds no deployment at all, so every command and answer is undelivered, whatever `initial`'s
+   * status: the API providers' stand-in while no workspace is named, which must never show a record.
+   */
+  offline?: boolean;
 }) {
   const [ws, setWs] = useState(initial);
   const [now, setNow] = useState(initial.now);
@@ -474,7 +480,7 @@ export function RuntimeProvider({
     setWs(result.ws);
     return result.recorded;
   }, []);
-  const reachable = initial.status !== "unreachable";
+  const reachable = !offline && initial.status !== "unreachable";
   const silent = initial.journal === "silent";
   /** A version waiting for a safe point is checked again until it settles, so the checks stop with the provider. */
   const mounted = useRef(true);
@@ -525,6 +531,10 @@ export function RuntimeProvider({
       setResponses((map) => ({ ...map, [approvalId]: entry }));
       window.setTimeout(() => {
         const at = nowRef.current;
+        if (!reachable) {
+          setResponses((map) => ({ ...map, [approvalId]: { ...entry, phase: "undelivered", reason: "unreachable" } }));
+          return;
+        }
         if (silent) {
           setResponses((map) => ({ ...map, [approvalId]: { ...entry, phase: "unknown" } }));
           return;
@@ -543,7 +553,7 @@ export function RuntimeProvider({
         }, recordAfterMs * 0.75);
       }, recordAfterMs);
     },
-    [silent, recordAfterMs, change],
+    [reachable, silent, recordAfterMs, change],
   );
 
   const changeMandate = useCallback(

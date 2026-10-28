@@ -323,6 +323,7 @@ describe("no order ticket (DEC-528)", () => {
     enrol: ["CREATE_TIMEOUT_MS", "ENROL_ROUTE", "REGISTRATION_ROUTE", "browserCreator", "createPasskey", "enrolBody", "enrolStepUpDigest", "enrolled", "passkeyList", "registrationChallenge"],
     decisions: ["DEFERRED_CHECKS", "decisionsOf"],
     decode: ["array", "closedEnum", "contentRef", "decimal", "integer", "isRecord", "nullable", "object", "string", "timestamp", "watermark"],
+    memberships: ["MY_WORKSPACES_ROUTE", "myWorkspaces", "pickWorkspace", "resolveWorkspace"],
     "mock-server": ["MOCK_AUTHORIZATION_ORIGIN", "MOCK_MODEL", "MOCK_PASSKEY_ID", "MOCK_PRINCIPAL", "MOCK_RP_ID", "MOCK_USER_HANDLE", "createMockServer"],
     operations: ["NOT_COMMANDS", "WEB_OPERATIONS", "operationFor"],
     passkey: ["ASSERTION_TIMEOUT_MS", "assertPasskey", "browserAuthenticator", "deployStepUpDigest", "fromBase64url", "ownerCommandStepUpDigest", "passkeysRead", "toBase64url", "usablePasskeys"],
