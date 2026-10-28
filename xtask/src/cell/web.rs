@@ -15,6 +15,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
+use super::scenario::{SET_UP_BY, SetUpBy};
 use super::{DEMO_APP_ORIGIN, DEMO_SUBJECT, LOCAL_ISSUER, WEB_URL, state};
 
 /// The local API's port-forward on `localhost`, as `cargo xtask cell demo`'s own `web/` reaches it.
@@ -748,6 +749,17 @@ struct SpecRun {
     log: PathBuf,
 }
 
+/// What every cell spec is told of the step-up cool-off when the run's agent is set up `by`
+/// `web/`: `OWLHEAD_CELL_COOL_OFF_WAIVED=1`, so `next dev` is built with the browser's side of
+/// DEC-2146's waiver, which the cell's API takes only then ([`super::scenario::point_args`]);
+/// nothing when the CLI sets it up, so no spec's browser tries a cooling-off passkey.
+pub fn cool_off_env(by: SetUpBy) -> Vec<(&'static str, &'static str)> {
+    match by {
+        SetUpBy::Web => vec![("OWLHEAD_CELL_COOL_OFF_WAIVED", "1")],
+        SetUpBy::Cli => Vec::new(),
+    }
+}
+
 /// Runs a cell spec against the cell's API as the demo owner, signed in through the stub, with
 /// `extra` beside the shared environment, under `state/<dir>`, for at most `polls` polls, calling
 /// `each` before every poll.
@@ -809,6 +821,7 @@ fn spec_run(
             .env("OWLHEAD_CELL_TLS_CERT", &cert)
             .env("OWLHEAD_CELL_RESULT", &result)
             .envs(extra.iter().map(|(n, v)| (*n, v.as_str())))
+            .envs(cool_off_env(SET_UP_BY))
             .stdout(output.try_clone()?)
             .stderr(output),
     )
@@ -892,6 +905,26 @@ mod tests {
                 "the spec writes {step}"
             );
         }
+        Ok(())
+    }
+
+    /// Lane W's #2908: the browser's side of the cool-off waiver goes to every spec only when
+    /// `web/` sets the agent up, as the API's side does, and the variable is the one
+    /// `playwright.cell.config.ts` reads.
+    #[test]
+    fn only_a_web_set_up_tells_the_specs_the_cool_off_is_waived() -> Result<()> {
+        assert_eq!(
+            cool_off_env(SetUpBy::Web),
+            [("OWLHEAD_CELL_COOL_OFF_WAIVED", "1")]
+        );
+        assert!(cool_off_env(SetUpBy::Cli).is_empty());
+        let runner = fs::read_to_string(crate::repo_root()?.join(file!()))?;
+        let code = runner.split("#[cfg(test)]").next().unwrap_or_default();
+        assert_eq!(
+            code.matches(".envs(cool_off_env(SET_UP_BY))").count(),
+            1,
+            "spec_run hands it on, from the switch"
+        );
         Ok(())
     }
 
