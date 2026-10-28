@@ -919,7 +919,10 @@ mod tests {
         );
         assert!(cool_off_env(SetUpBy::Cli).is_empty());
         let runner = fs::read_to_string(crate::repo_root()?.join(file!()))?;
-        let code = runner.split("#[cfg(test)]").next().unwrap_or_default();
+        let code = runner
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
         assert_eq!(
             code.matches(".envs(cool_off_env(SET_UP_BY))").count(),
             1,

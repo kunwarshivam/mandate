@@ -5475,6 +5475,21 @@ mod tests {
             cli[cli.len() - 4..],
             ["--wait", "--wait-for-jobs", "--timeout", "3m"]
         );
+        let ours = fs::read_to_string("src/cell/scenario.rs").unwrap();
+        let code = ours
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        assert_eq!(
+            code.matches("point_api(&workspace, SET_UP_BY)").count(),
+            1,
+            "the demo points its cell from the switch"
+        );
+        assert_eq!(
+            code.matches("point_api(&").count(),
+            1,
+            "and makes no other call"
+        );
         for drill in ["exchange.rs", "executor.rs"] {
             let source = fs::read_to_string(format!("src/cell/{drill}")).unwrap();
             assert!(
