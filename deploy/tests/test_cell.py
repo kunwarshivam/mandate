@@ -19,6 +19,7 @@ from pathlib import Path
 
 import celpy
 import pytest
+import yaml
 from celpy import celtypes
 
 CELL = Path(__file__).resolve().parents[1] / "cell"
@@ -994,16 +995,31 @@ def test_the_gateway_follows_the_research_workspace_to_its_manager_s_runtime():
     assert len(managed_pods(docs)) == 2 * len(managed_pods(render_all("--set", f"api.workspace={hosted}")))
 
 
-def test_only_the_local_cell_names_the_model_gateway_s_budgets():
-    """DEC-2326 item 2, DEC-2396: no values file but the local cell's names a model budget, and the
-    local cell's gateway serves the workspace its API hosts."""
+STAGING_WORKSPACE = CELL.parent / "gitops" / "clusters" / "staging" / "workspace.yaml"
+LIVE_REGISTRY_FILE = CELL / "model-gateway" / "registry.json"
+
+
+def staging_values() -> dict:
+    release = next(d for d in yaml.safe_load_all(STAGING_WORKSPACE.read_text()) if d and d.get("kind") == "HelmRelease")
+    return release["spec"]["values"]
+
+
+def test_only_the_local_cell_and_staging_name_the_model_gateway_s_budgets():
+    """DEC-2326 item 2, DEC-2282, DEC-2081: no values file names a model budget but the local
+    cell's, over its recorded bundle, and staging's, which are the founder's $50 and $50; the
+    local cell's gateway serves the workspace its API hosts, and so does staging's."""
     for values in sorted((CELL / "values").glob("*.yaml")) + sorted(
         (CELL.parent / "gitops").rglob("*.yaml")
     ):
-        if values.name == "k3d.yaml":
+        if values.name == "k3d.yaml" or values == STAGING_WORKSPACE:
             continue
         text = values.read_text()
         assert "MonthlyUsd" not in text, f"{values} names a model budget"
+    staging = staging_values()
+    gateway = staging["modelGateway"]
+    assert (gateway["workspaceMonthlyUsd"], gateway["deploymentMonthlyUsd"]) == ("50", "50"), gateway
+    assert gateway["workspace"] == staging["api"]["workspace"]
+    assert gateway["deployment"] == "staging", "the meter stream's deployment never changes (DEC-2207)"
     defaults = (CHART / "values.yaml").read_text()
     for budget in ("workspaceMonthlyUsd", "deploymentMonthlyUsd"):
         assert f'  {budget}: ""\n' in defaults, f"the chart defaults {budget}"
@@ -1013,6 +1029,15 @@ def test_only_the_local_cell_names_the_model_gateway_s_budgets():
         for block in ("api", "modelGateway")
     }
     assert workspaces["api"] == workspaces["modelGateway"], workspaces
+
+
+def test_staging_names_the_committed_live_registry_byte_for_byte():
+    """DEC-2081, #2844: staging's gateway starts from deploy/cell/model-gateway/registry.json as
+    committed, every entry `evaluating` and none naming a gate report, so it offers nothing."""
+    registry = staging_values()["modelGateway"]["registry"]
+    assert registry == LIVE_REGISTRY_FILE.read_text()
+    entries = json.loads(registry)["entries"]
+    assert entries and all(e["status"] == "evaluating" and "gate_report" not in e for e in entries)
 
 
 def test_the_local_cell_records_both_demo_agents_instruments():

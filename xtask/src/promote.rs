@@ -303,7 +303,7 @@ mod tests {
         (
             "mandate-gatewayd",
             "model-gateway",
-            "modelGateway.workspace and modelGateway.deployment; its two monthly budgets, without which it refuses to start, are the founder's (DEC-2282)",
+            "platform/model-provider-key in the staging vault, which the founder's apply writes (FOUNDER-STEPS K): without it the gateway stops at start and holds the whole workspace release unready, so it is promoted in the change after that apply (DEC-2081 item 5)",
         ),
     ];
 
