@@ -643,6 +643,63 @@ pub fn setup_result(text: &str) -> Result<BTreeMap<String, String>> {
     Ok(steps)
 }
 
+/// The backtest report spec under `web/e2e-cell/` (the demo's step 5 from web/, lane W).
+const REPORT_SPEC: &str = "backtest-report.spec.ts";
+/// Playwright's bound on the report run (`OWLHEAD_CELL_TIMEOUT_MS`): 270 seconds, which holds the
+/// spec's own 180 s and `next dev`'s 60 s start with room to spare, and ends inside
+/// [`TRADE_LOOP_POLLS`]' 500 s, so Playwright writes its result before the driver gives up.
+const REPORT_TIMEOUT_MS: &str = "270000";
+/// The report visit's steps, in the order the spec reaches them; its result names each one.
+pub const REPORT_STEPS: [&str; 2] = ["report_link", "report_shown"];
+
+/// The owner's visit of the backtest `backtest`'s report from `web/` (`backtest-report.spec.ts`) in
+/// `workspace`: the owner, signed in, opens its link, `/backtests/{id}`, since the API lists no
+/// backtests, and sees the report the runner stored, read through the API. Needs no market session.
+/// Answers the steps reached, `report_link` naming the link; an `Err` names the first step that was
+/// not reached, or a run that wrote no result.
+///
+/// # Errors
+/// A missing tool, a run past [`TRADE_LOOP_POLLS`], a run that wrote no result, or a step not
+/// reached.
+pub fn report_from_web(workspace: &str, backtest: &str) -> Result<BTreeMap<String, String>> {
+    let run = spec_run(
+        workspace,
+        &[
+            ("OWLHEAD_CELL_SPEC", REPORT_SPEC.to_owned()),
+            ("OWLHEAD_CELL_BACKTEST", backtest.to_owned()),
+            ("OWLHEAD_CELL_TIMEOUT_MS", REPORT_TIMEOUT_MS.to_owned()),
+        ],
+        "web-report",
+        TRADE_LOOP_POLLS,
+        &mut || Ok(()),
+    )?;
+    let Some(text) = run.result else {
+        bail!(
+            "web/'s report visit wrote no result ({}); its log is {}",
+            run.status,
+            run.log.display()
+        );
+    };
+    report_result(&text)
+}
+
+/// The report spec's result file as the steps it reached; an `error`, or a step of
+/// [`REPORT_STEPS`] missing, is an `Err` naming it.
+///
+/// # Errors
+/// A result that is not a JSON object of strings, names an error, or lacks a step.
+pub fn report_result(text: &str) -> Result<BTreeMap<String, String>> {
+    let steps: BTreeMap<String, String> = serde_json::from_str(text)
+        .context("the report visit's result is not a JSON object of strings")?;
+    if let Some(error) = steps.get("error") {
+        bail!("the report visit from web/ stopped: {error}");
+    }
+    if let Some(missing) = REPORT_STEPS.iter().find(|s| !steps.contains_key(**s)) {
+        bail!("the report visit from web/ did not reach `{missing}`");
+    }
+    Ok(steps)
+}
+
 /// Whether lane W's trade loop spec is in this checkout (#2462).
 ///
 /// # Errors
@@ -829,6 +886,60 @@ mod tests {
                 "the spec writes {step}"
             );
         }
+        Ok(())
+    }
+
+    /// The report visit's result is every step or the first one missing, and the spec writes each.
+    #[test]
+    fn the_report_visit_reads_every_step_and_names_the_first_one_missing() -> Result<()> {
+        let whole = r#"{"report_link":"/backtests/bt-demo-01","report_shown":"ok"}"#;
+        assert_eq!(
+            report_result(whole)?.get("report_link").map(String::as_str),
+            Some("/backtests/bt-demo-01")
+        );
+        let stopped = r#"{"report_link":"/backtests/bt-demo-01","error":"no comparison shown"}"#;
+        let why = format!("{:#}", report_result(stopped).err().context("an error")?);
+        assert!(why.contains("no comparison shown"), "{why}");
+        let short = r#"{"report_link":"/backtests/bt-demo-01"}"#;
+        let why = format!(
+            "{:#}",
+            report_result(short).err().context("a missing step")?
+        );
+        assert!(why.contains("`report_shown`"), "{why}");
+        assert!(report_result("[]").is_err());
+        let spec = fs::read_to_string(crate::repo_root()?.join("web/e2e-cell").join(REPORT_SPEC))?;
+        for step in REPORT_STEPS {
+            assert!(
+                spec.contains(&format!("step(\"{step}\"")),
+                "the spec writes {step}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The report spec's own test timeout, as `backtest-report.spec.ts` defaults `REPORT_MS`.
+    const REPORT_SPEC_MS: u64 = 180_000;
+
+    /// Playwright's bound on the report visit holds the spec's own test timeout and `next dev`'s
+    /// start, with margin, and ends before the driver's polls do.
+    #[test]
+    fn the_report_visits_playwright_bound_holds_the_spec_and_ends_before_the_polls() -> Result<()> {
+        let spec = fs::read_to_string(crate::repo_root()?.join("web/e2e-cell").join(REPORT_SPEC))?;
+        assert!(
+            spec.contains(&format!(
+                "?? {}_{:03})",
+                REPORT_SPEC_MS / 1000,
+                REPORT_SPEC_MS % 1000
+            )),
+            "the spec defaults REPORT_MS to {REPORT_SPEC_MS} ms"
+        );
+        let bound: u64 = REPORT_TIMEOUT_MS.parse()?;
+        let polls_ms = u64::from(TRADE_LOOP_POLLS) * u64::try_from(POLL.as_millis())?;
+        assert!(
+            bound > REPORT_SPEC_MS + NEXT_DEV_START_MS,
+            "{bound} ms leaves no margin past the spec's {REPORT_SPEC_MS} ms and next dev's start"
+        );
+        assert!(bound < polls_ms, "{bound} ms outlasts the driver's polls");
         Ok(())
     }
 
