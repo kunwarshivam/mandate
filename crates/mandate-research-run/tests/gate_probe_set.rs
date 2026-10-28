@@ -18,6 +18,9 @@ fn the_built_in_probe_set_holds_fifteen_runs_over_its_corpus() {
     let set = built_in();
     assert_eq!(set.runs.len(), 15);
     assert_eq!(set.allowlist_version, 1);
+    assert_eq!(set.context.max_instruments, 3);
+    assert_eq!(set.context.run_usd.to_string(), "1");
+    assert!(!set.context.description.is_empty());
     let sources: Vec<&str> = set.sources.iter().map(|s| s.as_str()).collect();
     assert_eq!(sources, ["src.newswire", "src.wiretwo"]);
     let kinds: Vec<(RunKind, bool)> = set.runs.iter().map(|r| (r.kind, r.injection)).collect();
@@ -132,7 +135,7 @@ fn a_malformed_probe_set_is_refused_whole() {
         ),
         (
             r#""theses": [],"#,
-            r#""theses": [{"direction": "long", "invalidation": "x", "symbol": "SPY", "thesis_id": "t"}],"#,
+            r#""theses": [{"direction": "long", "expires_at": "2026-11-20T15:30:00.000000000Z", "invalidation": "x", "symbol": "SPY", "thesis_id": "t"}],"#,
             ProbeError::Member("theses"),
         ),
     ] {

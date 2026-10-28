@@ -62,6 +62,7 @@ pub mod plane;
 mod ports;
 pub mod recorded;
 mod retrieve;
+pub mod shadow;
 mod turn;
 
 pub use backend::{

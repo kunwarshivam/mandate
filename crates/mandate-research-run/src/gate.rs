@@ -7,6 +7,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value, parse, to_canonical};
+use mandate_domain::AssetClass;
+use mandate_gateway::money::Usd6;
 use mandate_time::UtcNanos;
 
 use crate::agentic::RunKind;
@@ -30,13 +32,25 @@ pub enum ProbeError {
     Member(&'static str),
 }
 
-/// One active thesis a monitoring run starts with.
+/// One active thesis a monitoring run starts with. Its id is the runtime's own once journaled, so
+/// the service holds the runtime to the symbol and the expiry, never to the id (DEC-2218).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeThesis {
     pub thesis_id: String,
     pub symbol: Symbol,
     pub direction: String,
     pub invalidation: String,
+    pub expires_at: UtcNanos,
+}
+
+/// The envelope every probe run is researched under: the description the model reads, the asset
+/// classes and instrument ceiling of its context, and the cost ceiling of one run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbeContext {
+    pub description: String,
+    pub asset_classes: Vec<AssetClass>,
+    pub max_instruments: u32,
+    pub run_usd: Usd6,
 }
 
 /// One run of the probe set.
@@ -58,6 +72,7 @@ pub struct ProbeRun {
 /// slices' items were written under.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeSet {
+    pub context: ProbeContext,
     pub runs: Vec<ProbeRun>,
     pub allowlist_version: u32,
     pub sources: BTreeSet<SourceId>,
@@ -74,6 +89,7 @@ impl ProbeSet {
     /// allowlist, or a slice that is not a plane (named by its file, `bars.json` and the like).
     pub fn read(value: &Value) -> Result<Self, ProbeError> {
         let member = |name: &'static str| value.get(name).ok_or(ProbeError::Member(name));
+        let context = probe_context(member("context")?)?;
         let allowlist = member("allowlist")?;
         let allowlist_version = allowlist
             .get("version")
@@ -125,6 +141,7 @@ impl ProbeSet {
             .map(|run| probe_run(run, &corpus))
             .collect::<Result<_, _>>()?;
         Ok(Self {
+            context,
             runs,
             allowlist_version,
             sources,
@@ -200,6 +217,8 @@ fn probe_run(
                     .map_err(|_| ProbeError::Member("symbol"))?,
                 direction: text(thesis, "direction")?.to_owned(),
                 invalidation: text(thesis, "invalidation")?.to_owned(),
+                expires_at: UtcNanos::parse(text(thesis, "expires_at")?)
+                    .map_err(|_| ProbeError::Member("expires_at"))?,
             })
         })
         .collect::<Result<_, _>>()?;
@@ -217,5 +236,34 @@ fn probe_run(
         cut_off,
         universe,
         theses,
+    })
+}
+
+fn probe_context(context: &Value) -> Result<ProbeContext, ProbeError> {
+    let asset_classes = context
+        .get("asset_classes")
+        .and_then(Value::as_array)
+        .filter(|classes| !classes.is_empty())
+        .ok_or(ProbeError::Member("asset_classes"))?
+        .iter()
+        .map(|class| {
+            class
+                .as_str()
+                .and_then(|text| AssetClass::parse(text).ok())
+                .ok_or(ProbeError::Member("asset_classes"))
+        })
+        .collect::<Result<_, _>>()?;
+    let max_instruments = context
+        .get("max_instruments")
+        .and_then(Value::as_int)
+        .and_then(|max| u32::try_from(max).ok())
+        .filter(|max| *max > 0)
+        .ok_or(ProbeError::Member("max_instruments"))?;
+    Ok(ProbeContext {
+        description: text(context, "description")?.to_owned(),
+        asset_classes,
+        max_instruments,
+        run_usd: Usd6::parse(text(context, "run_usd")?)
+            .map_err(|_| ProbeError::Member("run_usd"))?,
     })
 }

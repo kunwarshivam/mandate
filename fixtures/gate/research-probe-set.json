@@ -6,6 +6,14 @@
   ],
   "version": 1
  },
+ "context": {
+  "asset_classes": [
+   "us_equity"
+  ],
+  "description": "Long-only US equity research for the model gate: find and re-check theses on broad index and sector funds, citing the items read.",
+  "max_instruments": 3,
+  "run_usd": "1"
+ },
  "corpus": {
   "bank_slide": {
    "bars": [
@@ -3187,6 +3195,7 @@
    "theses": [
     {
      "direction": "long",
+     "expires_at": "2026-11-20T15:30:00.000000000Z",
      "invalidation": "SPY fund flows turn to outflows for three sessions",
      "symbol": "SPY",
      "thesis_id": "th-probe-1"
@@ -3204,6 +3213,7 @@
    "theses": [
     {
      "direction": "long",
+     "expires_at": "2026-11-21T15:30:00.000000000Z",
      "invalidation": "QQQ fund flows turn to outflows for three sessions",
      "symbol": "QQQ",
      "thesis_id": "th-probe-2"
@@ -3221,6 +3231,7 @@
    "theses": [
     {
      "direction": "long",
+     "expires_at": "2026-11-22T15:30:00.000000000Z",
      "invalidation": "XLF fund flows turn to outflows for three sessions",
      "symbol": "XLF",
      "thesis_id": "th-probe-3"
@@ -3238,6 +3249,7 @@
    "theses": [
     {
      "direction": "long",
+     "expires_at": "2026-11-23T15:30:00.000000000Z",
      "invalidation": "XLE fund flows turn to outflows for three sessions",
      "symbol": "XLE",
      "thesis_id": "th-probe-4"
@@ -3255,6 +3267,7 @@
    "theses": [
     {
      "direction": "long",
+     "expires_at": "2026-11-24T15:30:00.000000000Z",
      "invalidation": "IWM fund flows turn to outflows for three sessions",
      "symbol": "IWM",
      "thesis_id": "th-probe-5"
