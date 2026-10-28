@@ -361,7 +361,7 @@
       }
     },
     "deployManager": {
-      "description": "The local cell's second deployment manager's workspace, for the research agent alone (DEC-2070)",
+      "description": "The second deployment manager's workspace, for the research agent alone: dev or ci, or staging beside the model gateway (DEC-2070, DEC-2080)",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -375,14 +375,15 @@
       }
     },
     "modelGateway": {
-      "description": "The model-gateway service's workspace and deployment, ids only, and its two monthly budgets, which only the local cell's values name (E21-62, DEC-2326)",
+      "description": "The model-gateway service's workspace and deployment, ids only, its two monthly budgets, and the live registry file a hosted cell starts it from (E21-62, DEC-2326, DEC-2081)",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "workspace",
         "deployment",
         "workspaceMonthlyUsd",
-        "deploymentMonthlyUsd"
+        "deploymentMonthlyUsd",
+        "registry"
       ],
       "properties": {
         "workspace": {
@@ -400,6 +401,10 @@
         "deploymentMonthlyUsd": {
           "type": "string",
           "pattern": "^$|^[0-9]{1,6}(\\.[0-9]{1,6})?$"
+        },
+        "registry": {
+          "type": "string",
+          "pattern": "^$|^\\{"
         }
       }
     },
@@ -431,11 +436,12 @@
       }
     },
     "data": {
-      "description": "The data process's recorded series (mandate-datad): each instrument it stores, with its asset id, which the closes object names, and its series' anchor, `<YYYY-MM-DD>=<close>`; a recording, so only the local cell's values list any",
+      "description": "The data process (mandate-datad): where its bars come from, `recorded` or `alpaca-iex` (DEC-2082), and the recorded series' instruments, each with its asset id, which the closes object names, and its series' anchor, `<YYYY-MM-DD>=<close>`; a recording, so only the local cell's values list any",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "instruments"
+        "instruments",
+        "source"
       ],
       "properties": {
         "instruments": {
@@ -463,6 +469,13 @@
               }
             }
           }
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "recorded",
+            "alpaca-iex"
+          ]
         }
       }
     },

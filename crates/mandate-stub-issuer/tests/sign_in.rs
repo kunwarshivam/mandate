@@ -33,6 +33,9 @@ impl Journal for NoJournal {
     fn rows<'a>(&'a self, _: &'a str) -> Rows<'a> {
         Box::pin(async { Err(JournalUnavailable) })
     }
+    fn rows_from<'a>(&'a self, _: &'a str, _: mandate_journal::TrustedStart) -> Rows<'a> {
+        Box::pin(async { Err(JournalUnavailable) })
+    }
     fn take_ownership<'a>(&'a self, _: &'a str) -> Answer<'a, u64> {
         Box::pin(async { Err(JournalUnavailable) })
     }
@@ -126,6 +129,7 @@ fn api(
         challenges: Arc::default(),
         connect: None,
         reduction: Arc::new(Reduction::new(Vec::new(), Box::new(OsRandom::new()))),
+        folds: Arc::default(),
     };
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
     let addr = listener.local_addr().expect("its address");

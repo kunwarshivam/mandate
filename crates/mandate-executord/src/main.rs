@@ -194,7 +194,11 @@ fn run(
         let reader = store.clone();
         let production = deployment::production(
             |name| std::env::var(name).ok(),
-            || Ok(Box::new(move |stream: &StreamId| reader.rows(stream))),
+            || {
+                Ok(Box::new(move |stream: &StreamId, start| {
+                    reader.rows_from(stream, start)
+                }))
+            },
         )?;
         return serve(store, named, socket, &terminate, (paper, production));
     }
@@ -203,7 +207,9 @@ fn run(
         |name| std::env::var(name).ok(),
         || {
             let reader = PgStore::connect(&dsn)?;
-            Ok(Box::new(move |stream: &StreamId| reader.rows(stream)))
+            Ok(Box::new(move |stream: &StreamId, start| {
+                reader.rows_from(stream, start)
+            }))
         },
     )?;
     serve(

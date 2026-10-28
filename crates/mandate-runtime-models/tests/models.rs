@@ -17,7 +17,7 @@ use mandate_daemon::models::{Evaluated, Models, Streams};
 use mandate_journal::{ArtifactStore, Environment, StoredEvent};
 use mandate_runtime::ModelDirection;
 use mandate_runtime_models::{
-    Held, PinnedModels, RECORDED_SOURCE, Registry, registry, source, wiring,
+    Held, IEX_SOURCE, PinnedModels, RECORDED_SOURCE, Registry, registry, source, wiring,
 };
 use mandate_time::Date;
 use proptest::prelude::*;
@@ -97,6 +97,64 @@ fn a_rising_series_gives_the_pinned_model_s_long_output_at_the_close_it_read() {
         models.evaluate(tick(NOW), NO_STREAMS),
         models.evaluate(tick(NOW), NO_STREAMS),
         "the same tick over the same partitions answers the same"
+    );
+}
+
+/// DEC-2283 item 6: over an `alpaca-iex` root the composer reads the daily generation its tick
+/// names, so the same series stored there gives the same output, named by the IEX source; a series
+/// stored only in the generation of the session before gives none.
+#[test]
+fn a_generation_root_gives_the_output_of_the_generation_its_tick_names() {
+    let root = Root::new("generations");
+    let series = rising(30);
+    let generations = root.generations();
+    store_series(
+        &mandate_bars::generations::daily_generation(&generations, last()),
+        "QQQ",
+        &series,
+        None,
+    );
+    let models = PinnedModels::new(
+        &document(),
+        registry(&registered(), Environment::Paper).unwrap(),
+        &generations,
+    )
+    .unwrap();
+    let answer = models.evaluate(tick(NOW), NO_STREAMS);
+    let [evaluated] = answer.as_slice() else {
+        panic!("one output: {answer:?}");
+    };
+    assert_eq!(evaluated.source, IEX_SOURCE);
+    assert_eq!(evaluated.output.direction, ModelDirection::Long);
+    assert_eq!(evaluated.output.as_of, tick(LAST_CLOSE));
+    assert_eq!(
+        String::from_utf8(evaluated.closes.clone()).unwrap(),
+        String::from_utf8(closes_json(&series)).unwrap()
+    );
+
+    let earlier = Root::new("earlier-generation");
+    let before = sessions(31, last());
+    let shifted: Vec<(Date, u32)> = before[..30]
+        .iter()
+        .zip(series.iter())
+        .map(|(day, (_, cents))| (*day, *cents))
+        .collect();
+    let generations = earlier.generations();
+    store_series(
+        &mandate_bars::generations::daily_generation(&generations, before[29]),
+        "QQQ",
+        &shifted,
+        None,
+    );
+    let models = PinnedModels::new(
+        &document(),
+        registry(&registered(), Environment::Paper).unwrap(),
+        &generations,
+    )
+    .unwrap();
+    assert!(
+        models.evaluate(tick(NOW), NO_STREAMS).is_empty(),
+        "the generation of the session before is never read in its place"
     );
 }
 
@@ -230,8 +288,12 @@ fn a_registration_that_does_not_read_gives_no_registry() {
 }
 
 #[test]
-fn only_the_cell_s_recording_names_a_source() {
+fn the_recording_and_the_iex_generations_name_a_source_and_nothing_else_does() {
     for (root, named) in [
+        ("/srv/artifacts/datasets/alpaca-iex", Some(IEX_SOURCE)),
+        ("alpaca-iex/", Some(IEX_SOURCE)),
+        ("/srv/artifacts/datasets/alpaca-iexx", None),
+        ("/srv/artifacts/datasets/alpaca-iex/daily", None),
         (
             "/srv/artifacts/datasets/cell-recorded",
             Some(RECORDED_SOURCE),

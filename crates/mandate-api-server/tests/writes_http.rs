@@ -93,6 +93,7 @@ fn fixture() -> Fixture {
         challenges: Arc::default(),
         connect: None,
         reduction: Arc::default(),
+        folds: Arc::default(),
     };
     let drain = Drain::new();
     let f = Fixture {

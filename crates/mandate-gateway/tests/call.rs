@@ -1101,3 +1101,35 @@ fn open_weights_pin_their_one_quantization() {
         serde_json::json!(["fp8"])
     );
 }
+
+/// An evaluation is the platform's call: it names no agent, one that names an agent is refused
+/// with no record, and it is reserved on the meter like any call, with a `null` agent (rule 156,
+/// DEC-2216).
+#[test]
+fn an_evaluation_names_no_agent_and_is_metered_like_any_call() {
+    use mandate_gateway::RequestError;
+    let (mut gateway, model) = gateway();
+    let mut with_agent = request(&model, 1);
+    with_agent.purpose = Purpose::Evaluation;
+    assert_eq!(gateway.call(&with_agent), Err(RequestError::AgentPurpose));
+    assert!(gateway.meter().store().records().is_empty());
+    gateway.transport_mut().script(vec![ok_reply(100)]);
+    let mut evaluation = request(&model, 2);
+    evaluation.purpose = Purpose::Evaluation;
+    evaluation.agent_id = None;
+    let record = gateway.call(&evaluation).unwrap();
+    assert_eq!(record.outcome, Outcome::Ok);
+    assert_eq!(record.purpose, Purpose::Evaluation);
+    let reserved = gateway
+        .meter()
+        .store()
+        .records()
+        .iter()
+        .find_map(|r| match r {
+            MeterRecord::Reserved(reservation) => Some(reservation.clone()),
+            MeterRecord::Settled(_) => None,
+        })
+        .unwrap();
+    assert_eq!(reserved.purpose, Purpose::Evaluation);
+    assert_eq!(reserved.agent_id, None);
+}

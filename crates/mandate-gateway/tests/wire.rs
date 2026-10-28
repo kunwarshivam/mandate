@@ -388,6 +388,7 @@ fn a_frame_the_encoder_would_not_write_reads_as_nothing() {
     for (member, value) in [
         ("wire_version", Value::Int(Int::new(2).unwrap())),
         ("purpose", Value::Str("trading".to_owned())),
+        ("purpose", Value::Str("evaluation".to_owned())),
         ("key_owner", Value::Str("nobody".to_owned())),
         ("as_of", Value::Str("2026-10-16T14:00:00Z".to_owned())),
         ("spend_ceiling", Value::Str("0.250".to_owned())),

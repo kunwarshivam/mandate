@@ -41,6 +41,7 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
+                        secrets |
                         postgres | openbao | objectstore | stub-release | exchange-release |
                         provisionerd-release | api-release | mutants |
                         schema-mutants | cell | cell-seeded | cell-upgrade | cell-demo |
@@ -54,8 +55,9 @@ commands:
                         base, all of them
   ci select             print which scoped jobs this diff runs, as GITHUB_OUTPUT lines
   land-check [BASE]     before landing: merge BASE (origin/main, fetched first) into HEAD in a
-                        scratch worktree, run spec-guard, lint and the diff's tests on the merged
-                        tree, and end with one `land-check summary:` line (DEC-2642)
+                        scratch worktree, run spec-guard, gitleaks over the diff, lint and the
+                        diff's tests on the merged tree, and end with one `land-check summary:`
+                        line (DEC-2642, DEC-2645)
   ci sweep --plan       print tonight's share of the whole-crate mutation sweep (DEC-1190)
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
                         MANDATE_TEST_PARTITION=K/N is set (CI's fast-test matrix)
@@ -138,6 +140,10 @@ commands:
                         accepted on the host, then from web/ the go-live screen pending counsel
                         and a real-money request refused and journaled
                         (DEC-2134); with a workspace, only the web/ part against it
+  cell web-setup <workspace>
+                        step 2 from web/ against a running cell with sign-in ready: a passkey
+                        added in Settings by a virtual authenticator, version 1 created in
+                        /agents/new, and its confirm held for the passkey's first 24 hours
   cell web-kill-switch <workspace> [agent]
                         step 7 from web/ against a running cell with sign-in ready: next dev, then
                         Playwright presses one listed agent's kill switch (DEC-2406)
@@ -454,6 +460,7 @@ fn run() -> Result<()> {
             cell::scenario::accept_disclosure(workspace)?;
             cell::journey(workspace, agent)
         }
+        ["cell", "web-setup", workspace] => cell::setup(workspace),
         ["cell", "web-kill-switch", workspace] => {
             cell::web::report(cell::web::kill_switch_from_web(workspace, None))
         }
@@ -503,11 +510,11 @@ fn ci(job: &str) -> Result<()> {
             }
             Ok(())
         }
-        "test-nextest" => {
+        "test-nextest" | "test-python" => {
             let partition = env::var(TEST_PARTITION_ENV).ok().filter(|s| !s.is_empty());
             test_part(job, partition.as_deref())
         }
-        "test-doc" | "test-rh-sim" | "test-python" => test_part(job, None),
+        "test-doc" | "test-rh-sim" => test_part(job, None),
         "pending" => pending(),
         "portable" => portable(),
         "select" => ci_select(),
@@ -553,20 +560,9 @@ fn ci(job: &str) -> Result<()> {
         "supply-chain" => {
             sh("cargo", &["deny", "--locked", "check"])?;
             deps()?;
-            match base_ref()? {
-                Some(base) => sh(
-                    "gitleaks",
-                    &[
-                        "git",
-                        "--no-banner",
-                        "--redact",
-                        &format!("--log-opts={base}..HEAD"),
-                    ],
-                ),
-                None => sh("gitleaks", &["dir", "--no-banner", "--redact", "."]),
-            }?;
-            gitleaks_exceptions()
+            secrets()
         }
+        "secrets" => secrets(),
         "spec-guard" => spec_guard(),
         "postgres" => postgres(),
         "openbao" => openbao(),
@@ -653,7 +649,8 @@ fn portable() -> Result<()> {
 }
 
 /// One of [`TEST_PARTS`], over the crates the diff selects (DEC-1190); `partition`, a `K/N`
-/// counted from 1, runs only the nextest run's `K`th of `N` slices (DEC-871).
+/// counted from 1, runs only the `K`th of `N` slices of the nextest run (DEC-871) or of the
+/// Python tests (DEC-2646).
 fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
     match part {
         "test-nextest" => {
@@ -719,7 +716,7 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
             sh("cargo", &args)
         }
         "test-rh-sim" => rh_sim_tests(),
-        "test-python" => uv_tools(&["pytest", "-q"]),
+        "test-python" => uv_tools(&pytest_args(partition)?),
         other => bail!("unknown test part: {other}"),
     }
 }
@@ -872,19 +869,42 @@ fn nextest_args(partition: Option<&str>, packages: Option<&[String]>) -> Result<
     }
     args.extend(["--locked", "--no-tests=pass"].map(String::from));
     if let Some(partition) = partition {
-        let parsed = partition.split_once('/').and_then(|(k, n)| {
-            let plain = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-            if !plain(k) || !plain(n) || k.starts_with('0') || n.starts_with('0') {
-                return None;
-            }
-            Some((k.parse::<u32>().ok()?, n.parse::<u32>().ok()?))
-        });
-        match parsed {
-            Some((k, n)) if k <= n => args.push(format!("--partition=count:{k}/{n}")),
-            _ => bail!(
-                "{TEST_PARTITION_ENV} must be K/N with 1 <= K <= N, counted from 1; got {partition:?}"
-            ),
+        let (k, n) = partition_of(partition)?;
+        args.push(format!("--partition=count:{k}/{n}"));
+    }
+    Ok(args)
+}
+
+/// A test part's shard, [`TEST_PARTITION_ENV`]'s `K/N`: plain decimals with no leading zero,
+/// `1 <= K <= N`, counted from 1 (DEC-871). The nextest run and the Python tests read it alike.
+fn partition_of(partition: &str) -> Result<(u32, u32)> {
+    let parsed = partition.split_once('/').and_then(|(k, n)| {
+        let plain = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        if !plain(k) || !plain(n) || k.starts_with('0') || n.starts_with('0') {
+            return None;
         }
+        Some((k.parse::<u32>().ok()?, n.parse::<u32>().ok()?))
+    });
+    match parsed {
+        Some((k, n)) if k <= n => Ok((k, n)),
+        _ => bail!(
+            "{TEST_PARTITION_ENV} must be K/N with 1 <= K <= N, counted from 1; got {partition:?}"
+        ),
+    }
+}
+
+/// The pytest plugin that keeps one shard of the collected tests (DEC-2646): every shard collects
+/// the same tests and keeps every `N`-th of their sorted node ids from `K-1`, reading `K/N` from
+/// [`TEST_PARTITION_ENV`] itself (`python/mandate_tools/src/mandate_tools/pytest_shard.py`).
+const PYTEST_SHARD_PLUGIN: &str = "mandate_tools.pytest_shard";
+
+/// The pytest arguments of the Python tests, or of one shard of them when `partition` is given:
+/// the shard plugin loaded, `K/N` checked here first so a malformed one fails before pytest runs.
+fn pytest_args(partition: Option<&str>) -> Result<Vec<&'static str>> {
+    let mut args = vec!["pytest", "-q"];
+    if let Some(partition) = partition {
+        partition_of(partition)?;
+        args.extend(["-p", PYTEST_SHARD_PLUGIN]);
     }
     Ok(args)
 }
@@ -1440,6 +1460,10 @@ fn tofu_checks() -> Result<()> {
     if !unchecked.is_empty() {
         bail!("tofu:\n  {}", unchecked.join("\n  "));
     }
+    sh(
+        "python3",
+        &["deploy/tofu/modules/ci-runners/tests/manager_test.py"],
+    )?;
     Ok(())
 }
 
@@ -2239,6 +2263,7 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
             kubectl: &in_cluster,
             provision: &|command, stdin| in_vault_cli(command, stdin),
             put: &|secret, stdin| in_vault_cli(&vault_provision::put_command(secret), stdin),
+            pause: &std::thread::sleep,
         },
         &listed,
         &model_key,
@@ -2913,7 +2938,7 @@ const EVERY_JOB_PATHS: [&str; 11] = [
 /// `fast-python`), by `web.yml`, or by the crates whose sources name it ([`source_references`]).
 /// Markdown anywhere is known too. A changed path outside every crate and outside this list
 /// selects everything, so a new top-level directory is never assumed unread.
-const KNOWN_OUTSIDE_CRATES: [&str; 17] = [
+const KNOWN_OUTSIDE_CRATES: [&str; 18] = [
     "docs/",
     "web/",
     "python/",
@@ -2929,6 +2954,7 @@ const KNOWN_OUTSIDE_CRATES: [&str; 17] = [
     ".claude/",
     "_typos.toml",
     ".gitleaks.toml",
+    ".gitleaksignore",
     "CODEOWNERS",
     "LICENSE*",
 ];
@@ -3486,13 +3512,14 @@ fn ci_select() -> Result<()> {
 /// The base [`land_check_cmd`] merges when it is given none.
 const LAND_CHECK_BASE: &str = "origin/main";
 
-/// The `ci` jobs [`land_check`] runs on the merged tree, in order: the spec guard (ES-22), lint, and
-/// each part of `ci test`, which run over the crates the diff from the base selects (DEC-1190). The
-/// parts run as jobs of their own, so a failing nextest run never keeps the doctests, the rehearsal
-/// or the Python tests from running. No cell and no mutants, so the check stays fast enough to run
-/// before every landing (DEC-2642).
-const LAND_CHECK_JOBS: [&str; 6] = [
+/// The `ci` jobs [`land_check`] runs on the merged tree, in order: the spec guard (ES-22), gitleaks
+/// over the diff (`secrets`, DEC-2645), lint, and each part of `ci test`, which run over the crates
+/// the diff from the base selects (DEC-1190). The parts run as jobs of their own, so a failing
+/// nextest run never keeps the doctests, the rehearsal or the Python tests from running. No cell
+/// and no mutants, so the check stays fast enough to run before every landing (DEC-2642).
+const LAND_CHECK_JOBS: [&str; 7] = [
     "spec-guard",
+    "secrets",
     "lint",
     "test-nextest",
     "test-doc",
@@ -4349,6 +4376,11 @@ struct Finding {
     file: String,
     #[serde(rename = "RuleID")]
     rule_id: String,
+    /// The commit a `gitleaks git` finding is in; a `gitleaks dir` finding has none.
+    #[serde(rename = "Commit", default)]
+    commit: String,
+    #[serde(rename = "StartLine", default)]
+    start_line: u64,
 }
 
 /// Cases for the `.gitleaks.toml` exceptions (DEC-89): a line appended to a file, and the rule that
@@ -4573,6 +4605,26 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     ]
 }
 
+/// `ci secrets`, a part of `supply-chain` that land-check also runs (DEC-2645): gitleaks over the
+/// commits since the diff base, or over the tree with none, then the `.gitleaks.toml` exceptions'
+/// own cases, so a secret, or an exception that stopped working, is caught before a landing.
+fn secrets() -> Result<()> {
+    match base_ref()? {
+        Some(base) => sh(
+            "gitleaks",
+            &[
+                "git",
+                "--no-banner",
+                "--redact",
+                &format!("--log-opts={base}..HEAD"),
+            ],
+        ),
+        None => sh("gitleaks", &["dir", "--no-banner", "--redact", "."]),
+    }?;
+    gitleaks_exceptions()?;
+    gitleaks_ignore()
+}
+
 /// Scans [`gitleaks_plants`], written to a temporary directory, with the repository's
 /// `.gitleaks.toml`: exactly the expected findings must be reported.
 fn gitleaks_exceptions() -> Result<()> {
@@ -4639,6 +4691,156 @@ fn gitleaks_exceptions() -> Result<()> {
         expected.values().sum::<usize>()
     );
     Ok(())
+}
+
+/// The fingerprints gitleaks skips (DEC-2647): each names one finding, one rule on one line of
+/// one file in one commit, for a test-fixture value that only the history still holds.
+const GITLEAKS_IGNORE: &str = ".gitleaksignore";
+
+/// `.gitleaksignore`'s lines that are neither a comment, blank, nor a commit-pinned fingerprint.
+/// A fingerprint without its commit, `<path>:<rule>:<line>`, makes gitleaks skip that line of that
+/// file in every commit, so a key later written there would pass unreported.
+fn gitleaks_ignore_problems(text: &str) -> Vec<String> {
+    text.lines()
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty() && !line.starts_with('#'))
+        .filter(|(_, line)| !is_pinned_fingerprint(line))
+        .map(|(index, line)| {
+            format!(
+                "{GITLEAKS_IGNORE}:{}: `{line}` is not `<40-hex commit>:<path>:<rule>:<line>`",
+                index + 1
+            )
+        })
+        .collect()
+}
+
+/// Whether `line` is `<40 lower-case hex>:<path>:<rule>:<line number from 1>`, with no space.
+fn is_pinned_fingerprint(line: &str) -> bool {
+    let parts: Vec<&str> = line.split(':').collect();
+    let [commit, path, rule, number] = parts.as_slice() else {
+        return false;
+    };
+    commit.len() == 40
+        && commit
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        && !path.is_empty()
+        && !path.contains(char::is_whitespace)
+        && !rule.is_empty()
+        && rule
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !number.starts_with('0')
+        && !number.is_empty()
+        && number.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// The repository's [`GITLEAKS_IGNORE`] must hold only commit-pinned fingerprints, and
+/// [`gitleaks_ignore_case`] must show one skipping exactly its own finding.
+fn gitleaks_ignore() -> Result<()> {
+    let path = repo_root()?.join(GITLEAKS_IGNORE);
+    if path.exists() {
+        report(
+            gitleaks_ignore_problems(&fs::read_to_string(&path)?),
+            "gitleaks-ignore",
+        )?;
+    }
+    gitleaks_ignore_case()
+}
+
+/// A planted two-commit repository, scanned with the repository's `.gitleaks.toml`: the first
+/// commit adds a key-ID-shaped line and the second another in the same file. Without a
+/// [`GITLEAKS_IGNORE`] both are reported, so the case is not vacuous; with the first commit's
+/// fingerprint only the second is.
+fn gitleaks_ignore_case() -> Result<()> {
+    let dir = unique_temp_path("mandate-gitleaks-ignore", "");
+    fs::create_dir_all(&dir)?;
+    let outcome = gitleaks_ignore_case_in(&dir);
+    fs::remove_dir_all(&dir)?;
+    outcome
+}
+
+fn gitleaks_ignore_case_in(dir: &Path) -> Result<()> {
+    let git = |args: &[&str]| {
+        let mut full = vec![
+            "-c",
+            "user.name=xtask",
+            "-c",
+            "user.email=xtask@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ];
+        full.extend_from_slice(args);
+        output_in(dir, "git", &full)
+    };
+    let file = "planted.rs";
+    let first = format!("const FIRST: &str = \"PK{}\";", "PLANTEDKEYID000000");
+    let second = format!("const SECOND: &str = \"PK{}\";", "PLANTEDKEYID000001");
+    git(&["init", "-q"])?;
+    fs::write(dir.join(file), format!("{first}\n"))?;
+    git(&["add", file])?;
+    git(&["commit", "-q", "-m", "first"])?;
+    let first_commit = git(&["rev-parse", "HEAD"])?.trim().to_owned();
+    fs::write(dir.join(file), format!("{first}\n{second}\n"))?;
+    git(&["commit", "-q", "-a", "-m", "second"])?;
+    let second_commit = git(&["rev-parse", "HEAD"])?.trim().to_owned();
+    let rule = "alpaca-key-id";
+    let mut problems = Vec::new();
+    let unignored = gitleaks_git_findings(dir)?;
+    if unignored.len() != 2 {
+        problems.push(format!(
+            "with no fingerprint, {} finding(s), expected both planted keys",
+            unignored.len()
+        ));
+    }
+    fs::write(
+        dir.join(GITLEAKS_IGNORE),
+        format!("{first_commit}:{file}:{rule}:1\n"),
+    )?;
+    let ignored: Vec<(String, String, String, u64)> = gitleaks_git_findings(dir)?
+        .into_iter()
+        .map(|f| (f.file, f.rule_id, f.commit, f.start_line))
+        .collect();
+    let expected = vec![(file.to_owned(), rule.to_owned(), second_commit, 2)];
+    if ignored != expected {
+        problems.push(format!(
+            "with the first commit's fingerprint, {ignored:?}, expected only {expected:?}"
+        ));
+    }
+    report(problems, "gitleaks-ignore")?;
+    eprintln!("    gitleaks-ignore: a fingerprint skips its own finding and no other");
+    Ok(())
+}
+
+/// `gitleaks git` over the repository at `dir`, with the repository's `.gitleaks.toml` and the
+/// `.gitleaksignore` in `dir`, if any: its findings.
+fn gitleaks_git_findings(dir: &Path) -> Result<Vec<Finding>> {
+    let report_path = dir.with_extension("json");
+    eprintln!("    $ (in a planted repository) gitleaks git --config .gitleaks.toml .");
+    let status = Command::new("gitleaks")
+        .current_dir(dir)
+        .args([
+            "git",
+            "--no-banner",
+            "--redact",
+            "--exit-code",
+            "0",
+            "--report-format",
+            "json",
+        ])
+        .arg("--config")
+        .arg(repo_root()?.join(".gitleaks.toml"))
+        .arg("--report-path")
+        .arg(&report_path)
+        .arg(".")
+        .status()
+        .context("starting `gitleaks` (is it installed? see AGENTS.md)")?;
+    let report_text = fs::read_to_string(&report_path);
+    fs::remove_file(&report_path).ok();
+    if !status.success() {
+        bail!("gitleaks failed on the planted repository with {status}");
+    }
+    Ok(serde_json::from_str(&report_text?)?)
 }
 
 /// Runs a tool from the `python/` uv workspace (ruff, pytest, the exporter).
@@ -6748,8 +6950,9 @@ const READ_LINES: &[(&str, &str)] = &[
 
 /// The repository scripts a workflow may run, by the exact command word that runs them, each only
 /// while its whole text, comments included, holds no cargo word, no `.cargo` and no `CARGO_`
-/// (DEC-873 item 2). `ci.yml` runs the first four and the credential guard (DEC-964), `merge.yml`
-/// the fifth, and `release.yml`'s `release-signing` job the release signer (DEC-2024).
+/// (DEC-873 item 2). `ci.yml` runs the documentation and service scripts and the credential guard
+/// (DEC-964), `merge.yml` runs the merge guard, `release.yml` runs the release signer (DEC-2024),
+/// and `runner-smoke.yml` runs the runner smoke script (DEC-2078).
 const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/docs-only.sh",
     ".github/scripts/docs-checks.sh",
@@ -6758,6 +6961,7 @@ const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/start-minio.sh",
     ".github/scripts/merge-approved.sh",
     ".github/scripts/release-sign.sh",
+    ".github/scripts/runner-smoke.sh",
     CREDENTIAL_GUARD,
 ];
 
@@ -6832,6 +7036,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
     "MANDATE_CELL_VARIANT",
+    "MANDATE_DEMO_LOOP_ELSEWHERE",
     "MANDATE_DEMO_WEB_REQUIRED",
     "MANDATE_GITOPS_REQUIRED",
     "MANDATE_MUTANT_SHARD",
@@ -12936,6 +13141,7 @@ mod tests {
         nextest_runner, rerun_blocked, root_mismatch, summarised, unprivileged_rerun,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
+    use super::{GITLEAKS_IGNORE, gitleaks_ignore_problems};
     use super::{ProcessGroups, process_group_problems};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
     use super::{
@@ -14301,7 +14507,7 @@ mod tests {
                 &head[..12],
                 &base[..12]
             )) && line.ends_with(
-                " merge=clean spec-guard=pass lint=pass test-nextest=pass test-doc=pass \
+                " merge=clean spec-guard=pass secrets=pass lint=pass test-nextest=pass test-doc=pass \
                  test-rh-sim=pass test-python=pass rerun_unprivileged=[] verdict=pass"
             ),
             "{line}"
@@ -14342,7 +14548,7 @@ mod tests {
         assert!(
             line.contains(" fetched=no ")
                 && line.ends_with(
-                    " merge=clean spec-guard=pass lint=pass test-nextest=pass test-doc=pass \
+                    " merge=clean spec-guard=pass secrets=pass lint=pass test-nextest=pass test-doc=pass \
                  test-rh-sim=pass test-python=pass rerun_unprivileged=[] verdict=fail"
                 ),
             "{line}"
@@ -14410,7 +14616,7 @@ mod tests {
         assert!(
             line.contains(" fetched=yes merged=none merge=conflict ")
                 && line.ends_with(
-                    "spec-guard=not-run lint=not-run test-nextest=not-run test-doc=not-run \
+                    "spec-guard=not-run secrets=not-run lint=not-run test-nextest=not-run test-doc=not-run \
                  test-rh-sim=not-run test-python=not-run rerun_unprivileged=[] verdict=fail"
                 ),
             "{line}"
@@ -14437,7 +14643,7 @@ mod tests {
         assert!(
             line.contains(" fetched=yes ")
                 && line.ends_with(
-                    " merge=clean spec-guard=pass lint=fail test-nextest=pass test-doc=pass \
+                    " merge=clean spec-guard=pass secrets=pass lint=fail test-nextest=pass test-doc=pass \
                  test-rh-sim=pass test-python=pass rerun_unprivileged=[] verdict=fail"
                 ),
             "{line}"
@@ -14741,6 +14947,21 @@ mod tests {
                 .any(|(name, value)| name == OsStr::new(NEXTEST_RUNNER_ENV) && value.is_none()),
             "a job never inherits a runner"
         );
+        Ok(())
+    }
+
+    /// The Python tests run whole with no partition, and one shard through the shard plugin with
+    /// one; a malformed `K/N` fails before pytest runs (DEC-2646).
+    #[test]
+    fn a_python_shard_loads_the_shard_plugin_and_checks_its_partition() -> Result<()> {
+        assert_eq!(super::pytest_args(None)?, ["pytest", "-q"]);
+        assert_eq!(
+            super::pytest_args(Some("3/4"))?,
+            ["pytest", "-q", "-p", "mandate_tools.pytest_shard"]
+        );
+        for bad in ["0/4", "5/4", "1/0", "01/4", "4", "a/4", "1/4/2", ""] {
+            assert!(super::pytest_args(Some(bad)).is_err(), "{bad:?}");
+        }
         Ok(())
     }
 
@@ -19237,6 +19458,39 @@ mod tests {
         ] {
             assert!(test.contains(&line), "`fast-test` has `{line}`");
         }
+        let python: Vec<&str> = workflow_job(&workflow, "fast-python")
+            .context("ci.yml has `fast-python`")?
+            .iter()
+            .map(|l| l.trim())
+            .collect();
+        let shards = python
+            .iter()
+            .find_map(|l| l.strip_prefix("shard: "))
+            .context("`fast-python` has a shard matrix (DEC-2646)")?;
+        let shards: Vec<String> = serde_json::from_str(shards)?;
+        let total = shards.len();
+        assert!(total > 1, "the Python tests are split: {shards:?}");
+        let expected: Vec<String> = (1..=total).map(|k| format!("{k}/{total}")).collect();
+        assert_eq!(
+            shards, expected,
+            "the Python shards are 1/N to N/N, each once"
+        );
+        for shard in &shards {
+            assert_eq!(
+                super::pytest_args(Some(shard))?,
+                ["pytest", "-q", "-p", super::PYTEST_SHARD_PLUGIN],
+                "{shard} loads the shard plugin"
+            );
+        }
+        let first = format!("save-if: ${{{{ matrix.shard == '1/{total}' }}}}");
+        for line in [
+            "fail-fast: false",
+            partition_env.as_str(),
+            "shared-key: fast-python",
+            first.as_str(),
+        ] {
+            assert!(python.contains(&line), "`fast-python` has `{line}`");
+        }
         let fast = workflow_job(&workflow, "fast").context("ci.yml has `fast`")?;
         let names: Vec<&str> = std::iter::once("select")
             .chain(FAST_CI_JOBS.iter().map(|(name, _)| *name))
@@ -19459,6 +19713,128 @@ mod tests {
         Ok(())
     }
 
+    /// The one expression that may hand a job the self-hosted runners (DEC-2065, DEC-2075): their
+    /// label only for a pull request whose head is this repository, or a push or dispatch on
+    /// `main`. A fork's pull request, `pull_request_target`, a schedule, any other ref, and any run
+    /// while the variable is unset take `ubuntu-24.04`.
+    const RUNNER_GUARD: &str = "${{ ((github.event_name == 'pull_request' && \
+        github.event.pull_request.head.repo.full_name == github.repository) || \
+        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == \
+        'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}";
+
+    /// DEC-2078's canary reaches the runner label before `CI_RUNNER` is set, but only from the
+    /// founder-dispatched smoke on `main`; every other ref fails closed on a hosted runner.
+    const SMOKE_RUNNER_GUARD: &str = "${{ github.event_name == 'workflow_dispatch' && github.ref == \
+        'refs/heads/main' && 'mandate-ci-do' || 'ubuntu-24.04' }}";
+
+    /// DEC-2075, DEC-2076: `select` runs on GitHub's runners and hands [`RUNNER_GUARD`] on as its
+    /// `runner` output, and no other line of any workflow names `CI_RUNNER`, so every job that
+    /// reaches the self-hosted runners does so through `select`'s output or DEC-2078's one
+    /// dispatch-only canary guard.
+    #[test]
+    fn only_the_event_guards_reach_the_self_hosted_runners() -> Result<()> {
+        let root = repo_root()?;
+        let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))?;
+        let select = workflow_job(&workflow, "select").context("ci.yml has a `select` job")?;
+        let has = |want: String| select.iter().any(|line| line.trim() == want);
+        assert!(
+            has("runs-on: ubuntu-24.04".to_owned()),
+            "`select` runs on GitHub's runners, so no job waits on the self-hosted pool (DEC-2076)"
+        );
+        assert!(
+            has(format!("runner: {RUNNER_GUARD}")),
+            "`select` hands the guard on"
+        );
+        let mut named = 0_usize;
+        for path in files_by_extension(&root.join(".github/workflows"), &["yml", "yaml"])? {
+            for line in fs::read_to_string(&path)?.lines() {
+                let code = line.split(" #").next().unwrap_or(line).trim();
+                if code.starts_with('#') || !code.contains("CI_RUNNER") {
+                    continue;
+                }
+                named = named.saturating_add(1);
+                assert!(
+                    code == format!("runner: {RUNNER_GUARD}"),
+                    "{} names CI_RUNNER outside the guard: {code}",
+                    path.display()
+                );
+            }
+        }
+        assert_eq!(
+            named, 1,
+            "the guard is written out exactly once, as `select`'s output"
+        );
+        let allowed_runs_on = [
+            "ubuntu-24.04",
+            "ubuntu-24.04-arm",
+            "macos-14",
+            "${{ matrix.runner }}",
+            "${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}",
+            "${{ needs.select.outputs.runner }}",
+            "${{ needs.select.outputs.runner || 'ubuntu-24.04' }}",
+            SMOKE_RUNNER_GUARD,
+        ];
+        let smoke_path = root.join(".github/workflows/runner-smoke.yml");
+        let mut smoke_guards = 0_usize;
+        for path in files_by_extension(&root.join(".github/workflows"), &["yml", "yaml"])? {
+            for line in fs::read_to_string(&path)?.lines() {
+                let code = line.split(" #").next().unwrap_or(line).trim();
+                if code.starts_with('#') {
+                    continue;
+                }
+                if let Some(value) = code.strip_prefix("runs-on:") {
+                    assert!(
+                        allowed_runs_on.contains(&value.trim()),
+                        "{}: `runs-on:{value}` is neither a hosted runner nor the guard (DEC-2075)",
+                        path.display()
+                    );
+                }
+                if let Some(value) = code.strip_prefix("runner:")
+                    && !value.contains("${{")
+                {
+                    assert!(
+                        ["ubuntu-24.04", "ubuntu-24.04-arm"].contains(&value.trim()),
+                        "{}: matrix runner `{value}` is not a hosted runner (DEC-2075)",
+                        path.display()
+                    );
+                }
+                if code.contains("self-hosted") || code.contains("mandate-ci-do") {
+                    assert_eq!(
+                        path,
+                        smoke_path,
+                        "{} names a self-hosted label outside the smoke workflow: {code}",
+                        path.display()
+                    );
+                    assert_eq!(
+                        code,
+                        format!("runs-on: {SMOKE_RUNNER_GUARD}"),
+                        "the smoke workflow names the label only through DEC-2078's event guard"
+                    );
+                    smoke_guards = smoke_guards.saturating_add(1);
+                }
+            }
+        }
+        assert_eq!(
+            smoke_guards, 1,
+            "the dispatch-only smoke guard is written out exactly once"
+        );
+        for job in workflow_jobs(&workflow) {
+            let lines = workflow_job(&workflow, job).context("a listed job")?;
+            for line in lines.iter().map(|l| l.trim()) {
+                if let Some(value) = line.strip_prefix("runs-on: ")
+                    && value.contains("needs.")
+                {
+                    assert!(
+                        value == "${{ needs.select.outputs.runner }}"
+                            || value == "${{ needs.select.outputs.runner || 'ubuntu-24.04' }}",
+                        "`{job}` takes its runner only from `select`: {value}"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
     const SELECT_GATES: [(&str, &str); 20] = [
         ("fast-test", "tests"),
@@ -19597,6 +19973,47 @@ mod tests {
                 follows,
                 SELECT_GATES.iter().any(|(gated, _)| *gated == job),
                 "`{job}` follows the selection exactly when it is a scoped job"
+            );
+        }
+        Ok(())
+    }
+
+    /// The jobs in `ci.yml` that may run past DEC-464's ten minutes, each with its cap: only
+    /// `cell-demo-web`, at fifteen, which runs only on main and is no required check (DEC-2648).
+    const LONGER_CI_JOBS: [(&str, u32); 1] = [("cell-demo-web", 15)];
+
+    /// DEC-464 and DEC-2648 in `ci.yml`: every job's cap is ten minutes or less, but for the jobs
+    /// [`LONGER_CI_JOBS`] names, each capped exactly as it says, so the exception cannot spread to
+    /// another job, a required one among them, without a decision adding it there.
+    #[test]
+    fn only_the_named_ci_jobs_run_past_ten_minutes() -> Result<()> {
+        let ci = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let mut capped = BTreeMap::new();
+        for job in workflow_jobs(&ci) {
+            let lines = workflow_job(&ci, job).with_context(|| format!("ci.yml has `{job}`"))?;
+            let minutes = lines
+                .iter()
+                .find_map(|l| l.trim().strip_prefix("timeout-minutes: "))
+                .map(str::parse::<u32>)
+                .transpose()?;
+            if let Some(minutes) = minutes {
+                capped.insert(job, minutes);
+            }
+        }
+        for (job, minutes) in &capped {
+            match LONGER_CI_JOBS.iter().find(|(named, _)| named == job) {
+                Some((_, cap)) => assert_eq!(minutes, cap, "`{job}` is capped as DEC-2648 says"),
+                None => assert!(
+                    *minutes <= 10,
+                    "`{job}` runs {minutes} minutes, past DEC-464's ten, and no decision names it"
+                ),
+            }
+        }
+        for (job, cap) in LONGER_CI_JOBS {
+            assert_eq!(
+                capped.get(job),
+                Some(&cap),
+                "`{job}` is in ci.yml with its cap"
             );
         }
         Ok(())
@@ -28071,5 +28488,48 @@ jq -r "$filter" "$src"
             codeowners_problems(&unsorted, &layers),
             vec!["CODEOWNERS: `/crates/mandate-a/` must come before `/crates/mandate-c/`; keep the crate lines sorted".to_owned()]
         );
+    }
+
+    #[test]
+    fn gitleaks_fingerprints_must_pin_a_commit() -> Result<()> {
+        let commit = "1c96b0288f5d14abb688e1b3d8b2d18ac570307b";
+        let pinned = format!("{commit}:xtask/src/release.rs:generic-api-key:1976");
+        assert!(gitleaks_ignore_problems(&format!("# a comment\n\n{pinned}\n")).is_empty());
+        let refused = [
+            "xtask/src/release.rs:generic-api-key:1976".to_owned(),
+            format!(
+                "{}:xtask/src/release.rs:generic-api-key:1976",
+                &commit[..39]
+            ),
+            format!(
+                "{}:xtask/src/release.rs:generic-api-key:1976",
+                commit.to_uppercase()
+            ),
+            format!("{commit}:xtask/src/release.rs:generic-api-key:0"),
+            format!("{commit}:xtask/src/release.rs:generic-api-key:01"),
+            format!("{commit}:xtask/src/release.rs:generic-api-key:"),
+            format!("{commit}:xtask/src/release.rs:generic-api-key:1976:extra"),
+            format!("{commit}::generic-api-key:1976"),
+            format!("{commit}:xtask/src/release.rs::1976"),
+            format!("{commit}:xtask/src/release.rs:Generic:1976"),
+            format!("{commit}:xtask/src/my release.rs:generic-api-key:1976"),
+            format!(" {pinned}"),
+        ];
+        for line in &refused {
+            assert_eq!(
+                gitleaks_ignore_problems(&format!("{pinned}\n{line}\n")),
+                vec![format!(
+                    "{GITLEAKS_IGNORE}:2: `{line}` is not `<40-hex commit>:<path>:<rule>:<line>`"
+                )],
+                "{line}"
+            );
+        }
+        let committed = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join(GITLEAKS_IGNORE),
+        )?;
+        assert!(gitleaks_ignore_problems(&committed).is_empty());
+        Ok(())
     }
 }

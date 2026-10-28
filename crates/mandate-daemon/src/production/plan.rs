@@ -46,11 +46,11 @@ impl Plan {
         }
     }
 
-    /// The validated mandate and the builder's facts for an opening in `pinned`, or `None` when
+    /// The validated mandate and the builder's facts for an opening in `instrument`, or `None` when
     /// any is missing: the fold holds the opening, the agent holds the instrument or has an
     /// order working in it, the session admits no opening, or the mandate does not validate.
-    fn context(&self, pinned: &InstrumentRef) -> Option<(ValidatedMandate, BuilderContext)> {
-        let instrument = pinned.asset_id.as_str();
+    fn context(&self, opened: Opened<'_>) -> Option<(ValidatedMandate, BuilderContext)> {
+        let instrument = opened.asset_id.as_str();
         let (facts, flat, models) = self.facts.read(|journaled| {
             let flat = !journaled.held().contains_key(instrument)
                 && !journaled
@@ -64,10 +64,10 @@ impl Plan {
             )
         })?;
         let facts = facts.ok().filter(|_| flat)?;
-        let session = opening_session(pinned.asset_class, facts.now)?;
+        let session = opening_session(opened.asset_class, facts.now)?;
         let validation = validation_context(facts.account.equity, facts.now)?;
         let validated = ValidatedMandate::new(self.mandate.clone(), &validation, &[]).ok()?;
-        let builder = builder_context(&self.mandate, pinned, &facts, session, &models)?;
+        let builder = builder_context(&self.mandate, opened, &facts, session, &models)?;
         Some((validated, builder))
     }
 }
@@ -96,6 +96,23 @@ impl OrderPlan for Plan {
     }
 }
 
+/// The instrument an opening is sized and classified for: a pin, or an unpinned mandate's
+/// working instrument with the class its thesis states.
+#[derive(Clone, Copy)]
+struct Opened<'a> {
+    asset_id: &'a AssetId,
+    asset_class: AssetClass,
+}
+
+impl<'a> Opened<'a> {
+    fn pinned(pinned: &'a InstrumentRef) -> Self {
+        Self {
+            asset_id: &pinned.asset_id,
+            asset_class: pinned.asset_class,
+        }
+    }
+}
+
 /// Whether any model's output in `inputs` is a `Long`: an unpinned mandate's opening is sized only
 /// from one (DEC-2827 keeps a `Long` only on the instrument the executor would open in).
 fn any_long(inputs: &SignalInputs) -> bool {
@@ -107,29 +124,60 @@ fn any_long(inputs: &SignalInputs) -> bool {
 }
 
 impl Plan {
-    /// An unpinned mandate's opening, on its working universe: the instrument a current `Long`
-    /// names, whose admitted thesis gives its asset class, within the envelope's asset classes,
-    /// sized from journaled facts as a pinned one is (DEC-2378 item 10, DEC-2827). `None` when any
-    /// of it is missing (`AGENTS.md` rule 3). D1 implements (E21-2).
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
+    /// An unpinned mandate's opening, on its working universe (DEC-2841): the one instrument the
+    /// agent stream's single surviving thesis holds, replayed at the fold's clock as the executor
+    /// and the models replay it (DEC-2819, DEC-2827), with the class the runtime's fold of its
+    /// thesis gives (`inputs.thesis_classes`), within the envelope's asset classes, and sized from
+    /// journaled facts as a pinned opening is (DEC-2378 item 10). `None` when any of it is
+    /// missing, two theses survive, or a record does not replay (`AGENTS.md` rule 3).
     fn working_opening(&self, inputs: &SignalInputs) -> Option<Proposal> {
-        let _ = inputs;
-        todo!()
+        let working = self.facts.working_instrument()?;
+        let instrument = mandate_accounting::InstrumentId::new(&working).ok()?;
+        let asset_class = *inputs.thesis_classes.get(&instrument)?;
+        if !self.mandate.universe.asset_classes.contains(&asset_class) {
+            return None;
+        }
+        let asset_id = AssetId::parse(&working).ok()?;
+        let opened = Opened {
+            asset_id: &asset_id,
+            asset_class,
+        };
+        let (validated, builder) = self.context(opened)?;
+        mandate_ports::size(&validated, &builder, inputs)
+            .ok()
+            .flatten()
+            .filter(|proposal| proposal.purpose.adds_risk())
     }
 
-    /// An unpinned mandate's opening classified as a pinned one's is, on the instrument the
-    /// working universe names; a proposal on any other instrument, or outside the envelope's asset
-    /// classes, is denied (`AGENTS.md` rule 3). D1 implements (E21-2).
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    fn classify_working(&self, view: &MandateView, proposal: &Proposal) -> Classified {
-        let _ = (view, proposal);
-        todo!()
+    /// An unpinned mandate's opening classified as a pinned one's is (DEC-2841), only while its
+    /// instrument is still the working one and its class is the one its admitted thesis states and
+    /// the envelope allows; any other proposal is denied (`AGENTS.md` rule 3).
+    fn classify_working(&self, _view: &MandateView, proposal: &Proposal) -> Classified {
+        let denied = Classified {
+            autonomy: Autonomy::Deny,
+            decided_by: None,
+        };
+        let instrument = proposal.instrument.as_str();
+        let working = self.facts.working_instrument();
+        let class = self.facts.thesis_class(instrument);
+        if working.as_deref() != Some(instrument)
+            || class != Some(proposal.asset_class)
+            || !self
+                .mandate
+                .universe
+                .asset_classes
+                .contains(&proposal.asset_class)
+        {
+            return denied;
+        }
+        let Ok(asset_id) = AssetId::parse(instrument) else {
+            return denied;
+        };
+        let opened = Opened {
+            asset_id: &asset_id,
+            asset_class: proposal.asset_class,
+        };
+        self.classified(opened, proposal).unwrap_or(denied)
     }
 }
 
@@ -213,7 +261,7 @@ impl Plan {
             .pinned_instruments
             .iter()
             .find_map(|pinned| {
-                let (validated, builder) = self.context(pinned)?;
+                let (validated, builder) = self.context(Opened::pinned(pinned))?;
                 mandate_ports::size(&validated, &builder, inputs)
                     .ok()
                     .flatten()
@@ -238,13 +286,14 @@ impl Plan {
         else {
             return denied;
         };
-        self.classified(pinned, proposal).unwrap_or(denied)
+        self.classified(Opened::pinned(pinned), proposal)
+            .unwrap_or(denied)
     }
 }
 
 impl Plan {
-    fn classified(&self, pinned: &InstrumentRef, proposal: &Proposal) -> Option<Classified> {
-        let (validated, builder) = self.context(pinned)?;
+    fn classified(&self, opened: Opened<'_>, proposal: &Proposal) -> Option<Classified> {
+        let (validated, builder) = self.context(opened)?;
         let Value::Str(score) = &proposal.combined_score else {
             return None;
         };
@@ -359,7 +408,7 @@ fn validation_context(account_equity: Usd, now: UtcNanos) -> Option<ValidationCo
 /// fraction the instrument may not admit.
 fn builder_context(
     mandate: &Mandate,
-    pinned: &InstrumentRef,
+    opened: Opened<'_>,
     facts: &mandate_gate_context::Facts,
     session: MarketSession,
     models: &BTreeMap<(String, String), String>,
@@ -377,8 +426,8 @@ fn builder_context(
         goal_spent_usd: Usd::ZERO,
     };
     let market = BuilderMarket {
-        instrument: pinned.asset_id.clone(),
-        asset_class: pinned.asset_class,
+        instrument: opened.asset_id.clone(),
+        asset_class: opened.asset_class,
         session,
         in_close_window: false,
         bid,
@@ -415,7 +464,7 @@ fn builder_context(
         action,
         model_content_hashes,
         execution: OrderExecution {
-            asset_class: pinned.asset_class,
+            asset_class: opened.asset_class,
             tif: TimeInForce::Day,
             protection_required: protection.is_some(),
             protection,

@@ -1,9 +1,9 @@
-//! The binary's start (DEC-2326 items 1 to 3, DEC-2257 item 2, E21-62): what its arguments ask
-//! for, and the recorded service built over the journaled meters, both checked before the listener
-//! opens. `--recorded <research.json>` is the only mode it starts in: every test and the cell run
-//! it, and it reaches no provider and reads no key. A live start (`--registry`) is refused
-//! `live_not_built` until the founder names the live model and the budgets (DEC-2265 item 10,
-//! DEC-79), so no argument, value or file can make this binary spend.
+//! The binary's start (DEC-2326 items 1 to 3, DEC-2257 item 2, DEC-2216 item 4, E21-62): what its
+//! arguments ask for, and the recorded service built over the journaled meters, both checked
+//! before the listener opens. `--recorded <research.json>` reaches no provider and reads no key:
+//! every test and the cell run it. `--registry <registry.json>` starts live from the founder's
+//! vetted entries (DEC-2282), with the vault's address and mounted credentials (`crate::live`);
+//! the two never mix.
 
 use std::io::Write;
 use std::net::SocketAddr;
@@ -18,9 +18,10 @@ use mandate_canon::{Digest, parse};
 use mandate_gateway::fake::RecordedTransport;
 use mandate_gateway::meter::{Caps, DeploymentMeter, Meter};
 use mandate_gateway::openrouter::OpenRouter;
-use mandate_gateway::provider::{Clock, IdSource, SequentialIds};
+use mandate_gateway::provider::{Clock, IdSource, SecretSource, SequentialIds, Transport};
+use mandate_gateway::registry::Registry;
 use mandate_gateway::wire::Reply;
-use mandate_gateway::{CallRequest, Gateway};
+use mandate_gateway::{CallRequest, Gateway, Settings};
 use mandate_journal::{ArtifactSource, Environment};
 use mandate_process::lifecycle::{Input, Lifecycle};
 use mandate_process::probe::{Probe, Status};
@@ -41,6 +42,8 @@ use crate::start::meters_ready;
 pub enum Command {
     /// Serve calls, as [`RunArgs`] says.
     Run(RunArgs),
+    /// Serve calls live, as [`LiveArgs`] says.
+    Live(LiveArgs),
     /// Answer one `exec` probe over the running process's socket.
     Probe { asked: Probe, socket: PathBuf },
 }
@@ -56,6 +59,21 @@ pub struct RunArgs {
     pub probe: PathBuf,
 }
 
+/// What a live `run` was started with (DEC-2216 item 4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveArgs {
+    /// The live registry file the chart renders (DEC-2216 item 5).
+    pub registry: PathBuf,
+    /// The address the runtime calls.
+    pub listen: SocketAddr,
+    /// The probe socket's path.
+    pub probe: PathBuf,
+    /// The vault's address, which the provider key is read from once.
+    pub vault_address: String,
+    /// The directory the vault's CA and the model gateway's credentials are mounted in.
+    pub vault_dir: PathBuf,
+}
+
 /// Why the arguments start nothing, by its code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ArgsError {
@@ -69,8 +87,14 @@ pub enum ArgsError {
     ListenMissing,
     #[error("no recorded bundle is named")]
     RecordedMissing,
-    #[error("a live start is not built until the live model and budgets are named")]
-    LiveNotBuilt,
+    #[error("both a recording and a live registry are named")]
+    RecordedAndLive,
+    #[error("a live start names no registry file")]
+    RegistryMissing,
+    #[error("a live start names no vault address")]
+    VaultAddressMissing,
+    #[error("a live start names no vault directory")]
+    VaultDirMissing,
 }
 
 impl ArgsError {
@@ -82,18 +106,22 @@ impl ArgsError {
             Self::ProbeUnknown => "probe_unknown",
             Self::ListenMissing => "listen_missing",
             Self::RecordedMissing => "recorded_bundle_missing",
-            Self::LiveNotBuilt => "live_not_built",
+            Self::RecordedAndLive => "recorded_and_live",
+            Self::RegistryMissing => "registry_missing",
+            Self::VaultAddressMissing => "vault_address_missing",
+            Self::VaultDirMissing => "vault_dir_missing",
         }
     }
 }
 
 /// Reads the arguments after the program's name. Each flag takes the next argument as its value,
 /// and a value that is empty or is itself a flag reads as missing; a flag written `--name=value`
-/// is never read, so it refuses as missing too. Asking for a live start in any form refuses it,
-/// whatever else is named.
+/// is never read, so it refuses as missing too. A `run` that names `--registry` in any form is a
+/// live start, and never also replays a recording.
 ///
 /// # Errors
-/// The first [`ArgsError`]: the live refusal, then the probe socket, then the subcommand's own.
+/// The first [`ArgsError`]: the probe socket, then the subcommand's own, a live start's in the
+/// order recording, registry, listen address, vault address, vault directory.
 pub fn command(args: &[String]) -> Result<Command, ArgsError> {
     let flag = |name: &str| {
         args.iter()
@@ -102,12 +130,13 @@ pub fn command(args: &[String]) -> Result<Command, ArgsError> {
             .filter(|value| !value.is_empty() && !value.starts_with("--"))
             .cloned()
     };
-    if args
-        .iter()
-        .any(|a| a == "--registry" || a.starts_with("--registry="))
-    {
-        return Err(ArgsError::LiveNotBuilt);
-    }
+    let named = |name: &str| {
+        args.iter().any(|a| {
+            a == name
+                || a.strip_prefix(name)
+                    .is_some_and(|rest| rest.starts_with('='))
+        })
+    };
     let socket = flag("--probe")
         .map(PathBuf::from)
         .ok_or(ArgsError::ProbeSocketMissing)?;
@@ -118,6 +147,28 @@ pub fn command(args: &[String]) -> Result<Command, ArgsError> {
                 .and_then(|word| Probe::parse(word))
                 .ok_or(ArgsError::ProbeUnknown)?;
             Ok(Command::Probe { asked, socket })
+        }
+        Some("run") if named("--registry") => {
+            if named("--recorded") {
+                return Err(ArgsError::RecordedAndLive);
+            }
+            let registry = flag("--registry")
+                .map(PathBuf::from)
+                .ok_or(ArgsError::RegistryMissing)?;
+            let listen = flag("--listen")
+                .and_then(|text| text.parse().ok())
+                .ok_or(ArgsError::ListenMissing)?;
+            let vault_address = flag("--vault-address").ok_or(ArgsError::VaultAddressMissing)?;
+            let vault_dir = flag("--vault-dir")
+                .map(PathBuf::from)
+                .ok_or(ArgsError::VaultDirMissing)?;
+            Ok(Command::Live(LiveArgs {
+                registry,
+                listen,
+                probe: socket,
+                vault_address,
+                vault_dir,
+            }))
         }
         Some("run") => {
             let listen = flag("--listen")
@@ -136,7 +187,7 @@ pub fn command(args: &[String]) -> Result<Command, ArgsError> {
     }
 }
 
-/// Why the recorded service did not start, by its code.
+/// Why the service did not start, by its code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum StartFailure {
     #[error("the recorded bundle cannot be read")]
@@ -149,6 +200,12 @@ pub enum StartFailure {
     Meter(crate::start::StartError),
     #[error("a deployed agent's cap cannot be read: {0}")]
     Cap(crate::cap::CapError),
+    #[error("the live registry file cannot be read")]
+    RegistryUnreadable,
+    #[error("the live registry file is not a live registry")]
+    RegistryMalformed,
+    #[error("the live registry names a gate report the start cannot yet verify")]
+    GateReportUnverifiable,
 }
 
 impl StartFailure {
@@ -160,6 +217,9 @@ impl StartFailure {
             Self::Unregistered => "recorded_bundle_unregistered",
             Self::Meter(error) => error.code(),
             Self::Cap(error) => error.code(),
+            Self::RegistryUnreadable => "registry_unreadable",
+            Self::RegistryMalformed => "registry_malformed",
+            Self::GateReportUnverifiable => "gate_report_unverifiable",
         }
     }
 }
@@ -212,6 +272,41 @@ pub fn recorded_service<S: Store + 'static, C: Clock>(
     model: &RecordedModel,
     parts: Parts<S, C>,
 ) -> Result<RecordedService<S, C>, StartFailure> {
+    let registry = model.registry().map_err(|_| StartFailure::Unregistered)?;
+    metered_service(
+        config,
+        parts,
+        Served {
+            settings: settings(&config.workspace, model),
+            registry,
+            transport: RecordedTransport::new(),
+            key: Box::new(RecordedKey),
+        },
+    )
+}
+
+/// What a service serves its calls with besides its meters: its settings, its registry, its
+/// transport, and the key source the transport is handed.
+pub struct Served<T> {
+    pub settings: Settings,
+    pub registry: Registry,
+    pub transport: T,
+    pub key: Box<dyn SecretSource>,
+}
+
+/// The service for `config`'s workspace and deployment over `served`, metering through the
+/// journaled meter streams `meter:{workspace}` and `dmeter:{deployment}` under `config`'s monthly
+/// budgets, and holding each research call to its agent's deployed daily cap. It starts only when
+/// both meter streams read back and every deployed agent's cap reads; the recorded and the live
+/// start both build it here, so the two meter alike.
+///
+/// # Errors
+/// [`StartFailure`]: a meter stream that does not read, or a deployed agent's cap that does not.
+pub fn metered_service<S: Store + 'static, C: Clock, T: Transport>(
+    config: &Config,
+    parts: Parts<S, C>,
+    served: Served<T>,
+) -> Result<Service<T, JournalMeter<S>, C>, StartFailure> {
     let Parts {
         workspace_store,
         deployment_store,
@@ -227,7 +322,6 @@ pub fn recorded_service<S: Store + 'static, C: Clock>(
         control,
         artifacts,
     } = parts;
-    let registry = model.registry().map_err(|_| StartFailure::Unregistered)?;
     let workspace = JournalMeter::open(
         workspace_store,
         &config.workspace,
@@ -253,11 +347,11 @@ pub fn recorded_service<S: Store + 'static, C: Clock>(
         ),
     );
     let gateway = Gateway::new(
-        settings(&config.workspace, model),
-        registry,
+        served.settings,
+        served.registry,
         Box::new(OpenRouter),
-        RecordedTransport::new(),
-        Box::new(RecordedKey),
+        served.transport,
+        served.key,
         meter,
         clock,
         call_ids,
