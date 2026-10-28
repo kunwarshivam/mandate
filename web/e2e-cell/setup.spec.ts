@@ -18,6 +18,12 @@ import { virtualPasskey } from "./virtual-passkey";
  *    the CLI until then;
  * 4. is offered no deployment, since version 1 is not confirmed.
  *
+ * With `OWLHEAD_CELL_SETUP_DEPLOY=1`, in a dev or ci cell that waives a first passkey's cool-off
+ * (DEC-2146), steps 3 and 4 are instead the owner confirming version 1 with the passkey
+ * (`POST /mandate-versions/{v}/confirm`) and deploying it to paper (`POST /agents`): web/'s set-up
+ * then deploys the run's agent, and the API's id for it is the result's `agent_deployed`, which the
+ * driver hands every later step.
+ *
  * Nothing it records conflicts with the scenario's agent: a version that is never deployed starts
  * no agent. The driver (`cargo xtask cell demo`, step 2) names the workspace and reads the steps this
  * writes to `OWLHEAD_CELL_RESULT`, so a failure names the first step that did not happen. Paper only:
@@ -28,6 +34,14 @@ const WORKSPACE = process.env.OWLHEAD_WORKSPACE_ID ?? "";
 /** The whole test's bound, and one page's: `next dev` compiles each route on its first visit. */
 const SETUP_MS = Number(process.env.OWLHEAD_CELL_SETUP_MS ?? 240_000);
 const PAGE_MS = 90_000;
+/**
+ * Set by the driver when the cell waives a first passkey's cool-off (DEC-2146) and web/'s set-up
+ * deploys the run's agent: the owner then confirms and deploys version 1 here, and the driver takes
+ * the agent's id from `agent_deployed`. Unset, the confirm is held as the cool-off holds it.
+ */
+const DEPLOY = process.env.OWLHEAD_CELL_SETUP_DEPLOY === "1";
+/** An agent id as the API mints it, the form the driver accepts. */
+const AGENT_ID = /^agt_[A-Za-z0-9]{26}$/;
 /** The demo's figures: inside the paper account's room, and a loss inside the workspace's ceiling. */
 const MONEY = "$1,000";
 const GOAL = "Follow the trend on paper";
@@ -49,6 +63,22 @@ const refuse = (error: string): never => {
 
 const api = (path: string) => `/v1/workspaces/${WORKSPACE}${path}`;
 const isPost = (r: Response, path: string) => r.request().method() === "POST" && new URL(r.url()).pathname === api(path);
+
+/**
+ * Presses a set-up step's button, then the step-up dialog's "Use passkey" when it opens: the
+ * virtual authenticator answers the page's own WebAuthn call, so the owner's gesture is the click.
+ */
+async function passkeyAction(page: Page, name: string) {
+  await page.getByRole("button", { name, exact: true }).click({ timeout: 30_000 });
+  const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
+  const opened = await dialog.waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false);
+  if (opened) await dialog.getByRole("button", { name: "Use passkey" }).click();
+}
+
+/** What a set-up step's item says, for a refusal; bounded, since the cell config sets no action timeout. */
+async function stepSaid(page: Page, which: string): Promise<string> {
+  return ((await page.locator(`[data-step=${which}]`).textContent({ timeout: 2_000 }).catch(() => null)) ?? "nothing").replace(/\s+/g, " ").slice(0, 300);
+}
 
 /**
  * Opens `path` until its read of `apiPath` is not the one 401: `web/` opens the API session through
@@ -123,21 +153,46 @@ test("the owner's set-up from web/: a passkey added in Settings, version 1 creat
     step("version_created", ((await version.textContent()) ?? "").trim());
   });
 
-  await test.step("the confirm is held in words while the passkey is new, with nothing sent", async () => {
-    const before = posts.length;
-    await page.getByRole("button", { name: "Confirm version 1" }).click();
-    const held = page.locator("[data-step=confirm] [data-reason=passkey_cooling_off]");
-    await expect(held).toBeVisible({ timeout: 30_000 });
-    await expect(held).toContainText("your passkey is new, and confirms only once its first 24 hours have passed");
-    const sent = posts.slice(before).filter((p) => p.endsWith("/confirm") || p === api("/step-up/challenges"));
-    if (sent.length > 0) refuse(`the browser sent ${sent.join(", ")} for a confirm its passkey could not make`);
-    step("confirm_refused_cooling_off");
-  });
+  if (DEPLOY) {
+    await test.step("the owner confirms version 1 with the passkey, and the journal records it", async () => {
+      const confirmed = page.waitForResponse((r) => r.request().method() === "POST" && /\/mandate-versions\/[^/]+\/confirm$/.test(new URL(r.url()).pathname), { timeout: 60_000 });
+      await passkeyAction(page, "Confirm version 1");
+      const answer = await confirmed.catch(() => null);
+      if (!answer) return refuse(`the browser sent no confirm within 60 s; the confirm step said: ${await stepSaid(page, "confirm")}`);
+      if (!answer.ok()) refuse(`the API answered ${answer.status()} for the confirm: ${(await answer.text()).slice(0, 400)}`);
+      await expect(page.locator("[data-step=confirm][data-phase=recorded]")).toBeVisible({ timeout: 30_000 });
+      step("version_confirmed");
+    });
 
-  await test.step("no deployment is offered for a version not confirmed", async () => {
-    await expect(page.locator("[data-step=deploy]")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Deploy to paper" })).toHaveCount(0);
-    if (posts.some((p) => p === api("/agents"))) refuse("the browser sent a deployment for a version it never confirmed");
-    step("deploy_not_offered");
-  });
+    await test.step("the owner deploys version 1 to paper with the passkey, and the API names the agent", async () => {
+      const deployed = page.waitForResponse((r) => isPost(r, "/agents"), { timeout: 60_000 });
+      await passkeyAction(page, "Deploy to paper");
+      const answer = await deployed.catch(() => null);
+      if (!answer) return refuse(`the browser sent no deployment within 60 s; the deploy step said: ${await stepSaid(page, "deploy")}`);
+      if (!answer.ok()) refuse(`the API answered ${answer.status()} for the deployment: ${(await answer.text()).slice(0, 400)}`);
+      const shown = page.locator("[data-step=deploy] [data-slot=deployed-agent]");
+      await expect(shown).toBeVisible({ timeout: 30_000 });
+      const agent = ((await shown.textContent()) ?? "").trim();
+      if (!AGENT_ID.test(agent)) refuse(`the deployment showed agent "${agent}", not an id of the form agt_ and 26 letters or digits`);
+      step("agent_deployed", agent);
+    });
+  } else {
+    await test.step("the confirm is held in words while the passkey is new, with nothing sent", async () => {
+      const before = posts.length;
+      await page.getByRole("button", { name: "Confirm version 1" }).click();
+      const held = page.locator("[data-step=confirm] [data-reason=passkey_cooling_off]");
+      await expect(held).toBeVisible({ timeout: 30_000 });
+      await expect(held).toContainText("your passkey is new, and confirms only once its first 24 hours have passed");
+      const sent = posts.slice(before).filter((p) => p.endsWith("/confirm") || p === api("/step-up/challenges"));
+      if (sent.length > 0) refuse(`the browser sent ${sent.join(", ")} for a confirm its passkey could not make`);
+      step("confirm_refused_cooling_off");
+    });
+
+    await test.step("no deployment is offered for a version not confirmed", async () => {
+      await expect(page.locator("[data-step=deploy]")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Deploy to paper" })).toHaveCount(0);
+      if (posts.some((p) => p === api("/agents"))) refuse("the browser sent a deployment for a version it never confirmed");
+      step("deploy_not_offered");
+    });
+  }
 });
