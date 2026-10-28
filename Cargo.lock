@@ -2332,6 +2332,7 @@ dependencies = [
 name = "mandate-news-reader"
 version = "0.0.0"
 dependencies = [
+ "mandate-canon",
  "mandate-connections",
  "mandate-sources",
  "mandate-time",
