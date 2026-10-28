@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Page, expect, test } from "@playwright/test";
+import { type Locator, type Page, expect, test } from "@playwright/test";
 import { deferredCheckLabel } from "../src/lib/deferred-checks";
 
 /**
@@ -39,6 +39,20 @@ const APPROVER_SENTENCE = (JSON.parse(readFileSync(join(process.cwd(), "../fixtu
 
 /** The agent screen's fixed sentences for a section with nothing listed (`api-screens.tsx`'s `AgentActivity`), the only text a failure may quote from it. */
 const SECTION_STATES = ["Reading positions.", "This agent holds nothing.", "Not reported.", "Reading the journal.", "Not available to your role.", "Journal not reported.", "Nothing recorded yet."];
+
+/**
+ * Whether `locator`'s text comes to match `phrase` within `ms`, read here rather than by `expect`, so
+ * a miss prints nothing the page held: the exit's screens name the agent, the instrument and the
+ * quantity, and a failed run's log is uploaded (`AGENTS.md`, no positions in logs).
+ */
+async function comesToSay(locator: Locator, phrase: RegExp, ms: number): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (phrase.test((await locator.first().textContent({ timeout: 1_000 }).catch(() => null)) ?? "")) return true;
+    await locator.page().waitForTimeout(250);
+  }
+  return false;
+}
 
 const reached: Record<string, string> = {};
 const write = (extra: Record<string, string> = {}) => writeFileSync(RESULT, JSON.stringify({ ...reached, ...extra }));
@@ -197,12 +211,13 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     await expect(exit).toBeVisible({ timeout: 30_000 });
     await exit.click();
     const confirm = own.getByRole("group", { name: /^Exit / });
-    await expect(confirm).toContainText("only participation caps pace it");
+    if (!(await comesToSay(confirm, /only participation caps pace it/, 15_000))) refuse("the owner exit's confirmation did not say that only participation caps pace it within 15 s");
     const sent = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/agents/${AGENT}/exits`);
     await confirm.getByRole("button", { name: "Sell it" }).click();
     const answer = await sent;
     if (!answer.ok()) refuse(`the API answered ${answer.status()} for the owner exit: ${(await answer.text()).slice(0, 400)}`);
-    await expect(page.getByRole("status", { name: /^Your exit from / })).toContainText(/Recorded in the journal: your exit|Taken by the agent's runtime/, { timeout: 30_000 });
+    const exitStatus = page.getByRole("status", { name: /^Your exit from / });
+    if (!(await comesToSay(exitStatus, /Recorded in the journal: your exit|Taken by the agent's runtime/, 30_000))) refuse("the owner exit's status did not read recorded or taken within 30 s");
     const filled = await until(page, `/agents/${AGENT}`, FILL_MS, async () => (await sells.allTextContents()).some((sell) => !before.has(sell)));
     if (!filled) refuse(`the owner exit was recorded but no new sell filled on the agent's orders within ${FILL_MS} ms`);
     step("owner_exit", ((await answer.json()) as { command_id?: string }).command_id ?? "");
