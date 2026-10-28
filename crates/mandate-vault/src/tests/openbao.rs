@@ -10,8 +10,9 @@ use serde_json::{Value, json};
 use crate::openbao::{Http, ProvisionError, Refused, provisioned_policy};
 use crate::openbao::{
     OpenBaoConfig, OpenBaoSource, cas_refusal, kubernetes_login_path, kubernetes_login_refusal,
-    kubernetes_login_verdict, kubernetes_namespace_verdict, lost_or_denied_verdict, provision,
-    provisioned_identities, refusal, role_settings, seal_verdict, secret_id_identities, taken_read,
+    kubernetes_login_verdict, kubernetes_namespace_verdict, kv_upgrade_refusal,
+    lost_or_denied_verdict, provision, provisioned_identities, refusal, role_settings,
+    seal_verdict, secret_id_identities, taken_read,
 };
 use crate::openbao::{fingerprint_key_verdict, key_needs_creating, transit_mount_verdict};
 use crate::policy::{Identity, Mounts};
@@ -377,6 +378,67 @@ fn a_kubernetes_login_is_accepted_only_for_its_own_role_and_account() {
     assert_eq!(
         kubernetes_login_verdict(&executor, None),
         Err(SourceError::Malformed)
+    );
+}
+
+/// E21-32v: an answer from a KV v2 mount is `refusal`'s, except that OpenBao's own word that the
+/// mount is still finishing the upgrade it starts when enabled, as the one error of a 400, is
+/// `KvUpgrading`, which provisioning waits out. The same words beside another error, or on another
+/// status, a near miss, another 400, and a body that is not the vault's error list stay what
+/// `refusal` makes them.
+#[test]
+fn a_kv_mount_still_upgrading_is_its_own_refusal_and_every_other_answer_keeps_its_meaning() {
+    let upgrading = "Upgrading from non-versioned to versioned data. This backend will be \
+                     unavailable for a brief period and will resume service shortly.";
+    let waiting = "Waiting for the primary to upgrade from non-versioned to versioned data. This \
+                   backend will be unavailable for a brief period and will resume service when \
+                   the primary is finished.";
+    for message in [upgrading, waiting] {
+        let body = json!({ "errors": [message] }).to_string();
+        assert_eq!(
+            kv_upgrade_refusal(400, body.as_bytes()),
+            Err(SourceError::KvUpgrading),
+            "{message}"
+        );
+        assert_eq!(kv_upgrade_refusal(200, body.as_bytes()), Ok(()));
+        assert_eq!(kv_upgrade_refusal(204, b""), Ok(()));
+        for (status, want) in [
+            (403_u16, SourceError::Denied),
+            (404, SourceError::Missing),
+            (500, SourceError::Unavailable),
+            (503, SourceError::Sealed),
+        ] {
+            assert_eq!(
+                kv_upgrade_refusal(status, body.as_bytes()),
+                Err(want),
+                "{status}"
+            );
+        }
+    }
+    let beside = json!({ "errors": [upgrading, "permission denied"] }).to_string();
+    let near = json!({ "errors": [upgrading.trim_end_matches('.')] }).to_string();
+    let plain = json!({ "errors": [upgrading] })
+        .to_string()
+        .replace("errors", "warnings");
+    for body in [
+        beside.as_str(),
+        near.as_str(),
+        plain.as_str(),
+        r#"{"errors":["permission denied"]}"#,
+        r#"{"errors":[]}"#,
+        "not json",
+        "",
+    ] {
+        assert_eq!(
+            kv_upgrade_refusal(400, body.as_bytes()),
+            Err(SourceError::Denied),
+            "{body}"
+        );
+    }
+    assert_eq!(SourceError::KvUpgrading.code(), "kv_upgrading");
+    assert!(
+        !SourceError::KvUpgrading.is_outage(),
+        "only provisioning waits it out"
     );
 }
 
