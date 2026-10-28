@@ -2765,14 +2765,21 @@ const POINTED: [&str; 6] = [
 
 /// The chart values [`point_api`] sets for the run's `workspace`: the API on it, and the second
 /// manager and the model gateway on its research workspace, the same ULID with `r`, the one value
-/// the chart takes for either (DEC-2070 items 1 and 5).
-fn pointed_values(workspace: &str) -> [String; 3] {
+/// the chart takes for either (DEC-2070 items 1 and 5). Set up `by` `web/`, the API also waives a
+/// first passkey's 24-hour cool-off at step-up (DEC-2146, each waiver journaled), so the set-up can
+/// confirm and deploy; set up by the CLI it does not, and `k3d.yaml` keeps the waiver off, so the
+/// waiver goes on only with the switch.
+fn pointed_values(workspace: &str, by: SetUpBy) -> Vec<String> {
     let research = research_workspace_of(workspace);
-    [
+    let mut values = vec![
         format!("api.workspace={workspace}"),
         format!("deployManager.researchWorkspace={research}"),
         format!("modelGateway.workspace={research}"),
-    ]
+    ];
+    if by == SetUpBy::Web {
+        values.push("api.stepUpCoolOffWaiver=true".to_owned());
+    }
+    values
 }
 
 /// Points the cell's API and deployment manager at the run's `workspace` (DEC-2010), and the second
@@ -2791,7 +2798,7 @@ pub(super) fn point_api(workspace: &str) -> Result<()> {
         NAMESPACE.to_owned(),
         "--reuse-values".to_owned(),
     ];
-    for value in pointed_values(workspace) {
+    for value in pointed_values(workspace, SET_UP_BY) {
         args.extend(["--set".to_owned(), value]);
     }
     args.extend(["--wait", "--wait-for-jobs", "--timeout", "3m"].map(str::to_owned));
@@ -5436,13 +5443,16 @@ mod tests {
     #[test]
     fn the_cell_is_pointed_at_the_run_and_its_research_workspace() {
         let run = workspace_of("12");
+        let pointed = [
+            format!("api.workspace={run}"),
+            format!("deployManager.researchWorkspace={run}r"),
+            format!("modelGateway.workspace={run}r"),
+        ];
+        assert_eq!(pointed_values(&run, SetUpBy::Cli), pointed);
         assert_eq!(
-            pointed_values(&run),
-            [
-                format!("api.workspace={run}"),
-                format!("deployManager.researchWorkspace={run}r"),
-                format!("modelGateway.workspace={run}r"),
-            ]
+            pointed_values(&run, SetUpBy::Web),
+            [&pointed[..], &["api.stepUpCoolOffWaiver=true".to_owned()]].concat(),
+            "the cool-off waiver goes on with web/'s set-up, and only with it (DEC-2146)"
         );
         assert_eq!(
             POINTED,
