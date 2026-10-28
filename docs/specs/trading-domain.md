@@ -2,13 +2,20 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.25 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md); v0.20 amendment [DEC-2302](../project/decisions/DEC-2302.md) item 7; v0.21 amendment [DEC-2807](../project/decisions/DEC-2807.md); v0.22 amendment [DEC-2815](../project/decisions/DEC-2815.md); v0.23 amendment [DEC-2824](../project/decisions/DEC-2824.md); v0.24 amendment [DEC-2849](../project/decisions/DEC-2849.md), positions are per agent; v0.25 amendment [DEC-2855](../project/decisions/DEC-2855.md), the hold codes registered); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.26 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md); v0.20 amendment [DEC-2302](../project/decisions/DEC-2302.md) item 7; v0.21 amendment [DEC-2807](../project/decisions/DEC-2807.md); v0.22 amendment [DEC-2815](../project/decisions/DEC-2815.md); v0.23 amendment [DEC-2824](../project/decisions/DEC-2824.md); v0.24 amendment [DEC-2849](../project/decisions/DEC-2849.md), positions are per agent; v0.25 amendment [DEC-2855](../project/decisions/DEC-2855.md), the hold codes registered; v0.26 amendment [DEC-2849](../project/decisions/DEC-2849.md) item 8, each holder's exit cancels its own legs); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)); US equities on Robinhood for the founder's one live order ([DEC-529](../project/decisions/DEC-529.md)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.26 ([DEC-2849](../project/decisions/DEC-2849.md) item 8):** §5.4 under shared positions:
+  - each holder's protection is re-placed on a leg of its own;
+  - a marketable exit cancels its own agent's legs and every unattributed or `*` leg;
+  - another holder's legs are cancelled only when they would not fit beside the exit within N;
+  - the triggered-stop watchdog measures against the highest resting stop.
+
+  A passive exit, an exit of no agent, and every single-holder position behave as before.
 - **v0.25 ([DEC-2855](../project/decisions/DEC-2855.md)):** §9.1 step 4's `protection_unattributed`
   and `attribution_deficit` are registered (the founder's ruling), and the owner is alerted once
   per episode of openings held for either. No hold, check order or exit changes.
@@ -530,9 +537,10 @@ protective legs are checked against position + entry quantity.
   - **The gap is bounded.** That cancel falls inside an unprotected interval that is journaled and
     bounded by `max_unprotected_s`, like any other. Once the other exits end, or the bound ends
     them, protection is re-placed for what is left.
-- **Marketable exit sequence:** cancel all protective orders in the instrument → confirm → re-run
-  the gate on fresh state → submit the exit, priced marketable per §5.6 → after a terminal state,
-  re-place protection for any remaining quantity. **Orders submitted while protection is canceled
+- **Marketable exit sequence:** cancel the protective orders the exit cancels (all of them in
+  the instrument, unless other holders' legs fit beside it; see **Shared positions** below) →
+  confirm → re-run the gate on fresh state → submit the exit, priced marketable per §5.6 → after a
+  terminal state, re-place protection for any remaining quantity. **Orders submitted while protection is canceled
   must be marketable at submission.**
 - **Bounded unprotected intervals:** every interval is journaled from start to end. If an interval
   reaches `max_unprotected_s` (default 60 seconds) with the order unfilled, the executor cancels it,
@@ -541,7 +549,8 @@ protective legs are checked against position + entry quantity.
   unprotected and disclosed.
 - Protection triggers in the regular session only (stops do not trigger in extended hours).
 - **Triggered-stop watchdog:** if a sane risk mark has been at or below a resting stop's stop price
-  for `stop_watchdog_s` (default 60 seconds) in a session where the stop can trigger, with no fill,
+  (the highest stop among the resting legs, so a stop placed before a lower one is watched) for
+  `stop_watchdog_s` (default 60 seconds) in a session where the stop can trigger, with no fill,
   or is below a stop-limit's limit price, the executor cancels it, confirms, and exits the held
   quantity through the exit price ladder (§5.6) as a `risk_exit` (its ID and agent, §2.3), and
   alerts the owner.
@@ -601,8 +610,19 @@ item 7, resolving DEC-441 item 17 for DEC-529's one order):
   When Pᵢ falls below an agent's resting coverage, those legs are resized by cancel and re-place,
   an unprotected interval bounded by `max_unprotected_s`.
 - A triggered stop, watchdog or bound exit is its leg's agent's exit, sized min(Lᵢ, N) (DEC-2849
-  items 7 and 8, lane X). Until then, this section's instrument-wide exit sequence stands, and it
-  re-places every other holder's protection after the exit.
+  items 7 and 8). The watchdog's exit is the agent's whose leg the breach triggered: the resting
+  leg with the highest stop, the first placed of those at it.
+- Re-placement gives each holder a leg of its own, sized to its Pᵢ less its own legs and exits, at
+  its own entry's prices. The holders share what the long position leaves beside resting
+  protection and working exits, largest lots first. The owner's residual keeps the cover above, on
+  the re-placing sequence's own leg. A holder with no prices of its own is never lent another's:
+  its shares are journaled and alerted as unprotected.
+- A marketable exit cancels its own agent's legs and every unattributed or `*` leg. Another
+  holder's legs keep resting while they fit beside the exit: what they have left to sell (an OCO's
+  legs once), every working sell and the exit together within N. Otherwise they are cancelled too,
+  so they never cut a rule-13 exit (DEC-2849 I4), and re-placed after it.
+  - The sequence waits only on its own cancels, and re-places only what it cancelled.
+  - A passive exit, and an exit of no agent (`*`), still cancel every leg.
 
 ### 5.5 Kill switch
 
