@@ -346,6 +346,16 @@ pub fn run_put(
     Ok(())
 }
 
+/// How a stopped provisioning reads: its refusal and reason code, and, when the vault's own
+/// refusal stopped it, the request refused, its method, path and status (E21-32v).
+pub fn stopped_line(stopped: &ProvisionError) -> String {
+    let code = stopped.error.code();
+    match &stopped.refused {
+        Some(request) => format!("{} ({code}): {request}", stopped.error),
+        None => format!("{} ({code})", stopped.error),
+    }
+}
+
 /// Runs the provisioning and prints, to `out`, the name of each file written and nothing else.
 /// `--out` is checked before the vault is reached, so a directory the write would refuse leaves no
 /// secret id issued and unwritten. A refusal names its reason code; none carries a token, a
@@ -365,10 +375,7 @@ pub fn run_provision(
     out: &mut impl Write,
 ) -> anyhow::Result<()> {
     let refused = |e: SourceError| anyhow!("{e} ({})", e.code());
-    let stopped = |e: ProvisionError| match &e.refused {
-        Some(request) => anyhow!("{} ({}): {request}", e.error, e.error.code()),
-        None => refused(e.error),
-    };
+    let stopped = |e: ProvisionError| anyhow!("{}", stopped_line(&e));
     let connections = args
         .connections
         .iter()

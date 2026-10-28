@@ -753,3 +753,58 @@ fn a_refused_request_shows_its_method_path_and_status() {
         "the error shows as its refusal; the caller names the request"
     );
 }
+
+/// Provisioning names a refused request only when that refusal is the error that stopped it: a
+/// refusal gone past, a later answer of 200, a request that never reached an answer, or an error
+/// of another kind names none.
+#[test]
+fn provisioning_names_a_refusal_only_when_it_is_what_stopped_it() {
+    use crate::openbao::{Http, Refused};
+    use reqwest::{Method, StatusCode};
+    let http = Http::new(&unreachable()).unwrap();
+    let named = |http: &Http, error: SourceError| http.explained(error).refused;
+    let mounts_get = Refused {
+        method: "GET".to_owned(),
+        path: "sys/mounts/kv".to_owned(),
+        status: 404,
+    };
+    assert_eq!(named(&http, SourceError::Denied), None, "nothing asked yet");
+    http.note(
+        &Method::GET,
+        "sys/mounts/kv",
+        StatusCode::NOT_FOUND,
+        &Err(SourceError::Missing),
+    );
+    assert_eq!(named(&http, SourceError::Missing), Some(mounts_get));
+    assert_eq!(
+        named(&http, SourceError::Config),
+        None,
+        "an error of another kind is not the refusal's"
+    );
+    http.note(&Method::POST, "sys/mounts/kv", StatusCode::OK, &Ok(()));
+    assert_eq!(
+        named(&http, SourceError::Missing),
+        None,
+        "a refusal gone past is forgotten at the next answer"
+    );
+    http.note(
+        &Method::PUT,
+        "sys/policies/acl/mandate-api",
+        StatusCode::FORBIDDEN,
+        &Err(SourceError::Denied),
+    );
+    assert_eq!(
+        named(&http, SourceError::Denied),
+        Some(Refused {
+            method: "PUT".to_owned(),
+            path: "sys/policies/acl/mandate-api".to_owned(),
+            status: 403,
+        })
+    );
+    http.forget();
+    assert_eq!(
+        named(&http, SourceError::Denied),
+        None,
+        "a request that never reached an answer names no earlier one"
+    );
+}

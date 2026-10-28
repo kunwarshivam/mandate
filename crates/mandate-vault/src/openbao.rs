@@ -115,7 +115,7 @@ impl From<SourceError> for ProvisionError {
 }
 
 /// The HTTP client for one vault: TLS to the given CA only, no proxy, no redirect.
-struct Http {
+pub(crate) struct Http {
     client: reqwest::Client,
     address: String,
     /// The last request's refusal, if the vault refused it, and what it was judged to mean; reset
@@ -124,7 +124,7 @@ struct Http {
 }
 
 impl Http {
-    fn new(config: &OpenBaoConfig) -> Result<Self, SourceError> {
+    pub(crate) fn new(config: &OpenBaoConfig) -> Result<Self, SourceError> {
         let rest = config
             .address
             .strip_prefix("https://")
@@ -154,14 +154,14 @@ impl Http {
     }
 
     /// Clears the last request's refusal, before a request that may never reach an answer.
-    fn forget(&self) {
+    pub(crate) fn forget(&self) {
         if let Ok(mut last) = self.last.lock() {
             *last = None;
         }
     }
 
     /// Records the answer to `method` on `path`: its refusal, if `judged` is one, or none.
-    fn note(
+    pub(crate) fn note(
         &self,
         method: &Method,
         path: &str,
@@ -185,7 +185,7 @@ impl Http {
 
     /// `error` as provisioning reports it: with the last request's refusal when that refusal is
     /// `error`, and with none otherwise.
-    fn explained(&self, error: SourceError) -> ProvisionError {
+    pub(crate) fn explained(&self, error: SourceError) -> ProvisionError {
         let refused = self
             .last
             .lock()

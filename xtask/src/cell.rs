@@ -1880,11 +1880,12 @@ fn vault_state(status: &str) -> Result<VaultState> {
     })
 }
 
-/// How long the cell waits, after unsealing, for the vault to answer as the active node, and how
-/// often it asks (E21-32v): a raft node reports itself unsealed before it has won its election
-/// and loaded its token store, and refuses even the root token until then, so provisioning waits
-/// for it. A denial after that is a real one, never retried.
+/// How long the cell waits, after unsealing, for the vault to answer as the active node (E21-32v):
+/// a raft node reports itself unsealed before it has won its election and loaded its token store,
+/// and refuses even the root token until then, so provisioning waits for it. A denial after that
+/// is a real one, never retried.
 const VAULT_ACTIVE_S: u64 = 60;
+/// How often the cell asks the vault's status while it waits for it to be active.
 const VAULT_ACTIVE_EVERY_S: u64 = 2;
 
 /// Whether a vault's `bao status -format=json` says it is unsealed, on raft, and the active node:
@@ -1903,22 +1904,25 @@ fn vault_active(status: &str) -> Result<bool> {
 
 /// Asks `status` until the vault answers as active ([`vault_active`]), pausing
 /// [`VAULT_ACTIVE_EVERY_S`] between asks for no longer than [`VAULT_ACTIVE_S`] in all. A status
-/// that cannot be read is asked again; one that names a dev server stops it at once.
+/// that cannot be read or is not JSON, as `bao status` prints nothing on its standard output
+/// while it cannot find the leader, is asked again; one that names a dev server stops it at once.
 pub(crate) fn await_active(
     mut status: impl FnMut() -> Result<String>,
     mut pause: impl FnMut(Duration),
 ) -> Result<()> {
+    let mut active = || -> Result<bool> {
+        match status() {
+            Ok(answer) if serde_json::from_str::<Value>(&answer).is_ok() => vault_active(&answer),
+            _ => Ok(false),
+        }
+    };
     for _ in 0..VAULT_ACTIVE_S / VAULT_ACTIVE_EVERY_S {
-        if let Ok(answer) = status()
-            && vault_active(&answer)?
-        {
+        if active()? {
             return Ok(());
         }
         pause(Duration::from_secs(VAULT_ACTIVE_EVERY_S));
     }
-    if let Ok(answer) = status()
-        && vault_active(&answer)?
-    {
+    if active()? {
         return Ok(());
     }
     bail!("the vault did not answer as the active node within {VAULT_ACTIVE_S} s of unsealing")
@@ -7084,10 +7088,13 @@ mod tests {
             asks(vec![
                 Ok(standby.clone()),
                 Err(anyhow::anyhow!("the pod is restarting")),
+                Ok(String::new()),
+                Ok("Error checking leader status".to_owned()),
                 Ok(active.clone()),
             ]),
-            (true, 3, Duration::from_secs(4)),
-            "standby, then unreadable, then active: provisioning goes on after two pauses"
+            (true, 5, Duration::from_secs(8)),
+            "standby, then unreadable, empty and not JSON, then active: provisioning goes on \
+             after four pauses"
         );
         assert_eq!(
             asks(vec![Ok(active)]),
