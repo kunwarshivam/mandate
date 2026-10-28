@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiRuntimeProvider } from "./api-runtime";
-import { type Runtime, useRuntime } from "./mock-runtime";
+import { type Runtime, RuntimeProvider, useRuntime } from "./mock-runtime";
+import { emptyWorkspace } from "@/api/reads";
 import { type Fetch } from "@/api/client";
 import { createMockServer } from "@/api/mock-server";
 import type { SessionKeeper, SessionState } from "@/api/session";
@@ -17,6 +18,7 @@ import { CONFIRM_RECORD, DEPLOY_RECORD, mockAuthenticator } from "@/test/set-up"
 import { type Authenticator, deployStepUpDigest } from "@/api/passkey";
 import { MOCK_PASSKEY_ID } from "@/api/mock-server";
 import { AGENT_ID } from "./ids";
+import { propose } from "./mandate-change";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
 const ORIGIN = "https://api.owlhead.ai";
@@ -487,5 +489,48 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     await ready();
     await waitFor(() => expect(asked.filter((a) => a === "refresh").length).toBeGreaterThanOrEqual(3));
     expect(current().ws.status).toBe("ready");
+  });
+});
+
+describe("the stand-in while no workspace is named (offline)", () => {
+  it.each(["loading", "signed_out", "membership_unavailable"] as const)("records no command, answer, change or set-up step while %s", async (status) => {
+    let runtime: Runtime | null = null;
+    function Probe() {
+      const value = useRuntime();
+      useEffect(() => {
+        runtime = value;
+      });
+      return null;
+    }
+    render(
+      <RuntimeProvider initial={emptyWorkspace(status, "2026-10-26T14:00:00.000Z")} tick={false} recordAfterMs={5} offline>
+        <Probe />
+      </RuntimeProvider>,
+    );
+    const fixtures = buildWorkspace("approvals");
+    const agent = fixtures.agents[0];
+    let setUp = "";
+    act(() => {
+      runtime!.send("stop_all", null);
+      runtime!.respond("apr-offline", "approve", { screen: "D6", environment: "paper", shown: ["Buy 1 XYZ"], modelOutputExpanded: false });
+      runtime!.changeMandate(propose(fixtures, agent, { "/risk/max_order_usd": "500" }), { kind: "form" }, { screen: "A6", environment: "paper", shown: [] });
+      setUp = runtime!.createVersion({ mandate: agent.mandate, provenance: agent.provenance }).id;
+    });
+    await waitFor(() => expect(runtime!.setUps.find((s) => s.id === setUp)?.created.phase).toBe("undelivered"));
+    act(() => runtime!.confirmVersion(setUp, CONFIRM_RECORD, null));
+    act(() => runtime!.deployVersion(setUp, DEPLOY_RECORD));
+    await waitFor(() => {
+      expect(runtime!.commands.at(-1)?.phase).toBe("undelivered");
+      expect(runtime!.responses["apr-offline"]?.phase).toBe("undelivered");
+      expect(runtime!.mandateChanges.at(-1)?.phase).toBe("undelivered");
+      expect(runtime!.setUps.at(-1)?.confirmed?.phase).toBe("undelivered");
+      expect(runtime!.setUps.at(-1)?.deployed?.phase).toBe("undelivered");
+    });
+    await new Promise((r) => setTimeout(r, 40));
+    expect(runtime!.commands.some((c) => c.phase === "recorded")).toBe(false);
+    expect(Object.values(runtime!.responses).map((r) => r.phase)).toEqual(["undelivered"]);
+    expect(runtime!.mandateChanges.map((c) => c.phase)).toEqual(["undelivered"]);
+    expect(runtime!.setUps.map((s) => [s.created.phase, s.confirmed?.phase, s.deployed?.phase])).toEqual([["undelivered", "undelivered", "undelivered"]]);
+    expect(runtime!.ws.agents).toEqual([]);
   });
 });

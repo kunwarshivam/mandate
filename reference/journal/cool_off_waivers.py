@@ -1,4 +1,4 @@
-"""Journal spec v0.112 §9.38's reference vectors for `StepUpCoolOffWaived` (DEC-2146): a passkey step-up a
+"""Journal spec v0.113 §9.38's reference vectors for `StepUpCoolOffWaived` (DEC-2146): a passkey step-up a
 `dev` or `ci` test cell counted inside its credential's enrolment cool-off, appended immediately after
 that step-up's `StepUpAsserted` in one batch.
 
@@ -32,7 +32,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.112 §9.38 (DEC-2146)"
+SPEC = "docs/specs/journal.md v0.113 §9.38 (DEC-2146)"
 BASE = "cool_off_waived"
 CAUSE = step_up_assertions.CAUSE
 ASSERTED = step_up_assertions.ASSERTED

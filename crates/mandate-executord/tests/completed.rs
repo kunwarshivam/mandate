@@ -376,7 +376,7 @@ fn lane_d1s_probe_keeps_it_running() -> Result<(), Error> {
     let broker = Paper::new(&journal);
     broker.resting(OPENING, "AAPL", "10", "150")?;
     broker.fill(OPENING, "150")?;
-    broker.resting("md-protect", "AAPL", "10", "147")?;
+    broker.resting_sell("md-protect", "AAPL", "10", "147")?;
     let mut first = start_allowing(&journal, &broker)?;
     first.step(at(NOON)?);
     drop(first);

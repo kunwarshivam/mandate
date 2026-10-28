@@ -1,0 +1,2 @@
+- **E2-10 Derive the news reader's followed agents from the deployment records (DEC-2281 item 1).** The reader follows the agents its `--follow` flags name, set by the chart, so a newly deployed agent gets no news triggers until the chart names it. Derive the set from the workspace's deployment records instead, without widening the reader's control-stream read beyond DEC-2280's bound (a narrow view of the deployment rows, or the deploy manager handing it the set).
+<!-- section: E2 Market data -->

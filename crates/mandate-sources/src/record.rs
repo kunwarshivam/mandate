@@ -11,7 +11,7 @@ use mandate_time::UtcNanos;
 
 use crate::SourceError;
 use crate::allowlist::SourceKind;
-use crate::symbols::Cik;
+use crate::symbols::{Cik, Symbol};
 use crate::text::UntrustedText;
 
 /// How an item reached the platform, which decides its knowledge time (data-plane spec §5.2,
@@ -144,12 +144,49 @@ pub struct Draft {
     pub(crate) content: ContentHash,
     pub(crate) length_bytes: u64,
     pub(crate) tags: BTreeSet<AssetId>,
+    /// The tickers the item names, as parsed: a news item's from the vendor's own `symbols`, in
+    /// the vendor's order, unknown ones included (DEC-2280 item 2); a filing's from the CIK table.
+    pub(crate) tickers: Vec<Symbol>,
     pub(crate) body_group: GroupKey,
     pub(crate) filing: Option<FilingFields>,
     pub(crate) text: ItemText,
 }
 
 impl Draft {
+    pub fn source(&self) -> &SourceId {
+        &self.source
+    }
+
+    pub fn allowlist_version(&self) -> AllowlistVersion {
+        self.allowlist_version
+    }
+
+    pub fn vendor_version(&self) -> UtcNanos {
+        self.vendor_version
+    }
+
+    pub fn published_at(&self) -> UtcNanos {
+        self.published_at
+    }
+
+    pub fn received_at(&self) -> UtcNanos {
+        self.received_at
+    }
+
+    pub fn content(&self) -> &ContentHash {
+        &self.content
+    }
+
+    /// The tickers the item names, as parsed (DEC-2280 item 2).
+    pub fn tickers(&self) -> &[Symbol] {
+        &self.tickers
+    }
+
+    /// The item's text, all of it untrusted (DP-8).
+    pub fn text(&self) -> &ItemText {
+        &self.text
+    }
+
     pub fn vendor_id(&self) -> &VendorId {
         &self.vendor_id
     }

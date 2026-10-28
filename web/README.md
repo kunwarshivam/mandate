@@ -160,7 +160,10 @@ The deployed Worker reads all three from its own variables, which the founder se
 dashboard (DEC-823 items 4 and 5). Nothing in the repository sets them, and `keep_vars` in
 `wrangler.jsonc` keeps them across deploys. Unset, the Worker serves the fixtures.
 
-Over the API (`src/lib/api-runtime.tsx`) the browser reads the workspace with its own session
+With `OWLHEAD_WORKSPACE_ID` unset, the browser opens its session and reads the workspace from its
+own memberships, `GET /v1/me/workspaces` (DEC-2113): exactly one membership is the workspace, and
+none or several show that state, read nothing and take no command; set but malformed is still
+misconfigured. Over the API (`src/lib/api-runtime.tsx`) the browser reads the workspace with its own session
 cookie from the documented reads (`src/api/reads.ts`), polls them every five seconds, and sends
 each command and answer through the API's idempotent write routes (`src/api/commands.ts`),
 following it through `GET /commands/{id}`. A misconfigured or silent API shows the deployment

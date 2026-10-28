@@ -130479,7 +130479,7 @@
   ]
  },
  "cool_off_waivers": {
-  "spec": "docs/specs/journal.md v0.112 §9.38 (DEC-2146)",
+  "spec": "docs/specs/journal.md v0.113 §9.38 (DEC-2146)",
   "drafts": {
    "cool_off_waived": {
     "envelope_version": 1,

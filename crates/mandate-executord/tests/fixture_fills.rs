@@ -709,3 +709,141 @@ fn an_asset_id_symbol_is_answered_by_its_ticker() -> Result<(), Error> {
     assert_eq!(submit(&mut broker, unknown)?.instrument.as_str(), "AAPL");
     Ok(())
 }
+
+/// The agent's bracket opening, filled on the filling fixture and reconciled ten passes a minute
+/// apart, then handed `owed` and run six passes more: the journal and every order the process
+/// adopted as `unknown` before `owed`.
+fn reconciled_then(
+    owed: &dyn Fn(&Journal) -> Result<(), Error>,
+) -> Result<(Journal, usize), Error> {
+    let (journal, mut process) = running(FixturePaper::filling(at(NOON)?), true)?;
+    for minute in 0..10 {
+        let now = format!("2026-09-21T15:{minute:02}:00Z");
+        pass(&journal, &mut process, &format!("t{minute}"), &now)?;
+    }
+    let unknown = journal
+        .payloads("OrderStateChanged")
+        .iter()
+        .filter(|payload| payload.get("state").and_then(Value::as_str) == Some("unknown"))
+        .count();
+    owed(&journal)?;
+    for minute in 10..16 {
+        let now = format!("2026-09-21T15:{minute:02}:00Z");
+        pass(&journal, &mut process, &format!("t{minute}"), &now)?;
+    }
+    Ok((journal, unknown))
+}
+
+/// The sell of the agent's 10 shares filled, the account ends flat at the broker and in the
+/// model, and no reconciliation found an unexplained difference: the one booking the sell adopts
+/// its state and fill (§11), and nothing works after it. The fill is booked as a `FillApplied`, or
+/// as a `LateFillApplied` when the order was already terminal when its fill was read, as a kill
+/// switch's flatten is once its pending cancel reads it filled.
+fn assert_ends_flat_and_explained(journal: &Journal) -> Result<(), Error> {
+    let sold = |kind: &str| {
+        journal.payloads(kind).iter().any(|fill| {
+            fill.get("side").and_then(Value::as_str) == Some("sell")
+                && fill.get("qty_gross").and_then(Value::as_str) == Some("10")
+        })
+    };
+    assert!(
+        sold("FillApplied") || sold("LateFillApplied"),
+        "the sell fills"
+    );
+    let positions = journal.payloads("BrokerPositionObserved");
+    let last = positions.last().ok_or("a position is observed")?;
+    assert_eq!(
+        (
+            last.get("model_qty").and_then(Value::as_str),
+            last.get("broker_qty").and_then(Value::as_str)
+        ),
+        (Some("0"), Some("0")),
+        "the account ends flat: {last:?}"
+    );
+    let runs = journal.payloads("ReconciliationRun");
+    assert!(
+        runs.iter().all(|run| result(run) != Some("mismatch")),
+        "no run finds an unexplained difference: {runs:?}"
+    );
+    Ok(())
+}
+
+/// The client order ids of the sells of 10 the process submitted.
+fn sells_of_ten(journal: &Journal) -> Vec<String> {
+    journal
+        .payloads("OrderSubmitted")
+        .iter()
+        .filter(|payload| {
+            payload.get("side").and_then(Value::as_str) == Some("sell")
+                && payload.get("qty").and_then(Value::as_str) == Some("10")
+        })
+        .filter_map(|payload| {
+            payload
+                .get("client_order_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+/// The fixture lists a filled bracket's two legs under its entry on every read, so reconciliation
+/// after reconciliation adopts neither leg as `unknown`, and a risk exit proposed after ten of
+/// them is allowed, goes out and fills: nothing holds it on `unknown_order_in_flight`
+/// (`AGENTS.md` rule 13), as the cell's trade loop relies on.
+#[test]
+fn a_filled_brackets_legs_never_read_unknown_and_a_risk_exit_goes_out() -> Result<(), Error> {
+    let exit = "01JINTENT0000000000000000C";
+    let (journal, unknown) = reconciled_then(&|journal| {
+        propose(journal, AGENT, exit, "sell", "10", "149", "risk_exit")
+    })?;
+    assert_eq!(unknown, 0, "no leg is adopted unknown");
+    assert_eq!(sells_of_ten(&journal), [format!("md-{exit}")]);
+    assert!(
+        journal
+            .payloads("GateDecided")
+            .iter()
+            .all(|gate| gate.get("reason_code").and_then(Value::as_str)
+                != Some("unknown_order_in_flight")),
+        "nothing holds on an unknown order"
+    );
+    let exits: Vec<String> = journal
+        .payloads("OrderStateChanged")
+        .iter()
+        .filter(|change| {
+            change.get("client_order_id").and_then(Value::as_str) == Some(&format!("md-{exit}"))
+        })
+        .filter_map(|change| {
+            change
+                .get("state")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(
+        exits.last().map(String::as_str),
+        Some("filled"),
+        "the exit, which the fixture fills on placement and so lists in no open-orders read, may \
+         pass through unknown, but its own run books its fill and it ends filled: {exits:?}"
+    );
+    assert_ends_flat_and_explained(&journal)?;
+    Ok(())
+}
+
+/// And a kill switch applied after ten reconciliations flattens the agent's 10 shares: its sell
+/// goes out and fills, the account ends flat, and no run finds an unexplained difference.
+#[test]
+fn a_filled_brackets_kill_switch_flattens_after_many_reconciliations() -> Result<(), Error> {
+    let (journal, unknown) =
+        reconciled_then(&|journal| support::kill(journal, AGENT, "01JKILL00000000000000000AA"))?;
+    assert_eq!(unknown, 0, "no leg is adopted unknown");
+    assert_eq!(sells_of_ten(&journal).len(), 1, "the switch sells the 10");
+    assert!(
+        journal
+            .payloads("GateDecided")
+            .iter()
+            .all(|gate| gate.get("reason_code").and_then(Value::as_str)
+                != Some("unknown_order_in_flight")),
+        "nothing holds on an unknown order"
+    );
+    assert_ends_flat_and_explained(&journal)
+}
