@@ -1178,11 +1178,12 @@ def test_the_news_reader_renders_in_staging_alone_on_paper_and_with_a_followed_a
     assert "runs the news reader in staging alone" in local.stderr, local.stderr
 
     def reader_alone(*extra: str):
-        """A hosted render naming the news reader's image alone, so a refusal is its own."""
+        """A hosted render naming the news reader's image and the API server's, whose pod lays out
+        the artifact store, alone, so a refusal is the reader's own."""
         return helm(
             CHART, "-f", str(CELL / "values" / "k3d.yaml"), "--set", "localImages=false",
             "--set", "deploymentTier=staging", "--set", "api.workspace=01KDEM0000000000000000000W",
-            *NEWS, *extra,
+            "--set", f"images.api={PLACEHOLDER.format('api')}", *NEWS, *extra,
         )
 
     assert reader_alone().returncode == 0, reader_alone().stderr
@@ -1192,11 +1193,30 @@ def test_the_news_reader_renders_in_staging_alone_on_paper_and_with_a_followed_a
     unfollowed = helm(
         CHART, "-f", str(CELL / "values" / "k3d.yaml"), "--set", "localImages=false",
         "--set", "deploymentTier=staging", "--set", "api.workspace=01KDEM0000000000000000000W",
+        "--set", f"images.api={PLACEHOLDER.format('api')}",
         "--set", f"images.news-reader={PLACEHOLDER.format('news-reader')}",
     )
     assert "news.follows, the agents the news reader follows, is required" in unfollowed.stderr, unfollowed.stderr
     backtest = reader_alone("--set", "environment=backtest")
     assert "images.news-reader needs environment paper" in backtest.stderr, backtest.stderr
+    storeless = reader_alone("--set", "images.api=")
+    assert "images.news-reader needs images.api" in storeless.stderr, storeless.stderr
+
+
+def test_the_news_reader_s_journal_role_is_made_by_its_exact_name_in_the_application_group():
+    """R1 on #2896: migration 0002 refuses the news reader by its role's name alone, so the roles
+    file must make `mandate_news_reader` by exactly that name, a member of `mandate_journal_app`
+    and of nothing else, and Compose's initdb must set that same role's password; a role made under
+    another name, or outside the group, would write any stream its grants allow."""
+    made = re.findall(r"CREATE ROLE (\S+) LOGIN IN ROLE (\S+);", ROLES_SQL)
+    news = [(role, group) for role, group in made if "news" in role]
+    assert news == [("mandate_news_reader", "mandate_journal_app")], news
+    reader = next(p for p in PROCESSES if p["name"] == "news-reader")
+    assert reader["db_role"] == "mandate_news_reader" and "db_access" not in reader
+    initdb = (CELL / "compose" / "initdb.sh").read_text()
+    assert re.findall(r"set_password (\S*news\S*) (\S+)", initdb) == [
+        ("mandate_news_reader", "journal-role-mandate-news-reader")
+    ]
 
 
 def test_the_recorded_source_holds_no_journal_role_and_iex_is_staging_s_alone():

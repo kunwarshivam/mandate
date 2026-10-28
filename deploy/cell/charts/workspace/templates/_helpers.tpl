@@ -417,14 +417,18 @@ managed paper workspaces (DEC-2283). */}}
 {{- end }}
 {{- /* The news reader (DEC-2084 items 2 and 5): staging's alone, since its key is the platform's
 paper news data key (DEC-2277), never a local cell, where with no key it is never ready; paper
-only, as its binary is; and with at least one followed agent, without which it refuses
-`no_follows` and is never ready. */}}
+only, as its binary is; beside the API server, whose pod lays out the artifact store it writes;
+and with at least one followed agent, without which it refuses `no_follows` and is never
+ready. */}}
 {{- if eq .p.name "news-reader" }}
 {{- if or .root.Values.localImages (ne .root.Values.deploymentTier "staging") }}
 {{- fail (printf "images.news-reader runs the news reader in staging alone, and deploymentTier is %q: its key is the platform's paper news data key (DEC-2277, DEC-2084)" .root.Values.deploymentTier) }}
 {{- end }}
 {{- if ne .root.Values.environment "paper" }}
 {{- fail "images.news-reader needs environment paper: the news reader reads paper data alone (DEC-2277)" }}
+{{- end }}
+{{- if not .root.Values.images.api }}
+{{- fail "images.news-reader needs images.api: the API server's pod lays out the artifact store the news reader stores each item in, and without it the reader refuses artifact_store_unavailable and is never ready (DEC-2084 item 2)" }}
 {{- end }}
 {{- if not .root.Values.news.follows }}
 {{- fail "news.follows, the agents the news reader follows, is required with images.news-reader: with none it refuses no_follows and is never ready (DEC-2281, DEC-2084)" }}
