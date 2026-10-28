@@ -93,6 +93,12 @@ pub enum NoticeKind {
     /// (spec §3.2, DEC-2520).
     ConnectionUnavailable,
     Protection,
+    /// An unattributed protective leg holds the instrument's openings, once per episode (spec §3.2,
+    /// DEC-2855).
+    ProtectionUnattributed,
+    /// The agents' lots exceed the position, so the instrument's openings are held, once per
+    /// episode (spec §3.2, DEC-2855).
+    AttributionDeficit,
     ExitStalled,
     Reconciliation,
     ExternalActivity,
@@ -126,10 +132,11 @@ pub enum NoticeKind {
 
 impl NoticeKind {
     #[rustfmt::skip]
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 38] = [
         Self::ApprovalRequested, Self::ApprovalReminder, Self::RiskLimit, Self::KillSwitch,
         Self::KillSwitchUnapplied, Self::AgentHeld, Self::RetirementHeld,
-        Self::AccountRestriction, Self::ConnectionUnavailable, Self::Protection, Self::ExitStalled,
+        Self::AccountRestriction, Self::ConnectionUnavailable, Self::Protection,
+        Self::ProtectionUnattributed, Self::AttributionDeficit, Self::ExitStalled,
         Self::Reconciliation, Self::ExternalActivity, Self::AccountState, Self::DataFeedDown,
         Self::IntegrityIncident, Self::CredentialAdded, Self::NewDevice,
         Self::NotificationAddressChanged, Self::RecoveryUsed, Self::RoleGranted,
@@ -155,6 +162,8 @@ impl NoticeKind {
             Self::AccountRestriction => "account_restriction",
             Self::ConnectionUnavailable => "connection_unavailable",
             Self::Protection => "protection",
+            Self::ProtectionUnattributed => "protection_unattributed",
+            Self::AttributionDeficit => "attribution_deficit",
             Self::ExitStalled => "exit_stalled",
             Self::Reconciliation => "reconciliation",
             Self::ExternalActivity => "external_activity",
@@ -199,6 +208,8 @@ impl NoticeKind {
             | Self::AccountRestriction
             | Self::ConnectionUnavailable
             | Self::Protection
+            | Self::ProtectionUnattributed
+            | Self::AttributionDeficit
             | Self::ExitStalled
             | Self::Reconciliation
             | Self::ExternalActivity
@@ -244,6 +255,8 @@ impl NoticeKind {
             | Self::AccountRestriction
             | Self::ConnectionUnavailable
             | Self::Protection
+            | Self::ProtectionUnattributed
+            | Self::AttributionDeficit
             | Self::ExitStalled
             | Self::Reconciliation
             | Self::ExternalActivity

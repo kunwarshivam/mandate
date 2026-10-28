@@ -52,6 +52,7 @@ async fn only_the_provisioners_session_makes_or_removes_roles() {
         Identity::SecretImport,
         Identity::ModelGateway,
         Identity::NewsReader,
+        Identity::BarsReader,
         Identity::EmailSender,
     ] {
         let vault = session(identity.clone());

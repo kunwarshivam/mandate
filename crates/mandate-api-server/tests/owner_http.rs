@@ -116,6 +116,7 @@ fn fixture(accepting: bool) -> Fixture {
         challenges: Arc::default(),
         connect: None,
         reduction: Arc::default(),
+        folds: Arc::default(),
     };
     let f = Fixture {
         addr: serve(http::api(app, Drain::new())),

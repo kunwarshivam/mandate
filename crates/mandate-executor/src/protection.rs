@@ -8,13 +8,14 @@ use mandate_domain::MarketSession;
 use mandate_num::{Adverse, Fraction, Price, Qty, Rounding, ShareIncrement, SignedQty, TickRule};
 
 use mandate_accounting::Side;
-use mandate_canon::Value;
+use mandate_canon::{Object, Value};
 use mandate_time::{Date, ExchangeCalendar};
 
 use crate::batch::Batch;
 use crate::error::ExecutorError;
 use crate::fold::single_holder;
 use crate::gate::available;
+use crate::holders;
 use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
@@ -22,7 +23,7 @@ use crate::intent::{
 use crate::kill::{confirmed_bid, flatten_closes, flatten_room, floor_of, is_flatten, mode_holds};
 use crate::listing::query_unknown;
 use crate::orders::{StateEvidence, legal, transition};
-use crate::payload::{int, text};
+use crate::payload::{int, object, text};
 use crate::ports::Ports;
 use crate::session::{
     Venue, closed_hold, extended_hours, same_session, stops_trigger_since, venue,
@@ -94,14 +95,16 @@ fn spent(since: RiskClock, fired: RiskClock) -> bool {
 /// a passive take-profit (#385 round 1, blocker 1). With no sane observation to take it from, the
 /// watchdog does not fire: the breach persists, the stop keeps resting and nothing is cancelled,
 /// so no exit goes and none waits, and §5.6 step 4's alert, which is for an exit at its fallback
-/// or held, has nothing to report; the next sane quote prices it. One watchdog runs per
+/// or held, has nothing to report; the next sane quote prices it. Nor does it fire while its
+/// agent's mandate version or deployment references do not read: it waits, alerted once, and
+/// fires at the first step that reads them ([`awaits_configuration`], DEC-2846). One watchdog runs per
 /// instrument at a time: none fires while a sequence runs there or a watchdog intent waits, and a
 /// breach it has fired on fires no second time. It exits what the protection still covers, never more than the long
 /// position (§5.4's "the held quantity").
 pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let now = batch.at().secs();
     let wait = batch.ports.config.stop_watchdog_s;
-    let due: Vec<InstrumentId> = batch
+    let due: Vec<(InstrumentId, RiskClock)> = batch
         .view
         .breaches
         .iter()
@@ -117,15 +120,18 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
                 && !batch.view.exiting.contains_key(*instrument)
                 && !watching(&batch.view, instrument)
         })
-        .map(|(instrument, _)| instrument.clone())
+        .map(|(instrument, since)| (instrument.clone(), *since))
         .collect();
-    for instrument in due {
+    for (instrument, since) in due {
         let held = covered(&batch.view, &instrument)?.min(long(&batch.view, &instrument)?);
         let (true, Some(limit)) = (held > Qty::ZERO, lowest_sane(&batch.view, &instrument)) else {
             continue;
         };
         let agent = single_holder(&batch.view, &instrument)
             .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
+        if awaits_configuration(batch, &instrument, &agent, since)? {
+            continue;
+        }
         let pairs = vec![
             ("agent", text(agent.0.clone())),
             ("qty", text(held.to_string())),
@@ -546,8 +552,9 @@ fn unsent(state: &ExecutorState, intent: &IntentId, ladder: Ladder) -> Result<Qt
 }
 
 /// DEC-410 item 4: what `intent`'s next rung sends, of the `left` its stepped rung left unsold:
-/// what its remainder counts now ([`remainders`]), and for a switch's flatten no more than the
-/// agent's sub-ledger now (DEC-2360 item 1). A shorter rung is journaled `ProtectionChanged
+/// what its remainder counts now ([`remainders`]), for a switch's flatten no more than the
+/// agent's sub-ledger now (DEC-2360 item 1), and for a discretionary exit no more than its agent's
+/// sell authority leaves (DEC-2849 I3, [`holders::rung_room`]). A shorter rung is journaled `ProtectionChanged
 /// rung_short`, with what it does not send and why; with nothing to send, that record ends the
 /// ladder, so it never sends later into a position bought afresh.
 fn sendable(
@@ -560,7 +567,12 @@ fn sendable(
         .into_iter()
         .find(|(owner, _)| owner == intent)
         .map_or(Qty::ZERO, |(_, counts)| counts);
-    let sends = flatten_room(&batch.view, intent, counts)?;
+    let sends = holders::rung_room(
+        &batch.view,
+        instrument,
+        intent,
+        flatten_room(&batch.view, intent, counts)?,
+    )?;
     if sends < left {
         let pairs = vec![
             ("intent_id", text(intent.0.0.clone())),
@@ -778,6 +790,34 @@ pub(crate) fn fallback(
     let alerted = changed(batch, instrument, "exit_unpriced", pairs)?;
     batch.notify(alerted, OwnerAlertKind::ExitStalled);
     Ok(())
+}
+
+/// DEC-2846: whether the executor's own exit of `agent`'s in `instrument` waits because its
+/// configuration does not read ([`crate::gate::configured`]). Its intent could be neither
+/// journaled nor gated, so the caller journals nothing of it, leaves what raised it unspent and
+/// decides again at the next step; every other exit, protective order and kill switch goes on
+/// (`AGENTS.md` rule 13). The owner is alerted once (`exit_unpriced`) for the breach or interval
+/// that began at `since`: not again while one journaled after that second stands, since that one
+/// was its own; one journaled at that second or before was an earlier wait's.
+fn awaits_configuration(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+    agent: &AgentId,
+    since: RiskClock,
+) -> Result<bool, ExecutorError> {
+    if crate::gate::configured(batch.binding_gate(), batch.ports, agent, instrument) {
+        return Ok(false);
+    }
+    if batch
+        .view
+        .unpriced
+        .get(instrument)
+        .is_none_or(|alerted| *alerted <= since)
+    {
+        let alerted = changed(batch, instrument, "exit_unpriced", Vec::new())?;
+        batch.notify(alerted, OwnerAlertKind::ExitStalled);
+    }
+    Ok(true)
 }
 
 fn exits(purpose: Purpose) -> bool {
@@ -1221,7 +1261,7 @@ fn lone_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
         let paused = mode_holds(&batch.view, &lone.agent, &lone.intent);
         if let Some(reason) = closed_hold(batch.ports, &instrument, batch.at()) {
-            park(batch, &lone.intent, reason, lone.ladder.parked)?;
+            crate::intent::holds_alone(park(batch, &lone.intent, reason, lone.ladder.parked))?;
         } else if lone.ladder.parked && paused {
             continue;
         } else if rests(&batch.view, &instrument) {
@@ -1255,15 +1295,26 @@ fn park(
     if parked {
         return Ok(());
     }
+    let session = object(vec![
+        ("id", text("session")),
+        ("result", text("fail")),
+        ("inputs", Value::Object(Object::new())),
+        ("computed", Value::Object(Object::new())),
+    ])?;
     let pairs = vec![
         ("intent_id", text(intent.0.0.clone())),
         ("verdict", text("hold")),
         ("reason_code", text(reason)),
+        ("data_profile", text("account_stream_only")),
+        ("quotes_used", Value::Array(Vec::new())),
+        ("marks_used", Value::Array(Vec::new())),
+        ("checks", Value::Array(vec![session])),
         ("parked", Value::Bool(true)),
         ("held_long", Value::Bool(true)),
-        ("evaluation", text("account_stream_only")),
     ];
-    let decided = batch.journal("GateDecided", None, pairs)?;
+    let refs = crate::intent::intent_refs(batch, intent)?;
+    let decided =
+        batch.journal_with_refs("GateDecided", None, refs, crate::intent::own_members(pairs))?;
     batch.notify(decided, OwnerAlertKind::ExitStalled);
     Ok(())
 }
@@ -1315,7 +1366,12 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
                 if left == Qty::ZERO {
                     true
                 } else if let Some(reason) = closed_hold(batch.ports, &instrument, batch.at()) {
-                    park(batch, &sequence.intent, reason, sequence.ladder.parked)?;
+                    crate::intent::holds_alone(park(
+                        batch,
+                        &sequence.intent,
+                        reason,
+                        sequence.ladder.parked,
+                    ))?;
                     true
                 } else {
                     let sends = sendable(batch, &instrument, &sequence.intent, left)?;
@@ -1616,6 +1672,10 @@ fn stop_after(
         return Ok(());
     }
     if past_bound(&batch.view, &instrument, entry) {
+        let since = detail.bracket_since.unwrap_or(batch.at());
+        if unprotected_waits(batch, &instrument, entry, since)? {
+            return Ok(());
+        }
         let mut ended = named;
         ended.push(("uncovered", Value::Bool(true)));
         let record = changed(batch, &instrument, "unprotected_end", ended)?;
@@ -2128,7 +2188,7 @@ pub(crate) fn release_waiting(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorE
         cancel_openings(batch, Some(&exit.agent), Some(&exit.instrument))?;
         overtaken(batch, &exit.instrument)?;
         if !awaits_cancel(&batch.view, &exit.agent, &exit.instrument, exit.purpose) {
-            gate_and_submit(batch, &exit.intent)?;
+            crate::intent::holds_alone(gate_and_submit(batch, &exit.intent))?;
         }
     }
     Ok(())
@@ -2267,7 +2327,10 @@ fn handed(view: &ExecutorState, sequence: &ExitSequence) -> bool {
 /// quantity — the set `gate::available` walks, and one back in `Intent` for its resubmission — and
 /// every exit received that has no order yet. Stop coverage beyond the position less this would
 /// outlast the position once they fill (#286 round 2, M1′).
-fn still_selling(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+pub(crate) fn still_selling(
+    view: &ExecutorState,
+    instrument: &InstrumentId,
+) -> Result<Qty, ExecutorError> {
     let live = view
         .orders
         .values()
@@ -2336,7 +2399,7 @@ fn protectable(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, E
 
 /// What a sell of ours has sold as [`long`] reads it: its applied fills, or, once it ended, the
 /// larger fill the broker reported for it that no fill update has applied yet.
-fn sold(view: &ExecutorState, id: &ClientOrderId, order: &Order) -> Qty {
+pub(crate) fn sold(view: &ExecutorState, id: &ClientOrderId, order: &Order) -> Qty {
     let reported = view
         .details
         .get(id)
@@ -2353,7 +2416,7 @@ fn sold(view: &ExecutorState, id: &ClientOrderId, order: &Order) -> Qty {
 /// nothing rather than an error: the fold has already taken those shares off. The result is
 /// floored at zero. A live sell's unapplied fill is left in, because [`still_selling`] counts
 /// that order's remainder from the same applied quantity, so the two cancel.
-fn long(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+pub(crate) fn long(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
     let folded = view
         .positions
         .get(instrument)
@@ -2754,11 +2817,13 @@ fn oco(id: ClientOrderId, instrument: &InstrumentId, legs: OcoLegs) -> SubmitOrd
 /// with no OCO or bracket, an interval that names a plain entry whose stop is still not resting by
 /// then also exits the held quantity ([`flatten_unprotected`]) once the entry is terminal, so the
 /// exit covers everything it filled; an entry not yet terminal is cancelled first, and
-/// [`stop_after`] exits what it filled once it ends.
+/// [`stop_after`] exits what it filled once it ends. While that exit's configuration does not
+/// read, neither the bound nor [`stop_after`] journals anything of the interval: the exit waits,
+/// alerted once, and the first step that reads it reaches the bound ([`unprotected_waits`]).
 pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let now = batch.at().secs();
     let limit = batch.ports.config.max_unprotected_s;
-    let due: Vec<(InstrumentId, Option<ClientOrderId>)> = batch
+    let due: Vec<(InstrumentId, Option<ClientOrderId>, RiskClock)> = batch
         .view
         .unprotected
         .iter()
@@ -2767,35 +2832,42 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
                 && !interval.alerted
                 && now.saturating_sub(interval.started_at.secs()) >= limit
         })
-        .map(|interval| (interval.instrument.clone(), interval.bracket.clone()))
+        .map(|interval| {
+            (
+                interval.instrument.clone(),
+                interval.bracket.clone(),
+                interval.started_at,
+            )
+        })
         .collect();
-    for (instrument, entry) in due {
+    for (instrument, entry, since) in due {
         let exiting = batch.view.exiting.contains_key(&instrument);
+        let closing = batch.view.closing_all.contains(&instrument);
+        let plain = entry.filter(|_| !exiting && !closing).and_then(|entry| {
+            let plain = batch
+                .view
+                .details
+                .get(&entry)
+                .and_then(|detail| detail.request.as_ref())
+                .is_some_and(|request| request.bracket.is_none());
+            let state = batch.view.orders.get(&entry).filter(|_| plain)?.state;
+            Some((entry, state))
+        });
+        if let Some((entry, state)) = &plain
+            && state.is_terminal()
+            && unprotected_waits(batch, &instrument, entry, since)?
+        {
+            continue;
+        }
         if exiting {
             end_exits(batch, &instrument)?;
         }
         let alerted = changed(batch, &instrument, "interval_limit", Vec::new())?;
         batch.notify(alerted.clone(), OwnerAlertKind::Protection);
-        let closing = batch.view.closing_all.contains(&instrument);
         if closing {
             protect_at_bound(batch, &instrument)?;
         }
-        let Some(entry) = entry.filter(|_| !exiting && !closing) else {
-            continue;
-        };
-        let plain = batch
-            .view
-            .details
-            .get(&entry)
-            .and_then(|detail| detail.request.as_ref())
-            .is_some_and(|request| request.bracket.is_none());
-        let state = batch
-            .view
-            .orders
-            .get(&entry)
-            .filter(|_| plain)
-            .map(|order| order.state);
-        let Some(state) = state else {
+        let Some((entry, state)) = plain else {
             continue;
         };
         if state.is_terminal() {
@@ -2954,31 +3026,9 @@ fn flatten_unprotected(
     entry: &ClientOrderId,
     record: &EventId,
 ) -> Result<(), ExecutorError> {
-    let Some(order) = batch.view.orders.get(entry).cloned() else {
+    let Some((agent, held, limit)) = unprotected_exit(&batch.view, instrument, entry)? else {
         return Ok(());
     };
-    let stop = order
-        .intent_id
-        .as_ref()
-        .and_then(|intent| batch.view.bodies.get(intent))
-        .and_then(|body| match body {
-            IntentBody::Order { protection, .. } => protection.map(|prices| prices.stop),
-            IntentBody::Flatten(_) => None,
-        });
-    let Some(stop) = stop else {
-        return Ok(());
-    };
-    let held = long(&batch.view, instrument)?
-        .checked_sub(still_selling(&batch.view, instrument)?)
-        .unwrap_or(Qty::ZERO);
-    if held == Qty::ZERO {
-        return Ok(());
-    }
-    let limit = lowest_sane(&batch.view, instrument).unwrap_or(stop);
-    let agent = order
-        .agent
-        .clone()
-        .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
     let tif = order_tif(batch, instrument);
     received(
         batch,
@@ -2997,6 +3047,56 @@ fn flatten_unprotected(
             confirmation: None,
         },
     )
+}
+
+/// What [`flatten_unprotected`] exits for `entry`: its agent, the long position less what exits
+/// already sell, and its limit; none where the entry is unknown, carried no stop, or leaves
+/// nothing to sell.
+fn unprotected_exit(
+    view: &ExecutorState,
+    instrument: &InstrumentId,
+    entry: &ClientOrderId,
+) -> Result<Option<(AgentId, Qty, Price)>, ExecutorError> {
+    let Some(order) = view.orders.get(entry) else {
+        return Ok(None);
+    };
+    let stop = order
+        .intent_id
+        .as_ref()
+        .and_then(|intent| view.bodies.get(intent))
+        .and_then(|body| match body {
+            IntentBody::Order { protection, .. } => protection.map(|prices| prices.stop),
+            IntentBody::Flatten(_) => None,
+        });
+    let Some(stop) = stop else {
+        return Ok(None);
+    };
+    let held = long(view, instrument)?
+        .checked_sub(still_selling(view, instrument)?)
+        .unwrap_or(Qty::ZERO);
+    if held == Qty::ZERO {
+        return Ok(None);
+    }
+    let limit = lowest_sane(view, instrument).unwrap_or(stop);
+    let agent = order
+        .agent
+        .clone()
+        .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
+    Ok(Some((agent, held, limit)))
+}
+
+/// Whether `entry`'s [`flatten_unprotected`] would exit something and waits for its
+/// configuration ([`awaits_configuration`]), so the record that raises it is not journaled yet.
+fn unprotected_waits(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+    entry: &ClientOrderId,
+    since: RiskClock,
+) -> Result<bool, ExecutorError> {
+    match unprotected_exit(&batch.view, instrument, entry)? {
+        Some((agent, ..)) => awaits_configuration(batch, instrument, &agent, since),
+        None => Ok(false),
+    }
 }
 
 /// The bound's end of every exit in `instrument`, since [`settle`] re-places protection only once
@@ -4697,11 +4797,40 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// A deployment whose configuration does not read: no references for any agent's instrument
+    /// (DEC-2846). Its snapshot is the allowing one, which an exit never needs.
+    struct UnreadRefs;
+
+    impl crate::ports::BindingGateSource for UnreadRefs {
+        fn config_refs(
+            &self,
+            _agent: &AgentId,
+            _instrument: &InstrumentId,
+        ) -> Option<crate::ports::BindingGateConfigRefs> {
+            None
+        }
+
+        fn input(
+            &self,
+            request: &crate::ports::BindingGateRequest<'_>,
+        ) -> Option<crate::ports::BindingGateInput> {
+            crate::ports::AllowingBindingGate.input(request)
+        }
+    }
+
     /// The binding gate's allowing snapshot for an exit too, so its decision is binding: what an
     /// exit needs before it may go at the market (DEC-2037 item 4).
     struct BindingExit;
 
     impl crate::ports::BindingGateSource for BindingExit {
+        fn config_refs(
+            &self,
+            agent: &AgentId,
+            instrument: &InstrumentId,
+        ) -> Option<crate::ports::BindingGateConfigRefs> {
+            crate::ports::AllowingBindingGate.config_refs(agent, instrument)
+        }
+
         fn input(
             &self,
             request: &crate::ports::BindingGateRequest<'_>,
@@ -4718,6 +4847,14 @@ mod sequence_tests {
     struct StaleFeed;
 
     impl crate::ports::BindingGateSource for StaleFeed {
+        fn config_refs(
+            &self,
+            agent: &AgentId,
+            instrument: &InstrumentId,
+        ) -> Option<crate::ports::BindingGateConfigRefs> {
+            crate::ports::AllowingBindingGate.config_refs(agent, instrument)
+        }
+
         fn input(
             &self,
             request: &crate::ports::BindingGateRequest<'_>,
@@ -5604,6 +5741,107 @@ mod sequence_tests {
                 "restart {restart}"
             );
         }
+        Ok(())
+    }
+
+    /// DEC-2846, the review's round 4: a watchdog whose exit's configuration does not read
+    /// journals no watchdog record and hands itself no intent, so the breach is not spent and
+    /// nothing is cancelled; the owner is alerted once that the exit waits (`exit_unpriced`), and
+    /// neither the next tick nor the next quote alerts again. The first tick that reads the
+    /// configuration fires the watchdog as before, its intent the holder's `risk_exit` of the ten.
+    #[test]
+    fn a_watchdog_whose_configuration_does_not_read_waits_alerted_until_it_does()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(observation(Some(139), None, true, 0)?, &ports)?;
+        let held = executor.run_with(Input::Tick(RiskClock::from_secs(30)), &ports, &UnreadRefs)?;
+        assert!(watchdog_record(&held).is_none(), "{:?}", drafted(&held));
+        assert!(watchdog_intents(&held).is_empty(), "{:?}", drafted(&held));
+        assert!(cancels(&held).is_empty());
+        assert_eq!(
+            actions(&held),
+            vec!["exit_unpriced"],
+            "{:?}",
+            drafted(&held)
+        );
+        assert_eq!(alerts(&held), vec!["exit_stalled"]);
+        for again in [
+            Input::Tick(RiskClock::from_secs(31)),
+            observation(Some(139), None, true, 31)?,
+        ] {
+            let quiet = executor.run_with(again, &ports, &UnreadRefs)?;
+            assert!(actions(&quiet).is_empty(), "{:?}", drafted(&quiet));
+            assert!(alerts(&quiet).is_empty(), "{:?}", alerts(&quiet));
+        }
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(32)), &ports)?;
+        let record = watchdog_record(&fired).ok_or_else(|| missing("the watchdog record"))?;
+        assert_eq!(
+            watchdog_intents(&fired),
+            vec![(
+                format!("w-{record}"),
+                "agent-a".to_owned(),
+                "risk_exit".to_owned(),
+                "10".to_owned()
+            )]
+        );
+        assert_eq!(cancels(&fired), vec![OCO]);
+        Ok(())
+    }
+
+    /// DEC-2846: a breach that began at 10 alerts its wait unless the instrument's last own wait
+    /// was journaled after 10. One at 5 or at 10 itself belonged to an earlier wait, so the new
+    /// breach alerts; one at 11 was this breach's own, so it does not.
+    #[test]
+    fn a_wait_is_alerted_unless_this_breach_already_alerted_it() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        for (last, alerts_again) in [(5, true), (10, true), (11, false)] {
+            let mut executor = protected(&ports)?;
+            executor.run(observation(Some(139), None, true, 10)?, &ports)?;
+            executor
+                .state
+                .unpriced
+                .insert(aapl()?, RiskClock::from_secs(last));
+            let held =
+                executor.run_with(Input::Tick(RiskClock::from_secs(40)), &ports, &UnreadRefs)?;
+            assert!(watchdog_record(&held).is_none(), "{:?}", drafted(&held));
+            assert_eq!(
+                alerts(&held) == vec!["exit_stalled"],
+                alerts_again,
+                "last wait at {last}: {:?}",
+                alerts(&held)
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-2853, the review of #2838: a quote the executor process holds for a kill switch is
+    /// recorded as a market input records it, so an exit prices from it, but it runs no step. A
+    /// sane 139 under the resting 140 stop starts no breach, so no watchdog fires a minute later,
+    /// and nothing is drafted or sent; the same quote as a market input starts the breach the
+    /// watchdog fires on.
+    #[test]
+    fn a_held_quote_prices_but_never_runs_the_watchdog() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let Input::Market(quote) = observation(Some(139), None, true, 0)? else {
+            return Err(missing("a market observation"));
+        };
+        let mut held = protected(&ports)?;
+        held.state.hold_quote(&quote);
+        assert!(held.state.breaches.is_empty(), "{:?}", held.state.breaches);
+        assert_eq!(
+            super::lowest_sane(&held.state, &aapl()?),
+            Some(Price::parse("139")?)
+        );
+        let later = held.run(Input::Tick(RiskClock::from_secs(60)), &ports)?;
+        assert!(watchdog_record(&later).is_none(), "{:?}", drafted(&later));
+        let mut marked = protected(&ports)?;
+        marked.run(Input::Market(quote), &ports)?;
+        let fired = marked.run(Input::Tick(RiskClock::from_secs(60)), &ports)?;
+        assert!(watchdog_record(&fired).is_some(), "{:?}", drafted(&fired));
         Ok(())
     }
 
@@ -7988,6 +8226,56 @@ mod sequence_tests {
             .map(|interval| (interval.started_at.secs(), interval.alerted))
     }
 
+    /// `draft` through the journal's own `Draft::parse` in the envelope the shell appends it in,
+    /// under a fixed ULID, its references and payload as drafted: the refusal, if any (DEC-2848).
+    pub(super) fn refused_by_the_journal(draft: &crate::types::EventDraft) -> Option<String> {
+        let body = format!(
+            r#"{{"envelope_version":1,"environment":"paper",
+            "event_id":"01J8Z3M4000000000000000001","stream_id":"acct:ws_1:ACCT1",
+            "event_type":"{}","schema_version":{},
+            "event_time":"2026-09-21T14:00:00.000000000Z","clock_source":"local",
+            "causation_id":null,"correlation_id":null,
+            "actor":{{"kind":"system","id":"executor","version":"0.1.0",
+            "build":"sha256:{}"}},"config_refs":{},"payload":{},
+            "artifact_refs":[],"pii_refs":[]}}"#,
+            draft.event_type,
+            draft.schema_version,
+            "3".repeat(64),
+            String::from_utf8_lossy(&mandate_canon::to_canonical(&Value::Object(
+                draft.config_refs.clone()
+            ))),
+            String::from_utf8_lossy(&mandate_canon::to_canonical(&own_intent_as_ulid(
+                &draft.payload
+            )))
+        );
+        mandate_journal::Draft::parse(body.as_bytes())
+            .err()
+            .map(|refusal| format!("{} at {}", refusal.reason.code(), refusal.path))
+    }
+
+    /// `payload` with the executor's own intent, `w-{event}` or `k-{switch}-{n}` (§2.3), naming a
+    /// fixed ULID for the test's event id, as the shell's ids are ULIDs and the test's are not.
+    fn own_intent_as_ulid(payload: &Value) -> Value {
+        let mut payload = payload.clone();
+        if let Value::Object(members) = &mut payload
+            && let Some(Value::Str(intent)) = members.get("intent_id").cloned()
+        {
+            let ulid = "01J8Z3M4000000000000000002";
+            let named = if intent.starts_with(crate::ids::WATCHDOG) {
+                Some(format!("{}{ulid}", crate::ids::WATCHDOG))
+            } else if let Some(rest) = intent.strip_prefix(crate::ids::FLATTEN) {
+                rest.rsplit_once('-')
+                    .map(|(_, n)| format!("{}{ulid}-{n}", crate::ids::FLATTEN))
+            } else {
+                None
+            };
+            if let (Some(named), Ok(key)) = (named, mandate_canon::Key::new("intent_id")) {
+                members.insert(key, Value::Str(named));
+            }
+        }
+        payload
+    }
+
     /// Each `OrderAbandoned` in `effects` that the journal's own `Draft::parse` refuses (X10,
     /// DEC-2803), with its refusal: none, once §9.5 closes the record.
     fn abandonments_refused(effects: &[Effect]) -> Vec<String> {
@@ -9271,17 +9559,21 @@ mod sequence_tests {
             .collect()
     }
 
-    /// `agent-b`'s passive exit of 4 placed at 0 while `agent-a`'s marketable exit of 3 still
-    /// waits on its own acknowledged opening (§5.3 rule 5): the placement is sized around the
-    /// waiting exit (4 + 3 of stop over ten shares) and hands the sequence on.
+    /// `agent-a`'s passive exit of 4 of its ten shares placed at 0 while `agent-b`'s marketable
+    /// risk exit of 3 still waits on its own acknowledged opening (§5.3 rule 5): the placement is
+    /// sized around the waiting exit (4 + 3 of stop over ten shares) and hands the sequence on. The
+    /// discretionary exit is the holder's, as DEC-2849 I3 requires.
     fn placed_around_a_waiting_exit(
         ports: &Ports<'_>,
     ) -> Result<(Executor, Vec<Effect>), ExecutorError> {
-        let mut executor = protected_with_an_opening(ports, "agent-a", true)?;
-        let passive = sell_as("agent-b", EXIT, "4", "160", Purpose::DiscretionaryExit)?;
+        let mut executor = protected_with_an_opening(ports, "agent-b", true)?;
+        let passive = sell_as("agent-a", EXIT, "4", "160", Purpose::DiscretionaryExit)?;
         let asked = executor.run(passive, ports)?;
         assert_eq!(actions(&asked), vec!["passive_start"]);
-        let waiting = executor.run(sell(SECOND, "3", "139", Purpose::RiskExit)?, ports)?;
+        let waiting = executor.run(
+            sell_as("agent-b", SECOND, "3", "139", Purpose::RiskExit)?,
+            ports,
+        )?;
         assert_eq!(cancels(&waiting), vec![BUY, OCO]);
         assert_eq!(submitted(&waiting), 0);
         let placed = executor.run(cancel_accepted(OCO), ports)?;
@@ -10202,6 +10494,9 @@ mod sequence_tests {
         /// The exits laddered with no sequence of their own (DEC-260 (14)): a pause since a step
         /// was asked does not end them.
         lone: BTreeSet<String>,
+        /// The `sized_qty` each exit's allowing `GateDecided` journaled (DEC-410 item 3,
+        /// DEC-2848), as text, for the fold to read back on replay.
+        sized: BTreeMap<String, String>,
         /// The exits whose sequence is running, as the fold's `exiting` holds them: an
         /// `unprotected_start` whose trio names the exit starts one, and an `unprotected_end`
         /// ends it — a rung of a sequenced exit ends with its sequence (DEC-409), a rung of an
@@ -10599,8 +10894,24 @@ mod sequence_tests {
                 ("GateDecided", _) => {
                     let verdict = field("verdict").unwrap_or_default();
                     let reason = field("reason_code").unwrap_or_default();
+                    if draft.config_refs.len() != 5 {
+                        return Err(format!(
+                            "{intent}'s gate record names {} references, never the five every \
+                             GateDecided must (journal spec §9, DEC-2846)",
+                            draft.config_refs.len()
+                        ));
+                    }
+                    if let Some(refused) = refused_by_the_journal(draft) {
+                        return Err(format!(
+                            "{intent}'s gate record is refused by the journal: {refused} \
+                             (journal spec §9.5, DEC-2848)"
+                        ));
+                    }
                     if draft.payload.get("parked") == Some(&Value::Bool(true)) {
                         self.parked.insert(intent.clone());
+                    }
+                    if let Some(sized) = field("sized_qty") {
+                        self.sized.insert(intent.clone(), sized.to_owned());
                     }
                     let priceable = self.priceable();
                     let closed = self.closed();
@@ -11055,6 +11366,7 @@ mod sequence_tests {
             between: BTreeMap::new(),
             parked: BTreeSet::new(),
             lone: BTreeSet::new(),
+            sized: BTreeMap::new(),
             sequenced: BTreeSet::new(),
             companion: None,
             sequence: None,
@@ -12617,6 +12929,56 @@ mod sequence_tests {
         let desk =
             rule_13_script_with(TEN_SECONDS_BEFORE_THE_NIGHT, From::Protected, true, &script)?;
         assert_eq!(fate(&desk, 6), ("allow".to_owned(), String::new(), Some(6)));
+        assert_eq!(
+            desk.sized
+                .get("01JABCDEFGHJKMNPQRSTV00006")
+                .map(String::as_str),
+            Some("6"),
+            "the size it went for is journaled, for the fold to read back (DEC-2848)"
+        );
+        Ok(())
+    }
+
+    /// DEC-2848: on replay the fold sizes an allowed exit to the `sized_qty` its `GateDecided`
+    /// journaled, and leaves one that names none at its received quantity.
+    #[test]
+    fn the_fold_reads_an_allowed_exits_size_back() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        for (sized, qty) in [(text("6"), "6"), (Value::Null, "8")] {
+            let mut executor = held(&ports)?;
+            committed(
+                &mut executor,
+                "IntentReceived",
+                vec![
+                    ("intent_id", text(EXIT)),
+                    ("agent", text("agent-a")),
+                    ("kind", text("order")),
+                    ("instrument", text("AAPL")),
+                    ("side", text("sell")),
+                    ("qty", text("8")),
+                    ("limit", text("150")),
+                    ("purpose", text("discretionary_exit")),
+                ],
+            )?;
+            committed(
+                &mut executor,
+                "GateDecided",
+                vec![
+                    ("intent_id", text(EXIT)),
+                    ("verdict", text("allow")),
+                    ("sized_qty", sized),
+                ],
+            )?;
+            let body = executor
+                .state
+                .bodies
+                .get(&IntentId(EventId(EXIT.to_owned())));
+            assert!(
+                matches!(body, Some(IntentBody::Order { qty: got, .. }) if *got == Qty::parse(qty)?),
+                "{body:?}"
+            );
+        }
         Ok(())
     }
 
@@ -13436,15 +13798,19 @@ mod sequence_tests {
         let exit = format!("md-{EXIT}");
         executor.run(Input::Tick(RiskClock::from_secs(late + 10)), &ports)?;
         let night = executor.run(cancel_accepted(&exit), &ports)?;
-        let park = night
+        let (park, refs) = night
             .iter()
             .find_map(|effect| match effect {
                 Effect::Journal(draft) if draft.event_type == "GateDecided" => {
-                    Some(draft.event_id.clone())
+                    Some((draft.event_id.clone(), draft.config_refs.len()))
                 }
                 _ => None,
             })
             .ok_or_else(|| missing("the park"))?;
+        assert_eq!(
+            refs, 5,
+            "the park names the deployment's five references (journal spec §9, DEC-2846)"
+        );
         let mut notes: Vec<(EventId, &str)> = night
             .iter()
             .filter_map(|effect| match effect {
@@ -13663,6 +14029,14 @@ mod sequence_tests {
                 vec![reason],
                 "journaled with its reason"
             );
+            for effect in &long {
+                if let Effect::Journal(draft) = effect
+                    && draft.event_type == "GateDecided"
+                {
+                    assert_eq!(draft.payload.get("held_long"), Some(&Value::Bool(true)));
+                    assert_eq!(refused_by_the_journal(draft), None, "{reason}: DEC-2848");
+                }
+            }
             let again = executor.run(Input::Tick(RiskClock::from_secs(start + 200)), &ports)?;
             assert!(!alerts(&again).contains(&"exit_stalled"), "once: {reason}");
             let clear = if reason == "session_closed" {
@@ -14628,7 +15002,7 @@ mod sequence_tests {
         let handed = [
             ("intent_id", text(EXIT)),
             ("entry", text("md-held-1")),
-            ("agent_id", text("agent-b")),
+            ("agent_id", text("agent-a")),
             ("stop", text("140")),
             ("take_profit", text("170")),
         ];
@@ -15925,8 +16299,8 @@ mod remainder_pins {
         ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
     };
     use crate::types::{
-        AccountRef, AccountScope, AgentId, Effect, EventId, Mode, Order, OrderState, Purpose,
-        RiskClock, WorkspaceId, WriterEpoch,
+        AccountRef, AccountScope, AgentId, Effect, EventId, IntentBody, Mode, Order, OrderState,
+        Purpose, RiskClock, WorkspaceId, WriterEpoch,
     };
 
     const SEQUENCE: &str = "01JABCDEFGHJKMNPQRSTV00010";
@@ -15965,7 +16339,7 @@ mod remainder_pins {
         }
     }
 
-    /// Ten AAPL held and a live risk exit of 3 by `agent-c`, beside `agent-a`'s sequence whose
+    /// Ten AAPL held, all `agent-d`'s lots, and a live risk exit of 3 by `agent-c`, beside `agent-a`'s sequence whose
     /// stepped rung left 5 unsold ([`SEQUENCE`]) and `lone_agent`'s lone ladder, parked where
     /// `parked` is set, whose stepped rung left 4 unsold ([`LONE`]). [`SEQUENCE`]'s id sorts first.
     fn two_ladders(lone_agent: &str, parked: bool) -> Result<ExecutorState, ExecutorError> {
@@ -15978,6 +16352,7 @@ mod remainder_pins {
         state
             .positions
             .insert(aapl.clone(), SignedQty::parse("10")?);
+        crate::holders::bought(&mut state, "agent-d", &aapl, "10")?;
         for order in [
             sell(SEQUENCE, "agent-a", "5", OrderState::Canceled)?,
             sell(LONE, lone_agent, "4", OrderState::Canceled)?,
@@ -16202,6 +16577,46 @@ mod remainder_pins {
                 "deny",
                 "{mode:?}: resumed, the parked 2 count again and nothing is left"
             );
+        }
+        Ok(())
+    }
+
+    /// DEC-2849 I3 on a ladder's next rung: `agent-a`'s discretionary exit stepped a rung with 5
+    /// unsold, but `agent-a` holds 3 of the 10 (`agent-d` the other 7), so the next rung sends 3,
+    /// journaled short. The same ladder as a risk exit sends its 5 (I4).
+    #[test]
+    fn a_discretionary_rung_sends_no_more_than_its_agents_authority() -> Result<(), ExecutorError> {
+        let aapl = InstrumentId::new("AAPL")?;
+        for (purpose, sent) in [(Purpose::DiscretionaryExit, "3"), (Purpose::RiskExit, "5")] {
+            let mut state = two_ladders("agent-b", false)?;
+            state
+                .orders
+                .remove(&ClientOrderId::parse("md-bought-agent-d-AAPL")?);
+            crate::holders::bought(&mut state, "agent-a", &aapl, "3")?;
+            crate::holders::bought(&mut state, "agent-d", &aapl, "7")?;
+            state.bodies.insert(
+                intent(SEQUENCE),
+                IntentBody::Order {
+                    instrument: aapl.clone(),
+                    side: Side::Sell,
+                    qty: Qty::parse("10")?,
+                    limit: None,
+                    purpose,
+                    protection: None,
+                },
+            );
+            let (sends_, short) = sends(&state, &[(SEQUENCE, "5")])?;
+            assert_eq!(
+                sends_,
+                vec![(SEQUENCE.to_owned(), Qty::parse(sent)?)],
+                "{purpose:?}"
+            );
+            let expected_short = if sent == "5" {
+                Vec::new()
+            } else {
+                vec![(SEQUENCE.to_owned(), sent.to_owned())]
+            };
+            assert_eq!(short, expected_short, "{purpose:?}");
         }
         Ok(())
     }

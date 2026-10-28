@@ -24,6 +24,7 @@ mandate-time.workspace = true
 mandate-vault.workspace = true
 secrecy.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]
 mandate-canon.workspace = true

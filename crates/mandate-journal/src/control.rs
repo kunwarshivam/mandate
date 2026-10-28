@@ -68,7 +68,8 @@ const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 /// The account stream's closed executor records (DEC-446, DEC-447, DEC-459, DEC-460).
 /// `OrderRequestRecorded` closes at version 1, and `ProtectionChanged` at version 1 and 2
 /// (DEC-2312); `IntentReceived`,
-/// `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1, and so does
+/// `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1, `GateDecided` also
+/// at version 3 (DEC-2848), and so does
 /// `OrderStateChanged` (journal spec §9.16, DEC-869). `OwnerConfirmationReceived` closes at
 /// version 1 (DEC-2040), and so do `AccountCloseRequested` (DEC-2337),
 /// `AccountRestrictionChanged` (DEC-2137), the account stream's `KillSwitchActivated`
@@ -439,6 +440,7 @@ pub(crate) fn payload(
         "ThesisProposed" | "ThesisRevised" => thesis_rules(event_type, p, config_refs)?,
         COMPANION => companion_rules(p)?,
         "IntentReceived" => intent_received_rules(p)?,
+        "GateDecided" => gate_decided_v3_rules(p)?,
         CONFIRMATION => confirmation_rules(p)?,
         CLOSE => close_rules(p, causation_id)?,
         RESTRICTION => restriction_rules(p)?,
@@ -580,6 +582,35 @@ fn intent_received_rules(p: Payload<'_>) -> Result<(), Invalid> {
         p.is_null("limit_price") == (kind == "market"),
         InvalidReason::Schema,
         "payload.limit_price",
+    )
+}
+
+/// Rules 313 to 315 on `GateDecided` at `schema_version` 3 (DEC-2848), each member non-null only
+/// where the executor writes it, reported at the first that is not: `sized_qty` only on an
+/// `allow`, binding or the executor's own, and then above zero; `held_long` only `true`, on a
+/// `hold`; `parked` only `true`, on a `hold` for `session_closed` or `session_unknown` that is
+/// also `held_long`. Versions 1 and 2 close their schemas without the three members, so the rules
+/// hold on them as written: an absent member reads as `null`.
+fn gate_decided_v3_rules(p: Payload<'_>) -> Result<(), Invalid> {
+    let hold = p.text("verdict") == "hold";
+    let allow = p.text("verdict") == "allow";
+    ensure(
+        p.is_null("sized_qty") || allow && crate::scheduler::positive(p.text("sized_qty")),
+        InvalidReason::Schema,
+        "payload.sized_qty",
+    )?;
+    let held_long = p.0.get("held_long") == Some(&Value::Bool(true));
+    ensure(
+        p.is_null("held_long") || held_long && hold,
+        InvalidReason::Schema,
+        "payload.held_long",
+    )?;
+    let session = matches!(p.text("reason_code"), "session_closed" | "session_unknown");
+    ensure(
+        p.is_null("parked")
+            || p.0.get("parked") == Some(&Value::Bool(true)) && hold && session && held_long,
+        InvalidReason::Schema,
+        "payload.parked",
     )
 }
 
@@ -1132,6 +1163,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("OrderSubmitted", 1) => Some(&crate::schema::ORDER_SUBMITTED_V1),
         ("IntentReceived", 2) => Some(&INTENT_RECEIVED_V2),
         ("GateDecided", 2) => Some(&GATE_DECIDED_V2),
+        ("GateDecided", 3) => Some(&GATE_DECIDED_V3),
         ("OrderSubmitted", 2) => Some(&ORDER_SUBMITTED_V2),
         (COMPANION, 1) => Some(&ORDER_REQUEST_RECORDED),
         ("OrderStateChanged", 1) => Some(&ORDER_STATE_CHANGED),
@@ -1444,7 +1476,7 @@ static ACCOUNT_STATE_OBSERVED: Ty = Ty::Record(&[
 /// and nothing else moved (DEC-446 item 1). The protective prices are never members, at either
 /// version: they move to the `intended` `ProtectionChanged` (DEC-446 item 5).
 static INTENT_RECEIVED_V2: Ty = Ty::Record(&[
-    ("intent_id", Ty::Ulid),
+    ("intent_id", Ty::Intent),
     ("agent_id", Ty::Ident),
     ("instrument_id", Ty::Str),
     ("side", Ty::Str),
@@ -1456,41 +1488,58 @@ static INTENT_RECEIVED_V2: Ty = Ty::Record(&[
     ("risk_clock", Ty::RiskClock),
 ]);
 
-/// §9.5's `GateDecided` at `schema_version` 2: version 1's members with `risk_clock` last. The
-/// check id vocabulary is §9's, matching trading spec §9.1.
+/// §9.5's `GateDecided` quotes, as every version from 2 names them.
+const GATE_QUOTES_USED: Ty = Ty::List(&Ty::Record(&[
+    ("instrument_id", Ty::Str),
+    ("bid", Ty::Decimal),
+    ("ask", Ty::Decimal),
+    ("as_of", Ty::Timestamp),
+    ("feed", Ty::Str),
+]));
+
+/// §9.5's `GateDecided` marks, as every version from 2 names them.
+const GATE_MARKS_USED: Ty = Ty::List(&Ty::Record(&[
+    ("instrument_id", Ty::Str),
+    ("price", Ty::Decimal),
+    ("source", Ty::Str),
+    ("kind", Ty::Str),
+]));
+
+/// §9.5's `GateDecided` checks, as every version from 2 names them, in §9's check id vocabulary,
+/// matching trading spec §9.1.
+const GATE_CHECKS: Ty = Ty::List(&Ty::Record(&[
+    ("id", Ty::OneOf(GATE_CHECK_IDS)),
+    ("result", Ty::Str),
+    ("inputs", Ty::OpenObject),
+    ("computed", Ty::OpenObject),
+]));
+
+/// §9.5's `GateDecided` at `schema_version` 2: version 1's members with `risk_clock` last.
 static GATE_DECIDED_V2: Ty = Ty::Record(&[
-    ("intent_id", Ty::Ulid),
+    ("intent_id", Ty::Intent),
     ("verdict", Ty::Str),
     ("reason_code", Ty::Nullable(&Ty::Str)),
     ("data_profile", Ty::Str),
-    (
-        "quotes_used",
-        Ty::List(&Ty::Record(&[
-            ("instrument_id", Ty::Str),
-            ("bid", Ty::Decimal),
-            ("ask", Ty::Decimal),
-            ("as_of", Ty::Timestamp),
-            ("feed", Ty::Str),
-        ])),
-    ),
-    (
-        "marks_used",
-        Ty::List(&Ty::Record(&[
-            ("instrument_id", Ty::Str),
-            ("price", Ty::Decimal),
-            ("source", Ty::Str),
-            ("kind", Ty::Str),
-        ])),
-    ),
-    (
-        "checks",
-        Ty::List(&Ty::Record(&[
-            ("id", Ty::OneOf(GATE_CHECK_IDS)),
-            ("result", Ty::Str),
-            ("inputs", Ty::OpenObject),
-            ("computed", Ty::OpenObject),
-        ])),
-    ),
+    ("quotes_used", GATE_QUOTES_USED),
+    ("marks_used", GATE_MARKS_USED),
+    ("checks", GATE_CHECKS),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's `GateDecided` at `schema_version` 3 (DEC-2848): version 2's members, then the
+/// executor's own `sized_qty`, `parked` and `held_long`, then `risk_clock`. Rules 313 to 315 say
+/// where each may be non-null ([`gate_decided_v3_rules`]).
+static GATE_DECIDED_V3: Ty = Ty::Record(&[
+    ("intent_id", Ty::Intent),
+    ("verdict", Ty::Str),
+    ("reason_code", Ty::Nullable(&Ty::Str)),
+    ("data_profile", Ty::Str),
+    ("quotes_used", GATE_QUOTES_USED),
+    ("marks_used", GATE_MARKS_USED),
+    ("checks", GATE_CHECKS),
+    ("sized_qty", Ty::Nullable(&Ty::Decimal)),
+    ("parked", Ty::Nullable(&Ty::Bool)),
+    ("held_long", Ty::Nullable(&Ty::Bool)),
     ("risk_clock", Ty::RiskClock),
 ]);
 
@@ -1633,7 +1682,7 @@ static ACCOUNT_CLOSE_REQUESTED: Ty = Ty::Record(&[
 /// and 40 say which are null.
 static ORDER_REQUEST_RECORDED: Ty = Ty::Record(&[
     ("agent_id", Ty::Ident),
-    ("intent_id", Ty::Nullable(&Ty::Ulid)),
+    ("intent_id", Ty::Nullable(&Ty::Intent)),
     (
         "purpose",
         Ty::OneOf(&[
@@ -1758,7 +1807,7 @@ static PROTECTION_CHANGED: Ty = Ty::Record(&[
     ("qty", Ty::Nullable(&Ty::Decimal)),
     ("stop", Ty::Nullable(&Ty::Decimal)),
     ("take_profit", Ty::Nullable(&Ty::Decimal)),
-    ("intent_id", Ty::Nullable(&Ty::Ulid)),
+    ("intent_id", Ty::Nullable(&Ty::Intent)),
     ("bracket", Ty::Nullable(&Ty::Str)),
     ("entry", Ty::Nullable(&Ty::Str)),
     ("agent_id", Ty::Nullable(&Ty::Ident)),
@@ -1781,7 +1830,7 @@ static PROTECTION_CHANGED_V2: Ty = Ty::Record(&[
     ("qty", Ty::Nullable(&Ty::Decimal)),
     ("stop", Ty::Nullable(&Ty::Decimal)),
     ("take_profit", Ty::Nullable(&Ty::Decimal)),
-    ("intent_id", Ty::Nullable(&Ty::Ulid)),
+    ("intent_id", Ty::Nullable(&Ty::Intent)),
     ("bracket", Ty::Nullable(&Ty::Str)),
     ("entry", Ty::Nullable(&Ty::Str)),
     ("agent_id", Ty::Nullable(&Ty::Ident)),
@@ -3110,7 +3159,8 @@ mod tests {
     }
 
     /// The three records §9.5 closes at `schema_version` 2 keep their version-1 schemas registered
-    /// (§8): a version-1 record parses beside a version-2 one, and a version-3 one is unknown.
+    /// (§8): a version-1 record parses beside a version-2 one, and the next unregistered
+    /// version (3, or 4 for `GateDecided`, DEC-2848) is unknown.
     #[test]
     fn the_executor_records_keep_version_1_registered() -> Result<(), String> {
         let section = account_section()?;
@@ -3120,10 +3170,10 @@ mod tests {
             .ok_or("no v1 case")?
             .clone();
         assert_eq!(Draft::parse(&draft(&section, &case)?).map(|_| ()), Ok(()));
-        for (event_type, base_seq) in [
-            ("IntentReceived", 2u64),
-            ("GateDecided", 4),
-            ("OrderSubmitted", 6),
+        for (event_type, base_seq, unknown) in [
+            ("IntentReceived", 2u64, 3),
+            ("GateDecided", 4, 4),
+            ("OrderSubmitted", 6, 3),
         ] {
             let mut body = {
                 let mut body = list(&section, "chain")
@@ -3139,14 +3189,14 @@ mod tests {
                 body
             };
             let key = Key::new("schema_version").map_err(|e| e.to_string())?;
-            body.insert(key, Value::Int(Int::new(3).ok_or("an integer")?));
+            body.insert(key, Value::Int(Int::new(unknown).ok_or("an integer")?));
             let refused = Draft::parse(&to_canonical(&Value::Object(body)))
                 .err()
                 .map(|e| (e.reason.code().to_owned(), e.path));
             assert_eq!(
                 refused,
                 Some(("unknown_schema".to_owned(), "payload".to_owned())),
-                "{event_type} at version 3"
+                "{event_type} at version {unknown}"
             );
         }
         Ok(())

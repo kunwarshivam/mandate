@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::generations::{daily_dir_at, minute_dir_at};
 use mandate_liquidity::{DailyBar, DailyLiquidity, daily_liquidity, trailing_volume};
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, DatasetId, Feed, Kind, Symbol, TimeUnit, Timeframe};
@@ -79,7 +80,8 @@ pub fn trusted_daily_liquidity(
     Ok(daily_liquidity(&bars)?)
 }
 
-/// `symbol`'s four figures from the datasets under `root` at `now`, the reader's own clock.
+/// `symbol`'s four figures from the datasets under `root` at `now`, the reader's own clock: for an
+/// `alpaca-iex` root, from the generations `now` names ([`crate::generations`]).
 ///
 /// # Errors
 /// Any refusal of [`trusted_daily_liquidity`] or [`trailing_minutes`], a dataset missing under
@@ -89,8 +91,8 @@ pub fn liquidity(root: &Path, symbol: &str, now: UtcNanos) -> Result<LiquidityFa
         prior_close,
         median_dollar_volume_20d,
         adv_20d,
-    } = trusted_daily_liquidity(&daily_dir(root, symbol)?, symbol, now)?;
-    let minutes = trailing_minutes(&minute_dir(root, symbol)?, symbol, now)?;
+    } = trusted_daily_liquidity(&daily_dir_at(root, symbol, now)?, symbol, now)?;
+    let minutes = trailing_minutes(&minute_dir_at(root, symbol, now)?, symbol, now)?;
     Ok(LiquidityFacts {
         prior_close,
         median_dollar_volume_20d,

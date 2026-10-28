@@ -71,6 +71,7 @@ fn identities() -> Vec<Identity> {
         Identity::SecretImport,
         Identity::ModelGateway,
         Identity::NewsReader,
+        Identity::BarsReader,
         Identity::EmailSender,
     ]
 }

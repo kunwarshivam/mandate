@@ -20,20 +20,23 @@
 //! through [`Named`], which names each deployed instrument by its asset id, as the executor sent it,
 //! wherever the broker names it by its ticker (DEC-938 item 1, [DEC-2813](../../../docs/project/decisions/DEC-2813.md)).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::Duration;
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Value, parse};
+use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
+use mandate_connections::record::ConnectionId;
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    AccountDeclaration, AccountFillRefs, AccountScope, AgentId, BindingGateInput,
-    BindingGateRequest, BindingGateSource, BrokerOutcome, BrokerRequest, BrokerSymbols,
-    ConnectorError, ExitTier, FillConfigRefs, InstrumentSnapshot, MandateVersion, MandateView,
-    MarketObservation, ProtectionPrices,
+    AccountDeclaration, AccountFillRefs, AccountScope, AgentId, BindingGateConfigRefs,
+    BindingGateInput, BindingGateRequest, BindingGateSource, BrokerOutcome, BrokerRequest,
+    BrokerSymbols, ConnectorError, ExitTier, FillConfigRefs, InstrumentSnapshot, MandateVersion,
+    MandateView, MarketObservation, ProtectionPrices,
 };
 use mandate_gate_context::{Freshness, Journaled, Row};
 use mandate_gate_inputs::control::{
@@ -41,10 +44,11 @@ use mandate_gate_inputs::control::{
     admitted_configuration, configuration, confirmed_version,
 };
 use mandate_gate_inputs::{DeployedView, Reviewed};
-use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
+use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId, TrustedStart};
 use mandate_num::{Fraction, Price, Ratio, ShareIncrement, Usd};
 use mandate_research::{ReplayError, Replayed, ThesisRecord, replay_theses};
 use mandate_risk::{AgentMode, ConductState, DayTradeLedger, RiskSnapshot, SaneQuote};
+use mandate_spec::ValidatedMandate;
 use mandate_spec::context::Membership;
 use mandate_time::{Date, UtcNanos};
 
@@ -52,6 +56,8 @@ use crate::follow::agents_of;
 use crate::gate::{AccountRules, AgentRisk, AssetRecord, DeployedGate, Liquidity, OrderFacts};
 use crate::marks::Marked;
 use crate::quotes::QuoteFeed;
+use crate::risk::{GateRisk, RiskOpening, RiskOpenings};
+use crate::tail::Tail;
 use crate::{Broker, Protections, Unplanned, Wiring};
 
 /// How fresh, in risk-clock seconds, the journal's facts an opening reads must be: a mark within a
@@ -62,9 +68,43 @@ pub const FRESH: Freshness = Freshness {
     snapshot_max_age_s: 3600,
 };
 
-/// How a port reads one stream: the store's records from its first, `None` when the store cannot
-/// answer.
-pub type Rows = Box<dyn Fn(&StreamId) -> Option<Vec<StoredEvent>>>;
+/// How a port reads one stream: the store's records from `start.from_seq` on, their chain checked
+/// from `start` (`TrustedStart::GENESIS` reads the whole stream), `None` when the store cannot
+/// answer or the first record does not follow `start`.
+pub type Rows = Box<dyn Fn(&StreamId, TrustedStart) -> Option<Vec<StoredEvent>>>;
+
+/// `read`, a reader of whole streams, as [`Rows`]: the records it gives from `start.from_seq` on,
+/// `None` when the first of them does not follow `start`. Each read still reads the whole stream;
+/// the process's own stores read only what follows (`PgStore::rows_from`).
+pub fn reading(read: impl Fn(&StreamId) -> Option<Vec<StoredEvent>> + 'static) -> Rows {
+    Box::new(move |stream, start| {
+        let since: Vec<StoredEvent> = read(stream)?
+            .into_iter()
+            .filter(|row| row.seq >= start.from_seq)
+            .collect();
+        match since.first() {
+            Some(first) if first.seq != start.from_seq || first.prev_hash != start.prev_hash => {
+                None
+            }
+            _ => Some(since),
+        }
+    })
+}
+
+/// A thesis record of an agent stream as [`replay_theses`] reads it: its type, and its payload, or
+/// `None` for a body that does not parse.
+type Kept = (String, Option<Value>);
+
+/// What the hot ports read of the streams, each folded only past the head it was last read to, so
+/// a pass costs what was appended since and never the streams' whole length (DEC-2847): the
+/// control stream's records, the scheduler's clock folded, and each research agent stream's thesis
+/// records. The control stream is small; the clock and agent streams keep no other record.
+#[derive(Default)]
+struct Tails {
+    control: Option<Tail<Vec<StoredEvent>>>,
+    clock: Option<Tail<Journaled>>,
+    theses: BTreeMap<String, Tail<Vec<Kept>>>,
+}
 
 /// The stored bars' liquidity for the symbol `symbol` at `now` (trading spec §9.4, §9.5;
 /// DEC-2274), `None` when it cannot be read, which holds the opening.
@@ -177,6 +217,12 @@ struct Resolved {
     loss_carry: Usd,
     symbol: String,
     instrument: InstrumentId,
+    /// The confirmed version, validated on every V-rule but V-002, which its risk fold's opening
+    /// validates on the opening's equity (DEC-2804 item 2).
+    confirmed: ConfirmedVersion,
+    /// The reviewed instrument's asset class and its quote staleness, its fold's opening's.
+    asset_class: AssetClass,
+    quote_max_age: Duration,
     /// Whether the deployed version pins its universe: the binding gate's hold once the account
     /// has traded is named by it (DEC-2143).
     pinned: bool,
@@ -229,6 +275,12 @@ struct Inner {
     clock: Option<StreamId>,
     sources: Sources,
     cache: RefCell<Cache>,
+    tails: RefCell<Tails>,
+    /// Each agent's risk as the process's risk book last read it (DEC-2804 item 7).
+    risk: RefCell<BTreeMap<AgentId, GateRisk>>,
+    /// Whether the last hand-off could not be kept: then no agent's risk is answered, so a view
+    /// that failed is never read as the one before it.
+    risk_stale: Cell<bool>,
 }
 
 /// The account's deployments as every production port reads them, shared by all of them.
@@ -247,6 +299,9 @@ impl Deployment {
             clock: StreamId::parse(&format!("clock:{workspace}")),
             sources,
             cache: RefCell::new(Cache::default()),
+            tails: RefCell::new(Tails::default()),
+            risk: RefCell::new(BTreeMap::new()),
+            risk_stale: Cell::new(false),
         }))
     }
 
@@ -278,6 +333,7 @@ impl Deployment {
             protections: Box::new(deployment.clone()),
             quotes: Box::new(deployment.clone()),
             marked: Box::new(deployment.clone()),
+            risk: Box::new(deployment.clone()),
             ..wiring
         };
         (wired, deployment)
@@ -297,17 +353,26 @@ impl Deployment {
         }))
     }
 
+    /// `stream`'s whole records, read from its first: what the binding gate's fold of an opening
+    /// reads, once per opening.
     fn rows(&self, stream: Option<&StreamId>) -> Option<Vec<StoredEvent>> {
-        (self.0.sources.rows)(stream?)
+        (self.0.sources.rows)(stream?, TrustedStart::GENESIS)
+    }
+
+    /// The control stream's records, read only past the head it was last read to.
+    fn control_rows(&self) -> Option<Vec<StoredEvent>> {
+        let stream = self.0.control.as_ref()?;
+        let mut tails = self.0.tails.try_borrow_mut().ok()?;
+        let tail = tails.control.get_or_insert_with(|| Tail::new(Vec::new()));
+        tail.follow(&self.0.sources.rows, stream, |rows, row| {
+            rows.push(row.clone());
+        })
+        .then(|| tail.state.clone())
     }
 
     /// The trade date of the scheduler's latest tick, the date a deployment is read for.
     fn today(&self) -> Option<Date> {
-        let mut journaled = Journaled::new("", self.0.clock.as_ref()?.as_str(), "");
-        for row in self.rows(self.0.clock.as_ref())? {
-            fold(&mut journaled, &row);
-        }
-        Some(journaled.now()?.date())
+        Some(self.now()?.date())
     }
 
     /// Every agent the control stream deploys on this account whose deployment reads now, on
@@ -343,7 +408,7 @@ impl Deployment {
         BTreeMap<AgentId, Rc<Research>>,
     ) {
         let none = || (BTreeMap::new(), BTreeMap::new());
-        let Some(control) = self.rows(self.0.control.as_ref()) else {
+        let Some(control) = self.control_rows() else {
             return none();
         };
         let Ok(mut cache) = self.0.cache.try_borrow_mut() else {
@@ -442,39 +507,56 @@ impl Deployment {
         confirmed_version(records, self.0.sources.artifacts.as_ref(), &run).ok()
     }
 
-    /// The scheduler's latest tick, the instant a research agent's theses are replayed at.
+    /// The scheduler's latest tick, the instant a research agent's theses are replayed at: the
+    /// clock stream folded only past the head it was last read to.
     fn now(&self) -> Option<UtcNanos> {
-        let mut journaled = Journaled::new("", self.0.clock.as_ref()?.as_str(), "");
-        for row in self.rows(self.0.clock.as_ref())? {
-            fold(&mut journaled, &row);
+        let stream = self.0.clock.as_ref()?;
+        let mut tails = self.0.tails.try_borrow_mut().ok()?;
+        let tail = tails
+            .clock
+            .get_or_insert_with(|| Tail::new(Journaled::new("", stream.as_str(), "")));
+        if !tail.follow(&self.0.sources.rows, stream, fold) {
+            return None;
         }
-        journaled.now()
+        tail.state.now()
+    }
+
+    /// `agent`'s thesis records in stream order, each with its payload, read only past the head
+    /// its stream was last read to; `None` when the stream cannot be read.
+    fn theses(&self, agent: &AgentId) -> Option<Vec<Kept>> {
+        let workspace = self.0.scope.workspace.0.as_str();
+        let stream = StreamId::parse(&format!("agent:{workspace}:{}", agent.0))?;
+        let mut tails = self.0.tails.try_borrow_mut().ok()?;
+        let tail = tails
+            .theses
+            .entry(stream.as_str().to_owned())
+            .or_insert_with(|| Tail::new(Vec::new()));
+        tail.follow(&self.0.sources.rows, &stream, |kept, row| {
+            if matches!(
+                row.event_type.as_str(),
+                "ThesisProposed" | "ThesisRevised" | "ThesisInvalidated"
+            ) {
+                let payload = parse(&row.body)
+                    .ok()
+                    .and_then(|body| body.get("payload").cloned());
+                kept.push((row.event_type.clone(), payload));
+            }
+        })
+        .then(|| tail.state.clone())
     }
 
     /// `agent`'s thesis records replayed at `at` ([`replay_theses`]); `None` when its stream or a
     /// record cannot be read.
     fn replayed(&self, agent: &AgentId, at: UtcNanos) -> Option<Replayed> {
-        let workspace = self.0.scope.workspace.0.as_str();
-        let stream = StreamId::parse(&format!("agent:{workspace}:{}", agent.0));
-        let rows = self.rows(stream.as_ref())?;
-        let records = rows
-            .iter()
-            .filter(|row| {
-                matches!(
-                    row.event_type.as_str(),
-                    "ThesisProposed" | "ThesisRevised" | "ThesisInvalidated"
-                )
+        let kept = self.theses(agent)?;
+        let records = kept.iter().map(|(event_type, payload)| {
+            Ok(ThesisRecord {
+                event_type: event_type.as_str(),
+                payload: payload
+                    .clone()
+                    .ok_or(ReplayError::Unreadable { member: "payload" })?,
             })
-            .map(|row| {
-                let payload = parse(&row.body)
-                    .ok()
-                    .and_then(|body| body.get("payload").cloned())
-                    .ok_or(ReplayError::Unreadable { member: "payload" })?;
-                Ok(ThesisRecord {
-                    event_type: row.event_type.as_str(),
-                    payload,
-                })
-            });
+        });
         replay_theses(records, at).ok()
     }
 
@@ -594,16 +676,15 @@ impl Deployment {
     /// record admitted, on a cold start too (`AGENTS.md` rule 13); naming one more instrument for
     /// exits adds no risk.
     fn ever_admitted(&self, agent: &AgentId) -> BTreeSet<InstrumentId> {
-        let workspace = self.0.scope.workspace.0.as_str();
-        let stream = StreamId::parse(&format!("agent:{workspace}:{}", agent.0));
-        let Some(rows) = self.rows(stream.as_ref()) else {
+        let Some(kept) = self.theses(agent) else {
             return BTreeSet::new();
         };
-        rows.iter()
-            .filter(|row| matches!(row.event_type.as_str(), "ThesisProposed" | "ThesisRevised"))
-            .filter_map(|row| {
-                let body = parse(&row.body).ok()?;
-                let payload = body.get("payload")?;
+        kept.iter()
+            .filter(|(event_type, _)| {
+                matches!(event_type.as_str(), "ThesisProposed" | "ThesisRevised")
+            })
+            .filter_map(|(_, payload)| {
+                let payload = payload.as_ref()?;
                 if payload.get("admitted") != Some(&Value::Bool(true)) {
                     return None;
                 }
@@ -674,6 +755,9 @@ impl Deployment {
             loss_carry: confirmed.connection_loss_carry(),
             symbol: reviewed.instrument.symbol.as_str().to_owned(),
             instrument: InstrumentId::new(reviewed.instrument.asset_id.as_str()).ok()?,
+            asset_class: reviewed.instrument.asset_class,
+            quote_max_age: reviewed.quote_max_age,
+            confirmed: confirmed.clone(),
             pinned: confirmed.mandate().universe.pinned,
         })
     }
@@ -771,7 +855,8 @@ fn fold(journaled: &mut Journaled, stored: &StoredEvent) {
         event_type: &stored.event_type,
         payload: &payload,
     };
-    let _refused_rows_hold_every_later_opening = journaled.fold(row);
+    let recorded = UtcNanos::parse_rfc3339(&stored.recorded_at).ok();
+    let _refused_rows_hold_every_later_opening = journaled.fold_recorded(row, recorded);
 }
 
 /// The agent's risk while nothing has traded on the account: its whole allocation is its equity,
@@ -904,6 +989,16 @@ impl Marked for Deployment {
             .map(|resolved| resolved.instrument.clone())
             .collect()
     }
+
+    /// Half the smallest quote staleness among them, which is also how long each risk fold lets a
+    /// held instrument go without a sane mark (DEC-2844), so a mark lands before it goes stale.
+    fn every(&self) -> Duration {
+        crate::marks::mark_every(
+            self.lasting_all()
+                .into_iter()
+                .map(|resolved| resolved.quote_max_age),
+        )
+    }
 }
 
 impl QuoteFeed for Deployment {
@@ -936,6 +1031,25 @@ impl QuoteFeed for Deployment {
 }
 
 impl BindingGateSource for Deployment {
+    /// The configuration `agent`'s decision on `instrument` is journaled under when it read no
+    /// binding snapshot, an exit's above all (DEC-2846): all five references of `agent`'s own
+    /// deployment of `instrument`, as an exit reads it (current, else last, else a research
+    /// agent's admitted instrument as it last resolved). Never another agent's deployment of the
+    /// same instrument. It reads no quote, bars or broker fact, so an exit never waits on them
+    /// (`AGENTS.md` rule 13).
+    fn config_refs(
+        &self,
+        agent: &AgentId,
+        instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        self.lasting_all()
+            .into_iter()
+            .find(|resolved| {
+                &resolved.instrument == instrument && resolved.view.version(agent).is_some()
+            })
+            .map(|resolved| resolved.gate.config_refs().clone())
+    }
+
     /// The binding gate's input for the deployed agent's opening, read now. An order that reduces
     /// risk is answered `None` before anything is read, so the core keeps its own decision
     /// (`AGENTS.md` rule 13, DEC-2274 item 6). An opening is held, `None`, while its deployment,
@@ -959,6 +1073,11 @@ impl BindingGateSource for Deployment {
         {
             return None;
         }
+        let agent = if journaled.untraded() {
+            untraded(resolved.allocation, resolved.loss_carry)
+        } else {
+            self.traded(request.agent, &journaled, facts.now)
+        };
         let sources = &self.0.sources;
         let quote = sane(&self.observe(request.instrument, facts.now).ok()?)?;
         let order = OrderFacts {
@@ -966,12 +1085,87 @@ impl BindingGateSource for Deployment {
             asset: sources.broker.asset(&resolved.symbol),
             rules: sources.broker.rules(),
             liquidity: sources.liquidity.liquidity(&resolved.symbol, facts.now),
-            agent: untraded(resolved.allocation, resolved.loss_carry),
+            agent,
             halted: sources.broker.halted(&resolved.symbol),
             flat: true,
             journaled: facts,
         };
         resolved.gate.input(&order, request)
+    }
+}
+
+impl Deployment {
+    /// `agent`'s risk on a traded account that is flat again (DEC-2833 items 1 to 3), which
+    /// `Journaled::opening_hold` has already found flat: the account risk book's snapshot, whose
+    /// mode is the book's, and restrictions, with the counters `journaled` folds from the account stream at `now`. `None`
+    /// while the counters do not read, or the book reads no risk for the agent, which holds the
+    /// opening and never an exit. The day-trade ledger is empty: the gate answers only where day
+    /// trades cannot bind (item 5).
+    fn traded(&self, agent: &AgentId, journaled: &Journaled, now: UtcNanos) -> Option<AgentRisk> {
+        let counted = journaled.counted(now)?;
+        let GateRisk {
+            risk,
+            instrument_restrictions,
+            ..
+        } = self.risk(agent)?;
+        Some(AgentRisk {
+            risk,
+            conduct: counted.conduct,
+            instrument_restrictions,
+            last_exit_fill_at: counted.last_exit_fill_at,
+            orders_today: counted.orders_today,
+            day_trades: DayTradeLedger::default(),
+        })
+    }
+
+    /// `agent`'s risk as the process's risk book last read it: `None` while its fold is not open
+    /// or its view is unreadable, which holds its openings and never its exits (DEC-2804 items 2
+    /// and 7).
+    pub fn risk(&self, agent: &AgentId) -> Option<GateRisk> {
+        if self.0.risk_stale.get() {
+            return None;
+        }
+        self.0.risk.try_borrow().ok()?.get(agent).cloned()
+    }
+}
+
+impl RiskOpenings for Deployment {
+    /// `agent`'s deployment as `control` reads it (the rows up to its first deployment), on
+    /// `date`, its version validated on `equity` (DEC-2804 item 2).
+    fn opening(
+        &self,
+        agent: &AgentId,
+        control: &[StoredEvent],
+        equity: Usd,
+        date: Date,
+    ) -> Option<RiskOpening> {
+        let records: Vec<ControlRecord> =
+            control.iter().filter_map(ControlRecord::of_row).collect();
+        if records.len() != control.len() {
+            return None;
+        }
+        let confirmed = self.confirm(&records, agent, date)?;
+        let resolved = self.resolve_pinned(&records, agent, date, &confirmed)?;
+        let input = resolved.confirmed.clone().with_equity(equity).ok()?;
+        Some(RiskOpening {
+            mandate: ValidatedMandate::new(input.mandate().clone(), input.context(), &[]).ok()?,
+            instrument: resolved.instrument.as_str().to_owned(),
+            asset_class: resolved.asset_class,
+            inherited_loss_usd: resolved.loss_carry,
+            mark_max_age_s: u32::try_from(resolved.quote_max_age.as_secs()).ok()?,
+        })
+    }
+
+    /// Keeps `risks` for [`Self::risk`]. A hand-off that cannot be kept marks the map stale, and
+    /// no agent's risk is answered until the next one is kept.
+    fn read(&self, risks: BTreeMap<AgentId, GateRisk>) {
+        match self.0.risk.try_borrow_mut() {
+            Ok(mut held) => {
+                *held = risks;
+                self.0.risk_stale.set(false);
+            }
+            Err(_) => self.0.risk_stale.set(true),
+        }
     }
 }
 
@@ -1008,11 +1202,97 @@ impl<B: Broker> Broker for Named<B> {
     fn declared(&self) -> Option<AccountDeclaration> {
         self.broker.declared()
     }
+
+    fn has_later_checks(&self) -> bool {
+        self.broker.has_later_checks()
+    }
+
+    fn later_check(
+        &self,
+        connection: ConnectionId,
+        occasion: Occasion,
+        account: AccountRead,
+    ) -> Option<Result<CheckReport, &'static str>> {
+        self.broker.later_check(connection, occasion, account)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::agreed;
+    use mandate_connections::checks::{AccountRead, CheckReport, Occasion};
+    use mandate_connections::record::ConnectionId;
+    use mandate_domain::{CapabilityProfile, ProfileError};
+    use mandate_executor::{BrokerOutcome, BrokerRequest, ConnectorError};
+
+    use super::{Named, agreed};
+    use crate::Broker;
+
+    /// A broker with later checks, each answering a refusal the test can recognise.
+    struct Checking;
+
+    impl Broker for Checking {
+        fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
+            mandate_alpaca::alpaca_profile()
+        }
+
+        fn call(&mut self, _request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
+            Err(ConnectorError::NotSent { code: "fixture" })
+        }
+
+        fn has_later_checks(&self) -> bool {
+            true
+        }
+
+        fn later_check(
+            &self,
+            _connection: ConnectionId,
+            _occasion: Occasion,
+            _account: AccountRead,
+        ) -> Option<Result<CheckReport, &'static str>> {
+            Some(Err("checked_by_the_inner_broker"))
+        }
+    }
+
+    /// A broker that keeps every default.
+    struct Plain;
+
+    impl Broker for Plain {
+        fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
+            mandate_alpaca::alpaca_profile()
+        }
+
+        fn call(&mut self, _request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
+            Err(ConnectorError::NotSent { code: "fixture" })
+        }
+    }
+
+    /// DEC-2840: a broker whose later checks are not built runs none, and `Named` around it says
+    /// so too, so the process never reads the account for one.
+    #[test]
+    fn a_broker_without_later_checks_runs_none_named_or_not() -> Result<(), String> {
+        let connection = ConnectionId::new("conn-1").map_err(|e| format!("{e:?}"))?;
+        assert!(!Plain.has_later_checks());
+        assert_eq!(
+            Plain.later_check(connection.clone(), Occasion::Daily, AccountRead::Unreadable),
+            None
+        );
+        assert!(!Named::new(Plain, None).has_later_checks());
+        Ok(())
+    }
+
+    /// DEC-2840: the binary wraps every broker in `Named`, so it passes the later checks through;
+    /// otherwise the trait's default would answer none and the process would never run them.
+    #[test]
+    fn a_named_broker_runs_its_inner_broker_s_later_checks() -> Result<(), String> {
+        let named = Named::new(Checking, None);
+        assert!(named.has_later_checks());
+        let connection = ConnectionId::new("conn-1").map_err(|e| format!("{e:?}"))?;
+        assert_eq!(
+            named.later_check(connection, Occasion::Daily, AccountRead::Unreadable),
+            Some(Err("checked_by_the_inner_broker"))
+        );
+        Ok(())
+    }
 
     /// DEC-2817: the account's fill configuration is the one every deployment names alike; no
     /// deployment, one that names none, or two that differ name none.
@@ -1025,5 +1305,401 @@ mod tests {
         assert_eq!(agreed([Some(1), Some(1), Some(2)].into_iter()), None);
         assert_eq!(agreed([None, Some(1)].into_iter()), None);
         assert_eq!(agreed([Some(1), None].into_iter()), None);
+    }
+}
+
+/// DEC-2847: the hot ports read each stream only past the head they last read it to, and what they
+/// fold so equals a fold of the whole stream at every point.
+#[cfg(test)]
+mod incremental {
+    use std::cell::{Cell, RefCell};
+    use std::collections::BTreeMap;
+    use std::rc::Rc;
+
+    use mandate_canon::{Digest, Value, parse};
+    use mandate_executor::{AccountRef, AccountScope, AgentId, WorkspaceId};
+    use mandate_journal::{StoredEvent, TrustedStart};
+    use mandate_research::{ReplayError, ThesisRecord, replay_theses};
+    use mandate_time::UtcNanos;
+    use proptest::prelude::*;
+
+    use super::{Deployment, Rows, Sources, Unread};
+    use crate::quotes::NoQuotes;
+
+    const CLOCK: &str = "clock:ws1";
+    const AGENT: &str = "agent:ws1:demo-research";
+    const CONTROL: &str = "ctl:ws1";
+    const T0: i64 = 1_793_106_000;
+
+    /// The instant `secs` after the run's start.
+    fn at(secs: i64) -> Option<UtcNanos> {
+        UtcNanos::from_parts(T0.saturating_add(secs), 0).ok()
+    }
+
+    /// The journal as the test appends it, and how many records every read has handed back.
+    #[derive(Default)]
+    struct Journal {
+        streams: RefCell<BTreeMap<String, Vec<StoredEvent>>>,
+        read: Cell<usize>,
+        /// Refuse the next read past a held head, as a store does whose chain no longer follows it.
+        refuse_next: Cell<bool>,
+        /// Refuse every read, as a store does that cannot be reached.
+        down: Cell<bool>,
+        /// How many reads were asked, answered or not.
+        calls: Cell<usize>,
+    }
+
+    impl Journal {
+        fn append(&self, stream: &str, event_type: &str, payload: &str) {
+            let mut streams = self.streams.borrow_mut();
+            let rows = streams.entry(stream.to_owned()).or_default();
+            let seq = u64::try_from(rows.len()).map_or(u64::MAX, |n| n.saturating_add(1));
+            let prev_hash = rows.last().map_or(Digest::ZERO, |row| row.hash);
+            let body = format!(r#"{{"event_type":"{event_type}","payload":{payload}}}"#);
+            rows.push(StoredEvent {
+                stream_id: stream.to_owned(),
+                seq,
+                event_id: format!("{stream}-{seq}"),
+                event_type: event_type.to_owned(),
+                schema_version: 1,
+                environment: "paper".to_owned(),
+                recorded_at: "2026-10-27T14:00:00.000000000Z".to_owned(),
+                prev_hash,
+                hash: Digest::of(format!("{stream}{seq}{body}").as_bytes()),
+                body: body.into_bytes(),
+            });
+        }
+
+        fn tick(&self, secs: i64) {
+            if let Some(clock) = at(secs) {
+                self.append(CLOCK, "ClockAdvanced", &format!(r#"{{"clock":"{clock}"}}"#));
+            }
+        }
+
+        fn rows(self: &Rc<Self>) -> Rows {
+            let journal = Rc::clone(self);
+            Box::new(move |stream, start: TrustedStart| {
+                journal.calls.set(journal.calls.get().saturating_add(1));
+                if journal.down.get() {
+                    return None;
+                }
+                if start.from_seq > 1 && journal.refuse_next.replace(false) {
+                    return None;
+                }
+                let streams = journal.streams.borrow();
+                let since: Vec<StoredEvent> = streams
+                    .get(stream.as_str())
+                    .map(|rows| {
+                        rows.iter()
+                            .filter(|row| row.seq >= start.from_seq)
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if since
+                    .first()
+                    .is_some_and(|first| first.prev_hash != start.prev_hash)
+                {
+                    return None;
+                }
+                journal
+                    .read
+                    .set(journal.read.get().saturating_add(since.len()));
+                Some(since)
+            })
+        }
+
+        fn all(&self, stream: &str) -> Vec<StoredEvent> {
+            self.streams
+                .borrow()
+                .get(stream)
+                .cloned()
+                .unwrap_or_default()
+        }
+    }
+
+    fn deployment(journal: &Rc<Journal>) -> Deployment {
+        Deployment::new(
+            &AccountScope {
+                account: AccountRef("01KDER4814371439000000000A".to_owned()),
+                workspace: WorkspaceId("ws1".to_owned()),
+            },
+            Sources {
+                rows: journal.rows(),
+                artifacts: Box::new(BTreeMap::<Digest, Vec<u8>>::new()),
+                quotes: Box::new(NoQuotes),
+                liquidity: Box::new(Unread),
+                broker: Box::new(Unread),
+            },
+        )
+    }
+
+    fn agent() -> AgentId {
+        AgentId("demo-research".to_owned())
+    }
+
+    /// The oracle of the clock: the latest tick a `ClockAdvanced` names, read from the whole stream.
+    fn latest_tick(journal: &Journal) -> Option<UtcNanos> {
+        journal.all(CLOCK).iter().rev().find_map(|row| {
+            let body = parse(&row.body).ok()?;
+            UtcNanos::parse_rfc3339(body.get("payload")?.get("clock")?.as_str()?).ok()
+        })
+    }
+
+    /// The oracle of the theses: every thesis record of the whole agent stream, in order.
+    fn all_theses(journal: &Journal) -> Vec<(String, Option<Value>)> {
+        journal
+            .all(AGENT)
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.event_type.as_str(),
+                    "ThesisProposed" | "ThesisRevised" | "ThesisInvalidated"
+                )
+            })
+            .map(|row| {
+                let payload = parse(&row.body)
+                    .ok()
+                    .and_then(|body| body.get("payload").cloned());
+                (row.event_type.clone(), payload)
+            })
+            .collect()
+    }
+
+    fn thesis(n: u64) -> String {
+        format!(
+            r#"{{"thesis_id":"t{n}","lineage_id":"t{n}","revision":0,"instrument_id":"i{n}","admitted":true,"reason":null}}"#
+        )
+    }
+
+    #[test]
+    fn a_long_run_reads_each_record_once() {
+        let journal = Rc::new(Journal::default());
+        let deployment = deployment(&journal);
+        let mut appended = 0;
+        for secs in 0..10_000 {
+            journal.tick(secs);
+            appended += 1;
+            if secs % 500 == 0 {
+                journal.append(
+                    AGENT,
+                    "ThesisProposed",
+                    &thesis(u64::try_from(secs).unwrap_or_default()),
+                );
+                appended += 1;
+            }
+            let before = journal.read.get();
+            assert_eq!(
+                deployment.now(),
+                UtcNanos::from_parts(T0 + secs, 0).ok(),
+                "at {secs}"
+            );
+            assert!(deployment.theses(&agent()).is_some());
+            assert!(
+                journal.read.get() - before <= 2,
+                "a pass reads what was appended since, not the streams' length, at {secs}"
+            );
+        }
+        assert_eq!(
+            journal.read.get(),
+            appended,
+            "every record read exactly once"
+        );
+    }
+
+    #[test]
+    fn a_refused_read_past_the_head_is_read_again_from_the_first_record() {
+        let journal = Rc::new(Journal::default());
+        let deployment = deployment(&journal);
+        journal.tick(0);
+        journal.append(AGENT, "ThesisProposed", &thesis(1));
+        assert_eq!(deployment.now(), latest_tick(&journal));
+        assert_eq!(deployment.theses(&agent()), Some(all_theses(&journal)));
+        journal.tick(1);
+        journal.append(AGENT, "ThesisProposed", &thesis(2));
+        journal.refuse_next.set(true);
+        assert_eq!(
+            deployment.now(),
+            latest_tick(&journal),
+            "read from the first record, which holds the head, and folded past it"
+        );
+        journal.refuse_next.set(true);
+        assert_eq!(
+            deployment.theses(&agent()),
+            Some(all_theses(&journal)),
+            "never folded twice"
+        );
+    }
+
+    /// DEC-2854 item 6: a refused read past the head whose read from the first record no longer
+    /// holds the head, as a rewrite that hashes the chain again leaves it, reads nothing, then or
+    /// after, so nothing the port folded is read and every opening it is read for is held; and the
+    /// store is asked nothing more, so no ask reads a whole stream.
+    #[test]
+    fn a_read_from_the_first_record_that_no_longer_holds_the_head_reads_nothing() {
+        let journal = Rc::new(Journal::default());
+        let deployment = deployment(&journal);
+        journal.tick(0);
+        assert_eq!(deployment.now(), latest_tick(&journal));
+        if let Some(head) = journal
+            .streams
+            .borrow_mut()
+            .get_mut(CLOCK)
+            .and_then(|rows| rows.last_mut())
+        {
+            head.hash = Digest::of(b"rewritten");
+        }
+        journal.tick(1);
+        assert_eq!(deployment.now(), None);
+        let asked = journal.calls.get();
+        journal.tick(2);
+        assert_eq!(deployment.now(), None, "still nothing");
+        assert_eq!(
+            journal.calls.get(),
+            asked,
+            "and the store asked nothing more"
+        );
+    }
+
+    #[test]
+    fn a_store_that_cannot_answer_is_asked_once_and_nothing_kept_is_read() {
+        let journal = Rc::new(Journal::default());
+        let deployment = deployment(&journal);
+        journal.down.set(true);
+        assert_eq!(deployment.now(), None);
+        assert_eq!(
+            journal.calls.get(),
+            1,
+            "no head yet, so nothing to read again from"
+        );
+        journal.down.set(false);
+        journal.tick(0);
+        journal.append(CONTROL, "AgentDeployed", "{}");
+        assert_eq!(deployment.now(), latest_tick(&journal));
+        assert_eq!(deployment.control_rows(), Some(journal.all(CONTROL)));
+        journal.tick(1);
+        journal.append(CONTROL, "AgentDeployed", "{}");
+        journal.down.set(true);
+        assert_eq!(
+            deployment.now(),
+            None,
+            "never the kept tick once a read fails"
+        );
+        assert_eq!(
+            deployment.control_rows(),
+            None,
+            "nor the kept control records"
+        );
+        assert_eq!(deployment.theses(&agent()), None);
+        journal.down.set(false);
+        journal.refuse_next.set(true);
+        assert_eq!(
+            deployment.control_rows(),
+            Some(journal.all(CONTROL)),
+            "refolded once"
+        );
+        assert_eq!(deployment.now(), latest_tick(&journal));
+    }
+
+    /// A whole-stream reader's records past a start that does not follow them are refused, as a
+    /// store refuses a read whose held head is not its chain's.
+    #[test]
+    fn reading_a_whole_stream_refuses_a_start_it_does_not_follow() -> Result<(), String> {
+        let journal = Rc::new(Journal::default());
+        journal.tick(0);
+        journal.tick(1);
+        let all = journal.all(CLOCK);
+        let whole = Rc::clone(&journal);
+        let read = super::reading(move |stream| Some(whole.all(stream.as_str())));
+        let Some(clock) = mandate_journal::StreamId::parse(CLOCK) else {
+            return Err("the clock stream's id".to_owned());
+        };
+        let after = |row: &StoredEvent| TrustedStart {
+            from_seq: row.seq + 1,
+            prev_hash: row.hash,
+        };
+        assert_eq!(read(&clock, TrustedStart::GENESIS), Some(all.clone()));
+        let (Some(first), Some(second)) = (all.first(), all.get(1)) else {
+            return Err("two ticks".to_owned());
+        };
+        assert_eq!(read(&clock, after(first)), Some(vec![second.clone()]));
+        assert_eq!(read(&clock, after(second)), Some(Vec::new()));
+        let wrong_hash = TrustedStart {
+            from_seq: 2,
+            prev_hash: Digest::of(b"another chain"),
+        };
+        assert_eq!(read(&clock, wrong_hash), None);
+        let wrong_seq = TrustedStart {
+            from_seq: 0,
+            prev_hash: Digest::ZERO,
+        };
+        assert_eq!(read(&clock, wrong_seq), None);
+        Ok(())
+    }
+
+    #[derive(Debug, Clone)]
+    enum Step {
+        Ticks(u8),
+        Thesis,
+        Invalidated,
+        Unparsable,
+        Other,
+        Refuse,
+        Read,
+    }
+
+    fn step() -> impl Strategy<Value = Step> {
+        prop_oneof![
+            (1u8..20).prop_map(Step::Ticks),
+            Just(Step::Thesis),
+            Just(Step::Invalidated),
+            Just(Step::Unparsable),
+            Just(Step::Other),
+            Just(Step::Refuse),
+            Just(Step::Read),
+        ]
+    }
+
+    proptest! {
+        /// At every read, the incremental clock and thesis records equal a fold of the whole
+        /// streams, and the replay over them equals `replay_theses` over the whole stream, so the
+        /// research agent's working universe is the one DEC-2819 replays.
+        #[test]
+        fn the_incremental_fold_equals_a_fold_of_the_whole_streams(steps in prop::collection::vec(step(), 1..120)) {
+            let journal = Rc::new(Journal::default());
+            let deployment = deployment(&journal);
+            let mut secs: i64 = 0;
+            let mut theses: u64 = 0;
+            for step in steps {
+                match step {
+                    Step::Ticks(n) => for _ in 0..n {
+                        journal.tick(secs);
+                        secs = secs.saturating_add(1);
+                    },
+                    Step::Thesis => {
+                        theses = theses.saturating_add(1);
+                        journal.append(AGENT, "ThesisProposed", &thesis(theses));
+                    }
+                    Step::Invalidated => journal.append(AGENT, "ThesisInvalidated", &format!(r#"{{"thesis_id":"t{theses}"}}"#)),
+                    Step::Unparsable => journal.append(AGENT, "ThesisRevised", "not json"),
+                    Step::Other => journal.append(AGENT, "DecisionMade", r#"{"x":1}"#),
+                    Step::Refuse => journal.refuse_next.set(true),
+                    Step::Read => {
+                        prop_assert_eq!(deployment.now(), latest_tick(&journal));
+                        let kept = deployment.theses(&agent());
+                        prop_assert_eq!(kept.clone(), Some(all_theses(&journal)));
+                        let Some(at) = at(secs) else {
+                            continue;
+                        };
+                        let whole = all_theses(&journal);
+                        let expected = replay_theses(whole.iter().map(|(event_type, payload)| Ok(ThesisRecord {
+                            event_type: event_type.as_str(),
+                            payload: payload.clone().ok_or(ReplayError::Unreadable { member: "payload" })?,
+                        })), at).ok();
+                        prop_assert_eq!(deployment.replayed(&agent(), at), expected);
+                    }
+                }
+            }
+        }
     }
 }

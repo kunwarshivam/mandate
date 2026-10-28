@@ -31,9 +31,11 @@ use mandate_canon::Value;
 use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_time::UtcNanos;
 
+mod counters;
 mod positions;
 mod rule_set;
 
+pub use counters::Counted;
 pub use positions::{CountedSession, Positions, Protection, RiskMark};
 pub use rule_set::{RuleSetError, gate_rule_set};
 
@@ -42,8 +44,9 @@ pub use rule_set::{RuleSetError, gate_rule_set};
 /// order, not one of these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpeningHold {
-    /// The account has traded, and the account risk view, which must then read every opening,
-    /// does not yet read this agent's (DEC-2380 item 2, DEC-2804).
+    /// The account has traded, and the fold cannot answer an opening beside the account risk
+    /// view's snapshot (DEC-2380 item 2, DEC-2804, DEC-2833): the account holds a position or
+    /// works an order, the counters do not read, or the workspace relates another account.
     AccountTraded,
     /// The account has traded and the agent's mandate is unpinned: the account risk view binds an
     /// instrument at deployment, and a research agent has none (DEC-2819 item 4).
@@ -209,6 +212,7 @@ pub struct Journaled {
     released: BTreeMap<String, Qty>,
     models: BTreeMap<(String, String), String>,
     account_positions: BTreeMap<String, SignedQty>,
+    ledger: counters::Ledger,
     unreadable: bool,
 }
 
@@ -236,6 +240,7 @@ impl Journaled {
             released: BTreeMap::new(),
             models: BTreeMap::new(),
             account_positions: BTreeMap::new(),
+            ledger: counters::Ledger::default(),
             unreadable: false,
         }
     }
@@ -243,11 +248,54 @@ impl Journaled {
     /// Folds one row. A row of a type the fold reads that does not parse is refused and holds
     /// every later [`Journaled::facts`], since it may have changed a fact.
     pub fn fold(&mut self, row: Row<'_>) -> Result<(), Unreadable> {
+        self.fold_recorded(row, None)
+    }
+
+    /// Folds one row the store recorded at `recorded`, which the counters an opening on a traded
+    /// account reads time its fills by (DEC-2833 item 3). A fill folded with none leaves the
+    /// counters unread, which holds such an opening; every other fact reads as [`Self::fold`]'s.
+    pub fn fold_recorded(
+        &mut self,
+        row: Row<'_>,
+        recorded: Option<UtcNanos>,
+    ) -> Result<(), Unreadable> {
+        let on_account = row.stream == self.account_stream;
+        if row.stream != self.clock_stream {
+            self.ledger.fold(
+                on_account,
+                row.event_type,
+                row.payload,
+                recorded,
+                &self.agent,
+            );
+        }
         let folded = self.read(row);
         if folded.is_err() {
             self.unreadable = true;
         }
         folded
+    }
+
+    /// Whether the account is flat (DEC-2833 item 3): every row the facts read did, every
+    /// instrument's fills on the account net to no position, and every order seen on it, of any
+    /// agent, a protective leg or the owner's, has ended.
+    pub fn flat(&self) -> bool {
+        !self.unreadable
+            && self
+                .account_positions
+                .values()
+                .all(|position| *position == SignedQty::ZERO)
+            && self.ledger.none_working()
+    }
+
+    /// The counters an opening on a traded, flat account reads beside the agent's risk, in the
+    /// risk day of `now` (DEC-2833 item 3); `None` while any row they read, or any row the facts
+    /// read, did not, or while the workspace relates another account (item 4).
+    pub fn counted(&self, now: UtcNanos) -> Option<Counted> {
+        if self.unreadable {
+            return None;
+        }
+        self.ledger.counted(now)
     }
 
     /// The agent's sub-ledger, as the executor's `sub_ledger` computes it (DEC-2378 item 7): per
@@ -311,17 +359,21 @@ impl Journaled {
 
     /// Why every opening of the agent's is held whatever the order, as the binding gate's source
     /// binds on it and the workspace API's agent read serves it (DEC-2143): `None` while nothing
-    /// has traded on the account; once anything has, the account risk view must read an opening
-    /// (DEC-2380 item 2), and an unpinned mandate's agent binds no instrument for it (DEC-2819
-    /// item 4). No exit, protective order or kill switch reads it (`AGENTS.md` rule 13).
+    /// has traded on the account, or while a pinned agent's traded account is [`Self::flat`] and
+    /// its counters read (DEC-2833 items 1 and 8), when the account risk view's snapshot is what
+    /// the gate reads beside them; otherwise the account risk view does not yet read the opening
+    /// (DEC-2380 item 2), and an unpinned mandate's agent binds no instrument for it (DEC-2819 item
+    /// 4). No exit, protective order or kill switch reads it (`AGENTS.md` rule 13).
     #[must_use]
     pub fn opening_hold(&self, pinned: bool) -> Option<OpeningHold> {
         if self.untraded() {
             None
-        } else if pinned {
-            Some(OpeningHold::AccountTraded)
-        } else {
+        } else if !pinned {
             Some(OpeningHold::ResearchAgentTraded)
+        } else if self.flat() && self.ledger.readable() {
+            None
+        } else {
+            Some(OpeningHold::AccountTraded)
         }
     }
 

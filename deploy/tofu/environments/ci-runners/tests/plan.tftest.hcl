@@ -32,3 +32,31 @@ run "the_committed_fleet_plans_within_the_cap" {
     error_message = "Three runners."
   }
 }
+
+run "one_runner_is_a_48_usd_canary" {
+  command = plan
+
+  variables {
+    runner_count = 1
+  }
+
+  assert {
+    condition     = output.estimate_usd == 48
+    error_message = "One s-4vcpu-8gb canary should estimate 48 USD."
+  }
+
+  assert {
+    condition     = length(output.runner_names) == 1
+    error_message = "The canary plan should create one runner."
+  }
+}
+
+run "runner_count_stays_within_the_approved_fleet" {
+  command = plan
+
+  variables {
+    runner_count = 4
+  }
+
+  expect_failures = [var.runner_count]
+}

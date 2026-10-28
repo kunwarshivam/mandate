@@ -31,11 +31,12 @@ use crate::kubernetes::{
     mount_accessor, provisioner_policy, role_request, service_account_name,
 };
 use crate::openbao::{
-    OpenBaoConfig, OpenBaoSource, RoleCredentials, provision, provision_kubernetes_auth,
+    OpenBaoConfig, OpenBaoSource, ProvisionError, Refused, RoleCredentials, provision,
+    provision_kubernetes_auth,
 };
 use crate::openbao::{fingerprint_key_verdict, transit_mount_verdict};
 use crate::policy::{
-    Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, role_name,
+    Identity, Mounts, PlatformSecret, SecretPath, kv_path, openbao_policy, policy_name, role_name,
 };
 use crate::provisioner::{RoleProvisioner, RoleRefusal};
 use crate::source::{Grant, SecretSource};
@@ -440,6 +441,85 @@ async fn operator_call(
     } else {
         serde_json::from_slice(&answer).unwrap()
     }
+}
+
+/// E21-32v on a real vault: provisioning reads the KV mount's configuration right after it
+/// enables the mount, and before it enables the AppRole mount or writes any policy, role or
+/// secret id, so a mount still upgrading stops it while there is nothing yet to redo. An operator
+/// whose policy denies that one read is stopped there, named by that request, with the AppRole
+/// mount never made; let read it, the same provisioning goes on and makes it.
+#[tokio::test(flavor = "current_thread")]
+async fn provisioning_reads_the_kv_mount_before_it_writes_any_role() {
+    let Some((address, ca_pem, operator)) = server() else {
+        return;
+    };
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let suffix = format!("{}-{n}", std::process::id());
+    let config = OpenBaoConfig {
+        address: address.clone(),
+        ca_pem: ca_pem.clone(),
+        mounts: Mounts {
+            kv: format!("kv-{suffix}"),
+            auth: format!("approle-{suffix}"),
+            kubernetes_executor: format!("kubernetes-executor-{suffix}"),
+            kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
+            transit: format!("transit-{suffix}"),
+        },
+    };
+    let all_but_config = format!(
+        "path \"*\" {{\n  capabilities = [\"create\", \"read\", \"update\", \"delete\", \"list\", \"sudo\"]\n}}\n\
+         path \"kv-{suffix}/config\" {{\n  capabilities = [\"deny\"]\n}}\n"
+    );
+    let policy = format!("all-but-kv-config-{suffix}");
+    operator_call(
+        &address,
+        &ca_pem,
+        &operator,
+        Method::PUT,
+        &format!("sys/policies/acl/{policy}"),
+        Some(json!({ "policy": all_but_config })),
+    )
+    .await;
+    let made = operator_call(
+        &address,
+        &ca_pem,
+        &operator,
+        Method::POST,
+        "auth/token/create",
+        Some(json!({ "policies": [policy], "no_default_policy": true, "ttl": "5m" })),
+    )
+    .await;
+    let limited = SecretString::from(
+        made.pointer("/auth/client_token")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned(),
+    );
+    let stopped = provision(&config, &limited, &[c("c1")], None)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        stopped,
+        ProvisionError {
+            error: SourceError::Denied,
+            refused: Some(Refused {
+                method: "GET".to_owned(),
+                path: format!("kv-{suffix}/config"),
+                status: 403,
+            }),
+        }
+    );
+    let auth_mounts = |listed: &Value| listed.get(format!("approle-{suffix}/")).is_some();
+    let listed = operator_call(&address, &ca_pem, &operator, Method::GET, "sys/auth", None).await;
+    assert!(
+        !auth_mounts(listed.get("data").unwrap_or(&listed)),
+        "stopped before the AppRole mount"
+    );
+    provision(&config, &operator, &[c("c1")], None)
+        .await
+        .unwrap();
+    let listed = operator_call(&address, &ca_pem, &operator, Method::GET, "sys/auth", None).await;
+    assert!(auth_mounts(listed.get("data").unwrap_or(&listed)));
 }
 
 /// DEC-2060 items 4 and 7 on a real vault: provisioning, twice, enables both Kubernetes mounts,
@@ -856,7 +936,8 @@ async fn kubernetes_auth_alone_adds_only_the_missing_mount_and_mints_no_secret_i
             &auth(PEM_SHAPE, "https://127.0.0.1:6443"),
         )
         .await,
-        Err(SourceError::Unavailable)
+        Err(ProvisionError::from(SourceError::Unavailable)),
+        "a vault that never answered refused nothing, so no request is named"
     );
     let Some((address, ca_pem, operator)) = server() else {
         return;
@@ -1490,8 +1571,8 @@ async fn provisioning_fails_on_a_fingerprint_key_that_can_leave_the_vault() {
             provision(&config, &operator, &[c("c1")], None)
                 .await
                 .map(drop),
-            Err(SourceError::Config),
-            "{case}"
+            Err(ProvisionError::from(SourceError::Config)),
+            "{case}: refused by this client after the vault answered 200, so no request is named"
         );
     }
 }
@@ -1796,4 +1877,68 @@ async fn of_two_concurrent_claims_exactly_one_wins() {
         )
         .await;
     }
+}
+
+/// A provisioning the vault itself refuses names the request it refused, its status and its path,
+/// and nothing of the token (E21-32v): an operator token the vault does not know is refused at the
+/// first write, the KV mount, after the read before it was refused and gone past.
+#[tokio::test(flavor = "current_thread")]
+async fn a_refused_provisioning_names_the_request_the_vault_refused() {
+    let Some((address, ca_pem, _)) = server() else {
+        return;
+    };
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let kv = format!("kv-unknown-{}-{n}", std::process::id());
+    let config = OpenBaoConfig {
+        address,
+        ca_pem,
+        mounts: Mounts {
+            kv: kv.clone(),
+            ..Mounts::default()
+        },
+    };
+    let unknown = SecretString::from("canary-7d02-not-a-token-the-vault-knows".to_owned());
+    let stopped = provision(&config, &unknown, &[c("c1")], None)
+        .await
+        .map(drop)
+        .unwrap_err();
+    assert_eq!(
+        stopped,
+        ProvisionError {
+            error: SourceError::Denied,
+            refused: Some(Refused {
+                method: "POST".to_owned(),
+                path: format!("sys/mounts/{kv}"),
+                status: 403,
+            }),
+        }
+    );
+    let shown = format!("{stopped} {}", stopped.refused.clone().unwrap());
+    assert_eq!(
+        shown,
+        format!("this identity's policy does not allow that POST /v1/sys/mounts/{kv} answered 403")
+    );
+    assert!(!shown.contains("canary-7d02"));
+}
+
+/// A session ended right after its one read is refused at its next request (E2-22): the bars
+/// reader's token reads the platform data key's path, then the vault refuses it.
+#[tokio::test(flavor = "current_thread")]
+async fn an_ended_session_is_refused_after_its_read() {
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_800_000_000);
+    let session = bao.source(Identity::BarsReader, now).await;
+    let key = SecretPath::Platform(PlatformSecret::NewsDataKey);
+    assert!(
+        session.read(&key).await.is_ok(),
+        "the reader reads its key's path"
+    );
+    assert_eq!(session.end_session().await, Ok(()));
+    assert_eq!(
+        session.read(&key).await.map(|held| held.is_some()),
+        Err(SourceError::Denied),
+        "the revoked token is refused"
+    );
 }

@@ -3693,5 +3693,19 @@
       "/alerts/1/kind": "connection_unavailable",
       "/alerts/1/class": "safety"
     }
+  },
+  {
+    "label": "the kind protection_unattributed, safety",
+    "set": {
+      "/alerts/1/kind": "protection_unattributed",
+      "/alerts/1/class": "safety"
+    }
+  },
+  {
+    "label": "the kind attribution_deficit, safety",
+    "set": {
+      "/alerts/1/kind": "attribution_deficit",
+      "/alerts/1/class": "safety"
+    }
   }
 ]

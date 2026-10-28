@@ -21,8 +21,9 @@ fn openbao_policy(identity: &Identity, connections: &[ConnectionId], mounts: &Mo
     crate::policy::openbao_policy(identity, connections, mounts).unwrap()
 }
 
-/// The oracle: who may do what to a platform secret, its own way: one reader each, the secret
-/// import the only writer, and no deleter.
+/// The oracle: who may do what to a platform secret, its own way: one reader each but the data
+/// key, which the news reader and the bars reader both read, the secret import the only writer,
+/// and no deleter.
 fn may(identity: &Identity, access: Access, secret: PlatformSecret) -> bool {
     matches!(
         (identity, access, secret),
@@ -31,7 +32,7 @@ fn may(identity: &Identity, access: Access, secret: PlatformSecret) -> bool {
             Access::Read,
             PlatformSecret::ModelProviderKey
         ) | (
-            Identity::NewsReader,
+            Identity::NewsReader | Identity::BarsReader,
             Access::Read,
             PlatformSecret::NewsDataKey
         ) | (
@@ -56,6 +57,7 @@ fn identity() -> impl Strategy<Value = Identity> {
         Just(Identity::SecretImport),
         Just(Identity::ModelGateway),
         Just(Identity::NewsReader),
+        Just(Identity::BarsReader),
         Just(Identity::EmailSender),
         Just(Identity::Provisioner),
     ]

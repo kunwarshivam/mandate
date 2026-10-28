@@ -482,9 +482,11 @@ fn expire(state: &RuntimeState, now: RiskClock, batch: &mut Batch<'_>) -> Result
     Ok(())
 }
 
-/// One evaluation (tick step 5). The order builder proposes, the mode and the mandate's instrument
-/// restrictions may narrow the proposal away, the gate's **dry run** may narrow it away again, and
-/// only then is a decision journaled and either proposed, asked, or refused. A dry-run allow
+/// One evaluation (tick step 5). The order builder proposes, the mode, the mandate's instrument
+/// restrictions and an opening of this runtime's still working in the instrument (trading spec
+/// §5.3 rule 6, DEC-2843) may narrow the proposal away with nothing journaled, the gate's **dry
+/// run** may narrow it away again, and only then is a decision journaled and either proposed,
+/// asked, or refused. A dry-run allow
 /// authorises nothing: the binding gate runs on the account stream (`AGENTS.md` rules 1 and 12).
 fn decide(
     state: &RuntimeState,
@@ -508,6 +510,9 @@ fn decide(
             .restricted_instruments
             .contains(&proposal.instrument)
     {
+        return Ok(());
+    }
+    if proposal.purpose.adds_risk() && state.opening_works_in(&proposal.instrument) {
         return Ok(());
     }
     let verdict = dry_run(state, ports, &proposal, now);
@@ -618,7 +623,8 @@ fn liquidity_value(read: &LiquidityRead) -> Result<Value, RuntimeError> {
 /// cover is denied `account_restricted` before the gate is asked, as trading spec §7.3 row 5
 /// denies one on a connection that is not usable, and one in an instrument where an opening this
 /// runtime proposed still works is denied `working_order_limit` (trading spec §5.3 rule 6,
-/// DEC-1150 item 5); every other proposal, and every exit whatever either says, is the gate's to
+/// DEC-1150 item 5), which only a grant's re-validation reaches, since an evaluation is not
+/// taken then (DEC-2843); every other proposal, and every exit whatever either says, is the gate's to
 /// judge (`AGENTS.md` rule 13, DEC-969 item 4). An opening the gate allows with checks deferred but
 /// for which the builder produced no plan is denied `plan_required`: no approval request can both
 /// bind no plan and name the deferrals, so it is refused, journaled and notified rather than left
@@ -802,10 +808,15 @@ fn decided(
                 .output_events
                 .get(model)
                 .and_then(|by_instrument| by_instrument.get(&proposal.instrument))
-                .map(|event| payload::text(&event.0))
+                .map(|event| event.0.clone())
                 .ok_or_else(|| payload::non_canonical("outputs_used"))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let outputs_used = strictly_ascending(outputs_used)
+        .ok_or_else(|| payload::non_canonical("outputs_used"))?
+        .iter()
+        .map(|event| payload::text(event))
+        .collect::<Vec<_>>();
     let model_weights = proposal
         .model_weights
         .iter()
@@ -1104,13 +1115,23 @@ impl<'a> Batch<'a> {
     }
 }
 
+/// `ids` sorted ascending by bytes, as journal spec rule 9 lists a decision's `outputs_used`, or
+/// `None` when two are the same: one output event cited for two models would hide a model the
+/// decision rests on, so it is refused rather than listed once.
+fn strictly_ascending(mut ids: Vec<String>) -> Option<Vec<String>> {
+    ids.sort_unstable();
+    ids.windows(2)
+        .all(|pair| matches!(pair, [earlier, later] if earlier < later))
+        .then_some(ids)
+}
+
 #[cfg(test)]
 mod tests {
     use mandate_accounting::InstrumentId;
     use mandate_canon::{Digest, Value};
     use mandate_num::{Conviction, Unit};
 
-    use super::{clip_name, exit_origin_name, modelled};
+    use super::{clip_name, exit_origin_name, modelled, strictly_ascending};
     use crate::payload::model_output_of;
     use crate::{
         DecisionClip, EventId, ExitOrigin, ModelDirection, ModelOutput, ModelOutputIgnored,
@@ -1259,5 +1280,17 @@ mod tests {
         assert_eq!(clip_name(DecisionClip::TargetQty), "target_qty");
         assert_eq!(clip_name(DecisionClip::MaxSpendUsd), "max_spend_usd");
         assert_eq!(clip_name(DecisionClip::MaxAvgPrice), "max_avg_price");
+    }
+
+    #[test]
+    fn outputs_used_lists_ids_ascending_and_refuses_one_cited_twice() {
+        let ids = |list: &[&str]| list.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            strictly_ascending(ids(&["01B", "01A", "01C"])),
+            Some(ids(&["01A", "01B", "01C"]))
+        );
+        assert_eq!(strictly_ascending(ids(&["01A", "01B", "01A"])), None);
+        assert_eq!(strictly_ascending(ids(&["01A"])), Some(ids(&["01A"])));
+        assert_eq!(strictly_ascending(Vec::new()), Some(Vec::new()));
     }
 }

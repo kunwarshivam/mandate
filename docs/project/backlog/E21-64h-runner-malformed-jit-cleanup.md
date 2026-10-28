@@ -1,0 +1,2 @@
+- **E21-64h (Should; review of E21-64f)** As the operator, I want a malformed JIT response cleaned up by its runner name, so that a missing or null runner id never becomes `DELETE /actions/runners/null` or leaves an offline registration. *Accepted when:* the manager accepts only a numeric id, falls back to its unique generated name before retrying, and executable tests cover missing, null and malformed ids (DEC-2078).
+<!-- section: E21 Operations and infrastructure -->
