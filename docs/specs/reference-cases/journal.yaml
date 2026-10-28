@@ -83055,6 +83055,86 @@ cool_off_waivers:
       index: 2
       reason: schema
       path: payload.credential
+  - name: at_another_instant
+    clause: 'rule 317: the same event_time'
+    drafts:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: EBESExQVFhcYGRobHB0eHw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000S1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpAsserted
+      schema_version: 1
+      event_time: '2026-10-19T15:10:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        sign_count: 1
+        assertion: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      artifact_refs:
+      - sha256:6666666666666666666666666666666666666666666666666666666666666666
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000W1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpCoolOffWaived
+      schema_version: 1
+      event_time: '2026-10-19T15:20:05.250000000Z'
+      clock_source: local
+      causation_id: 01JAA3P4A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA3P0A000000000000000H1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        tier: ci
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      reason: schema
+      path: event_time
   - name: a_bad_waiver
     clause: each draft's own rules first
     drafts:

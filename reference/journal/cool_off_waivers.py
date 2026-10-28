@@ -182,6 +182,8 @@ def batch_failure(drafts: list[dict], skip: frozenset[str] = frozenset()) -> dic
             return {"index": i, "reason": "schema", "path": "payload.challenge"}
         if before["payload"].get("credential") != draft["payload"]["credential"] and "batch.317.credential" not in skip:
             return {"index": i, "reason": "schema", "path": "payload.credential"}
+        if before["event_time"] != draft["event_time"] and "batch.317.time" not in skip:
+            return {"index": i, "reason": "schema", "path": "event_time"}
     return None
 
 
@@ -213,6 +215,12 @@ def batch_cases() -> list[dict]:
             f"{RULE_317}: the same credential",
             [removal(), asserted(), waived(credential=OTHER_CREDENTIAL)],
             at(2, "payload.credential"),
+        ),
+        case(
+            "at_another_instant",
+            f"{RULE_317}: the same event_time",
+            [removal(), asserted(), waived(at=LATER_INSIDE)],
+            at(2, "event_time"),
         ),
         case("a_bad_waiver", "each draft's own rules first", [removal(), asserted(), waived(cause=None)], at(2, "causation_id")),
         case("a_bad_assertion", "rule 253 before rule 317", [asserted(), waived()], at(0, "event_type")),
@@ -327,6 +335,7 @@ def oracle_317(drafts: list[dict]) -> tuple[int, str] | None:
                 ("actor.id", draft["actor"]["id"], previous["actor"]["id"]),
                 ("payload.challenge", draft["payload"]["challenge"], previous["payload"]["challenge"]),
                 ("payload.credential", draft["payload"]["credential"], previous["payload"]["credential"]),
+                ("event_time", draft["event_time"], previous["event_time"]),
             ):
                 if mine != theirs:
                     return (i, path)
@@ -416,6 +425,7 @@ BATCH_MUTANTS = (
     "batch.317.actor",
     "batch.317.challenge",
     "batch.317.credential",
+    "batch.317.time",
 )
 STREAM_MUTANTS = ("stream.318.owner", "stream.318.ends", "stream.318.after", "stream.318.challenge", "stream.318.converse")
 
