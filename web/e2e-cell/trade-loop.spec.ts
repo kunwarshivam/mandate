@@ -49,20 +49,26 @@ const refuse = (error: string): never => {
   throw new Error(error);
 };
 
-/** Reloads `path` until `locator` shows, within `ms`: the screens read on open and poll, but a reload is the plain way to wait across them. */
+/** How long a screen is watched in place, its own polling running, before it is loaded again. */
+const WATCH_MS = 15_000;
+
+/**
+ * Opens `path` and waits for `ready` within `ms`, watching the screen in place: the agent's screen
+ * and the others poll the API themselves, so a reload would only throw away a read still on its way
+ * (the 2026-10-27 window's step 4: a first render slower than one reload cycle was never seen). The
+ * screen is loaded again only after `WATCH_MS` with nothing, for a screen that stopped polling.
+ */
 async function until(page: Page, path: string, ms: number, ready: () => Promise<boolean>): Promise<boolean> {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
     await page.goto(path, { timeout: 15_000 });
-    try {
-      await page.waitForLoadState("networkidle", { timeout: 10_000 });
-    } catch {
-      // fallthrough: a screen that keeps polling never goes idle
+    const reload = Math.min(deadline, Date.now() + WATCH_MS);
+    while (Date.now() < reload) {
+      if (await ready()) return true;
+      await page.waitForTimeout(500);
     }
-    if (await ready()) return true;
-    await page.waitForTimeout(3_000);
   }
-  return false;
+  return ready();
 }
 
 test("the trade loop from web/: approve in the browser, see the fill, the position and the journal, and kill the agent", async ({ page }) => {
@@ -145,9 +151,11 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     if (!filled) refuse(`no filled order on the agent's screen within ${FILL_MS} ms`);
     step("order_filled");
     const reads: string[] = [];
-    page.on("response", (r) => {
-      const path = new URL(r.url()).pathname;
-      if (r.request().method() === "GET" && (path.endsWith(`/agents/${AGENT}/positions`) || path.includes("/journal/streams/agent"))) reads.push(`${r.status()} ${path.split("/").slice(-2).join("/")}`);
+    page.on("requestfinished", async (request) => {
+      const path = new URL(request.url()).pathname;
+      if (request.method() !== "GET" || !(path.endsWith(`/agents/${AGENT}/positions`) || path.includes("/journal/streams/agent"))) return;
+      const status = (await request.response().catch(() => null))?.status() ?? 0;
+      reads.push(`${status} ${path.split("/").slice(-2).join("/")} ${Math.round(request.timing().responseEnd)}ms`);
     });
     const held = await until(page, `/agents/${AGENT}`, 30_000, async () => (await positions.count()) > 0 && (await journal.getByRole("listitem").count()) > 0);
     if (!held) {
@@ -156,7 +164,7 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
         if ((await region.count()) === 0) return "absent";
         return ((await region.first().textContent({ timeout: 2_000 }).catch(() => null)) ?? "unreadable").replace(/\s+/g, " ").slice(0, 240);
       };
-      refuse(`the agent's screen showed the fill but no position or no journal record within 30 s; positions: "${await said("This agent's positions")}"; journal: "${await said("Journal")}"; reads: ${reads.slice(-6).join(", ") || "none"}`);
+      refuse(`the agent's screen showed the fill but no position or no journal record within 30 s, watched in place; positions: "${await said("This agent's positions")}"; journal: "${await said("Journal")}"; reads (status, route, ms): ${reads.slice(-6).join(", ") || "none"}`);
     }
     step("position");
     step("journal", String(await journal.getByRole("listitem").count()));
