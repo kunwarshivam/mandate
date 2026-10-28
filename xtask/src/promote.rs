@@ -298,7 +298,7 @@ mod tests {
         (
             "mandate-datad",
             "data",
-            "data.instruments, a recording of closes only a dev or CI cell lists: a hosted cell needs a market-data source first",
+            "platform/news-data-key and vault-approle-bars-reader in the staging vault, which the founder's apply writes (FOUNDER-STEPS M): without them the IEX source stops at start and holds the whole workspace release unready, so it is promoted in the change after that apply (DEC-2082 item 4)",
         ),
         (
             "mandate-gatewayd",

@@ -545,15 +545,17 @@ def roles_match(journal_docs: list[dict]) -> list[str]:
     journal-db chart, and has a credential Secret with a pgpass key."""
     roles = sorted({p["db_role"] for p in PROCESSES if p["db_role"]} - {"mandate_migrator"})
     cluster = next(d for d in journal_docs if d["kind"] == "Cluster")
-    managed = sorted(r["name"] for r in cluster["spec"]["managed"]["roles"])
+    managed = sorted(r["name"] for r in cluster["spec"]["managed"]["roles"] if r.get("login") is not False)
     secrets = {d["metadata"]["name"]: d for d in journal_docs if d["kind"] == "Secret"}
     problems = [] if managed == roles else [f"managed roles {managed}, want {roles}"]
+    readers = {p["db_role"] for p in PROCESSES if p.get("db_access") == "read"}
+    groups = {r["name"]: r.get("inRoles") for r in cluster["spec"]["managed"]["roles"]}
     for role in [*roles, "mandate_migrator"]:
-        if (
-            role != "mandate_migrator"
-            and f"CREATE ROLE {role} LOGIN IN ROLE mandate_journal_app;" not in ROLES_SQL
-        ):
-            problems.append(f"roles.sql does not create {role}")
+        group = "mandate_journal_reader" if role in readers else "mandate_journal_app"
+        if role != "mandate_migrator" and f"CREATE ROLE {role} LOGIN IN ROLE {group};" not in ROLES_SQL:
+            problems.append(f"roles.sql does not create {role} in {group}")
+        if role != "mandate_migrator" and groups.get(role) != [group]:
+            problems.append(f"the managed role {role} is in {groups.get(role)}, want {group}")
         secret = secrets.get("journal-role-" + role.replace("_", "-"))
         if secret is None or not secret["stringData"]["pgpass"].startswith(f"*:*:mandate:{role}:"):
             problems.append(f"no pgpass credential for {role}")
@@ -1029,6 +1031,84 @@ def test_only_the_local_cell_and_staging_name_the_model_gateway_s_budgets():
         for block in ("api", "modelGateway")
     }
     assert workspaces["api"] == workspaces["modelGateway"], workspaces
+
+
+IEX = ("--set", "data.source=alpaca-iex")
+
+
+def without_instruments(args: list[str]) -> list[str]:
+    pairs = zip(args[0::2], args[1::2])
+    return [a for pair in pairs if not pair[1].startswith("data.instruments") for a in pair]
+
+
+def iex_staging(*extra: str):
+    return helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *without_instruments(every_image()),
+        "--set", "localImages=false", "--set", "deploymentTier=staging", *LIVE_REGISTRY, *IEX,
+        "--set-json", "data.instruments=[]", *extra,
+    )
+IEX_ARGS = [
+    "run", "--source", "alpaca-iex", "--workspace", "{workspace}", "--store",
+    "/var/lib/mandate/artifacts/datasets/alpaca-iex", "--artifacts", "/var/lib/mandate/artifacts",
+    "--vault-address", "{vault}", "--vault-dir", "/run/mandate/vault", "--probe", "/tmp/process.sock",
+]
+
+
+def env_of(workload: dict) -> dict[str, str]:
+    return {e["name"]: e.get("value", "") for e in first_container(workload).get("env", [])}
+
+
+def test_staging_stores_iex_bars_as_bars_reader_and_its_own_journal_role():
+    """DEC-2283, DEC-2082: with `data.source` alpaca-iex in staging, the data process runs the IEX
+    source for the hosted workspace, logs in to the vault as `bars-reader` with the AppRole and CA
+    copied into its vault directory, reads the control stream as `mandate_data`, reaches Postgres,
+    the vault and its data host alone, and the runtime and executor read the alpaca-iex store."""
+    done = iex_staging("--set", "api.workspace=01KDEM0000000000000000000W")
+    assert done.returncode == 0, done.stderr
+    docs = documents(done.stdout)
+    data = next(w for w in workloads(docs) if w["metadata"]["name"] == "data")
+    args = first_container(data)["args"]
+    vault = re.search(r"https://vault\.[^.]+\.svc:8200", " ".join(args))
+    assert vault, args
+    expected = [a.replace("{workspace}", "01KDEM0000000000000000000W").replace("{vault}", vault.group(0)) for a in IEX_ARGS]
+    assert args == expected and "--instruments" not in args
+    assert "MANDATE_JOURNAL_DSN" in env_of(data)
+    spec = data["spec"]["template"]["spec"]
+    copy_step = next(i for i in spec["initContainers"] if i["name"] == "vault-credentials")
+    assert "/run/secrets/vault-bars-reader/bars-reader.role-id" in copy_step["command"]
+    secrets = [
+        source["secret"]["name"]
+        for volume in spec["volumes"] if volume["name"] == "vault-sources"
+        for source in volume["projected"]["sources"] if "secret" in source
+    ]
+    assert secrets == ["vault-approle-bars-reader"]
+    roles = next(v for v in spec["volumes"] if v["name"] == "journal-role")
+    assert roles["secret"]["secretName"] == "journal-role-mandate-data"
+    labels = data["spec"]["template"]["metadata"]["labels"]
+    assert {k for k, v in labels.items() if k.startswith("mandate.dev/egress-") and v == "true"} == {
+        "mandate.dev/egress-postgres", "mandate.dev/egress-vault", "mandate.dev/egress-market-data",
+    }
+    readers = [w for w in workloads(docs) + managed_pods(docs) if w["metadata"]["name"] in ("runtime", "executor")]
+    assert readers and all(env_of(w)["MANDATE_BARS"].endswith("/datasets/alpaca-iex") for w in readers)
+
+
+def test_the_recorded_source_holds_no_journal_role_and_iex_is_staging_s_alone():
+    """DEC-2082: the local cell's recorded series reads no stream, so its data process holds no
+    journal role and its readers read the cell-recorded store; alpaca-iex outside staging, or
+    beside a recorded instrument list, is refused."""
+    docs = render_all()
+    data = next(w for w in workloads(docs) if w["metadata"]["name"] == "data")
+    assert "MANDATE_JOURNAL_DSN" not in env_of(data)
+    assert "--source" not in first_container(data)["args"]
+    readers = [w for w in workloads(docs) + managed_pods(docs) if w["metadata"]["name"] in ("runtime", "executor")]
+    assert readers and all(env_of(w)["MANDATE_BARS"].endswith("/datasets/cell-recorded") for w in readers)
+    local = helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *without_instruments(every_image()), *IEX,
+        "--set-json", "data.instruments=[]",
+    )
+    assert "stores IEX bars in staging alone" in local.stderr, local.stderr
+    listed = live_gateway("--set", "data.source=alpaca-iex")
+    assert "data.instruments is the recorded series' list" in listed.stderr, listed.stderr
 
 
 def test_staging_names_the_committed_live_registry_byte_for_byte():

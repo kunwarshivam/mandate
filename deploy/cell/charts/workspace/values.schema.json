@@ -436,11 +436,12 @@
       }
     },
     "data": {
-      "description": "The data process's recorded series (mandate-datad): each instrument it stores, with its asset id, which the closes object names, and its series' anchor, `<YYYY-MM-DD>=<close>`; a recording, so only the local cell's values list any",
+      "description": "The data process (mandate-datad): where its bars come from, `recorded` or `alpaca-iex` (DEC-2082), and the recorded series' instruments, each with its asset id, which the closes object names, and its series' anchor, `<YYYY-MM-DD>=<close>`; a recording, so only the local cell's values list any",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "instruments"
+        "instruments",
+        "source"
       ],
       "properties": {
         "instruments": {
@@ -468,6 +469,13 @@
               }
             }
           }
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "recorded",
+            "alpaca-iex"
+          ]
         }
       }
     },

@@ -50,6 +50,12 @@ spec:
     # footer is unresolved (DEC-2511, DEC-2516).
     dispatcher:
       recipient: founder
+    # The data process's bars (DEC-2082): each registered US-equity instrument's settled IEX bars
+    # from data.alpaca.markets, under the platform's paper data key, which it reads once from the
+    # vault as bars-reader and which is never here (DEC-2283). It lists no instrument: the control
+    # stream registers them.
+    data:
+      source: alpaca-iex
     # The model gateway (DEC-2081): it serves the hosted workspace and starts live from the registry
     # file below, which is deploy/cell/model-gateway/registry.json byte for byte (DEC-2282's vetted
     # entries, all evaluating, so it offers nothing until its gate passes, DEC-2216). Its meter

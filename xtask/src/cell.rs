@@ -3696,15 +3696,34 @@ fn login_roles(all: &[Value]) -> Vec<String> {
     roles
 }
 
+/// The read-only group (DEC-2082): a process whose `db_access` is `read`, the data process alone,
+/// logs in as a member of it, which may only select the journal's tables, since its binary does
+/// not itself refuse a write.
+const JOURNAL_READER: &str = "mandate_journal_reader";
+
+/// The group `role` is a member of: [`JOURNAL_READER`] for a process whose `db_access` is
+/// `read`, else `mandate_journal_app`.
+fn role_group(all: &[Value], role: &str) -> &'static str {
+    let read = all
+        .iter()
+        .any(|p| p["db_role"].as_str() == Some(role) && p["db_access"] == "read");
+    if read {
+        JOURNAL_READER
+    } else {
+        "mandate_journal_app"
+    }
+}
+
 /// The journal's roles (journal spec §6.1, infrastructure §3.5), run once at bootstrap as the
 /// superuser in the journal database: CloudNativePG runs it from the journal-db chart, and the
 /// Compose file's Postgres runs the same file. `mandate_journal_owner` owns the tables and only
 /// the migration role may become it; each process type logs in as its own role, a member of
-/// `mandate_journal_app`. Passwords are set elsewhere, from mounted files.
+/// `mandate_journal_app`, or of [`JOURNAL_READER`] when it only reads. Passwords are set
+/// elsewhere, from mounted files.
 pub fn roles_sql(all: &[Value]) -> String {
     let mut sql = format!(
         "-- {GENERATED}.\n\
-         DO $$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_owner') THEN\n    CREATE ROLE mandate_journal_owner NOLOGIN;\n  END IF;\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_app') THEN\n    CREATE ROLE mandate_journal_app NOLOGIN;\n  END IF;\nEND\n$$;\n\
+         DO $$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_owner') THEN\n    CREATE ROLE mandate_journal_owner NOLOGIN;\n  END IF;\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_app') THEN\n    CREATE ROLE mandate_journal_app NOLOGIN;\n  END IF;\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{JOURNAL_READER}') THEN\n    CREATE ROLE {JOURNAL_READER} NOLOGIN;\n  END IF;\nEND\n$$;\n\
          GRANT mandate_journal_owner TO mandate_migrator WITH INHERIT FALSE;\n\
          REVOKE ALL ON DATABASE mandate FROM PUBLIC;\n\
          REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;\n\
@@ -3712,11 +3731,13 @@ pub fn roles_sql(all: &[Value]) -> String {
          REVOKE ALL ON SCHEMA public FROM PUBLIC;\n\
          CREATE SCHEMA IF NOT EXISTS journal AUTHORIZATION mandate_journal_owner;\n\
          GRANT USAGE ON SCHEMA journal TO mandate_journal_app;\n\
+         GRANT USAGE ON SCHEMA journal TO {JOURNAL_READER};\n\
          CREATE SCHEMA IF NOT EXISTS deploy AUTHORIZATION mandate_migrator;\n"
     );
     for role in login_roles(all) {
+        let group = role_group(all, &role);
         sql.push_str(&format!(
-            "DO $$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{role}') THEN\n    CREATE ROLE {role} LOGIN IN ROLE mandate_journal_app;\n  END IF;\nEND\n$$;\n\
+            "DO $$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{role}') THEN\n    CREATE ROLE {role} LOGIN IN ROLE {group};\n  END IF;\nEND\n$$;\n\
              GRANT CONNECT ON DATABASE mandate TO {role};\n\
              ALTER ROLE {role} IN DATABASE mandate SET search_path = journal;\n"
         ));
@@ -6760,7 +6781,10 @@ mod tests {
             .context("processes.json has no data process")?;
         assert_eq!(process["image"], DATA_PROCESS);
         assert_eq!(process["built"], true);
-        assert_eq!(process["db_role"], Value::Null);
+        assert_eq!(
+            process["db_role"], "mandate_data",
+            "the IEX source's own journal role, which the chart drops for the recorded source (DEC-2082)"
+        );
         assert_eq!(process["probe"][0], "/mandate-datad");
         Ok(())
     }

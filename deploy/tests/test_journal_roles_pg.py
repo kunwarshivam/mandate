@@ -10,6 +10,7 @@ outside what the group was granted.
 """
 
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -26,6 +27,17 @@ MIGRATIONS = ROOT / "migrations"
 # The search path the workspace chart's DSN sets in the connection's options (mandate.journalDsn).
 OPTIONS = "-c search_path=journal"
 LATE_ROLE = "mandate_late"
+LATE_READER = "mandate_late_reader"
+# roles.sql before the read-only group (DEC-2082), as a journal bootstrapped then holds it: the
+# group's creation and grant removed, and its one member made the application group's.
+OLD_ROLES_SQL = re.sub(
+    r"  IF NOT EXISTS \(SELECT FROM pg_roles WHERE rolname = 'mandate_journal_reader'\) THEN\n"
+    r"    CREATE ROLE mandate_journal_reader NOLOGIN;\n  END IF;\n",
+    "",
+    ROLES_SQL.read_text(),
+).replace("IN ROLE mandate_journal_reader", "IN ROLE mandate_journal_app").replace(
+    "GRANT USAGE ON SCHEMA journal TO mandate_journal_reader;\n", ""
+)
 
 
 def postgres_bin() -> Path | None:
@@ -47,8 +59,8 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-@pytest.fixture(scope="module")
-def server() -> Iterator[dict]:
+def postgres() -> Iterator[dict]:
+    """A throwaway PostgreSQL 18 server on a socket of its own, stopped and removed after."""
     work = Path(tempfile.mkdtemp(prefix="journal-roles-"))
     data, sockets = work / "data", work / "sock"
     sockets.mkdir()
@@ -73,6 +85,11 @@ def server() -> Iterator[dict]:
         shutil.rmtree(work, ignore_errors=True)
 
 
+@pytest.fixture(scope="module")
+def server() -> Iterator[dict]:
+    yield from postgres()
+
+
 def psql(server: dict, user: str, sql: str, database: str = "mandate", options: str = "") -> subprocess.CompletedProcess:
     env = {**os.environ, "PGHOST": server["host"], "PGPORT": str(server["port"]), "PGOPTIONS": options}
     return subprocess.run(
@@ -86,18 +103,25 @@ def ok(done: subprocess.CompletedProcess) -> str:
     return done.stdout.strip()
 
 
-@pytest.fixture(scope="module")
-def bootstrapped(server: dict) -> dict:
-    """The journal as CloudNativePG bootstraps it, then a role added the managed way."""
+def bootstrap(server: dict, roles_sql: str) -> None:
+    """The journal as CloudNativePG bootstraps it: the migrator's database, then `roles_sql`."""
     ok(psql(server, "postgres", "CREATE ROLE mandate_migrator LOGIN", database="postgres"))
     ok(psql(server, "postgres", "CREATE DATABASE mandate OWNER mandate_migrator", database="postgres"))
     env = {**os.environ, "PGHOST": server["host"], "PGPORT": str(server["port"])}
     roles = subprocess.run(
-        ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "mandate", "-f", ROLES_SQL],
-        capture_output=True, text=True, env=env,
+        ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "mandate"],
+        input=roles_sql, capture_output=True, text=True, env=env,
     )
     assert roles.returncode == 0, roles.stderr
+
+
+@pytest.fixture(scope="module")
+def bootstrapped(server: dict) -> dict:
+    """The journal bootstrapped from today's roles.sql, then an application role and a read-only
+    role added the managed way."""
+    bootstrap(server, ROLES_SQL.read_text())
     ok(psql(server, "postgres", f"CREATE ROLE {LATE_ROLE} LOGIN INHERIT IN ROLE mandate_journal_app"))
+    ok(psql(server, "postgres", f"CREATE ROLE {LATE_READER} LOGIN INHERIT IN ROLE mandate_journal_reader"))
     return server
 
 
@@ -131,3 +155,44 @@ def test_the_group_gains_nothing_a_role_did_not_already_have(bootstrapped: dict)
         assert done.returncode != 0 and "permission denied" in done.stderr, (statement, done.stderr)
     other = psql(bootstrapped, LATE_ROLE, "SELECT 1", database="postgres", options=OPTIONS)
     assert other.returncode != 0, "the group connects to the journal's database alone"
+
+
+def test_a_reader_selects_the_journal_and_writes_nothing(bootstrapped: dict):
+    """DEC-2082: a member of the read-only group, as the data process is, reads the journal's
+    tables once the Job has run, and every write is refused, since its binary refuses none."""
+    assert migrate(bootstrapped).returncode == 0
+    assert ok(psql(bootstrapped, LATE_READER, "SELECT count(*) FROM events", options=OPTIONS)) == "0"
+    assert ok(psql(bootstrapped, LATE_READER, "SELECT count(*) FROM stream_heads", options=OPTIONS)) == "0"
+    writes = [
+        "INSERT INTO event_ids DEFAULT VALUES",
+        "INSERT INTO events SELECT * FROM events",
+        "UPDATE stream_heads SET seq = seq",
+        "DELETE FROM events",
+        "CREATE TABLE journal.extra (x int)",
+    ]
+    for statement in writes:
+        done = psql(bootstrapped, LATE_READER, statement, options=OPTIONS)
+        assert done.returncode != 0 and "permission denied" in done.stderr, (statement, done.stderr)
+
+
+@pytest.fixture(scope="module")
+def old_server() -> Iterator[dict]:
+    yield from postgres()
+
+
+def test_the_job_runs_on_a_journal_bootstrapped_before_the_reader_group(old_server: dict):
+    """DEC-2082: on a journal whose bootstrap made no read-only group, the Job grants it nothing and
+    still applies the migrations, so the workspace release never waits on the group; once the
+    managed roles have made it, the next run grants it its reads."""
+    bootstrap(old_server, OLD_ROLES_SQL)
+    group = psql(old_server, "postgres", "SELECT count(*) FROM pg_roles WHERE rolname = 'mandate_journal_reader'")
+    assert ok(group) == "0"
+    done = migrate(old_server)
+    assert done.returncode == 0 and "applied: 0001_journal.sql" in done.stdout, done.stderr
+    ok(psql(old_server, "postgres", "CREATE ROLE mandate_journal_reader NOLOGIN"))
+    ok(psql(old_server, "postgres", f"CREATE ROLE {LATE_READER} LOGIN INHERIT IN ROLE mandate_journal_reader"))
+    denied = psql(old_server, LATE_READER, "SELECT 1", options=OPTIONS)
+    assert denied.returncode != 0, "the group has nothing before the next run"
+    again = migrate(old_server)
+    assert again.returncode == 0, again.stderr
+    assert ok(psql(old_server, LATE_READER, "SELECT count(*) FROM events", options=OPTIONS)) == "0"
