@@ -734,6 +734,40 @@ fn reconciled_then(
     Ok((journal, unknown))
 }
 
+/// The sell of the agent's 10 shares filled, the account ends flat at the broker and in the
+/// model, and no reconciliation found an unexplained difference: the one booking the sell adopts
+/// its state and fill (§11), and nothing works after it. The fill is booked as a `FillApplied`, or
+/// as a `LateFillApplied` when the order was already terminal when its fill was read, as a kill
+/// switch's flatten is once its pending cancel reads it filled.
+fn assert_ends_flat_and_explained(journal: &Journal) -> Result<(), Error> {
+    let sold = |kind: &str| {
+        journal.payloads(kind).iter().any(|fill| {
+            fill.get("side").and_then(Value::as_str) == Some("sell")
+                && fill.get("qty_gross").and_then(Value::as_str) == Some("10")
+        })
+    };
+    assert!(
+        sold("FillApplied") || sold("LateFillApplied"),
+        "the sell fills"
+    );
+    let positions = journal.payloads("BrokerPositionObserved");
+    let last = positions.last().ok_or("a position is observed")?;
+    assert_eq!(
+        (
+            last.get("model_qty").and_then(Value::as_str),
+            last.get("broker_qty").and_then(Value::as_str)
+        ),
+        (Some("0"), Some("0")),
+        "the account ends flat: {last:?}"
+    );
+    let runs = journal.payloads("ReconciliationRun");
+    assert!(
+        runs.iter().all(|run| result(run) != Some("mismatch")),
+        "no run finds an unexplained difference: {runs:?}"
+    );
+    Ok(())
+}
+
 /// The client order ids of the sells of 10 the process submitted.
 fn sells_of_ten(journal: &Journal) -> Vec<String> {
     journal
@@ -772,13 +806,6 @@ fn a_filled_brackets_legs_never_read_unknown_and_a_risk_exit_goes_out() -> Resul
                 != Some("unknown_order_in_flight")),
         "nothing holds on an unknown order"
     );
-    assert!(
-        journal.payloads("FillApplied").iter().any(|fill| {
-            fill.get("side").and_then(Value::as_str) == Some("sell")
-                && fill.get("qty_gross").and_then(Value::as_str) == Some("10")
-        }),
-        "the exit fills"
-    );
     let exits: Vec<String> = journal
         .payloads("OrderStateChanged")
         .iter()
@@ -798,26 +825,12 @@ fn a_filled_brackets_legs_never_read_unknown_and_a_risk_exit_goes_out() -> Resul
         "the exit, which the fixture fills on placement and so lists in no open-orders read, may \
          pass through unknown, but its own run books its fill and it ends filled: {exits:?}"
     );
-    let positions = journal.payloads("BrokerPositionObserved");
-    let last = positions.last().ok_or("a position is observed")?;
-    assert_eq!(
-        (
-            last.get("model_qty").and_then(Value::as_str),
-            last.get("broker_qty").and_then(Value::as_str)
-        ),
-        (Some("0"), Some("0")),
-        "the account ends flat: {last:?}"
-    );
-    let runs = journal.payloads("ReconciliationRun");
-    assert!(
-        runs.iter().all(|run| result(run) != Some("mismatch")),
-        "no run finds an unexplained difference; the one booking the exit adopts its state and \
-         fill (§11), and nothing works after it: {runs:?}"
-    );
+    assert_ends_flat_and_explained(&journal)?;
     Ok(())
 }
 
-/// And a kill switch applied after ten reconciliations flattens the agent's 10 shares.
+/// And a kill switch applied after ten reconciliations flattens the agent's 10 shares: its sell
+/// goes out and fills, the account ends flat, and no run finds an unexplained difference.
 #[test]
 fn a_filled_brackets_kill_switch_flattens_after_many_reconciliations() -> Result<(), Error> {
     let (journal, unknown) =
@@ -832,5 +845,5 @@ fn a_filled_brackets_kill_switch_flattens_after_many_reconciliations() -> Result
                 != Some("unknown_order_in_flight")),
         "nothing holds on an unknown order"
     );
-    Ok(())
+    assert_ends_flat_and_explained(&journal)
 }
