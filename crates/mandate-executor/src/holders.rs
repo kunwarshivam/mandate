@@ -526,9 +526,9 @@ mod tests {
     };
     use crate::error::ExecutorError;
     use crate::fold::{fees_charged, fill_applied, position_released};
-    use crate::ids::ClientOrderId;
+    use crate::ids::{ClientOrderId, Leg};
     use crate::payload::{object, text};
-    use crate::state::{AccountSwitch, ExecutorState};
+    use crate::state::{AccountSwitch, EVERY_AGENT, ExecutorState};
     use crate::types::{
         AccountRef, AccountScope, AgentId, EventId, Mode, Order, OrderState, Purpose, RiskClock,
         Seq, WorkspaceId,
@@ -573,9 +573,32 @@ mod tests {
         AssetFee(usize, i64),
         /// Agent `a`'s resting protective leg of `q` in instrument `i` (DEC-2849 item 8).
         Protect(u8, usize, i64),
-        /// Agent `a`'s working risk exit of `q` in instrument `i`, none of it filled yet.
-        Exit(u8, usize, i64),
+        /// Agent `a`'s OCO for `q` in `i`: its take-profit and stop legs, `…-tp` and `…-sl`, each
+        /// for `q`, which count once, as the larger (I9).
+        Oco(u8, usize, i64),
+        /// A resting protective leg of `q` in `i` that names no agent, or `*` when `.2`: no
+        /// holder's, so it counts in no holder's legs (§5.4's unattributed leg).
+        Unattributed(usize, i64, bool),
+        /// Agent `a`'s working sell of `q` in `i` for [`EXITS`]`[k]`, none of it filled yet.
+        Exit(u8, usize, i64, usize),
+        /// The `k`-th sell rested in `i` (by [`Event::Protect`], [`Event::Oco`],
+        /// [`Event::Unattributed`] or [`Event::Exit`], live or not) is cancelled.
+        Cancel(usize, usize),
+        /// The `k`-th sell rested in `i` fills `f` more, all of what it has left when `f` is at
+        /// least that. Only an agent's own leg or exit fills here; an OCO's leg or a leg of no
+        /// agent is only cancelled.
+        Fill(usize, usize, i64),
     }
+
+    /// The sells that count as an agent's working exits beside its legs: every sell that is not
+    /// protective and adds no risk, the watchdog's and the bound's `RiskExit` among them. An
+    /// opening's sell remainder, which adds risk, counts in none.
+    const EXITS: [Purpose; 4] = [
+        Purpose::RiskExit,
+        Purpose::DiscretionaryExit,
+        Purpose::OwnerExit,
+        Purpose::Flatten,
+    ];
 
     fn event() -> impl Strategy<Value = Event> {
         let at = 0_usize..INSTRUMENTS.len();
@@ -595,9 +618,15 @@ mod tests {
     fn leg_event() -> impl Strategy<Value = Event> {
         let at = 0_usize..INSTRUMENTS.len();
         prop_oneof![
-            3 => event(),
-            1 => (0_u8..AGENTS, at.clone(), 1_i64..=20).prop_map(|(a, i, q)| Event::Protect(a, i, q)),
-            1 => (0_u8..AGENTS, at, 1_i64..=10).prop_map(|(a, i, q)| Event::Exit(a, i, q)),
+            6 => event(),
+            2 => (0_u8..AGENTS, at.clone(), 1_i64..=20).prop_map(|(a, i, q)| Event::Protect(a, i, q)),
+            1 => (0_u8..AGENTS, at.clone(), 1_i64..=20).prop_map(|(a, i, q)| Event::Oco(a, i, q)),
+            1 => (at.clone(), 1_i64..=20, any::<bool>())
+                .prop_map(|(i, q, star)| Event::Unattributed(i, q, star)),
+            2 => (0_u8..AGENTS, at.clone(), 1_i64..=10, 0..EXITS.len())
+                .prop_map(|(a, i, q, k)| Event::Exit(a, i, q, k)),
+            1 => (at.clone(), 0_usize..8).prop_map(|(i, k)| Event::Cancel(i, k)),
+            2 => (at, 0_usize..8, 1_i64..=10).prop_map(|(i, k, f)| Event::Fill(i, k, f)),
         ]
     }
 
@@ -609,9 +638,56 @@ mod tests {
         lots: BTreeMap<u8, i64>,
         owner: i64,
         working: i64,
-        /// Each agent's resting protective legs, and its own working exits.
-        legs: BTreeMap<u8, i64>,
-        exits: BTreeMap<u8, i64>,
+        /// Every sell rested in the instrument, in the order it rested, live or not.
+        resting: Vec<Resting>,
+        /// Each agent's own orders' buy fills less their sell fills, as DEC-160's single-holder
+        /// rule reads them: releases, closes and fees aside.
+        raw: BTreeMap<u8, i64>,
+    }
+
+    /// One rested sell as the oracle keeps it, apart from the executor's order.
+    #[derive(Debug)]
+    struct Resting {
+        id: ClientOrderId,
+        /// The agent it names; `None` for a leg of no agent or of `*`.
+        agent: Option<u8>,
+        /// Whether a leg of no agent names `*`, which no later fill attributes.
+        star: bool,
+        protective: bool,
+        /// The OCO whose leg it is, by the OCO's parent id.
+        pair: Option<String>,
+        qty: i64,
+        filled: i64,
+        live: bool,
+    }
+
+    impl Resting {
+        fn new(
+            id: ClientOrderId,
+            agent: Option<u8>,
+            protective: bool,
+            pair: Option<String>,
+            qty: i64,
+        ) -> Self {
+            Self {
+                id,
+                agent,
+                protective,
+                pair,
+                qty,
+                filled: 0,
+                live: true,
+                star: false,
+            }
+        }
+
+        fn left(&self) -> i64 {
+            if self.live {
+                self.qty.saturating_sub(self.filled)
+            } else {
+                0
+            }
+        }
     }
 
     impl Oracle {
@@ -650,17 +726,82 @@ mod tests {
             order
         }
 
+        /// Agent `a`'s own orders filled `q` more, bought when positive, sold when negative.
+        fn traded(&mut self, a: u8, q: i64) {
+            let raw = self.raw.entry(a).or_insert(0);
+            *raw = raw.saturating_add(q);
+        }
+
+        /// DEC-160's rule, retried after a fill as the fold retries it: a leg that names no agent
+        /// (not `*`) takes the one agent whose own orders' net fills are the whole position.
+        fn reattribute(&mut self) {
+            let holding: Vec<(u8, i64)> = self
+                .raw
+                .iter()
+                .filter(|(_, net)| **net != 0)
+                .map(|(a, net)| (*a, *net))
+                .collect();
+            let position = self.position();
+            let [(a, net)] = holding.as_slice() else {
+                return;
+            };
+            if *net != position {
+                return;
+            }
+            for rest in &mut self.resting {
+                if rest.agent.is_none() && !rest.star {
+                    rest.agent = Some(*a);
+                }
+            }
+        }
+
+        /// Each agent's live protective legs, what they have left to sell, an OCO's two legs
+        /// counted once, as the larger.
+        fn legs(&self) -> BTreeMap<u8, i64> {
+            let mut by_order: BTreeMap<(u8, String), i64> = BTreeMap::new();
+            for rest in self.resting.iter().filter(|rest| rest.protective) {
+                let Some(a) = rest.agent else {
+                    continue;
+                };
+                let key = rest
+                    .pair
+                    .clone()
+                    .unwrap_or_else(|| rest.id.as_str().to_owned());
+                let counted = by_order.entry((a, key)).or_insert(0);
+                *counted = (*counted).max(rest.left());
+            }
+            let mut legs = BTreeMap::new();
+            for ((a, _), left) in by_order {
+                let sum = legs.entry(a).or_insert(0_i64);
+                *sum = sum.saturating_add(left);
+            }
+            legs.retain(|_, left| *left > 0);
+            legs
+        }
+
+        /// Each agent's live exits, what they have left to sell.
+        fn exits(&self) -> BTreeMap<u8, i64> {
+            let mut exits = BTreeMap::new();
+            for rest in self.resting.iter().filter(|rest| !rest.protective) {
+                if let Some(a) = rest.agent {
+                    let sum = exits.entry(a).or_insert(0_i64);
+                    *sum = sum.saturating_add(rest.left());
+                }
+            }
+            exits
+        }
+
         /// Item 8's gaps: each holder's Pᵢ less its own legs and exits, where that is above zero.
         fn gaps(&self) -> BTreeMap<u8, i64> {
+            let (legs, exits) = (self.legs(), self.exits());
             self.coverage()
                 .into_iter()
                 .map(|(a, p)| {
-                    let own = self
-                        .legs
+                    let own = legs
                         .get(&a)
                         .copied()
                         .unwrap_or(0)
-                        .saturating_add(self.exits.get(&a).copied().unwrap_or(0));
+                        .saturating_add(exits.get(&a).copied().unwrap_or(0));
                     (a, p.saturating_sub(own))
                 })
                 .filter(|(_, gap)| *gap > 0)
@@ -670,12 +811,12 @@ mod tests {
         /// Item 8's excess: each agent's legs beyond its Pᵢ, zero for an agent holding no lots.
         fn excess(&self) -> BTreeMap<u8, i64> {
             let covered = self.coverage();
-            self.legs
-                .iter()
+            self.legs()
+                .into_iter()
                 .map(|(a, legs)| {
                     (
-                        *a,
-                        legs.saturating_sub(covered.get(a).copied().unwrap_or(0)),
+                        a,
+                        legs.saturating_sub(covered.get(&a).copied().unwrap_or(0)),
                     )
                 })
                 .filter(|(_, over)| *over > 0)
@@ -716,6 +857,8 @@ mod tests {
         view: ExecutorState,
         oracles: BTreeMap<usize, Oracle>,
         seq: u64,
+        /// Whether the event being applied folded a fill, after which the fold reattributes.
+        folded: bool,
     }
 
     impl Run {
@@ -724,6 +867,7 @@ mod tests {
                 view: state(),
                 oracles: BTreeMap::new(),
                 seq: 0,
+                folded: false,
             }
         }
 
@@ -754,6 +898,7 @@ mod tests {
             if let Some(order) = order {
                 fields.push(("client_order_id", text(order.as_str())));
             }
+            self.folded = true;
             fill_applied(&mut self.view, &object(fields)?, seq)
         }
 
@@ -797,22 +942,26 @@ mod tests {
             Ok(())
         }
 
-        /// Places agent `a`'s sell of `qty` for `purpose`, accepted and none of it filled.
+        /// Places a sell of `qty` for `purpose` naming `owner`, under `id` or else a fresh one,
+        /// accepted and none of it filled; it returns the id.
         fn rest(
             &mut self,
-            a: u8,
+            (owner, id): (Option<AgentId>, Option<ClientOrderId>),
             i: usize,
             purpose: Purpose,
             qty: i64,
-        ) -> Result<(), ExecutorError> {
+        ) -> Result<ClientOrderId, ExecutorError> {
             let seq = self.next();
-            let id = ClientOrderId::parse(&format!("md-r{}-{a}", seq.0))?;
+            let id = match id {
+                Some(id) => id,
+                None => ClientOrderId::parse(&format!("md-r{}", seq.0))?,
+            };
             self.view.orders.insert(
                 id.clone(),
                 Order {
-                    client_order_id: id,
+                    client_order_id: id.clone(),
                     intent_id: None,
-                    agent: Some(agent(a)),
+                    agent: owner,
                     instrument: instrument(i)?,
                     side: Side::Sell,
                     qty: shares(qty)?,
@@ -827,7 +976,7 @@ mod tests {
                     created_on: None,
                 },
             );
-            Ok(())
+            Ok(id)
         }
 
         /// Applies `event` to the oracle and to the fold. An event the account could not have (a
@@ -842,17 +991,24 @@ mod tests {
                 | Event::Close(i, _)
                 | Event::AssetFee(i, _)
                 | Event::Protect(_, i, _)
-                | Event::Exit(_, i, _) => i,
+                | Event::Oco(_, i, _)
+                | Event::Unattributed(i, _, _)
+                | Event::Exit(_, i, _, _)
+                | Event::Cancel(i, _)
+                | Event::Fill(i, _, _) => i,
             };
             let mut oracle = self.oracles.remove(&i).unwrap_or_default();
             let held = oracle.position();
+            self.folded = false;
             match *event {
                 Event::Buy(a, _, q) => {
                     self.order(a, i, Side::Buy, q, q)?;
                     oracle.add(a, q);
+                    oracle.traded(a, q);
                 }
                 Event::Sell(a, _, q, w) if q <= held => {
                     self.order(a, i, Side::Sell, q.saturating_add(w), q)?;
+                    oracle.traded(a, q.saturating_neg());
                     let beyond = q.saturating_sub(oracle.take(a, q));
                     oracle.owner = oracle.owner.saturating_sub(beyond);
                     oracle.working = oracle.working.saturating_add(w);
@@ -910,17 +1066,83 @@ mod tests {
                     oracle.close(q);
                 }
                 Event::Protect(a, _, q) => {
-                    self.rest(a, i, Purpose::Protective, q)?;
-                    let legs = oracle.legs.entry(a).or_insert(0);
-                    *legs = legs.saturating_add(q);
+                    let id = self.rest((Some(agent(a)), None), i, Purpose::Protective, q)?;
+                    oracle
+                        .resting
+                        .push(Resting::new(id, Some(a), true, None, q));
                 }
-                Event::Exit(a, _, q) if q <= held => {
-                    self.rest(a, i, Purpose::RiskExit, q)?;
-                    let exits = oracle.exits.entry(a).or_insert(0);
-                    *exits = exits.saturating_add(q);
+                Event::Oco(a, _, q) => {
+                    let parent = ClientOrderId::parse(&format!("md-e{}-p{}", a, self.seq))?;
+                    for leg in [Leg::TakeProfit, Leg::Stop] {
+                        let id = Some(parent.leg(leg)?);
+                        let id = self.rest((Some(agent(a)), id), i, Purpose::Protective, q)?;
+                        let pair = Some(parent.as_str().to_owned());
+                        oracle
+                            .resting
+                            .push(Resting::new(id, Some(a), true, pair, q));
+                    }
+                }
+                Event::Unattributed(_, q, star) => {
+                    let owner = star.then(|| AgentId(EVERY_AGENT.to_owned()));
+                    let id = self.rest((owner, None), i, Purpose::Protective, q)?;
+                    let mut leg = Resting::new(id, None, true, None, q);
+                    leg.star = star;
+                    oracle.resting.push(leg);
+                }
+                Event::Exit(a, _, q, k) if q <= held => {
+                    let purpose = EXITS.get(k).copied().unwrap_or(Purpose::RiskExit);
+                    let id = self.rest((Some(agent(a)), None), i, purpose, q)?;
+                    oracle
+                        .resting
+                        .push(Resting::new(id, Some(a), false, None, q));
                     oracle.working = oracle.working.saturating_add(q);
                 }
+                Event::Cancel(_, k) => {
+                    let len = oracle.resting.len();
+                    if let Some(rest) = oracle.resting.get_mut(k.checked_rem(len).unwrap_or(0)) {
+                        if !rest.protective {
+                            oracle.working = oracle.working.saturating_sub(rest.left());
+                        }
+                        rest.live = false;
+                        if let Some(order) = self.view.orders.get_mut(&rest.id) {
+                            order.state = OrderState::Canceled;
+                        }
+                    }
+                }
+                Event::Fill(_, k, f) => {
+                    let len = oracle.resting.len();
+                    let at = k.checked_rem(len).unwrap_or(0);
+                    let fill = oracle.resting.get(at).and_then(|rest| {
+                        let a = rest.agent?;
+                        let q = f.min(rest.left());
+                        (rest.pair.is_none() && q > 0 && q <= held)
+                            .then(|| (a, q, rest.id.clone(), rest.protective))
+                    });
+                    if let Some((a, q, id, protective)) = fill {
+                        self.fill(i, "sell", q, Some(&id))?;
+                        oracle.traded(a, q.saturating_neg());
+                        let beyond = q.saturating_sub(oracle.take(a, q));
+                        oracle.owner = oracle.owner.saturating_sub(beyond);
+                        if !protective {
+                            oracle.working = oracle.working.saturating_sub(q);
+                        }
+                        if let Some(rest) = oracle.resting.get_mut(at) {
+                            rest.filled = rest.filled.saturating_add(q);
+                            rest.live = rest.filled < rest.qty;
+                            if let Some(order) = self.view.orders.get_mut(&id) {
+                                order.state = if rest.live {
+                                    OrderState::PartiallyFilled
+                                } else {
+                                    OrderState::Filled
+                                };
+                            }
+                        }
+                    }
+                }
                 _ => {}
+            }
+            if self.folded {
+                oracle.reattribute();
             }
             self.oracles.insert(i, oracle);
             Ok(())
@@ -1254,6 +1476,12 @@ mod tests {
     /// sixteen. Two holders' ten and five each need their own, and one's legs never fill the
     /// other's gap. In the worked example (each holds five, the owner sold four), five-share legs
     /// each leave agent 0 four over its Pᵢ of one. A released agent's legs are all excess.
+    ///
+    /// R3 on #2879: a cancelled leg covers nothing, and a filled one only what it has left, its
+    /// fill having sold the agent's lots; a part-filled exit counts its remainder. A leg of no
+    /// agent, or of `*`, is no holder's: it fills no gap and is no agent's excess. An OCO's two
+    /// legs count once, and one of them cancelled leaves the other covering. A discretionary exit,
+    /// an owner exit and a flatten count as working exits beside a risk exit.
     #[test]
     fn each_holders_legs_cover_its_own_coverage() -> Result<(), ExecutorError> {
         let at = instrument(0)?;
@@ -1277,7 +1505,7 @@ mod tests {
                     Event::Buy(0, 0, 10),
                     Event::Buy(1, 0, 5),
                     Event::Protect(0, 0, 4),
-                    Event::Exit(0, 0, 3),
+                    Event::Exit(0, 0, 3, 0),
                 ],
                 vec![(0, 3), (1, 5)],
                 vec![],
@@ -1301,6 +1529,91 @@ mod tests {
                 ],
                 vec![],
                 vec![(0, 10)],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 10),
+                    Event::Protect(0, 0, 10),
+                    Event::Cancel(0, 0),
+                ],
+                vec![(0, 10)],
+                vec![],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 10),
+                    Event::Protect(0, 0, 4),
+                    Event::Fill(0, 0, 4),
+                ],
+                vec![(0, 6)],
+                vec![],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 10),
+                    Event::Protect(0, 0, 10),
+                    Event::Fill(0, 0, 3),
+                ],
+                vec![],
+                vec![],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 10),
+                    Event::Exit(0, 0, 6, 0),
+                    Event::Fill(0, 0, 2),
+                ],
+                vec![(0, 4)],
+                vec![],
+            ),
+            (
+                vec![Event::Buy(0, 0, 10), Event::Unattributed(0, 10, false)],
+                vec![(0, 10)],
+                vec![],
+            ),
+            (
+                vec![Event::Buy(0, 0, 10), Event::Unattributed(0, 4, true)],
+                vec![(0, 10)],
+                vec![],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 4),
+                    Event::Unattributed(0, 10, false),
+                    Event::Unattributed(0, 10, true),
+                    Event::Protect(0, 0, 6),
+                ],
+                vec![],
+                vec![(0, 2)],
+            ),
+            (
+                vec![Event::Buy(0, 0, 10), Event::Oco(0, 0, 10)],
+                vec![],
+                vec![],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 10),
+                    Event::Oco(0, 0, 10),
+                    Event::Cancel(0, 1),
+                ],
+                vec![],
+                vec![],
+            ),
+            (
+                vec![Event::Buy(0, 0, 10), Event::Oco(0, 0, 12)],
+                vec![],
+                vec![(0, 2)],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 10),
+                    Event::Exit(0, 0, 3, 1),
+                    Event::Exit(0, 0, 2, 2),
+                    Event::Exit(0, 0, 1, 3),
+                ],
+                vec![(0, 4)],
+                vec![],
             ),
         ];
         for (events, gaps, excess) in cases {
