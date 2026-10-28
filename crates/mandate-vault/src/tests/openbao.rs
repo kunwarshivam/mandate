@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use crate::openbao::{Http, ProvisionError, Refused, provisioned_policy};
 use crate::openbao::{
     OpenBaoConfig, OpenBaoSource, cas_refusal, kubernetes_login_path, kubernetes_login_refusal,
-    kubernetes_login_verdict, kubernetes_namespace_verdict, kv_upgrade_refusal,
+    kubernetes_login_verdict, kubernetes_namespace_verdict, kv_settled, kv_upgrade_refusal,
     lost_or_denied_verdict, provision, provisioned_identities, refusal, role_settings,
     seal_verdict, secret_id_identities, taken_read,
 };
@@ -225,6 +225,20 @@ async fn provisioning_an_unreachable_vault_is_an_outage() {
         provisioned.map(|credentials| credentials.len()),
         Err(ProvisionError::from(SourceError::Unavailable)),
         "a vault that never answered refused nothing, so no request is named"
+    );
+}
+
+/// E21-32v without a server: provisioning's settle check asks the vault for the KV mount's
+/// configuration, so a vault nobody answers for is an outage there, never a mount taken as
+/// settled unasked; with a server, `openbao_server`'s test pins where provisioning asks it.
+#[tokio::test(flavor = "current_thread")]
+async fn the_kv_settle_check_asks_the_vault() {
+    let config = unreachable();
+    let http = Http::new(&config).unwrap();
+    let token = SecretString::from("operator".to_owned());
+    assert_eq!(
+        kv_settled(&http, Some(&token), &config.mounts).await,
+        Err(SourceError::Unavailable)
     );
 }
 

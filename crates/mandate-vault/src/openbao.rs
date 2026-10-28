@@ -1391,7 +1391,7 @@ pub fn provisioned_policy(
 /// Reads the KV mount's configuration, so a mount that is still upgrading answers
 /// [`SourceError::KvUpgrading`] before provisioning writes anything to it, or any policy, role or
 /// secret id: the caller waits and provisions again (E21-32v).
-async fn kv_settled(
+pub(crate) async fn kv_settled(
     http: &Http,
     token: Option<&SecretString>,
     mounts: &Mounts,
