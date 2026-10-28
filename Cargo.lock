@@ -2334,7 +2334,11 @@ version = "0.0.0"
 dependencies = [
  "mandate-canon",
  "mandate-connections",
+ "mandate-gate-context",
+ "mandate-journal",
+ "mandate-research",
  "mandate-sources",
+ "mandate-store",
  "mandate-time",
  "mandate-vault",
  "secrecy",
