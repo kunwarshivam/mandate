@@ -620,7 +620,6 @@ fn all_documents() -> [Document; 4] {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn the_history_is_the_deployment_then_each_confirmation_for_the_agent_in_order() {
     let world = seeded();
     let [b, s, l, r] = all_documents();
@@ -692,7 +691,6 @@ fn the_history_is_the_deployment_then_each_confirmation_for_the_agent_in_order()
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn a_confirmed_version_is_in_effect_only_once_the_executor_applied_it() {
     let mut world = seeded();
     let [b, s, l, r] = all_documents();
@@ -766,7 +764,6 @@ fn a_confirmed_version_is_in_effect_only_once_the_executor_applied_it() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn a_version_confirmed_twice_is_listed_twice_each_with_its_own_application() {
     let (b, s) = (base(), smaller());
     let f = fixture(&[&b, &s]);
@@ -834,7 +831,6 @@ fn a_version_confirmed_twice_is_listed_twice_each_with_its_own_application() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn each_classification_is_the_servers_from_the_stored_documents() {
     let world = seeded();
     let [b, s, l, r] = all_documents();
@@ -876,7 +872,6 @@ fn each_classification_is_the_servers_from_the_stored_documents() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn a_classification_the_store_cannot_compute_is_null_never_a_guess() {
     let world = seeded();
     let [b, _, l, _] = all_documents();
@@ -902,7 +897,6 @@ fn a_classification_the_store_cannot_compute_is_null_never_a_guess() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn an_agent_whose_account_stream_is_not_found_has_nothing_in_effect() {
     let b = base();
     let f = fixture(&[&b]);
@@ -924,7 +918,6 @@ fn an_agent_whose_account_stream_is_not_found_has_nothing_in_effect() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn a_stopped_agent_keeps_its_history_and_has_nothing_in_effect() {
     let mut world = seeded();
     let [b, s, l, r] = all_documents();
@@ -942,7 +935,6 @@ fn a_stopped_agent_keeps_its_history_and_has_nothing_in_effect() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn an_agent_never_deployed_is_404_even_when_a_confirmation_names_it() {
     let world = seeded();
     let [b, s, l, r] = all_documents();
@@ -961,7 +953,6 @@ fn an_agent_never_deployed_is_404_even_when_a_confirmation_names_it() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn an_unknown_or_malformed_agent_is_the_one_404() {
     let world = seeded();
     let f = fixture(&[]);
@@ -977,7 +968,6 @@ fn an_unknown_or_malformed_agent_is_the_one_404() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn another_workspaces_agent_is_the_same_404_and_leaks_nothing() {
     let world = seeded();
     let [b, s, l, r] = all_documents();
@@ -1009,7 +999,6 @@ fn another_workspaces_agent_is_the_same_404_and_leaks_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn a_member_of_another_workspace_only_is_404_and_a_non_member_too() {
     let world = seeded();
     let f = fixture(&[]);
@@ -1029,7 +1018,6 @@ fn a_member_of_another_workspace_only_is_404_and_a_non_member_too() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn the_view_row_admits_every_role_it_lists_and_refuses_the_rest() {
     let world = seeded();
     let [b, s, l, r] = all_documents();
@@ -1069,7 +1057,6 @@ fn the_view_row_admits_every_role_it_lists_and_refuses_the_rest() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn without_a_live_session_it_is_the_one_401_and_a_reduction_only_session_is_refused() {
     let world = seeded();
     let f = fixture(&[]);
@@ -1095,7 +1082,6 @@ fn without_a_live_session_it_is_the_one_401_and_a_reduction_only_session_is_refu
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn an_unreadable_control_stream_fails_the_membership_read_first() {
     let world = seeded();
     let f = fixture(&[]);
@@ -1108,7 +1094,6 @@ fn an_unreadable_control_stream_fails_the_membership_read_first() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn an_unreadable_account_stream_is_journal_unavailable_never_the_deployed_version() {
     let world = seeded();
     let [b, s, l, r] = all_documents();
@@ -1122,7 +1107,6 @@ fn an_unreadable_account_stream_is_journal_unavailable_never_the_deployed_versio
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn a_folded_record_that_does_not_read_is_journal_unavailable_never_a_shorter_list() {
     let [b, s, l, r] = all_documents();
     let full = |result: &str, reason: &str| {
@@ -1179,7 +1163,6 @@ fn a_folded_record_that_does_not_read_is_journal_unavailable_never_a_shorter_lis
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn a_query_is_invalid() {
     let world = seeded();
     let f = fixture(&[]);
@@ -1193,7 +1176,6 @@ fn a_query_is_invalid() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn the_read_writes_nothing_and_takes_no_other_method() {
     let world = seeded();
     let [b, s, l, r] = all_documents();
@@ -1242,7 +1224,6 @@ fn answered(world: &mut Seeded) {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn an_application_that_contradicts_its_entry_is_journal_unavailable() {
     let [b, s, l, r] = all_documents();
     let contradictions: [Contradiction<'_>; 4] = [
@@ -1285,7 +1266,6 @@ fn an_application_that_contradicts_its_entry_is_journal_unavailable() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn an_application_no_listed_confirmation_caused_puts_nothing_in_effect() {
     let mut world = seeded();
     let [b, s, l, r] = all_documents();
@@ -1329,7 +1309,6 @@ fn listed(body: &Value) -> Vec<Value> {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn in_effect_is_always_a_listed_version_or_null() {
     let [b, s, l, r] = all_documents();
     let worlds: Vec<(&str, Seeded)> = vec![
@@ -1369,7 +1348,6 @@ fn in_effect_is_always_a_listed_version_or_null() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn every_entry_keeps_the_cross_field_rules() {
     let mut world = seeded();
     answered(&mut world);
@@ -1428,7 +1406,6 @@ fn every_entry_keeps_the_cross_field_rules() {
 }
 
 #[test]
-#[ignore = "pending E10-27"]
 fn the_same_agent_id_in_another_workspace_is_never_read_or_reflected() {
     let mut world = seeded();
     answered(&mut world);
