@@ -239,6 +239,9 @@ pub struct WebCheck {
 #[derive(Debug)]
 pub struct SetUpCheck {
     pub shows: &'static str,
+    /// Whether this set-up confirms and deploys the run's agent ([`SetUpBy::Web`]), so the
+    /// scenario's later parts act on the agent it deployed and its second Job runs after it.
+    pub deploys: bool,
 }
 
 /// The owner's visit of a backtest's report from `web/`: what it shows, and the backtest whose
@@ -918,6 +921,7 @@ pub fn plan(
                         shows: "the owner's set-up from web/: a passkey added in Settings, \
                                 version 1 created in /agents/new, and its confirm held in words \
                                 for the passkey's first 24 hours, with nothing sent",
+                        deploys: false,
                     }),
                     Part::Gap(Gap {
                         what: "the confirm and deploy from web/",
@@ -1312,6 +1316,122 @@ pub fn plan(
         },
     ];
     steps
+}
+
+/// Who sets the run's agent up: the CLI's gestures in the first Job, as the demo has run, or the
+/// owner in `web/`, a passkey, then version 1 created, confirmed and deployed, with a second Job
+/// after it for the gestures that need the confirmed version (lane W's cut).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetUpBy {
+    Cli,
+    Web,
+}
+
+/// The scenario's switch between the two set-ups: the CLI's until the trade loop runs green in a
+/// regular session from the CLI's set-up and L1's DEC-2146 waiver lets a new passkey confirm,
+/// then `web/`'s (the coordinator's ruling of 2026-10-28).
+pub const SET_UP_BY: SetUpBy = SetUpBy::Cli;
+
+/// [`plan`]'s steps, with the run's agent set up `by` the CLI or by `web/`. From `web/`, step 1
+/// reads the workspace's agents before any is deployed, the CLI's version and deployment
+/// gestures for [`WEB_AGENT`] give way to `web/`'s set-up, which deploys, and the sign-in read of
+/// `web/` moves to the end of step 2, after the agent it reads exists.
+pub fn plan_set_up_by(
+    workspace: &str,
+    envelopes: (&[u8], &[u8]),
+    connections: Option<&Connections>,
+    by: SetUpBy,
+) -> Vec<Step> {
+    let mut steps = plan(workspace, envelopes, connections);
+    if by == SetUpBy::Web {
+        set_up_from_web(&mut steps, workspace);
+    }
+    steps
+}
+
+/// [`plan_set_up_by`]'s changes for [`SetUpBy::Web`].
+fn set_up_from_web(steps: &mut [Step], workspace: &str) {
+    let mut sign_in = None;
+    if let Some(first) = steps.iter_mut().find(|s| s.number == 1) {
+        for part in &mut first.parts {
+            if let Part::Api(check) = part
+                && matches!(check.body, Body::Lists(agent) if agent == WEB_AGENT)
+            {
+                check.shows = "the demo owner, signed in, reading the run's workspace's agents \
+                               through the API (200), before web/'s set-up deploys one";
+                check.body = Body::Any;
+            }
+        }
+        if let Some(at) = first
+            .parts
+            .iter()
+            .position(|p| matches!(p, Part::WebSignIn(_)))
+        {
+            sign_in = Some(first.parts.remove(at));
+        }
+    }
+    if let Some(second) = steps.iter_mut().find(|s| s.number == 2) {
+        second.parts.retain(|part| {
+            !cli_set_up(part, workspace)
+                && !matches!(part, Part::Gap(gap) if gap.what == WEB_SET_UP_GAP)
+        });
+        for part in &mut second.parts {
+            if let Part::WebSetUp(check) = part {
+                check.shows = "the owner's set-up from web/: a passkey added in Settings, version \
+                               1 created in /agents/new, confirmed and deployed, the agent the \
+                               later steps act on";
+                check.deploys = true;
+            }
+        }
+        second.parts.extend(sign_in);
+    }
+}
+
+/// What step 2's gap for `web/`'s confirm and deploy says, which `web/`'s set-up closes.
+const WEB_SET_UP_GAP: &str = "the confirm and deploy from web/";
+
+/// Whether `part` is one of the CLI's gestures that set the run's agent up in `workspace`: its
+/// version created or confirmed, or [`WEB_AGENT`] deployed.
+fn cli_set_up(part: &Part, workspace: &str) -> bool {
+    let Part::Gesture(gesture) = part else {
+        return false;
+    };
+    let words: Vec<&str> = gesture.args.iter().map(String::as_str).collect();
+    let here = words.windows(2).any(|w| w == ["--workspace", workspace]);
+    here && matches!(
+        words.as_slice(),
+        ["version", "create" | "confirm", ..] | ["agent", "deploy", WEB_AGENT, ..]
+    )
+}
+
+/// The gestures the run's first Job runs, and those its second runs after a [`SetUpCheck`] that
+/// deploys: every gesture in the first when the CLI sets the agent up.
+pub fn job_phases(steps: &[Step]) -> (Vec<&Gesture>, Vec<&Gesture>) {
+    let (mut first, mut second) = (Vec::new(), Vec::new());
+    let mut deployed = false;
+    for part in steps.iter().flat_map(|s| &s.parts) {
+        match part {
+            Part::WebSetUp(check) if check.deploys => deployed = true,
+            Part::Gesture(gesture) if deployed => second.push(gesture),
+            Part::Gesture(gesture) => first.push(gesture),
+            _ => {}
+        }
+    }
+    (first, second)
+}
+
+/// The agent id a set-up that deploys reached, when it is one the API mints, `agt_` and its
+/// ULID's 26 characters; anything else is no agent, so no later part acts on what it named.
+pub fn deployed_agent(reached: &BTreeMap<String, String>) -> Option<&str> {
+    let id = reached.get("agent_deployed")?;
+    let ulid = id.strip_prefix("agt_")?;
+    (ulid.len() == 26 && ulid.bytes().all(|b| b.is_ascii_alphanumeric())).then_some(id)
+}
+
+/// The agent a part acts on: the run's own, from `web/`'s set-up, wherever the plan names
+/// [`WEB_AGENT`], which only the CLI's set-up deploys.
+fn on_agent(named: &'static str, run: &'static str) -> &'static str {
+    if named == WEB_AGENT { run } else { named }
 }
 
 /// Every gesture of `steps`, in the order the scenario runs them.
@@ -1930,38 +2050,21 @@ pub fn run_in(name: &str) -> Result<String> {
             },
         })
     };
-    let steps = plan(&workspace, inputs.envelopes(), connected.as_ref());
-    let all = gestures(&steps);
-    let first = all.first().context("the scenario has no gesture")?;
-    let rendered = render(
-        &[
-            format!("run.id=\"{id}\""),
-            format!("run.args={}", json!(first.args)),
-        ],
-        Some("templates/run.yaml"),
-    )?;
+    let steps = plan_set_up_by(
+        &workspace,
+        inputs.envelopes(),
+        connected.as_ref(),
+        SET_UP_BY,
+    );
+    let (before, after) = job_phases(&steps);
     let files = inputs.files();
-    let objects = gestures_job(rendered, &all, &format!("demo-in-{id}"), &files, NAMESPACE)?;
     eprintln!("==> the demo, end to end (paper and demo data only; local-cell results)");
-    eprintln!("    workspace {workspace}, agent {WEB_AGENT}");
-    let job = objects
-        .iter()
-        .find(|o| o["kind"] == "Job")
-        .and_then(|o| o["metadata"]["name"].as_str())
-        .context("the gestures' Job has no name")?
-        .to_string();
-    let (succeeded, logs) = run_job(objects)?;
-    let pods = kubectl(&[
-        "get",
-        "pods",
-        "--namespace",
-        NAMESPACE,
-        "--selector",
-        &format!("job-name={job}"),
-        "-o",
-        "json",
-    ])?;
-    let codes = exit_codes(&serde_json::from_str(&pods).context("the gestures' pods")?);
+    match SET_UP_BY {
+        SetUpBy::Cli => eprintln!("    workspace {workspace}, agent {WEB_AGENT}"),
+        SetUpBy::Web => eprintln!("    workspace {workspace}, its agent deployed from web/"),
+    }
+    let (mut succeeded, mut logs, mut codes) = gestures_run(&id, &before, &files)?;
+    let mut run_agent: &'static str = WEB_AGENT;
     let mut failed = None;
     let mut gaps = 0;
     let mut browsed: Option<WebOutcome> = None;
@@ -2025,7 +2128,11 @@ pub fn run_in(name: &str) -> Result<String> {
                         (Some(_), _) => ("not run", "an earlier part failed".to_owned()),
                         (None, Err(why)) => ("not run", why),
                         (None, Ok(command)) => {
-                            let read = applied_read(&workspace, check.agent, &command);
+                            let read = applied_read(
+                                &workspace,
+                                on_agent(check.agent, run_agent),
+                                &command,
+                            );
                             let (word, said, fails) = poll_applied(&read)?;
                             if fails {
                                 failed.get_or_insert_with(|| format!("GET {}: {said}", read.path));
@@ -2047,7 +2154,7 @@ pub fn run_in(name: &str) -> Result<String> {
                 Part::WebSetUp(check) => {
                     let outcome = match &failed {
                         Some(_) => SetUpOutcome::AfterFailure,
-                        None => set_up(&workspace)?,
+                        None => set_up(&workspace, check.deploys)?,
                     };
                     let required = Required {
                         cell: env::var_os(CELL_REQUIRED_ENV).is_some(),
@@ -2057,6 +2164,28 @@ pub fn run_in(name: &str) -> Result<String> {
                     eprintln!("    {word:<8} {}: {said}", check.shows);
                     if fails {
                         failed.get_or_insert_with(|| format!("web/ set-up: {said}"));
+                    }
+                    if check.deploys && failed.is_none() {
+                        let agent = match &outcome {
+                            SetUpOutcome::Ran(reached) => deployed_agent(reached),
+                            _ => None,
+                        };
+                        match agent {
+                            Some(agent) => {
+                                run_agent = leaked(agent);
+                                let (ok, more, exited) =
+                                    gestures_run(&format!("{id}b"), &after, &files)?;
+                                succeeded &= ok;
+                                logs.push_str(&more);
+                                codes.extend(exited);
+                            }
+                            None => {
+                                failed.get_or_insert_with(|| {
+                                    "web/'s set-up deployed no agent the later steps can act on"
+                                        .to_owned()
+                                });
+                            }
+                        }
                     }
                 }
                 Part::WebReport(check) => {
@@ -2079,7 +2208,8 @@ pub fn run_in(name: &str) -> Result<String> {
                         (Some(_), _) => TradeOutcome::AfterFailure,
                         (None, Some(seen)) => seen.clone(),
                         (None, None) => {
-                            let (seen, web) = browse(check.agent, &workspace, &id, &files)?;
+                            let agent = on_agent(check.agent, run_agent);
+                            let (seen, web) = browse(agent, &workspace, &id, &files)?;
                             browsed = Some(web);
                             traded = Some(seen.clone());
                             seen
@@ -2095,7 +2225,11 @@ pub fn run_in(name: &str) -> Result<String> {
                         failed.get_or_insert_with(|| format!("web/ trade loop: {said}"));
                     }
                 }
-                Part::Web(check) | Part::WebSignIn(check) => {
+                Part::Web(named) | Part::WebSignIn(named) => {
+                    let check = &WebCheck {
+                        shows: named.shows,
+                        agent: on_agent(named.agent, run_agent),
+                    };
                     let outcome = match (&failed, &browsed) {
                         (Some(_), _) => WebOutcome::AfterFailure,
                         (None, Some(seen)) => seen.clone(),
@@ -2176,10 +2310,60 @@ pub fn run_in(name: &str) -> Result<String> {
     eprintln!(
         "==> {} gestures ran, {gaps} gaps named; kubectl: docker exec {} kubectl --namespace \
          {NAMESPACE} get jobs",
-        all.len(),
+        before.len() + after.len(),
         NODE
     );
     Ok(workspace)
+}
+
+/// Runs `gestures` as the run's Job `run`, the demo's `files` mounted: whether it succeeded, its
+/// logs, and each container's exit code.
+fn gestures_run(
+    run: &str,
+    gestures: &[&Gesture],
+    files: &[(&str, String)],
+) -> Result<(bool, String, BTreeMap<String, i64>)> {
+    let first = gestures.first().context("the Job has no gesture")?;
+    let rendered = render(
+        &[
+            format!("run.id=\"{run}\""),
+            format!("run.args={}", json!(first.args)),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    let objects = gestures_job(
+        rendered,
+        gestures,
+        &format!("demo-in-{run}"),
+        files,
+        NAMESPACE,
+    )?;
+    let job = objects
+        .iter()
+        .find(|o| o["kind"] == "Job")
+        .and_then(|o| o["metadata"]["name"].as_str())
+        .context("the gestures' Job has no name")?
+        .to_string();
+    let (succeeded, logs) = run_job(objects)?;
+    let pods = kubectl(&[
+        "get",
+        "pods",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        &format!("job-name={job}"),
+        "-o",
+        "json",
+    ])?;
+    let codes = exit_codes(&serde_json::from_str(&pods).context("the gestures' pods")?);
+    Ok((succeeded, logs, codes))
+}
+
+/// `agent` for the rest of the run: the scenario's checks name their agent as a `&'static str`,
+/// and the one `web/`'s set-up deploys is known only once it has, so its id, a few bytes, lives as
+/// long as the one-shot `cargo xtask` process does.
+fn leaked(agent: &str) -> &'static str {
+    Box::leak(agent.to_owned().into_boxed_str())
 }
 
 /// Reads `check` with the owner's session every two seconds until it passes or [`APPLIED_WITHIN`]
@@ -2829,7 +3013,7 @@ pub enum SetUpOutcome {
 
 /// The owner's set-up from `web/` in `workspace`, as [`browse`] reaches the browser: the API
 /// asked first, then `web/`'s tools, then the API's port-forward.
-fn set_up(workspace: &str) -> Result<SetUpOutcome> {
+fn set_up(workspace: &str, deploys: bool) -> Result<SetUpOutcome> {
     if let Some(why) = api_unaskable()? {
         return Ok(SetUpOutcome::Unaskable(why));
     }
@@ -2839,7 +3023,7 @@ fn set_up(workspace: &str) -> Result<SetUpOutcome> {
     if let Err(why) = api_port_forward(stub_image_tag()?.is_some()) {
         return Ok(SetUpOutcome::Unaskable(format!("{why:#}")));
     }
-    Ok(match web::setup_from_web(workspace) {
+    Ok(match web::setup_from_web(workspace, deploys) {
         Ok(reached) => SetUpOutcome::Ran(reached),
         Err(why) => SetUpOutcome::Failed(format!("{why:#}")),
     })
@@ -2861,13 +3045,13 @@ pub fn setup_verdict(outcome: &SetUpOutcome, required: Required) -> (&'static st
         SetUpOutcome::Failed(why) => ("failed", why.clone(), true),
         SetUpOutcome::Ran(reached) => {
             let version = reached.get("version_created").map_or("", String::as_str);
-            (
-                "ran",
-                format!(
+            let said = match reached.get("agent_deployed") {
+                Some(agent) => format!("version {version} created and confirmed; {agent} deployed"),
+                None => format!(
                     "version {version} created; its confirm held for the passkey's first 24 hours"
                 ),
-                false,
-            )
+            };
+            ("ran", said, false)
         }
     }
 }
@@ -3285,6 +3469,160 @@ mod tests {
                 research: research_connected(),
             }),
         )
+    }
+
+    /// The plan with the run's agent set up by `web/` (lane W's cut).
+    fn planned_from_web(workspace: &str) -> Vec<Step> {
+        plan_set_up_by(
+            workspace,
+            (&mandate(), &research_mandate()),
+            Some(&Connections {
+                demo: connected(),
+                research: research_connected(),
+            }),
+            SetUpBy::Web,
+        )
+    }
+
+    /// The words of every gesture `steps` runs, each joined by spaces.
+    fn gesture_lines(gestures: &[&Gesture]) -> Vec<String> {
+        gestures.iter().map(|g| g.args.join(" ")).collect()
+    }
+
+    /// The coordinator's ruling: the switch stays on the CLI's set-up until the trade loop runs
+    /// green in a regular session and L1's DEC-2146 waiver lands, and the CLI's path is `plan`'s
+    /// own, unchanged, with every gesture in one Job.
+    #[test]
+    fn the_cli_sets_the_agent_up_until_the_switch_is_flipped() {
+        assert_eq!(
+            SET_UP_BY,
+            SetUpBy::Cli,
+            "flip only once the loop is green and the waiver landed"
+        );
+        let cli = plan_set_up_by(
+            "demo1",
+            (&mandate(), &research_mandate()),
+            Some(&Connections {
+                demo: connected(),
+                research: research_connected(),
+            }),
+            SetUpBy::Cli,
+        );
+        assert_eq!(
+            gesture_lines(&gestures(&cli)),
+            gesture_lines(&gestures(&planned("demo1")))
+        );
+        let (first, second) = job_phases(&cli);
+        assert_eq!(first.len(), gestures(&cli).len());
+        assert!(second.is_empty(), "the CLI's set-up runs one Job");
+    }
+
+    /// Lane W's cut: set up from `web/`, the plan names no CLI gesture that creates or confirms
+    /// the run's version or deploys [`WEB_AGENT`], and no gap for `web/`'s confirm and deploy;
+    /// `web/`'s set-up deploys, step 1 reads the agents before there is one, and the sign-in read
+    /// of `web/` follows the set-up. The research workspace's own version and deployment stay
+    /// the CLI's.
+    #[test]
+    fn set_up_from_web_the_plan_names_no_cli_deploy_of_the_agent() {
+        let steps = planned_from_web("demo1");
+        let lines = gesture_lines(&gestures(&steps));
+        let ours = |line: &&String| line.contains("--workspace demo1 ");
+        for line in lines.iter().filter(ours) {
+            assert!(!line.starts_with("version create"), "{line}");
+            assert!(!line.starts_with("version confirm"), "{line}");
+            assert!(!line.starts_with("agent deploy"), "{line}");
+        }
+        assert!(
+            lines.iter().all(|l| !l.contains(WEB_AGENT)),
+            "no CLI gesture names it"
+        );
+        let research = lines
+            .iter()
+            .filter(|l| l.contains("--workspace demo1r "))
+            .filter(|l| l.starts_with("agent deploy") || l.starts_with("version confirm"))
+            .count();
+        assert_eq!(
+            research, 4,
+            "the research agent's codes and commits stay the CLI's"
+        );
+        let parts = |n: u8| &steps.iter().find(|s| s.number == n).unwrap().parts;
+        assert!(!parts(1).iter().any(|p| matches!(p, Part::WebSignIn(_))));
+        assert!(!parts(1).iter().any(
+            |p| matches!(p, Part::Api(c) if matches!(c.body, Body::Lists(a) if a == WEB_AGENT))
+        ));
+        let two = parts(2);
+        let set_up = two
+            .iter()
+            .position(|p| matches!(p, Part::WebSetUp(c) if c.deploys))
+            .expect("web/'s set-up deploys in step 2");
+        let executor = two
+            .iter()
+            .position(|p| matches!(p, Part::Executor(_)))
+            .unwrap();
+        let signed_in = two
+            .iter()
+            .position(|p| matches!(p, Part::WebSignIn(_)))
+            .unwrap();
+        assert!(
+            set_up < executor && executor < signed_in,
+            "{set_up} {executor} {signed_in}"
+        );
+        assert!(
+            !two.iter()
+                .any(|p| matches!(p, Part::Gap(g) if g.what == WEB_SET_UP_GAP))
+        );
+    }
+
+    /// Set up from `web/`, the gestures split around it: the first Job opens the workspace,
+    /// records the connection and registers the configuration and the model, which the set-up's
+    /// version needs; the second records the backtest, which needs the version `web/` confirmed
+    /// (`backtest record` refuses `version_not_confirmed`). Each gesture runs in exactly one.
+    #[test]
+    fn set_up_from_web_the_gestures_split_around_it() {
+        let steps = planned_from_web("demo1");
+        let (first, second) = job_phases(&steps);
+        let (first, second) = (gesture_lines(&first), gesture_lines(&second));
+        let has = |lines: &[String], start: &str| lines.iter().any(|l| l.starts_with(start));
+        for start in [
+            "workspace open --workspace demo1 ",
+            "workspace found --workspace demo1 ",
+            "connection record",
+            "config register --kind rule_set",
+            "config register --kind fee_config",
+            "config register --kind trading_calendar",
+            "config register --kind instrument_snapshot",
+            "model register quant.ma_crossover",
+        ] {
+            assert!(has(&first, start), "the first Job runs `{start}`");
+        }
+        assert!(has(&second, "backtest record"), "{second:?}");
+        assert!(!has(&first, "backtest record"));
+        assert_eq!(
+            first.len() + second.len(),
+            gestures(&steps).len(),
+            "each gesture runs once"
+        );
+    }
+
+    /// A set-up's deployed agent is acted on only when it is an id the API mints.
+    #[test]
+    fn only_a_minted_agent_id_is_acted_on() {
+        let reached = |id: &str| BTreeMap::from([("agent_deployed".to_owned(), id.to_owned())]);
+        let minted = "agt_01KDEM00000000000000000WEB";
+        assert_eq!(deployed_agent(&reached(minted)), Some(minted));
+        for wrong in [
+            "",
+            "agt_",
+            "01KDEM00000000000000000WEB",
+            "agt_01KDEM00000000000000000WE",
+            "agt_01KDEM0000000000000000/WEB",
+            "agt_01KDEM00000000000000000WEB ",
+        ] {
+            assert_eq!(deployed_agent(&reached(wrong)), None, "{wrong:?}");
+        }
+        assert_eq!(deployed_agent(&BTreeMap::new()), None);
+        assert_eq!(on_agent(WEB_AGENT, minted), minted);
+        assert_eq!(on_agent(RESEARCH_AGENT, minted), RESEARCH_AGENT);
     }
 
     /// The plan the staging dry run renders, which names no connect check.

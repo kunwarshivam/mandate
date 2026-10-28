@@ -3085,7 +3085,8 @@ pub fn setup(workspace: &str) -> Result<()> {
     eprintln!(
         "==> the owner's set-up from web/ (paper only; confirm and deploy wait for the passkey's first 24 hours)"
     );
-    for (name, value) in web::setup_from_web(workspace)? {
+    let deploys = scenario::SET_UP_BY == scenario::SetUpBy::Web;
+    for (name, value) in web::setup_from_web(workspace, deploys)? {
         eprintln!("    {name}: {value}");
     }
     Ok(())

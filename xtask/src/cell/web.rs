@@ -602,27 +602,39 @@ pub const SETUP_STEPS: [&str; 4] = [
     "deploy_not_offered",
 ];
 
+/// The set-up's steps when it deploys the run's agent (`OWLHEAD_CELL_SETUP_DEPLOY`, lane W's cut):
+/// the passkey, version 1 created and confirmed, and the agent deployed, whose value is the agent
+/// id the API minted, which the scenario's later parts act on.
+pub const DEPLOY_SETUP_STEPS: [&str; 4] = [
+    "passkey_enrolled",
+    "version_created",
+    "version_confirmed",
+    "agent_deployed",
+];
+
 /// The owner's set-up from `web/` (`setup.spec.ts`) in `workspace`: the owner, signed in, adds a
 /// passkey in Settings through the API's enrolment, made by Chromium's virtual authenticator,
 /// creates version 1 in `/agents/new`, and is told the confirm waits for the new passkey's first 24
 /// hours, with nothing sent and no deployment offered. A first passkey's cool-off is a safety rule
-/// the founder decides (DEC-79), so the cell's confirm and deploy stay the CLI's. Answers the steps
-/// reached; an `Err` names the first that was not, or a run that wrote no result.
+/// the founder decides (DEC-79), so the cell's confirm and deploy stay the CLI's. With `deploys`,
+/// once L1's DEC-2146 waiver lets a new passkey confirm, it confirms and deploys too, the steps
+/// [`DEPLOY_SETUP_STEPS`] names (the scenario's `SetUpBy::Web`). Answers the steps reached; an
+/// `Err` names the first that was not, or a run that wrote no result.
 ///
 /// # Errors
 /// A missing tool, a run past [`TRADE_LOOP_POLLS`], a run that wrote no result, or a step not
 /// reached.
-pub fn setup_from_web(workspace: &str) -> Result<BTreeMap<String, String>> {
-    let run = spec_run(
-        workspace,
-        &[
-            ("OWLHEAD_CELL_SPEC", SETUP_SPEC.to_owned()),
-            ("OWLHEAD_CELL_TIMEOUT_MS", SETUP_TIMEOUT_MS.to_owned()),
-        ],
-        "web-setup",
-        TRADE_LOOP_POLLS,
-        &mut || Ok(()),
-    )?;
+pub fn setup_from_web(workspace: &str, deploys: bool) -> Result<BTreeMap<String, String>> {
+    let mut env = vec![
+        ("OWLHEAD_CELL_SPEC", SETUP_SPEC.to_owned()),
+        ("OWLHEAD_CELL_TIMEOUT_MS", SETUP_TIMEOUT_MS.to_owned()),
+    ];
+    if deploys {
+        env.push(("OWLHEAD_CELL_SETUP_DEPLOY", "1".to_owned()));
+    }
+    let run = spec_run(workspace, &env, "web-setup", TRADE_LOOP_POLLS, &mut || {
+        Ok(())
+    })?;
     let Some(text) = run.result else {
         bail!(
             "web/'s set-up wrote no result ({}); its log is {}",
@@ -630,7 +642,14 @@ pub fn setup_from_web(workspace: &str) -> Result<BTreeMap<String, String>> {
             run.log.display()
         );
     };
-    setup_result(&text)
+    setup_result(
+        &text,
+        if deploys {
+            &DEPLOY_SETUP_STEPS
+        } else {
+            &SETUP_STEPS
+        },
+    )
 }
 
 /// The set-up spec's result file as the steps it reached; an `error`, or a step of
@@ -638,13 +657,13 @@ pub fn setup_from_web(workspace: &str) -> Result<BTreeMap<String, String>> {
 ///
 /// # Errors
 /// A result that is not a JSON object of strings, names an error, or lacks a step.
-pub fn setup_result(text: &str) -> Result<BTreeMap<String, String>> {
+pub fn setup_result(text: &str, expected: &[&str]) -> Result<BTreeMap<String, String>> {
     let steps: BTreeMap<String, String> = serde_json::from_str(text)
         .context("the set-up's result is not a JSON object of strings")?;
     if let Some(error) = steps.get("error") {
         bail!("the set-up from web/ stopped: {error}");
     }
-    if let Some(missing) = SETUP_STEPS.iter().find(|s| !steps.contains_key(**s)) {
+    if let Some(missing) = expected.iter().find(|s| !steps.contains_key(**s)) {
         bail!("the set-up from web/ did not reach `{missing}`");
     }
     Ok(steps)
@@ -876,23 +895,50 @@ mod tests {
         Ok(())
     }
 
+    /// A set-up that deploys passes only when it reached the confirm and the deployment too.
+    #[test]
+    fn a_deploying_set_up_reads_its_confirm_and_deployment() -> Result<()> {
+        let deployed = r#"{"passkey_enrolled":"pk","version_created":"sha256:ab","version_confirmed":"ok","agent_deployed":"agt_01KDEM00000000000000000WEB"}"#;
+        let reached = setup_result(deployed, &DEPLOY_SETUP_STEPS)?;
+        assert_eq!(reached["agent_deployed"], "agt_01KDEM00000000000000000WEB");
+        let held = r#"{"passkey_enrolled":"pk","version_created":"sha256:ab","confirm_refused_cooling_off":"ok","deploy_not_offered":"ok"}"#;
+        let why = format!(
+            "{:#}",
+            setup_result(held, &DEPLOY_SETUP_STEPS)
+                .err()
+                .context("held")?
+        );
+        assert!(why.contains("`version_confirmed`"), "{why}");
+        Ok(())
+    }
+
     /// The set-up's result passes only when it names every step and no error, and the spec it
     /// runs is in this checkout and writes each step the driver reads.
     #[test]
     fn the_setup_reads_every_step_and_names_the_first_one_missing() -> Result<()> {
         let all = r#"{"passkey_enrolled":"pk","version_created":"sha256:ab","confirm_refused_cooling_off":"ok","deploy_not_offered":"ok"}"#;
-        assert_eq!(setup_result(all)?.len(), 4);
+        assert_eq!(setup_result(all, &SETUP_STEPS)?.len(), 4);
         let stopped =
             r#"{"passkey_enrolled":"pk","error":"the deployment registered no instrument"}"#;
-        let why = format!("{:#}", setup_result(stopped).err().context("an error")?);
+        let why = format!(
+            "{:#}",
+            setup_result(stopped, &SETUP_STEPS)
+                .err()
+                .context("an error")?
+        );
         assert!(
             why.contains("the deployment registered no instrument"),
             "{why}"
         );
         let short = r#"{"passkey_enrolled":"pk","version_created":"sha256:ab","confirm_refused_cooling_off":"ok"}"#;
-        let why = format!("{:#}", setup_result(short).err().context("a missing step")?);
+        let why = format!(
+            "{:#}",
+            setup_result(short, &SETUP_STEPS)
+                .err()
+                .context("a missing step")?
+        );
         assert!(why.contains("`deploy_not_offered`"), "{why}");
-        assert!(setup_result("[]").is_err());
+        assert!(setup_result("[]", &SETUP_STEPS).is_err());
         let spec = fs::read_to_string(crate::repo_root()?.join("web/e2e-cell").join(SETUP_SPEC))?;
         for step in SETUP_STEPS {
             assert!(
