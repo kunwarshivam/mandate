@@ -52,6 +52,8 @@
 //! - [`connections`]: the connections read's fold, references only (DEC-2620).
 //! - [`reduction`]: route 2's challenge route, its store and request keys, and the address and
 //!   device its limits count against (DEC-2117, DEC-2119).
+//! - [`mandate_versions`]: an agent's mandate versions and the one in effect, read-only (§4.7,
+//!   DEC-2147).
 //! - [`me`]: the caller's own session, outside every workspace path (§4.10, DEC-2113).
 //! - [`connect_binding`]: whether the start binds a connect, from its four settings (DEC-2338).
 //! - [`vault_codes`]: the callback's vault port, which writes a code as the API's vault identity
@@ -83,6 +85,7 @@ pub mod journal;
 pub mod journal_reads;
 pub mod keys;
 pub mod lifecycle;
+pub mod mandate_versions;
 pub mod me;
 pub mod members;
 pub mod methods;
