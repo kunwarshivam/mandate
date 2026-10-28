@@ -254,6 +254,41 @@ pub(crate) fn uncovered(
         .unwrap_or(Qty::ZERO))
 }
 
+/// I9 for the legs re-placement sends (DEC-2849 item 8): each holder's gap, its coverage Pᵢ less
+/// its own resting protective legs and its own working exits, floored at zero, for every holder
+/// with a gap. The owner's residual R is in no holder's gap, so no agent's legs cover the owner's
+/// shares, and an unattributed leg counts in no holder's legs.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "pending E7-4 (DEC-2849 item 8): re-placement sends each holder's legs on it"
+    )
+)]
+pub(crate) fn leg_gaps(
+    _view: &ExecutorState,
+    _instrument: &InstrumentId,
+) -> Result<BTreeMap<AgentId, Qty>, ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-4" })
+}
+
+/// I9 for the legs a resize cuts (DEC-2849 item 8): each agent's resting protective legs beyond its
+/// coverage Pᵢ, for every agent with an excess, an agent whose lots are gone included. So the
+/// broker-side sum of resting legs comes back within N once the executor has read the change.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "pending E7-4 (DEC-2849 item 8): a resize cancels and re-places on it"
+    )
+)]
+pub(crate) fn leg_excess(
+    _view: &ExecutorState,
+    _instrument: &InstrumentId,
+) -> Result<BTreeMap<AgentId, Qty>, ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-4" })
+}
+
 /// I4's clip: N less every working sell in `instrument` as [`still_selling`] counts them, never
 /// below zero.
 #[cfg_attr(
@@ -449,7 +484,8 @@ mod tests {
     use proptest::prelude::*;
 
     use super::{
-        available_to_sell, coverage, coverages, holders, sell_authority, sub_ledger, uncovered,
+        available_to_sell, coverage, coverages, holders, leg_excess, leg_gaps, sell_authority,
+        sub_ledger, uncovered,
     };
     use crate::error::ExecutorError;
     use crate::fold::{fees_charged, fill_applied, position_released};
@@ -498,6 +534,10 @@ mod tests {
         Release(u8, usize, i64),
         Close(usize, i64),
         AssetFee(usize, i64),
+        /// Agent `a`'s resting protective leg of `q` in instrument `i` (DEC-2849 item 8).
+        Protect(u8, usize, i64),
+        /// Agent `a`'s working risk exit of `q` in instrument `i`, none of it filled yet.
+        Exit(u8, usize, i64),
     }
 
     fn event() -> impl Strategy<Value = Event> {
@@ -514,6 +554,16 @@ mod tests {
         ]
     }
 
+    /// [`event`]'s events and the legs and exits item 8 reads.
+    fn leg_event() -> impl Strategy<Value = Event> {
+        let at = 0_usize..INSTRUMENTS.len();
+        prop_oneof![
+            3 => event(),
+            1 => (0_u8..AGENTS, at.clone(), 1_i64..=20).prop_map(|(a, i, q)| Event::Protect(a, i, q)),
+            1 => (0_u8..AGENTS, at, 1_i64..=10).prop_map(|(a, i, q)| Event::Exit(a, i, q)),
+        ]
+    }
+
     /// The oracle for one instrument: each holder's whole shares, written apart from `holders`.
     /// `lots` per agent; `owner`, the owner's residual, which may go negative; `working`, what the
     /// agents' working sells have left to sell. The position is the lots and the residual summed.
@@ -522,6 +572,9 @@ mod tests {
         lots: BTreeMap<u8, i64>,
         owner: i64,
         working: i64,
+        /// Each agent's resting protective legs, and its own working exits.
+        legs: BTreeMap<u8, i64>,
+        exits: BTreeMap<u8, i64>,
     }
 
     impl Oracle {
@@ -558,6 +611,38 @@ mod tests {
             let mut order: Vec<u8> = (0..AGENTS).filter(|a| self.lots(*a) > 0).collect();
             order.sort_by(|a, b| self.lots(*b).cmp(&self.lots(*a)).then(a.cmp(b)));
             order
+        }
+
+        /// Item 8's gaps: each holder's Pᵢ less its own legs and exits, where that is above zero.
+        fn gaps(&self) -> BTreeMap<u8, i64> {
+            self.coverage()
+                .into_iter()
+                .map(|(a, p)| {
+                    let own = self
+                        .legs
+                        .get(&a)
+                        .copied()
+                        .unwrap_or(0)
+                        .saturating_add(self.exits.get(&a).copied().unwrap_or(0));
+                    (a, p.saturating_sub(own))
+                })
+                .filter(|(_, gap)| *gap > 0)
+                .collect()
+        }
+
+        /// Item 8's excess: each agent's legs beyond its Pᵢ, zero for an agent holding no lots.
+        fn excess(&self) -> BTreeMap<u8, i64> {
+            let covered = self.coverage();
+            self.legs
+                .iter()
+                .map(|(a, legs)| {
+                    (
+                        *a,
+                        legs.saturating_sub(covered.get(a).copied().unwrap_or(0)),
+                    )
+                })
+                .filter(|(_, over)| *over > 0)
+                .collect()
         }
 
         fn coverage(&self) -> BTreeMap<u8, i64> {
@@ -675,6 +760,39 @@ mod tests {
             Ok(())
         }
 
+        /// Places agent `a`'s sell of `qty` for `purpose`, accepted and none of it filled.
+        fn rest(
+            &mut self,
+            a: u8,
+            i: usize,
+            purpose: Purpose,
+            qty: i64,
+        ) -> Result<(), ExecutorError> {
+            let seq = self.next();
+            let id = ClientOrderId::parse(&format!("md-r{}-{a}", seq.0))?;
+            self.view.orders.insert(
+                id.clone(),
+                Order {
+                    client_order_id: id,
+                    intent_id: None,
+                    agent: Some(agent(a)),
+                    instrument: instrument(i)?,
+                    side: Side::Sell,
+                    qty: shares(qty)?,
+                    filled_qty: Qty::ZERO,
+                    state: OrderState::Accepted,
+                    attempt: 1,
+                    purpose,
+                    absent_lookups: 0,
+                    first_absence_at: None,
+                    cancel_unconfirmed: false,
+                    replaced_by: None,
+                    created_on: None,
+                },
+            );
+            Ok(())
+        }
+
         /// Applies `event` to the oracle and to the fold. An event the account could not have (a
         /// sale of more than it holds) is skipped.
         fn apply(&mut self, event: &Event) -> Result<(), ExecutorError> {
@@ -685,7 +803,9 @@ mod tests {
                 | Event::OwnerSell(i, _)
                 | Event::Release(_, i, _)
                 | Event::Close(i, _)
-                | Event::AssetFee(i, _) => i,
+                | Event::AssetFee(i, _)
+                | Event::Protect(_, i, _)
+                | Event::Exit(_, i, _) => i,
             };
             let mut oracle = self.oracles.remove(&i).unwrap_or_default();
             let held = oracle.position();
@@ -751,6 +871,17 @@ mod tests {
                     self.fill(i, "sell", q, None)?;
                     self.view.account_switch = None;
                     oracle.close(q);
+                }
+                Event::Protect(a, _, q) => {
+                    self.rest(a, i, Purpose::Protective, q)?;
+                    let legs = oracle.legs.entry(a).or_insert(0);
+                    *legs = legs.saturating_add(q);
+                }
+                Event::Exit(a, _, q) if q <= held => {
+                    self.rest(a, i, Purpose::RiskExit, q)?;
+                    let exits = oracle.exits.entry(a).or_insert(0);
+                    *exits = exits.saturating_add(q);
+                    oracle.working = oracle.working.saturating_add(q);
                 }
                 _ => {}
             }
@@ -1029,6 +1160,132 @@ mod tests {
         let held = holders(&run.view, &aapl)?;
         assert_eq!(held.lots, BTreeMap::from([(agent(0), shares(4)?)]));
         assert_eq!(held.position, shares(11)?);
+        Ok(())
+    }
+
+    /// The legs each holder must still be given and the legs a resize must cut, as the oracle
+    /// computes them: item 8's gap and excess for every agent in every instrument.
+    fn legs_are_the_oracles(run: &Run) -> Result<(), TestCaseError> {
+        let fail = |e: ExecutorError| TestCaseError::fail(e.to_string());
+        for (i, oracle) in &run.oracles {
+            let at = instrument(*i).map_err(fail)?;
+            let want = |by: BTreeMap<u8, i64>| -> Result<BTreeMap<AgentId, Qty>, TestCaseError> {
+                by.into_iter()
+                    .map(|(a, q)| Ok((agent(a), shares(q).map_err(fail)?)))
+                    .collect()
+            };
+            prop_assert_eq!(
+                leg_gaps(&run.view, &at).map_err(fail)?,
+                want(oracle.gaps())?,
+                "the gaps in {}",
+                i
+            );
+            prop_assert_eq!(
+                leg_excess(&run.view, &at).map_err(fail)?,
+                want(oracle.excess())?,
+                "the excess in {}",
+                i
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-2849 item 8 (I9), over the attribution fuzz's events with each agent's resting legs and
+    /// working exits: every holder's gap is its Pᵢ less its own legs and exits, never the owner's
+    /// residual and never another holder's legs, and every agent's excess is its legs beyond its
+    /// Pᵢ, an agent whose lots are gone included.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn holder_legs_are_the_oracles() -> Result<(), String> {
+        let mut runner = proptest::test_runner::TestRunner::new(ProptestConfig::with_cases(256));
+        runner
+            .run(&proptest::collection::vec(leg_event(), 1..60), |events| {
+                let mut run = Run::new();
+                for event in &events {
+                    run.apply(event)
+                        .map_err(|e| TestCaseError::fail(e.to_string()))?;
+                    legs_are_the_oracles(&run)?;
+                }
+                Ok(())
+            })
+            .map_err(|e| e.to_string())
+    }
+
+    /// One hand case: its events, then each holder's gap and each agent's excess it leaves.
+    type LegCase = (Vec<Event>, Vec<(u8, i64)>, Vec<(u8, i64)>);
+
+    /// DEC-2849 item 8 by hand. An agent's ten beside the owner's six needs legs for its ten, not
+    /// sixteen. Two holders' ten and five each need their own, and one's legs never fill the
+    /// other's gap. In the worked example (each holds five, the owner sold four), five-share legs
+    /// each leave agent 0 four over its Pᵢ of one. A released agent's legs are all excess.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn each_holders_legs_cover_its_own_coverage() -> Result<(), ExecutorError> {
+        let at = instrument(0)?;
+        let cases: Vec<LegCase> = vec![
+            (
+                vec![Event::Buy(0, 0, 10), Event::OwnerBuy(0, 6)],
+                vec![(0, 10)],
+                vec![],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 10),
+                    Event::Buy(1, 0, 5),
+                    Event::Protect(0, 0, 10),
+                ],
+                vec![(1, 5)],
+                vec![],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 10),
+                    Event::Buy(1, 0, 5),
+                    Event::Protect(0, 0, 4),
+                    Event::Exit(0, 0, 3),
+                ],
+                vec![(0, 3), (1, 5)],
+                vec![],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 5),
+                    Event::Buy(1, 0, 5),
+                    Event::Protect(0, 0, 5),
+                    Event::Protect(1, 0, 5),
+                    Event::OwnerSell(0, 4),
+                ],
+                vec![],
+                vec![(0, 4)],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 10),
+                    Event::Protect(0, 0, 10),
+                    Event::Release(0, 0, 10),
+                ],
+                vec![],
+                vec![(0, 10)],
+            ),
+        ];
+        for (events, gaps, excess) in cases {
+            let mut run = Run::new();
+            for event in &events {
+                run.apply(event)?;
+            }
+            let by = |pairs: Vec<(u8, i64)>| -> Result<BTreeMap<AgentId, Qty>, ExecutorError> {
+                pairs
+                    .into_iter()
+                    .map(|(a, q)| Ok((agent(a), shares(q)?)))
+                    .collect()
+            };
+            assert_eq!(leg_gaps(&run.view, &at)?, by(gaps)?, "{events:?}: gaps");
+            assert_eq!(
+                leg_excess(&run.view, &at)?,
+                by(excess)?,
+                "{events:?}: excess"
+            );
+        }
         Ok(())
     }
 }
