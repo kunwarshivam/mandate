@@ -404,8 +404,8 @@ const SECRET_JOB_ENV: &[(&str, &[&str])] = &[
 ];
 
 /// Every path an `upload-artifact` step may upload, by workflow and path, matched exactly (L5):
-/// the mutation cost reports, `cell-demo-web`'s Playwright log alone (never its directory, which
-/// holds `next dev`'s throwaway TLS key), the release build's binaries, SBOMs, images and their test-key
+/// the mutation cost reports, `cell-demo-web`'s Playwright logs and the trade loop's result, each
+/// file alone (never a spec's directory, which holds `next dev`'s throwaway TLS key), the release build's binaries, SBOMs, images and their test-key
 /// signatures, what each publish wrote (the release-signed publish's too, DEC-2026), the release
 /// to sign with its SBOMs and its signatures, and the Playwright traces of a failed end-to-end
 /// run, uploaded before the sign-in suite runs, so they never hold a sign-in session's cookies.
@@ -414,6 +414,18 @@ const ARTIFACT_PATHS: &[(&str, &str)] = &[
     (
         ".github/workflows/ci.yml",
         "target/cell/web-gesture/playwright.log",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "target/cell/web-trade-loop/playwright.log",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "target/cell/web-trade-loop/result.json",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "target/cell/web-journey/playwright.log",
     ),
     (
         ".github/workflows/ci.yml",
