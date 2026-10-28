@@ -8,6 +8,7 @@
 import { OPERATIONS, SESSION_ROUTE, STEP_UP_CHALLENGE_ROUTE } from "./client";
 import { CONNECT_START_ROUTE } from "./connect";
 import { ENROL_ROUTE, REGISTRATION_ROUTE } from "./enrol";
+import { MY_WORKSPACES_ROUTE } from "./memberships";
 import type { Operation } from "./types";
 
 export interface DocumentedOperation {
@@ -86,6 +87,7 @@ const OTHERS: readonly DocumentedOperation[] = [
   { id: "step_up_challenge", method: "POST", route: STEP_UP_CHALLENGE_ROUTE, query: [], section: "§3.6" },
   { id: "connect_start", method: "POST", route: CONNECT_START_ROUTE, query: [], section: "§4.5, DEC-2623" },
   { id: "session", method: "GET", route: SESSION_ROUTE, query: [], section: "§4.10", outside: true },
+  { id: "my_workspaces", method: "GET", route: MY_WORKSPACES_ROUTE, query: [], section: "§4.10, DEC-2113", outside: true },
   { id: "passkey_registration_challenge", method: "POST", route: REGISTRATION_ROUTE, query: [], section: "§3.6, DEC-2108" },
   { id: "passkey_enrol", method: "POST", route: ENROL_ROUTE, query: [], section: "§3.6, DEC-2108" },
 ];
