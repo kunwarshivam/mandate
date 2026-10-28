@@ -7,13 +7,15 @@ import { connection } from "next/server";
  * default, or `api`), `OWLHEAD_API_ORIGIN` and `OWLHEAD_WORKSPACE_ID`. Neither is a secret; the browser
  * reaches the API with its own session cookie (spec §3.3).
  *
- * An `api` choice whose origin or workspace does not parse, or any other value, is `misconfigured`:
+ * An `api` choice whose origin or workspace does not parse, or any other value, is `misconfigured`
+ * (an unset workspace is not: the session's memberships name it):
  * the app shows the deployment unreachable rather than falling back to fixtures, so fixture figures
  * never pass for a record (rule 3).
  */
 export type DataSource =
   | { kind: "fixtures" }
-  | { kind: "api"; origin: string; workspaceId: string }
+  /** `workspaceId` is `null` when `OWLHEAD_WORKSPACE_ID` is unset: the browser reads it from the session's memberships (`GET /v1/me/workspaces`). */
+  | { kind: "api"; origin: string; workspaceId: string | null }
   | { kind: "misconfigured"; reason: string };
 
 /** What the browser is told: the API's origin and the workspace, never anything else. */
@@ -46,7 +48,8 @@ export function readDataSource(env: Readonly<Record<string, string | undefined>>
   if (kind !== "api") return { kind: "misconfigured", reason: `${DATA_SOURCE_ENV} is neither fixtures nor api` };
   const origin = originOf(env[API_ORIGIN_ENV] ?? "");
   if (!origin) return { kind: "misconfigured", reason: `${API_ORIGIN_ENV} is not an https origin` };
-  const workspaceId = env[WORKSPACE_ENV] ?? "";
+  const workspaceId = env[WORKSPACE_ENV];
+  if (workspaceId === undefined) return { kind: "api", origin, workspaceId: null };
   if (!WORKSPACE_ID.test(workspaceId)) return { kind: "misconfigured", reason: `${WORKSPACE_ENV} is not a workspace id` };
   return { kind: "api", origin, workspaceId };
 }
