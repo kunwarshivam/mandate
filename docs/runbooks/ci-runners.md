@@ -212,20 +212,26 @@ runners misbehave (for example, runners registering and never going Online), ope
 yourself alone, read the logs, and shut it again the same day (DEC-2077). Opening and shutting it
 each replace the droplets, so do it while `CI_RUNNER` is unset (§7).
 
+The E21-64l diagnostic canary found cloud-init stopping at `sshd -t` because Ubuntu 24.04 had not
+created volatile `/run/sshd`; bootstrap therefore never installed Docker, Sysbox or the manager.
+The module now creates that root-owned mode-0755 directory before validation. A recurrence is a
+boot-order regression, not evidence against the GitHub App or Sysbox.
+
 1. **Make a fresh DigitalOcean token** (§2.3) and export the same variables as in §4, then add:
 
    ```bash
    cd deploy/tofu/environments/ci-runners
    export TF_VAR_debug_ssh_key="$(cat ~/.ssh/id_ed25519.pub)"            # your public key, one line
    export TF_VAR_debug_ssh_cidr="$(curl -s https://ipv4.icanhazip.com)/32" # your own address only
-   tofu apply
+   tofu apply -var runner_count=1                                        # while debugging the canary
    ```
 
    Check that the address is your own, for example against your router's page. Behind a shared or
    carrier-grade NAT, one address is everyone behind it; use another network then.
 
-   The plan adds one inbound rule (TCP 22 from your address) and replaces the three droplets.
-   The window takes both variables or neither, and refuses any range wider than one address.
+   The canary plan adds one inbound rule (TCP 22 from your address) and replaces its one droplet.
+   On an already scaled fleet, omit `-var runner_count=1`; that plan replaces all three. The
+   window takes both variables or neither, and refuses any range wider than one address.
 2. **Wait about 30 minutes**, for the new droplets to boot and start looping, then for each
    droplet's address (the console's **Droplets** page):
 
