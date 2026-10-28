@@ -581,6 +581,68 @@ pub fn journey_result(text: &str) -> Result<BTreeMap<String, String>> {
     Ok(steps)
 }
 
+/// The owner's set-up spec under `web/e2e-cell/` (the demo's step 2 from web/, lane WB).
+const SETUP_SPEC: &str = "setup.spec.ts";
+/// Playwright's bound on the set-up run (`OWLHEAD_CELL_TIMEOUT_MS`): 330 seconds, which holds the
+/// spec's own 240 s and `next dev`'s 60 s start with room to spare, and ends inside
+/// [`TRADE_LOOP_POLLS`]' 500 s, so Playwright writes its result before the driver gives up.
+const SETUP_TIMEOUT_MS: &str = "330000";
+/// The set-up's steps, in the order the spec reaches them; its result names each one.
+pub const SETUP_STEPS: [&str; 4] = [
+    "passkey_enrolled",
+    "version_created",
+    "confirm_refused_cooling_off",
+    "deploy_not_offered",
+];
+
+/// The owner's set-up from `web/` (`setup.spec.ts`) in `workspace`: the owner, signed in, adds a
+/// passkey in Settings through the API's enrolment, made by Chromium's virtual authenticator,
+/// creates version 1 in `/agents/new`, and is told the confirm waits for the new passkey's first 24
+/// hours, with nothing sent and no deployment offered. A first passkey's cool-off is a safety rule
+/// the founder decides (DEC-79), so the cell's confirm and deploy stay the CLI's. Answers the steps
+/// reached; an `Err` names the first that was not, or a run that wrote no result.
+///
+/// # Errors
+/// A missing tool, a run past [`TRADE_LOOP_POLLS`], a run that wrote no result, or a step not
+/// reached.
+pub fn setup_from_web(workspace: &str) -> Result<BTreeMap<String, String>> {
+    let run = spec_run(
+        workspace,
+        &[
+            ("OWLHEAD_CELL_SPEC", SETUP_SPEC.to_owned()),
+            ("OWLHEAD_CELL_TIMEOUT_MS", SETUP_TIMEOUT_MS.to_owned()),
+        ],
+        "web-setup",
+        TRADE_LOOP_POLLS,
+        &mut || Ok(()),
+    )?;
+    let Some(text) = run.result else {
+        bail!(
+            "web/'s set-up wrote no result ({}); its log is {}",
+            run.status,
+            run.log.display()
+        );
+    };
+    setup_result(&text)
+}
+
+/// The set-up spec's result file as the steps it reached; an `error`, or a step of
+/// [`SETUP_STEPS`] missing, is an `Err` naming it.
+///
+/// # Errors
+/// A result that is not a JSON object of strings, names an error, or lacks a step.
+pub fn setup_result(text: &str) -> Result<BTreeMap<String, String>> {
+    let steps: BTreeMap<String, String> = serde_json::from_str(text)
+        .context("the set-up's result is not a JSON object of strings")?;
+    if let Some(error) = steps.get("error") {
+        bail!("the set-up from web/ stopped: {error}");
+    }
+    if let Some(missing) = SETUP_STEPS.iter().find(|s| !steps.contains_key(**s)) {
+        bail!("the set-up from web/ did not reach `{missing}`");
+    }
+    Ok(steps)
+}
+
 /// Whether lane W's trade loop spec is in this checkout (#2462).
 ///
 /// # Errors
@@ -740,6 +802,60 @@ mod tests {
                 "the spec writes {step}"
             );
         }
+        Ok(())
+    }
+
+    /// The set-up's result passes only when it names every step and no error, and the spec it
+    /// runs is in this checkout and writes each step the driver reads.
+    #[test]
+    fn the_setup_reads_every_step_and_names_the_first_one_missing() -> Result<()> {
+        let all = r#"{"passkey_enrolled":"pk","version_created":"sha256:ab","confirm_refused_cooling_off":"ok","deploy_not_offered":"ok"}"#;
+        assert_eq!(setup_result(all)?.len(), 4);
+        let stopped =
+            r#"{"passkey_enrolled":"pk","error":"the deployment registered no instrument"}"#;
+        let why = format!("{:#}", setup_result(stopped).err().context("an error")?);
+        assert!(
+            why.contains("the deployment registered no instrument"),
+            "{why}"
+        );
+        let short = r#"{"passkey_enrolled":"pk","version_created":"sha256:ab","confirm_refused_cooling_off":"ok"}"#;
+        let why = format!("{:#}", setup_result(short).err().context("a missing step")?);
+        assert!(why.contains("`deploy_not_offered`"), "{why}");
+        assert!(setup_result("[]").is_err());
+        let spec = fs::read_to_string(crate::repo_root()?.join("web/e2e-cell").join(SETUP_SPEC))?;
+        for step in SETUP_STEPS {
+            assert!(
+                spec.contains(&format!("step(\"{step}\"")),
+                "the spec writes {step}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The set-up spec's own test timeout, as `setup.spec.ts` defaults `SETUP_MS`.
+    const SETUP_SPEC_MS: u64 = 240_000;
+
+    /// Playwright's bound on the set-up holds the spec's own test timeout and `next dev`'s start,
+    /// with margin, and ends before the driver's polls do, so a slow set-up is the spec's named
+    /// failure rather than Playwright's global kill.
+    #[test]
+    fn the_setups_playwright_bound_holds_the_spec_and_ends_before_the_polls() -> Result<()> {
+        let spec = fs::read_to_string(crate::repo_root()?.join("web/e2e-cell").join(SETUP_SPEC))?;
+        assert!(
+            spec.contains(&format!(
+                "?? {}_{:03})",
+                SETUP_SPEC_MS / 1000,
+                SETUP_SPEC_MS % 1000
+            )),
+            "the spec defaults SETUP_MS to {SETUP_SPEC_MS} ms"
+        );
+        let bound: u64 = SETUP_TIMEOUT_MS.parse()?;
+        let polls_ms = u64::from(TRADE_LOOP_POLLS) * u64::try_from(POLL.as_millis())?;
+        assert!(
+            bound > SETUP_SPEC_MS + NEXT_DEV_START_MS,
+            "{bound} ms leaves no margin past the spec's {SETUP_SPEC_MS} ms and next dev's start"
+        );
+        assert!(bound < polls_ms, "{bound} ms outlasts the driver's polls");
         Ok(())
     }
 
