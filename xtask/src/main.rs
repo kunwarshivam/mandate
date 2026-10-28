@@ -140,6 +140,10 @@ commands:
                         accepted on the host, then from web/ the go-live screen pending counsel
                         and a real-money request refused and journaled
                         (DEC-2134); with a workspace, only the web/ part against it
+  cell web-setup <workspace>
+                        step 2 from web/ against a running cell with sign-in ready: a passkey
+                        added in Settings by a virtual authenticator, version 1 created in
+                        /agents/new, and its confirm held for the passkey's first 24 hours
   cell web-kill-switch <workspace> [agent]
                         step 7 from web/ against a running cell with sign-in ready: next dev, then
                         Playwright presses one listed agent's kill switch (DEC-2406)
@@ -456,6 +460,7 @@ fn run() -> Result<()> {
             cell::scenario::accept_disclosure(workspace)?;
             cell::journey(workspace, agent)
         }
+        ["cell", "web-setup", workspace] => cell::setup(workspace),
         ["cell", "web-kill-switch", workspace] => {
             cell::web::report(cell::web::kill_switch_from_web(workspace, None))
         }
