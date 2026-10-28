@@ -32,6 +32,7 @@ from common import (
     ENVELOPE,
     LIQUIDITY_PAIR,
     ULID,
+    INTENT,
     INT,
     REF,
     STEP_UP,
@@ -774,6 +775,8 @@ REQUIRED_REFS["ModelInvocationRecorded"] = ("model_version",)
 
 # §9.19 (DEC-998): the agent stream's `ModelInvocationRecorded` and the model gateway's meter stream.
 AGENT_PURPOSES = ("research", "llm_signal", "fast_signal")
+# The purposes of a call with no agent: the compiler's and an evaluation's (rule 156, DEC-2216).
+NO_AGENT_PURPOSES = ("compiler", "evaluation")
 HARNESS_RESULTS = (
     "judged",
     "unknown_instrument",
@@ -820,7 +823,7 @@ SCHEMAS[("meter", "StreamOpened")] = rec(("stream_type", one_of("meter")), ("wor
 SCHEMAS[("meter", "MeterReserved")] = rec(
     ("call_id", ULID),
     ("agent_id", opt(IDENT_T)),
-    ("purpose", one_of(*AGENT_PURPOSES, "compiler")),
+    ("purpose", one_of(*AGENT_PURPOSES, *NO_AGENT_PURPOSES)),
     ("model", MODEL_REF),
     ("endpoint", STR),
     ("key_owner", one_of("platform", "customer")),
@@ -1281,7 +1284,7 @@ GATE_CHECK_IDS = tuple(
     "mark_freshness collar conduct buying_power gross_exposure day_trade_budget".split()
 )
 INTENT_V1 = rec(
-    ("intent_id", ULID),
+    ("intent_id", INTENT),
     ("agent_id", IDENT_T),
     ("instrument_id", STR),
     ("side", STR),
@@ -1292,7 +1295,7 @@ INTENT_V1 = rec(
     ("purpose", STR),
 )
 GATE_V1 = rec(
-    ("intent_id", ULID),
+    ("intent_id", INTENT),
     ("verdict", STR),
     ("reason_code", opt(STR)),
     ("data_profile", STR),
@@ -1312,7 +1315,7 @@ SUBMITTED_V1 = rec(
 )
 COMPANION = rec(
     ("agent_id", IDENT_T),
-    ("intent_id", opt(ULID)),
+    ("intent_id", opt(INTENT)),
     ("purpose", one_of("open", "increase", "discretionary_exit", "risk_exit", "owner_exit", "protective", "flatten")),
     ("extended_hours", BOOL),
     ("stop_price", opt(DEC)),
@@ -1331,7 +1334,7 @@ PROTECTION_CHANGED = rec(
     ("qty", opt(DEC)),
     ("stop", opt(DEC)),
     ("take_profit", opt(DEC)),
-    ("intent_id", opt(ULID)),
+    ("intent_id", opt(INTENT)),
     ("bracket", opt(STR)),
     ("entry", opt(STR)),
     ("agent_id", opt(IDENT_T)),
@@ -1363,7 +1366,7 @@ ESTABLISHED_V2 = rec(
 VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "StreamOpened"): (1,),
     ("acct", "IntentReceived"): (1, 2),
-    ("acct", "GateDecided"): (1, 2),
+    ("acct", "GateDecided"): (1, 2, 3),
     ("acct", "OrderSubmitted"): (1, 2),
     ("acct", "OrderRequestRecorded"): (1,),
     ("acct", "ProtectionChanged"): (1, 2),
@@ -1459,6 +1462,13 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "IntentReceived", 2): rec(*INTENT_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "GateDecided", 1): GATE_V1,
     ("acct", "GateDecided", 2): rec(*GATE_V1.fields, ("risk_clock", RISK_CLOCK)),
+    ("acct", "GateDecided", 3): rec(
+        *GATE_V1.fields,
+        ("sized_qty", opt(DEC)),
+        ("parked", opt(BOOL)),
+        ("held_long", opt(BOOL)),
+        ("risk_clock", RISK_CLOCK),
+    ),
     ("acct", "OrderSubmitted", 1): SUBMITTED_V1,
     ("acct", "OrderSubmitted", 2): rec(*SUBMITTED_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "OrderRequestRecorded", 1): COMPANION,
@@ -2089,6 +2099,29 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             clauses.reverse()
         wrong = next((m for m, ok in clauses if not ok), None)
         rule("245", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "GateDecided" and draft["schema_version"] == 3:
+        # Rules 313 to 315 (DEC-2848): the executor's own members, each only where it writes it.
+        sized = p["sized_qty"]
+        allow = p["verdict"] == "allow" or "rule.313.allow" in skip
+        positive = sized is None or normalize_decimal(sized) is None or Decimal(sized) > 0 or "rule.313.positive" in skip
+        rule("313", sized is None or (allow and positive), "schema", "payload.sized_qty")
+        held_long = p["held_long"]
+        rule(
+            "314",
+            held_long is None
+            or ((held_long is True or "rule.314.true" in skip) and (p["verdict"] == "hold" or "rule.314.hold" in skip)),
+            "schema",
+            "payload.held_long",
+        )
+        parked = p["parked"]
+        sessions = ("session_closed",) if "rule.315.closed_only" in skip else ("session_closed", "session_unknown")
+        parked_ok = parked is None or (
+            (parked is True or "rule.315.true" in skip)
+            and p["verdict"] == "hold"
+            and (p["reason_code"] in sessions or "rule.315.reason" in skip)
+            and (held_long is True or "rule.315.held_long" in skip)
+        )
+        rule("315", parked_ok, "schema", "payload.parked")
     if event_type == "ConnectionRequested" and draft["schema_version"] == 2:
         oauth = p["credential"] == "oauth"
         breadth = p["breadth"]
@@ -2681,7 +2714,7 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
         rule("155", actor["kind"] == "system", "actor.kind")
     if event_type == "MeterReserved":
         (
-            rule("156.agent", (p["agent_id"] is None) == (p["purpose"] == "compiler"), "payload.agent_id")
+            rule("156.agent", (p["agent_id"] is None) == (p["purpose"] in (NO_AGENT_PURPOSES if "rule.156.evaluation" not in skip else ("compiler",))), "payload.agent_id")
             and rule("156.cost", Decimal(p["max_cost_usd"]) >= 0, "payload.max_cost_usd")
         )
     if event_type == "MeterSettled":

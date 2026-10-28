@@ -562,7 +562,7 @@ forbidden_internal = ["mandate-spec", "mandate-journal", "mandate-builder", "man
 layer = 9
 safety_critical = true
 pure = false
-allowed_external = ["secrecy", "thiserror"]
+allowed_external = ["secrecy", "thiserror", "tokio"]
 forbidden_internal = ["mandate-spec", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-mcp", "mandate-paper", "mandate-cli"]
 
 [crates.mandate-marketdata]
@@ -971,13 +971,18 @@ forbidden_internal = ["mandate-paper", "mandate-shell", "mandate-cli", "mandate-
 # bars from the cell's recorded series, stored as mandate-marketdata's dataset under the artifact
 # store, with mandate-process's lifecycle and probes. tokio drives the SIGTERM listener alone. It
 # appends to no journal stream and may never reach the runner, the shell, the CLI, any broker
-# connector, the executor or the runtime: it holds nothing secret and places nothing.
+# connector, the executor or the runtime: it places nothing. Its hosted IEX source (DEC-2283,
+# superseding DEC-2385 item 3 for that source) reads the control stream through mandate-journal-pg
+# and the platform data key through mandate-vault (secrecy holds it), so it sits at layer 10, above
+# both, as mandate-provisionerd does; tokio also drives the batched fetch. PgJournal can append, so
+# what keeps the process to reading is its read-only database role (DEC-2283 item 3), which its
+# DSN must name.
 [crates.mandate-datad]
-layer = 8
+layer = 10
 safety_critical = true
 pure = false
-allowed_external = ["thiserror", "tokio"]
-forbidden_internal = ["mandate-paper", "mandate-shell", "mandate-cli", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-executor", "mandate-runtime", "mandate-journal-pg", "mandate-store"]
+allowed_external = ["secrecy", "thiserror", "tokio"]
+forbidden_internal = ["mandate-paper", "mandate-shell", "mandate-cli", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-executor", "mandate-runtime", "mandate-store"]
 
 # The paper adapter (E7-19 slice 5, the first paper trade brief's E1a): it hands the model host's
 # output to the shell's production cycle and decides nothing itself. It is the runner: the only

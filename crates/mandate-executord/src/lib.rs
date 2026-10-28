@@ -33,6 +33,7 @@
 //! port. In CI it is a fixture, never a broker host, and this crate names no host (X2). Paper
 //! only: [`ExecutorProcess::start`] refuses any other environment before it takes the stream.
 
+pub mod acknowledgments;
 pub mod alpaca;
 pub mod connect;
 pub mod credential;
@@ -50,9 +51,11 @@ pub mod oauth_check;
 pub mod paper;
 mod process;
 pub mod quotes;
+pub mod risk;
 pub mod robinhood;
 pub mod run;
 pub mod serve;
+mod tail;
 
 pub use process::{
     Alert, Broker, Config, ExecutorProcess, Protections, Unplanned, VERSION, Wiring,

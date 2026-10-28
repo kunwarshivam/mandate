@@ -21,12 +21,12 @@ use sha2::{Digest, Sha256};
 
 use super::executor::{CONNECTION, RESEARCH_CONNECTION, connect_check, executor_live};
 use super::{
-    API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_OWNER, DEPLOY_MANAGER_PROCESS,
-    ImageSource, MODEL_GATEWAY_PROCESS, NAMESPACE, NODE, RESEARCH_MANAGER_PROCESS,
-    RESEARCH_SCHEDULER_PROCESS, SCHEDULER_PROCESS, WORKSPACE_CHART, api_diagnosis, api_image_tag,
-    api_port_forward, helm, host_image_source, http, kubectl, open_session, processes, render,
-    render_with, reply_body, run_id, run_job, session_cookie, signed_in, stub_image_tag,
-    stub_token, template_args, tools_missing, up, web,
+    API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_APP_ORIGIN, DEMO_OWNER,
+    DEPLOY_MANAGER_PROCESS, ImageSource, MODEL_GATEWAY_PROCESS, NAMESPACE, NODE,
+    RESEARCH_MANAGER_PROCESS, RESEARCH_SCHEDULER_PROCESS, SCHEDULER_PROCESS, WORKSPACE_CHART,
+    api_diagnosis, api_image_tag, api_port_forward, helm, host_image_source, http, kubectl,
+    open_session, processes, render, render_with, reply_body, run_id, run_job, session_cookie,
+    signed_in, stub_image_tag, stub_token, template_args, tools_missing, up, web,
 };
 use crate::output;
 
@@ -36,6 +36,10 @@ pub const SCENARIOS: &[&str] = &["demo"];
 /// Both are stored as canonical JSON (journal spec §4), so a version is the SHA-256 of the file.
 pub const MANDATE_FILE: &str = "deploy/cell/demo/mandate.json";
 pub const INSTRUMENT_FILE: &str = "deploy/cell/demo/instrument.json";
+/// The member of [`INSTRUMENT_FILE`] a run stamps with the instant it starts (DEC-2073): the
+/// committed value is a template, so the snapshot a run registers is never older than the rule
+/// set's `etp_classification_max_age_s`, which the eligibility floor holds openings to.
+const CLASSIFIED_AT: &str = "etp_classified_at";
 /// The reviewed configuration every agent the demo deploys trades under, registered on the
 /// workspace's control stream before any version: the gate's rule set, which the runtime's gate
 /// and the executor's binding gate both read as the stream's latest `rule_set` (one artifact for
@@ -153,6 +157,8 @@ pub enum Part {
     Api(ApiCheck),
     Web(WebCheck),
     WebSignIn(WebCheck),
+    WebSetUp(SetUpCheck),
+    WebReport(ReportCheck),
     WebTradeLoop(WebCheck),
     Executor(ExecutorCheck),
     Applied(AppliedCheck),
@@ -224,6 +230,23 @@ pub struct AppliedCheck {
 pub struct WebCheck {
     pub shows: &'static str,
     pub agent: &'static str,
+}
+
+/// The owner's set-up from `web/` in the run's workspace (`web/e2e-cell/setup.spec.ts`), run after
+/// the gestures' Job: a passkey added in Settings by Chromium's virtual authenticator, version 1
+/// created in `/agents/new`, and its confirm held in words for the passkey's first 24 hours, with
+/// no deployment offered ([`web::setup_from_web`]).
+#[derive(Debug)]
+pub struct SetUpCheck {
+    pub shows: &'static str,
+}
+
+/// The owner's visit of a backtest's report from `web/`: what it shows, and the backtest whose
+/// report it opens from its link.
+#[derive(Debug)]
+pub struct ReportCheck {
+    pub shows: &'static str,
+    pub backtest: &'static str,
 }
 
 /// A link of the story not on `main` yet (DEC-2004): what it would show, what of it is already on
@@ -341,12 +364,13 @@ const DR_CONNECT: Wait = Wait {
     lands: "a connection the dry run can name: staging's comes from the owner's OAuth connect, \
             which the scenario does not run yet",
 };
-const W2_WEB: Wait = Wait {
-    lane: "W2",
-    story: "E11-9",
+const WB_SETUP: Wait = Wait {
+    lane: "WB",
+    story: "E9-4",
     pr: None,
-    lands: "web/ sends the demo's gestures through the API, and `cell demo` drives web/ against \
-            the cell (claim #1443)",
+    lands: "web/'s confirm and deploy with a passkey in the cell, once the founder decides whether \
+            a dev or ci cell may waive a first passkey's 24-hour cool-off (workspace API spec \
+            §3.6, DEC-79); until then the cell's confirm and deploy stay the CLI's",
 };
 const E2E_FILL: Wait = Wait {
     lane: "E2E",
@@ -890,12 +914,18 @@ pub fn plan(
                         owner(&["agent", "deploy", WEB_AGENT, &version, "--code", &deploy]),
                         "deployed as event".into(),
                     ),
+                    Part::WebSetUp(SetUpCheck {
+                        shows: "the owner's set-up from web/: a passkey added in Settings, \
+                                version 1 created in /agents/new, and its confirm held in words \
+                                for the passkey's first 24 hours, with nothing sent",
+                    }),
                     Part::Gap(Gap {
-                        what: "the same gestures from web/",
-                        on_main: "the API's version, confirm and deploy routes (#1552) in the \
-                                  cell (#1554), web/'s set-up (#1557), its sign-in to a dev cell \
-                                  (#1588) and the stub issuer (#1591)",
-                        waits: vec![W2_WEB],
+                        what: "the confirm and deploy from web/",
+                        on_main: "the API's version, confirm and deploy routes (#1552) with \
+                                  passkey step-up (DEC-2128), web/'s set-up (#1557), and the \
+                                  set-up above, which a passkey still in its first 24 hours \
+                                  stops at the confirm",
+                        waits: vec![WB_SETUP],
                     }),
                 ],
                 connected
@@ -1110,16 +1140,14 @@ pub fn plan(
             parts: vec![
                 Part::Gap(Gap {
                     what: "the runtime sizes the opening and the gate and autonomy rules ask",
-                    on_main: "the runtime and its image (#1521, #1560), on the deny-all wiring \
-                              that proposes nothing (DEC-1013 item 2), started by the manager \
-                              from step 2's version-2 deployment (#1759, #1763)",
+                    on_main: "the runtime and its image (#1521, #1560), started by the manager \
+                              from step 2's version-2 deployment (#1759, #1763), asking the owner \
+                              on a deferring opening (#2538), the demo envelope's loop from \
+                              decide to proposed as a test (#2637); the owner's inbox is read \
+                              by this step's web run below, since a read in the Job races the \
+                              runtime's first ask",
                     waits: vec![P5_HOOK],
                 }),
-                gesture(
-                    "the owner's inbox, read (empty until the runtime asks)",
-                    owner(&["approvals", "list", "--agent", WEB_AGENT]),
-                    "no approvals".into(),
-                ),
                 Part::Gap(Gap {
                     what: "the owner approves the ask in web/",
                     on_main: "the approval answer in web/ and the API's responses route in the \
@@ -1216,11 +1244,11 @@ pub fn plan(
                         ("/backtest/mandate_version", version.clone()),
                     ]),
                 }),
-                Part::Gap(Gap {
-                    what: "web/ shows the backtest's report",
-                    on_main: "the API's backtest read (#1555), web/'s report screen (#1549), \
-                              and the owner's session through the stub issuer (#1591)",
-                    waits: vec![W2_WEB],
+                Part::WebReport(ReportCheck {
+                    shows: "the owner opening the backtest's report in web/ from its link (the \
+                            API lists no backtests), and the report the run stored shown, read \
+                            through the API",
+                    backtest: BACKTEST_ID,
                 }),
             ],
         },
@@ -1296,6 +1324,8 @@ pub fn gestures(steps: &[Step]) -> Vec<&Gesture> {
             Part::Api(_)
             | Part::Web(_)
             | Part::WebSignIn(_)
+            | Part::WebSetUp(_)
+            | Part::WebReport(_)
             | Part::WebTradeLoop(_)
             | Part::Executor(_)
             | Part::Applied(_)
@@ -1616,6 +1646,53 @@ impl DemoInputs {
     }
 }
 
+/// The demo's instrument snapshot as a run registers it (DEC-2073): `committed`,
+/// [`INSTRUMENT_FILE`]'s text, with its classification instant replaced by `classified_at`, a UTC
+/// instant to the second, and every other byte as committed, so the file stays canonical JSON.
+/// The cell has no classifier: the fixture's classification, a plain fund from the Nasdaq Trader
+/// symbol directory, is asserted as of the run's start.
+pub fn registered_instrument(committed: &str, classified_at: &str) -> Result<String> {
+    let instant = |t: &str| {
+        let b = t.as_bytes();
+        b.len() == 20
+            && b.iter().enumerate().all(|(i, c)| match i {
+                4 | 7 => *c == b'-',
+                10 => *c == b'T',
+                13 | 16 => *c == b':',
+                19 => *c == b'Z',
+                _ => c.is_ascii_digit(),
+            })
+    };
+    if !instant(classified_at) {
+        bail!("`{classified_at}` is not a UTC instant to the second (YYYY-MM-DDTHH:MM:SSZ)");
+    }
+    let parsed: Value = serde_json::from_str(committed)
+        .with_context(|| format!("{INSTRUMENT_FILE} is not JSON"))?;
+    let old = parsed[CLASSIFIED_AT]
+        .as_str()
+        .filter(|t| instant(t))
+        .with_context(|| format!("{INSTRUMENT_FILE} names no {CLASSIFIED_AT} to the second"))?;
+    let member = |t: &str| format!("\"{CLASSIFIED_AT}\":\"{t}\"");
+    if committed.matches(&member(old)).count() != 1 {
+        bail!("{INSTRUMENT_FILE} names {CLASSIFIED_AT} other than once");
+    }
+    Ok(committed.replacen(&member(old), &member(classified_at), 1))
+}
+
+/// The instant a run starts, as [`registered_instrument`] takes it: `date -u`, to the second.
+pub fn run_started() -> Result<String> {
+    Ok(output("date", &["-u", "+%Y-%m-%dT%H:%M:%SZ"])?
+        .trim()
+        .to_owned())
+}
+
+/// [`INSTRUMENT_FILE`], read from the checkout and classified at the run's start.
+pub fn instrument_for_run() -> Result<String> {
+    let committed = fs::read_to_string(INSTRUMENT_FILE)
+        .with_context(|| format!("reading {INSTRUMENT_FILE}"))?;
+    registered_instrument(&committed, &run_started()?)
+}
+
 /// Reads the demo's inputs from the checkout.
 pub fn demo_inputs() -> Result<DemoInputs> {
     let read = |path: &str| fs::read(path).with_context(|| format!("reading {path}"));
@@ -1625,10 +1702,7 @@ pub fn demo_inputs() -> Result<DemoInputs> {
     let (mandate, research_mandate) = (read(MANDATE_FILE)?, read(RESEARCH_MANDATE_FILE)?);
     let files = [
         ("mandate.json", text(mandate.clone(), MANDATE_FILE)?),
-        (
-            "instrument.json",
-            text(read(INSTRUMENT_FILE)?, INSTRUMENT_FILE)?,
-        ),
+        ("instrument.json", instrument_for_run()?),
         ("rule-set.json", text(read(RULE_SET_FILE)?, RULE_SET_FILE)?),
         (
             "fee-config.json",
@@ -1970,6 +2044,36 @@ pub fn run_in(name: &str) -> Result<String> {
                         failed.get_or_insert_with(|| format!("GET {}: {said}", check.path));
                     }
                 }
+                Part::WebSetUp(check) => {
+                    let outcome = match &failed {
+                        Some(_) => SetUpOutcome::AfterFailure,
+                        None => set_up(&workspace)?,
+                    };
+                    let required = Required {
+                        cell: env::var_os(CELL_REQUIRED_ENV).is_some(),
+                        web: env::var_os(WEB_REQUIRED_ENV).is_some(),
+                    };
+                    let (word, said, fails) = setup_verdict(&outcome, required);
+                    eprintln!("    {word:<8} {}: {said}", check.shows);
+                    if fails {
+                        failed.get_or_insert_with(|| format!("web/ set-up: {said}"));
+                    }
+                }
+                Part::WebReport(check) => {
+                    let outcome = match &failed {
+                        Some(_) => SetUpOutcome::AfterFailure,
+                        None => report(&workspace, check.backtest)?,
+                    };
+                    let required = Required {
+                        cell: env::var_os(CELL_REQUIRED_ENV).is_some(),
+                        web: env::var_os(WEB_REQUIRED_ENV).is_some(),
+                    };
+                    let (word, said, fails) = report_verdict(&outcome, required);
+                    eprintln!("    {word:<8} {}: {said}", check.shows);
+                    if fails {
+                        failed.get_or_insert_with(|| format!("web/ report visit: {said}"));
+                    }
+                }
                 Part::WebTradeLoop(check) => {
                     let outcome = match (&failed, &traded) {
                         (Some(_), _) => TradeOutcome::AfterFailure,
@@ -2021,6 +2125,10 @@ pub fn run_in(name: &str) -> Result<String> {
                         Part::Grant(check) => (check.shows, &check.gap),
                         _ => continue,
                     };
+                    if !loop_read_here(env::var_os(LOOP_ELSEWHERE_ENV).as_deref()) {
+                        eprintln!("    not run  {shows}: {LOOP_ELSEWHERE}");
+                        continue;
+                    }
                     let seen = match (&failed, &looped, part) {
                         (None, Looped::Open, Part::Loop(check)) => {
                             Some(journaled(check, &mut linked))
@@ -2102,6 +2210,23 @@ const APPLIED_WITHIN: Duration = Duration::from_secs(90);
 /// research pass at the runtime's tick, or the executor's next reconciliation, with the Job's ten
 /// minutes in mind, since a link not seen stops the loop's later reads.
 const LINK_WITHIN: Duration = Duration::from_secs(60);
+
+/// Set where another job of the same run reads the research loop (CI's `cell-demo-web`, whose
+/// `cell-demo` sibling runs the same scenario and reads it): this run reads each link and the grant
+/// as `not run`, never failed, and spends none of their waits, so the web job stays inside its ten
+/// minutes by sharing the scenario's parts with its sibling rather than dropping one (DEC-464).
+const LOOP_ELSEWHERE_ENV: &str = "MANDATE_DEMO_LOOP_ELSEWHERE";
+
+/// What a run that leaves the research loop to its sibling prints for each of its parts.
+const LOOP_ELSEWHERE: &str =
+    "read by this run's cell-demo job, which runs the same scenario (DEC-464)";
+
+/// Whether this run reads the research loop: unless [`LOOP_ELSEWHERE_ENV`] is `1`, which CI sets
+/// only when the sibling job runs too; empty or any other value reads it here, so a selection
+/// without the sibling never leaves the loop unread.
+fn loop_read_here(elsewhere: Option<&std::ffi::OsStr>) -> bool {
+    elsewhere.is_none_or(|value| value != "1")
+}
 
 /// The variable a rehearsal sets to wait longer for each link, in whole seconds, up to
 /// [`LINK_WITHIN_MAX`]: the recorded news item arrives 900 seconds after the research agent is
@@ -2619,8 +2744,13 @@ pub enum TradeOutcome {
     NoTools(String),
     Failed(String),
     /// The loop stopped before any approval reached `web/`, and the API, read with the owner's
-    /// session, lists no approval of the agent in any state: the runtime proposed nothing, which
-    /// waits on E15-14's composer, not on `web/`.
+    /// session, lists no approval of the agent in any state: the runtime proposed nothing, not a
+    /// fault of `web/`. Among the plan's conditions, the runtime proposes the agent's equity
+    /// opening only in the regular session, outside its close window, on a crossover output that
+    /// is neither expired nor too old, with fresh facts and nothing held or working in the
+    /// instrument (`mandate-daemon`'s plan; the in-session loop is `runtime.rs`'s
+    /// `the_demo_envelope_decides_asks_and_proposes_once_granted_in_session`, #2637). A plan that
+    /// proposes nothing journals no decision, so no event points to one of those conditions.
     Unproposed(String),
     Ran(web::TradeLoop),
 }
@@ -2683,6 +2813,98 @@ fn browse(
         None => web_outcome(&WebCheck { shows: "", agent }, workspace)?,
     };
     Ok((traded, web))
+}
+
+/// What became of the owner's set-up from `web/`: an earlier part failed, so it was not tried; the
+/// API could not be asked; this machine lacks `web/`'s tools; the run failed or stopped at a step;
+/// or it reached every step, with what each recorded.
+#[derive(Debug, Clone)]
+pub enum SetUpOutcome {
+    AfterFailure,
+    Unaskable(String),
+    NoTools(String),
+    Failed(String),
+    Ran(BTreeMap<String, String>),
+}
+
+/// The owner's set-up from `web/` in `workspace`, as [`browse`] reaches the browser: the API
+/// asked first, then `web/`'s tools, then the API's port-forward.
+fn set_up(workspace: &str) -> Result<SetUpOutcome> {
+    if let Some(why) = api_unaskable()? {
+        return Ok(SetUpOutcome::Unaskable(why));
+    }
+    if let Some(why) = web::unavailable()? {
+        return Ok(SetUpOutcome::NoTools(why));
+    }
+    if let Err(why) = api_port_forward(stub_image_tag()?.is_some()) {
+        return Ok(SetUpOutcome::Unaskable(format!("{why:#}")));
+    }
+    Ok(match web::setup_from_web(workspace) {
+        Ok(reached) => SetUpOutcome::Ran(reached),
+        Err(why) => SetUpOutcome::Failed(format!("{why:#}")),
+    })
+}
+
+/// How the set-up from `web/` reads: `ran` only when it reached every step of
+/// [`web::SETUP_STEPS`]; `failed` for a run that stopped or failed, for an API that cannot be
+/// asked where the cell is required, and for a machine without `web/`'s tools where the web
+/// gesture is; otherwise `not run`, as [`web_verdict`] reads a gesture. Returns the word, what to
+/// print after it, and whether the run fails.
+pub fn setup_verdict(outcome: &SetUpOutcome, required: Required) -> (&'static str, String, bool) {
+    match outcome {
+        SetUpOutcome::AfterFailure => ("not run", "an earlier part failed".into(), false),
+        SetUpOutcome::Unaskable(why) if required.cell => ("failed", why.clone(), true),
+        SetUpOutcome::NoTools(why) if required.web => ("failed", why.clone(), true),
+        SetUpOutcome::Unaskable(why) | SetUpOutcome::NoTools(why) => {
+            ("not run", why.clone(), false)
+        }
+        SetUpOutcome::Failed(why) => ("failed", why.clone(), true),
+        SetUpOutcome::Ran(reached) => {
+            let version = reached.get("version_created").map_or("", String::as_str);
+            (
+                "ran",
+                format!(
+                    "version {version} created; its confirm held for the passkey's first 24 hours"
+                ),
+                false,
+            )
+        }
+    }
+}
+
+/// The owner's visit of `backtest`'s report from `web/` in `workspace`, reached as [`set_up`]
+/// reaches the browser, with its outcome read as a set-up's ([`SetUpOutcome`]).
+fn report(workspace: &str, backtest: &str) -> Result<SetUpOutcome> {
+    if let Some(why) = api_unaskable()? {
+        return Ok(SetUpOutcome::Unaskable(why));
+    }
+    if let Some(why) = web::unavailable()? {
+        return Ok(SetUpOutcome::NoTools(why));
+    }
+    if let Err(why) = api_port_forward(stub_image_tag()?.is_some()) {
+        return Ok(SetUpOutcome::Unaskable(format!("{why:#}")));
+    }
+    Ok(match web::report_from_web(workspace, backtest) {
+        Ok(reached) => SetUpOutcome::Ran(reached),
+        Err(why) => SetUpOutcome::Failed(format!("{why:#}")),
+    })
+}
+
+/// How the report visit from `web/` reads, as [`setup_verdict`] reads a set-up: `ran` only when
+/// it reached every step of [`web::REPORT_STEPS`], naming the link the owner opens, at `web/`'s
+/// origin.
+pub fn report_verdict(outcome: &SetUpOutcome, required: Required) -> (&'static str, String, bool) {
+    match outcome {
+        SetUpOutcome::Ran(reached) => {
+            let link = reached.get("report_link").map_or("", String::as_str);
+            (
+                "ran",
+                format!("the stored report shown at {}{link}", DEMO_APP_ORIGIN),
+                false,
+            )
+        }
+        _ => setup_verdict(outcome, required),
+    }
 }
 
 /// The signed-in read of every approval in `workspace`, whatever its state.
@@ -2802,7 +3024,11 @@ pub fn trade_verdict(outcome: &TradeOutcome, required: Required) -> (&'static st
             "pending",
             format!(
                 "no approval request reached web/ ({why}), and the API lists none of the agent's: \
-                 the runtime proposed nothing, which waits on E15-14's composer"
+                 the runtime proposed nothing. Among other conditions, it proposes an equity \
+                 opening only in the regular session, outside its close window, on a fresh \
+                 crossover output; a gate or autonomy denial shows in the agent's DecisionMade and \
+                 GateDecided, and no decision at all points to the session, a stale output or fact, \
+                 or a held position"
             ),
             false,
         ),
@@ -3144,6 +3370,44 @@ mod tests {
         assert_eq!(pinned[0]["symbol"], instrument["symbol"]);
     }
 
+    /// A run registers the committed snapshot with only its classification instant replaced by
+    /// the run's start (DEC-2073): every other member as committed, the file still the compact
+    /// JSON it was, and an instant that is not UTC to the second refused.
+    #[test]
+    fn a_run_registers_the_snapshot_classified_at_its_start() -> Result<()> {
+        let committed = fs::read_to_string(format!("../{INSTRUMENT_FILE}"))?;
+        let stamped = registered_instrument(&committed, "2026-10-27T13:20:05Z")?;
+        let (mut ours, mut template) = (
+            serde_json::from_str::<Value>(&stamped)?,
+            parsed(INSTRUMENT_FILE),
+        );
+        assert_eq!(ours[CLASSIFIED_AT], "2026-10-27T13:20:05Z");
+        assert_ne!(template[CLASSIFIED_AT], ours[CLASSIFIED_AT]);
+        ours[CLASSIFIED_AT] = Value::Null;
+        template[CLASSIFIED_AT] = Value::Null;
+        assert_eq!(ours, template, "only the classification instant moves");
+        assert_eq!(
+            stamped.len(),
+            committed.len(),
+            "the same bytes but the instant's own"
+        );
+        for bad in [
+            "2026-10-27T13:20:05",
+            "2026-10-27 13:20:05Z",
+            "2026-10-27T13:20:05.5Z",
+            "2026-10-27T13:20:05+00:00",
+            "",
+        ] {
+            assert!(registered_instrument(&committed, bad).is_err(), "{bad:?}");
+        }
+        let started = run_started()?;
+        assert!(
+            registered_instrument(&committed, &started).is_ok(),
+            "{started}"
+        );
+        Ok(())
+    }
+
     /// The QQQ envelope, a test fixture now, is the demo's but for its name, its description and its one
     /// pinned instrument, which its own snapshot names and which is not the demo agent's, so V-006
     /// finds it unclaimed on the shared connection (DEC-2036).
@@ -3353,16 +3617,23 @@ mod tests {
         );
         assert_eq!(all[record].expect, format!("report={DEMO_REPORT}"));
         assert!(all.iter().filter(|g| g.command.is_some()).count() == 1);
-        let lanes: Vec<&str> = steps[4]
+        assert!(
+            !steps[4].parts.iter().any(|p| matches!(p, Part::Gap(_))),
+            "step 5 waits on no lane: web/ visits the report screen"
+        );
+        let visits: Vec<&str> = steps[4]
             .parts
             .iter()
             .filter_map(|p| match p {
-                Part::Gap(g) => Some(g.waits.iter().map(|w| w.lane)),
+                Part::WebReport(r) => Some(r.backtest),
                 _ => None,
             })
-            .flatten()
             .collect();
-        assert_eq!(lanes, ["W2"], "only web/'s report screen is left");
+        assert_eq!(
+            visits,
+            [BACKTEST_ID],
+            "web/ opens the backtest the Job recorded"
+        );
     }
 
     /// Step 2 registers the reviewed configuration before any version, once each in each
@@ -4247,7 +4518,8 @@ mod tests {
     }
 
     /// Which steps run today: the sign-in, through the API and web/, runs whole; the gestures on
-    /// `main` make steps 2 to 5 partial, step 3's research gestures among them; step 6, the trade
+    /// `main` make steps 2 to 4 partial, step 3's research gestures among them; step 5, the report
+    /// the Job records and web/'s visit of it, runs whole; step 6, the trade
     /// loop's own exit after the fill, runs whole; the kill switch,
     /// applied by the runtime step 2's deployment starts, and the record run whole. Without a
     /// connect check (the staging dry run) step 7 is partial.
@@ -4257,15 +4529,13 @@ mod tests {
         let read: Vec<Readiness> = steps.iter().map(readiness).collect();
         assert_eq!(
             read,
-            [
-                Ready, Partial, Partial, Partial, Partial, Ready, Ready, Ready
-            ]
+            [Ready, Partial, Partial, Partial, Ready, Ready, Ready, Ready]
         );
         let dry: Vec<Readiness> = unconnected("demo1").iter().map(readiness).collect();
         assert_eq!(
             dry,
             [
-                Ready, Partial, Partial, Partial, Partial, Ready, Partial, Ready
+                Ready, Partial, Partial, Partial, Ready, Ready, Partial, Ready
             ]
         );
         let step = |parts: Vec<Part>| Step {
@@ -4358,6 +4628,125 @@ mod tests {
                 "slice {slice} landed as {cited}, but no gap's on_main cites it"
             );
         }
+    }
+
+    /// Step 2 ends with the owner's set-up from web/ after the CLI's deployment, then the gap for
+    /// the confirm and deploy from web/, which waits on lane WB once the founder decides the
+    /// cool-off; so step 2 stays partial while that gap stands.
+    #[test]
+    fn step_two_runs_the_web_set_up_after_the_cli_deployment_and_names_its_gap() {
+        for steps in [planned("demo1"), unconnected("demo1")] {
+            let step2 = &steps[1];
+            let set_up = step2
+                .parts
+                .iter()
+                .position(|p| matches!(p, Part::WebSetUp(_)))
+                .unwrap();
+            let deployed = step2
+                .parts
+                .iter()
+                .position(|p| {
+                    matches!(p, Part::Gesture(g) if g.args[..2] == ["agent", "deploy"] && g.args.iter().any(|a| a == "--code"))
+                })
+                .unwrap();
+            assert!(deployed < set_up, "after the CLI's deployment");
+            let Some(Part::Gap(gap)) = step2.parts.get(set_up + 1) else {
+                panic!("the gap for the confirm and deploy follows the set-up");
+            };
+            assert_eq!(gap.what, "the confirm and deploy from web/");
+            assert_eq!(gap.waits.iter().map(|w| w.lane).collect::<Vec<_>>(), ["WB"]);
+            assert!(
+                gap.waits[0].lands.contains("founder"),
+                "the founder's cool-off decision is what it waits on"
+            );
+            assert_eq!(readiness(step2), Partial);
+        }
+    }
+
+    /// The set-up from web/ reads `ran` only once it reached every step; a run that stopped is
+    /// `failed`; a machine without web/'s tools or an API that cannot be asked is `not run`,
+    /// unless the run requires the web gesture or the cell, as a web gesture reads.
+    #[test]
+    fn the_web_set_up_reads_ran_failed_or_not_run() {
+        let free = Required {
+            cell: false,
+            web: false,
+        };
+        let strict = Required {
+            cell: true,
+            web: true,
+        };
+        let reached: BTreeMap<String, String> = web::SETUP_STEPS
+            .iter()
+            .map(|s| ((*s).to_owned(), "v".to_owned()))
+            .collect();
+        let (word, _, fails) = setup_verdict(&SetUpOutcome::Ran(reached), free);
+        assert_eq!((word, fails), ("ran", false));
+        let stopped =
+            SetUpOutcome::Failed("the set-up from web/ did not reach `version_created`".into());
+        assert_eq!(setup_verdict(&stopped, free).0, "failed");
+        assert!(setup_verdict(&stopped, free).2);
+        for outcome in [
+            SetUpOutcome::NoTools("no Chromium".into()),
+            SetUpOutcome::Unaskable("no API".into()),
+            SetUpOutcome::AfterFailure,
+        ] {
+            let (word, _, fails) = setup_verdict(&outcome, free);
+            assert_eq!((word, fails), ("not run", false), "{outcome:?}");
+        }
+        for outcome in [
+            SetUpOutcome::NoTools("no Chromium".into()),
+            SetUpOutcome::Unaskable("no API".into()),
+        ] {
+            let (word, _, fails) = setup_verdict(&outcome, strict);
+            assert_eq!((word, fails), ("failed", true), "{outcome:?}");
+        }
+        assert_eq!(
+            setup_verdict(&SetUpOutcome::AfterFailure, strict).0,
+            "not run",
+            "an earlier failure already fails the run"
+        );
+    }
+
+    /// CI's `cell-demo-web` leaves the research loop to `cell-demo`, which runs the same scenario
+    /// and reads it, only when `select` starts `cell-demo` too, and `cell-demo` never does, so every
+    /// link is still read in each run of the workflow (DEC-464); unset, empty or anything but `1`,
+    /// a run reads the loop itself.
+    #[test]
+    fn only_the_web_job_leaves_the_research_loop_to_its_sibling() {
+        assert!(loop_read_here(None));
+        assert!(loop_read_here(Some(std::ffi::OsStr::new(""))));
+        assert!(loop_read_here(Some(std::ffi::OsStr::new("0"))));
+        assert!(!loop_read_here(Some(std::ffi::OsStr::new("1"))));
+        let workflow = fs::read_to_string("../.github/workflows/ci.yml").unwrap();
+        let job = |name: &str| -> String {
+            let header = format!("  {name}:");
+            workflow
+                .lines()
+                .skip_while(|line| *line != header)
+                .skip(1)
+                .take_while(|line| line.is_empty() || line.starts_with("   "))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let (web, plain) = (job("cell-demo-web"), job("cell-demo"));
+        for (name, body) in [("cell-demo-web", &web), ("cell-demo", &plain)] {
+            assert!(
+                body.contains("timeout-minutes:") && body.contains("steps:"),
+                "{name} is read whole"
+            );
+        }
+        let setting = format!(
+            "{LOOP_ELSEWHERE_ENV}: ${{{{ needs.select.outputs.cell == 'true' && '1' || '' }}}}"
+        );
+        assert!(
+            web.contains(&setting),
+            "cell-demo-web leaves the loop only when cell-demo runs: {setting}"
+        );
+        assert!(
+            !plain.contains(LOOP_ELSEWHERE_ENV),
+            "cell-demo reads the loop itself"
+        );
     }
 
     /// DEC-2379: step 2 records the paper connection the connect check left before anything else,

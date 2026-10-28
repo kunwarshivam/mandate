@@ -14,8 +14,10 @@ use mandate_process::{Input, Kind, Lifecycle, Snapshot, State};
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 
+use crate::credential::CREDENTIAL_LOST;
 use crate::establish::{Establishment, GateReport, OpeningGate, pass, read_establishment};
 use crate::follow::agents_of;
+use crate::process::Alert;
 use crate::run::Run;
 use crate::{Broker, Config, ExecutorProcess, Wiring};
 
@@ -188,6 +190,9 @@ fn serve_with<S: Store, B: Broker>(
     loop {
         let stop = tick(now());
         let stopping = stop.is_some() || terminated();
+        if stop == Some(CREDENTIAL_LOST) {
+            process.credential_lost(now());
+        }
         if stopping {
             process.drain(now());
         }
@@ -202,18 +207,48 @@ fn serve_with<S: Store, B: Broker>(
         if stopping {
             return Err(stop.unwrap_or("drain_unfinished"));
         }
-        process.step(now());
-        let passed = pass(
-            &mut process,
-            &gate,
-            &config.scope,
-            config.environment,
-            now(),
-        );
+        for alert in process.step(now()) {
+            say(&alert_line(&alert));
+        }
+        let passed = pass(&mut process, &gate, now());
         if let Some(code) = report.changed(passed) {
             say(code);
         }
         status.publish(process.lifecycle().snapshot());
         thread::sleep(interval);
+    }
+}
+
+/// The line an operator alert is logged as: its fixed key and, when it has one, its subject, an
+/// event id or a refusal's record type, reason code and path. Neither carries an order, a position
+/// or mandate content (`AGENTS.md` rules 6 and 7), and before E21-26's outbound path the log is how
+/// an operator sees a held or refused exit at all (DEC-2846).
+#[must_use]
+pub fn alert_line(alert: &Alert) -> String {
+    match &alert.subject {
+        Some(subject) => format!("alert {} {subject}", alert.key),
+        None => format!("alert {}", alert.key),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_alert_logs_its_key_and_its_subject_alone() {
+        let held = Alert {
+            key: "exit_held",
+            subject: Some("01JABCDEFGHJKMNPQRSTVWXYZ0".to_owned()),
+        };
+        assert_eq!(
+            alert_line(&held),
+            "alert exit_held 01JABCDEFGHJKMNPQRSTVWXYZ0"
+        );
+        let refused = Alert {
+            key: "journal_refused",
+            subject: None,
+        };
+        assert_eq!(alert_line(&refused), "alert journal_refused");
     }
 }

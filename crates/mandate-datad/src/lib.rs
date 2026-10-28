@@ -22,10 +22,17 @@
 //! - [`observation`] puts the closes object the runtime's `ObservationRecorded` names, read back
 //!   through `mandate_bars`'s trust check (DEC-2385 item 5).
 //!
-//! It holds nothing secret, reaches no host, and appends to no journal stream; it writes only the
-//! datasets and content-addressed objects, whose put never replaces one. It never reads a
-//! clock itself: the binary hands it the host clock's reading.
+//! - [`iex`] is the hosted source (data-plane spec §3.8, DEC-2283): Alpaca's IEX bars of the
+//!   workspace's registered instruments, fetched with the platform's data-only paper key, stored as
+//!   immutable generations that `mandate_bars::generations` reads by the reader's clock.
+//!
+//! The recording holds nothing secret and reaches no host. The IEX source holds the platform data
+//! key in memory only, reaches only the data host's bars and corporate-actions endpoints, and
+//! reads the control stream without appending to it. Both write only the datasets and
+//! content-addressed objects, whose put never replaces one. Neither reads a clock itself: the
+//! binary hands it the host clock's reading.
 
+pub mod iex;
 pub mod observation;
 pub mod series;
 

@@ -92,20 +92,7 @@ pub fn handle(
     }
     if let Input::Market(observation) = &input {
         breach(state, observation);
-        for (kept, carries) in [
-            (&mut state.sane_bids, observation.bid.is_some()),
-            (&mut state.trades, observation.last_trade.is_some()),
-        ] {
-            let newer = kept
-                .get(&observation.instrument)
-                .is_none_or(|held| held.observed_at <= observation.observed_at);
-            if observation.sane && carries && newer {
-                kept.insert(observation.instrument.clone(), observation.clone());
-            }
-        }
-        state
-            .quotes
-            .insert(observation.instrument.clone(), observation.clone());
+        state.hold_quote(observation);
     }
     note_read(state, &input);
     let head = state.account_head();

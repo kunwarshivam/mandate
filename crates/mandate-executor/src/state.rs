@@ -99,6 +99,10 @@ pub struct ExecutorState {
     /// a breach fires only if it began after, so one breach is watchdogged once (§5.4, DEC-260
     /// (11)).
     pub(crate) watchdogged: BTreeMap<InstrumentId, RiskClock>,
+    /// When an exit in each instrument was last journaled `exit_unpriced` on its own, no kill
+    /// switch its cause: the executor's own exit waiting for a price or for its configuration,
+    /// alerted once for each breach or interval that began before (DEC-2846).
+    pub(crate) unpriced: BTreeMap<InstrumentId, RiskClock>,
     pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
     pub(crate) fills: BTreeSet<FillId>,
     /// Sell fills applied with no order named (`FillApplied` with no `client_order_id`), by the
@@ -139,6 +143,9 @@ pub struct ExecutorState {
     pub(crate) last_submission: Option<Seq>,
     pub(crate) bodies: BTreeMap<IntentId, IntentBody>,
     pub(crate) held: BTreeSet<IntentId>,
+    /// Each held intent's reason code, from its last journaled hold: what tells whether an episode
+    /// of openings held for a reason is already open in an instrument (DEC-2855 item 3).
+    pub(crate) hold_reasons: BTreeMap<IntentId, String>,
     /// Held exits whose hold past `max_intent_age_s` was journaled and alerted, once (D2).
     pub(crate) held_long: BTreeSet<IntentId>,
     pub(crate) details: BTreeMap<ClientOrderId, OrderDetail>,
@@ -160,6 +167,15 @@ pub struct ExecutorState {
     /// What each agent released to the owner in each instrument, from its `PositionReleased`
     /// records (journal spec §9.27, mandate spec §3.1, DEC-2354): shares no longer its lots.
     pub(crate) released: BTreeMap<(AgentId, InstrumentId), Qty>,
+    /// What an account switch's close took from each agent's lots in each instrument (DEC-2849
+    /// I5): its fills come out of the owner's positive residual first, then the agents' lots in
+    /// coverage order, allocated as each fill is folded, so a close that fills in part leaves every
+    /// remaining share attributed and a later buy reassigns nothing.
+    pub(crate) closed: BTreeMap<(AgentId, InstrumentId), Qty>,
+    /// What each agent's sell fills and releases took beyond its lots in each instrument as each
+    /// was folded (DEC-2849: a sell beyond Lᵢ leaves Lᵢ at 0 and its excess comes out of R). It is
+    /// added back to the lots, so an excess never consumes a later buy.
+    pub(crate) oversold: BTreeMap<(AgentId, InstrumentId), Qty>,
     /// The instruments an account-scoped kill switch closes through the broker's close-position,
     /// from its `KillSwitchActivated`: their protection is never placed again beside that close,
     /// which would sell the same shares twice (§5.4, §5.5). They all leave once the account's
@@ -417,6 +433,27 @@ pub(crate) struct ConnectionView {
 }
 
 impl ExecutorState {
+    /// Records `observation` as the latest quote held for its instrument, and its bid and trade
+    /// as the latest sane ones where it is sane and newer, as a market input does. It runs no
+    /// step: no watchdog, no draft and no broker request, so it can neither fail nor delay
+    /// anything. The executor process hands a kill switch's flatten the marks it holds this way,
+    /// so the flatten prices from the market and the switch never waits on it (DEC-2853).
+    pub fn hold_quote(&mut self, observation: &MarketObservation) {
+        for (kept, carries) in [
+            (&mut self.sane_bids, observation.bid.is_some()),
+            (&mut self.trades, observation.last_trade.is_some()),
+        ] {
+            let newer = kept
+                .get(&observation.instrument)
+                .is_none_or(|held| held.observed_at <= observation.observed_at);
+            if observation.sane && carries && newer {
+                kept.insert(observation.instrument.clone(), observation.clone());
+            }
+        }
+        self.quotes
+            .insert(observation.instrument.clone(), observation.clone());
+    }
+
     /// An empty state for one broker account, before any event is folded. Reads nothing: there is
     /// no constructor that touches a clock, a file, or a random number.
     pub fn new(scope: AccountScope) -> Self {
@@ -447,6 +484,7 @@ impl ExecutorState {
             trades: BTreeMap::new(),
             breaches: BTreeMap::new(),
             watchdogged: BTreeMap::new(),
+            unpriced: BTreeMap::new(),
             positions: BTreeMap::new(),
             fills: BTreeSet::new(),
             unattributed: BTreeMap::new(),
@@ -470,6 +508,7 @@ impl ExecutorState {
             last_submission: None,
             bodies: BTreeMap::new(),
             held: BTreeSet::new(),
+            hold_reasons: BTreeMap::new(),
             held_long: BTreeSet::new(),
             details: BTreeMap::new(),
             restrictions: BTreeMap::new(),
@@ -479,6 +518,8 @@ impl ExecutorState {
             alerted: BTreeSet::new(),
             day_started: None,
             released: BTreeMap::new(),
+            closed: BTreeMap::new(),
+            oversold: BTreeMap::new(),
             closing_all: BTreeSet::new(),
             account_switch: None,
             switch_read: None,
@@ -784,6 +825,12 @@ impl ExecutorState {
         self.epoch
     }
 
+    /// Whether this stream holds a copy of the control stream's acknowledgment or request
+    /// `original` (journal spec §9.28, DEC-2828): the shell hands only those it does not.
+    pub fn copied_acknowledgment(&self, original: &EventId) -> bool {
+        self.acknowledgments.copied(&original.0)
+    }
+
     /// Whether a switch this stream journaled copied `source`, another stream's record
     /// (`copied_from`, DEC-2003 item 4): read from this stream's own `KillSwitchActivated`
     /// records alone, so no mode another restriction set can make a switch count as applied.
@@ -814,7 +861,8 @@ impl ExecutorState {
 
     /// Whether `agent` may hold lots in any instrument the account holds (DEC-2347 item 3.6,
     /// DEC-2354): an upper bound on its lots there is above zero. The bound is its buys, net of its
-    /// sells and of what it released to the owner, capped at the position, where a buy in any
+    /// sells and of what it released to the owner, plus what those took beyond its lots
+    /// ([`ExecutorState::oversold`]), capped at the position, where a buy in any
     /// state but `Rejected` or `Abandoned` with other than its quantity applied to it counts at its
     /// whole quantity: its fill may have named no order the fold could attribute it to. The bound
     /// only ever holds the exit longer; the kill switch sells the sub-ledger, never the bound.
@@ -836,12 +884,12 @@ impl ExecutorState {
                     Side::Sell => applied.negated(),
                 })?;
             }
-            let released = self
-                .released
-                .get(&(agent.clone(), instrument.clone()))
-                .copied()
-                .unwrap_or(Qty::ZERO);
-            bound = bound.checked_add(SignedQty::from(released).negated())?;
+            let key = (agent.clone(), instrument.clone());
+            let released = self.released.get(&key).copied().unwrap_or(Qty::ZERO);
+            let oversold = self.oversold.get(&key).copied().unwrap_or(Qty::ZERO);
+            bound = bound
+                .checked_add(SignedQty::from(released).negated())?
+                .checked_add(SignedQty::from(oversold))?;
             if bound.min(*position) > SignedQty::ZERO {
                 return Ok(true);
             }
@@ -859,6 +907,12 @@ impl ExecutorState {
             detail.broker_ids.clear();
         }
         state
+    }
+
+    /// The connection the stream's copy of `ConnectionEstablished` names, once it holds one
+    /// (journal spec rule 68).
+    pub fn connection_id(&self) -> Option<&str> {
+        self.connection.as_ref().map(|view| view.id.as_str())
     }
 
     pub fn started(&self) -> bool {

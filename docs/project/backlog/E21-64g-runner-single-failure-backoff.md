@@ -1,0 +1,2 @@
+- **E21-64g (Should; review of E21-64f)** As the operator, I want one bootstrap failure to increment and sleep once, so that inherited `ERR` traps inside command substitutions do not double one retry delay. *Accepted when:* token-mint, prior-registration cleanup and JIT-parse failures each increment `failure-count` once, sleep once at the expected bounded delay and perform cleanup once; executable manager tests plant each failure (DEC-2078).
+<!-- section: E21 Operations and infrastructure -->

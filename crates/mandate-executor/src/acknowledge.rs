@@ -31,7 +31,8 @@ const RECONCILIATION: &str = "reconciliation:";
 const STEP_UP_WINDOW_S: i64 = 300;
 
 /// The members a request and the acknowledgment answering it must agree on (§9.28 check 4, rule
-/// 240 restated on the account stream).
+/// 240 restated on the account stream), besides their subjects, which [`request_subject`] and
+/// [`subject`] read (DEC-2838).
 const MATCHED: [&str; 4] = ["agent", "event", "requested_by", "independent_required"];
 
 /// What §9.28's judgment reads from the account stream, folded from it alone.
@@ -74,6 +75,11 @@ struct Pending {
 }
 
 impl Acknowledgments {
+    /// Whether the control-stream record `original` has been copied.
+    pub(crate) fn copied(&self, original: &str) -> bool {
+        self.copied.contains(original)
+    }
+
     /// Marks every standing trigger of `agent`'s `limit` superseded but `keep`, answering those it
     /// marked.
     fn supersede(&mut self, agent: &str, limit: &str, keep: Option<&str>) -> Vec<String> {
@@ -269,6 +275,16 @@ fn subject(handoff: &AcknowledgmentHandoff) -> Option<&str> {
     }
 }
 
+/// The subject a copied request names, read as DEC-2838 reads rule 240: version 2's `subject`, and
+/// `limit` for a version-1 request, which carries none (§9.28 makes `subject` required from
+/// version 2). `None` for a `subject` that is not text, which matches no acknowledgment.
+fn request_subject(request: &Value) -> Option<&str> {
+    match request.get("subject") {
+        None => Some("limit"),
+        Some(subject) => subject.as_str(),
+    }
+}
+
 /// The reconciliation hold an acknowledgment of `subject` `reconciliation` names, as its agent and
 /// restriction, if the account stream holds it.
 fn held_by<'h>(
@@ -346,6 +362,10 @@ fn judged(
     {
         return Some("request_invalid");
     }
+    let asked = request_subject(copied);
+    if asked.is_none() || asked != subject(handoff) {
+        return Some("request_invalid");
+    }
     let submitted = optional_int(copied, "submitted_at").and_then(|s| i64::try_from(s).ok());
     let request_spent = handoff.request_spent.as_ref();
     let request_failed = match (submitted, request_spent) {
@@ -394,7 +414,7 @@ mod tests {
 
     use mandate_canon::Value;
 
-    use super::{fold, step_up_failure};
+    use super::{fold, request_subject, step_up_failure};
     use crate::payload::{int, object, text};
     use crate::state::ExecutorState;
     use crate::types::{AccountRef, AccountScope, EventId, FoldedEvent, Seq, WorkspaceId};
@@ -595,5 +615,17 @@ mod tests {
             step_up_failure(Some(&step_up), 1_000, &BTreeSet::new(), &BTreeSet::new()),
             Some("step_up_method")
         );
+    }
+
+    #[test]
+    fn a_request_names_its_subject_a_limit_without_one_and_none_when_it_is_not_text()
+    -> Result<(), crate::error::ExecutorError> {
+        let none = object(vec![])?;
+        let named = object(vec![("subject", text("reconciliation"))])?;
+        let not_text = object(vec![("subject", Value::Bool(true))])?;
+        assert_eq!(request_subject(&none), Some("limit"));
+        assert_eq!(request_subject(&named), Some("reconciliation"));
+        assert_eq!(request_subject(&not_text), None);
+        Ok(())
     }
 }

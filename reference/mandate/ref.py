@@ -336,6 +336,46 @@ def reduces_previous(prev, current, m):
             and V.is_valid(prev) and version(prev) == current
             and classify(prev, m)[0] == "risk_reducing")
 
+
+def agents_current(prev, current):
+    """`prev` is the agent's current version: a whole schema-valid document whose canonical hash is `current`, which
+    the platform supplies (V-047, V-048). Anything else is no previous version (rule 3)."""
+    return (prev is not None and current is not None and set(SCHEMA["required"]) <= set(prev)
+            and V.is_valid(prev) and version(prev) == current)
+
+def research_pins(sm):
+    """The admitting model's pins by run kind: its own is `ideate`, its `routes` the rest (DEC-2282)."""
+    own = {"id": sm["id"], "version": sm["version"], "content_hash": sm["content_hash"]}
+    return dict(sm.get("routes") or {}, ideate=own)
+
+
+def pins_refused(sm, prev, current, reg):
+    """V-048 (DEC-2282) for the admitting model `sm`, against the agent's current version `prev` (V-047's binding). A pin
+    carried unchanged for its run kind skips the status test, so a deprecated or withdrawn entry never blocks
+    a version; a new or changed one must be offered."""
+    pins = research_pins(sm)
+    carried = {}
+    for p in (prev["behavior"]["signal_models"] if agents_current(prev, current) else []):
+        if p.get("admits_instruments"):
+            carried = research_pins(p)
+    if any(kind != "ideate" and pin["id"] == sm["id"] for kind, pin in pins.items()):
+        return True
+    if reg is None:
+        return False
+    own = reg.get(sm["id"])
+    for kind, pin in pins.items():
+        e = reg.get(pin["id"])
+        exact = e is not None and e["version"] == pin["version"] and e["content_hash"] == pin["content_hash"]
+        offered = carried.get(kind) == pin or (exact and e.get("status") == "offered")
+        if kind == "ideate":
+            if exact and e.get("admits_instruments", False) and not offered:
+                return True
+        elif not (exact and offered
+                  and own is not None and e.get("harness") == own.get("harness")):
+            return True
+    return False
+
+
 def semantic(m, ctx):
     errs, warns = set(), set()
     u = m["universe"]
@@ -453,6 +493,9 @@ def semantic(m, ctx):
         errs.add("V-036")
     if u["pinned"] and admitting:
         errs.add("V-037")
+    if any(pins_refused(s, ctx.get("previous_version"), ctx.get("current_mandate_version"), reg) for s in admitting) \
+            or any("routes" in s and not s["admits_instruments"] for s in sms):
+        errs.add("V-048")
     if u["pinned"] != (len(inst) > 0):
         errs.add("V-034")
     if u["max_instruments"] < len(inst):

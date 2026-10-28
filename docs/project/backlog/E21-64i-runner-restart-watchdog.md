@@ -1,0 +1,2 @@
+- **E21-64i (Should; review of E21-64f)** As the operator, I want a restarted manager to bound its wait for an existing job container, so that one listener that never came online cannot stall a host forever. *Accepted when:* restart recovery applies a deadline, stops the stale container after it, deletes the recorded registration before retrying and has an executable restart test (DEC-2078).
+<!-- section: E21 Operations and infrastructure -->

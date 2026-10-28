@@ -19,6 +19,7 @@ from pathlib import Path
 
 import celpy
 import pytest
+import yaml
 from celpy import celtypes
 
 CELL = Path(__file__).resolve().parents[1] / "cell"
@@ -544,15 +545,17 @@ def roles_match(journal_docs: list[dict]) -> list[str]:
     journal-db chart, and has a credential Secret with a pgpass key."""
     roles = sorted({p["db_role"] for p in PROCESSES if p["db_role"]} - {"mandate_migrator"})
     cluster = next(d for d in journal_docs if d["kind"] == "Cluster")
-    managed = sorted(r["name"] for r in cluster["spec"]["managed"]["roles"])
+    managed = sorted(r["name"] for r in cluster["spec"]["managed"]["roles"] if r.get("login") is not False)
     secrets = {d["metadata"]["name"]: d for d in journal_docs if d["kind"] == "Secret"}
     problems = [] if managed == roles else [f"managed roles {managed}, want {roles}"]
+    readers = {p["db_role"] for p in PROCESSES if p.get("db_access") == "read"}
+    groups = {r["name"]: r.get("inRoles") for r in cluster["spec"]["managed"]["roles"]}
     for role in [*roles, "mandate_migrator"]:
-        if (
-            role != "mandate_migrator"
-            and f"CREATE ROLE {role} LOGIN IN ROLE mandate_journal_app;" not in ROLES_SQL
-        ):
-            problems.append(f"roles.sql does not create {role}")
+        group = "mandate_journal_reader" if role in readers else "mandate_journal_app"
+        if role != "mandate_migrator" and f"CREATE ROLE {role} LOGIN IN ROLE {group};" not in ROLES_SQL:
+            problems.append(f"roles.sql does not create {role} in {group}")
+        if role != "mandate_migrator" and groups.get(role) != [group]:
+            problems.append(f"the managed role {role} is in {groups.get(role)}, want {group}")
         secret = secrets.get("journal-role-" + role.replace("_", "-"))
         if secret is None or not secret["stringData"]["pgpass"].startswith(f"*:*:mandate:{role}:"):
             problems.append(f"no pgpass credential for {role}")
@@ -891,8 +894,61 @@ def test_the_model_gateway_serves_the_recording_and_names_no_budget_of_its_own()
     for unset in ("modelGateway.workspace=", "modelGateway.deployment="):
         done = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", unset)
         assert done.returncode != 0 and "is required with images.model-gateway" in done.stderr, unset
-    hosted = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", "localImages=false")
-    assert hosted.returncode != 0 and "named only by the local cell's values" in hosted.stderr, hosted.stderr
+    hosted = helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+        "--set", "localImages=false", "--set", "deploymentTier=staging",
+    )
+    assert hosted.returncode != 0 and "a hosted model gateway starts live" in hosted.stderr, hosted.stderr
+    local = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), *LIVE_REGISTRY)
+    assert local.returncode != 0 and "the local cell serves the recorded bundle alone" in local.stderr, local.stderr
+
+
+LIVE_REGISTRY = ("--set-json", 'modelGateway.registry="{\\"entries\\":[]}"')
+LIVE_ARGS = [
+    "run", "--registry", "/run/mandate/model-gateway/registry.json", "--listen", "0.0.0.0:8080",
+    "--probe", "/tmp/process.sock", "--vault-address", "{vault}", "--vault-dir", "/run/mandate/vault",
+]
+
+
+def live_gateway(*extra: str):
+    return helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+        "--set", "localImages=false", "--set", "deploymentTier=staging", *LIVE_REGISTRY, *extra,
+    )
+
+
+def test_a_hosted_gateway_starts_live_from_the_registry_and_the_vault():
+    """DEC-2216 item 4, DEC-2081: in staging, with `modelGateway.registry` named, the gateway runs
+    the live start, never `--recorded`: the registry file mounted read-only from its ConfigMap,
+    the cell's vault, and the model gateway's AppRole and the vault's CA copied into its vault
+    directory, with the budgets the founder accepted rendered; any other hosted tier is refused."""
+    done = live_gateway()
+    assert done.returncode == 0, done.stderr
+    docs = documents(done.stdout)
+    gateway = next(w for w in workloads(docs) if w["metadata"]["name"] == "model-gateway")
+    container = first_container(gateway)
+    deployment = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "model-gateway")
+    namespace = re.search(r"https://vault\.([^.]+)\.svc:8200", " ".join(container["args"]))
+    assert namespace, container["args"]
+    expected = [a.replace("{vault}", namespace.group(0)) for a in LIVE_ARGS]
+    assert container["args"] == expected and "--recorded" not in container["args"]
+    mounts = {m["mountPath"]: m for m in container["volumeMounts"]}
+    assert mounts["/run/mandate/model-gateway"]["readOnly"] is True
+    assert mounts["/run/mandate/vault"]["readOnly"] is True
+    spec = deployment["spec"]["template"]["spec"]
+    assert deployment["spec"]["template"]["metadata"]["labels"].get("mandate.dev/egress-vault") == "true"
+    copy_step = next(i for i in spec["initContainers"] if i["name"] == "vault-credentials")
+    assert "/run/secrets/vault-model-gateway/model-gateway.role-id" in copy_step["command"]
+    volumes = {v["name"]: v for v in spec["volumes"]}
+    assert volumes["model-gateway-registry"]["configMap"]["name"] == "model-gateway-registry"
+    secrets = [s["secret"]["name"] for s in volumes["vault-sources"]["projected"]["sources"] if "secret" in s]
+    assert secrets == ["vault-approle-model-gateway"]
+    registry = next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "model-gateway-registry")
+    assert registry["data"] == {"registry.json": '{"entries":[]}'}
+    assert set(GATEWAY_BUDGETS) <= set(gateway_env(docs))
+    for tier in ("production", "dev"):
+        refused = live_gateway("--set", f"deploymentTier={tier}")
+        assert "runs the model gateway in staging alone" in refused.stderr, (tier, refused.stderr)
 
 
 def test_a_researching_runtime_calls_the_gateway_of_its_own_workspace_alone():
@@ -941,16 +997,31 @@ def test_the_gateway_follows_the_research_workspace_to_its_manager_s_runtime():
     assert len(managed_pods(docs)) == 2 * len(managed_pods(render_all("--set", f"api.workspace={hosted}")))
 
 
-def test_only_the_local_cell_names_the_model_gateway_s_budgets():
-    """DEC-2326 item 2, DEC-2396: no values file but the local cell's names a model budget, and the
-    local cell's gateway serves the workspace its API hosts."""
+STAGING_WORKSPACE = CELL.parent / "gitops" / "clusters" / "staging" / "workspace.yaml"
+LIVE_REGISTRY_FILE = CELL / "model-gateway" / "registry.json"
+
+
+def staging_values() -> dict:
+    release = next(d for d in yaml.safe_load_all(STAGING_WORKSPACE.read_text()) if d and d.get("kind") == "HelmRelease")
+    return release["spec"]["values"]
+
+
+def test_only_the_local_cell_and_staging_name_the_model_gateway_s_budgets():
+    """DEC-2326 item 2, DEC-2282, DEC-2081: no values file names a model budget but the local
+    cell's, over its recorded bundle, and staging's, which are the founder's $50 and $50; the
+    local cell's gateway serves the workspace its API hosts, and so does staging's."""
     for values in sorted((CELL / "values").glob("*.yaml")) + sorted(
         (CELL.parent / "gitops").rglob("*.yaml")
     ):
-        if values.name == "k3d.yaml":
+        if values.name == "k3d.yaml" or values == STAGING_WORKSPACE:
             continue
         text = values.read_text()
         assert "MonthlyUsd" not in text, f"{values} names a model budget"
+    staging = staging_values()
+    gateway = staging["modelGateway"]
+    assert (gateway["workspaceMonthlyUsd"], gateway["deploymentMonthlyUsd"]) == ("50", "50"), gateway
+    assert gateway["workspace"] == staging["api"]["workspace"]
+    assert gateway["deployment"] == "staging", "the meter stream's deployment never changes (DEC-2207)"
     defaults = (CHART / "values.yaml").read_text()
     for budget in ("workspaceMonthlyUsd", "deploymentMonthlyUsd"):
         assert f'  {budget}: ""\n' in defaults, f"the chart defaults {budget}"
@@ -960,6 +1031,93 @@ def test_only_the_local_cell_names_the_model_gateway_s_budgets():
         for block in ("api", "modelGateway")
     }
     assert workspaces["api"] == workspaces["modelGateway"], workspaces
+
+
+IEX = ("--set", "data.source=alpaca-iex")
+
+
+def without_instruments(args: list[str]) -> list[str]:
+    pairs = zip(args[0::2], args[1::2])
+    return [a for pair in pairs if not pair[1].startswith("data.instruments") for a in pair]
+
+
+def iex_staging(*extra: str):
+    return helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *without_instruments(every_image()),
+        "--set", "localImages=false", "--set", "deploymentTier=staging", *LIVE_REGISTRY, *IEX,
+        "--set-json", "data.instruments=[]", *extra,
+    )
+IEX_ARGS = [
+    "run", "--source", "alpaca-iex", "--workspace", "{workspace}", "--store",
+    "/var/lib/mandate/artifacts/datasets/alpaca-iex", "--artifacts", "/var/lib/mandate/artifacts",
+    "--vault-address", "{vault}", "--vault-dir", "/run/mandate/vault", "--probe", "/tmp/process.sock",
+]
+
+
+def env_of(workload: dict) -> dict[str, str]:
+    return {e["name"]: e.get("value", "") for e in first_container(workload).get("env", [])}
+
+
+def test_staging_stores_iex_bars_as_bars_reader_and_its_own_journal_role():
+    """DEC-2283, DEC-2082: with `data.source` alpaca-iex in staging, the data process runs the IEX
+    source for the hosted workspace, logs in to the vault as `bars-reader` with the AppRole and CA
+    copied into its vault directory, reads the control stream as `mandate_data`, reaches Postgres,
+    the vault and its data host alone, and the runtime and executor read the alpaca-iex store."""
+    done = iex_staging("--set", "api.workspace=01KDEM0000000000000000000W")
+    assert done.returncode == 0, done.stderr
+    docs = documents(done.stdout)
+    data = next(w for w in workloads(docs) if w["metadata"]["name"] == "data")
+    args = first_container(data)["args"]
+    vault = re.search(r"https://vault\.[^.]+\.svc:8200", " ".join(args))
+    assert vault, args
+    expected = [a.replace("{workspace}", "01KDEM0000000000000000000W").replace("{vault}", vault.group(0)) for a in IEX_ARGS]
+    assert args == expected and "--instruments" not in args
+    assert "MANDATE_JOURNAL_DSN" in env_of(data)
+    spec = data["spec"]["template"]["spec"]
+    copy_step = next(i for i in spec["initContainers"] if i["name"] == "vault-credentials")
+    assert "/run/secrets/vault-bars-reader/bars-reader.role-id" in copy_step["command"]
+    secrets = [
+        source["secret"]["name"]
+        for volume in spec["volumes"] if volume["name"] == "vault-sources"
+        for source in volume["projected"]["sources"] if "secret" in source
+    ]
+    assert secrets == ["vault-approle-bars-reader"]
+    roles = next(v for v in spec["volumes"] if v["name"] == "journal-role")
+    assert roles["secret"]["secretName"] == "journal-role-mandate-data"
+    labels = data["spec"]["template"]["metadata"]["labels"]
+    assert {k for k, v in labels.items() if k.startswith("mandate.dev/egress-") and v == "true"} == {
+        "mandate.dev/egress-postgres", "mandate.dev/egress-vault", "mandate.dev/egress-market-data",
+    }
+    readers = [w for w in workloads(docs) + managed_pods(docs) if w["metadata"]["name"] in ("runtime", "executor")]
+    assert readers and all(env_of(w)["MANDATE_BARS"].endswith("/datasets/alpaca-iex") for w in readers)
+
+
+def test_the_recorded_source_holds_no_journal_role_and_iex_is_staging_s_alone():
+    """DEC-2082: the local cell's recorded series reads no stream, so its data process holds no
+    journal role and its readers read the cell-recorded store; alpaca-iex outside staging, or
+    beside a recorded instrument list, is refused."""
+    docs = render_all()
+    data = next(w for w in workloads(docs) if w["metadata"]["name"] == "data")
+    assert "MANDATE_JOURNAL_DSN" not in env_of(data)
+    assert "--source" not in first_container(data)["args"]
+    readers = [w for w in workloads(docs) + managed_pods(docs) if w["metadata"]["name"] in ("runtime", "executor")]
+    assert readers and all(env_of(w)["MANDATE_BARS"].endswith("/datasets/cell-recorded") for w in readers)
+    local = helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *without_instruments(every_image()), *IEX,
+        "--set-json", "data.instruments=[]",
+    )
+    assert "stores IEX bars in staging alone" in local.stderr, local.stderr
+    listed = live_gateway("--set", "data.source=alpaca-iex")
+    assert "data.instruments is the recorded series' list" in listed.stderr, listed.stderr
+
+
+def test_staging_names_the_committed_live_registry_byte_for_byte():
+    """DEC-2081, #2844: staging's gateway starts from deploy/cell/model-gateway/registry.json as
+    committed, every entry `evaluating` and none naming a gate report, so it offers nothing."""
+    registry = staging_values()["modelGateway"]["registry"]
+    assert registry == LIVE_REGISTRY_FILE.read_text()
+    entries = json.loads(registry)["entries"]
+    assert entries and all(e["status"] == "evaluating" and "gate_report" not in e for e in entries)
 
 
 def test_the_local_cell_records_both_demo_agents_instruments():
@@ -2204,17 +2362,32 @@ def test_the_second_manager_is_bound_as_the_first_for_its_own_workspace():
 
 
 @pytest.mark.parametrize("tier", ["dev", "ci", "staging", "production"])
-def test_the_second_manager_runs_only_in_a_dev_or_ci_cell(tier: str):
-    """DEC-2070 item 4: the chart renders the second manager in a dev or ci cell and refuses it at
-    any other tier."""
+def test_the_second_manager_runs_only_in_a_dev_or_ci_cell_or_staging(tier: str):
+    """DEC-2070 item 4, DEC-2080: with the model gateway named, as every image names it, the chart
+    renders the second manager in a dev, ci or staging cell and refuses it in production."""
     done = helm(
         CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
         "--set", f"deploymentTier={tier}", "--set", f"deployManager.researchWorkspace={RESEARCH_WORKSPACE}",
     )
-    if tier in ("dev", "ci"):
+    if tier in ("dev", "ci", "staging"):
         assert done.returncode == 0, done.stderr
     else:
         assert done.returncode != 0 and "runs only in a dev or ci cell" in done.stderr, done.stderr
+
+
+def test_staging_runs_the_second_manager_only_beside_the_model_gateway():
+    """DEC-2080: staging's research agent spends only through the model gateway's meter, so without
+    the gateway the chart refuses the second manager there, while a dev cell still renders it."""
+    for tier, renders in (("staging", False), ("dev", True)):
+        done = helm(
+            CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+            "--set", f"deploymentTier={tier}", "--set", f"deployManager.researchWorkspace={RESEARCH_WORKSPACE}",
+            "--set", "images.model-gateway=",
+        )
+        if renders:
+            assert done.returncode == 0, done.stderr
+        else:
+            assert done.returncode != 0 and "beside the model gateway" in done.stderr, done.stderr
 
 
 @pytest.mark.parametrize(
@@ -3977,6 +4150,11 @@ def tiers(docs: list[dict]) -> set[str]:
     return found
 
 
+# A hosted cell's model gateway starts live from a registry only staging names (DEC-2081), so a
+# render of another hosted tier with every image leaves the gateway's out.
+HOSTED_WITHOUT_GATEWAY = ["--set", "images.model-gateway="]
+
+
 def test_deployment_tier_is_set_from_values():
     hosted = CELL.parent / "hosted" / "values" / "cell1.yaml"
     api = ["--set", f"images.api={PLACEHOLDER.format('api')}"]
@@ -3988,7 +4166,7 @@ def test_deployment_tier_is_set_from_values():
         for pair in zip(images[0::2], images[1::2])
         if list(pair) not in (api, dispatcher)
         for arg in pair
-    ] + manager_workspace
+    ] + manager_workspace + HOSTED_WITHOUT_GATEWAY
     assert tiers(render(*without_api)) == {"production"}, "unset is production"
     assert tiers(render_all()) == {"ci"}, (
         "the local cell, its API server too, runs its own unsigned build as ci"
@@ -4004,7 +4182,7 @@ def test_deployment_tier_is_set_from_values():
         "api.appOrigin=https://app.example",
     ]
     with_api = [arg for s in api_block for arg in ("--set", s)]
-    assert tiers(render(*k3s, "-f", str(hosted), *images, *with_api)) == {"dev"}, (
+    assert tiers(render(*k3s, "-f", str(hosted), *images, *with_api, *HOSTED_WITHOUT_GATEWAY)) == {"dev"}, (
         "cell #1's API server takes the one tier too"
     )
     for refused in ("live", "prod", ""):
@@ -4656,3 +4834,27 @@ def test_the_journal_reaches_the_kubernetes_api_by_ipv4_hosts_only():
         assert skipped.returncode != 0 and "Kubernetes API" in skipped.stderr, cidrs
     unknown = helm(JOURNAL_CHART, *k3d)
     assert unknown.returncode != 0 and "Kubernetes API" in unknown.stderr
+
+
+def test_every_journal_dsn_names_the_journal_schema_in_its_options():
+    """DEC-2083: a role CloudNativePG adds after bootstrap has no per-role search path, so every
+    DSN the chart renders sets `search_path=journal` in the connection's options, the migrator's
+    and the API's included."""
+    docs = render_all()
+    started = [{"spec": {"template": pod}} for pod in managed_pods(docs)]
+    dsns = [
+        env["value"]
+        for doc in docs + started
+        for container in _containers(doc)
+        for env in container.get("env", [])
+        if env.get("value", "").startswith("postgres://")
+    ]
+    assert dsns, "the render names no journal DSN"
+    for dsn in dsns:
+        assert dsn.endswith("&options=-c%20search_path%3Djournal"), dsn
+
+
+def _containers(doc: dict) -> list[dict]:
+    spec = doc.get("spec", {})
+    pod = spec.get("template", {}).get("spec", spec.get("jobTemplate", {}).get("spec", {}).get("template", {}).get("spec", {}))
+    return list(pod.get("initContainers", [])) + list(pod.get("containers", []))

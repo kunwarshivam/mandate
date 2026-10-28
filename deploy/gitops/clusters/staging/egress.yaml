@@ -93,7 +93,7 @@ spec:
         - ports:
             - {port: "443", protocol: TCP}
 ---
-# data: Alpaca's market data, REST and stream.
+# data: Alpaca's market data, REST alone: the IEX source calls no stream (DEC-2082).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -117,7 +117,6 @@ spec:
               - matchPattern: "*"
     - toFQDNs:
         - matchName: data.alpaca.markets
-        - matchName: stream.data.alpaca.markets
       toPorts:
         - ports:
             - {port: "443", protocol: TCP}

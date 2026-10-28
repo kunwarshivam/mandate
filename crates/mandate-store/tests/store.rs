@@ -174,3 +174,141 @@ fn a_draft_with_its_own_clock_names_it_and_changes_nothing_else() {
     }
     assert_eq!(local, scheduled);
 }
+
+/// A reader past a head it holds reads only the records appended since, and none when its held
+/// head is not the journal's: it must read the whole stream again rather than fold a fork.
+#[test]
+fn rows_from_a_held_head_read_only_what_follows_it() {
+    let mut store = MemoryStore::default();
+    let epoch = store.take_ownership(&stream()).unwrap();
+    let committed = store.append(
+        &stream(),
+        0,
+        epoch,
+        UtcNanos::from_parts(T, 0).unwrap(),
+        &[opened(epoch)],
+    );
+    assert!(
+        matches!(committed, AppendOutcome::Committed(_)),
+        "{committed:?}"
+    );
+    let all = store.rows(&stream()).unwrap();
+    let head = all.last().unwrap();
+    let past = mandate_journal::TrustedStart {
+        from_seq: head.seq + 1,
+        prev_hash: head.hash,
+    };
+    assert_eq!(store.rows_from(&stream(), past), Some(Vec::new()));
+    assert_eq!(
+        store.rows_from(&stream(), mandate_journal::TrustedStart::GENESIS),
+        Some(all.clone())
+    );
+    let forked = mandate_journal::TrustedStart {
+        from_seq: 1,
+        prev_hash: Digest::of(b"another chain"),
+    };
+    assert_eq!(store.rows_from(&stream(), forked), None);
+    let skipped = mandate_journal::TrustedStart {
+        from_seq: 0,
+        prev_hash: Digest::ZERO,
+    };
+    assert_eq!(
+        store.rows_from(&stream(), skipped),
+        None,
+        "a seq the stream never held"
+    );
+}
+
+/// A store that reads only whole streams, so `rows_from` is the trait's own.
+struct Whole(MemoryStore);
+
+impl Store for Whole {
+    fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
+        self.0.take_ownership(stream)
+    }
+
+    fn rows(&self, stream: &StreamId) -> Option<Vec<mandate_journal::StoredEvent>> {
+        self.0.rows(stream)
+    }
+
+    fn append(
+        &mut self,
+        stream: &StreamId,
+        expected_head: u64,
+        epoch: u64,
+        recorded_at: UtcNanos,
+        drafts: &[Vec<u8>],
+    ) -> AppendOutcome {
+        self.0
+            .append(stream, expected_head, epoch, recorded_at, drafts)
+    }
+}
+
+/// The scheduler's `ClockAdvanced` number `n` under `epoch` (journal spec §9.20).
+fn ticked(epoch: u64, n: u64) -> Vec<u8> {
+    let clock = UtcNanos::from_parts(T + i64::try_from(n).unwrap(), 0).unwrap();
+    let payload = object(vec![("clock", text(&clock.to_string()))]).unwrap();
+    let event_id = format!("2{epoch:05}{n:014}{:06}", 0);
+    draft_bytes(
+        &envelope(),
+        &Fields {
+            event_id: &event_id,
+            event_type: "ClockAdvanced",
+            schema_version: 1,
+            causation_id: None,
+            correlation_id: None,
+            config_refs: &Object::new(),
+            payload: &payload,
+        },
+    )
+    .unwrap()
+}
+
+/// DEC-2852: a store that reads only whole streams answers a read from the first record with its
+/// whole read, and a read past a head with the records at and after the asked seq, but only when
+/// the first of them follows the held record; otherwise none, so the reader reads again whole.
+#[test]
+fn a_whole_stream_store_reads_past_a_head_only_when_its_records_follow_it() {
+    let mut store = Whole(MemoryStore::default());
+    let epoch = store.take_ownership(&stream()).unwrap();
+    let at = UtcNanos::from_parts(T, 0).unwrap();
+    let drafts = vec![opened(epoch), ticked(epoch, 1), ticked(epoch, 2)];
+    let committed = store.append(&stream(), 0, epoch, at, &drafts);
+    assert!(
+        matches!(committed, AppendOutcome::Committed(_)),
+        "{committed:?}"
+    );
+    let all = store.rows(&stream()).unwrap();
+    assert_eq!(all.len(), 3);
+    let after = |row: &mandate_journal::StoredEvent| mandate_journal::TrustedStart {
+        from_seq: row.seq + 1,
+        prev_hash: row.hash,
+    };
+    assert_eq!(
+        store.rows_from(&stream(), mandate_journal::TrustedStart::GENESIS),
+        Some(all.clone())
+    );
+    assert_eq!(
+        store.rows_from(&stream(), after(&all[0])),
+        Some(all[1..].to_vec())
+    );
+    assert_eq!(store.rows_from(&stream(), after(&all[2])), Some(Vec::new()));
+    let wrong_hash = mandate_journal::TrustedStart {
+        from_seq: 2,
+        prev_hash: all[1].hash,
+    };
+    assert_eq!(
+        store.rows_from(&stream(), wrong_hash),
+        None,
+        "seq 2 follows seq 1, not 2"
+    );
+    let gap = mandate_journal::TrustedStart {
+        from_seq: 0,
+        prev_hash: all[0].prev_hash,
+    };
+    assert_eq!(
+        store.rows_from(&stream(), gap),
+        None,
+        "the first record read is not the asked seq"
+    );
+}

@@ -1,0 +1,244 @@
+[
+  {
+    "label": "no acknowledgments",
+    "remove": [
+      "/acknowledgments"
+    ]
+  },
+  {
+    "label": "an extra top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "a hold without its event",
+    "remove": [
+      "/acknowledgments/0/event"
+    ]
+  },
+  {
+    "label": "a hold without its agent",
+    "remove": [
+      "/acknowledgments/0/agent_id"
+    ]
+  },
+  {
+    "label": "a hold without its account",
+    "remove": [
+      "/acknowledgments/0/account"
+    ]
+  },
+  {
+    "label": "a hold without its reason",
+    "remove": [
+      "/acknowledgments/0/reason"
+    ]
+  },
+  {
+    "label": "a hold without its mode",
+    "remove": [
+      "/acknowledgments/0/mode"
+    ]
+  },
+  {
+    "label": "a hold without raised_at",
+    "remove": [
+      "/acknowledgments/0/raised_at"
+    ]
+  },
+  {
+    "label": "a hold without independent_required",
+    "remove": [
+      "/acknowledgments/0/independent_required"
+    ]
+  },
+  {
+    "label": "a hold without its request",
+    "remove": [
+      "/acknowledgments/0/request"
+    ]
+  },
+  {
+    "label": "an extra member in a hold",
+    "set": {
+      "/acknowledgments/0/extra": 1
+    }
+  },
+  {
+    "label": "a subject no hold has",
+    "set": {
+      "/acknowledgments/0/subject": "mutant_value"
+    }
+  },
+  {
+    "label": "a reconciliation hold without its kind",
+    "remove": [
+      "/acknowledgments/0/reason/kind"
+    ]
+  },
+  {
+    "label": "a reconciliation hold without its instrument",
+    "remove": [
+      "/acknowledgments/0/reason/instrument"
+    ]
+  },
+  {
+    "label": "a reconciliation hold without its restriction",
+    "remove": [
+      "/acknowledgments/0/reason/restriction"
+    ]
+  },
+  {
+    "label": "a kind no hold has",
+    "set": {
+      "/acknowledgments/0/reason/kind": "mutant_value"
+    }
+  },
+  {
+    "label": "a restriction that is not a reconciliation",
+    "set": {
+      "/acknowledgments/0/reason/restriction": "connection:x"
+    }
+  },
+  {
+    "label": "a limit without its code",
+    "set": {
+      "/acknowledgments/1/reason": {
+        "cause": "x"
+      }
+    }
+  },
+  {
+    "label": "a limit with a mode",
+    "set": {
+      "/acknowledgments/1/mode": "exits_only"
+    }
+  },
+  {
+    "label": "a reconciliation hold with no mode",
+    "set": {
+      "/acknowledgments/0/mode": null
+    }
+  },
+  {
+    "label": "a restriction without its cause",
+    "set": {
+      "/acknowledgments/0/subject": "restriction",
+      "/acknowledgments/0/reason": {
+        "limit": "x"
+      },
+      "/acknowledgments/0/mode": "paused"
+    }
+  },
+  {
+    "label": "a restriction with no mode",
+    "set": {
+      "/acknowledgments/0/subject": "restriction",
+      "/acknowledgments/0/reason": {
+        "cause": "x"
+      },
+      "/acknowledgments/0/mode": null
+    }
+  },
+  {
+    "label": "a mode no hold has",
+    "set": {
+      "/acknowledgments/0/mode": "mutant_value"
+    }
+  },
+  {
+    "label": "an empty reason",
+    "set": {
+      "/acknowledgments/0/reason": {}
+    }
+  },
+  {
+    "label": "an extra member in a reason",
+    "set": {
+      "/acknowledgments/0/reason/extra": 1
+    }
+  },
+  {
+    "label": "an event that is not an event id",
+    "set": {
+      "/acknowledgments/0/event": "evt_1"
+    }
+  },
+  {
+    "label": "a request without who asked",
+    "remove": [
+      "/acknowledgments/1/request/requested_by"
+    ]
+  },
+  {
+    "label": "a request without its event",
+    "remove": [
+      "/acknowledgments/1/request/event_id"
+    ]
+  },
+  {
+    "label": "an extra member in a request",
+    "set": {
+      "/acknowledgments/1/request/extra": 1
+    }
+  },
+  {
+    "label": "independence as text",
+    "set": {
+      "/acknowledgments/0/independent_required": "yes"
+    }
+  },
+  {
+    "label": "an empty account",
+    "set": {
+      "/acknowledgments/0/account": ""
+    }
+  },
+  {
+    "label": "an empty limit code",
+    "set": {
+      "/acknowledgments/1/reason/limit": ""
+    }
+  },
+  {
+    "label": "an empty instrument",
+    "set": {
+      "/acknowledgments/0/reason/instrument": ""
+    }
+  },
+  {
+    "label": "a limit's reason naming a restriction's cause too",
+    "set": {
+      "/acknowledgments/1/reason/cause": "broker_notice"
+    }
+  },
+  {
+    "label": "a reconciliation hold's reason naming a limit too",
+    "set": {
+      "/acknowledgments/0/reason/limit": "max_daily_loss"
+    }
+  },
+  {
+    "label": "a hold without its subject",
+    "remove": [
+      "/acknowledgments/0/subject"
+    ]
+  },
+  {
+    "label": "an empty cause",
+    "set": {
+      "/acknowledgments/0/subject": "restriction",
+      "/acknowledgments/0/reason": {
+        "cause": ""
+      },
+      "/acknowledgments/0/mode": "paused"
+    }
+  },
+  {
+    "label": "an account that is not an account stream",
+    "set": {
+      "/acknowledgments/0/account": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_1"
+    }
+  }
+]

@@ -23,8 +23,8 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use super::scenario::{
-    AGENT, FOUNDER, Gesture, INSTRUMENT_FILE, MANDATE_FILE, confirm_code, deploy_code,
-    gestures_job, lines_of, point_api, reference,
+    AGENT, FOUNDER, Gesture, MANDATE_FILE, confirm_code, deploy_code, gestures_job,
+    instrument_for_run, lines_of, point_api, reference,
 };
 use super::{NAMESPACE, Verdict, kubectl, render, run_id, run_job};
 
@@ -399,11 +399,7 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
             "mandate.json",
             String::from_utf8(mandate).context("the mandate is not UTF-8")?,
         ),
-        (
-            "instrument.json",
-            fs::read_to_string(INSTRUMENT_FILE)
-                .with_context(|| format!("reading {INSTRUMENT_FILE}"))?,
-        ),
+        ("instrument.json", instrument_for_run()?),
     ];
     let recorded = if seeded {
         let (done, logs) = gestures(&id, "o", &workspace_opened(&workspace), &files)?;

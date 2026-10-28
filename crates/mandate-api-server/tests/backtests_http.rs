@@ -145,6 +145,7 @@ fn app(
         challenges: Arc::default(),
         connect: None,
         reduction: Arc::default(),
+        folds: Arc::default(),
     }
 }
 
