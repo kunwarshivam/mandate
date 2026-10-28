@@ -580,9 +580,32 @@ impl Paper {
         Ok(())
     }
 
-    /// An order the broker already holds, accepted and resting, under our `client_order_id`.
+    /// A buy the broker already holds, accepted and resting, under our `client_order_id`.
     pub fn resting(
         &self,
+        client_order_id: &str,
+        instrument: &str,
+        qty: &str,
+        limit: &str,
+    ) -> Result<(), Error> {
+        self.resting_on(Side::Buy, client_order_id, instrument, qty, limit)
+    }
+
+    /// A sell resting at the broker, as a protective leg rests (R3's review of #2764): the sell
+    /// side of [`Self::resting`].
+    pub fn resting_sell(
+        &self,
+        client_order_id: &str,
+        instrument: &str,
+        qty: &str,
+        limit: &str,
+    ) -> Result<(), Error> {
+        self.resting_on(Side::Sell, client_order_id, instrument, qty, limit)
+    }
+
+    fn resting_on(
+        &self,
+        side: Side,
         client_order_id: &str,
         instrument: &str,
         qty: &str,
@@ -594,7 +617,7 @@ impl Paper {
             broker_order_id: format!("b{}", books.sequence),
             client_order_id: Some(client_order_id.to_owned()),
             instrument: InstrumentId::new(instrument)?,
-            side: Side::Buy,
+            side,
             qty: Qty::parse(qty)?,
             filled_qty: Qty::ZERO,
             limit_price: Some(Price::parse(limit)?),
