@@ -116,7 +116,7 @@ fn holding() -> Result<
     let broker = Paper::new(&journal);
     broker.resting(support::OPENING, "AAPL", "10", "150")?;
     broker.fill(support::OPENING, "150")?;
-    broker.resting("md-protect", "AAPL", "10", "147")?;
+    broker.resting_sell("md-protect", "AAPL", "10", "147")?;
     let mut process = support::start_allowing(&journal, &broker)?;
     process.step(at("2026-09-21T15:00:00Z")?);
     if !process.ready() {
