@@ -114,6 +114,7 @@ fn world_storing(store: impl FnOnce(Arc<MemObjects>) -> Arc<dyn ObjectStore>) ->
                         challenges: Arc::clone(&challenges),
                         rp: support_passkey::rp(),
                         keys: Some(keys),
+                        cool_off_waiver: None,
                     },
                     cli_confirm: CliConfirm {
                         challenges,

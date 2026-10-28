@@ -174,6 +174,7 @@ fn built_with(port: Port, with_store: bool, records: Vec<MembershipRecord>) -> F
                 challenges: Arc::clone(&challenges),
                 rp: support_passkey::rp(),
                 keys: Some(Arc::clone(&store) as Arc<dyn ArtifactSource + Send + Sync>),
+                cool_off_waiver: None,
             },
             cli_confirm: CliConfirm {
                 challenges: Arc::clone(&challenges),

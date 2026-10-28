@@ -152,6 +152,7 @@ fn world_with(signer: Signer) -> World {
             challenges: Arc::clone(&challenges),
             rp: support_passkey::rp(),
             keys: Some(Arc::new(keys)),
+            cool_off_waiver: None,
         },
         cli_confirm: CliConfirm {
             challenges: Arc::clone(&challenges),

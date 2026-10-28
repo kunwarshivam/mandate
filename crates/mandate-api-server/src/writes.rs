@@ -604,6 +604,7 @@ async fn granted(app: &App, gate: &Gate, reader: &Reader, asked: &Asked<'_>) -> 
             Refused::JournalUnavailable.response()
         }
         Err(Unverified::Code(code)) => problem(StatusCode::UNAUTHORIZED, problem_body(code)),
+        Err(Unverified::Unimplemented { story }) => invalid(vec![Unverified::unimplemented(story)]),
     }
 }
 

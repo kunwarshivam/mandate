@@ -356,9 +356,12 @@ async fn started(
             &action,
             &judged,
         )
-        .map_err(|Unverified::Code(code)| match code {
-            ProblemCode::JournalUnavailable => unavailable(),
-            code => coded(StatusCode::UNAUTHORIZED, code),
+        .map_err(|unverified| match unverified {
+            Unverified::Code(ProblemCode::JournalUnavailable) => unavailable(),
+            Unverified::Code(code) => coded(StatusCode::UNAUTHORIZED, code),
+            Unverified::Unimplemented { story } => {
+                Box::new(invalid(vec![Unverified::unimplemented(story)]))
+            }
         })?;
     if request.environment == Wire::Live {
         gated(app, &reader, &gate, Gated::Connect)

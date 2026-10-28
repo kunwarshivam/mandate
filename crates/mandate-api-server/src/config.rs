@@ -13,6 +13,8 @@ use std::path::Path;
 use mandate_connections::start::AuthorizePage;
 use mandate_release::startup::Tier;
 
+use crate::methods::CoolOffWaiver;
+
 /// The session signing key's file name under `$CREDENTIALS_DIRECTORY` (`deploy/systemd`).
 pub const SESSION_KEY_FILE: &str = "session-signing-key";
 
@@ -48,6 +50,8 @@ pub enum StartRefusal {
     /// [`INTERNAL_PAPER_WORKSPACE`] is on, and the hosted control stream is not shown to be paper
     /// (DEC-1143 item 2).
     InternalWorkspaceNotPaper,
+    /// A check its story has not implemented yet (DEC-77).
+    Unimplemented { story: &'static str },
 }
 
 impl fmt::Display for StartRefusal {
@@ -74,6 +78,7 @@ impl fmt::Display for StartRefusal {
                 f,
                 "{INTERNAL_PAPER_WORKSPACE} is on, and the control stream is not shown to be paper"
             ),
+            Self::Unimplemented { story } => write!(f, "{story} has not been implemented yet"),
         }
     }
 }
@@ -165,6 +170,25 @@ pub fn authorize_page(tier: Tier, value: Option<&OsStr>) -> Result<AuthorizePage
         Err(StartRefusal::AuthorizeUrl)
     };
     judged
+}
+
+/// The setting a `dev` or `ci` test cell waives a first passkey's enrolment cool-off with
+/// ([DEC-2146](../../../docs/project/decisions/DEC-2146.md) item 2): exactly `true`, which the chart
+/// renders from `api.passkeyCoolOffWaiver` and refuses outside those tiers.
+pub const COOL_OFF_WAIVER: &str = "MANDATE_API_PASSKEY_COOL_OFF_WAIVER";
+
+/// The waiver [`COOL_OFF_WAIVER`]'s `value` sets in `tier`: none when unset; the tier's own when it
+/// is exactly `true` in `dev` or `ci`. Any other value, and `true` in any other tier, refuses the
+/// start, so a staging or production cell never waives (DEC-2146 item 2).
+///
+/// # Errors
+/// [`StartRefusal::Setting`] naming [`COOL_OFF_WAIVER`].
+pub fn cool_off_waiver(
+    tier: Tier,
+    value: Option<&OsStr>,
+) -> Result<Option<CoolOffWaiver>, StartRefusal> {
+    let _unread_until_implemented = (tier, value);
+    Err(StartRefusal::Unimplemented { story: "E9-4" })
 }
 
 /// Refuses a key set fetched over anything but `https` outside dev and CI (E21-53, DEC-2100 item

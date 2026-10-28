@@ -43,6 +43,18 @@ pub struct Passkey {
     /// The store the passkeys' public keys are artifacts in; `None` when the deployment names
     /// none, and then no key resolves.
     pub keys: Option<Arc<dyn ArtifactSource + Send + Sync>>,
+    /// The test cell's waiver of a first passkey's enrolment cool-off
+    /// ([DEC-2146](../../../docs/project/decisions/DEC-2146.md)), set only by
+    /// [`crate::config::cool_off_waiver`] at start; `None` everywhere else.
+    pub cool_off_waiver: Option<CoolOffWaiver>,
+}
+
+/// The tier of a test cell that waives a first passkey's enrolment cool-off (DEC-2146 item 2): the
+/// only two tiers that may.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoolOffWaiver {
+    Dev,
+    Ci,
 }
 
 /// The assertion's four members, decoded from unpadded base64url.
@@ -139,6 +151,11 @@ impl StepUp for Passkey {
             .into_iter()
             .find(|enrolment| enrolment.credential == assertion.passkey_id)
             .and_then(|enrolment| self.credential(&fold, enrolment, &decoded.credential_id));
+        if let (Some(waiver), Some(credential)) = (self.cool_off_waiver, enrolled.as_ref())
+            && judged.now < credential.cool_off_ends
+        {
+            waived(waiver)?;
+        }
         let record = self.challenges.held(id);
         let state = match &record {
             None => ChallengeState::Unknown,
@@ -181,6 +198,12 @@ impl StepUp for Passkey {
             to_canonical(&canonical),
         )))
     }
+}
+
+/// A step-up made inside its credential's enrolment cool-off, counted under `waiver` and journaled
+/// as `StepUpCoolOffWaived` (DEC-2146 items 3 and 4): not implemented yet.
+fn waived(_waiver: CoolOffWaiver) -> Result<(), Unverified> {
+    Err(Unverified::Unimplemented { story: "E9-4" })
 }
 
 /// Whether an event on `control` already carries step-up naming the challenge `id`, so the
