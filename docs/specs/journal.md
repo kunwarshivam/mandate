@@ -7623,7 +7623,7 @@ after the event (rule 249). Until then the API's passkey verifier counts no step
 (identity spec §7.2 step 4).
 
 In a `dev` or `ci` test cell started with the waiver, the verifier counts such a step-up anyway, and
-says so in this record. The waiver is the API server's setting `MANDATE_API_PASSKEY_COOL_OFF_WAIVER`
+says so in this record. The waiver is the API server's setting `MANDATE_API_STEP_UP_COOL_OFF_WAIVER`
 under `MANDATE_DEPLOYMENT_TIER` `dev` or `ci`, refused at start in any other tier
 ([DEC-2146](../project/decisions/DEC-2146.md) item 2). The API appends the record immediately after
 the `StepUpAsserted` of the step-up it waived, in the same batch. Staging and production never start
