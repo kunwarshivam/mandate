@@ -33,6 +33,9 @@ impl Journal for NoJournal {
     fn rows<'a>(&'a self, _: &'a str) -> Rows<'a> {
         Box::pin(async { Err(JournalUnavailable) })
     }
+    fn rows_from<'a>(&'a self, _: &'a str, _: mandate_journal::TrustedStart) -> Rows<'a> {
+        Box::pin(async { Err(JournalUnavailable) })
+    }
     fn take_ownership<'a>(&'a self, _: &'a str) -> Answer<'a, u64> {
         Box::pin(async { Err(JournalUnavailable) })
     }
