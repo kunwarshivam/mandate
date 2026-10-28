@@ -274,7 +274,7 @@ fn owed_under_low_headroom(owed: &dyn Fn(&Journal) -> Result<(), Error>) -> Resu
     let broker = Paper::new(&journal);
     broker.resting(OPENING, "AAPL", "10", "150")?;
     broker.fill(OPENING, "150")?;
-    broker.resting("md-protect", "AAPL", "10", "147")?;
+    broker.resting_sell("md-protect", "AAPL", "10", "147")?;
     broker.report_rate_limit(200, 3);
     let mut process = start_allowing(&journal, &broker)?;
     owed(&journal)?;
