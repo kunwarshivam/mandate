@@ -3348,7 +3348,7 @@ fn a_long_run_with_the_fold_following_reads_only_what_each_pass_appended() {
     let mut process = RuntimeProcess::start(
         following.clone(),
         Wiring {
-            facts: Some(mandate_daemon::production::Facts::new(CLOCK, AGENT)),
+            facts: Some(unpinned()),
             ..wiring()
         },
         &config(),
@@ -3363,6 +3363,13 @@ fn a_long_run_with_the_fold_following_reads_only_what_each_pass_appended() {
         let read = following.handed.get() - before;
         assert_read(read, rechecks(1, second), &following, second);
     }
+}
+
+/// The production fold of an unpinned mandate, which reads the agent stream at every pass.
+fn unpinned() -> mandate_daemon::production::Facts {
+    let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+    facts.read_working_universe();
+    facts
 }
 
 /// Whether the pass at `NOW + second` reads every stream again from its first record, the
