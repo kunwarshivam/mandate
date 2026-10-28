@@ -956,16 +956,17 @@ forbidden_internal = ["mandate-paper", "mandate-shell", "mandate-cli", "mandate-
 
 # The workspace news reader process (E2-10, DEC-2278, DEC-2280): the news stream's single writer,
 # over the Postgres journal and the artifact store, with mandate-process's lifecycle and probes. It
-# holds the news data key, a paper key only it may read, fetches through mandate-sources' allowlisted
-# fetcher alone, and reads the agent, account and control streams only to choose what to poll. It
-# may never reach the runner, the shell, the CLI, a broker connector, the executor, the runtime, the
-# builder: news only ever leads to an opinion, never an order.
+# holds the news data key, a paper data key that only it and the data process's bars reader may read
+# (DEC-2277, DEC-2283 item 2), fetches through mandate-sources' allowlisted fetcher alone, and reads
+# the agent, account and control streams only to choose what to poll. It may never reach the runner,
+# the shell, the CLI, a broker connector, the executor or its process, the runtime or its process,
+# the agent process, the builder: news only ever leads to an opinion, never an order.
 [crates.mandate-news-reader]
 layer = 9
 safety_critical = true
 pure = false
-allowed_external = ["secrecy", "tokio"]
-forbidden_internal = ["mandate-paper", "mandate-shell", "mandate-cli", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-executor", "mandate-runtime", "mandate-builder", "mandate-spec"]
+allowed_external = ["secrecy"]
+forbidden_internal = ["mandate-paper", "mandate-shell", "mandate-cli", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-executor", "mandate-executord", "mandate-runtime", "mandate-daemon", "mandate-agentd", "mandate-builder", "mandate-spec"]
 
 # The workspace data process in the local cell (E21-29 lane SC): the deployed instrument's daily
 # bars from the cell's recorded series, stored as mandate-marketdata's dataset under the artifact

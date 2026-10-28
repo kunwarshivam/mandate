@@ -20,4 +20,5 @@ mandate-vault.workspace = true
 secrecy.workspace = true
 
 [dev-dependencies]
+mandate-connections.workspace = true
 mandate-store.workspace = true
