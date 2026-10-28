@@ -531,25 +531,42 @@ each stops at start without its key and would hold the whole workspace release u
 spends nothing on models or data: the gateway offers no model until its gate passes, and the bars
 come from Alpaca's free IEX feed.
 
-**Before you start**
-- Section K steps 1 and 2 are done: `OPENROUTER_API_KEY` is in `infra-staging`.
-- Section M steps 1 to 3 are done: `ALPACA_NEWS_KEY_ID` and `ALPACA_NEWS_SECRET` are in
-  `infra-staging`. The bars are read with that same paper data key (DEC-2283).
-- The coordinator has told you that the chart changes have landed.
+**Before you start.** These are every secret the `apply` reads, all in GitHub **Settings →
+Environments → `infra-staging` → Environment secrets**, by these exact names. Preflight lists any
+that is missing.
+- **Set by earlier staging applies, so check they are still there:** `DIGITAL_OCEAN_API_KEY`,
+  `CF_INFRA_API_TOKEN`, `TOFU_STATE_PASSPHRASE`, `KUBE_API_ALLOWED_CIDRS`,
+  `ACCESS_ALLOWED_EMAILS` and `FOUNDER_OIDC_SUBJECT`.
+- **New for this apply:**
+  - `OPENROUTER_API_KEY` (section K, steps 1 and 2);
+  - `ALPACA_NEWS_KEY_ID` and `ALPACA_NEWS_SECRET` (section M, steps 1 to 3), with which the bars
+    are read too (DEC-2283);
+  - `ALPACA_OAUTH_CLIENT_SECRET` (section H, steps 1 to 3), so the web app can connect your
+    Alpaca paper account.
+- **The OAuth client id is not a secret.** Send it to the coordinator, so an agent lands the
+  one-line change to `alpacaOAuth.clientId` (section H step 4). Apply at a commit that holds it.
+- **The coordinator has told you the chart changes have landed.**
 
 **Steps**
 1. **Preflight.** In GitHub, open **Actions → infra → Run workflow**. Pick branch `main`,
    environment `staging` and action `preflight`, leave `sha` empty, and click **Run workflow**. It
-   lists anything missing. Fix that first.
-2. **Plan.** Run it again with action `plan`. Note the full commit it prints. Read the changes. If
-   the plan replaces the cluster (DEC-2047's move to `sfo2`), tell the coordinator before you
-   apply: the journal and the vault then start fresh, which is safe on paper, but the step after
-   the apply differs.
+   must list nothing missing. Fix anything it lists first.
+2. **Plan.** Run it again with action `plan`. Note the full commit it prints. In its log, look
+   for these:
+   - **The plan's summary line** (`Plan: N to add, N to change, N to destroy`). The costed
+     staging resources may change. Nothing outside staging may change.
+   - **Whether the cluster is replaced.** A line with `digitalocean_kubernetes_cluster` and
+     `must be replaced` is DEC-2047's move to `sfo2`. If you see it, tell the coordinator before
+     you apply: the journal and the vault then start fresh, which is safe on paper, but the vault
+     must be initialized again.
+   - **`monthly_estimate_usd`** in the plan's outputs. It was about $57 at the 10-19 apply, and
+     it must stay inside DEC-2011's $150 cap.
 3. **Apply.** Run it again with action `apply` and `sha` set to the commit the plan printed. When
    the run waits on the `infra-staging` environment, click **Review deployments → Approve and
    deploy**.
-4. **Check two lines in the run's log:** `model provider key: written` and `news data key:
-   written`. If either says `not set`, stop: that environment secret's name is wrong or empty.
+4. **Check three lines in the run's log:** `model provider key: written`, `news data key:
+   written` and `alpaca oauth client secret: written`. If one says `not set`, stop: that
+   environment secret's name is wrong or empty.
 5. **Tell the coordinator** the run's link. IAC then lands one change that moves the gateway and
    the data process into `promote`, and promotes staging. Flux starts both.
 6. **Then section N:** deploy the research agent.
