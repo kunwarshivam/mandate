@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use mandate_artifacts_fs::FsArtifactStore;
@@ -19,12 +19,15 @@ use mandate_num::Usd;
 use mandate_research::PolicyOverlay;
 use mandate_research_run::agentic::{OutputMode, Tool, ToolClass};
 use mandate_runtime::{AgenticConfig, EventDraft, ResearchConfig};
+use mandate_store::Store;
+use mandate_store::meter::{JournalMeter, ReadMeter};
 use mandate_time::UtcNanos;
 
 use crate::deployment;
 use crate::meter::CellMeter;
 use crate::recorded::{Bundle, BundleError};
-use crate::runtime::{Refs, ResearchWiring};
+use crate::remote::{GatewayAddress, RemoteGateway, RemoteSink};
+use crate::runtime::{ArtifactSink, Refs, ResearchWiring};
 use crate::source::{CellSource, Rows, SourceFor};
 use crate::worker::{RecordedWorker, StoreSink, WorkerError, WorkerFor};
 
@@ -223,6 +226,81 @@ pub fn research_metered(
     wired(opted, rows, meter, artifacts, now)
 }
 
+/// Where a researching runtime that goes through the model-gateway service finds the research
+/// store, read-only (DEC-2279 item 5).
+pub const RESEARCH_ARTIFACTS_ENV: &str = "MANDATE_RESEARCH_ARTIFACTS";
+
+/// The model-gateway service a researching runtime goes through, and the research store it reads
+/// its artifacts back from (DEC-2397, DEC-2279 items 3 and 5). An empty `research` names no store,
+/// so every read-back fails and research halts, and the runtime still starts.
+#[derive(Debug, Clone)]
+pub struct ViaGateway {
+    pub address: GatewayAddress,
+    pub research: PathBuf,
+}
+
+/// As [`research_metered`], calling models through the model-gateway service at `remote`
+/// (DEC-2397 items 1, 4 and 6): the worker builds no gateway, and the research source reads `meter`,
+/// the service's journaled stream read without its writer epoch, for its own checks. The service
+/// meters and holds each research call to the deployed daily cap, and stores the research
+/// artifacts in the research store at `research`, which they are read back from (DEC-2279).
+///
+/// # Errors
+/// As [`research_metered`].
+pub fn research_remote(
+    opted: OptIn,
+    rows: Box<dyn Rows>,
+    meter: Box<dyn MeterStore>,
+    artifacts: &Path,
+    now: Box<dyn FnMut() -> UtcNanos>,
+    remote: RemoteGateway,
+    research: &Path,
+) -> Result<CellResearch, CellError> {
+    wired_through(opted, rows, meter, artifacts, now, Some((remote, research)))
+}
+
+/// The research a journaled process wires for `workspace`'s paper deployment, its meter stream in
+/// `journal` (DEC-2397 items 4 and 6): with a `gateway`, through the model-gateway service there,
+/// reading that stream with a [`ReadMeter`], which never takes the service's writer epoch; without
+/// one, [`research_metered`] over a [`JournalMeter`], its writer. Both read the clock `clock`.
+///
+/// # Errors
+/// As [`research_metered`].
+pub fn research_through<S: Store + 'static>(
+    opted: OptIn,
+    rows: Box<dyn Rows>,
+    journal: S,
+    workspace: &str,
+    artifacts: &Path,
+    clock: fn() -> UtcNanos,
+    gateway: Option<ViaGateway>,
+) -> Result<CellResearch, CellError> {
+    match gateway {
+        Some(via) => research_remote(
+            opted,
+            rows,
+            Box::new(ReadMeter::open(journal, workspace)),
+            artifacts,
+            Box::new(clock),
+            RemoteGateway::new(via.address, clock),
+            &via.research,
+        ),
+        None => research_metered(
+            opted,
+            rows,
+            Box::new(JournalMeter::open(
+                journal,
+                workspace,
+                Environment::Paper,
+                Rc::new(clock),
+                Box::new(meter_opened_ids(workspace)),
+            )),
+            artifacts,
+            Box::new(clock),
+        ),
+    }
+}
+
 /// The research `opted` asks for, reading the streams through `rows` and the mandate documents and
 /// artifacts from the store at `artifacts`, its meter in memory, for fixtures and tests (DEC-2259
 /// item 1).
@@ -247,6 +325,22 @@ fn wired(
     artifacts: &Path,
     now: Box<dyn FnMut() -> UtcNanos>,
 ) -> Result<CellResearch, CellError> {
+    wired_through(opted, rows, meter, artifacts, now, None)
+}
+
+/// The research `opted` asks for: its worker calls models through `remote` when one is given, and
+/// otherwise through its own gateway, which shares `meter` with the source. With `remote`, its
+/// artifacts are stored through it too, in the research store it names, each read back from there
+/// (DEC-2279 items 3 and 5), since the runtime's own mounts are read-only; without it, they are
+/// put in `artifacts` directly.
+fn wired_through(
+    opted: OptIn,
+    rows: Box<dyn Rows>,
+    meter: Box<dyn MeterStore>,
+    artifacts: &Path,
+    now: Box<dyn FnMut() -> UtcNanos>,
+    remote: Option<(RemoteGateway, &Path)>,
+) -> Result<CellResearch, CellError> {
     let OptIn {
         bundle,
         deployment,
@@ -266,6 +360,16 @@ fn wired(
     let meter = CellMeter::over(meter, Rc::clone(&rows), who.clone(), Rc::new(clock.clone()));
     let open =
         || FsArtifactStore::open_existing(artifacts).map_err(|_| CellError::ArtifactsUnavailable);
+    let sink = || -> Result<Box<dyn ArtifactSink>, CellError> {
+        Ok(match &remote {
+            Some((remote, research)) => Box::new(RemoteSink::new(
+                remote.clone(),
+                &deployment.workspace,
+                *research,
+            )),
+            None => Box::new(StoreSink(open()?)),
+        })
+    };
     let control = StreamId::parse(&format!("ctl:{}", deployment.workspace))
         .ok_or(CellError::Mandate("deployment_missing"))?;
     let rows_now = rows
@@ -292,19 +396,29 @@ fn wired(
         })
     })?;
     let daily = research_daily_cap(&document)?;
-    let worker = RecordedWorker::capped(
-        &bundle,
-        WorkerFor {
-            workspace: deployment.workspace.clone(),
-            agent: deployment.agent.clone(),
-            description: description.clone(),
-        },
-        Box::new(StoreSink(open()?)),
-        Box::new(clock),
-        meter.clone(),
-        daily,
-    )
-    .map_err(CellError::Worker)?;
+    let worker_for = WorkerFor {
+        workspace: deployment.workspace.clone(),
+        agent: deployment.agent.clone(),
+        description: description.clone(),
+    };
+    let worker = match &remote {
+        Some((remote, _)) => RecordedWorker::remote(
+            &bundle,
+            worker_for,
+            sink()?,
+            Box::new(clock),
+            remote.clone(),
+        ),
+        None => RecordedWorker::capped(
+            &bundle,
+            worker_for,
+            sink()?,
+            Box::new(clock),
+            meter.clone(),
+            daily,
+        )
+        .map_err(CellError::Worker)?,
+    };
     let source = CellSource::metered(&bundle, who, rows, Box::new(open()?), meter);
     let refs = ResearchRefs {
         mandate_version: version,
@@ -324,7 +438,7 @@ fn wired(
             },
             source: Box::new(source),
             worker: Box::new(worker),
-            artifacts: Box::new(StoreSink(open()?)),
+            artifacts: sink()?,
         },
         refs: Box::new(refs),
     })

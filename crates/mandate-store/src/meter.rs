@@ -98,6 +98,38 @@ impl<S: Store> JournalMeter<S> {
     }
 }
 
+/// A workspace's meter stream `meter:{workspace_id}` read through a [`Store`] without its writer
+/// epoch (DEC-2397 item 4): the runtime that calls models through the model-gateway service reads
+/// the service's stream for its own checks, and must never fence the service, the stream's one
+/// writer. It takes no epoch, so every append is refused `Unavailable` and writes nothing.
+pub struct ReadMeter<S: Store> {
+    store: S,
+    stream: Option<StreamId>,
+}
+
+impl<S: Store> ReadMeter<S> {
+    /// The meter stream of `workspace` through `store`. A workspace that names no stream gives a
+    /// meter whose every read fails `Unavailable`.
+    pub fn open(store: S, workspace: &str) -> Self {
+        Self {
+            store,
+            stream: StreamId::parse(&format!("meter:{workspace}")),
+        }
+    }
+}
+
+impl<S: Store> MeterStore for ReadMeter<S> {
+    fn read(&self) -> Result<Vec<MeterRecord>, StoreError> {
+        let stream = self.stream.as_ref().ok_or(StoreError::Unavailable)?;
+        records(&self.store.rows(stream).ok_or(StoreError::Unavailable)?)
+    }
+
+    fn append(&mut self, record: MeterRecord) -> Result<(), StoreError> {
+        let _never_written = record;
+        Err(StoreError::Unavailable)
+    }
+}
+
 /// What a meter stream is named for and opens with: its prefix, its `StreamOpened`'s
 /// `stream_type`, and the member naming whose stream it is.
 struct Opened {

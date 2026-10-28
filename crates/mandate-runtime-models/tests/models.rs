@@ -13,11 +13,11 @@ use common::*;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::Value;
 use mandate_daemon::ArtifactSink;
-use mandate_daemon::models::{Evaluated, Models};
+use mandate_daemon::models::{Evaluated, Models, Streams};
 use mandate_journal::{ArtifactStore, Environment, StoredEvent};
 use mandate_runtime::ModelDirection;
 use mandate_runtime_models::{
-    Held, PinnedModels, RECORDED_SOURCE, Registry, registry, source, wiring,
+    Held, IEX_SOURCE, PinnedModels, RECORDED_SOURCE, Registry, registry, source, wiring,
 };
 use mandate_time::Date;
 use proptest::prelude::*;
@@ -61,6 +61,12 @@ fn assert_expected(answer: &[Evaluated], series: &[(Date, u32)]) {
     );
 }
 
+/// A pinned mandate reads no stream.
+const NO_STREAMS: Streams<'static> = Streams {
+    control: None,
+    agent: &[],
+};
+
 fn composer(root: &Root, control: &[StoredEvent], document: &Value) -> Option<PinnedModels> {
     PinnedModels::new(
         document,
@@ -86,11 +92,69 @@ fn a_rising_series_gives_the_pinned_model_s_long_output_at_the_close_it_read() {
     let series = rising(30);
     store_series(&root.bars(), "QQQ", &series, None);
     let models = composer(&root, &registered(), &document()).unwrap();
-    assert_expected(&models.evaluate(tick(NOW)), &series);
+    assert_expected(&models.evaluate(tick(NOW), NO_STREAMS), &series);
     assert_eq!(
-        models.evaluate(tick(NOW)),
-        models.evaluate(tick(NOW)),
+        models.evaluate(tick(NOW), NO_STREAMS),
+        models.evaluate(tick(NOW), NO_STREAMS),
         "the same tick over the same partitions answers the same"
+    );
+}
+
+/// DEC-2283 item 6: over an `alpaca-iex` root the composer reads the daily generation its tick
+/// names, so the same series stored there gives the same output, named by the IEX source; a series
+/// stored only in the generation of the session before gives none.
+#[test]
+fn a_generation_root_gives_the_output_of_the_generation_its_tick_names() {
+    let root = Root::new("generations");
+    let series = rising(30);
+    let generations = root.generations();
+    store_series(
+        &mandate_bars::generations::daily_generation(&generations, last()),
+        "QQQ",
+        &series,
+        None,
+    );
+    let models = PinnedModels::new(
+        &document(),
+        registry(&registered(), Environment::Paper).unwrap(),
+        &generations,
+    )
+    .unwrap();
+    let answer = models.evaluate(tick(NOW), NO_STREAMS);
+    let [evaluated] = answer.as_slice() else {
+        panic!("one output: {answer:?}");
+    };
+    assert_eq!(evaluated.source, IEX_SOURCE);
+    assert_eq!(evaluated.output.direction, ModelDirection::Long);
+    assert_eq!(evaluated.output.as_of, tick(LAST_CLOSE));
+    assert_eq!(
+        String::from_utf8(evaluated.closes.clone()).unwrap(),
+        String::from_utf8(closes_json(&series)).unwrap()
+    );
+
+    let earlier = Root::new("earlier-generation");
+    let before = sessions(31, last());
+    let shifted: Vec<(Date, u32)> = before[..30]
+        .iter()
+        .zip(series.iter())
+        .map(|(day, (_, cents))| (*day, *cents))
+        .collect();
+    let generations = earlier.generations();
+    store_series(
+        &mandate_bars::generations::daily_generation(&generations, before[29]),
+        "QQQ",
+        &shifted,
+        None,
+    );
+    let models = PinnedModels::new(
+        &document(),
+        registry(&registered(), Environment::Paper).unwrap(),
+        &generations,
+    )
+    .unwrap();
+    assert!(
+        models.evaluate(tick(NOW), NO_STREAMS).is_empty(),
+        "the generation of the session before is never read in its place"
     );
 }
 
@@ -104,7 +168,7 @@ fn a_falling_or_flat_series_gives_no_output() {
             .collect();
         store_series(&root.bars(), "QQQ", &series, None);
         let models = composer(&root, &registered(), &document()).unwrap();
-        assert_eq!(models.evaluate(tick(NOW)), Vec::new(), "{name}");
+        assert_eq!(models.evaluate(tick(NOW), NO_STREAMS), Vec::new(), "{name}");
     }
 }
 
@@ -129,7 +193,7 @@ fn a_pinned_1_1_0_s_exit_output_is_handed_on_on_a_falling_series() {
     let control = [registration_of(1, "paper", ("1.1.0", &exit_hash), PARAMS)];
     let answer = composer(&root, &control, &pinned)
         .unwrap()
-        .evaluate(tick(NOW));
+        .evaluate(tick(NOW), NO_STREAMS);
     let [evaluated] = answer.as_slice() else {
         panic!("one output: {answer:?}");
     };
@@ -143,7 +207,7 @@ fn a_pinned_1_1_0_s_exit_output_is_handed_on_on_a_falling_series() {
     assert_eq!(
         composer(&root, &registered(), &document())
             .unwrap()
-            .evaluate(tick(NOW)),
+            .evaluate(tick(NOW), NO_STREAMS),
         Vec::new()
     );
 }
@@ -224,8 +288,12 @@ fn a_registration_that_does_not_read_gives_no_registry() {
 }
 
 #[test]
-fn only_the_cell_s_recording_names_a_source() {
+fn the_recording_and_the_iex_generations_name_a_source_and_nothing_else_does() {
     for (root, named) in [
+        ("/srv/artifacts/datasets/alpaca-iex", Some(IEX_SOURCE)),
+        ("alpaca-iex/", Some(IEX_SOURCE)),
+        ("/srv/artifacts/datasets/alpaca-iexx", None),
+        ("/srv/artifacts/datasets/alpaca-iex/daily", None),
         (
             "/srv/artifacts/datasets/cell-recorded",
             Some(RECORDED_SOURCE),
@@ -387,7 +455,7 @@ proptest! {
             document()
         };
         let clock = if fault == Fault::StaleClock { STALE } else { NOW };
-        let answer = composer(&root, &control, &document).unwrap().evaluate(tick(clock));
+        let answer = composer(&root, &control, &document).unwrap().evaluate(tick(clock), NO_STREAMS);
         if fault == Fault::None && long(&series) {
             assert_expected(&answer, &series);
         } else {

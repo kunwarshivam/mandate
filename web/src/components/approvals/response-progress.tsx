@@ -16,11 +16,13 @@ export interface Step {
 
 /**
  * Where a response stands, in three steps: sent, recorded in the journal, and the result. A step is
- * done only once the runtime says so, so nothing reads as finished before the journal records it.
+ * done only once the runtime says so, so nothing reads as finished before the journal records it. An
+ * answer the runtime refused is recorded and its result is the refusal, never an approval.
  */
 export function responseSteps(approval: Approval, response: ApprovalResponse): Step[] {
   const resolved = approval.status !== "delivered";
-  const recorded = resolved || response.phase === "recorded" || response.phase === "decided";
+  const refused = response.phase === "refused";
+  const recorded = resolved || refused || response.phase === "recorded" || response.phase === "decided";
   const waitingOn = approval.approvers_required - approval.approvals_so_far.length;
   return [
     { key: "sent", label: "Sent", state: "done" },
@@ -31,8 +33,8 @@ export function responseSteps(approval: Approval, response: ApprovalResponse): S
     },
     {
       key: "result",
-      label: resolved ? APPROVAL_STATUS_LABEL[approval.status] : waitingOn > 0 && recorded ? "Waiting for approvers" : "Result",
-      state: resolved ? "done" : recorded ? "current" : "waiting",
+      label: resolved ? APPROVAL_STATUS_LABEL[approval.status] : refused ? "Refused" : waitingOn > 0 && recorded ? "Waiting for approvers" : "Result",
+      state: resolved || refused ? "done" : recorded ? "current" : "waiting",
     },
   ];
 }

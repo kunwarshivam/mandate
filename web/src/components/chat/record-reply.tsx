@@ -157,7 +157,7 @@ function StopCard({ agentId, resume }: { agentId: string | null; resume: boolean
       <p className="text-sm text-pretty">
         {resume
           ? `Resuming ${label ?? "an agent"} lets it trade again, so it needs your passkey. It's in Stop.`
-          : `Stopping ${label ?? "an agent"}, a kill switch, or closing positions needs your passkey and the full list of what it touches. It's in Stop, where pausing comes first.`}
+          : `Stopping ${label ?? "an agent"} needs your passkey; a kill switch or closing positions needs no passkey, only the full list of what it touches. It's in Stop, where pausing comes first.`}
       </p>
       <button type="button" onClick={openStop} className={cn(QUIET_KEY, "w-fit gap-1.5 border-2 border-ink pl-3 font-semibold text-ink")}>
         <StopOctagon aria-hidden className="size-6" />

@@ -32,6 +32,7 @@ from common import (
     ENVELOPE,
     LIQUIDITY_PAIR,
     ULID,
+    INTENT,
     INT,
     REF,
     STEP_UP,
@@ -104,7 +105,7 @@ CREDENTIAL_ID = T("credential_id")
 CREDENTIAL_ID_FORM = re.compile(r"^[A-Za-z0-9_-]{22,1364}\Z")
 SIGN_COUNT = T("sign_count")
 SIGN_COUNT_MAX = 4294967295
-STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2, "meter": 2}
+STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2, "meter": 2, "dmeter": 2, "news": 2}
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
 REFUSED_COMMANDS = {"agent": ("resume", "stop", "lift_hold"), "acct": ("acknowledge",)}
@@ -239,6 +240,25 @@ for _kind in ("ctl", "acct"):
     SCHEMAS[(_kind, "OwnerAcknowledgmentRequested")] = ACK_REQUESTED
     SCHEMAS[(_kind, "OwnerAcknowledged")] = ACKNOWLEDGED
 
+# v0.102 §9.28 (DEC-2824): version 2 of both adds `subject`, so an acknowledgment can name an
+# account restriction (`restriction`) as well as a triggered limit (`limit`). Version 1 reads as
+# `limit`, and rule 239 judges both versions alike.
+ACK_SUBJECTS = ("limit", "restriction", "reconciliation")
+
+
+def with_subject(record: T) -> T:
+    """Version 1's members with `subject` after `event`, the member it qualifies."""
+    fields = []
+    for name, ty in record.fields:
+        fields.append((name, ty))
+        if name == "event":
+            fields.append(("subject", one_of(*ACK_SUBJECTS)))
+    return rec(*fields)
+
+
+ACK_REQUESTED_V2 = with_subject(ACK_REQUESTED)
+ACKNOWLEDGED_V2 = with_subject(ACKNOWLEDGED)
+
 REQUIRED_REFS = {
     "ApprovalRequested": ("mandate_version",),
     "ApprovalResponded": ("mandate_version",),
@@ -262,6 +282,8 @@ REQUIRED_REFS = {
     "ThesisProposed": ("mandate_version", "model_version"),
     "ThesisRevised": ("mandate_version", "model_version"),
     "ThesisInvalidated": ("mandate_version",),
+    **{event_type: ("fee_config", "trading_calendar", "settlement_calendar", "instrument_snapshot")
+       for event_type in ("FillApplied", "LateFillApplied")},
 }
 
 # §9.3 (DEC-403): the account stream's risk-state records.
@@ -753,6 +775,8 @@ REQUIRED_REFS["ModelInvocationRecorded"] = ("model_version",)
 
 # §9.19 (DEC-998): the agent stream's `ModelInvocationRecorded` and the model gateway's meter stream.
 AGENT_PURPOSES = ("research", "llm_signal", "fast_signal")
+# The purposes of a call with no agent: the compiler's and an evaluation's (rule 156, DEC-2216).
+NO_AGENT_PURPOSES = ("compiler", "evaluation")
 HARNESS_RESULTS = (
     "judged",
     "unknown_instrument",
@@ -799,7 +823,7 @@ SCHEMAS[("meter", "StreamOpened")] = rec(("stream_type", one_of("meter")), ("wor
 SCHEMAS[("meter", "MeterReserved")] = rec(
     ("call_id", ULID),
     ("agent_id", opt(IDENT_T)),
-    ("purpose", one_of(*AGENT_PURPOSES, "compiler")),
+    ("purpose", one_of(*AGENT_PURPOSES, *NO_AGENT_PURPOSES)),
     ("model", MODEL_REF),
     ("endpoint", STR),
     ("key_owner", one_of("platform", "customer")),
@@ -807,6 +831,21 @@ SCHEMAS[("meter", "MeterReserved")] = rec(
     ("max_cost_usd", DEC),
     ("risk_day", DATE),
 )
+# §9.37 (v0.97, DEC-2278): the news reader's stream and the one record it writes per stored item.
+SCHEMAS[("news", "StreamOpened")] = rec(("stream_type", one_of("news")), ("workspace_id", IDENT_T))
+SCHEMAS[("news", "NewsItemStored")] = rec(
+    ("source", STR),
+    ("allowlist_version", INT),
+    ("item_id", STR),
+    ("symbols", list_of(STR)),
+    ("published_at", TS),
+    ("knowledge_at", TS),
+    ("item_ref", REF),
+    ("licensed", BOOL),
+)
+NEWS_ITEM_ID_FORM = re.compile(r"^[A-Za-z0-9._:-]{1,128}\Z")
+NEWS_RESERVED_PREFIXES = ("bar:", "quote:", "instrument:")
+NEWS_MAX_SYMBOLS = 32
 SCHEMAS[("meter", "MeterSettled")] = rec(
     ("call_id", ULID),
     ("reservation", ULID),
@@ -989,6 +1028,7 @@ EVENT_CHECKS = (
     "held_mismatch",
     "connection_lifecycle_mismatch",
     "connection_cause_mismatch",
+    "approval_deferral_mismatch",
 )
 RANGE_CHECKS = ("anchor_root_mismatch", "tsa_token_invalid", "segment_manifest_mismatch", "segment_gap")
 # v0.38 (DEC-894): version 2's list gains the range-level `segment_rows_mismatch`; version 1's
@@ -1244,7 +1284,7 @@ GATE_CHECK_IDS = tuple(
     "mark_freshness collar conduct buying_power gross_exposure day_trade_budget".split()
 )
 INTENT_V1 = rec(
-    ("intent_id", ULID),
+    ("intent_id", INTENT),
     ("agent_id", IDENT_T),
     ("instrument_id", STR),
     ("side", STR),
@@ -1255,7 +1295,7 @@ INTENT_V1 = rec(
     ("purpose", STR),
 )
 GATE_V1 = rec(
-    ("intent_id", ULID),
+    ("intent_id", INTENT),
     ("verdict", STR),
     ("reason_code", opt(STR)),
     ("data_profile", STR),
@@ -1275,7 +1315,7 @@ SUBMITTED_V1 = rec(
 )
 COMPANION = rec(
     ("agent_id", IDENT_T),
-    ("intent_id", opt(ULID)),
+    ("intent_id", opt(INTENT)),
     ("purpose", one_of("open", "increase", "discretionary_exit", "risk_exit", "owner_exit", "protective", "flatten")),
     ("extended_hours", BOOL),
     ("stop_price", opt(DEC)),
@@ -1294,7 +1334,7 @@ PROTECTION_CHANGED = rec(
     ("qty", opt(DEC)),
     ("stop", opt(DEC)),
     ("take_profit", opt(DEC)),
-    ("intent_id", opt(ULID)),
+    ("intent_id", opt(INTENT)),
     ("bracket", opt(STR)),
     ("entry", opt(STR)),
     ("agent_id", opt(IDENT_T)),
@@ -1326,7 +1366,7 @@ ESTABLISHED_V2 = rec(
 VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "StreamOpened"): (1,),
     ("acct", "IntentReceived"): (1, 2),
-    ("acct", "GateDecided"): (1, 2),
+    ("acct", "GateDecided"): (1, 2, 3),
     ("acct", "OrderSubmitted"): (1, 2),
     ("acct", "OrderRequestRecorded"): (1,),
     ("acct", "ProtectionChanged"): (1, 2),
@@ -1337,6 +1377,8 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "ExternalActivityIngested"): (1,),
     ("acct", "RejectObserved"): (1,),
     ("acct", "OrderAbandoned"): (1,),
+    ("acct", "FillApplied"): (1, 2),
+    ("acct", "LateFillApplied"): (1,),
     ("acct", "ClockAdvanced"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
@@ -1366,6 +1408,41 @@ MARK_UPDATED_V2 = rec(
     ("session", one_of(*MARK_SESSIONS)),
     ("risk_clock", RISK_CLOCK),
 )
+FILL_FEE = rec(("kind", STR), ("amount", DEC), ("asset", STR), ("status", STR))
+
+
+def fill_applied(client_order_id: T) -> T:
+    return rec(
+        ("fill_id", STR),
+        ("client_order_id", client_order_id),
+        ("instrument_id", STR),
+        ("side", STR),
+        ("qty_gross", DEC),
+        ("price", DEC),
+        ("trade_date", DATE),
+        ("risk_clock", RISK_CLOCK),
+        ("fees", list_of(FILL_FEE)),
+    )
+
+
+FILL_APPLIED_V1 = fill_applied(STR)
+FILL_APPLIED_V2 = fill_applied(opt(STR))
+# v0.98 §9.5 (DEC-2817): `FillApplied` version 2 requires the instrument snapshot only of a fill
+# that names an order of ours, which rule 300 checks; an unattributed fill may be in an instrument
+# the platform holds no snapshot of.
+FILL_V2_REQUIRED_REFS = ("fee_config", "trading_calendar", "settlement_calendar")
+
+
+def required_refs(event_type: str, version: int) -> tuple[str, ...]:
+    if event_type == "FillApplied" and version == 2:
+        return FILL_V2_REQUIRED_REFS
+    return REQUIRED_REFS.get(event_type, ())
+
+
+# Trading spec §2.3 (v0.21): every client order id of ours is `md-` and one or more ASCII letters,
+# digits or hyphens, at most 128 characters in all.
+OUR_CLIENT_ORDER_ID = re.compile(r"md-[A-Za-z0-9-]+")
+OUR_CLIENT_ORDER_ID_MAX = 128
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "AccountSnapshotRecorded", 2): rec(
         *SNAPSHOT_ACCOUNT_MEMBERS,
@@ -1385,6 +1462,13 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "IntentReceived", 2): rec(*INTENT_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "GateDecided", 1): GATE_V1,
     ("acct", "GateDecided", 2): rec(*GATE_V1.fields, ("risk_clock", RISK_CLOCK)),
+    ("acct", "GateDecided", 3): rec(
+        *GATE_V1.fields,
+        ("sized_qty", opt(DEC)),
+        ("parked", opt(BOOL)),
+        ("held_long", opt(BOOL)),
+        ("risk_clock", RISK_CLOCK),
+    ),
     ("acct", "OrderSubmitted", 1): SUBMITTED_V1,
     ("acct", "OrderSubmitted", 2): rec(*SUBMITTED_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "OrderRequestRecorded", 1): COMPANION,
@@ -1450,6 +1534,12 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("reason", one_of("intent_too_old", "gate_recheck", "released_to_owner", "unprotected_interval_limit")),
         ("risk_clock", RISK_CLOCK),
     ),
+    # v0.95 §9.5 (DEC-2812): one broker fill. Version 2 is version 1's members with
+    # `client_order_id` nullable, `null` for a fill that names no order of ours; `LateFillApplied`
+    # stays at version 1, since a late fill is always of an order of ours.
+    ("acct", "FillApplied", 1): FILL_APPLIED_V1,
+    ("acct", "FillApplied", 2): FILL_APPLIED_V2,
+    ("acct", "LateFillApplied", 1): FILL_APPLIED_V1,
     # v0.94 §9.5 (DEC-2808): the executor's copy of the scheduler's tick, journaled when the tick
     # returns a risk record or crosses New York midnight. It carries the tick as `clock` and, like
     # every account-stream row the executor's fold reads, as `risk_clock`: rules 301 and 302.
@@ -1584,6 +1674,46 @@ REQUEST_TOP = (
     ("on_timeout", one_of("skip")),
 )
 VERSIONED_VERSIONS[("ctl", "CredentialEnrolled")] = (1, 2)
+for _kind in ("ctl", "acct"):
+    VERSIONED_VERSIONS[(_kind, "OwnerAcknowledgmentRequested")] = (1, 2)
+    VERSIONED_VERSIONS[(_kind, "OwnerAcknowledged")] = (1, 2)
+    VERSIONED_SCHEMAS[(_kind, "OwnerAcknowledgmentRequested", 2)] = ACK_REQUESTED_V2
+    VERSIONED_SCHEMAS[(_kind, "OwnerAcknowledged", 2)] = ACKNOWLEDGED_V2
+# v0.102 §9.5 (DEC-2824): one cause of an account restriction lifted, naming the accepted
+# acknowledgment copy and the evidence that completes it, and the account state the causes left set.
+VERSIONED_SCHEMAS[("acct", "AccountRestrictionLifted", 1)] = rec(
+    ("cause", one_of("broker_reject", "broker_notice", "connection_unavailable")),
+    ("acknowledgment", ULID),
+    ("evidence", ULID),
+    ("restriction", one_of("active", "closing_only", "blocked")),
+    ("risk_clock", RISK_CLOCK),
+)
+# §9's `AgentModeApplied` on the account stream, closed at version 1 as `mandate-journal` registers
+# it: the mode an agent (`*` for every agent) is moved to under a named restriction. v0.104 rule
+# reads it as the reconciliation hold an acknowledgment names (DEC-2830).
+SCHEMAS[("acct", "AgentModeApplied")] = rec(
+    ("agent", STR),
+    ("to", one_of("normal", "exits_only", "paused", "stopped")),
+    ("restriction", STR),
+    ("originated", BOOL),
+    ("risk_clock", RISK_CLOCK),
+)
+# §9 (DEC-458): the broker's account report, closed at version 1, which a broker cause's lift reads
+# as its refresh (v0.102 rule 312). Registered here as `mandate-journal` registers it.
+SCHEMAS[("acct", "AccountStateObserved")] = rec(
+    ("status", STR),
+    ("crypto_status", STR),
+    ("trading_blocked", BOOL),
+    ("account_blocked", BOOL),
+    ("trade_suspended_by_user", BOOL),
+    ("multiplier", INT),
+    ("equity", DEC),
+    ("cash", DEC),
+    ("buying_power", DEC),
+    ("non_marginable_buying_power", DEC),
+    ("accrued_fees", DEC),
+    ("risk_clock", RISK_CLOCK),
+)
 VERSIONED_SCHEMAS[("ctl", "CredentialEnrolled", 2)] = CREDENTIAL_ENROLLED_V2
 VERSIONED_VERSIONS[("agent", "ApprovalRequested")] = (1, 2, 3)
 VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 1)] = rec(
@@ -1969,6 +2099,29 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             clauses.reverse()
         wrong = next((m for m, ok in clauses if not ok), None)
         rule("245", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "GateDecided" and draft["schema_version"] == 3:
+        # Rules 313 to 315 (DEC-2848): the executor's own members, each only where it writes it.
+        sized = p["sized_qty"]
+        allow = p["verdict"] == "allow" or "rule.313.allow" in skip
+        positive = sized is None or normalize_decimal(sized) is None or Decimal(sized) > 0 or "rule.313.positive" in skip
+        rule("313", sized is None or (allow and positive), "schema", "payload.sized_qty")
+        held_long = p["held_long"]
+        rule(
+            "314",
+            held_long is None
+            or ((held_long is True or "rule.314.true" in skip) and (p["verdict"] == "hold" or "rule.314.hold" in skip)),
+            "schema",
+            "payload.held_long",
+        )
+        parked = p["parked"]
+        sessions = ("session_closed",) if "rule.315.closed_only" in skip else ("session_closed", "session_unknown")
+        parked_ok = parked is None or (
+            (parked is True or "rule.315.true" in skip)
+            and p["verdict"] == "hold"
+            and (p["reason_code"] in sessions or "rule.315.reason" in skip)
+            and (held_long is True or "rule.315.held_long" in skip)
+        )
+        rule("315", parked_ok, "schema", "payload.parked")
     if event_type == "ConnectionRequested" and draft["schema_version"] == 2:
         oauth = p["credential"] == "oauth"
         breadth = p["breadth"]
@@ -2022,6 +2175,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("280", not blocked or noticed, "schema", "payload.cause")
     if event_type == "ClockAdvanced":
         account_clock_rules(draft, skip, rule)
+    if draft["stream_id"].startswith("news:"):
+        news_rules(event_type, draft, skip, rule)
     if event_type == "ExternalActivityIngested":
         fill = p["source"] == "fill"
         if fill:
@@ -2044,6 +2199,17 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
                 rule("298", False, "schema", "payload.fill_id")
             else:
                 rule("298", missing is None, "schema", f"payload.{missing}" if missing else "")
+    if event_type == "OrderAbandoned":
+        derived = "md-" + p["intent_id"] if isinstance(p["intent_id"], str) else None
+        rule("303", p["client_order_id"] is None or p["client_order_id"] == derived, "schema",
+             "payload.client_order_id")
+    if event_type == "FillApplied" and draft["schema_version"] == 2:
+        named = p["client_order_id"]
+        limit = OUR_CLIENT_ORDER_ID_MAX + (1 if "boundary.rule_299_length" in skip else 0)
+        ours = named is None or (OUR_CLIENT_ORDER_ID.fullmatch(named) is not None and len(named) <= limit)
+        rule("299", ours, "schema", "payload.client_order_id")
+        snapshot = "instrument_snapshot" in draft["config_refs"]
+        rule("300", named is None or snapshot, "missing_config_ref", "config_refs.instrument_snapshot")
     if event_type == "AccountCloseRequested":
         qty = normalize_decimal(p["qty"])
         if qty is None:
@@ -2548,7 +2714,7 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
         rule("155", actor["kind"] == "system", "actor.kind")
     if event_type == "MeterReserved":
         (
-            rule("156.agent", (p["agent_id"] is None) == (p["purpose"] == "compiler"), "payload.agent_id")
+            rule("156.agent", (p["agent_id"] is None) == (p["purpose"] in (NO_AGENT_PURPOSES if "rule.156.evaluation" not in skip else ("compiler",))), "payload.agent_id")
             and rule("156.cost", Decimal(p["max_cost_usd"]) >= 0, "payload.max_cost_usd")
         )
     if event_type == "MeterSettled":
@@ -2794,6 +2960,31 @@ def account_clock_rules(draft: dict, skip: frozenset[str], rule) -> None:
         if not holds and f"rule.{name}" not in skip:
             rule(name, False, "schema", path)
             return
+
+
+def news_rules(event_type: str, draft: dict, skip: frozenset[str], rule) -> None:
+    """Rule 283 on `NewsItemStored` (v0.97 §9.37, DEC-2278), its clauses in the spec's order, the
+    first that fails reported; then rule 286's writer, a `system` actor, on every news-stream record."""
+    if event_type == "NewsItemStored":
+        p = draft["payload"]
+        symbols = p["symbols"]
+        least = 0 if "boundary.rule_283_none" in skip else 1
+        most = NEWS_MAX_SYMBOLS + 1 if "boundary.rule_283_33" in skip else NEWS_MAX_SYMBOLS
+        item = p["item_id"]
+        grammar = bool(NEWS_ITEM_ID_FORM.match(item)) or "rule.283.grammar" in skip
+        reserved = item.startswith(NEWS_RESERVED_PREFIXES) and "rule.283.prefix" not in skip
+        clauses = [
+            ("symbols", symbols == sorted(symbols) or "rule.283.sorted" in skip),
+            ("symbols", len(set(symbols)) == len(symbols) or "rule.283.unique" in skip),
+            ("symbols", least <= len(symbols) <= most),
+            ("item_id", grammar and not reserved),
+            ("knowledge_at", p["knowledge_at"] >= p["published_at"] or "rule.283.known" in skip),
+        ]
+        if "order.rule_283_known_first" in skip:
+            clauses.reverse()
+        wrong = next((m for m, ok in clauses if not ok), None)
+        rule("283", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    rule("286.actor", draft["actor"]["kind"] == "system", "schema", "actor.kind")
 
 
 def passkey_step_up(number: str, draft: dict, skip: frozenset[str], rule) -> bool:
@@ -3534,12 +3725,12 @@ def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
     p = draft["payload"]
     kind = draft["stream_id"].split(":")[0]
     out = []
-    name = "rule.154" if kind == "meter" else "rule.25"
+    name = {"meter": "rule.154", "news": "rule.286"}.get(kind, "rule.25")
     if event_type == "StreamOpened" and name not in skip:
         if kind == "acct":
             opened = f"acct:{p['workspace_id']}:{p['account_ref']}"
-        elif kind == "meter":
-            opened = f"meter:{p['workspace_id']}"
+        elif kind in ("meter", "news"):
+            opened = f"{kind}:{p['workspace_id']}"
         else:
             opened = f"ctl:{p['workspace_id']}"
         if draft["stream_id"] != opened:
@@ -3646,7 +3837,7 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     kinds |= {k for k, e, _ in VERSIONED_SCHEMAS if e == event_type}
     if not kinds:
         return [Violation("catalogue", "unknown_event_type", "event_type")]
-    shape = {"acct": 3, "agent": 3, "ctl": 2, "meter": 2}.get(stream[0])
+    shape = {"acct": 3, "agent": 3, "ctl": 2, "meter": 2, "news": 2}.get(stream[0])
     if shape != len(stream) or not all(IDENT_RE.match(s) for s in stream[1:]):
         return [Violation("stream", "non_canonical", "stream_id")]
     if stream[0] not in kinds:
@@ -3663,7 +3854,7 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
         elif not (isinstance(refs[kind], str) and DIGEST_REF.match(refs[kind])):
             out.append(Violation("config_refs", "non_canonical", f"config_refs.{kind}"))
     if "config_refs.required" not in skip:
-        missing = [k for k in REQUIRED_REFS.get(event_type, ()) if k not in refs]
+        missing = [k for k in required_refs(event_type, draft["schema_version"]) if k not in refs]
         out += [
             Violation("config_refs.required", "missing_config_ref", f"config_refs.{k}") for k in missing[:1]
         ]

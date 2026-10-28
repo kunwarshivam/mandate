@@ -14,8 +14,8 @@ use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Key, Object, Value, parse};
 use mandate_daemon::cell::{self, CellDeployment, CellResearch, opt_in};
 use mandate_daemon::{
-    Alert, ArtifactSink, Config, Refs, ResearchParts, ResearchSource, ResearchWiring,
-    ResearchWorker, RuntimeProcess, Wiring,
+    Alert, ArtifactSink, Config, ContextUnread, Refs, ResearchParts, ResearchSource,
+    ResearchWiring, ResearchWorker, RuntimeProcess, Wiring,
 };
 use mandate_gateway::money::{Usage, Usd6};
 use mandate_gateway::{CallRecord, Outcome as CallOutcome, Purpose};
@@ -231,13 +231,13 @@ pub struct Evented {
 }
 
 impl ResearchSource for Open {
-    fn parts(&self, _: &RuntimeState) -> Option<ResearchParts> {
+    fn parts(&self, _: &RuntimeState) -> Result<ResearchParts, ContextUnread> {
         self.asked.set(self.asked.get() + 1);
         if self.off.get() {
-            return None;
+            return Err(ContextUnread::Clock);
         }
         let evented = self.evented.borrow().clone();
-        Some(ResearchParts {
+        Ok(ResearchParts {
             preconditions: Preconditions::read(&JournalCatalog::JOURNAL),
             mandate: ValidatedMandate::from_validated_envelope(envelope()),
             overlay: PolicyOverlay::internal_research_profile(),
@@ -372,6 +372,7 @@ pub fn wiring_with(research: Option<ResearchWiring>, refs: Box<dyn Refs>) -> Wir
         research,
         models: None,
         facts: None,
+        approvers: None,
     }
 }
 

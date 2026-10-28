@@ -571,6 +571,28 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
         None,
         "another instrument's fill names none"
     );
+    assert_eq!(
+        trusted.config_refs(&executor_agent, &reviewed).as_ref(),
+        Some(refs),
+        "the reviewed instrument's gate records name the registered references (DEC-2846)"
+    );
+    assert_eq!(trusted.config_refs(&executor_agent, &symbol("SPY")?), None);
+    assert_eq!(
+        trusted.config_refs(&ExecutorAgentId("agent_other".to_owned()), &reviewed),
+        None
+    );
+    assert_eq!(
+        trusted.account_fill_refs().map(|named| (
+            named.fee_config,
+            named.trading_calendar,
+            named.settlement_calendar
+        )),
+        refs.fee_config
+            .clone()
+            .zip(refs.trading_calendar.clone())
+            .map(|(fee, calendar)| (fee, calendar.clone(), calendar)),
+        "an unattributed fill in any instrument names the registered fee and calendar (DEC-2817)"
+    );
     Ok(())
 }
 
@@ -614,6 +636,13 @@ fn the_reconciling_context_names_the_fill_configuration_and_answers_no_gate_requ
     );
     assert_eq!(context.increment(&other), None);
     assert_eq!(context.exit_tier(&reviewed), None);
+    assert_eq!(
+        context.config_refs(&ours, &reviewed),
+        Some(refs.clone()),
+        "the reviewed instrument's gate records name the registered references (DEC-2846)"
+    );
+    assert_eq!(context.config_refs(&theirs, &reviewed), None);
+    assert_eq!(context.config_refs(&ours, &other), None);
     let (Some(fee), Some(calendar), Some(snapshot)) = (
         refs.fee_config.clone(),
         refs.trading_calendar.clone(),
@@ -631,6 +660,19 @@ fn the_reconciling_context_names_the_fill_configuration_and_answers_no_gate_requ
         })
     );
     assert_eq!(context.fill_refs(&other), None);
+    assert_eq!(
+        context.account_fill_refs().map(|named| (
+            named.fee_config,
+            named.trading_calendar,
+            named.settlement_calendar
+        )),
+        refs.fee_config
+            .clone()
+            .zip(refs.trading_calendar.clone())
+            .map(|(fee, calendar)| (fee, calendar.clone(), calendar)),
+        "an unattributed fill in any instrument names the registered fee and calendar (DEC-2817)"
+    );
+    assert!(context.account_fill_refs().is_some());
     let missing: [fn(&mut mandate_executor::BindingGateConfigRefs); 3] = [
         |refs| refs.fee_config = None,
         |refs| refs.trading_calendar = None,

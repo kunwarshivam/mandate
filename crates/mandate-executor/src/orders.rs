@@ -21,7 +21,8 @@ use crate::protection::{overdue, protection_cancelled};
 use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
     AccountState, AgentId, BrokerAccount, BrokerFill, BrokerOrder, BrokerReject, BrokerRequest,
-    EventId, Mode, OrderState, Purpose, RiskClock, Seq, StatusMapping,
+    ConnectionHealth, ConnectionTrouble, EventId, Mode, OrderState, Purpose, RiskClock, Seq,
+    StatusMapping,
 };
 
 /// Trading-domain spec §5.7's broker status table. It is **total**: every value the table names
@@ -590,7 +591,9 @@ fn replaced(
 /// `LateFillApplied` that triggers a reconciliation. A fill that cannot be one of our orders' —
 /// not our id, another instrument or side, or more than the order has left — is still applied to
 /// accounting, unattributed, as external activity: every agent goes `exits_only` and the owner is
-/// alerted (§7.1), so filled quantity never exceeds an order's quantity.
+/// alerted (§7.1), so filled quantity never exceeds an order's quantity. Its `FillApplied` is
+/// version 2's, naming no order (`null`), and moves the account's position and cash, no agent's
+/// (journal spec §9.5, DEC-2812).
 ///
 /// `before` is the state a reconciliation began from, when the fill is one it found missing: an
 /// order the same reconciliation adopted as terminal was not terminal when the fill happened, so
@@ -652,6 +655,12 @@ pub(crate) fn fill(
                 ("qty", Value::Null),
             ],
         )?;
+        pairs.push(("client_order_id", Value::Null));
+        let refs = if refs.is_empty() {
+            account_fill_config(batch)?
+        } else {
+            refs
+        };
         batch.journal_with_refs("FillApplied", None, refs, pairs)?;
         every_agent_alerted(
             batch,
@@ -764,6 +773,23 @@ fn fill_config(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Result<Objec
             "instrument_snapshot",
             Some(refs.instrument_snapshot.as_str()),
         ),
+        (
+            "settlement_calendar",
+            Some(refs.settlement_calendar.as_str()),
+        ),
+        ("trading_calendar", Some(refs.trading_calendar.as_str())),
+    ])
+}
+
+/// The `config_refs` an unattributed fill in an instrument with no snapshot is journaled with: the
+/// account's fee configuration and both calendars, and no instrument snapshot (journal spec §9.5
+/// rule 300, DEC-2817); none when the port knows none, which the journal refuses as before.
+fn account_fill_config(batch: &Batch<'_, '_>) -> Result<Object, ExecutorError> {
+    let Some(refs) = batch.ports.instruments.account_fill_refs() else {
+        return Ok(Object::new());
+    };
+    config_refs(&[
+        ("fee_config", Some(refs.fee_config.as_str())),
         (
             "settlement_calendar",
             Some(refs.settlement_calendar.as_str()),
@@ -978,12 +1004,13 @@ impl Restriction {
 }
 
 /// What detected a restriction, journaled as its closed `cause` (journal spec §9.5, DEC-441 item
-/// 23, DEC-2137): the broker's account report (§7.3 row 1) or its rejects (rows 2 and 3). A lost
-/// connection restricts nothing here yet (E7-2v), so there is no variant for it.
+/// 23, DEC-2137): the broker's account report (§7.3 row 1), its rejects (rows 2 and 3), or a
+/// connection the platform cannot reach or use (row 5, DEC-2826).
 #[derive(Debug, Clone, Copy)]
 enum Cause {
     BrokerNotice,
     BrokerReject,
+    ConnectionUnavailable,
 }
 
 impl Cause {
@@ -991,22 +1018,36 @@ impl Cause {
         match self {
             Self::BrokerNotice => "broker_notice",
             Self::BrokerReject => "broker_reject",
+            Self::ConnectionUnavailable => "connection_unavailable",
+        }
+    }
+
+    /// The owner's alert for a record of this cause: the broker's restriction, or the distinct one
+    /// that says the broker has not restricted the account (notifications spec §3.2, DEC-2520).
+    fn alert(self) -> OwnerAlertKind {
+        match self {
+            Self::BrokerNotice | Self::BrokerReject => OwnerAlertKind::AccountRestriction,
+            Self::ConnectionUnavailable => OwnerAlertKind::ConnectionUnavailable,
         }
     }
 }
 
-/// Stores a detected restriction as account state and applies its agent effect to every agent
-/// (§7.3), alerting the owner. A restriction already in force is not journaled again, and the
-/// answer says whether this one was new.
+/// Journals a detected restriction's cause when it is not already in force at that restriction or
+/// a stricter one (journal spec v0.96 rule 309, DEC-2816), alerting the owner. Only a restriction
+/// that makes the account state stricter applies its agent effect to every agent (§7.3); one
+/// beside a stricter cause moves no agent, which already holds the stricter mode. The answer says
+/// whether a cause was journaled.
 fn restrict(
     batch: &mut Batch<'_, '_>,
     restriction: Restriction,
     cause: Cause,
     reason: &'static str,
 ) -> Result<bool, ExecutorError> {
-    if batch.view.account_state >= restriction.state() {
+    let held = batch.view.causes.get(cause.name()).copied();
+    if held.is_some_and(|held| held >= restriction.state()) {
         return Ok(false);
     }
+    let tightens = batch.view.account_state < restriction.state();
     let changed = batch.journal(
         "AccountRestrictionChanged",
         None,
@@ -1016,14 +1057,54 @@ fn restrict(
             ("reason_code", text(reason)),
         ],
     )?;
-    every_agent_alerted(
-        batch,
-        restriction.mode(),
-        reason,
-        changed,
-        OwnerAlertKind::AccountRestriction,
-    )?;
+    if tightens {
+        every_agent_alerted(batch, restriction.mode(), reason, changed, cause.alert())?;
+    } else {
+        batch.notify(changed, cause.alert());
+    }
     Ok(true)
+}
+
+/// A connection the platform cannot reach or use (trading spec §7.3 row 5, connections spec CN-6
+/// and §9.1, DEC-2826), reported at every step while it holds. While the cause
+/// `connection_unavailable` is not in force, the step journals only the restriction, every agent
+/// `exits_only` and the owner's alert, so the halt is never behind the state change (journal spec
+/// §9.8). Once it is in force, a later step records the state change: into the reported state, or
+/// a new reason while staying in it, each once per stay. A degrading cause while `suspended` is
+/// held and journals nothing (DEC-687 item 1, rule 60), and so is every state change before the
+/// stream's copy of the establishment (rule 68).
+pub(crate) fn connection(
+    batch: &mut Batch<'_, '_>,
+    trouble: ConnectionTrouble,
+) -> Result<(), ExecutorError> {
+    if restrict(
+        batch,
+        Restriction::ClosingOnly,
+        Cause::ConnectionUnavailable,
+        "account_restricted",
+    )? {
+        return Ok(());
+    }
+    let Some(view) = batch.view.connection.clone() else {
+        return Ok(());
+    };
+    let to = trouble.state();
+    let held = view.health == ConnectionHealth::Suspended && to == ConnectionHealth::Degraded;
+    let recorded = view.health == to && view.reasons.contains(trouble.reason());
+    if held || recorded {
+        return Ok(());
+    }
+    batch.journal(
+        "ConnectionStateChanged",
+        None,
+        vec![
+            ("connection_id", text(&view.id)),
+            ("from", text(view.health.name())),
+            ("to", text(to.name())),
+            ("reason", text(trouble.reason())),
+        ],
+    )?;
+    Ok(())
 }
 
 /// A reject the broker answered with. Journaled with its status, code and message; an order of
@@ -1033,8 +1114,8 @@ fn restrict(
 /// closing only (§7.3) by DEC-143's reading: a message that says `closing` or `restricted`, since
 /// no connector reject table maps a `code` yet, or the configured run of consecutive 403s, every
 /// 403 counting, a named order's included. A reject naming an id we do not know counts toward
-/// that run and is nothing more. The account is asked for again once, when the run restricts it,
-/// not at every 403 after.
+/// that run and is nothing more. The account is asked for again once, when the run journals the
+/// reject as a cause in force, even beside a stricter one (DEC-2816), not at every 403 after.
 pub(crate) fn reject(
     batch: &mut Batch<'_, '_>,
     reject: &BrokerReject,

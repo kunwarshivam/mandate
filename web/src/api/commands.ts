@@ -40,16 +40,22 @@ export function recordRef(record: CommandRecord | ApprovalRecord | ConfirmRecord
 
 const one = (command: PreparedCommand): Prepared => ({ ok: true, commands: [command] });
 
-export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, kind: CommandKind, agentId: string | null, record?: CommandRecord): Prepared {
+/**
+ * An owner command as its route takes it. A resume or a plain Stop carries the owner's passkey
+ * evidence and its assertion when `stepUp` is given (DEC-2140 item 1), and `null` evidence otherwise,
+ * which the runtime refuses (DEC-2102 item 4).
+ */
+export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, kind: CommandKind, agentId: string | null, record?: CommandRecord, stepUp: PasskeyStepUp | null = null): Prepared {
   const agentCommand = (operation: "pause" | "resume" | "stop", body: JsonObject): Prepared =>
     agentId ? one(client.prepare(operation, { agent: agentId }, body)) : { ok: false, reason: "no_agent" };
+  const evidence: JsonObject = stepUp ? { step_up: { ...stepUp.step_up }, step_up_assertion: { ...stepUp.step_up_assertion } } : { step_up: null };
   switch (kind) {
     case "pause":
       return agentCommand("pause", { record: null });
     case "resume":
-      return agentCommand("resume", { record: null, step_up: null });
+      return agentCommand("resume", { record: null, ...evidence });
     case "stop":
-      return agentCommand("stop", { release: false, warning_shown: null, record: null, step_up: null });
+      return agentCommand("stop", { release: false, warning_shown: null, record: null, ...evidence });
     case "release":
       if (!record) return { ok: false, reason: "no_warning_shown" };
       return agentCommand("stop", { release: true, warning_shown: ref(JSON.stringify(record.shown)), record: null, step_up: null });
@@ -71,6 +77,24 @@ export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, k
       throw new Error(`unhandled command ${String(unhandled)}`);
     }
   }
+}
+
+/** An asset id as the exits route takes it (`common.schema.json#/$defs/AssetId`): a lowercase UUID. */
+const ASSET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export const isAssetId = (instrument: string): boolean => ASSET_ID.test(instrument);
+
+/**
+ * The owner's exit from one instrument (§5.4, `POST /agents/{id}/exits`; rule 13): the asset and the
+ * screen the owner confirmed. The bid confirmation is all `null`: the positions read serves no quote
+ * with its size and time, so there is no bid the owner could have seen, and an equity sell outside the
+ * regular session waits for it, which the screen says. It carries no step-up: the server records an
+ * owner exit without one (§3.11 item 12), and it is never refused for step-up.
+ */
+export function prepareOwnerExit(client: WorkspaceClient, agentId: string, instrument: string, record: CommandRecord): Prepared {
+  if (!agentId) return { ok: false, reason: "no_agent" };
+  if (!isAssetId(instrument)) return { ok: false, reason: "no_asset_id" };
+  return one(client.prepare("owner_exit", { agent: agentId }, { instrument, bid: null, bid_size: null, quoted_at: null, floor: null, record: recordRef(record), step_up: null }));
 }
 
 /**

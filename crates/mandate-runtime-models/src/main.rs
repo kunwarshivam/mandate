@@ -21,7 +21,8 @@
 //!
 //! A deployment resolved from the journal evaluates its confirmed mandate's pinned quant models on
 //! each tick, over the daily closes stored under `MANDATE_BARS`, through
-//! [`mandate_runtime_models::wiring`] (DEC-2383 item 7); with no bars root it evaluates none.
+//! [`mandate_runtime_models::wiring`] (DEC-2383 item 7), or, for a research mandate, its quant
+//! models on its working universe (DEC-2827); with no bars root it evaluates none.
 //!
 //! A pod the deployment manager starts runs `mandate-daemon run --probe <socket>` and names its
 //! workspace and agent by variables instead ([`launch`], DEC-1015). Until the connection and the
@@ -32,10 +33,13 @@
 //! and without it the process runs deny-all ([`cell`]). The flag with no bundle after it, an empty
 //! one, another flag in its place, or written `--research=`, which the process does not read,
 //! refuses `research_bundle_missing`, so asking for research is never read as not asking.
+//! `--gateway <host:port>` beside it calls models through the model-gateway service there, whose
+//! meter stream the runtime then only reads (DEC-2397), and which stores the research artifacts in
+//! the research store, read back from `MANDATE_RESEARCH_ARTIFACTS` (DEC-2279); without it, the
+//! in-process recorded fake.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -43,14 +47,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_daemon::bars::{BARS_ENV, BarsReader};
-use mandate_daemon::cell::{self, CellDeployment};
+use mandate_daemon::cell::{self, CellDeployment, RESEARCH_ARTIFACTS_ENV, ViaGateway};
+use mandate_daemon::remote::GatewayAddress;
 use mandate_daemon::wake::Sleep;
 use mandate_daemon::{Config, RuntimeProcess, Wake, deployment, fixture, launch, production};
 use mandate_journal::{Environment, StreamId};
 use mandate_process::State;
 use mandate_process::probe::{self, Probe, Status};
 use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
-use mandate_store::meter::JournalMeter;
 use mandate_store::{MemoryStore, PgStore, Store};
 use mandate_time::UtcNanos;
 use tokio::signal::unix::{SignalKind, signal};
@@ -118,8 +122,22 @@ fn main() -> ExitCode {
                 eprintln!("research_bundle_missing");
                 return ExitCode::from(2);
             }
+            let gateway = match launch::gateway(&args, research.is_some()) {
+                Ok(gateway) => gateway,
+                Err(code) => {
+                    eprintln!("{code}");
+                    return ExitCode::from(2);
+                }
+            };
             let research = research.map(PathBuf::from);
-            match run(deployment, given, &socket, fixture, research.as_deref()) {
+            match run(
+                deployment,
+                given,
+                &socket,
+                fixture,
+                research.as_deref(),
+                gateway,
+            ) {
                 Ok(status) => ExitCode::from(status),
                 Err(code) => {
                     eprintln!("runtime_start_failed: {code}");
@@ -159,6 +177,7 @@ fn run(
     socket: &Path,
     fixture: bool,
     research: Option<&Path>,
+    gateway: Option<GatewayAddress>,
 ) -> Result<u8, &'static str> {
     let terminate = Arc::new(AtomicBool::new(false));
     watch_terminate(Arc::clone(&terminate)).map_err(|_| "signal_unavailable")?;
@@ -234,20 +253,22 @@ fn run(
                 &agent,
             );
             wiring.models = models;
+            wiring.approvers = Some(found.source);
             if let Some(opted) = opted {
-                let meter = JournalMeter::open(
+                let rows = Box::new(PgStore::connect(&dsn)?);
+                let wired = cell::research_through(
+                    opted,
+                    rows,
                     PgStore::connect(&dsn)?,
                     &workspace,
-                    Environment::Paper,
-                    Rc::new(host_now),
-                    Box::new(cell::meter_opened_ids(&workspace)),
-                );
-                let wired = cell::research_metered(
-                    opted,
-                    Box::new(PgStore::connect(&dsn)?),
-                    Box::new(meter),
                     Path::new(&root),
-                    Box::new(host_now),
+                    host_now,
+                    gateway.map(|address| ViaGateway {
+                        address,
+                        research: std::env::var(RESEARCH_ARTIFACTS_ENV)
+                            .map(PathBuf::from)
+                            .unwrap_or_default(),
+                    }),
                 )
                 .map_err(|error| error.code())?;
                 wiring.research = Some(wired.wiring);

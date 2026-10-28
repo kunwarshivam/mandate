@@ -134,6 +134,7 @@ fn resume_stop_and_acknowledge_need_the_code() {
             Command::Acknowledge {
                 event: common::runtime_id(42),
                 request: None,
+                subject: None,
             },
             "OwnerAcknowledged",
             None,
@@ -386,6 +387,7 @@ fn a_code_is_bound_to_every_field_it_confirms() {
     let ack = |n: u64| Command::Acknowledge {
         event: common::runtime_id(n),
         request: None,
+        subject: None,
     };
     let base = of(AGENT, &exit_aapl(true), &fx);
     let changed = [
@@ -1105,6 +1107,7 @@ fn a_repeated_acknowledgment_reports_the_first() {
     let ack = Command::Acknowledge {
         event: common::runtime_id(42),
         request: None,
+        subject: None,
     };
     let typed = code_for(&fx, AGENT, &ack);
     let acknowledge = |fx: &mut Fixture, ids: &mut FixedIds, second: i64| {

@@ -18,12 +18,17 @@ proves each pending test fails on them (DEC-110).
   `checks` and `admit` for the §8.5 decision, `fold_theses` for the §8.6 lineages, `expire_theses`
   for the three removals, `stagger_offset`, `stagger_release_at` and `next_proposal_at` for §8.4's
   timing, and the `ResearchEvent` entries the crate produces),
+  `crates/mandate-research/src/journaled.rs` (`replay_theses`, the agent stream's thesis records
+  replayed as judged into the universe, lineages, surviving theses and every instrument ever
+  admitted, which the runtime's research source and the executor both read, DEC-2819),
   `crates/mandate-research/src/score.rs` (E17-8's `evaluate`, the pure forward-paper scorer) and
   `crates/mandate-research/src/spec_types.rs` (the narrow stream-F views the first implementation PR
   after F's tests PR deletes). It **never calls a model:** a model output arrives as a typed value,
   and the platform boundary that produces it is E17-2's shell story. The spike that found the shape
   is `python/research_spike/` (E17-0, a spike, not product code).
-- **Tests:** `crates/mandate-research/tests/admission.rs` (one case per §8.5 check, plus MC-N01,
+- **Tests:** `crates/mandate-research/tests/journaled.rs` (the replay's ever-admitted set, its
+  refusals and retirements, and the records it passes over or cannot read; DEC-2819),
+  `crates/mandate-research/tests/admission.rs` (one case per §8.5 check, plus MC-N01,
   MC-N02, MC-N08, MC-N14, MC-N16, MC-N25 and MC-N26 by hand),
   `crates/mandate-research/tests/lineage.rs` (MC-N17 to MC-N19, MC-N24, MC-N27, MC-N28),
   `crates/mandate-research/tests/expiry.rs` (MC-N20 to MC-N22 and the horizon boundary),

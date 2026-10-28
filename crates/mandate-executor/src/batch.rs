@@ -121,6 +121,25 @@ impl<'p, 'a> Batch<'p, 'a> {
         )
     }
 
+    /// Drafts `payload` exactly as given, without the batch's risk clock: a copy of another stream's
+    /// record, whose payload is the original's unchanged, and §9.28's refusal of an acknowledgment,
+    /// whose schema has no `risk_clock` (journal spec §9.28, DEC-2828).
+    pub(crate) fn journal_raw(
+        &mut self,
+        event_type: &str,
+        schema_version: u64,
+        causation_id: Option<EventId>,
+        payload: Value,
+    ) -> Result<EventId, ExecutorError> {
+        self.draft(
+            event_type,
+            schema_version,
+            causation_id,
+            Object::new(),
+            payload,
+        )
+    }
+
     fn journal_at(
         &mut self,
         event_type: &str,
@@ -294,12 +313,13 @@ pub(crate) const OWNER_ALERT_SENT: &str = "OwnerAlertSent";
 
 pub(crate) fn schema_version(event_type: &str) -> u64 {
     match event_type {
+        "GateDecided" => 3,
         "IntentReceived"
-        | "GateDecided"
         | "OrderSubmitted"
         | "OrderStateChanged"
         | "ProtectionChanged"
-        | "AccountSnapshotRecorded" => 2,
+        | "AccountSnapshotRecorded"
+        | "FillApplied" => 2,
         _ => 1,
     }
 }
@@ -322,13 +342,15 @@ mod tests {
     fn the_executor_owns_each_account_draft_schema_version() {
         for event_type in [
             "IntentReceived",
-            "GateDecided",
             "OrderSubmitted",
             "AccountSnapshotRecorded",
+            "FillApplied",
         ] {
             assert_eq!(schema_version(event_type), 2, "{event_type}");
         }
+        assert_eq!(schema_version("GateDecided"), 3, "DEC-2848");
         for event_type in [
+            "LateFillApplied",
             "OrderRequestRecorded",
             "ReconciliationRun",
             "OwnerCommandRefused",

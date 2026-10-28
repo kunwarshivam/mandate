@@ -4,7 +4,9 @@
 //! member required and nothing defaulted. The cell's bundle loader and the model-gateway service's
 //! `--recorded` mode read the same file through this, so the two cannot drift apart.
 
-use mandate_canon::{Digest, Value, to_canonical};
+use std::collections::BTreeMap;
+
+use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_gateway::money::{PriceTable, TokenPrice, Usage, Usd6};
 use mandate_gateway::registry::{Endpoint, Locality, Registry, Reported, Route, Status};
 use mandate_gateway::schema::fits;
@@ -48,6 +50,12 @@ pub struct RecordedModel {
     /// The scripted replies of an agentic run's turns before its final one, turn 1 first; empty
     /// for a recording with no `turns` (DEC-2266).
     pub turns: Vec<ScriptedTurn>,
+    /// A `monitor` run's final reply, its output the monitor schema's `invalidations` alone (agent
+    /// harness spec §6.9), which a monitor run takes at its first turn, with no scripted turn;
+    /// `None` for a recording with no `monitor_reply`, whose monitor runs take [`Self::reply`].
+    /// Its output names the thesis it invalidates as [`SHOWN_THESIS`], which [`shown_thesis`]
+    /// replaces with a thesis the call showed the model.
+    pub monitor_reply: Option<RecordedReply>,
 }
 
 impl RecordedModel {
@@ -74,42 +82,23 @@ impl RecordedModel {
             .map(|turns| scripted(turns, &pinned))
             .transpose()?
             .unwrap_or_default();
-        let slug = pinned.identity.model_name.clone();
-        let reported_provider = endpoint.text("reported_provider")?;
-        let prices = PriceTable::new(
-            endpoint.per_million("input_per_million")?,
-            endpoint.per_million("output_per_million")?,
-            endpoint.per_million("cached_per_million")?,
-            Digest::of(endpoint.text("price_table")?.as_bytes()),
-        )
-        .map_err(|_| RecordedError::Malformed("cached_per_million"))?;
+        let monitor_reply = research
+            .get("monitor_reply")
+            .map(|monitor| {
+                if pinned.content().agentic().is_none() {
+                    return Err(RecordedError::Malformed("monitor_reply"));
+                }
+                replayed(&Field(monitor))
+            })
+            .transpose()?;
+        let (endpoint, probe) = hosted(&endpoint, &pinned.identity.model_name)?;
         Ok(Self {
             entry: pinned,
-            endpoint: Endpoint {
-                id: endpoint.text("id")?.to_owned(),
-                host: endpoint.text("host")?.to_owned(),
-                region: endpoint.text("region")?.to_owned(),
-                locality: Locality::Hosted,
-                route: Route {
-                    upstream: endpoint.text("upstream")?.to_owned(),
-                    reported_provider: reported_provider.to_owned(),
-                },
-                prices,
-            },
-            probe: Reported {
-                model: Some(slug),
-                provider: Some(reported_provider.to_owned()),
-            },
-            reply: RecordedReply {
-                output: reply.text("output")?.to_owned(),
-                latency_ms: reply.int("latency_ms")?,
-                usage: Usage {
-                    input: reply.int("input_tokens")?,
-                    output: reply.int("output_tokens")?,
-                    cached: reply.int("cached_tokens")?,
-                },
-            },
+            endpoint,
+            probe,
+            reply: replayed(&reply)?,
             turns,
+            monitor_reply,
         })
     }
 
@@ -146,11 +135,44 @@ pub fn registry(
     Ok(registry)
 }
 
+/// The hosted endpoint `endpoint` describes, and what it reports serving `slug`: the endpoint member
+/// of a recording, and of each entry of the live registry file.
+pub(crate) fn hosted(
+    endpoint: &Field<'_>,
+    slug: &str,
+) -> Result<(Endpoint, Reported), RecordedError> {
+    let reported_provider = endpoint.text("reported_provider")?;
+    let prices = PriceTable::new(
+        endpoint.per_million("input_per_million")?,
+        endpoint.per_million("output_per_million")?,
+        endpoint.per_million("cached_per_million")?,
+        Digest::of(endpoint.text("price_table")?.as_bytes()),
+    )
+    .map_err(|_| RecordedError::Malformed("cached_per_million"))?;
+    Ok((
+        Endpoint {
+            id: endpoint.text("id")?.to_owned(),
+            host: endpoint.text("host")?.to_owned(),
+            region: endpoint.text("region")?.to_owned(),
+            locality: Locality::Hosted,
+            route: Route {
+                upstream: endpoint.text("upstream")?.to_owned(),
+                reported_provider: reported_provider.to_owned(),
+            },
+            prices,
+        },
+        Reported {
+            model: Some(slug.to_owned()),
+            provider: Some(reported_provider.to_owned()),
+        },
+    ))
+}
+
 /// One member's value, read strictly.
-struct Field<'a>(&'a Value);
+pub(crate) struct Field<'a>(pub(crate) &'a Value);
 
 impl Field<'_> {
-    fn text(&self, member: &'static str) -> Result<&str, RecordedError> {
+    pub(crate) fn text(&self, member: &'static str) -> Result<&str, RecordedError> {
         self.0
             .get(member)
             .and_then(Value::as_str)
@@ -170,6 +192,53 @@ impl Field<'_> {
             .map(TokenPrice::per_million)
             .map_err(|_| RecordedError::Malformed(member))
     }
+}
+
+/// What a recorded monitor reply writes for the thesis it invalidates: a runtime's thesis ids are
+/// made at admission, so a recording cannot name one, and the double names the thesis the call
+/// showed it instead, as a model answers about what it was shown.
+pub const SHOWN_THESIS: &str = "$THESIS_ID";
+
+/// `output` with [`SHOWN_THESIS`] replaced by the least of `shown`, the thesis ids the call's
+/// `memory` input showed the model; unchanged when it showed none, so an invalidation of no thesis
+/// is judged `unknown_thesis` and ends nothing. The id goes into the text unescaped: a journaled
+/// thesis id is an identifier (`[A-Za-z0-9_-]`), and one that broke the JSON would only fail the
+/// gateway's schema, using nothing.
+pub fn shown_thesis(output: &str, shown: &[&str]) -> String {
+    match shown.iter().min() {
+        Some(thesis) => output.replace(SHOWN_THESIS, thesis),
+        None => output.to_owned(),
+    }
+}
+
+/// The thesis ids a call's `memory` input shows, as [`crate::call`] writes it: a canonical array of
+/// objects each naming its `thesis_id`. None when the input is absent or not that array.
+pub fn memory_theses(inputs: &BTreeMap<String, String>) -> Vec<String> {
+    inputs
+        .get("memory")
+        .and_then(|text| parse(text.as_bytes()).ok())
+        .and_then(|value| {
+            value.as_array().map(|theses| {
+                theses
+                    .iter()
+                    .filter_map(|thesis| thesis.get("thesis_id")?.as_str().map(str::to_owned))
+                    .collect()
+            })
+        })
+        .unwrap_or_default()
+}
+
+/// A recorded reply's members: its output text, latency, and usage.
+fn replayed(reply: &Field<'_>) -> Result<RecordedReply, RecordedError> {
+    Ok(RecordedReply {
+        output: reply.text("output")?.to_owned(),
+        latency_ms: reply.int("latency_ms")?,
+        usage: Usage {
+            input: reply.int("input_tokens")?,
+            output: reply.int("output_tokens")?,
+            cached: reply.int("cached_tokens")?,
+        },
+    })
 }
 
 /// `research.json`'s `turns` (DEC-2266): refused whole, `Malformed("turns")`, unless the entry

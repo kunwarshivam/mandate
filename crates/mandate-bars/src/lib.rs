@@ -14,10 +14,12 @@
 //! - [`trusted`]: the trust check on a stored daily-bar dataset and the bars and closes it admits.
 //! - [`closes`]: the closes a model output rested on, as the artifact its observation names.
 //! - [`minutes`]: the complete one-minute bars a trailing-volume figure rests on.
+//! - [`generations`]: which of an `alpaca-iex` root's generations a reader at a clock reads.
 //! - [`liquidity`]: the four figures the liquidity floor and participation read, at the reader's
 //!   own clock, for the runtime's dry run and the executor's binding gate alike (DEC-2274).
 
 pub mod closes;
+pub mod generations;
 pub mod liquidity;
 pub mod minutes;
 pub mod trusted;

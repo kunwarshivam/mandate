@@ -34,7 +34,7 @@ const KEY: &str = "k1Z-9_aaaaaaaaaa";
 const KEY_2: &str = "k2Z-9_bbbbbbbbbb";
 const ALICE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W3Z";
 const BOB: &str = "01JB3K6F0C9R2V7N4M8Q1T5W41";
-const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
 const EVIDENCE: &str = r#"{"assertion_id":"01JBH3BTZ8K2M4N6P8R0S2T4V6","authenticated_at":"2026-10-08T14:30:00.000000000Z","method":"passkey"}"#;
 /// The CLI's release warning (`mandate agent stop --release`, DEC-136), written out.
 const WARNING: &str = "The positions become yours and unprotected: this agent's protective orders are canceled and nothing watches them. This warning is recorded with your confirmation.";
@@ -116,6 +116,7 @@ fn fixture(accepting: bool) -> Fixture {
         challenges: Arc::default(),
         connect: None,
         reduction: Arc::default(),
+        folds: Arc::default(),
     };
     let f = Fixture {
         addr: serve(http::api(app, Drain::new())),

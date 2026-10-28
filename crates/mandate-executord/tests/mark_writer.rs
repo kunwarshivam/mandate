@@ -7,6 +7,7 @@
 mod support;
 
 use std::collections::BTreeSet;
+use std::time::Duration;
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::Value;
@@ -229,7 +230,60 @@ fn a_named_instrument_is_marked_at_the_tick() -> Result<(), Error> {
     Ok(())
 }
 
-/// A pass within [`marks::MARK_EVERY`] of the last mark writes none; one at that interval or later
+/// Names instruments to mark, as [`Naming`] does, at an interval of its own.
+struct NamingEvery(Vec<&'static str>, Duration);
+
+impl Marked for NamingEvery {
+    fn instruments(&self) -> BTreeSet<InstrumentId> {
+        Naming(self.0.clone()).instruments()
+    }
+
+    fn every(&self) -> Duration {
+        self.1
+    }
+}
+
+/// DEC-2844: a wiring that asks for marks every 5 s gets one at every tick 5 s apart, so a risk
+/// fold whose staleness limit is 10 s never sees its mark's age reach it at a tick.
+#[test]
+fn the_wiring_s_interval_sets_how_often_an_instrument_is_marked() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    let mut wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    wiring.quotes = Box::new(Quoting(vec![AAPL]));
+    wiring.marked = Box::new(NamingEvery(vec![AAPL], Duration::from_secs(5)));
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    let ticks = [
+        NOON,
+        "2026-09-21T15:00:04Z",
+        "2026-09-21T15:00:05Z",
+        "2026-09-21T15:00:10Z",
+        "2026-09-21T15:00:15Z",
+    ];
+    for (index, clock) in ticks.iter().enumerate() {
+        if index > 0 {
+            tick(&journal, &format!("t{}", index + 1), clock)?;
+        }
+        process.step(at(clock)?);
+    }
+    let clocks: Vec<Option<String>> = marks_of(&journal)
+        .iter()
+        .map(|(_, payload)| member(payload, "risk_clock"))
+        .collect();
+    assert_eq!(
+        clocks,
+        vec![
+            Some("2026-09-21T15:00:00.000000000Z".to_owned()),
+            Some("2026-09-21T15:00:05.000000000Z".to_owned()),
+            Some("2026-09-21T15:00:10.000000000Z".to_owned()),
+            Some("2026-09-21T15:00:15.000000000Z".to_owned()),
+        ]
+    );
+    Ok(())
+}
+
+/// With the default interval, a pass within [`marks::MARK_EVERY`] of the last mark writes none; one at that interval or later
 /// marks again, at its own tick.
 #[test]
 fn an_instrument_is_marked_at_most_once_an_interval() -> Result<(), Error> {
@@ -548,6 +602,56 @@ fn instruments_left_unmarked_by_a_stopped_pass_stay_due() -> Result<(), Error> {
             mark(AAPL, "2026-09-21T15:00:15.000000000Z"),
             mark(BTC, "2026-09-21T15:00:16.000000000Z"),
         ]
+    );
+    Ok(())
+}
+
+/// DEC-2823: the pass's thesis copy is handed before its marks, and a copy that commits never ends
+/// the pass: the same pass both copies the admission and marks the instrument.
+#[test]
+fn a_pass_that_copies_a_thesis_still_writes_its_marks() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    journal.write(
+        &support::agent_stream(AGENT),
+        "01JTHES0000000000000000002",
+        "ThesisProposed",
+        1,
+        None,
+        support::object(vec![
+            ("thesis_id", Value::Str("th-1".to_owned())),
+            ("lineage_id", Value::Str("ln-1".to_owned())),
+            (
+                "instrument_id",
+                Value::Str("00000000-0000-4000-8000-000000000015".to_owned()),
+            ),
+            (
+                "revision",
+                Value::Int(mandate_canon::Int::new(1).ok_or("revision")?),
+            ),
+            (
+                "expires_at",
+                Value::Str("2026-09-30T00:00:00.000000000Z".to_owned()),
+            ),
+            ("admitted", Value::Bool(true)),
+            ("reason", Value::Null),
+        ])?,
+    )?;
+    let broker = Paper::new(&journal);
+    let mut wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    wiring.quotes = Box::new(Quoting(vec![AAPL]));
+    wiring.marked = Box::new(Naming(vec![AAPL]));
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    process.step(at(NOON)?);
+    assert_eq!(
+        journal.payloads("UniverseChanged").len(),
+        1,
+        "the admission is copied"
+    );
+    assert_eq!(
+        marks_of(&journal).len(),
+        1,
+        "and the pass marks the instrument"
     );
     Ok(())
 }

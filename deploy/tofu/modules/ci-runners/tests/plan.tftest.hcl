@@ -23,10 +23,12 @@ variables {
     not-a-key
     -----END RSA PRIVATE KEY-----
   KEY
-  runner_version             = "2.338.1"
-  runner_sha256              = "08e9ccb3604d2462c24b5e33604dc30810296ca15cc65f23cffd4317eb144c37"
+  runner_version             = "2.338.2"
+  runner_sha256              = "baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40"
   sysbox_version             = "0.7.1"
   sysbox_sha256              = "9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5"
+  kubectl_version            = "1.35.9"
+  kubectl_sha256             = "3cfeaf80be482b435b0aa214aff6e0b2c312ee23c0ff20810c75517b6004c6eb"
   base_image                 = "ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac"
   toolchain_ref              = "main"
 }
@@ -53,6 +55,85 @@ run "three_runners_plan_within_the_cap" {
     condition     = alltrue([for d in digitalocean_droplet.runner : issensitive(d.user_data)])
     error_message = "The boot script carries the App key, so it must be sensitive."
   }
+}
+
+run "the_debug_window_is_shut_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(digitalocean_firewall.runner.inbound_rule) == 0
+    error_message = "With no debug variables, nothing is admitted on port 22 (DEC-2077)."
+  }
+
+  assert {
+    condition     = alltrue([for d in digitalocean_droplet.runner : !strcontains(nonsensitive(d.user_data), "/home/debug")])
+    error_message = "With no debug variables, no debug user or key is made (DEC-2077)."
+  }
+
+  assert {
+    condition     = alltrue([for d in digitalocean_droplet.runner : strcontains(nonsensitive(d.user_data), "PasswordAuthentication no") && strcontains(nonsensitive(d.user_data), "PermitRootLogin no")])
+    error_message = "sshd takes no password and no root login, window open or shut."
+  }
+}
+
+run "the_debug_window_admits_one_address_and_one_key" {
+  command = plan
+
+  variables {
+    debug_ssh_key  = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample founder@laptop"
+    debug_ssh_cidr = "203.0.113.7/32"
+  }
+
+  assert {
+    condition     = length(digitalocean_firewall.runner.inbound_rule) == 1 && alltrue([for r in digitalocean_firewall.runner.inbound_rule : r.protocol == "tcp" && r.port_range == "22" && toset(r.source_addresses) == toset(["203.0.113.7/32"])])
+    error_message = "The window admits port 22 from the one address only."
+  }
+
+  assert {
+    condition     = alltrue([for d in digitalocean_droplet.runner : strcontains(nonsensitive(d.user_data), "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample founder@laptop")])
+    error_message = "The debug user gets the one key."
+  }
+}
+
+run "the_ssh_runtime_exists_before_sshd_validation" {
+  command = plan
+
+  assert {
+    condition     = length(split("install -d -o root -g root -m 0755 /run/sshd", local.boot)) == 2 && strcontains(element(split("install -d -o root -g root -m 0755 /run/sshd", local.boot), 1), "sshd -t")
+    error_message = "Cloud-init must create sshd's volatile runtime directory before validating the SSH configuration."
+  }
+}
+
+run "refuses_a_debug_range_wider_than_one_host" {
+  command = plan
+
+  variables {
+    debug_ssh_key  = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample founder@laptop"
+    debug_ssh_cidr = "203.0.113.0/24"
+  }
+
+  expect_failures = [var.debug_ssh_cidr]
+}
+
+run "refuses_a_debug_key_without_an_address" {
+  command = plan
+
+  variables {
+    debug_ssh_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample founder@laptop"
+  }
+
+  expect_failures = [digitalocean_firewall.runner]
+}
+
+run "refuses_a_debug_key_that_could_break_its_quoting" {
+  command = plan
+
+  variables {
+    debug_ssh_key  = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample a';reboot;'"
+    debug_ssh_cidr = "203.0.113.7/32"
+  }
+
+  expect_failures = [var.debug_ssh_key]
 }
 
 run "the_firewall_admits_nothing_and_lets_out_only_what_jobs_need" {
@@ -99,4 +180,76 @@ run "refuses_a_base_image_not_pinned_by_digest" {
   }
 
   expect_failures = [var.base_image]
+}
+
+# E21-64d: the job image installs kubectl at infra.yml's pin, checked against its SHA-256.
+run "the_image_installs_kubectl_at_its_pin_and_checks_it" {
+  command = plan
+
+  assert {
+    condition     = strcontains(local.image_build, "release/v1.35.9/bin/linux/amd64/kubectl") && strcontains(local.image_build, "3cfeaf80be482b435b0aa214aff6e0b2c312ee23c0ff20810c75517b6004c6eb  /usr/local/bin/kubectl") && strcontains(local.image_build, "sha256sum --check") && strcontains(local.image_build, "chmod 0755 /usr/local/bin/kubectl")
+    error_message = "The image downloads the pinned kubectl and checks its SHA-256 before using it."
+  }
+}
+
+run "refuses_a_kubectl_version_that_is_not_exact" {
+  command = plan
+
+  variables {
+    kubectl_version = "latest"
+  }
+
+  expect_failures = [var.kubectl_version]
+}
+
+run "refuses_a_kubectl_checksum_that_is_not_one" {
+  command = plan
+
+  variables {
+    kubectl_sha256 = "not-a-checksum"
+  }
+
+  expect_failures = [var.kubectl_sha256]
+}
+
+run "the_job_image_uses_the_stable_runner_release" {
+  command = plan
+
+  assert {
+    condition     = var.runner_version == "2.338.2" && var.runner_sha256 == "baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40"
+    error_message = "The job image should use GitHub's stable runner 2.338.2 release and its published SHA-256."
+  }
+}
+
+run "runtime_readiness_precedes_jit_registration" {
+  command = plan
+
+  assert {
+    condition     = length(split("runtime preflight passed", local.manager)) == 2 && strcontains(element(split("runtime preflight passed", local.manager), 1), "generate-jitconfig")
+    error_message = "The manager should prove the Sysbox runtime, nested Docker and GitHub egress before it creates a JIT registration."
+  }
+
+  assert {
+    condition     = strcontains(local.image_entry, "docker info > /dev/null 2>&1 || exit 1")
+    error_message = "The job entry should fail instead of starting the runner after nested Docker's readiness timeout."
+  }
+
+  assert {
+    condition     = strcontains(local.image_preflight, "sudo -u runner -H docker info") && strcontains(local.image_preflight, "Runner.Listener --version") && strcontains(local.image_preflight, "broker.actions.githubusercontent.com")
+    error_message = "The preflight should prove the job user's Docker and runner paths and GitHub's broker egress."
+  }
+}
+
+run "a_failed_listener_is_cleaned_up_before_a_bounded_retry" {
+  command = plan
+
+  assert {
+    condition     = strcontains(local.manager, ".runner.id") && strcontains(local.manager, "actions/runners/$runner_id") && strcontains(local.image_entry, "RUNNER_MANUALLY_TRAP_SIG=1")
+    error_message = "The manager should retain the JIT runner id, propagate listener failures and delete the registration."
+  }
+
+  assert {
+    condition     = strcontains(local.manager, "failure_count") && strcontains(local.manager, "backoff") && strcontains(local.manager, "900") && strcontains(local.manager, "trap 'unexpected_failure $?' ERR")
+    error_message = "Repeated bootstrap failures should back off to a bounded delay rather than flood GitHub with registrations."
+  }
 }

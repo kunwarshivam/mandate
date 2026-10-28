@@ -127,6 +127,7 @@ const TITLES: &[(&str, &str)] = &[
     ("step_up_method", "Confirmation method not allowed"),
     ("step_up_mismatch", "Confirmation does not match"),
     ("live_unavailable", "Live trading unavailable"),
+    ("deferral_mismatch", "Request does not match its decision"),
     ("control_stream_frozen", "Changes are frozen"),
     ("journal_unavailable", "Temporarily unavailable"),
     ("rate_limited", "Too many requests"),

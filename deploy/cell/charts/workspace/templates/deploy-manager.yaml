@@ -82,6 +82,12 @@ DEC-2031). Its probes are processes.json's `probe`, as a Deployment's are (DEC-1
 {{- $args := list "run" "--probe" "/tmp/process.sock" -}}
 {{- if and (eq .p.name "runtime") .root.Values.runtime.research -}}
 {{- $args = concat $args (list "--research" .root.Values.runtime.research) -}}
+{{- /* A researching runtime of the workspace the model gateway serves, the one its manager
+`workspace` serves, calls models through it (DEC-2397 items 5 and 6, DEC-2070 item 5); any other
+keeps its in-process recorded fake. */ -}}
+{{- if and (index .root.Values.images "model-gateway") .root.Values.modelGateway.workspace (eq .workspace .root.Values.modelGateway.workspace) -}}
+{{- $args = concat $args (list "--gateway" "model-gateway:8080") -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .p.name "executor" -}}
 {{- $args = concat $args (include "mandate.executorBroker" .root | fromJsonArray) -}}
@@ -114,7 +120,7 @@ and the namespace has no Pod Security label, so a ValidatingAdmissionPolicy (GA 
 in this namespace that is not shaped like one of its templates. Every other client and pod is outside
 it (`matchConditions`). The allowed images, Secrets, processes and egress labels are list and map
 literals built from the rendered templates and processes.json, never written by hand (the claims
-only those a template mounts read-only, the artifact store's for the runtime); each is valid
+only those a template mounts read-only, the artifact stores' for the runtime); each is valid
 JSON as well as CEL, so the invariant tests read them back. It fails closed: an error evaluating it
 refuses the pod.
 */ -}}
@@ -405,11 +411,12 @@ spec:
 {{- $root := . }}
 {{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) }}
 {{- if has .name (list "deploy-manager" "deploy-manager-research") }}
+{{- $served := include "mandate.managedWorkspace" (dict "root" $root "p" .) }}
 {{- $templates := dict }}
 {{- $egress := dict }}
 {{- range (include "mandate.processes" $root | fromJsonArray) }}
 {{- if and (eq (.started_by | default "") "deploy-manager") (index $root.Values.images .image) }}
-{{- $_ := set $templates (printf "%s.json" .name) (include "mandate.managedPod" (dict "root" $root "p" .)) }}
+{{- $_ := set $templates (printf "%s.json" .name) (include "mandate.managedPod" (dict "root" $root "p" . "workspace" $served)) }}
 {{- $labels := list }}
 {{- range .egress }}
 {{- $labels = append $labels (printf "mandate.dev/egress-%s" .) }}

@@ -798,7 +798,7 @@ pub(crate) mod tests {
         }
     }
 
-    struct SchemaIds;
+    pub(crate) struct SchemaIds;
 
     impl IdGen for SchemaIds {
         fn event_id(&self, epoch: WriterEpoch, head: Seq, ordinal: u32) -> EventId {
@@ -997,6 +997,70 @@ pub(crate) mod tests {
             Ok(())
         }
 
+        /// Hands the executor an owner's acknowledgment of the standing hold under `restriction`
+        /// (journal spec v0.104 §9.28, DEC-2830): version 2, `subject` `reconciliation`, naming the
+        /// executor's latest `AgentModeApplied` under it, with fresh step-up evidence at the
+        /// executor's clock.
+        pub(crate) fn acknowledge_hold(
+            &mut self,
+            restriction: &str,
+            ports: &Ports<'_>,
+        ) -> Result<Vec<Effect>, ExecutorError> {
+            let hold = self
+                .journal
+                .iter()
+                .rev()
+                .find(|e| {
+                    e.event_type == "AgentModeApplied"
+                        && e.payload.get("restriction").and_then(Value::as_str) == Some(restriction)
+                })
+                .map(|e| e.event_id.0.clone())
+                .ok_or_else(|| ExecutorError::NotInterpreted {
+                    what: format!("no hold under {restriction}"),
+                    story: "E7-4b",
+                })?;
+            let at = self.state.clock();
+            let secs = crate::payload::int(u64::try_from(at.secs()).unwrap_or(0))?;
+            let original = FoldedEvent {
+                stream: "ctl:ws1".to_owned(),
+                seq: Seq(1),
+                event_id: EventId(format!("ctl-ack-{hold}")),
+                event_type: "OwnerAcknowledged".to_owned(),
+                causation_id: None,
+                payload: object(vec![
+                    ("agent", Value::Str("agent-a".to_owned())),
+                    ("event", Value::Str(hold)),
+                    ("subject", Value::Str("reconciliation".to_owned())),
+                    ("user", Value::Str("user-1".to_owned())),
+                    ("requested_by", Value::Str("user-1".to_owned())),
+                    ("independent_required", Value::Bool(false)),
+                    ("request", Value::Null),
+                    ("submitted_at", secs.clone()),
+                    ("risk_clock", crate::payload::risk_clock_stamp(at)?),
+                    (
+                        "step_up",
+                        object(vec![
+                            ("assertion_id", Value::Str("assertion-1".to_owned())),
+                            ("authenticated_at", secs),
+                            ("method", Value::Str("cli_confirm".to_owned())),
+                        ])?,
+                    ),
+                ])?,
+            };
+            self.run(
+                Input::Acknowledgment(crate::types::AcknowledgmentHandoff {
+                    original,
+                    schema_version: 2,
+                    processed_at: at,
+                    spent: std::collections::BTreeSet::new(),
+                    request_spent: None,
+                    independent_overlay: false,
+                    methods: std::collections::BTreeSet::from(["cli_confirm".to_owned()]),
+                }),
+                ports,
+            )
+        }
+
         /// Handles one input and commits at most `keep` of its drafts; `usize::MAX` commits all.
         fn run_keeping(
             &mut self,
@@ -1004,7 +1068,27 @@ pub(crate) mod tests {
             ports: &Ports<'_>,
             keep: usize,
         ) -> Result<Vec<Effect>, ExecutorError> {
-            let effects = handle(&mut self.state, input, ports, &ALLOWING_BINDING_GATE)?;
+            self.run_binding(input, ports, keep, &ALLOWING_BINDING_GATE)
+        }
+
+        /// [`Self::run`] with `binding_gate` as the deployment's configuration.
+        pub(crate) fn run_with(
+            &mut self,
+            input: Input,
+            ports: &Ports<'_>,
+            binding_gate: &dyn crate::ports::BindingGateSource,
+        ) -> Result<Vec<Effect>, ExecutorError> {
+            self.run_binding(input, ports, usize::MAX, binding_gate)
+        }
+
+        fn run_binding(
+            &mut self,
+            input: Input,
+            ports: &Ports<'_>,
+            keep: usize,
+            binding_gate: &dyn crate::ports::BindingGateSource,
+        ) -> Result<Vec<Effect>, ExecutorError> {
+            let effects = handle(&mut self.state, input, ports, binding_gate)?;
             let mut kept = 0;
             for effect in &effects {
                 if let Effect::Journal(draft) = effect {
@@ -1310,12 +1394,11 @@ pub(crate) mod tests {
     }
 
     /// DEC-140's slice-5 amendment: a stream slice 5 wrote may hold every agent `exits_only` under
-    /// `reconciliation:incomplete`. The cash slice completes those runs, and the owner's
-    /// acknowledgment of `incomplete`, with step-up evidence, lifts the hold (§11, interpretation
-    /// 14): openings are submitted again. A run that now completes lifts nothing by itself, and an
-    /// acknowledgment without step-up evidence lifts nothing either.
+    /// `reconciliation:incomplete`. The cash slice completes those runs, but a run that now
+    /// completes lifts nothing by itself: the owner's acknowledgment of the hold, with step-up
+    /// (§11, journal spec v0.104 §9.28, DEC-2830), lifts it, and openings are submitted again.
     #[test]
-    fn an_acknowledgment_of_incomplete_lifts_the_slice_5_hold() -> Result<(), ExecutorError> {
+    fn an_acknowledgment_of_the_slice_5_hold_lifts_it() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
             ids: &Ids,
@@ -1368,31 +1451,13 @@ pub(crate) mod tests {
         )?;
         assert_eq!(submitted(&held), 0, "the hold outlives a completed run");
 
-        let acknowledged = |step_up: &str| -> Result<Value, ExecutorError> {
-            object(vec![
-                ("subject", Value::Str("incomplete".to_owned())),
-                ("user", Value::Str("user-1".to_owned())),
-                ("step_up", Value::Str(step_up.to_owned())),
-                (
-                    "risk_clock",
-                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
-                ),
-            ])
-        };
-        executor.commit_one("OwnerAcknowledged", acknowledged("")?)?;
+        executor.acknowledge_hold("reconciliation:incomplete", &ports)?;
         assert_eq!(
             executor
                 .state
                 .effective_mode(&AgentId("agent-a".to_owned())),
-            Mode::ExitsOnly,
-            "no step-up evidence, no lift"
-        );
-        executor.commit_one("OwnerAcknowledged", acknowledged("assertion-1")?)?;
-        assert_eq!(
-            executor
-                .state
-                .effective_mode(&AgentId("agent-a".to_owned())),
-            Mode::Normal
+            Mode::Normal,
+            "the owner's acknowledgment of the hold lifts it"
         );
         let opening = executor.run(
             intent(
@@ -1589,21 +1654,50 @@ pub(crate) mod tests {
                         .and_then(Value::as_str)
                         .map(str::to_owned)
                 };
-                field("verdict").zip(field("reason_code"))
+                field("verdict").map(|verdict| (verdict, field("reason_code").unwrap_or_default()))
             }
             _ => None,
         })
     }
 
+    /// Ten AAPL bought and filled by `agent-a`'s order, so they are its lots (DEC-2849).
     fn filled_ten(executor: &mut Executor) -> Result<(), ExecutorError> {
+        executor.commit_one(
+            "OrderSubmitted",
+            object(vec![
+                ("client_order_id", Value::Str("md-ten".to_owned())),
+                ("agent", Value::Str("agent-a".to_owned())),
+                ("instrument", Value::Str("AAPL".to_owned())),
+                ("side", Value::Str("buy".to_owned())),
+                ("qty", Value::Str("10".to_owned())),
+                ("limit", Value::Str("150".to_owned())),
+                ("purpose", Value::Str("open".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
         executor.commit_one(
             "FillApplied",
             object(vec![
                 ("fill_id", Value::Str("f-0".to_owned())),
+                ("client_order_id", Value::Str("md-ten".to_owned())),
                 ("instrument", Value::Str("AAPL".to_owned())),
                 ("side", Value::Str("buy".to_owned())),
                 ("qty_gross", Value::Str("10".to_owned())),
                 ("price", Value::Str("150".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
+        executor.commit_one(
+            "OrderStateChanged",
+            object(vec![
+                ("client_order_id", Value::Str("md-ten".to_owned())),
+                ("state", Value::Str("filled".to_owned())),
                 (
                     "risk_clock",
                     crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
@@ -1620,6 +1714,263 @@ pub(crate) mod tests {
                 crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
             )])?,
         )
+    }
+
+    /// An unattributed fill of `qty` AAPL on `side`, the owner's own trade outside Mandate.
+    fn owners_fill(
+        executor: &mut Executor,
+        id: &str,
+        side: &str,
+        qty: &str,
+        at: i64,
+    ) -> Result<(), ExecutorError> {
+        executor.commit_one(
+            "FillApplied",
+            object(vec![
+                ("fill_id", Value::Str(id.to_owned())),
+                ("instrument", Value::Str("AAPL".to_owned())),
+                ("side", Value::Str(side.to_owned())),
+                ("qty_gross", Value::Str(qty.to_owned())),
+                ("price", Value::Str("150".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(at))?,
+                ),
+            ])?,
+        )
+    }
+
+    /// The `OwnerAlertSent` drafts in `effects`, each as its payload's members.
+    fn owner_alerts(effects: &[Effect]) -> Vec<(EventId, Option<EventId>, Value)> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "OwnerAlertSent" => Some((
+                    draft.event_id.clone(),
+                    draft.causation_id.clone(),
+                    draft.payload.clone(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The event id of the `GateDecided` in `effects`.
+    fn decided_id(effects: &[Effect]) -> Option<EventId> {
+        effects.iter().find_map(|effect| match effect {
+            Effect::Journal(draft) if draft.event_type == "GateDecided" => {
+                Some(draft.event_id.clone())
+            }
+            _ => None,
+        })
+    }
+
+    /// DEC-2855: the owner is alerted once per episode of openings held `attribution_deficit`. The
+    /// first held opening's `GateDecided` is the subject, and the alert carries only it, the kind
+    /// and a `null` command (`AGENTS.md` rule 6); a second opening held in the same episode raises
+    /// nothing. Once the owner buys the gap back the held openings go, the episode ends, and the
+    /// next deficit's first hold is alerted again. A replay of the journal reaches the same state.
+    #[test]
+    fn a_deficit_episode_alerts_the_owner_once() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        filled_ten(&mut executor)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        run_completed(&mut executor)?;
+        owners_fill(&mut executor, "f-owner-1", "sell", "5", 0)?;
+        let buy = |id: &str| intent(id, "agent-a", Side::Buy, Purpose::Open);
+        let first = executor.run(buy("01JABCDEFGHJKMNPQRSTVWXYZ3")?, &ports)?;
+        assert_eq!(
+            gate_decision(&first),
+            Some(("hold".to_owned(), "attribution_deficit".to_owned()))
+        );
+        let subject = decided_id(&first).ok_or_else(|| ExecutorError::NotInterpreted {
+            what: "no GateDecided".to_owned(),
+            story: "E6-15",
+        })?;
+        let raised = owner_alerts(&first);
+        assert_eq!(raised.len(), 1, "one alert for the episode's first hold");
+        let (_, cause, payload) = raised
+            .first()
+            .ok_or_else(|| ExecutorError::NotInterpreted {
+                what: "no alert".to_owned(),
+                story: "E6-15",
+            })?;
+        assert_eq!(
+            cause.as_ref(),
+            Some(&subject),
+            "rule 119: caused by its subject"
+        );
+        assert_eq!(
+            payload,
+            &object(vec![
+                ("subject", Value::Str(subject.0.clone())),
+                ("kind", Value::Str("attribution_deficit".to_owned())),
+                ("owner_command", Value::Null),
+            ])?,
+            "nothing about the instrument, a quantity or a price"
+        );
+        let second = executor.run(buy("01JABCDEFGHJKMNPQRSTVWXYZ4")?, &ports)?;
+        assert_eq!(
+            gate_decision(&second),
+            Some(("hold".to_owned(), "attribution_deficit".to_owned()))
+        );
+        assert!(
+            owner_alerts(&second).is_empty(),
+            "the same episode alerts once"
+        );
+
+        owners_fill(&mut executor, "f-owner-2", "buy", "5", 0)?;
+        let released = executor.run(Input::Tick(crate::types::RiskClock::from_secs(1)), &ports)?;
+        assert_eq!(
+            submitted(&released),
+            2,
+            "both openings go once the gap is bought back"
+        );
+        assert!(executor.state.hold_reasons.is_empty(), "the episode ended");
+
+        owners_fill(&mut executor, "f-owner-3", "sell", "5", 1)?;
+        let next = executor.run(buy("01JABCDEFGHJKMNPQRSTVWXYZ5")?, &ports)?;
+        assert_eq!(owner_alerts(&next).len(), 1, "a new episode alerts again");
+
+        let mut replayed = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        for event in &executor.journal {
+            fold(&mut replayed, event)?;
+        }
+        assert_eq!(replayed.hold_reasons, executor.state.hold_reasons);
+        assert_eq!(replayed.held, executor.state.held);
+        Ok(())
+    }
+
+    /// A buy of 5 `instrument` by `agent-a` to open, as intent `id`.
+    fn opening_in(id: &str, instrument: &str) -> Result<Input, ExecutorError> {
+        Ok(Input::Intent(IntentHandoff {
+            intent_id: IntentId(EventId(id.to_owned())),
+            agent: AgentId("agent-a".to_owned()),
+            tif: Some(TimeInForce::Day),
+            body: IntentBody::Order {
+                instrument: InstrumentId::new(instrument)?,
+                side: Side::Buy,
+                qty: Qty::parse("5")?,
+                limit: Some(Price::parse("150")?),
+                purpose: Purpose::Open,
+                protection: None,
+            },
+            confirmation: None,
+        }))
+    }
+
+    /// A protective leg resting in `instrument` that no agent can be named for (§5.4).
+    fn ownerless_leg(
+        executor: &mut Executor,
+        id: &str,
+        instrument: &str,
+    ) -> Result<(), ExecutorError> {
+        let leg = crate::types::Order {
+            client_order_id: ClientOrderId::parse(id)?,
+            intent_id: None,
+            agent: None,
+            instrument: InstrumentId::new(instrument)?,
+            side: Side::Sell,
+            qty: Qty::parse("10")?,
+            filled_qty: Qty::ZERO,
+            state: OrderState::Accepted,
+            attempt: 1,
+            purpose: Purpose::Protective,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        };
+        executor
+            .state
+            .orders
+            .insert(leg.client_order_id.clone(), leg);
+        Ok(())
+    }
+
+    /// The kinds of the owner alerts in `effects`, each with the `GateDecided` it names.
+    fn alerted(effects: &[Effect]) -> Vec<(String, bool)> {
+        let subject = decided_id(effects).map(|id| Value::Str(id.0));
+        owner_alerts(effects)
+            .into_iter()
+            .map(|(_, _, payload)| {
+                (
+                    payload
+                        .get("kind")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned(),
+                    payload.get("subject") == subject.as_ref(),
+                )
+            })
+            .collect()
+    }
+
+    /// DEC-2855 for `protection_unattributed`, and each reason and instrument its own episode: an
+    /// ownerless leg in AAPL holds a first opening, alerted once, and a second, not alerted. A
+    /// deficit in AAPL then holds an opening `attribution_deficit`, a new episode of its own reason,
+    /// and an ownerless leg in MSFT holds an opening there, a new episode of its own instrument:
+    /// each alerted once, its alert naming its own hold.
+    #[test]
+    fn each_reason_and_instrument_is_its_own_episode() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        filled_ten(&mut executor)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        run_completed(&mut executor)?;
+        ownerless_leg(&mut executor, "md-leg-aapl", "AAPL")?;
+        let held = |reason: &str| Some(("hold".to_owned(), reason.to_owned()));
+        let unattributed = || vec![("protection_unattributed".to_owned(), true)];
+        let first = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY10", "AAPL")?, &ports)?;
+        assert_eq!(gate_decision(&first), held("protection_unattributed"));
+        assert_eq!(alerted(&first), unattributed());
+        let second = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY11", "AAPL")?, &ports)?;
+        assert_eq!(gate_decision(&second), held("protection_unattributed"));
+        assert!(alerted(&second).is_empty(), "the same episode alerts once");
+
+        owners_fill(&mut executor, "f-owner-1", "sell", "5", 0)?;
+        let deficit = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY12", "AAPL")?, &ports)?;
+        assert_eq!(gate_decision(&deficit), held("attribution_deficit"));
+        assert_eq!(
+            alerted(&deficit),
+            vec![("attribution_deficit".to_owned(), true)],
+            "another reason in the same instrument is another episode"
+        );
+
+        ownerless_leg(&mut executor, "md-leg-msft", "MSFT")?;
+        let other = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY13", "MSFT")?, &ports)?;
+        assert_eq!(gate_decision(&other), held("protection_unattributed"));
+        assert_eq!(
+            alerted(&other),
+            unattributed(),
+            "another instrument is another episode"
+        );
+        Ok(())
     }
 
     /// The coordinator's ruling on #174 (comment 5857742391), rule 3: on a stream that has
@@ -2029,7 +2380,7 @@ pub(crate) mod tests {
         ])?;
         assert!(
             executor.commit_one("OwnerAcknowledged", unnamed).is_err(),
-            "an acknowledgment with no user is refused"
+            "an acknowledgment copy that names no original is refused"
         );
         assert_eq!(
             executor
@@ -2400,6 +2751,33 @@ pub(crate) mod tests {
     /// fill of ours or of anyone's has the `config_refs` the journal requires (DEC-938 item 2).
     struct Registered;
 
+    /// Instruments with no snapshot, on an account whose fill configuration is known: an
+    /// unattributed fill in any of them is accounted under the account's (DEC-2817).
+    struct AccountOnly;
+
+    impl InstrumentSnapshot for AccountOnly {
+        fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
+            Everything.asset_class(instrument)
+        }
+
+        fn increment(&self, instrument: &InstrumentId) -> Option<ShareIncrement> {
+            Everything.increment(instrument)
+        }
+
+        fn exit_tier(&self, instrument: &InstrumentId) -> Option<ExitTier> {
+            Everything.exit_tier(instrument)
+        }
+
+        fn account_fill_refs(&self) -> Option<crate::ports::AccountFillRefs> {
+            let digest = |n: char| format!("sha256:{}", n.to_string().repeat(64));
+            Some(crate::ports::AccountFillRefs {
+                fee_config: digest('a'),
+                trading_calendar: digest('b'),
+                settlement_calendar: digest('c'),
+            })
+        }
+    }
+
     impl InstrumentSnapshot for Registered {
         fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
             Everything.asset_class(instrument)
@@ -2426,7 +2804,7 @@ pub(crate) mod tests {
 
     /// `draft` through the journal's own `Draft::parse`, with its own `config_refs`, so a fill
     /// drafted without the references its schema requires is refused here as the journal refuses it.
-    fn journal_accepts_with_refs(draft: &EventDraft) -> Result<(), ExecutorError> {
+    pub(crate) fn journal_accepts_with_refs(draft: &EventDraft) -> Result<(), ExecutorError> {
         let causation = draft
             .causation_id
             .as_ref()
@@ -2466,15 +2844,14 @@ pub(crate) mod tests {
         })
     }
 
-    /// DEC-2805 item 2: every external fill's batch is one the journal refuses today. Journal spec
-    /// §9's `FillApplied` version 1 requires a client order id, which an unattributed fill does not
-    /// have, and requires the fill configuration and a non-empty fill id besides. So the executor
-    /// cannot record such a fill, and DEC-2805 item 1's hold, not the batch, keeps it running: the
-    /// batch is refused whole, and every other draft in it is one the journal would accept. The
-    /// backlog's `FillApplied` version 2 books the fill, and this test then fails until it is
-    /// rewritten.
+    /// The two cases DEC-2812 and DEC-2817 leave to DEC-2805: an external fill in an instrument with
+    /// no instrument snapshot on an account whose own fill configuration is not known either, so it
+    /// has no fill configuration to journal, and one whose fill id the broker sent empty. The
+    /// journal refuses the batch at its `FillApplied` alone, every other draft is one it would
+    /// accept, and DEC-2805 item 1's hold keeps the executor running.
     #[test]
-    fn every_external_fill_batch_is_refused_at_its_fill_alone() -> Result<(), ExecutorError> {
+    fn an_external_fill_without_its_config_or_its_id_is_refused_at_its_fill_alone()
+    -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let unregistered = Ports {
             ids: &SchemaIds,
@@ -2490,7 +2867,6 @@ pub(crate) mod tests {
         for (ports, fill_id, at) in [
             (&unregistered, "f-ext-1", "config_refs"),
             (&registered, "", "payload.fill_id"),
-            (&registered, "f-ext-1", "payload.client_order_id"),
         ] {
             let mut executor = Executor::opened(ports)?;
             let run = executor.run_keeping(
@@ -2533,6 +2909,251 @@ pub(crate) mod tests {
                 "every agent holds its openings"
             );
         }
+        Ok(())
+    }
+
+    /// DEC-2817: an external fill in an instrument with no snapshot is booked under the account's
+    /// fill configuration, naming the fee configuration and both calendars and no instrument
+    /// snapshot, in a batch the journal accepts whole. It moves the account's position in that
+    /// instrument, and every agent holds its openings until the owner acknowledges, as for any
+    /// external fill (trading spec §7.1).
+    #[test]
+    fn an_external_fill_in_an_instrument_with_no_snapshot_is_booked_on_the_accounts_refs()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &AccountOnly,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        let run = executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Fill(external_fill("f-ext-6")?)),
+            &ports,
+        )?;
+        assert_eq!(
+            drafted(&run),
+            vec![
+                "ExternalActivityIngested",
+                "FillApplied",
+                "AgentModeApplied",
+                "OwnerAlertSent"
+            ]
+        );
+        let mut checked = false;
+        for effect in &run {
+            if let Effect::Journal(draft) = effect {
+                journal_accepts_with_refs(draft)?;
+                if draft.event_type == "FillApplied" {
+                    let named: Vec<&str> = draft.config_refs.keys().map(|k| k.as_str()).collect();
+                    assert_eq!(
+                        named,
+                        ["fee_config", "settlement_calendar", "trading_calendar"],
+                        "the account's three, and no instrument snapshot"
+                    );
+                    checked = true;
+                }
+            }
+        }
+        assert!(checked, "the fill was drafted");
+        assert_eq!(
+            executor.state.positions().get(&aapl()?).copied(),
+            Some(SignedQty::from(Qty::parse("2")?))
+        );
+        assert_eq!(
+            executor
+                .state
+                .effective_mode(&AgentId("agent-a".to_owned())),
+            Mode::ExitsOnly
+        );
+        Ok(())
+    }
+
+    /// DEC-2812 (trading spec §6.1, §7.1): an external fill in a registered instrument is booked.
+    /// Its `FillApplied` is version 2's, naming no order (`null`), and the journal accepts the whole
+    /// batch. The fill moves the account's position and no order's filled quantity; every agent
+    /// holds its openings under `reconciliation:external_activity` until the owner acknowledges the
+    /// hold (DEC-2830); and the same fill read again is applied once.
+    #[test]
+    fn an_external_fill_is_booked_to_the_account_and_held_until_the_owner_acknowledges()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Registered,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        let before = executor.state.positions().get(&aapl()?).copied();
+        let run = executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Fill(external_fill("f-ext-5")?)),
+            &ports,
+        )?;
+        assert_eq!(
+            drafted(&run),
+            vec![
+                "ExternalActivityIngested",
+                "FillApplied",
+                "AgentModeApplied",
+                "OwnerAlertSent"
+            ]
+        );
+        for effect in &run {
+            if let Effect::Journal(draft) = effect {
+                journal_accepts_with_refs(draft)?;
+                if draft.event_type == "FillApplied" {
+                    assert_eq!(draft.schema_version, 2);
+                    assert_eq!(draft.payload.get("client_order_id"), Some(&Value::Null));
+                    let named: Vec<&str> = draft.config_refs.keys().map(|k| k.as_str()).collect();
+                    assert_eq!(
+                        named,
+                        [
+                            "fee_config",
+                            "instrument_snapshot",
+                            "settlement_calendar",
+                            "trading_calendar"
+                        ],
+                        "a registered instrument's fill names its snapshot too (DEC-2817)"
+                    );
+                }
+            }
+        }
+        assert_eq!(before, None);
+        assert_eq!(
+            executor.state.positions().get(&aapl()?).copied(),
+            Some(SignedQty::from(Qty::parse("2")?)),
+            "the account holds the 2 the owner bought"
+        );
+        assert!(
+            executor
+                .state
+                .orders
+                .values()
+                .all(|order| order.filled_qty == Qty::ZERO),
+            "no order of ours filled"
+        );
+        let agent = AgentId("agent-a".to_owned());
+        assert_eq!(executor.state.effective_mode(&agent), Mode::ExitsOnly);
+
+        let again = executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Fill(external_fill("f-ext-5")?)),
+            &ports,
+        )?;
+        assert!(drafted(&again).is_empty(), "{:?}", drafted(&again));
+        assert_eq!(
+            executor.state.positions().get(&aapl()?).copied(),
+            Some(SignedQty::from(Qty::parse("2")?)),
+            "applied once"
+        );
+
+        executor.acknowledge_hold("reconciliation:external_activity", &ports)?;
+        assert_eq!(
+            executor.state.effective_mode(&agent),
+            Mode::Normal,
+            "the owner's acknowledgment of the external activity's hold lifts it"
+        );
+        Ok(())
+    }
+
+    /// DEC-2821: a broker input the core could not apply holds every agent's openings under
+    /// `reconciliation:incomplete` and alerts the owner, once: with the hold in force, another
+    /// adds nothing. The owner's acknowledgment of the hold lifts it (DEC-2830).
+    #[test]
+    fn a_failed_broker_input_holds_every_agents_openings_once() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        let held = executor.run(Input::InputFailed, &ports)?;
+        assert_eq!(drafted(&held), vec!["AgentModeApplied", "OwnerAlertSent"]);
+        for effect in &held {
+            if let Effect::Journal(draft) = effect {
+                journal_accepts_with_refs(draft)?;
+            }
+        }
+        let agent = AgentId("agent-a".to_owned());
+        assert_eq!(executor.state.effective_mode(&agent), Mode::ExitsOnly);
+        assert_eq!(
+            drafted(&executor.run(Input::InputFailed, &ports)?),
+            Vec::<&str>::new(),
+            "the hold is already in force"
+        );
+        executor.acknowledge_hold("reconciliation:incomplete", &ports)?;
+        assert_eq!(executor.state.effective_mode(&agent), Mode::Normal);
+        Ok(())
+    }
+
+    /// DEC-2821: the failed input may have been the answer to a submission, which the core never
+    /// learns of. An order still awaiting its answer goes `Unknown` and is looked up by its own id,
+    /// as when the broker answers nothing, so its acceptance or fill is found and its protection
+    /// placed; it is never sent again.
+    #[test]
+    fn a_failed_broker_input_looks_up_the_order_awaiting_its_answer() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        executor.run(
+            Input::BrokerSnapshot(BrokerSnapshot {
+                account: account("100000")?,
+                ..snapshot(ReconcileReason::Scheduled)?
+            }),
+            &ports,
+        )?;
+        let opening = executor.run(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ0",
+                "agent-a",
+                Side::Buy,
+                Purpose::Open,
+            )?,
+            &ports,
+        )?;
+        assert_eq!(
+            submitted(&opening),
+            1,
+            "the opening is sent and awaits its answer"
+        );
+        let failed = executor.run(Input::InputFailed, &ports)?;
+        assert!(
+            drafted(&failed).contains(&"OrderStateChanged"),
+            "{:?}",
+            drafted(&failed)
+        );
+        assert!(
+            failed.iter().any(|effect| matches!(
+                effect,
+                Effect::Broker(BrokerRequest::GetOrderByClientId(_))
+            )),
+            "the order is looked up: {failed:?}"
+        );
+        assert_eq!(submitted(&failed), 0, "and never sent again");
+        assert!(
+            executor
+                .state
+                .orders
+                .values()
+                .all(|order| order.state != OrderState::Submitting),
+            "no order is left awaiting an answer that will not come"
+        );
         Ok(())
     }
 
@@ -2589,8 +3210,8 @@ pub(crate) mod tests {
     /// DEC-2805 item 1: a batch the journal refused leaves nothing committed. The core forgets it,
     /// so later inputs are handled rather than refused as an unresolved append. It holds every
     /// agent's openings under `reconciliation:incomplete` and alerts the owner, once: a second
-    /// refusal adds nothing. An opening is then held, and the owner's acknowledgment of `incomplete`
-    /// lifts the hold as it lifts any incomplete run's.
+    /// refusal adds nothing. An opening is then held, and the owner's acknowledgment of the hold
+    /// lifts it as it lifts any incomplete run's (DEC-2830).
     #[test]
     fn a_refused_batch_holds_every_agents_openings_once() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -2694,24 +3315,13 @@ pub(crate) mod tests {
             &ports,
         )?;
         assert_eq!(submitted(&opening), 0, "openings are held");
-        executor.commit_one(
-            "OwnerAcknowledged",
-            object(vec![
-                ("subject", Value::Str("incomplete".to_owned())),
-                ("user", Value::Str("user-1".to_owned())),
-                ("step_up", Value::Str("assertion-1".to_owned())),
-                (
-                    "risk_clock",
-                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
-                ),
-            ])?,
-        )?;
+        executor.acknowledge_hold("reconciliation:incomplete", &ports)?;
         assert_eq!(
             executor
                 .state
                 .effective_mode(&AgentId("agent-a".to_owned())),
             Mode::Normal,
-            "the owner's acknowledgment of `incomplete` lifts the hold"
+            "the owner's acknowledgment of `incomplete`'s hold lifts it"
         );
         Ok(())
     }

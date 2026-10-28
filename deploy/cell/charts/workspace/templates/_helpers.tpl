@@ -14,7 +14,13 @@ tests (deploy/tests/test_cell.py) and the drills (`cargo xtask cell drill`) read
 
 {{- /* The processes of processes.json; with `api.vaultBinding` the API's egress also names the
 vault, so its pod carries the label the vault's policy admits on 8200 and an egress rule to it
-alone (DEC-2338). */ -}}
+alone (DEC-2338). With `modelGateway.registry` the model gateway starts live (DEC-2216 item 4,
+DEC-2081): it reads the registry file the chart renders, logs in to the vault as the model gateway
+with the AppRole `mandate.vaultCopy` puts in its vault directory, and never names `--recorded`.
+With `data.source` alpaca-iex the data process stores IEX bars (DEC-2283, DEC-2082): it reads the
+hosted workspace's control stream as its own journal role and Postgres, logs in to the vault as
+`bars-reader`, and reaches its data host; with `recorded` it holds no journal role, since it reads
+no stream. */ -}}
 {{- define "mandate.processes" -}}
 {{- $all := (fromJson (.Files.Get "processes.json")).processes -}}
 {{- $out := list -}}
@@ -22,9 +28,23 @@ alone (DEC-2338). */ -}}
 {{- if and (eq .name "api") $.Values.api.vaultBinding -}}
 {{- $_ := set . "egress" (concat (list (first .egress) "vault") (rest .egress)) -}}
 {{- end -}}
+{{- if eq .name "data" -}}
+{{- if eq $.Values.data.source "alpaca-iex" -}}
+{{- $_ := set . "args" (list "run" "--source" "alpaca-iex" "--workspace" "{hosted_workspace}" "--store" "/var/lib/mandate/artifacts/datasets/alpaca-iex" "--artifacts" "/var/lib/mandate/artifacts" "--vault-address" "{vault}" "--vault-dir" "/run/mandate/vault" "--probe" "/tmp/process.sock") -}}
+{{- $_ := set . "egress" (list "postgres" "vault" "market-data") -}}
+{{- else -}}
+{{- $_ := set . "db_role" nil -}}
+{{- end -}}
+{{- end -}}
+{{- if and (eq .name "model-gateway") $.Values.modelGateway.registry -}}
+{{- $_ := set . "args" (list "run" "--registry" "/run/mandate/model-gateway/registry.json" "--listen" "0.0.0.0:8080" "--probe" "/tmp/process.sock" "--vault-address" "{vault}" "--vault-dir" "/run/mandate/vault") -}}
+{{- end -}}
 {{- $out = append $out . -}}
 {{- if and (eq .name "deploy-manager") $.Values.deployManager.researchWorkspace -}}
 {{- $out = append $out (include "mandate.researchManager" (dict "root" $ "p" .) | fromJson) -}}
+{{- end -}}
+{{- if and (eq .name "scheduler") $.Values.deployManager.researchWorkspace (index $.Values.images "deploy-manager") -}}
+{{- $out = append $out (include "mandate.researchScheduler" (dict "root" $ "p" .) | fromJson) -}}
 {{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
@@ -33,10 +53,14 @@ alone (DEC-2338). */ -}}
 {{- /* The local cell's second deployment manager (DEC-2070): the first's process entry under its own
 name, so every per-process rule (its network policy, its colocation) holds for it as for the first,
 and it signs in as the first's journal role, serving `deployManager.researchWorkspace` alone: the
-hosted workspace's ULID with `r` (DEC-2247 item 2). Only a dev or ci cell names it. */ -}}
+hosted workspace's ULID with `r` (DEC-2247 item 2). A dev or ci cell names it, and staging may once
+it runs the model gateway, whose meter's caps bind the research it does (DEC-2080); production
+never does. */ -}}
 {{- define "mandate.researchManager" -}}
-{{- if not (has .root.Values.deploymentTier (list "dev" "ci")) -}}
-{{- fail (printf "deployManager.researchWorkspace runs only in a dev or ci cell, and deploymentTier is %q (DEC-2070)" .root.Values.deploymentTier) -}}
+{{- $tier := .root.Values.deploymentTier -}}
+{{- $gateway := index .root.Values.images "model-gateway" -}}
+{{- if not (or (has $tier (list "dev" "ci")) (and (eq $tier "staging") $gateway)) -}}
+{{- fail (printf "deployManager.researchWorkspace runs only in a dev or ci cell, or in staging beside the model gateway, and deploymentTier is %q (DEC-2070, DEC-2080)" $tier) -}}
 {{- end -}}
 {{- $hosted := .root.Values.api.workspace | default "" -}}
 {{- if and $hosted (ne .root.Values.deployManager.researchWorkspace (printf "%sr" $hosted)) -}}
@@ -45,6 +69,23 @@ hosted workspace's ULID with `r` (DEC-2247 item 2). Only a dev or ci cell names 
 {{- $copy := deepCopy .p -}}
 {{- $_ := set $copy "name" "deploy-manager-research" -}}
 {{- $_ := set $copy "row" "The local cell's second deployment manager, for the research agent's workspace alone (DEC-2070)" -}}
+{{- $copy | toJson -}}
+{{- end -}}
+
+{{- /* The local cell's second scheduler (DEC-2071): the first's process entry under its own name,
+writing the research workspace's clock stream, `clock:<workspace>r`, whose ticks the runtime and
+executor the second manager starts read, as the first writes the hosted workspace's. It renders
+only beside the second manager, which refuses any tier but dev, ci, or staging beside the model
+gateway (DEC-2070, DEC-2080). */ -}}
+{{- define "mandate.researchScheduler" -}}
+{{- $copy := deepCopy .p -}}
+{{- $_ := set $copy "name" "scheduler-research" -}}
+{{- $_ := set $copy "row" "The local cell's second scheduler, the single writer of the research workspace's clock stream (DEC-2071)" -}}
+{{- $args := list -}}
+{{- range .p.args -}}
+{{- $args = append $args (ternary $.root.Values.deployManager.researchWorkspace . (eq . "{hosted_workspace}")) -}}
+{{- end -}}
+{{- $_ := set $copy "args" $args -}}
 {{- $copy | toJson -}}
 {{- end -}}
 
@@ -136,7 +177,8 @@ fixed path. Who may write it is fixed here, by process type, not a value, so no 
 the control runs write ("rw"); the API server only reads, but its pod lays the store out before it
 starts ("seed": the pod's volume is writable, the server's own mount is not); the runtime, the
 deployment manager and the model gateway, for each agent's research cap (DEC-2272), read ("ro");
-every other process has no store at all.
+every other process has no store at all. The model gateway writes only the research store
+("mandate.researchArtifactsRole", DEC-2279), never this one.
 */}}
 {{- define "mandate.artifactsRole" -}}
 {{- $access := dict "api" "seed" "control" "rw" "runtime" "ro" "executor" "ro" "deploy-manager" "ro" "deploy-manager-research" "ro" "model-gateway" "ro" "data" "rw" -}}
@@ -177,10 +219,66 @@ follows. So a node's loss takes the whole group down together, until the store m
 attaches to many nodes or to the object store (E21-40).
 */}}
 {{- define "mandate.colocated" -}}
-{{- if or .p.colocate (include "mandate.artifactsAccess" .) -}}true{{- end -}}
+{{- if or .p.colocate (include "mandate.artifactsAccess" .) (include "mandate.researchArtifactsAccess" .) -}}true{{- end -}}
 {{- end -}}
 
 {{- define "mandate.artifactsPath" -}}/var/lib/mandate/artifacts{{- end -}}
+
+{{/*
+The research store (DEC-2279 item 5): a store of its own for the research runtime's artifacts, which
+only the model gateway writes ("rw"), create-only and capped, and the runtime reads back ("ro"). No
+other process mounts it, so nothing the executor, the gate, the managers or a mandate read is within
+the gateway's reach. Fixed here, by process type, never a value.
+*/}}
+{{- define "mandate.researchArtifactsRole" -}}
+{{- $access := dict "model-gateway" "rw" "runtime" "ro" -}}
+{{- get $access .p.name -}}
+{{- end -}}
+
+{{/*
+Whether the research claim renders: with the shared store's, and only when the model gateway, its
+one writer, renders and lays it out. "true" or empty.
+*/}}
+{{- define "mandate.researchArtifactsClaimed" -}}
+{{- if include "mandate.artifactsClaimed" . -}}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) -}}
+{{- if eq .name "model-gateway" -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Process `p`'s access to the research store, "rw" or "ro", or empty. */}}
+{{- define "mandate.researchArtifactsAccess" -}}
+{{- if include "mandate.researchArtifactsClaimed" .root -}}
+{{- include "mandate.researchArtifactsRole" . -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "mandate.researchArtifactsPath" -}}/var/lib/mandate/research-artifacts{{- end -}}
+
+{{/*
+The research store's layout, made by its one writer's pod before the gateway starts. A reader's pod
+never waits for it: the runtime opens the store at each read, so one not yet laid out is a failed
+read-back that halts research, never a runtime that does not start (DEC-2279 item 5).
+*/}}
+{{- define "mandate.researchArtifactsLayout" -}}
+{{- $path := include "mandate.researchArtifactsPath" . -}}
+- name: research-artifacts-layout
+  image: {{ .root.Values.images.postgres | quote }}
+  imagePullPolicy: IfNotPresent
+  command:
+    - bash
+    - -c
+    - {{ printf "mkdir -p %s/sha256 %s/tmp" $path $path | quote }}
+  securityContext:
+    {{- include "mandate.containerSecurity" . | nindent 4 }}
+  resources:
+    limits: {cpu: "50m", memory: "32Mi"}
+    requests: {cpu: "50m", memory: "32Mi"}
+  volumeMounts:
+    - name: research-artifacts
+      mountPath: {{ $path | quote }}
+{{- end -}}
 
 {{/*
 The store's layout, before the process starts: the API server refuses a root without `sha256/`,
@@ -218,7 +316,7 @@ start without them (AGENTS.md rule 3).
 {{- $j := .root.Values.journal -}}
 {{- if .p.db_role }}
 - name: MANDATE_JOURNAL_DSN
-  value: {{ printf "postgres://%s@%s:%v/%s?sslmode=verify-full&sslrootcert=/run/secrets/journal-ca/ca.crt" .p.db_role $j.host $j.port $j.database | quote }}
+  value: {{ include "mandate.journalDsn" (dict "role" .p.db_role "journal" $j) | quote }}
 - name: PGPASSFILE
   value: /run/pg/pgpass
 {{- end }}
@@ -253,11 +351,20 @@ start without them (AGENTS.md rule 3).
   value: http://oauth-fixture:8091/alpaca/v2/account
 {{- end }}
 {{- /* The model gateway's workspace and deployment, required with its image, and its two monthly
-budgets, rendered only when named, so an unnamed one stops its start with its code (DEC-2326). */}}
+budgets, rendered only when named, so an unnamed one stops its start with its code (DEC-2326). The
+local cell serves the recorded bundle alone and names no registry; a hosted cell starts live, from
+`modelGateway.registry`, and only staging names one, under the budgets the founder accepted
+(DEC-2282, DEC-2081); production's are the founder's to approve. */}}
 {{- if eq .p.name "model-gateway" }}
 {{- $g := .root.Values.modelGateway }}
-{{- if and (or $g.workspaceMonthlyUsd $g.deploymentMonthlyUsd) (not .root.Values.localImages) }}
-{{- fail "modelGateway's monthly budgets are named only by the local cell's values (localImages), over the recorded bundle; a hosted cell's budgets are the founder's (DEC-2326 item 2, DEC-2396)" }}
+{{- if and .root.Values.localImages $g.registry }}
+{{- fail "modelGateway.registry is a hosted cell's: the local cell serves the recorded bundle alone and reaches no provider (DEC-2326, DEC-2081)" }}
+{{- end }}
+{{- if and (not .root.Values.localImages) (ne .root.Values.deploymentTier "staging") }}
+{{- fail (printf "a hosted cell runs the model gateway in staging alone, and deploymentTier is %q: production's model budgets are the founder's (DEC-2282, DEC-2081)" .root.Values.deploymentTier) }}
+{{- end }}
+{{- if and (not .root.Values.localImages) (not $g.registry) }}
+{{- fail "a hosted model gateway starts live, from modelGateway.registry: its released image carries no recorded bundle (DEC-2079 item 5, DEC-2081)" }}
 {{- end }}
 - name: MANDATE_GATEWAY_WORKSPACE
   value: {{ required "modelGateway.workspace, the one workspace the model gateway serves, is required with images.model-gateway" $g.workspace | quote }}
@@ -276,11 +383,27 @@ budgets, rendered only when named, so an unnamed one stops its start with its co
 - name: {{ ternary "MANDATE_API_ARTIFACTS" "MANDATE_ARTIFACTS" (eq .p.name "api") }}
   value: {{ include "mandate.artifactsPath" . | quote }}
 {{- end }}
+{{- if include "mandate.researchArtifactsAccess" . }}
+- name: MANDATE_RESEARCH_ARTIFACTS
+  value: {{ include "mandate.researchArtifactsPath" . | quote }}
+{{- end }}
 {{- /* The stored bars' root the runtime's dry run and the executor's binding gate read their
 liquidity figures from (DEC-2274), only where the data process stores them. */}}
 {{- if and (has .p.name (list "runtime" "executor")) .root.Values.images.data (include "mandate.artifactsAccess" .) }}
 - name: MANDATE_BARS
-  value: {{ printf "%s/datasets/cell-recorded" (include "mandate.artifactsPath" .) | quote }}
+  value: {{ printf "%s/datasets/%s" (include "mandate.artifactsPath" .) (ternary "alpaca-iex" "cell-recorded" (eq .root.Values.data.source "alpaca-iex")) | quote }}
+{{- end }}
+{{- /* The data process's source (DEC-2082): `recorded` is the local and CI cell's, `alpaca-iex`
+staging's alone, since its data key is the platform's paper data key and the stored bars serve
+managed paper workspaces (DEC-2283). */}}
+{{- if eq .p.name "data" }}
+{{- $iex := eq .root.Values.data.source "alpaca-iex" }}
+{{- if and $iex (or .root.Values.localImages (ne .root.Values.deploymentTier "staging")) }}
+{{- fail (printf "data.source alpaca-iex stores IEX bars in staging alone, and deploymentTier is %q (DEC-2283, DEC-2082)" .root.Values.deploymentTier) }}
+{{- end }}
+{{- if and $iex .root.Values.data.instruments }}
+{{- fail "data.instruments is the recorded series' list: data.source alpaca-iex stores the instruments the control stream registers (DEC-2082)" }}
+{{- end }}
 {{- end }}
 {{- end -}}
 
@@ -298,6 +421,11 @@ liquidity figures from (DEC-2274), only where the data process stores them. */}}
 {{- with include "mandate.artifactsAccess" . }}
 - name: artifacts
   mountPath: {{ include "mandate.artifactsPath" $ | quote }}
+  readOnly: {{ ne . "rw" }}
+{{- end }}
+{{- with include "mandate.researchArtifactsAccess" . }}
+- name: research-artifacts
+  mountPath: {{ include "mandate.researchArtifactsPath" $ | quote }}
   readOnly: {{ ne . "rw" }}
 {{- end }}
 {{- if include "mandate.vaultToken" . }}
@@ -441,6 +569,9 @@ spec:
     {{- if include "mandate.artifactsAccess" . }}
     {{- include "mandate.artifactsLayout" . | nindent 4 }}
     {{- end }}
+    {{- if eq (include "mandate.researchArtifactsAccess" .) "rw" }}
+    {{- include "mandate.researchArtifactsLayout" . | nindent 4 }}
+    {{- end }}
     {{- if include "mandate.publicTls" . }}
     - name: ca-bundle
       image: {{ $root.Values.images.postgres | quote }}
@@ -498,6 +629,12 @@ spec:
       persistentVolumeClaim:
         claimName: artifacts
         readOnly: {{ eq (include "mandate.artifactsAccess" .) "ro" }}
+    {{- end }}
+    {{- with include "mandate.researchArtifactsAccess" . }}
+    - name: research-artifacts
+      persistentVolumeClaim:
+        claimName: research-artifacts
+        readOnly: {{ eq . "ro" }}
     {{- end }}
     {{- if include "mandate.vaultToken" . }}
     - name: vault-token
@@ -862,4 +999,42 @@ from its environment; it never mounts the Secret itself.
           name: vault-ca
           items:
             - {key: ca.crt, path: ca.crt}
+{{- end -}}
+
+{{- define "mandate.modelGatewayService" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-gateway
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "mandate.selector" . | nindent 4 }}
+  ports:
+    - {name: calls, port: 8080, targetPort: 8080, protocol: TCP}
+{{- end -}}
+
+{{- /* The live model gateway's registry file (DEC-2216 item 4, DEC-2081): `modelGateway.registry`,
+the founder's vetted entries (DEC-2282) as the live registry's strict JSON, held in the ConfigMap
+`model-gateway-registry`, which its Deployment mounts read-only at /run/mandate/model-gateway. It
+holds no key and no secret; the gateway reads the file once, at start, and refuses it whole when
+it is not a live registry or names a gate report it cannot yet verify. */ -}}
+{{- define "mandate.modelGatewayRegistry" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-gateway-registry
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+data:
+  registry.json: {{ .root.Values.modelGateway.registry | quote }}
+{{- end -}}
+
+{{- /* A process's journal DSN, as its own role: TLS verified against the journal's CA, and the
+`journal` schema as its search path in the connection's options (DEC-2083), so a role added after
+the journal's bootstrap, which never had roles.sql's per-role search path, reads the same tables. */ -}}
+{{- define "mandate.journalDsn" -}}
+{{- printf "postgres://%s@%s:%v/%s?sslmode=verify-full&sslrootcert=/run/secrets/journal-ca/ca.crt&options=-c%%20search_path%%3Djournal" .role .journal.host .journal.port .journal.database -}}
 {{- end -}}

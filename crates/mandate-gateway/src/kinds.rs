@@ -8,6 +8,9 @@ pub enum Purpose {
     LlmSignal,
     FastSignal,
     Compiler,
+    /// The platform's call that evaluates a registry entry: the §4.3 gate and the live start's
+    /// identity probe (DEC-2216). It names no agent and never crosses the wire.
+    Evaluation,
 }
 
 impl Purpose {
@@ -17,7 +20,14 @@ impl Purpose {
             Self::LlmSignal => "llm_signal",
             Self::FastSignal => "fast_signal",
             Self::Compiler => "compiler",
+            Self::Evaluation => "evaluation",
         }
+    }
+
+    /// Whether a call of this purpose names an agent: every purpose's but the compiler's and an
+    /// evaluation's (rule 156).
+    pub fn names_agent(self) -> bool {
+        !matches!(self, Self::Compiler | Self::Evaluation)
     }
 }
 

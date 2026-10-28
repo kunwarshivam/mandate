@@ -194,7 +194,11 @@ fn run(
         let reader = store.clone();
         let production = deployment::production(
             |name| std::env::var(name).ok(),
-            || Ok(Box::new(move |stream: &StreamId| reader.rows(stream))),
+            || {
+                Ok(Box::new(move |stream: &StreamId, start| {
+                    reader.rows_from(stream, start)
+                }))
+            },
         )?;
         return serve(store, named, socket, &terminate, (paper, production));
     }
@@ -203,7 +207,9 @@ fn run(
         |name| std::env::var(name).ok(),
         || {
             let reader = PgStore::connect(&dsn)?;
-            Ok(Box::new(move |stream: &StreamId| reader.rows(stream)))
+            Ok(Box::new(move |stream: &StreamId, start| {
+                reader.rows_from(stream, start)
+            }))
         },
     )?;
     serve(
@@ -243,7 +249,7 @@ fn serve<S: Store>(
         )?;
         let run = match production {
             Some(production) => run.deployed(&config.scope, production),
-            None => run,
+            None => run.undeployed(),
         };
         let edge = Edge {
             now: &host_now,
@@ -274,7 +280,7 @@ fn serve<S: Store>(
     let run = run::paper(broker, TokioPause, &config.scope)?;
     let run = match production {
         Some(production) => run.deployed(&config.scope, production),
-        None => run,
+        None => run.undeployed(),
     };
     let mut tick = |now| lease.pass(now);
     let mut edge = Edge {

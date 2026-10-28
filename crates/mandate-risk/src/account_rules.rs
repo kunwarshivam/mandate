@@ -10,29 +10,35 @@ use crate::{
     ReasonCode, Side, TimeInForce, Verdict, WorkingOrder,
 };
 
-/// The rules of §5.3 that deny an opening with no registered reason code: rule 2 (quantity at
-/// least `min_order_size`, and whole shares in an instrument that is not fractionable) and rule 7
-/// (a fractional equity order is TIF day, and §5.2 keeps it out of a bracket). A denial without a
-/// code is unrepresentable in [`crate::CheckOutcome`] and minting one would break ES-09, so the
-/// gate refuses to decide an opening that breaks one, which adds no risk (DEC-129 item 27). A
-/// reduction is never refused for them: the broker judges its size, a sell of the whole position is
-/// always valid, and `AGENTS.md` rule 3 forbids a safe default that blocks an exit.
-pub(crate) fn unregistered_rules(input: &GateInput<'_>) -> Result<(), GateError> {
+/// §5.3 rule 2, for an opening (DEC-2815): a quantity below `min_order_size` is
+/// `below_min_order_size`, judged first, and a fractional quantity in an equity that is not
+/// fractionable is `quantity_off_increment`. A reduction never reaches here: the broker judges an
+/// exit's size, a sell of the whole position is always valid, and `AGENTS.md` rule 3 forbids a safe
+/// default that blocks an exit.
+pub(crate) fn rule_2(input: &GateInput<'_>) -> Result<Option<Stop>, GateError> {
     let p = input.proposed;
-    let i = input.instrument;
-    let refuse = |rule| Err(GateError::Unimplemented(rule, "DEC-129 item 27"));
-    if p.qty < i.min_order_size {
-        return refuse("the reason code of §5.3 rule 2's minimum size");
+    if p.qty < input.instrument.min_order_size {
+        return Ok(Some((Verdict::Deny, ReasonCode::BelowMinOrderSize)));
     }
-    let fractional = i.asset_class == AssetClass::UsEquity
-        && p.qty.portion(Fraction::ONE, ShareIncrement::Whole)? != p.qty;
-    if fractional && !i.fractionable {
-        return refuse("the reason code of §5.3 rule 2's increment");
-    }
-    if fractional && (p.tif != TimeInForce::Day || matches!(p.kind, ProposedKind::Bracket { .. })) {
-        return refuse("the reason code of §5.3 rule 7");
-    }
-    Ok(())
+    Ok((fractional(input)? && !input.instrument.fractionable)
+        .then_some((Verdict::Deny, ReasonCode::QuantityOffIncrement)))
+}
+
+/// §5.3 rule 7, for an opening (DEC-2815): a fractional equity order that is not TIF day, or is a
+/// bracket's entry (§5.2 keeps fractional orders out of a bracket), is
+/// `fractional_order_tif_or_bracket`.
+fn rule_7(input: &GateInput<'_>) -> Result<Option<Stop>, GateError> {
+    let p = input.proposed;
+    let breaks = p.tif != TimeInForce::Day || matches!(p.kind, ProposedKind::Bracket { .. });
+    Ok((fractional(input)? && breaks)
+        .then_some((Verdict::Deny, ReasonCode::FractionalOrderTifOrBracket)))
+}
+
+/// Whether the proposal is an equity order of a fraction of a share.
+fn fractional(input: &GateInput<'_>) -> Result<bool, GateError> {
+    let p = input.proposed;
+    Ok(input.instrument.asset_class == AssetClass::UsEquity
+        && p.qty.portion(Fraction::ONE, ShareIncrement::Whole)? != p.qty)
 }
 
 /// §5.3 rule 4, for a reduction: the sell quantity plus the agent's own open sells in the
@@ -61,24 +67,28 @@ pub(crate) fn sell_available(input: &GateInput<'_>) -> Result<Option<Stop>, Gate
         .then_some((Verdict::Deny, ReasonCode::SellExceedsAvailable)))
 }
 
-/// §5.3 rules 5, 6 and 8, for an opening. Rules 5 and 6 are both `working_order_limit`, and one
+/// §5.3 rules 5 to 8, for an opening, in list order. Rules 5 and 6 are both `working_order_limit`, and one
 /// working non-protective order per instrument on the account (rule 6) is already one side at a
 /// time (rule 5). They bind openings only: §9.6 lists them as market-conduct controls, which "deny
 /// opening and increasing orders", and `AGENTS.md` rule 13 exempts every exit from conduct controls
 /// (DEC-150 item 2). Rule 8: a plain equity opening in an instrument with a resting protective order
 /// is `add_blocked_by_protective_order` (§5.4), because a risk-increasing order never cancels
-/// protection; a bracket is a new tranche with its own, and crypto follows DEC-36's sequence.
-pub(crate) fn one_working_order(input: &GateInput<'_>) -> Option<Stop> {
+/// protection; a bracket is a new tranche with its own, and crypto follows DEC-36's sequence. Rule 7
+/// ([`rule_7`]) sits between them.
+pub(crate) fn one_working_order(input: &GateInput<'_>) -> Result<Option<Stop>, GateError> {
     let p = input.proposed;
     let here = |o: &&WorkingOrder| o.instrument == p.instrument;
     let resting = input.account.working_orders.values().filter(here);
     if resting.clone().any(|o| !o.protective) {
-        return Some((Verdict::Deny, ReasonCode::WorkingOrderLimit));
+        return Ok(Some((Verdict::Deny, ReasonCode::WorkingOrderLimit)));
+    }
+    if let Some(stop) = rule_7(input)? {
+        return Ok(Some(stop));
     }
     let plain_equity = input.instrument.asset_class == AssetClass::UsEquity
         && !matches!(p.kind, ProposedKind::Bracket { .. });
-    (plain_equity && resting.clone().any(|o| o.protective))
-        .then_some((Verdict::Deny, ReasonCode::AddBlockedByProtectiveOrder))
+    Ok((plain_equity && resting.clone().any(|o| o.protective))
+        .then_some((Verdict::Deny, ReasonCode::AddBlockedByProtectiveOrder)))
 }
 
 /// Check 7's buying power (§9.5, DEC-34, DEC-129 items 8 and 16): quantity × limit + the fee

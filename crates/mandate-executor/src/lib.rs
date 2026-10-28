@@ -76,12 +76,14 @@
 //! account-wide endpoints. There is no deposit, withdrawal, or transfer request, no live base
 //! URL anywhere in this stream, and no path that could build one (`AGENTS.md` rule 8, ES-23).
 
+mod acknowledge;
 mod batch;
 mod codec;
 mod error;
 mod fees;
 mod fold;
 mod gate;
+mod holders;
 mod ids;
 mod intent;
 mod kill;
@@ -99,8 +101,10 @@ mod session;
 mod shape;
 mod state;
 mod step;
+mod symbols;
 pub mod tripwire;
 mod types;
+mod universe;
 
 pub use error::{ExecutorError, JsonError};
 pub use fees::{
@@ -113,8 +117,9 @@ pub use mandate_notify::OwnerAlertKind;
 pub use opening::equity_bracket_prices;
 pub use own::{book_own_fills, limit_fills, owed_orders, recorded_fills};
 pub use ports::{
-    BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource,
-    BrokerConnector, ConnectorError, FillConfigRefs, IdGen, InstrumentSnapshot, MandateView, Ports,
+    AccountFillRefs, BindingGateConfigRefs, BindingGateInput, BindingGateRequest,
+    BindingGateSource, BrokerConnector, ConnectorError, FillConfigRefs, IdGen, InstrumentSnapshot,
+    MandateView, Ports,
 };
 pub use protection::{LadderPrice, LadderReference, is_protected};
 pub use reconcile::reconcile;
@@ -124,15 +129,18 @@ pub use state::{
     fold,
 };
 pub use step::handle;
+pub use symbols::BrokerSymbols;
 pub use types::{
     AccountDeclaration, AccountRef, AccountScope, AccountState, AccountWide, AccountWideScope,
-    ActivityCursor, AgentId, BracketLegs, BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome,
-    BrokerPosition, BrokerReject, BrokerRequest, BrokerSnapshot, BrokerUnknown, BrokerUpdate,
-    Command, DeclaredRegime, Difference, DifferenceKind, Effect, EventDraft, EventId,
-    ExecutorConfig, ExitTier, FillId, FlattenLeg, FlattenPlan, FoldedEvent, GateCheck, GateVerdict,
+    AcknowledgmentHandoff, ActivityCursor, AgentId, BracketLegs, BrokerAccount, BrokerFill,
+    BrokerOrder, BrokerOutcome, BrokerPosition, BrokerReject, BrokerRequest, BrokerSnapshot,
+    BrokerUnknown, BrokerUpdate, Command, ConnectionHealth, ConnectionTrouble, DeclaredRegime,
+    DegradeReason, Difference, DifferenceKind, Effect, EventDraft, EventId, ExecutorConfig,
+    ExitTier, FillId, FlattenLeg, FlattenPlan, FoldedEvent, GateCheck, GateVerdict,
     HandedConfirmation, Initiator, Input, IntentBody, IntentHandoff, KillScope, ListedOrder,
     MandateVersion, MarketObservation, Mode, NotificationRef, OcoLegs, Order, OrderListing,
     OrderOrigin, OrderState, OrderType, OwnerConfirmation, Protection, ProtectionPrices, Purpose,
     ReconcileReason, Reconciliation, ReconciliationVerdict, RiskClock, Seq, StatusMapping,
-    SubmitOrder, TimeInForce, TimerId, TimerRequest, UnprotectedInterval, WorkspaceId, WriterEpoch,
+    SubmitOrder, SuspendReason, ThesisRow, TimeInForce, TimerId, TimerRequest, UnprotectedInterval,
+    WorkspaceId, WriterEpoch,
 };

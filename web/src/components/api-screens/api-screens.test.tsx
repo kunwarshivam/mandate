@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ApiAgent, ApiAgents, ApiApproval, ApiApprovals, ApiHome, BySource } from "./api-screens";
@@ -8,6 +10,7 @@ import { WorkspaceGate } from "@/components/screens/common";
 import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { ApiRuntimeProvider } from "@/lib/api-runtime";
+import { DEFERRED_CHECK_LABELS } from "@/lib/deferred-checks";
 import { quantity } from "@/lib/format";
 import { RoleProvider } from "@/lib/roles";
 
@@ -54,6 +57,30 @@ const fixture = buildWorkspace("approvals");
 const agentOf = (id: string) => fixture.agents.find((a) => a.agent_id === id)!;
 /** The API names an approval by its event id, a bare ULID; the fixtures prefix theirs with `apr_`. */
 const pending = fixture.approvals.filter((a) => a.status === "delivered").map((a) => ({ ...a, approval_id: a.approval_id.replace(/^apr_/, "") }));
+
+/** The journal vectors' sentence and every name a version 3 request may defer (DEC-2515 item 5). */
+const deferrals = (JSON.parse(readFileSync(join(process.cwd(), "../fixtures/refcases/journal.json"), "utf8")) as { approval_deferrals: { approver_sentence: string } }).approval_deferrals;
+/**
+ * Serves the approval as version 3 with `deferred_to_binding` set to `value`, or with none when `value` is `undefined`, and
+ * its decision's list as `decided`: by default the same list, as the runtime writes the two (DEC-2519).
+ */
+const deferring =
+  (value: unknown, decided: unknown = Array.isArray(value) ? value : []): Tamper =>
+  (route, body) => {
+    if (!route.startsWith("/approvals/")) return body;
+    const approval = body.approval as Record<string, unknown>;
+    const content = { ...(approval.content as Record<string, unknown>) };
+    if (value === undefined) delete content.deferred_to_binding;
+    else content.deferred_to_binding = value;
+    return { ...body, approval: { ...approval, schema_version: 3, content, decision_deferred_to_binding: decided } };
+  };
+/** Serves the approval as the mock's version 2, naming no deferral, across from a decision whose list is `decided`. */
+const decidedOnly =
+  (decided: unknown): Tamper =>
+  (route, body) => {
+    if (!route.startsWith("/approvals/")) return body;
+    return { ...body, approval: { ...(body.approval as Record<string, unknown>), decision_deferred_to_binding: decided } };
+  };
 
 afterEach(() => {
   cleanup();
@@ -195,6 +222,78 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     await screen.findByRole("button", { name: "Skip" });
     expect(screen.getByText("ENVIRONMENT NOT REPORTED")).toBeTruthy();
     expect(screen.queryByText("PAPER")).toBeNull();
+  });
+
+  it("a request whose dry run deferred checks names each one under the fixed sentence, and never as passed (DEC-2515 item 5)", async () => {
+    const approval = pending[0];
+    const names = ["halt", "liquidity_floor", "participation"];
+    mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", deferring(names));
+    const region = await screen.findByRole("region", { name: "Checks not run yet" });
+    expect(within(region).getByText(deferrals.approver_sentence)).toBeTruthy();
+    expect(within(region).getAllByRole("listitem").map((li) => li.textContent)).toEqual(names.map((n) => DEFERRED_CHECK_LABELS[n]));
+    expect(region.textContent).not.toMatch(/passed|cleared/i);
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+  });
+
+  it("the answer's record covers the deferred checks shown: a different list gives a different record", async () => {
+    const approval = pending[0];
+    const artifacts: unknown[] = [];
+    for (const names of [["halt"], ["eligibility", "halt"]]) {
+      const { posts } = mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", deferring(names));
+      await screen.findByRole("region", { name: "Checks not run yet" });
+      fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+      await waitFor(() => expect(posts).toHaveLength(1));
+      artifacts.push((posts[0].body.record as { artifact: unknown }).artifact);
+      cleanup();
+    }
+    expect(artifacts[0]).toEqual(expect.stringMatching(/^sha256:[0-9a-f]{64}$/));
+    expect(artifacts[1]).not.toEqual(artifacts[0]);
+  });
+
+  it("a deferred check the web app has no label for is shown by its name, never dropped", async () => {
+    const approval = pending[0];
+    mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", deferring(["halt", "new_check"]));
+    const region = await screen.findByRole("region", { name: "Checks not run yet" });
+    expect(within(region).getAllByRole("listitem").map((li) => li.textContent)).toEqual([DEFERRED_CHECK_LABELS.halt, "new_check"]);
+  });
+
+  it("a request with no deferred checks shows no such list", async () => {
+    const approval = pending[0];
+    mount(<ApiApproval approvalId={approval.approval_id} />);
+    await screen.findByRole("button", { name: "Approve" });
+    expect(screen.queryByRole("region", { name: "Checks not run yet" })).toBeNull();
+    expect(screen.queryByText(deferrals.approver_sentence)).toBeNull();
+  });
+
+  it("deferred checks it cannot read, or a version 3 request without them, are never read as none: it says so and offers Skip, not Approve (DEC-2518)", async () => {
+    const approval = pending[0];
+    for (const value of [undefined, null, [], "halt", [7]]) {
+      const { posts } = mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", deferring(value));
+      const region = await screen.findByRole("region", { name: "Checks not run yet" });
+      expect(region.textContent, JSON.stringify(value)).toMatch(/cannot be read/);
+      expect(screen.queryByRole("button", { name: "Approve" }), JSON.stringify(value)).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+      await waitFor(() => expect(posts).toHaveLength(1));
+      expect(posts[0].body).toMatchObject({ verdict: "skipped" });
+      cleanup();
+    }
+  });
+
+  it("a request that hides or invents a deferral its decision does not name, or whose decision is not found, offers Skip, not Approve (DEC-2519)", async () => {
+    const approval = pending[0];
+    const cases: Array<[string, Tamper]> = [
+      ["a version 2 request whose decision deferred checks", decidedOnly(["halt"])],
+      ["a request whose decision is not on the stream", decidedOnly(null)],
+      ["a version 3 request naming a check its decision did not", deferring(["agent_mode", "halt"], ["halt"])],
+    ];
+    for (const [name, tamper] of cases) {
+      mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", tamper);
+      const region = await screen.findByRole("region", { name: "Checks not run yet" });
+      expect(region.textContent, name).toMatch(/cannot be read/);
+      expect(screen.queryByRole("button", { name: "Approve" }), name).toBeNull();
+      expect(screen.getByRole("button", { name: "Skip" }), name).toBeTruthy();
+      cleanup();
+    }
   });
 
   it("Approve asks for a code first and sends no answer: the owner confirms it on the host (DEC-2104)", async () => {

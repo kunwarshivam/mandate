@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.13 (fees charged to the agent's own orders lower E, [DEC-2393](../project/decisions/DEC-2393.md), and a trigger's recorded breach time is the whole breached interval, [DEC-2331](../project/decisions/DEC-2331.md); v0.12 an approval names the checks its dry run deferred, and such an opening is always asked, [DEC-2515](../project/decisions/DEC-2515.md); v0.11 a news item or filing may bring a monitoring run forward, [DEC-2392](../project/decisions/DEC-2392.md); v0.10 a thesis that ends sells its position, [DEC-2391](../project/decisions/DEC-2391.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
+| **Status** | v0.17 (the research agent's model per run kind, `routes`, chosen by the owner from the offered research entries, [DEC-2282](../project/decisions/DEC-2282.md); v0.16 another instrument's mark steps nothing in an agent's fold, and agents share instruments, each folded on its own lots, [DEC-2849](../project/decisions/DEC-2849.md); v0.15 a fold opened flat is unpriced until its first counted sane mark, which prices the own fills before it, [DEC-2834](../project/decisions/DEC-2834.md); v0.14 a version-1 order-state `CompensatingEvent` beside the `OrderStateChanged` it corrects moves no figure, [DEC-2829](../project/decisions/DEC-2829.md); v0.13 fees charged to the agent's own orders lower E, [DEC-2393](../project/decisions/DEC-2393.md), and a trigger's recorded breach time is the whole breached interval, [DEC-2331](../project/decisions/DEC-2331.md); v0.12 an approval names the checks its dry run deferred, and such an opening is always asked, [DEC-2515](../project/decisions/DEC-2515.md); v0.11 a news item or filing may bring a monitoring run forward, [DEC-2392](../project/decisions/DEC-2392.md); v0.10 a thesis that ends sells its position, [DEC-2391](../project/decisions/DEC-2391.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
 | **Implements** | PRD 6.3 (FR-3.1 to FR-3.8), 6.5 (FR-5.2 to FR-5.5), 6.6 (FR-6.1 to FR-6.6); backlog E6, E10, E17 |
 | **Schemas** | [mandate.schema.json](../../schemas/mandate.schema.json), [policy.schema.json](../../schemas/policy.schema.json) (structural rules) |
 | **Reference cases** | [reference-cases/mandate.yaml](reference-cases/mandate.yaml) |
@@ -20,6 +20,13 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.17 ([DEC-2282](../project/decisions/DEC-2282.md), the founder's of 2026-10-27; E21-62):**
+  the research agent's signal model gains `routes`, the entry each run kind other than `ideate`
+  calls. The model's own pin is the `ideate` entry. A route names another offered research entry
+  (V-048), sits in the canonical bytes, and is confirmed like every envelope field. A change to it
+  classifies as increasing under §9.2's signal-model row, so it takes step-up authentication. V-048
+  also requires a new or changed research pin, the model's own included, to name an `offered`
+  entry.
 - **v0.12 ([DEC-2515](../project/decisions/DEC-2515.md), an agent reading under
   [DEC-176](../project/04-decision-log.md#decisions); E21-30):** the approval content of §6.4 gains
   `deferred_to_binding`, the checks the cell's runtime's dry run left to the executor's binding
@@ -366,7 +373,7 @@ changes, acknowledgments, version changes, approval requests and responses, and 
 | MI-31 | **A tripwire only tightens, and only the owner lifts it** ([DEC-187](../project/04-decision-log.md#decisions)). A tripwire fires at the first evaluation at which its metric, counted over the inputs since it was armed, reaches its threshold, and at no other. Once fired it stays fired through every later input, version, risk day, and restart until the owner acknowledges it with valid step-up (§6.1), and, with `independent_approval_required`, as a user other than the requester (§5.8), which re-arms it with nothing counted. While fired it is a latched limit, so no allocation increase applies (MI-7). While any tripwire is fired, no delegation lifts (MI-28); while one whose action, or whose action in the version in effect, is `exits_only` is fired, the effective mode is at least `exits_only`. With or without `autonomy.tripwires`, every other decision is the same, a tripwire never makes the mode `paused`, and no exit is held or denied by it (MI-1). A version classified risk-reducing or neutral never lifts a fired tripwire, softens what it holds, or makes one fire later (checked against an independent oracle that recounts each metric from the fill log) |
 | MI-32 | **Silence ends autonomy** ([DEC-188](../project/04-decision-log.md#decisions)). From 00:00 America/New_York after `autonomy.review_by` in the version in effect, judged on the risk clock, no `open` or `increase` is `auto`: it is `ask`, or `deny` when the decision without the review date denies, whatever the rules, the default, or a delegation say, and an `ask` keeps its own source. The admission ceiling only tightens (MI-17), so it never yields an `auto` of its own: an `auto` admission setting leaves the rules' `auto` standing, and that is what the review ceiling turns into `ask`. Exits stay built-in AUTO (MI-1). Before that instant, and with no review date, every decision, label, and delegation id is what it would be without this rule. With no risk clock to judge by, nothing is `auto` (checked against an independent oracle that builds the instant from the calendar date) |
 | MI-33 | **A corporate action moves the risk state only by its cash, never by its timing or a rounding** ([DEC-2303](../project/decisions/DEC-2303.md)). A split changes E by exactly cash in lieu + Q' × mark' − Q × mark, mark' being mark × old ÷ new rounded toward zero at 12 places: that is cash in lieu − f × mark' (f the residual removed) less Q_raw × (mark × old ÷ new − mark'), a rounding in [0, Q_raw × 10⁻¹²) with Q_raw = Q × new ÷ old. With no residual E never rises, so the split lifts nothing, clears no breach and restarts no wait: it triggers everything a clock tick at the same instant would, and nothing more than that tick or the rounding's fall reaches. A cash dividend changes nothing at application; its receivable round(Q × d, 2), Q the position at application, joins E with the first counted sane mark after it, in that mark's step. Neither changes E₀, C, N or L. Posting either receivable changes no figure, whatever amount is posted. H follows E as after any input (checked against an independent oracle that recomputes each change from the action and the state before it, carries the dividends due itself, and steps a twin of the state with a clock tick at the split's instant, including at a rung's exact boundary) |
-| MI-34 | **A thesis that ends sells its position** (§8.3, §8.6, [DEC-2391](../project/decisions/DEC-2391.md)). At every evaluation at which the agent holds an instrument whose thesis has ended and no fresh thesis for it has been admitted since, the order builder proposes a `discretionary_exit` with `exit_origin` `removed_instrument` of exactly the position less working exits, unless that is zero, and proposes no buy in it, whatever the signals, while the version in effect leaves the universe unpinned; nothing but mode `paused` or `stopped`, an `Unknown` order in the instrument, or the broker holds that exit (`AGENTS.md` rule 13), and the gate refuses it only as `sell_exceeds_available` |
+| MI-34 | **A thesis that ends sells its position** (§8.3, §8.6, [DEC-2391](../project/decisions/DEC-2391.md)). At every evaluation at which the agent holds an instrument whose thesis has ended and no fresh thesis for it has been admitted since, the order builder proposes a `discretionary_exit` with `exit_origin` `removed_instrument` of exactly the position less working exits, unless that is zero, and proposes no buy in it, whatever the signals, while the version in effect leaves the universe unpinned; nothing but mode `paused` or `stopped`, an `Unknown` order in the instrument, or the broker holds that exit (`AGENTS.md` rule 13), and the gate refuses it only as `sell_exceeds_available`, which for a shared instrument in a deficit is read on the agent's sell authority Sᵢ (trading spec §8.1; DEC-2849, the founder's) |
 
 ## 2. Lifecycle
 
@@ -473,6 +480,7 @@ decimal strings; the schema gives each field's bounds.
 | `behavior.description` | The user's description of the strategy; given to LLM signal models and the research agent |
 | `behavior.signal_models[]` | Selected signal models: id, version, content hash, parameters, fixed weight, `max_output_age_s`, `admits_instruments` |
 | `behavior.signal_models[].admits_instruments` | True for the **research agent** (§8.4): at most one model, with the `llm.` prefix (V-036) |
+| `behavior.signal_models[].routes` | The research agent only: absent, or a non-empty object whose members are run kinds other than `ideate` (`monitor` in v1), each naming the registry entry that run kind calls, as `id`, `version` and `content_hash`. A run kind with no member calls the model's own pin, which is always the `ideate` entry ([DEC-2282](../project/decisions/DEC-2282.md); agent harness spec §6.9). V-048 |
 | `behavior.research` | The research agent's envelope fields: `interval_s` (how often it may propose), `cost_cap_usd_per_day` (DEC-120), `max_revisions_per_lineage` (DEC-111), and `event_triggers` (§8.4, [DEC-2392](../project/decisions/DEC-2392.md)): `null` or absent for none, else `sources` (`news`, `filings`, sorted and unique, at least one), `debounce_s` (300 to 86,400) and `max_runs_per_day` (1 to 24). Null exactly when no model admits (V-036) |
 | `behavior.cadence` | Scheduled interval and the event sources that trigger evaluation |
 | `behavior.sizing` | Sizing method, entry and exit thresholds, rebalance band (§8.3) |
@@ -610,6 +618,7 @@ and is recorded in `MandateConfirmed`.
 | V-044 | Tripwire ids are sorted and unique. A `consecutive_losing_exits` or `new_instruments` threshold is a whole number from 1 to 1,000; a `realized_loss_usd` threshold is in whole cents and at most `capital.allocation_usd`, so a tripwire never appears to guard what it cannot reach ([DEC-187](../project/04-decision-log.md#decisions), [DEC-352](../project/decisions/DEC-352.md)) |
 | V-046 | An `autonomy.review_by` the version sets or moves (absent from, or different from, the previous version's) is not before the validation date and at most 180 days after it; one carried unchanged is not checked again, so a lapsed date stays lapsed through a version that changes something else. A version whose previous version set a review date sets one too ([DEC-188](../project/04-decision-log.md#decisions), [DEC-272](../project/04-decision-log.md#decisions)) |
 | V-047 | When the workspace's policy requires independent approval (`independent_approval_required`, §4.3, its effective value), the workspace has at least two users. Users are the workspace's active members: a pending invitation or a deactivated account is not one, and a user count that is absent or not known counts as one user (rule 3, as §6.7 says of a missing name). Under that policy, deployment, a risk-increasing change, a high-water-mark reset, and lifting a fired tripwire each need a user other than the requester (§4.3, §5.8, §6.7). A one-user workspace could not deploy the mandate, make a risk-increasing change to it, acknowledge its drawdown ladder, or lift a tripwire it fired, so it is refused here, where the owner sees why, rather than at deployment or at the first latch. **One exception** ([DEC-444](../project/decisions/DEC-444.md), the founder's decision of 2026-10-03 on DEC-411 item 6): a new version of a running agent that §9.2 classifies as **risk-reducing** against its previous version is not refused by V-047. The classification is §9.2's own result for the two documents, as change classification computes it, and no other reading of "reducing" counts. The previous version is the agent's **current** version: the document whose canonical hash (§9.1) is the agent's current `mandate_version`, which the platform supplies from the journal and the requester never does. A document validation cannot match to that hash is not a previous version for this purpose. A version with any risk-increasing path is risk-increasing (§9.2), so one that reduces some fields and adds risk on another is refused, and so is a **neutral** version, a first version (no previous version: a deployment), and a version whose previous document validation does not have or cannot match to the agent's current `mandate_version` (rule 3). At application the current version is read again: a version validated against a predecessor that is no longer current when it applies is refused. Checked at validation and again when a version is applied, as V-002 is ([DEC-411](../project/decisions/DEC-411.md)) |
+| V-048 | `routes` is absent on every signal model that does not admit instruments. On the one that does, each pin by run kind (its own for `ideate`, each route for its run kind) is checked against the registry ([DEC-2282](../project/decisions/DEC-2282.md)):<br>• a route differs from the model's own id, so each choice has one encoding;<br>• a route names a registered entry with the same version and content hash, whose harness content (inference spec §4.2 step 5) is the own pin's entry's;<br>• a route, and an own pin whose entry admits instruments, names an entry with status `offered`, unless the previous version pins the same entry for the same run kind. The previous version is the agent's current version as V-047 binds it (a whole schema-valid document whose canonical hash is the `mandate_version` the platform supplies); any other, or none, carries nothing (rule 3). A carried pin is exempt from the status test, so a deprecated or withdrawn model never blocks a version, a risk-reducing one included; a withdrawn entry stays in the registry with its status (inference spec §4.4), and its outputs count as missing (§8.1).<br>Without a registry in the validation context, as for V-007, only the first test applies |
 
 ### 4.2 Warnings and the confirmation screen
 
@@ -749,7 +758,11 @@ stream** fold (journal spec §2). It belongs to the agent and survives restarts 
   (withdrawals are negative). It measures the dollar loss carried to the connection (§5.7).
 - **Agent equity** E = A + agent realized P&L (net of fees) + agent income + agent market value at
   risk marks − cost basis. Cost basis follows trading spec §8.1 (reductions rounded half-even to 12
-  places). The agent sub-ledger is the account ledger filtered to the agent's orders.
+  places). The agent sub-ledger is the account ledger filtered to the agent's orders. Several agents
+  may hold the same instrument in one account (trading spec §8.1, DEC-2849). Each agent's E is
+  computed on its own lots alone, and another agent's fills and fees, the owner's activity, and a
+  mark for an instrument other than the one its fold is bound to step nothing in its risk state
+  (single-instrument v1).
 - **An allocation change** of Δ is applied when its version applies, **after** time has been
   settled at that instant (§5.2), with no time passing:
   1. **Rejected** if Δ > 0 while any limit is latched; if E + Δ ≤ 0; if E + Δ < the agent's gross
@@ -772,6 +785,16 @@ stream** fold (journal spec §2). It belongs to the agent and survives restarts 
   `USD` fees, and the paper executor's simulated `FeesCharged` naming the order, at its `accrued`)
   lowers cash, and so E, when it accrues. Another agent's fills and fees on the same account never
   move E.
+- **An adopted order state moves no figure** ([DEC-2829](../project/decisions/DEC-2829.md)): a
+  `CompensatingEvent` at version 1, whose difference is `order_state`, right after the
+  `OrderStateChanged` it corrects in the same append, steps nothing; the order's state is that
+  record's and its fill is its own `FillApplied`. Any other compensation, a crash's included, is an
+  input not yet read, and the view fails closed.
+- **A fold opened flat is unpriced** ([DEC-2834](../project/decisions/DEC-2834.md)) until it reads
+  a counted sane mark of its instrument. An own fill while unpriced is booked with E unknown: the
+  inputs from it on are held, openings wait, and nothing trips, lifts or pauses. The first counted
+  sane mark prices them: its bid at the first held input's instant, then the held inputs in order,
+  then the mark.
 - **Corporate actions** ([DEC-2303](../project/decisions/DEC-2303.md)) are folded at application,
   trading spec §8.5's instant (20:00 New York time on the last trading day before the ex-date). A
   **split** replaces Q, B and realized by §8.5's rule: Q' and the removed residual basis R, and cash
@@ -1561,6 +1584,13 @@ until the owner confirms them, §7), because they only reduce risk.
   ([inference spec §4.1](inference.md#41-registry-entry), DEC-432 items 17 and 18). The entry's
   endpoints and status are **not** in the hash: a routing or status change never changes a pin.
   **Signal models never place orders.**
+- **The research agent's model per run kind** ([DEC-2282](../project/decisions/DEC-2282.md)). The
+  owner picks the entry each run kind calls, from the research entries the platform offers. The
+  model's own pin is the `ideate` entry, and `routes` names any other run kind's (V-048). Every
+  offered research entry pins the same template, tools, output schemas, loop bounds and retrieval
+  plan, and differs only in identity, sampling, deadline and prices, so a choice changes which model
+  answers, never what the agent may read or do. The platform proposes defaults, and the owner
+  confirms them with the envelope. Nothing chooses a model at call time.
 - **The model gateway never substitutes a model** (DEC-67): a fallback may route only to another
   endpoint serving the identical pinned model; otherwise the call fails and the output counts as
   missing (§8.3). The platform withdraws a model version only through a journaled
@@ -1911,7 +1941,7 @@ invalid (V-031).
 | `autonomy.delegations` ([DEC-181](../project/04-decision-log.md#decisions)) | Classified on its own. The row above compares the rest of `autonomy` with the delegations removed from both versions, reading the new version's delegations only for what they lift. Reducing only if every change is one of the following; anything else (adding one, reordering, or changing `lifts`, `when`, or `source_approval_id`) is increasing:<br>• a delegation removed;<br>• a delegation narrowed: same `id`, `lifts`, `when`, and `source_approval_id`, with no cap larger, `starts_at` no earlier, and `expires_at` no later.<br>Expiry and exhaustion are runtime states, never versions (§6.5) |
 | Notifications | Removing a channel: increasing. Adding a channel or changing quiet hours: neutral |
 | `name` | Neutral |
-| Signal models (any change, including `max_output_age_s` and `admits_instruments`), sizing method, `description`, cadence, `daily_loss_action`, `take_profit_distance`, goal type, `on_complete`, and every path not listed | Increasing (fail safe). Turning the research agent off therefore classifies as increasing unless it is the pinning switch above, which covers the whole mode change in one row |
+| Signal models (any change, including `max_output_age_s`, `admits_instruments` and `routes`), sizing method, `description`, cadence, `daily_loss_action`, `take_profit_distance`, goal type, `on_complete`, and every path not listed | Increasing (fail safe). Turning the research agent off therefore classifies as increasing unless it is the pinning switch above, which covers the whole mode change in one row |
 
 **Risk-increasing versions require step-up authentication** (and independent approval where
 policy requires it); reducing and neutral versions take effect on owner confirmation (§2.2). MI-11
@@ -1946,7 +1976,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 464 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 477 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1959,7 +1989,7 @@ shared harness, which counts only the families it owns, by case-ID prefix.
 | Family | IDs | Covers |
 |---|---|---|
 | Schema | MC-S01 to MC-S31 | Structural rejects, including `on_complete`, the 300 s confirmation cap, per-model output age, `max_instruments` bounds, the research object, `autonomy.admission` |
-| Semantic | MC-V01 to MC-V77 | Every V-rule and warning, independent approval in a one-user workspace (V-047) and its risk-reducing exception, the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
+| Semantic | MC-V01 to MC-V90 | Every V-rule and warning, owner-chosen research routes (V-048), independent approval in a one-user workspace (V-047) and its risk-reducing exception, the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
 | Policy | MC-P01 to MC-P22 | Nearest-level reporting, each key kind, the retail profile (DEC-98), the internal research profile (DEC-103), paper-only environments, the research keys, platform maximums |
 | Risk state | MC-R01 to MC-R32 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a release's loss carry and a redeploy at the carried L, a universe change as a risk input, a split with and without a residual, at a rung's boundary and with no whole share left, and a cash dividend held until the ex-date's mark, as risk inputs (MI-33) |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |

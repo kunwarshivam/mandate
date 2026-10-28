@@ -49,6 +49,14 @@ impl BindingGateSource for GateFixture {
     fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         self.input.clone()
     }
+
+    fn config_refs(
+        &self,
+        _agent: &mandate_executor::AgentId,
+        _instrument: &mandate_accounting::InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        Some(input(AccountState::Active, false).config_refs)
+    }
 }
 
 fn decimal<T>(raw: &str, parse: impl FnOnce(&str) -> Result<T, mandate_num::NumError>) -> T {
@@ -278,6 +286,10 @@ fn gate_draft(draft: &EventDraft) -> Map<String, Json> {
         convert(&mandate_canon::Value::Object(draft.config_refs.clone())),
     );
     body.insert("payload".to_owned(), convert(&draft.payload));
+    body.insert(
+        "schema_version".to_owned(),
+        Json::from(draft.schema_version),
+    );
     body
 }
 
@@ -442,7 +454,7 @@ fn local_only_hold_uses_the_registered_schema_and_remains_a_denial() {
             .get("checks")
             .and_then(mandate_canon::Value::as_array)
             .map(|checks| checks.len()),
-        Some(8)
+        Some(9)
     );
     assert!(draft.payload.get("evaluation").is_none());
     let bytes = serde_json::to_vec(&Json::Object(gate_draft(&draft)))
@@ -760,4 +772,141 @@ fn an_advisory_allow_has_no_api_that_can_override_the_binding_denial() {
         &gate,
     );
     assert!(!submitted(&ran));
+}
+
+/// The five references journal spec §9 requires of every `GateDecided`, by key.
+const GATE_REFS: [&str; 5] = [
+    "fee_config",
+    "instrument_snapshot",
+    "mandate_version",
+    "rule_set",
+    "trading_calendar",
+];
+
+fn gate_refs(ran: &common::Ran) -> Vec<Vec<String>> {
+    ran.drafts
+        .iter()
+        .filter(|draft| draft.event_type == "GateDecided")
+        .map(|draft| {
+            draft
+                .config_refs
+                .keys()
+                .map(|key| key.as_str().to_owned())
+                .collect()
+        })
+        .collect()
+}
+
+/// A deployment that reads no configuration: no binding snapshot and no references.
+struct UnreadConfiguration;
+
+impl BindingGateSource for UnreadConfiguration {
+    fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
+        None
+    }
+
+    fn config_refs(
+        &self,
+        _agent: &mandate_executor::AgentId,
+        _instrument: &mandate_accounting::InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        None
+    }
+}
+
+/// DEC-2846: an exit's gate decision, which reads no binding snapshot (`AGENTS.md` rule 13), is
+/// journaled under the deployment's five references, as every `GateDecided` must be (journal spec
+/// §9). Before, it named none, the journal refused its whole batch, and the exit was lost. A risk
+/// exit's and a discretionary exit's decisions each name all five.
+#[test]
+fn an_exits_gate_decision_names_the_deployments_five_references() {
+    for exit in [
+        risk_exit(AAPL, "10", "149"),
+        discretionary_exit(AAPL, "10", "149"),
+    ] {
+        let (mut shell, ports) = ready_with_position();
+        let gate = GateFixture { input: None };
+        let ran = shell.run_with_binding(handoff(INTENT, AGENT, exit), &ports, &gate);
+        let decided = gate_refs(&ran);
+        assert!(!decided.is_empty(), "the exit is gated");
+        for refs in decided {
+            assert_eq!(refs, GATE_REFS, "every reference, sorted by key");
+        }
+        assert!(submitted(&ran), "and sent");
+    }
+}
+
+/// DEC-2846's fallback: an exit whose deployment reads no references cannot be journaled, so it
+/// is held, journaling nothing the journal would refuse and sending nothing, and the process
+/// alerts it (`exit_held`); the next pass that reads them receives and sends it. It is decided
+/// again, never dropped (`AGENTS.md` rule 13).
+#[test]
+fn an_exit_whose_references_do_not_read_is_held_and_goes_once_they_do() {
+    let (mut shell, ports) = ready_with_position();
+    let held = shell.step_with_binding(
+        handoff(INTENT, AGENT, risk_exit(AAPL, "10", "149")),
+        &ports,
+        &UnreadConfiguration,
+    );
+    assert!(
+        matches!(held, Err(ExecutorError::BindingGateInputMissing)),
+        "held: {held:?}"
+    );
+    assert_eq!(
+        shell.connector.total_accepted(),
+        0,
+        "nothing sent while held"
+    );
+    let ran = shell.run_with_binding(
+        handoff(INTENT, AGENT, risk_exit(AAPL, "10", "149")),
+        &ports,
+        &GateFixture { input: None },
+    );
+    assert!(submitted(&ran), "and it goes once the references read");
+    assert!(gate_refs(&ran).iter().all(|refs| refs == &GATE_REFS));
+}
+
+/// DEC-2846 and `AGENTS.md` rule 13: an input's re-gates hold one intent alone. A held exit whose
+/// deployment's references no longer read is left held at the next tick, and the tick, with every
+/// other exit, protective order and kill switch it carries, goes on: before, the re-gate's error
+/// failed the whole tick. Once the references read, the exit is decided again.
+#[test]
+fn a_tick_holds_alone_an_exit_whose_references_do_not_read() {
+    let (mut shell, ports) = ready_with_position();
+    let market_exit = mandate_executor::IntentBody::Order {
+        instrument: mandate_accounting::InstrumentId::new(AAPL).expect("an instrument"),
+        side: mandate_accounting::Side::Sell,
+        qty: qty("10"),
+        limit: None,
+        purpose: mandate_executor::Purpose::RiskExit,
+        protection: None,
+    };
+    let held = shell.run_with_binding(
+        handoff(INTENT, AGENT, market_exit),
+        &ports,
+        &GateFixture { input: None },
+    );
+    let verdicts: Vec<String> = held
+        .drafts
+        .iter()
+        .filter(|draft| draft.event_type == "GateDecided")
+        .filter_map(|draft| {
+            draft
+                .payload
+                .get("verdict")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(verdicts, ["hold"], "held, nothing to price from");
+    let tick = shell.step_with_binding(
+        mandate_executor::Input::Tick(mandate_executor::RiskClock::from_secs(1_790_002_900)),
+        &ports,
+        &UnreadConfiguration,
+    );
+    assert!(tick.is_ok(), "the tick goes on: {tick:?}");
+    assert!(
+        !submitted(&tick.expect("a tick")),
+        "and the exit stays held"
+    );
 }

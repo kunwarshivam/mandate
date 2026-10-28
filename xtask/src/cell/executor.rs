@@ -23,13 +23,17 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use super::scenario::{
-    AGENT, FOUNDER, Gesture, INSTRUMENT_FILE, MANDATE_FILE, confirm_code, deploy_code,
-    gestures_job, lines_of, point_api, reference,
+    AGENT, FOUNDER, Gesture, MANDATE_FILE, confirm_code, deploy_code, gestures_job,
+    instrument_for_run, lines_of, point_api, reference,
 };
 use super::{NAMESPACE, Verdict, kubectl, render, run_id, run_job};
 
 /// The connection the demo's mandate names; [`tests`] checks the file still names it.
 pub const CONNECTION: &str = "conn_demo_paper_01";
+/// The research workspace's own paper connection, which the research agent's mandate names
+/// (DEC-2070 item 2): its executor's ServiceAccount, its vault role and its account stream are its
+/// own, never the demo connection's.
+pub const RESEARCH_CONNECTION: &str = "conn_demo_research_paper_01";
 const JOURNAL: &str = "$(MANDATE_JOURNAL_DSN)";
 const STORE: &str = "/work/store";
 const INPUTS: &str = "/in";
@@ -86,8 +90,8 @@ pub fn account_of(id: &str) -> String {
     format!("01KACT{id:0>10.10}000000000A")
 }
 
-/// The connect check's arguments, for the executor image's `mandate-executord`.
-pub fn check_args(workspace: &str, account: &str) -> Vec<String> {
+/// The connect check's arguments for `connection`, for the executor image's `mandate-executord`.
+pub fn check_args(workspace: &str, account: &str, connection: &str) -> Vec<String> {
     [
         "connect-check",
         "--workspace",
@@ -95,7 +99,7 @@ pub fn check_args(workspace: &str, account: &str) -> Vec<String> {
         "--account",
         account,
         "--connection",
-        CONNECTION,
+        connection,
         "--pii-ref",
         "pii_01KDEX0000000000000000000P",
     ]
@@ -139,12 +143,20 @@ pub fn ticking(first: Option<u64>, second: Option<u64>) -> bool {
 
 /// The executor's connect check for `account` in `workspace`, as the one-off Job run `run`: the
 /// passing `ConnectionChecked`'s event id, or the Job's logs when it did not pass.
-pub fn connect_check(run: &str, workspace: &str, account: &str) -> Result<Result<String, String>> {
+pub fn connect_check(
+    run: &str,
+    workspace: &str,
+    account: &str,
+    connection: &str,
+) -> Result<Result<String, String>> {
     let check = render(
         &[
             format!("run.id=\"{run}\""),
             "run.process=\"connect-check\"".into(),
-            format!("run.args={}", json!(check_args(workspace, account))),
+            format!(
+                "run.args={}",
+                json!(check_args(workspace, account, connection))
+            ),
         ],
         Some("templates/run.yaml"),
     )?;
@@ -387,11 +399,7 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
             "mandate.json",
             String::from_utf8(mandate).context("the mandate is not UTF-8")?,
         ),
-        (
-            "instrument.json",
-            fs::read_to_string(INSTRUMENT_FILE)
-                .with_context(|| format!("reading {INSTRUMENT_FILE}"))?,
-        ),
+        ("instrument.json", instrument_for_run()?),
     ];
     let recorded = if seeded {
         let (done, logs) = gestures(&id, "o", &workspace_opened(&workspace), &files)?;
@@ -402,7 +410,7 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
         }
         None
     } else {
-        let checked = match connect_check(&format!("{id}c"), &workspace, &account)? {
+        let checked = match connect_check(&format!("{id}c"), &workspace, &account, CONNECTION)? {
             Ok(checked) => checked,
             Err(logs) => {
                 return Ok(Verdict::Broken(format!(

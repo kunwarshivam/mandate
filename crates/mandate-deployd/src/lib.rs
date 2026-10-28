@@ -50,7 +50,7 @@ impl ControlJournal for PgControl {
 
     async fn append(
         &mut self,
-        draft: &[u8],
+        drafts: &[&[u8]],
         recorded_at: UtcNanos,
     ) -> Result<AppendOutcome, Unavailable> {
         let epoch = self
@@ -64,7 +64,7 @@ impl ControlJournal for PgControl {
             .await
             .map_err(|_| Unavailable)?;
         self.journal
-            .append(&self.stream, head.seq, epoch, recorded_at, &[draft])
+            .append(&self.stream, head.seq, epoch, recorded_at, drafts)
             .await
             .map_err(|_| Unavailable)
     }
@@ -102,14 +102,14 @@ impl ControlJournal for MemoryControl {
 
     async fn append(
         &mut self,
-        draft: &[u8],
+        drafts: &[&[u8]],
         recorded_at: UtcNanos,
     ) -> Result<AppendOutcome, Unavailable> {
         let epoch = self.journal.take_ownership(&self.stream);
         let head = self.journal.head(&self.stream).seq;
         Ok(self
             .journal
-            .append(&self.stream, head, epoch, recorded_at, &[draft]))
+            .append(&self.stream, head, epoch, recorded_at, drafts))
     }
 }
 

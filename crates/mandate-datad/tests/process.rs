@@ -1,6 +1,6 @@
 //! The `mandate-datad` process: it stores the series before it answers ready, its `exec` probe
 //! answers over the probe socket, and on SIGTERM it drains and exits cleanly (DEC-994 item 5). It
-//! writes only under its store root and reaches no host.
+//! writes only under its store root, and the recording reaches no host.
 
 #![allow(
     clippy::disallowed_methods,
@@ -20,7 +20,7 @@ const BOUND: Duration = Duration::from_secs(20);
 /// The demo instruments' series, as the chart starts the process.
 const SERIES: [&str; 2] = [
     "--instruments",
-    "SPY:b0b6dd9d-8b9b-48a9-ba46-b9d54906e415:2026-01-02=600,\
+    "SPY:b28f4066-5c6d-479b-a2af-85dc1a8f16fb:2026-01-02=600,\
      QQQ:eb82ffb0-efd6-4f4e-9307-8fead28e04f6:2026-01-02=500",
 ];
 /// The symbols [`SERIES`] names, in its order.
@@ -96,7 +96,7 @@ fn without_its_arguments_the_process_refuses() {
                 "--artifacts",
                 "/a",
                 "--instruments",
-                "SPY:b0b6dd9d-8b9b-48a9-ba46-b9d54906e415:2026-01-02",
+                "SPY:b28f4066-5c6d-479b-a2af-85dc1a8f16fb:2026-01-02",
             ],
             "instruments_malformed\n",
         ),
@@ -227,4 +227,70 @@ fn the_ready_process_has_stored_the_series_and_drains_on_sigterm() {
         "a stopped process is not ready"
     );
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// DEC-2283: the IEX source refuses to start without its arguments, on a store that is not an
+/// `alpaca-iex` root, and an unknown source is refused, each before reaching any host.
+#[test]
+fn the_iex_source_refuses_to_start_without_what_it_needs() {
+    let probe = scratch("iex-args").join("probe.sock");
+    let probe = probe.to_str().unwrap().to_owned();
+    let base = |extra: &[&str]| -> Vec<String> {
+        let mut args = vec!["run".to_owned(), "--probe".to_owned(), probe.clone()];
+        args.extend(extra.iter().map(|a| (*a).to_owned()));
+        args
+    };
+    let run = |args: Vec<String>| {
+        let output = Command::new(BIN).args(&args).output().unwrap();
+        (
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        )
+    };
+    assert_eq!(
+        run(base(&["--source", "alpaca-iex", "--workspace", "ws"])),
+        (Some(2), "iex_arguments_missing".to_owned())
+    );
+    assert_eq!(
+        run(base(&[
+            "--source",
+            "alpaca-iex",
+            "--workspace",
+            "ws",
+            "--store",
+            "/nowhere/cell-recorded",
+            "--artifacts",
+            "/nowhere",
+            "--vault-address",
+            "https://127.0.0.1:1",
+            "--vault-dir",
+            "/nowhere",
+        ])),
+        (
+            Some(2),
+            "data_start_failed: store_not_generations".to_owned()
+        )
+    );
+    assert_eq!(
+        run(base(&[
+            "--source",
+            "alpaca-iex",
+            "--workspace",
+            "ws",
+            "--store",
+            "/nowhere/alpaca-iex",
+            "--artifacts",
+            "/nowhere",
+            "--vault-address",
+            "https://127.0.0.1:1",
+            "--vault-dir",
+            "/nowhere",
+        ])),
+        (Some(2), "data_start_failed: vault_ca_unreadable".to_owned()),
+        "the CA is read before anything is asked of the vault"
+    );
+    assert_eq!(
+        run(base(&["--source", "sip"])),
+        (Some(2), "source_unknown".to_owned())
+    );
 }

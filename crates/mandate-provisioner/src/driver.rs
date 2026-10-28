@@ -134,7 +134,7 @@ impl<J: ControlJournal, V: RoleProvisioner, A: Alerts> Provisioner<J, V, A> {
             let record = draft(&self.identity, &step, outcome, &environment, now);
             match self
                 .journal
-                .append(&record, now)
+                .append(&[&record], now)
                 .await
                 .map_err(|_| Halt::Journal)?
             {

@@ -52,7 +52,16 @@ DELIBERATE: dict[str, str] = {
     "read-models/alerts.schema.json/$defs/Alert/allOf/0/if/properties/kind/enum gains a value": "the value the mutant adds is not in `kind`'s own enum, so no instance that carries it is valid whatever the `if` reads (DEC-2141)",
     "read-models/alerts.schema.json/$defs/Alert/properties/class/enum gains a value": "the `allOf` pins `class` to `info` or `safety` for every kind, so an added value is refused whatever the enum holds (DEC-2141)",
     "read-models/alerts.schema.json/$defs/AlertStream/properties/type/enum gains a value": "each `oneOf` branch pins `type` to one constant, so an added value matches no branch (DEC-2141)",
+    "read-models/approval.schema.json/$defs/ApprovalDetail/allOf/1/if/required drops schema_version": "`schema_version` is required by `ApprovalDetail` itself, so an instance without it fails whatever the `if` reads (DEC-2518)",
     "read-models/session.schema.json/allOf/1/if/required drops kind": "`kind` is required by the session itself, so an instance without it fails whatever the `if` reads (DEC-2113)",
+    "read-models/acknowledgments.schema.json/$defs/Hold/allOf/0/if/required drops subject": "`subject` is required by `Hold` itself, so an instance without it fails whatever the `if` reads (DEC-2144)",
+    "read-models/acknowledgments.schema.json/$defs/Hold/allOf/1/if/required drops subject": "`subject` is required by `Hold` itself, so an instance without it fails whatever the `if` reads (DEC-2144)",
+    "read-models/acknowledgments.schema.json/$defs/Hold/allOf/2/if/required drops subject": "`subject` is required by `Hold` itself, so an instance without it fails whatever the `if` reads (DEC-2144)",
+    "read-models/acknowledgments.schema.json/$defs/Hold/allOf/0/then/properties/reason/required drops limit": "the limit's `not` excludes every other member and `Reason` has at least one, so a limit's reason without `limit` is refused whatever `required` holds (DEC-2144)",
+    "read-models/acknowledgments.schema.json/$defs/Hold/allOf/1/then/properties/reason/required drops cause": "the restriction's `not` excludes every other member and `Reason` has at least one, so a restriction's reason without `cause` is refused whatever `required` holds (DEC-2144)",
+    "read-models/acknowledgments.schema.json/$defs/Hold/properties/mode/oneOf/0/enum gains a value": "each subject's `then` pins `mode` to `null` or to `exits_only` and `paused`, so an added value is refused whatever this enum holds (DEC-2144)",
+    "read-models/acknowledgments.schema.json/$defs/Hold/allOf/1/then/properties/mode/enum gains a value": "`mode` is also `Hold`'s own, whose enum refuses any added value (DEC-2144)",
+    "read-models/acknowledgments.schema.json/$defs/Hold/allOf/2/then/properties/mode/enum gains a value": "`mode` is also `Hold`'s own, whose enum refuses any added value (DEC-2144)",
 }
 
 

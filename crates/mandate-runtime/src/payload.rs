@@ -487,6 +487,14 @@ pub(crate) const WORKING_ORDER_LIMIT: &str = "working_order_limit";
 /// request version can both bind no plan and name a deferral, so the runtime refuses it itself
 /// rather than ask no one unseen (DEC-2810, DEC-2515 item 1).
 pub(crate) const PLAN_REQUIRED: &str = "plan_required";
+/// An opening classified `ask` whose decision cannot be bound for an approval request: no
+/// `decided_by` label, or a `combined_score` that is not a decimal (DEC-2814).
+pub(crate) const ASK_UNBOUND: &str = "ask_unbound";
+/// An opening classified `ask` whose builder plan names another asset class than the order
+/// (journal spec rule 136; DEC-2814).
+pub(crate) const PLAN_MISMATCH: &str = "plan_mismatch";
+/// An opening classified `ask` whose approval content object or hash cannot be written (DEC-2814).
+pub(crate) const CONTENT_UNHASHABLE: &str = "content_unhashable";
 pub(crate) const REASON_STARTUP_HOLD: &str = "awaiting_reconciliation";
 pub(crate) const REASON_OWNER_PAUSE: &str = "owner_pause";
 pub(crate) const REASON_OWNER_RESUME: &str = "owner_resume";

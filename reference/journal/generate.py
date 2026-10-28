@@ -33,9 +33,15 @@ from pathlib import Path
 
 import account
 import account_activity
+import fill_applied
+import exit_intents
+import gate_v3
 import account_clock
+import news
 import account_closes
 import account_restrictions
+import reconciliation_acks
+import restriction_lifts
 import account_switches
 import acknowledgments
 import approval
@@ -4268,10 +4274,16 @@ def render(
     stepped_up_section: dict,
     real_money_section: dict,
     account_restrictions_section: dict,
+    restriction_lifts_section: dict,
+    reconciliation_acks_section: dict,
     account_switches_section: dict,
     snapshots_section: dict,
     account_activity_section: dict,
+    fill_applied_section: dict,
     account_clock_section: dict,
+    news_section: dict,
+    exit_intents_section: dict,
+    gate_v3_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -4328,10 +4340,16 @@ def render(
             "stepped_up_records": stepped_up_section,
             "real_money": real_money_section,
             "account_restrictions": account_restrictions_section,
+            "restriction_lifts": restriction_lifts_section,
+            "reconciliation_acknowledgments": reconciliation_acks_section,
             "account_switches": account_switches_section,
             "account_activity": account_activity_section,
+            "fill_applied": fill_applied_section,
             "account_clock": account_clock_section,
             "snapshot_prior_close": snapshots_section,
+            "news_stream": news_section,
+            "exit_intents": exit_intents_section,
+            "gate_v3": gate_v3_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -4419,10 +4437,16 @@ def main(argv: list[str] | None = None) -> int:
     stepped_up_section = stepped_up.build_section()
     real_money_section = real_money.build_section()
     account_restrictions_section = account_restrictions.build_section()
+    restriction_lifts_section = restriction_lifts.build_section()
+    reconciliation_acks_section = reconciliation_acks.build_section()
     account_switches_section = account_switches.build_section()
     account_activity_section = account_activity.build_section()
+    fill_applied_section = fill_applied.build_section()
     account_clock_section = account_clock.build_section()
     snapshots_section = snapshots.build_section()
+    news_section = news.build_section()
+    exit_intents_section = exit_intents.build_section()
+    gate_v3_section = gate_v3.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -4498,14 +4522,26 @@ def main(argv: list[str] | None = None) -> int:
     problems += real_money.run_mutants(real_money_section)
     problems += account_restrictions.check_section(account_restrictions_section)
     problems += account_restrictions.run_mutants(account_restrictions_section)
+    problems += restriction_lifts.check_section(restriction_lifts_section)
+    problems += restriction_lifts.run_mutants(restriction_lifts_section)
+    problems += reconciliation_acks.check_section(reconciliation_acks_section)
+    problems += reconciliation_acks.run_mutants(reconciliation_acks_section)
     problems += account_switches.check_section(account_switches_section)
     problems += account_switches.run_mutants(account_switches_section)
     problems += account_activity.check_section(account_activity_section)
     problems += account_activity.run_mutants(account_activity_section)
+    problems += fill_applied.check_section(fill_applied_section)
+    problems += fill_applied.run_mutants(fill_applied_section)
+    problems += exit_intents.check_section(exit_intents_section)
+    problems += exit_intents.run_mutants(exit_intents_section)
+    problems += gate_v3.check_section(gate_v3_section)
+    problems += gate_v3.run_mutants(gate_v3_section)
     problems += account_clock.check_section(account_clock_section)
     problems += account_clock.run_mutants(account_clock_section)
     problems += snapshots.check_section(snapshots_section)
     problems += snapshots.run_mutants(snapshots_section)
+    problems += news.check_section(news_section)
+    problems += news.run_mutants(news_section)
     problems += connection_requested.check_section(connection_requested_section)
     problems += connection_requested.run_mutants(connection_requested_section)
     problems += check_broker_profile(broker_profile)
@@ -4595,10 +4631,16 @@ def main(argv: list[str] | None = None) -> int:
         stepped_up_section,
         real_money_section,
         account_restrictions_section,
+        restriction_lifts_section,
+        reconciliation_acks_section,
         account_switches_section,
         snapshots_section,
         account_activity_section,
+        fill_applied_section,
         account_clock_section,
+        news_section,
+        exit_intents_section,
+        gate_v3_section,
     )
     reread = yaml.safe_load(rendered)
     canonical_self_test()
@@ -4655,10 +4697,16 @@ def main(argv: list[str] | None = None) -> int:
         or stepped_up.check_section(reread["stepped_up_records"])
         or real_money.check_section(reread["real_money"])
         or account_restrictions.check_section(reread["account_restrictions"])
+        or restriction_lifts.check_section(reread["restriction_lifts"])
+        or reconciliation_acks.check_section(reread["reconciliation_acknowledgments"])
         or account_switches.check_section(reread["account_switches"])
         or account_activity.check_section(reread["account_activity"])
+        or fill_applied.check_section(reread["fill_applied"])
+        or exit_intents.check_section(reread["exit_intents"])
+        or gate_v3.check_section(reread["gate_v3"])
         or account_clock.check_section(reread["account_clock"])
         or snapshots.check_section(reread["snapshot_prior_close"])
+        or news.check_section(reread["news_stream"])
         or connection_roles.check_section(reread["connection_roles"])
         or connection_requested.check_section(reread["connection_requested"])
     ):
@@ -4689,8 +4737,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(deferred_section['invalid_drafts'])} invalid and {len(deferred_section['valid_drafts'])} valid "
         f"version-3 DecisionMade drafts, {len(DEFERRED_VALIDATOR_MUTANTS)} validator and 2 vector mutants caught; "
         f"{len(deferrals_section['invalid_drafts'])} invalid and {len(deferrals_section['valid_drafts'])} valid "
-        f"version-3 ApprovalRequested drafts and {len(deferrals_section['batches'])} rule-292 batches, "
-        f"{len(approval_deferrals.VALIDATOR_MUTANTS)} validator and "
+        f"version-3 ApprovalRequested drafts, {len(deferrals_section['batches'])} rule-292 batches and "
+        f"{len(deferrals_section['ranges'])} approval_deferral_mismatch ranges, "
+        f"{len(approval_deferrals.VALIDATOR_MUTANTS)} validator, {len(approval_deferrals.RANGE_MUTANTS)} range and "
         f"{len(approval_deferrals.vector_mutants(deferrals_section))} vector mutants caught; "
         f"{len(control_section['chain'])} control-stream events, {len(control_section['drafts'])} base drafts, "
         f"{len(control_section['journaled_facts'])} journaled facts, {len(control_section['invalid_drafts'])} invalid "
@@ -4761,14 +4810,28 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(real_money.VALIDATOR_MUTANTS)} validator, {len(real_money.FOLD_MUTANTS)} fold and "
         f"{len(real_money.vector_mutants(real_money_section))} vector mutants caught; "
         f"{len(account_restrictions_section['invalid_drafts'])} invalid and {len(account_restrictions_section['valid_drafts'])} valid "
-        f"AccountRestrictionChanged drafts, {len(account_restrictions.VALIDATOR_MUTANTS)} validator and "
+        f"AccountRestrictionChanged drafts and {len(account_restrictions_section['streams'])} rule-309 streams, "
+        f"{len(account_restrictions.VALIDATOR_MUTANTS)} validator, {len(account_restrictions.STREAM_MUTANTS)} stream and "
         f"{len(account_restrictions.vector_mutants(account_restrictions_section))} vector mutants caught; "
+        f"{len(restriction_lifts_section['invalid_drafts'])} invalid and {len(restriction_lifts_section['valid_drafts'])} valid "
+        f"restriction-lift drafts, {len(restriction_lifts_section['streams'])} rule-309-to-312 streams and "
+        f"{restriction_lifts.FUZZ_STREAMS} fuzzed, {len(restriction_lifts.STREAM_MUTANTS)} stream and "
+        f"{len(restriction_lifts.vector_mutants(restriction_lifts_section))} vector mutants caught; "
         f"{len(account_switches_section['invalid_drafts'])} invalid and {len(account_switches_section['valid_drafts'])} valid "
         f"account KillSwitchActivated drafts, {len(account_switches.VALIDATOR_MUTANTS)} validator and "
         f"{len(account_switches.vector_mutants(account_switches_section))} vector mutants caught; "
         f"{len(account_activity_section['invalid_drafts'])} invalid and {len(account_activity_section['valid_drafts'])} valid "
         f"account activity drafts, {len(account_activity.VALIDATOR_MUTANTS)} validator and "
         f"{len(account_activity.vector_mutants(account_activity_section))} vector mutants caught; "
+        f"{len(fill_applied_section['invalid_drafts'])} invalid and {len(fill_applied_section['valid_drafts'])} valid "
+        f"version-2 FillApplied drafts, {len(fill_applied.VALIDATOR_MUTANTS)} validator and "
+        f"{len(fill_applied.vector_mutants(fill_applied_section))} vector mutants caught; "
+        f"{len(exit_intents_section['invalid_drafts'])} invalid and {len(exit_intents_section['valid_drafts'])} valid "
+        f"exit intent drafts, {len(exit_intents.VALIDATOR_MUTANTS)} validator and "
+        f"{len(exit_intents.vector_mutants(exit_intents_section))} vector mutants caught; "
+        f"{len(gate_v3_section['invalid_drafts'])} invalid and {len(gate_v3_section['valid_drafts'])} valid "
+        f"version-3 GateDecided drafts, {len(gate_v3.VALIDATOR_MUTANTS)} validator and "
+        f"{len(gate_v3.vector_mutants(gate_v3_section))} vector mutants caught; "
         f"{len(account_clock_section['invalid_drafts'])} invalid and {len(account_clock_section['valid_drafts'])} valid "
         f"account ClockAdvanced drafts, {len(account_clock.VALIDATOR_MUTANTS)} validator and "
         f"{len(account_clock.vector_mutants(account_clock_section))} vector mutants caught; "
@@ -4776,6 +4839,9 @@ def main(argv: list[str] | None = None) -> int:
         f"version-2 AccountSnapshotRecorded drafts, {len(snapshots_section['readings'])} readings, "
         f"{len(snapshots.VALIDATOR_MUTANTS)} validator, {len(snapshots.READING_MUTANTS)} reading and "
         f"{len(snapshots.vector_mutants(snapshots_section))} vector mutants caught; "
+        f"{len(news_section['invalid_drafts'])} invalid and {len(news_section['valid_drafts'])} valid "
+        f"news-stream drafts, {len(news_section['streams'])} rule-284 and rule-285 streams, "
+        f"{len(news.VALIDATOR_MUTANTS)} validator and {len(news.vector_mutants(news_section))} vector mutants caught; "
         f"{len(connection_requested_section['invalid_drafts'])} invalid and {len(connection_requested_section['valid_drafts'])} valid "
         f"rule-255 ConnectionRequested drafts, {len(connection_requested.VALIDATOR_MUTANTS)} validator and "
         f"{len(connection_requested.vector_mutants(connection_requested_section))} vector mutants caught; "

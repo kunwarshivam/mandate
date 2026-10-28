@@ -17,8 +17,9 @@ use mandate_builder::{
 };
 use mandate_domain::{AssetClass as DomainAssetClass, Environment, MarketSession};
 use mandate_executor::{
-    BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource, FillConfigRefs,
-    InstrumentSnapshot, MandateVersion, MandateView as ExecutorMandateView,
+    AccountFillRefs, BindingGateConfigRefs, BindingGateInput, BindingGateRequest,
+    BindingGateSource, FillConfigRefs, InstrumentSnapshot, MandateVersion,
+    MandateView as ExecutorMandateView,
 };
 use mandate_num::{
     CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, ShareIncrement, Signed, SizeFraction,
@@ -31,8 +32,8 @@ use mandate_spec::context::stop_limit_asset_classes;
 use mandate_spec::document::{Protection, ProvenanceMap};
 use mandate_time::{Date, UtcNanos};
 
-use mandate_gate_inputs::fill_refs;
 pub(super) use mandate_gate_inputs::stop_limit_offset;
+use mandate_gate_inputs::{account_fill_refs, fill_refs};
 
 use super::artifacts::Artifacts;
 use super::facts::{BrokerFacts, PaperFacts};
@@ -256,6 +257,11 @@ impl InstrumentSnapshot for ReconcilingPaperContext {
             .then(|| fill_refs(&self.config_refs))
             .flatten()
     }
+
+    /// The registered fee configuration and calendar, whatever the instrument (DEC-2817).
+    fn account_fill_refs(&self) -> Option<AccountFillRefs> {
+        account_fill_refs(&self.config_refs)
+    }
 }
 
 impl BindingGateSource for ReconcilingPaperContext {
@@ -263,6 +269,16 @@ impl BindingGateSource for ReconcilingPaperContext {
     /// asked about: the own-fill reconciliation never sends one (DEC-955 item 5).
     fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         None
+    }
+
+    /// The registered references, for the reviewed agent's asset only (DEC-2846).
+    fn config_refs(
+        &self,
+        agent: &mandate_executor::AgentId,
+        instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        self.reviewed(agent, instrument)
+            .then(|| self.config_refs.clone())
     }
 }
 
@@ -460,9 +476,26 @@ impl InstrumentSnapshot for TrustedPaperContext {
         }
         fill_refs(&self.template.config_refs)
     }
+
+    /// The registered fee configuration and calendar, which an unattributed fill in any other
+    /// instrument is accounted under (DEC-2817).
+    fn account_fill_refs(&self) -> Option<AccountFillRefs> {
+        account_fill_refs(&self.template.config_refs)
+    }
 }
 
 impl BindingGateSource for TrustedPaperContext {
+    /// The template's references, which every gate record of the reviewed agent's asset names
+    /// (DEC-2846); none for any other.
+    fn config_refs(
+        &self,
+        agent: &mandate_executor::AgentId,
+        instrument: &InstrumentId,
+    ) -> Option<BindingGateConfigRefs> {
+        self.reviewed(agent, instrument)
+            .then(|| self.template.config_refs.clone())
+    }
+
     /// The template, with the quote the run last handed the gate ([`GateQuote`], DEC-943 item 2)
     /// and `mandate-accounting`'s fee reservation of the very order the executor asks about. An
     /// order it cannot price gets no input, so the gate refuses it.

@@ -10,7 +10,8 @@
 //! - `GET /v2/account/activities`: its fills as `FILL` activities, oldest first, after the
 //!   `page_token` the client sends;
 //! - `POST /v2/orders`: an order accepted, or `422` for a `client_order_id` it already holds, as
-//!   Alpaca answers; a bracket or an OCO with its two legs; a sell of more than the position
+//!   Alpaca answers; a `symbol` that is one of [`ASSETS`]' asset ids is that asset's, and every
+//!   answer, position and fill names it by its ticker, as Alpaca's do (DEC-938 item 1); a bracket or an OCO with its two legs; a sell of more than the position
 //!   less what open sells hold (an OCO's or a bracket's legs once), none held included, `403`
 //!   with code 40310000, refused before anything changes, since there are no short sales
 //!   (`AGENTS.md` rule 12);
@@ -22,13 +23,16 @@
 //!   `canceled`; `422` for one no longer open).
 //!
 //! [`FixturePaper::new`] fills nothing: every order rests. [`FixturePaper::filling`] fills a limit
-//! order whole at its limit when it is placed, a simple order or a bracket's entry, buy or sell;
-//! the bracket's legs then rest. The submission's answer is the order as Alpaca accepts it, before
-//! the fill, which later reads report, as a marketable order's would. An OCO, a stop and a market
-//! order rest, since the fixture has no price. The serving process with no paper credential runs
-//! over [`FixturePaper::filling`], so the cell's trade loop fills (X1b-3). A fill names the broker's order id and no client order id, as Alpaca's activity does
-//! (DEC-2353), and Alpaca paper does not simulate regulatory fees (trading spec §11), so a fill
-//! moves the cash by its notional alone.
+//! order whole when it is placed, a simple order or a bracket's entry, buy or sell, as a venue
+//! would (E21-30): for one of [`ASSETS`], at the touch (its ask for a buy, its bid for a sell)
+//! when the limit reaches it, and not at all, so it rests, when it does not; for any other symbol,
+//! which the fixture has no price for, at its limit. The bracket's legs then rest. The submission's
+//! answer is the order as Alpaca accepts it, before the fill, which later reads report, as a
+//! marketable order's would. An OCO, a stop and a market order rest, since the fixture prices
+//! none. The serving process with no paper credential runs over [`FixturePaper::filling`], so the
+//! cell's trade loop fills (X1b-3). A fill names the broker's order id and no client order id, as
+//! Alpaca's activity does (DEC-2353), and Alpaca paper does not simulate regulatory fees (trading
+//! spec §11), so a fill moves the cash by its notional alone.
 //!
 //! Every other request is `404`. Ids are a counter in UUID form, so a run is deterministic.
 //!
@@ -52,17 +56,20 @@ use mandate_time::UtcNanos;
 /// The fixture account's cash, equity and buying power: a paper account of 100,000 dollars.
 pub const CASH: &str = "100000";
 
-/// The fixture's assets: symbol, listing exchange as Alpaca writes it, and the latest quote's bid
-/// and ask. The cell's deployments trade SPY and QQQ.
+/// The fixture's assets: symbol, asset id, listing exchange as Alpaca writes it, and the latest
+/// quote's bid and ask. The cell's deployments trade SPY and QQQ, each named by the asset id its
+/// instrument snapshot registers ([DEC-2813](../../../docs/project/decisions/DEC-2813.md)).
 pub const ASSETS: [FixtureAsset; 2] = [
     FixtureAsset {
         symbol: "SPY",
+        asset_id: "b28f4066-5c6d-479b-a2af-85dc1a8f16fb",
         exchange: "ARCA",
         bid: "580.11",
         ask: "580.13",
     },
     FixtureAsset {
         symbol: "QQQ",
+        asset_id: "eb82ffb0-efd6-4f4e-9307-8fead28e04f6",
         exchange: "NASDAQ",
         bid: "500.21",
         ask: "500.23",
@@ -73,18 +80,40 @@ pub const ASSETS: [FixtureAsset; 2] = [
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FixtureAsset {
     pub symbol: &'static str,
+    pub asset_id: &'static str,
     pub exchange: &'static str,
     pub bid: &'static str,
     pub ask: &'static str,
 }
 
 /// The listed asset `symbol`, if the fixture lists it.
-fn listed(symbol: &str) -> Option<(usize, FixtureAsset)> {
-    ASSETS
-        .iter()
-        .copied()
-        .enumerate()
-        .find(|(_, asset)| asset.symbol == symbol)
+fn listed(symbol: &str) -> Option<FixtureAsset> {
+    ASSETS.iter().copied().find(|asset| asset.symbol == symbol)
+}
+
+/// A limit the fixture cannot read as a decimal of at most nine places, which it refuses as the
+/// request body Alpaca would not take.
+struct Unpriceable;
+
+/// What a limit `order` fills at when it is placed (E21-30), as a venue fills it: for one of
+/// [`ASSETS`], at the touch when the limit reaches it, its ask for a buy and its bid for a sell,
+/// and nothing, so it rests, when it does not; for any other symbol, which the fixture has no
+/// price for, at its limit. `None` for an order with no limit.
+fn touch_price(order: &Order) -> Result<Option<String>, Unpriceable> {
+    let Some(limit) = order.limit_price.clone() else {
+        return Ok(None);
+    };
+    let at = scaled(&limit).ok_or(Unpriceable)?;
+    let Some(asset) = listed(&order.symbol) else {
+        return Ok(Some(limit));
+    };
+    let touch = |price: &'static str| scaled(price).ok_or(Unpriceable);
+    let (price, reaches) = if order.side == "buy" {
+        (asset.ask, at >= touch(asset.ask)?)
+    } else {
+        (asset.bid, at <= touch(asset.bid)?)
+    };
+    Ok(reaches.then(|| price.to_owned()))
 }
 
 /// The clock a quote is stamped by: the reader's own, so the fixture never ages its quote.
@@ -193,11 +222,10 @@ impl Books {
             .collect()
     }
 
-    /// Fills `index`'s order whole at its limit: its status and fill, the `FILL` activity naming
+    /// Fills `index`'s order whole at `price`: its status and fill, the `FILL` activity naming
     /// its broker id, the holding, and the cash by the notional. Its legs, held until now, rest.
-    fn fill(&mut self, index: usize) -> Option<()> {
+    fn fill(&mut self, index: usize, price: String) -> Option<()> {
         let order = self.orders.get(index)?.clone();
-        let price = order.limit_price.clone()?;
         let qty = scaled(&order.qty)?;
         let notional = qty.checked_mul(scaled(&price)?)?.checked_div(SCALE)?;
         let holding = self.holdings.entry(order.symbol.clone()).or_default();
@@ -274,8 +302,9 @@ impl FixturePaper {
         listed(symbol).map(|_| false)
     }
 
-    /// A broker with an empty book whose records are stamped `at`, that fills each limit order
-    /// whole at its limit when it is placed (X1b-3): the cell's fixture once its orders fill.
+    /// A broker with an empty book whose records are stamped `at`, that fills each marketable
+    /// limit order whole at the touch when it is placed (X1b-3, E21-30): the cell's fixture once
+    /// its orders fill.
     pub fn filling(at: UtcNanos) -> Self {
         Self {
             fills: true,
@@ -330,7 +359,7 @@ impl FixturePaper {
             (Method::Post, "/v2/orders") => self.submit(request.body()),
             (Method::Get, route) if route.starts_with("/v2/assets/") => {
                 match route.strip_prefix("/v2/assets/").and_then(listed) {
-                    Some((index, asset)) => ok(asset_json(index, asset)),
+                    Some(asset) => ok(asset_json(asset)),
                     None => refusal(404, 40_410_000, "asset not found"),
                 }
             }
@@ -369,7 +398,7 @@ impl FixturePaper {
                 .and_then(Value::as_str)
                 .map(str::to_owned)
         };
-        let (Some(client_order_id), Some(symbol), Some(side), Some(order_type)) = (
+        let (Some(client_order_id), Some(named), Some(side), Some(order_type)) = (
             text("client_order_id"),
             text("symbol"),
             text("side"),
@@ -377,6 +406,10 @@ impl FixturePaper {
         ) else {
             return refusal(422, 40_010_000, "request body is not valid");
         };
+        let symbol = ASSETS
+            .iter()
+            .find(|asset| asset.asset_id == named)
+            .map_or(named, |asset| asset.symbol.to_owned());
         let mut books = self.books.borrow_mut();
         if books
             .orders
@@ -450,15 +483,21 @@ impl FixturePaper {
             }
             _ => base,
         };
-        let fills = self.fills
-            && class != "oco"
-            && first.order_type == "limit"
-            && first.limit_price.is_some();
+        let price = if self.fills && class != "oco" && first.order_type == "limit" {
+            match touch_price(&first) {
+                Ok(price) => price,
+                Err(Unpriceable) => return refusal(422, 40_010_000, "request body is not valid"),
+            }
+        } else {
+            None
+        };
         books.orders.push(first);
         let index = books.orders.len().saturating_sub(1);
         books.orders.extend(legs);
         let accepted = nested(&books.group(&id), &self.at);
-        if fills && books.fill(index).is_none() {
+        if let Some(price) = price
+            && books.fill(index, price).is_none()
+        {
             return refusal(422, 40_010_000, "request body is not valid");
         }
         ok(accepted)
@@ -597,7 +636,7 @@ impl FixturePaper {
             .and_then(|rest| rest.strip_suffix("/quotes/latest?feed=iex"))
             .and_then(listed);
         match (asset, &self.quotes) {
-            (Some((_, asset)), Some(QuoteClock(clock))) => {
+            (Some(asset), Some(QuoteClock(clock))) => {
                 let quote = format!(
                     r#"{{"quote":{{"ap":{},"as":100,"ax":"V","bp":{},"bs":100,"bx":"V","c":["R"],"t":"{}","z":"B"}},"symbol":"{}"}}"#,
                     asset.ask,
@@ -616,20 +655,15 @@ impl FixturePaper {
 }
 
 /// One of [`ASSETS`] as Alpaca's asset record: a US equity, active, tradable and fractionable,
-/// with an empty `attributes` list, so neither an IPO nor a PTP. Its id is the asset's place in
-/// the list in UUID form, apart from the order ids' counter by its high digit.
-fn asset_json(index: usize, asset: FixtureAsset) -> Value {
-    let id = format!(
-        "a0000000-0000-4000-8000-{:012}",
-        u64::try_from(index).unwrap_or(u64::MAX)
-    );
+/// with an empty `attributes` list, so neither an IPO nor a PTP, under its asset id.
+fn asset_json(asset: FixtureAsset) -> Value {
     object(vec![
         ("attributes", Value::Array(Vec::new())),
         ("class", s("us_equity")),
         ("easy_to_borrow", Value::Bool(true)),
         ("exchange", s(asset.exchange)),
         ("fractionable", Value::Bool(true)),
-        ("id", s(&id)),
+        ("id", s(asset.asset_id)),
         ("maintenance_margin_requirement", s("30")),
         ("marginable", Value::Bool(true)),
         ("name", s(asset.symbol)),

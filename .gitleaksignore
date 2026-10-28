@@ -1,0 +1,21 @@
+# Gitleaks fingerprints (DEC-2647): each line skips exactly one finding, one rule on one line of
+# one file in one commit, `<40-hex commit>:<path>:<rule>:<line>`. They are test-fixture values that
+# the whole-history scan (`cargo xtask ci nightly-gitleaks`) found in commits whose files no longer
+# hold them, so no `.gitleaks.toml` entry, which allows a value in a file at every commit, is needed.
+# A real key anywhere, the same value again in the same file, or any other commit is still reported.
+# A line without its commit would skip that file's line in every commit, so `cargo xtask ci
+# supply-chain` refuses one, and plants a two-commit repository to prove the narrowness.
+#
+# The API server's catalogue test: a JWT built for a client-credential case, with an ES256 header
+# and only `sub` and `scope` claims, no issuer, audience or expiry.
+7844e43b2dd2acf98c6aefc7048d021b486c7ca7:crates/mandate-api-server/tests/catalogue_http.rs:generic-api-key:1457
+# The web client's step-up test: an example `webauthn_challenge`, 32 bytes; a challenge is public.
+761e79b1355d8a20ac2a9b5d55be954fbea819c2:web/src/api/client.test.ts:generic-api-key:457
+# The executor's and the Alpaca connector's vault tests: key-ID-shaped sentinels the tests check
+# never reach output.
+5b5dc187cb582186853a9cf812ca9fce5529c367:crates/mandate-executord/tests/paper_credential.rs:alpaca-key-id:31
+4da6a99a44dd4f7532c3b4144fcc14aa767eaa6d:crates/mandate-alpaca/tests/vault_secret.rs:alpaca-key-id:11
+# The release script's test: a short stand-in for `RELEASE_SIGNING_KEY` (a real one is a cosign
+# PEM), handed to a stand-in cosign, and the test's assertion that stderr never shows it.
+1c96b0288f5d14abb688e1b3d8b2d18ac570307b:xtask/src/release.rs:generic-api-key:1976
+1c96b0288f5d14abb688e1b3d8b2d18ac570307b:xtask/src/release.rs:generic-api-key:1997

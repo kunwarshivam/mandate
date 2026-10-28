@@ -9,6 +9,7 @@ use mandate_time::Date;
 
 use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of};
 use crate::error::ExecutorError;
+use crate::holders;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::kill::{close_named, closes_with};
 use crate::payload::{
@@ -17,14 +18,14 @@ use crate::payload::{
 };
 use crate::protection::climbs;
 use crate::state::{
-    AccountSwitch, Adoption, Confirmed, EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome,
-    IntentRecord, Ladder, LoneLadder, ObservedAccount, OrderDetail, PendingRequest, PriorBase,
-    Replacement, Switch,
+    AccountSwitch, Adoption, Confirmed, ConnectionView, EVERY_AGENT, ExecutorState, ExitSequence,
+    Holding, IntentOutcome, IntentRecord, Ladder, LoneLadder, ObservedAccount, OrderDetail,
+    PendingRequest, PriorBase, Replacement, Switch,
 };
 use crate::types::{
-    AccountRef, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent,
-    IntentBody, Mode, OcoLegs, Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose,
-    RiskClock, Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
+    AccountRef, AccountState, ActivityCursor, AgentId, BracketLegs, ConnectionHealth, EventId,
+    FillId, FoldedEvent, IntentBody, Mode, OcoLegs, Order, OrderState, OrderType, Protection,
+    ProtectionPrices, Purpose, RiskClock, Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
 };
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
@@ -93,6 +94,16 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
     if kind == "OwnerAlertSent" {
         return Ok(());
     }
+    crate::acknowledge::fold(state, event)?;
+    if matches!(kind, "OwnerAcknowledged" | "OwnerAcknowledgmentRequested") {
+        return Ok(());
+    }
+    if kind == "OwnerCommandRefused" {
+        return match optional_text(payload, "command") {
+            Some("acknowledge") => Ok(()),
+            _ => not_interpreted(kind, "E7-2"),
+        };
+    }
     if let Some(story) = owner_elsewhere(kind) {
         return not_interpreted(kind, story);
     }
@@ -135,7 +146,6 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             }
             Ok(())
         }
-        "OwnerAcknowledged" => owner_acknowledged(state, payload),
         "PositionReleased" => position_released(state, payload),
         "ReconciliationRun" => {
             state.reconciled_through = Some(event.seq);
@@ -145,11 +155,18 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             Ok(())
         }
         "OrderAbandoned" => order_abandoned(state, payload),
+        "UniverseChanged" => universe_changed(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "KillSwitchActivated" => kill_switch_activated(state, event, at),
         "AccountCloseRequested" => account_close_requested(state, event),
         "OwnerConfirmationReceived" => owner_confirmation_received(state, payload),
         "ClockAdvanced" | "MarkUpdated" | "ConductBreachDetected" => Ok(()),
+        "RiskDayStarted"
+        | "RiskLimitTriggered"
+        | "RiskLimitLifted"
+        | "HighWaterMarkReset"
+        | "InstrumentRestrictionChanged"
+        | "GoalCompleted" => risk_record(),
         "TradingDayStarted" => {
             let date = Date::parse(required_text(payload, "date")?)?;
             state.trading_day = Some(state.trading_day.map_or(date, |current| current.max(date)));
@@ -159,13 +176,21 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload, event.seq),
         "FeesCharged" => fees_charged(state, payload),
         "ExternalActivityIngested" => Ok(()),
-        "ConnectionChecked" | "ConnectionEstablished" => connection_checked(),
+        "ConnectionChecked" => connection_checked(),
+        "ConnectionEstablished" => connection_established(state, payload),
+        "ConnectionStateChanged" => connection_state_changed(state, payload),
         "AccountRestrictionChanged" => {
-            state.account_state = match required_text(payload, "restriction")? {
+            let restriction = match required_text(payload, "restriction")? {
                 "closing_only" => AccountState::ClosingOnly,
                 "blocked" => AccountState::Blocked,
                 _ => return Err(refused("restriction")),
             };
+            let cause = state
+                .causes
+                .entry(required_text(payload, "cause")?.to_owned())
+                .or_default();
+            *cause = (*cause).max(restriction);
+            state.account_state = state.account_state.max(restriction);
             state.consecutive_403s = 0;
             Ok(())
         }
@@ -210,6 +235,14 @@ fn net_after(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorE
     }
 }
 
+/// The account risk fold's records (journal spec §9.27) fold as records here (DEC-2804 item 1):
+/// `mandate_executor::risk_state` is their reader, which finds each one where it owes it
+/// (DEC-2399), and the mode one of them changes reaches this state through its own
+/// `AgentModeApplied`, as every originated mode record does.
+fn risk_record() -> Result<(), ExecutorError> {
+    Ok(())
+}
+
 /// The executor's own `ConnectionChecked` folds as a record only (journal spec §9.8): into
 /// `degraded` or `suspended`, the executor commits `AccountRestrictionChanged` and
 /// `AgentModeApplied` before the failed check, so the halt is never behind this record and a
@@ -221,8 +254,99 @@ fn connection_checked() -> Result<(), ExecutorError> {
     Ok(())
 }
 
-/// Corporate actions, reconciliation's records and snapshot, recorded broker exchanges, the owner
-/// acknowledgment, the trading and risk days, and the kill switch (trading-domain spec §5.5 to §5.7,
+/// One change of an agent's working universe (journal spec §9.3, DEC-2823): an admission holds the
+/// instrument under the thesis and lineage it names, replacing any it was held by; a removal takes
+/// it out. The account stream's own fold, so the executor's universe replays without the agent's
+/// stream.
+fn universe_changed(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let agent = AgentId(required_text(payload, "agent_id")?.to_owned());
+    let instrument = InstrumentId::new(required_text(payload, "instrument")?)?;
+    let held = state.universes.entry(agent).or_default();
+    match required_text(payload, "change")? {
+        "admitted" => {
+            held.insert(
+                instrument,
+                Holding {
+                    thesis_id: optional_text(payload, "thesis_id").map(str::to_owned),
+                    lineage_id: optional_text(payload, "lineage_id").map(str::to_owned),
+                },
+            );
+        }
+        "removed" => {
+            held.remove(&instrument);
+        }
+        _ => return Err(refused("change")),
+    }
+    Ok(())
+}
+
+/// The copy of `ConnectionEstablished` names the stream's connection (rule 68), `active` with no
+/// cause. A reconnect's second copy names the same one and keeps the state the stream last
+/// recorded (CN-12): a connection revoked while `suspended` is still `suspended` when it is
+/// established again. A copy naming another connection is refused: one account stream holds one
+/// connection, so it can never hide the state the stream holds.
+fn connection_established(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let id = required_text(payload, "connection_id")?;
+    match &state.connection {
+        Some(view) if view.id == id => Ok(()),
+        Some(_) => Err(refused("connection_id")),
+        None => {
+            state.connection = Some(ConnectionView {
+                id: id.to_owned(),
+                ..ConnectionView::default()
+            });
+            Ok(())
+        }
+    }
+}
+
+fn health_of(payload: &Value, member: &str) -> Result<ConnectionHealth, ExecutorError> {
+    match required_text(payload, member)? {
+        "active" => Ok(ConnectionHealth::Active),
+        "degraded" => Ok(ConnectionHealth::Degraded),
+        "suspended" => Ok(ConnectionHealth::Suspended),
+        _ => Err(refused(member)),
+    }
+}
+
+/// The connection's state as `ConnectionStateChanged` records it (journal spec §9.8, DEC-2826):
+/// its `to`, with the causes journaled since it entered that state or since the latest
+/// `condition_cleared` or `acknowledged`, which record none and end the ones before them (DEC-687
+/// item 1), so a cause that recurs after the condition cleared is journaled again. A state change
+/// before the stream's copy of the establishment is refused, as rule 68 refuses it, and so is one
+/// for another connection or whose `from` is not the state the stream holds. Rules 59 and 60,
+/// which `append` judges, are not judged again here: by rule 59 only `acknowledged` enters
+/// `active`, so `active` never holds a cause.
+fn connection_state_changed(
+    state: &mut ExecutorState,
+    payload: &Value,
+) -> Result<(), ExecutorError> {
+    let to = health_of(payload, "to")?;
+    let from = health_of(payload, "from")?;
+    let reason = required_text(payload, "reason")?;
+    let view = state
+        .connection
+        .as_mut()
+        .ok_or_else(|| refused("connection_id"))?;
+    if view.id != required_text(payload, "connection_id")? {
+        return Err(refused("connection_id"));
+    }
+    if view.health != from {
+        return Err(refused("from"));
+    }
+    let ends_causes = matches!(reason, "condition_cleared" | "acknowledged");
+    if view.health != to || ends_causes {
+        view.reasons.clear();
+    }
+    view.health = to;
+    if !ends_causes {
+        view.reasons.insert(reason.to_owned());
+    }
+    Ok(())
+}
+
+/// Corporate actions, reconciliation's records and snapshot, recorded broker exchanges, the trading
+/// and risk days, and the kill switch (trading-domain spec §5.5 to §5.7,
 /// §6, §10, §11): the later slices of this stack; the trading day is slice 5's trading-day part,
 /// which owes what a new day starts (GTC re-placement, the copy, the harness's start) together.
 /// An `ExternalActivityIngested` and a `ConductBreachDetected` fold as records only: the
@@ -273,15 +397,16 @@ fn owner_elsewhere(kind: &str) -> Option<&'static str> {
         | "AccountCloseRequested"
         | "ConnectionChecked"
         | "ConnectionEstablished"
-        | "PositionReleased" => None,
-        "RelatedAccountsCoordination" => Some("E7-5"),
-        "MandateVersionApplied"
+        | "ConnectionStateChanged"
+        | "PositionReleased"
         | "RiskLimitTriggered"
         | "RiskLimitLifted"
         | "HighWaterMarkReset"
         | "InstrumentRestrictionChanged"
-        | "GoalCompleted" => Some("E6-4"),
-        "UniverseChanged" => Some("E17-3"),
+        | "GoalCompleted" => None,
+        "RelatedAccountsCoordination" => Some("E7-5"),
+        "MandateVersionApplied" => Some("E6-4"),
+        "UniverseChanged" => None,
         _ => Some("E7-2"),
     }
 }
@@ -339,16 +464,24 @@ fn risk_clock(state: &ExecutorState, event: &FoldedEvent) -> Result<RiskClock, E
 /// form's `instrument_id` (§9.5) beside the legacy `instrument` the golden journal carries
 /// (DEC-446 item 7: the fold's legacy reads stay).
 /// An agent's position, or part of it, became the owner's (journal spec §9.27, mandate spec §3.1,
-/// DEC-2354): the quantity leaves the agent's lots, so its kill switch never sells it.
-fn position_released(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+/// DEC-2354): the quantity leaves the agent's lots, so its kill switch never sells it. What it
+/// releases beyond its lots is noted as [`ExecutorState::oversold`], so it never takes a later buy.
+pub(crate) fn position_released(
+    state: &mut ExecutorState,
+    payload: &Value,
+) -> Result<(), ExecutorError> {
     let agent = AgentId(required_text(payload, "agent_id")?.to_owned());
     let released = qty(payload, "qty")?;
+    let instrument = instrument(payload)?;
+    let beyond = released
+        .checked_sub(holders::lots(state, &agent, &instrument)?)
+        .unwrap_or(Qty::ZERO);
     let total = state
         .released
-        .entry((agent, instrument(payload)?))
+        .entry((agent.clone(), instrument.clone()))
         .or_insert(Qty::ZERO);
     *total = total.checked_add(released)?;
-    Ok(())
+    holders::oversell(state, agent, instrument, beyond)
 }
 
 fn instrument(payload: &Value) -> Result<InstrumentId, ExecutorError> {
@@ -575,12 +708,17 @@ fn gate_decided(
             if flag(payload, "held_long") {
                 state.held_long.insert(id.clone());
             }
+            match optional_text(payload, "reason_code") {
+                Some(reason) => state.hold_reasons.insert(id.clone(), reason.to_owned()),
+                None => state.hold_reasons.remove(&id),
+            };
             state.held.insert(id);
             return Ok(());
         }
         _ => return Err(refused("verdict")),
     }
     state.held.remove(&id);
+    state.hold_reasons.remove(&id);
     Ok(())
 }
 
@@ -1057,6 +1195,7 @@ fn order_abandoned(state: &mut ExecutorState, payload: &Value) -> Result<(), Exe
         record.outcome = IntentOutcome::Abandoned;
     }
     state.held.remove(&intent);
+    state.hold_reasons.remove(&intent);
     Ok(())
 }
 
@@ -1067,7 +1206,11 @@ fn order_abandoned(state: &mut ExecutorState, payload: &Value) -> Result<(), Exe
 /// A sell fill that names no order has taken shares off the position that an ended sell's
 /// unapplied report may also name, so it joins the instrument's unattributed sells and is netted
 /// against those reports ([`net_unattributed`], DEC-421 item 5).
-fn fill_applied(state: &mut ExecutorState, payload: &Value, seq: Seq) -> Result<(), ExecutorError> {
+pub(crate) fn fill_applied(
+    state: &mut ExecutorState,
+    payload: &Value,
+    seq: Seq,
+) -> Result<(), ExecutorError> {
     let fill = FillId(required_text(payload, "fill_id")?.to_owned());
     if state.fills.contains(&fill) {
         return Ok(());
@@ -1081,16 +1224,32 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value, seq: Seq) -> Result<
         Side::Buy => (SignedQty::from(quantity), notional.negated()),
         Side::Sell => (SignedQty::from(quantity).negated(), notional),
     };
+    let named = optional_text(payload, "client_order_id");
+    let closing = state
+        .account_switch
+        .as_ref()
+        .and_then(|switch| switch.requests.get(&instrument))
+        .is_some_and(|(_, requested)| *requested < seq);
+    if named.is_none() && side == Side::Sell && closing {
+        for (agent, taken) in holders::close_takes(state, &instrument, quantity)? {
+            let closed = state
+                .closed
+                .entry((agent, instrument.clone()))
+                .or_insert(Qty::ZERO);
+            *closed = closed.checked_add(taken)?;
+        }
+    }
+    let named_order = named.and_then(|raw| ClientOrderId::parse(raw).ok());
+    let selling = match &named_order {
+        Some(id) => holders::selling(state, id)?,
+        None => None,
+    };
     let position_of = instrument.clone();
     let position = state.positions.entry(instrument).or_insert(SignedQty::ZERO);
     *position = position.checked_add(signed)?;
     state.cash_flow = state.cash_flow.checked_add(cash)?;
     state.fill_notional = state.fill_notional.checked_add(notional)?;
-    let named = optional_text(payload, "client_order_id");
-    if let Some(order) = named
-        .and_then(|raw| ClientOrderId::parse(raw).ok())
-        .and_then(|id| state.orders.get_mut(&id))
-    {
+    if let Some(order) = named_order.and_then(|id| state.orders.get_mut(&id)) {
         order.filled_qty = order.filled_qty.checked_add(quantity)?;
         let id = order.client_order_id.clone();
         state
@@ -1106,6 +1265,9 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value, seq: Seq) -> Result<
             .entry(position_of.clone())
             .or_default()
             .push((seq, quantity));
+    }
+    if let Some(selling) = selling {
+        holders::note_oversold(state, selling)?;
     }
     state.fills.insert(fill);
     reattribute(state, &position_of);
@@ -1187,7 +1349,10 @@ fn account_close_requested(
 /// Lifting the `kill_switch` restriction also lifts whatever closes the agent's kill switches had
 /// not yet raised (DEC-485 item 7): the agent was resumed, so nothing sells its lots behind its
 /// back later.
-fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+pub(crate) fn agent_mode_applied(
+    state: &mut ExecutorState,
+    payload: &Value,
+) -> Result<(), ExecutorError> {
     let agent = AgentId(required_text(payload, "agent")?.to_owned());
     let mode = mode_of(required_text(payload, "to")?)?;
     let restriction = optional_text(payload, "restriction")
@@ -1203,6 +1368,12 @@ fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), 
             state.closing_all.clear();
             state.account_switch = None;
             state.switch_read = None;
+        }
+        if let Some(held) = restriction.strip_prefix("reconciliation:")
+            && flag(payload, "originated")
+            && let Ok(instrument) = InstrumentId::new(held)
+        {
+            state.mismatched.remove(&instrument);
         }
         state.restrictions.remove(&(agent.clone(), restriction));
     } else {
@@ -1507,6 +1678,9 @@ fn protection_changed(
             state.alerted.insert(instrument.clone());
         }
         "expiry_unreplaceable" => {}
+        "exit_unpriced" if cause.is_none() => {
+            state.unpriced.insert(instrument.clone(), at);
+        }
         "exit_unpriced" | "ladder_floor" => {}
         "rung_short" if optional_qty(payload, "sent")? == Some(Qty::ZERO) => {
             let intent = required_text(payload, "intent_id")?;
@@ -1779,8 +1953,14 @@ fn ids(raw: &str) -> Result<Vec<ClientOrderId>, ExecutorError> {
 /// Paper's simulated fee accrues in its `(family, day)` bucket, which buying power charges at
 /// `round(bucket, 2, ceiling)` as `mandate-accounting` charges it (trading-domain spec §6.2, §7.2,
 /// §10, DEC-104), so paper never looks richer than live. The broker's own fees, posted or
-/// unposted, are the cash slice's; until then they fold as records only.
-fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+/// unposted, are the cash slice's; until then they fold as records only. A crypto asset fee names
+/// no buy, so it lowers the position and no agent's lots: it comes out of the owner's residual.
+/// That is DEC-2850's interim reading, which the journal keeps unreachable by refusing
+/// `family: crypto_asset` until the fee comes off the buying agent's lots (DEC-2849's Lᵢ).
+pub(crate) fn fees_charged(
+    state: &mut ExecutorState,
+    payload: &Value,
+) -> Result<(), ExecutorError> {
     if required_text(payload, "family")? == "crypto_asset" {
         let instrument = instrument(payload)?;
         let accrued = qty(payload, "accrued")?;
@@ -1833,36 +2013,6 @@ fn posted(
         .checked_add(accrued)?
         .checked_sub(charged)?
         .max(Usd::ZERO);
-    Ok(())
-}
-
-/// Only an owner acknowledgment carrying step-up evidence clears a reconciliation mismatch and the
-/// pause it caused (trading-domain spec §11, interpretation 14).
-///
-/// The owner is who authorizes it: the event reaches the account stream only as a copy from the
-/// control stream, which only the owner-facing surface writes, and it names its `user` (required,
-/// opaque) and carries step-up evidence. Inside this crate nothing else tells an owner from an
-/// agent (journal spec §9, #205 review, round 1, finding 6).
-fn owner_acknowledged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
-    let subject = required_text(payload, "subject")?;
-    required_text(payload, "user")?;
-    if required_text(payload, "step_up")?.is_empty() {
-        return Ok(());
-    }
-    if let Ok(instrument) = InstrumentId::new(subject) {
-        state.mismatched.remove(&instrument);
-    }
-    let lifted = crate::state::restriction_for(subject);
-    let agents: Vec<AgentId> = state
-        .restrictions
-        .keys()
-        .filter(|(_, name)| *name == lifted)
-        .map(|(agent, _)| agent.clone())
-        .collect();
-    for agent in agents {
-        state.restrictions.remove(&(agent.clone(), lifted.clone()));
-        recompute(state, &agent);
-    }
     Ok(())
 }
 
@@ -3575,6 +3725,103 @@ mod protection_tests {
 }
 
 #[cfg(test)]
+mod mode_layering_tests {
+    use mandate_canon::Value;
+
+    use crate::error::ExecutorError;
+    use crate::payload::{clock, object};
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Executor, Ids, executor_config, fees};
+    use crate::types::{AgentId, Mode, RiskClock};
+
+    fn applied(to: &str, restriction: &str) -> Result<Value, ExecutorError> {
+        applied_to("agent-a", to, restriction)
+    }
+
+    fn applied_to(agent: &str, to: &str, restriction: &str) -> Result<Value, ExecutorError> {
+        object(vec![
+            ("agent", Value::Str(agent.to_owned())),
+            ("to", Value::Str(to.to_owned())),
+            ("restriction", Value::Str(restriction.to_owned())),
+            ("originated", Value::Bool(true)),
+            ("risk_clock", clock(RiskClock::from_secs(0))?),
+        ])
+    }
+
+    /// A risk rung's `exits_only`, journaled after an agent kill switch's `stopped` (as a cell run
+    /// journaled them), layers under it and never loosens it (mandate spec §5.9, most
+    /// restrictive wins). The effective mode stays `stopped` while the rung holds and once it is
+    /// lifted; only the switch's own `normal` lifts the stop, and then the rung still binds while
+    /// it holds.
+    #[test]
+    fn a_later_risk_rung_never_loosens_the_stop_of_a_kill_switch() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let agent = AgentId("agent-a".to_owned());
+        for lift_the_rung_first in [true, false] {
+            let mut executor = Executor::opened(&ports)?;
+            executor.commit_one("AgentModeApplied", applied("stopped", "kill_switch")?)?;
+            executor.commit_one("AgentModeApplied", applied("exits_only", "exits_only")?)?;
+            assert_eq!(executor.state.effective_mode(&agent), Mode::Stopped);
+            if lift_the_rung_first {
+                executor.commit_one("AgentModeApplied", applied("normal", "exits_only")?)?;
+                assert_eq!(executor.state.effective_mode(&agent), Mode::Stopped);
+                executor.commit_one("AgentModeApplied", applied("normal", "kill_switch")?)?;
+                assert_eq!(executor.state.effective_mode(&agent), Mode::Normal);
+            } else {
+                executor.commit_one("AgentModeApplied", applied("normal", "kill_switch")?)?;
+                assert_eq!(executor.state.effective_mode(&agent), Mode::ExitsOnly);
+            }
+        }
+        Ok(())
+    }
+
+    /// The same layering across the other modes and scopes: a pause outranks a rung's
+    /// `exits_only` and a stop outranks a pause, whatever order they arrive in; and an account-wide
+    /// kill switch (`*`) stops the agent beside its own rung, until the account switch's own
+    /// `normal` lifts it.
+    #[test]
+    fn every_mode_and_scope_layers_strictest_first() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let agent = AgentId("agent-a".to_owned());
+        let mut executor = Executor::opened(&ports)?;
+        executor.commit_one("AgentModeApplied", applied("paused", "agent_paused")?)?;
+        executor.commit_one("AgentModeApplied", applied("exits_only", "exits_only")?)?;
+        assert_eq!(executor.state.effective_mode(&agent), Mode::Paused);
+        executor.commit_one("AgentModeApplied", applied("stopped", "kill_switch")?)?;
+        assert_eq!(executor.state.effective_mode(&agent), Mode::Stopped);
+        executor.commit_one("AgentModeApplied", applied("normal", "kill_switch")?)?;
+        assert_eq!(executor.state.effective_mode(&agent), Mode::Paused);
+        let mut account = Executor::opened(&ports)?;
+        account.commit_one("AgentModeApplied", applied("exits_only", "exits_only")?)?;
+        account.commit_one(
+            "AgentModeApplied",
+            applied_to("*", "stopped", "kill_switch")?,
+        )?;
+        assert_eq!(account.state.effective_mode(&agent), Mode::Stopped);
+        account.commit_one(
+            "AgentModeApplied",
+            applied_to("*", "normal", "kill_switch")?,
+        )?;
+        assert_eq!(account.state.effective_mode(&agent), Mode::ExitsOnly);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
 mod interval_tests {
     use mandate_canon::Value;
 
@@ -3596,6 +3843,43 @@ mod interval_tests {
 
     fn action(name: &str) -> (&'static str, Value) {
         ("action", Value::Str(name.to_owned()))
+    }
+
+    /// DEC-2846: only an `exit_unpriced` no kill switch caused notes the instrument's latest own
+    /// wait, which the executor's own exits alert against; a switch's close is noted on the
+    /// switch alone, so it never silences the alert of an exit waiting beside it.
+    #[test]
+    fn only_an_uncaused_exit_unpriced_notes_the_instruments_wait() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        let aapl = mandate_accounting::InstrumentId::new("AAPL")?;
+        let switched = crate::types::FoldedEvent {
+            stream: executor.state.account_stream(),
+            seq: crate::types::Seq(executor.state.account_head().0.saturating_add(1)),
+            event_id: crate::types::EventId("j-switched".to_owned()),
+            event_type: "ProtectionChanged".to_owned(),
+            causation_id: Some(crate::types::EventId("j-switch".to_owned())),
+            payload: object(vec![
+                action("exit_unpriced"),
+                ("instrument", Value::Str("AAPL".to_owned())),
+                ("risk_clock", clock(RiskClock::from_secs(7))?),
+            ])?,
+        };
+        super::fold(&mut executor.state, &switched)?;
+        assert_eq!(executor.state.unpriced.get(&aapl), None);
+        protection_changed(&mut executor, 9, vec![action("exit_unpriced")])?;
+        assert_eq!(
+            executor.state.unpriced.get(&aapl),
+            Some(&RiskClock::from_secs(9))
+        );
+        Ok(())
     }
 
     /// DEC-367 item 4 (#468's round-4 review, m2): a sequence that ends with no prices to place
@@ -3677,6 +3961,215 @@ mod interval_tests {
             vec![(1, Some(2)), (3, Some(5)), (5, None)]
         );
         assert!(executor.state.awaiting.is_empty());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod account_close {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_num::{Qty, SignedQty};
+
+    use super::fill_applied;
+    use crate::error::ExecutorError;
+    use crate::holders::holders;
+    use crate::ids::ClientOrderId;
+    use crate::payload::{object, text};
+    use crate::state::{AccountSwitch, ExecutorState};
+    use crate::types::{
+        AccountRef, AccountScope, AgentId, EventId, Order, OrderState, Purpose, RiskClock, Seq,
+        WorkspaceId,
+    };
+
+    /// A filled buy of `qty` AAPL by `agent`.
+    fn bought(id: &str, agent: &str, qty: &str) -> Result<Order, ExecutorError> {
+        Ok(Order {
+            client_order_id: ClientOrderId::parse(id)?,
+            intent_id: None,
+            agent: Some(AgentId(agent.to_owned())),
+            instrument: InstrumentId::new("AAPL")?,
+            side: Side::Buy,
+            qty: Qty::parse(qty)?,
+            filled_qty: Qty::parse(qty)?,
+            state: OrderState::Filled,
+            attempt: 1,
+            purpose: Purpose::Open,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        })
+    }
+
+    /// DEC-2849 I5: the fills of the account switch's close come out of the owner's positive
+    /// residual first, then the agents' lots, largest first, as each is folded. So a close that
+    /// fills in part leaves every remaining share attributed. An unattributed sell folded before
+    /// the close was requested is the owner's own, and takes nothing from an agent.
+    #[test]
+    fn an_account_close_fill_comes_out_of_the_owner_then_the_largest_lots()
+    -> Result<(), ExecutorError> {
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let aapl = InstrumentId::new("AAPL")?;
+        for order in [
+            bought("md-1-a", "agent-a", "6")?,
+            bought("md-2-b", "agent-b", "3")?,
+        ] {
+            state.orders.insert(order.client_order_id.clone(), order);
+        }
+        state
+            .positions
+            .insert(aapl.clone(), SignedQty::parse("12")?);
+        let sell = |id: &str, qty: &str| {
+            object(vec![
+                ("fill_id", text(id)),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty_gross", text(qty)),
+                ("price", text("100")),
+            ])
+        };
+        fill_applied(&mut state, &sell("f-owner", "1")?, Seq(2))?;
+        assert!(state.closed.is_empty(), "no close is outstanding");
+        state.account_switch = Some(AccountSwitch {
+            event: EventId("k-1".to_owned()),
+            seq: Seq(3),
+            reference: AccountRef("acct-1".to_owned()),
+            at: RiskClock::from_secs(0),
+            requests: BTreeMap::from([(aapl.clone(), (1, Seq(4)))]),
+            bound: BTreeSet::new(),
+        });
+        fill_applied(&mut state, &sell("f-before", "0")?, Seq(4))?;
+        fill_applied(&mut state, &sell("f-close-1", "5")?, Seq(5))?;
+        let held = holders(&state, &aapl)?;
+        assert_eq!(
+            held.lots,
+            BTreeMap::from([
+                (AgentId("agent-a".to_owned()), Qty::parse("3")?),
+                (AgentId("agent-b".to_owned()), Qty::parse("3")?),
+            ]),
+            "the owner's 2, then 3 of agent-a's 6"
+        );
+        assert_eq!(held.residual, SignedQty::ZERO);
+        fill_applied(&mut state, &sell("f-close-2", "6")?, Seq(6))?;
+        let held = holders(&state, &aapl)?;
+        assert!(held.lots.is_empty(), "a complete close leaves no lots");
+        assert_eq!((held.position, held.deficit), (Qty::ZERO, Qty::ZERO));
+        Ok(())
+    }
+
+    /// Only an unattributed sell folded after the close was requested, in an instrument the close
+    /// names, is charged to the holders: not a fill at the request's own seq, not a sell naming an
+    /// order, not a buy, not a sell in another instrument, and not a fill folded twice.
+    #[test]
+    fn only_a_close_fill_is_charged_to_the_holders() -> Result<(), ExecutorError> {
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let aapl = InstrumentId::new("AAPL")?;
+        let msft = InstrumentId::new("MSFT")?;
+        let mut sell = bought("md-2-a", "agent-a", "1")?;
+        sell.side = Side::Sell;
+        sell.filled_qty = Qty::ZERO;
+        sell.state = OrderState::Accepted;
+        for order in [bought("md-1-a", "agent-a", "6")?, sell] {
+            state.orders.insert(order.client_order_id.clone(), order);
+        }
+        let mut msft_buy = bought("md-3-a", "agent-a", "5")?;
+        msft_buy.instrument = msft.clone();
+        state
+            .orders
+            .insert(msft_buy.client_order_id.clone(), msft_buy);
+        state.positions.insert(aapl.clone(), SignedQty::parse("6")?);
+        state.positions.insert(msft.clone(), SignedQty::parse("5")?);
+        state.account_switch = Some(AccountSwitch {
+            event: EventId("k-1".to_owned()),
+            seq: Seq(3),
+            reference: AccountRef("acct-1".to_owned()),
+            at: RiskClock::from_secs(0),
+            requests: BTreeMap::from([(aapl.clone(), (1, Seq(4)))]),
+            bound: BTreeSet::new(),
+        });
+        let fill = |id: &str, instrument: &str, side: &str, order: Option<&str>| {
+            let mut fields = vec![
+                ("fill_id", text(id)),
+                ("instrument", text(instrument)),
+                ("side", text(side)),
+                ("qty_gross", text("1")),
+                ("price", text("100")),
+            ];
+            if let Some(order) = order {
+                fields.push(("client_order_id", text(order)));
+            }
+            object(fields)
+        };
+        fill_applied(&mut state, &fill("f-at", "AAPL", "sell", None)?, Seq(4))?;
+        fill_applied(
+            &mut state,
+            &fill("f-named", "AAPL", "sell", Some("md-2-a"))?,
+            Seq(5),
+        )?;
+        fill_applied(&mut state, &fill("f-buy", "AAPL", "buy", None)?, Seq(6))?;
+        fill_applied(&mut state, &fill("f-msft", "MSFT", "sell", None)?, Seq(7))?;
+        assert!(state.closed.is_empty(), "none of these is a close fill");
+        fill_applied(&mut state, &fill("f-close", "AAPL", "sell", None)?, Seq(8))?;
+        fill_applied(&mut state, &fill("f-close", "AAPL", "sell", None)?, Seq(9))?;
+        assert_eq!(
+            state.closed,
+            BTreeMap::from([(
+                (AgentId("agent-a".to_owned()), aapl.clone()),
+                Qty::parse("1")?
+            )]),
+            "the owner's residual was spent, so the one close fill, folded once, is agent-a's"
+        );
+        let held = holders(&state, &aapl)?;
+        assert_eq!(
+            held.lots,
+            BTreeMap::from([(AgentId("agent-a".to_owned()), Qty::parse("4")?)])
+        );
+        assert_eq!(held.position, Qty::parse("4")?);
+        let held = holders(&state, &msft)?;
+        assert_eq!(
+            held.lots,
+            BTreeMap::from([(AgentId("agent-a".to_owned()), Qty::parse("5")?)])
+        );
+        assert_eq!(held.deficit, Qty::parse("1")?);
+        Ok(())
+    }
+
+    /// A sell that ended with a broker-reported fill no update applied comes off the agent's lots
+    /// at the reported quantity ([`crate::protection::sold`]), and the lots stay floored at zero.
+    #[test]
+    fn an_ended_sells_reported_fill_comes_off_its_lots() -> Result<(), ExecutorError> {
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let aapl = InstrumentId::new("AAPL")?;
+        let mut sell = bought("md-2-a", "agent-a", "4")?;
+        sell.side = Side::Sell;
+        sell.filled_qty = Qty::parse("1")?;
+        sell.state = OrderState::Canceled;
+        let id = sell.client_order_id.clone();
+        for order in [bought("md-1-a", "agent-a", "6")?, sell] {
+            state.orders.insert(order.client_order_id.clone(), order);
+        }
+        state.positions.insert(aapl.clone(), SignedQty::parse("5")?);
+        state.details.entry(id.clone()).or_default().reported_filled = Some(Qty::parse("3")?);
+        let held = holders(&state, &aapl)?;
+        assert_eq!(
+            held.lots,
+            BTreeMap::from([(AgentId("agent-a".to_owned()), Qty::parse("3")?)])
+        );
+        assert_eq!(held.position, Qty::parse("3")?, "N is the broker's");
+        state.details.entry(id).or_default().reported_filled = Some(Qty::parse("9")?);
+        assert!(holders(&state, &aapl)?.lots.is_empty(), "floored at zero");
         Ok(())
     }
 }

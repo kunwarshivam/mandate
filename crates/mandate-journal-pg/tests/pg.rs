@@ -1161,3 +1161,54 @@ fn error_codes_are_stable() {
         "unavailable"
     );
 }
+
+/// A reader that verified a stream up to a seq reads only what was appended since, checked from
+/// the hash it holds: the same rows a full read gives past that seq, nothing when nothing was
+/// appended, and an integrity failure when the hash it holds is not the stored chain's.
+#[test]
+fn rows_from_a_trusted_head_read_only_the_rows_appended_since() {
+    let Some(db) = TestDb::new() else { return };
+    let journal = db.journal();
+    let (s, epoch) = db.block_on(opened(&journal, 3));
+    let all = db.block_on(journal.rows(&s)).unwrap();
+    let head = all.last().unwrap();
+    let past_head = TrustedStart {
+        from_seq: head.seq + 1,
+        prev_hash: head.hash,
+    };
+    assert!(
+        db.block_on(journal.rows_from(&s, past_head))
+            .unwrap()
+            .is_empty()
+    );
+    committed(db.block_on(journal.append(&s, 4, epoch, now(), &[&mark(4)])));
+    let since = db.block_on(journal.rows_from(&s, past_head)).unwrap();
+    let full = db.block_on(journal.rows(&s)).unwrap();
+    assert_eq!(
+        since,
+        full[4..].to_vec(),
+        "only the appended row, as a full read gives it"
+    );
+    let middle = TrustedStart {
+        from_seq: 3,
+        prev_hash: full[1].hash,
+    };
+    assert_eq!(
+        db.block_on(journal.rows_from(&s, middle)).unwrap(),
+        full[2..].to_vec()
+    );
+    let wrong = TrustedStart {
+        from_seq: head.seq + 1,
+        prev_hash: Digest::ZERO,
+    };
+    assert!(
+        db.block_on(journal.rows_from(&s, wrong)).is_err(),
+        "a held hash that is not the chain's fails"
+    );
+    assert_eq!(
+        db.block_on(journal.rows_from(&s, TrustedStart::GENESIS))
+            .unwrap(),
+        full,
+        "from genesis, a full read"
+    );
+}

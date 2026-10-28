@@ -128,7 +128,8 @@ const REGISTERED: &[&str] = &[
 
 /// DEC-948 item 3: `FeesCharged` version 1 is the simulated equity fee the paper executor books
 /// (trading spec §10): a record with exactly its members, refusing a family it does not book and
-/// a component that is not a decimal.
+/// a component that is not a decimal. A crypto asset fee is refused until it comes off the buying
+/// agent's lots (DEC-2850 item 3).
 #[test]
 fn fees_charged_is_closed_to_the_simulated_equity_fee() {
     let (_, refs, payload) = RISK_INPUT_PAYLOADS
@@ -142,6 +143,11 @@ fn fees_charged_is_closed_to_the_simulated_equity_fee() {
         (
             "payload.family",
             Some(r#""crypto""#),
+            InvalidReason::NonCanonical,
+        ),
+        (
+            "payload.family",
+            Some(r#""crypto_asset""#),
             InvalidReason::NonCanonical,
         ),
         ("payload.cat", Some(r#""x""#), InvalidReason::NonCanonical),
@@ -282,8 +288,9 @@ const RISK_STATE_ON_ACCOUNT: [(&str, &str); 2] =
 /// The agent stream's research-agent thesis records journal spec §9.4 closes (DEC-413, DEC-414).
 const THESIS_ON_AGENT: [(&str, &str); 2] = [("ThesisProposed", AGENT), ("ThesisRevised", AGENT)];
 
-/// The account stream's closed executor records (DEC-446, DEC-447, DEC-459, DEC-460).
-const EXECUTOR_ON_ACCOUNT: [(&str, &str); 14] = [
+/// The account stream's closed executor records (DEC-446, DEC-447, DEC-459, DEC-460), the
+/// `ClockAdvanced` copy among them (DEC-2808).
+const EXECUTOR_ON_ACCOUNT: [(&str, &str); 15] = [
     ("IntentReceived", ACCT),
     ("GateDecided", ACCT),
     ("OrderSubmitted", ACCT),
@@ -298,6 +305,7 @@ const EXECUTOR_ON_ACCOUNT: [(&str, &str); 14] = [
     ("ExternalActivityIngested", ACCT),
     ("RejectObserved", ACCT),
     ("OrderAbandoned", ACCT),
+    ("ClockAdvanced", ACCT),
 ];
 
 fn closed_by_section_9_2(event_type: &str, kind: &str) -> bool {
@@ -1652,9 +1660,9 @@ fn the_risk_limit_records_are_closed_on_the_account_stream() {
 }
 
 /// §9.28's request and acknowledgment are catalogued on the control stream and, as the executor's
-/// copies, on the account stream, with no configuration, and closed on both at schema version 1:
-/// an unlisted member is refused `schema` there and `wrong_stream` on every other stream, and
-/// version 2 has no schema.
+/// copies, on the account stream, with no configuration, and closed on both at schema versions 1
+/// and 2 (v0.102, v0.104): an unlisted member is refused `schema` there and `wrong_stream` on every
+/// other stream, and version 3 has no schema.
 #[test]
 fn the_acknowledgment_records_are_closed_on_the_control_and_account_streams() {
     for event_type in SECTION_9_28 {
@@ -1670,13 +1678,13 @@ fn the_acknowledgment_records_are_closed_on_the_control_and_account_streams() {
             );
         }
         for kind in [ACCT, CTL] {
-            let version_2 = edit(&draft(event_type, kind, &[]), "schema_version", Some("2"));
-            let e = Draft::parse(&version_2).unwrap_err();
+            let version_3 = edit(&draft(event_type, kind, &[]), "schema_version", Some("3"));
+            let e = Draft::parse(&version_3).unwrap_err();
             let want = (InvalidReason::UnknownSchema, "payload");
             assert_eq!(
                 (e.reason, e.path.as_str()),
                 want,
-                "{event_type} version 2 in {kind}"
+                "{event_type} version 3 in {kind}"
             );
         }
     }

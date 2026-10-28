@@ -14,7 +14,8 @@
   hook), `src/launch.rs` (the deployment from `run`'s flags or the deployment manager's variables,
   DEC-1015), `src/deployment.rs` (the connection, approvers and author from the latest
   `AgentDeployed` and its stored mandate document, DEC-1016; the approvers through
-  `mandate_identity::approvers`, DEC-2388 item 11), and the `mandate-daemon` binary, built by `mandate-runtime-models` (`crates/mandate-runtime-models/src/main.rs`) since DEC-2383 item 7 (`run` over Postgres, or `--fixture` over an in-memory
+  `mandate_identity::approvers`, DEC-2388 item 11, and `ApproverSource`, which each control pass
+  narrows the view's approvers through, DEC-2818), and the `mandate-daemon` binary, built by `mandate-runtime-models` (`crates/mandate-runtime-models/src/main.rs`) since DEC-2383 item 7 (`run` over Postgres, or `--fixture` over an in-memory
   journal, refused `fixture_under_manager` on a pod the manager started, and `probe` for `exec`
   probes; SIGTERM drains). In the cell: the `runtime` image
   (`deploy/cell/images/runtime.Dockerfile`), its `args` and `probe` in
@@ -28,7 +29,8 @@
   agent stream, the control stream read before the clock stream, an unreadable clock stream never
   holding the kill switch, a control stream handed again writing nothing twice, a lost answer
   written once, a hint deciding nothing, a second process fencing the first, paper only, drain, a
-  draft without references stopping the process, a property test over interleavings of kill
+  draft without references stopping the process, a connection revoked while running leaving no
+  approver and a grant in the same pass refused `not_an_approver` (DEC-2818), a property test over interleavings of kill
   switches, ticks, lost answers, and restarts with an oracle from the control rows; and for the
   account stream, the startup hold lifting on a clean reconciliation, the account folded before the
   start, the latest establishment followed and another connection's or environment's ignored, an
@@ -42,8 +44,13 @@
   another process, and a flag that disagrees with the manager. `tests/deployment.rs`: the latest
   deployment, a stopped agent, a missing, corrupt or invalid document, another environment, the
   approvers DEC-953's owner or the founded workspace's roster resolves, an unreadable membership
-  record resolving no one, and an unknown author. `crates/mandate-runtime-models/tests/pg.rs`: the binary
-  on Postgres opening its agent stream once across two runs and draining. `deploy/tests/test_cell.py`:
+  record resolving no one, the admitted approvers narrowing at each read and never growing
+  (DEC-2818), and an unknown author. `crates/mandate-runtime-models/tests/pg.rs`: the binary
+  on Postgres opening its agent stream once across two runs and draining. `tests/working.rs`: a
+  research mandate's quant model pinned on its admitted instrument, a `Long` only on the one
+  instrument a surviving thesis holds, an ended, refused or unreadable thesis or unread control rows
+  holding the `Long` while an admitted instrument keeps its exit, and a property test whose oracle
+  replays the thesis records its own way (DEC-2827). `deploy/tests/test_cell.py`:
   each service started and probed as its process list says, and no runtime rendered for no
   deployment. `mandate-runtime`'s
   `an_owner_kill_switch_without_a_bid_records_null_bid_members_and_its_owner`.

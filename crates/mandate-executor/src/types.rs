@@ -1,5 +1,7 @@
 //! The core's vocabulary: what goes in, what comes out, and the order states in between.
 
+use std::collections::BTreeSet;
+
 use mandate_accounting::{AccountType, AssetClass, InstrumentId, Side};
 use mandate_canon::{Object, Value};
 use mandate_num::{Fraction, Price, Qty, SignedQty, Usd};
@@ -768,6 +770,11 @@ pub enum BrokerUnknown {
     Ambiguous,
     #[error("the connection failed")]
     Transport,
+    /// The broker refused the request's credential (HTTP `401`). One refusal is a possible
+    /// transient (connections spec §5.4), so the outcome is unknown and resolved by query, never
+    /// read as a rejection; two in a row make the connection `suspended` (§8.2, DEC-2832).
+    #[error("the broker refused the credential")]
+    Unauthorized,
 }
 
 impl BrokerUnknown {
@@ -777,6 +784,7 @@ impl BrokerUnknown {
             Self::Timeout => "timeout",
             Self::Ambiguous => "ambiguous",
             Self::Transport => "transport",
+            Self::Unauthorized => "unauthorized",
         }
     }
 }
@@ -788,6 +796,15 @@ pub enum BrokerUpdate {
     Fill(BrokerFill),
     Account(BrokerAccount),
     Reject(BrokerReject),
+}
+
+/// One agent-stream thesis record: `ThesisProposed`, `ThesisRevised` or `ThesisInvalidated` (journal
+/// spec §9.4, §9.22), with the id a `UniverseChanged` copying it names as its `causation_id`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThesisRow {
+    pub event_id: EventId,
+    pub event_type: String,
+    pub payload: Value,
 }
 
 /// A quote or mark the shell observed, used for collar and ladder pricing, **never** for time.
@@ -945,6 +962,41 @@ pub struct FoldedEvent {
     pub payload: Value,
 }
 
+/// The control stream's `OwnerAcknowledged` or `OwnerAcknowledgmentRequested` the shell hands the
+/// executor to copy into the account stream and judge (journal spec §9.28, DEC-2828), with what the
+/// judgment needs that the account stream does not hold. The shell computes each member from the
+/// control stream and the effective policy at the original's position, so the judgment the copy's
+/// batch records is the same on every retry, and a replay reads that record rather than judging
+/// again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcknowledgmentHandoff {
+    /// The control-stream record, as journaled: its `event_id` becomes the copy's `causation_id`.
+    pub original: FoldedEvent,
+    /// The original's `schema_version`, which the copy keeps.
+    pub schema_version: u64,
+    /// The whole second the shell hands the original at, from its clock: the copy is judged at the
+    /// later of this and the executor's risk clock, so a risk clock behind the shell's never judges
+    /// a step-up fresher than it is at processing (§9.28 check 3, DEC-2828 item 3).
+    pub processed_at: RiskClock,
+    /// Every step-up `assertion_id` an `ApprovalResponseSubmitted`, `OwnerCommandIssued`,
+    /// `OwnerAcknowledgmentRequested` or `OwnerAcknowledged` on the control stream spent before the
+    /// original (mandate spec §6.1's reuse check).
+    pub spent: BTreeSet<String>,
+    /// For an acknowledgment that names a request, the same set before that request's original on
+    /// the control stream, which check 4 judges the request's own step-up against. `None` for a
+    /// request, and for an acknowledgment whose request the control stream does not hold. Handed
+    /// with the acknowledgment so a restart between the two copies loses nothing.
+    pub request_spent: Option<BTreeSet<String>>,
+    /// The policy overlay's `independent_approval_required` at processing, the strictest of every
+    /// agent the acknowledgment's subject belongs to (§9.28 check 4). The shell keeps the handoff
+    /// it built until the copy's batch resolves, so a retry hands it unchanged.
+    pub independent_overlay: bool,
+    /// The step-up methods the environment allows (journal spec v0.106 §9.28 check 3, DEC-2523):
+    /// `passkey` everywhere, and `cli_confirm` in paper and in live only on the founder's own
+    /// connection (DEC-529 item 3, DEC-923).
+    pub methods: BTreeSet<String>,
+}
+
 /// A command addressed to this account's executor. The shell reads kill switches and risk exits
 /// from a priority channel before ordinary inputs, and what gets journaled is the order in which
 /// [`crate::handle`] saw them (ADR-0001 ES-06, interpretation 30).
@@ -977,6 +1029,82 @@ pub enum Command {
     },
 }
 
+/// Why the connector's signals put the connection in `degraded` (connections spec §8.2): journal
+/// spec §9.8's degrading reasons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DegradeReason {
+    NetworkErrors,
+    RateHeadroom,
+    ContractDrift,
+}
+
+/// Why the credential no longer works, putting the connection in `suspended` (connections spec
+/// §9.1, §9.2): journal spec §9.8's suspending reasons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SuspendReason {
+    AuthorizationFailed,
+    CredentialExpired,
+    RefreshFailed,
+    CheckFailed,
+    LeaseExpired,
+}
+
+/// A connection the platform cannot reach or use, as the shell's signals found it: the state it is
+/// in and why (connections spec §9.1, DEC-2826). Reported at every step while it holds, so the core
+/// can restrict the account in one batch and record the state change in a later one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ConnectionTrouble {
+    Degraded(DegradeReason),
+    Suspended(SuspendReason),
+}
+
+impl ConnectionTrouble {
+    /// The state it puts the connection in, as `ConnectionStateChanged.to` journals it.
+    #[must_use]
+    pub fn state(self) -> ConnectionHealth {
+        match self {
+            Self::Degraded(_) => ConnectionHealth::Degraded,
+            Self::Suspended(_) => ConnectionHealth::Suspended,
+        }
+    }
+
+    /// The reason `ConnectionStateChanged.reason` journals (journal spec §9.8, rule 59).
+    #[must_use]
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Degraded(DegradeReason::NetworkErrors) => "network_errors",
+            Self::Degraded(DegradeReason::RateHeadroom) => "rate_headroom",
+            Self::Degraded(DegradeReason::ContractDrift) => "contract_drift",
+            Self::Suspended(SuspendReason::AuthorizationFailed) => "authorization_failed",
+            Self::Suspended(SuspendReason::CredentialExpired) => "credential_expired",
+            Self::Suspended(SuspendReason::RefreshFailed) => "refresh_failed",
+            Self::Suspended(SuspendReason::CheckFailed) => "check_failed",
+            Self::Suspended(SuspendReason::LeaseExpired) => "lease_expired",
+        }
+    }
+}
+
+/// The connection's state on the executor's side (journal spec §9.8 `ConnectionStateChanged`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum ConnectionHealth {
+    #[default]
+    Active,
+    Degraded,
+    Suspended,
+}
+
+impl ConnectionHealth {
+    /// The wire name.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Degraded => "degraded",
+            Self::Suspended => "suspended",
+        }
+    }
+}
+
 /// Everything that can reach the core.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Input {
@@ -987,6 +1115,9 @@ pub enum Input {
     /// An event tailed from a stream the executor follows, in `seq` order. The agent streams it
     /// follows are where `IntentProposed` arrives from.
     Journal(FoldedEvent),
+    /// An owner's acknowledgment, or its request, from the control stream, to copy and judge
+    /// (journal spec §9.28, DEC-2828).
+    Acknowledgment(AcknowledgmentHandoff),
     /// An intent the shell's adapter took from stream I's `IntentSink`. It carries no authority:
     /// it is journaled as `IntentReceived` and then gated like any other.
     Intent(IntentHandoff),
@@ -1001,10 +1132,29 @@ pub enum Input {
     /// A quote or mark, used for pricing and never for time.
     Market(MarketObservation),
     Command(Command),
+    /// The connection is `degraded` or `suspended` (connections spec §9.1, CN-6): reported at every
+    /// step while it holds. The core restricts the account first, and records the state change in a
+    /// later batch (journal spec §9.8, DEC-2826).
+    Connection(ConnectionTrouble),
     /// The journal refused the batch the last input drafted, as `Invalid` (DEC-2805). Nothing of
     /// it committed, so the core forgets it, and holds every agent's openings and alerts the owner
     /// once, rather than stopping the process and its exits, protection and kill switch.
     BatchRefused,
+    /// The core could not apply the last broker input it was handed, of which nothing is journaled
+    /// (DEC-2821). An order whose submission was awaiting the broker's answer goes `Unknown` and is
+    /// looked up by its own id, as on a broker that answers nothing, since that answer may have
+    /// been the one dropped; and every agent's openings are held, with the owner alerted once, as
+    /// for a refused batch, rather than stopping the process and its exits, protection and kill
+    /// switch on a broker answer the restart would read again.
+    InputFailed,
+    /// Every thesis record on `agent`'s stream, in stream order, as the process read it this pass
+    /// (mandate spec §8.5, §8.6; DEC-2823). The core replays them at its risk clock and journals
+    /// each difference from the working universe the account stream folds to as `UniverseChanged`,
+    /// once: a record handed again changes nothing the account stream already holds.
+    Theses {
+        agent: AgentId,
+        records: Vec<ThesisRow>,
+    },
 }
 
 /// What one step asks the shell to do, in order. The shell runs the journal appends first and

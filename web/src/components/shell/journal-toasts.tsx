@@ -30,7 +30,10 @@ function actionName(kind: CommandKind): string {
 
 /**
  * A toast appears only once the runtime has journaled the action. Sending raises nothing; the
- * Stop sheet and the approval screen say "sent" in their own status text.
+ * Stop sheet and the approval screen say "sent" in their own status text. An approval, and a resume
+ * or Stop the agent's runtime still answers (`awaitsRuntime`, DEC-2140), is announced only once the
+ * runtime acted on it: recorded alone, it may still be refused (DEC-2822, DEC-2102 item 4), and a
+ * toast cannot be taken back.
  */
 export function JournalToasts() {
   const { commands, responses, setUps } = useRuntime();
@@ -40,13 +43,15 @@ export function JournalToasts() {
   useEffect(() => {
     for (const c of commands) {
       const key = `cmd:${c.id}`;
-      if (c.phase !== "recorded" || announced.current.has(key)) continue;
+      const journaled = c.phase === "recorded" && (!c.awaitsRuntime || c.settled === "applied");
+      if (!journaled || announced.current.has(key)) continue;
       announced.current.add(key);
       toasts.add({ title: "Recorded in the journal", description: `${actionName(c.kind)}, as you asked.` });
     }
     for (const r of Object.values(responses)) {
       const key = `resp:${r.approvalId}`;
-      if ((r.phase !== "recorded" && r.phase !== "decided") || announced.current.has(key)) continue;
+      const journaled = r.response === "skip" ? r.phase === "recorded" || r.phase === "decided" : r.phase === "decided";
+      if (!journaled || announced.current.has(key)) continue;
       announced.current.add(key);
       toasts.add({ title: "Recorded in the journal", description: r.response === "skip" ? "Your skip." : "Your approval." });
     }

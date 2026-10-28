@@ -31,14 +31,31 @@
   `draft_bytes_with_pii`; `src/launch.rs` (the account from `run`'s flags or the deployment
   manager's variables) and the `mandate-executord` binary (`run`, `connect-check`, `probe`;
   SIGTERM drains, DEC-2007 item 3).
-- **Tests:** `crates/mandate-executord/tests/refused.rs` (DEC-2805): a refused batch holds every
+- **Tests:** `crates/mandate-executord/tests/connection_health.rs` (DEC-2832, `src/health.rs`):
+  lost answers in a row or `401`s restrict the account to closing with cause
+  `connection_unavailable`, a good answer resets its class, a `403` is not an authorization
+  failure, and the counter fuzzed against an independent oracle.
+  `crates/mandate-executord/tests/health_probe.rs` (DEC-2837): an idle executor probes the account
+  once a minute with reads only, and a lost or refused-credential probe restricts it.
+  `crates/mandate-executord/tests/universe.rs` (DEC-2823): an admitted thesis copied
+  onto the account stream as `UniverseChanged` once, across passes and a restart; in
+  `mandate-executor`, `universe.rs`'s copy tests and its property test that the folded universe is
+  the one the thesis records derive.
+  `crates/mandate-executord/tests/broker_input.rs` (DEC-2821): a broker answer the
+  core cannot apply holds every agent's openings once, alerts the operator once, and a later kill
+  switch still applies; `src/process.rs`'s `a_core_error_is_held_for_a_broker_input_alone`; in
+  `mandate-executor`, `reconcile.rs`'s `a_failed_broker_input_holds_every_agents_openings_once`.
+  `crates/mandate-executord/tests/refused.rs` (DEC-2805): a refused batch holds every
   agent's openings once and alerts, the process stays up and a later kill switch still applies, a
   refused exit's order is not sent and the exit goes at the next pass, and a refused hold stops
   it; `src/process.rs`'s `a_refusal_is_held_unless_it_is_of_the_hold_or_the_start`;
   `tests/mark_writer.rs`'s refused mark dropped and marked again; in `mandate-executor`,
   `reconcile.rs`'s `a_refused_batch_holds_every_agents_openings_once`,
   `a_refused_batch_leaves_the_clocks_as_its_input_found_them` and
-  `every_external_fill_batch_is_refused_at_its_fill_alone`.
+  `an_external_fill_without_its_config_or_its_id_is_refused_at_its_fill_alone`;
+  `tests/external_fill.rs` (DEC-2812): an external fill booked once as `FillApplied` version 2,
+  naming no order, and the activity cursor past it; in `mandate-executor`, `reconcile.rs`'s
+  `an_external_fill_is_booked_to_the_account_and_held_until_the_owner_acknowledges`.
   `crates/mandate-executord/tests/process.rs`: paper only, the stream opened once, the
   start waiting for a tick, readiness only after a clean startup reconciliation, a lost read read
   again without holding the kill switch, a process that is not ready applying the kill switch, a
@@ -93,5 +110,13 @@
   reading its ports from it, the deployment read again only when the control stream or the date
   moves, a store outage holding openings while keeping what exits read, the connection's loss
   carry inherited, the crypto stop-limit offset, the mounted store and the stored bars
-  (DEC-2802).
+  (DEC-2802); the cell's trade loop end to end, a deployed opening gated on the executor's own mark,
+  sent under its asset id, filled on the fixture, booked by asset id, its stop resting and every
+  later reconciliation clean, on a test deployment and on the cell's demo deployment as checked in
+  (`deploy/cell/demo`), and a deployed run's broker answering by asset id (DEC-2813).
+  A research agent's deployment (DEC-2819): its instrument only one its admission admitted, an
+  ended or unreadable thesis holding openings while exits, fills, marks and the ticker map keep
+  it, and the research loop in process: one opening filled and protected, the next held as
+  `opening_held`, and the thesis exit cancelling the protection and selling.
+  `tests/fixture_fills.rs` also shows the fixture answering an asset-id symbol by its ticker.
 - **Run:** `cargo nextest run -p mandate-executord` (with `MANDATE_PG_URL` for `tests/pg.rs`).

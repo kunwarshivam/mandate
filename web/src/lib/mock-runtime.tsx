@@ -10,10 +10,13 @@ import { type BacktestRead, backtestNotFound, servedBacktest } from "@/api/backt
 import { backtestOfVersion, servedBacktestFixture } from "@/fixtures/backtests";
 import type { ApiView, ReadPosition } from "@/api/read-models";
 import type { Enrolled, ListedPasskey } from "@/api/enrol";
+import type { CatalogueAnswer } from "@/api/catalogue";
+import type { JournalRecord } from "@/api/records";
 import type { Applies, Classification } from "@/api/confirm";
 import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-up";
 import type { AgentHolding, AgentOrder, JournalLine } from "@/api/activity";
 import type { ConnectionDetail } from "@/api/connect";
+import type { Alerts } from "@/api/alerts";
 
 /**
  * A stand-in for the workspace deployment. Commands and approval responses are held in memory
@@ -45,6 +48,14 @@ export interface Command {
   sentAt: Iso;
   recordedAt?: Iso;
   record?: CommandRecord;
+  /** Over the API, a resume or Stop waits for the owner's passkey before anything is sent (DEC-2140). */
+  awaitingPasskey?: boolean;
+  /** Why it was not sent, as the passkey check or the deployment said; a code, never shown as one. */
+  reason?: string;
+  /** Where the runtime settled it once its status was read (§5.5); `unconfirmed` when the reads ran out first. */
+  settled?: "applied" | "refused" | "ended" | "unconfirmed";
+  /** Over the API, a resume or Stop shows its effect only once the runtime applied it (DEC-2102 item 4). */
+  awaitsRuntime?: boolean;
 }
 
 /**
@@ -62,8 +73,12 @@ export interface ApprovalRecord {
 export interface ApprovalResponse {
   approvalId: string;
   response: "approve" | "skip";
-  /** `undelivered`: the deployment answered that nothing was recorded (`effect: none`), for the reason in `reason`. */
-  phase: "sent" | "recorded" | "decided" | "undelivered" | "unknown";
+  /**
+   * `undelivered`: the deployment answered that nothing was recorded (`effect: none`), for the reason
+   * in `reason`. `refused`: recorded, and the runtime refused it (`ApprovalResponded` refused), for
+   * the reason in `reason`; nothing was approved, and the answer is not sent again.
+   */
+  phase: "sent" | "recorded" | "decided" | "refused" | "undelivered" | "unknown";
   sentAt: Iso;
   recordedAt?: Iso;
   reason?: string;
@@ -198,8 +213,19 @@ export interface Runtime {
   activity: ((agentId: string) => Promise<ActivityAnswer>) | null;
   /** An agent's own positions alone (`GET /agents/{id}/positions`, DEC-2111), for the positions screen; `null` over the fixtures. */
   holdings: ((agentId: string) => Promise<PositionsAnswer>) | null;
+  /** The registered instruments and signal models a version may name (§4.1, DEC-2136); `null` over the fixtures, whose set-up uses the fixture catalogue. */
+  catalogue: (() => Promise<CatalogueAnswer>) | null;
+  /**
+   * The owner's exit from one instrument (`POST /agents/{id}/exits`, §5.4, rule 13), followed to its
+   * outcome; `onRecorded` runs once the journal holds it. `null` over the fixtures.
+   */
+  ownerExit: ((agentId: string, instrument: string, record: CommandRecord, onRecorded: () => void) => Promise<ExitOutcome>) | null;
+  /** A stream's latest `count` records with their bodies, each checked against its hash (§4.8.1), oldest first; `null` over the fixtures. */
+  streamRecords: ((streamId: string, count: number) => Promise<RecordsAnswer>) | null;
   /** A stream's latest `count` records, oldest first (§4.8.1), for the audit screens; `null` over the fixtures. */
   streamTail: ((streamId: string, count: number) => Promise<ActivityAnswer["journal"]>) | null;
+  /** The owner alerts about the workspace's agents and accounts (`GET /alerts`, DEC-2141); `null` over the fixtures. */
+  alerts: (() => Promise<AlertsAnswer>) | null;
   /** The member's workspace passkeys (§3.6); `null` over the fixtures. */
   passkeys: PasskeyPort | null;
   setUps: SetUp[];
@@ -251,6 +277,18 @@ export interface ConnectPort {
   /** `GET /connections`. */
   list: () => Promise<{ ok: true; connections: ConnectionDetail[] } | { ok: false; reason: string }>;
 }
+
+/**
+ * Where an owner exit came to: settled by the agent's runtime (`applied`, `refused`, `ended`), recorded
+ * with no settled outcome read yet, not delivered with the refusal's code, or not known.
+ */
+export type ExitOutcome = { phase: "applied" | "refused" | "ended" | "recorded" } | { phase: "undelivered"; reason: string } | { phase: "unknown" };
+
+/** The owner alerts the API served (DEC-2141), or why not. */
+export type AlertsAnswer = { ok: true; read: Alerts } | { ok: false; reason: string };
+
+/** A stream's records with their bodies, and whether they reach back to the stream's first record; or why they were not read. */
+export type RecordsAnswer = { ok: true; items: JournalRecord[]; fromStart: boolean } | { ok: false; reason: string };
 
 /** An agent's own positions with its account's holdings from the same read (DEC-2111), or why not. */
 export type PositionsAnswer = { ok: true; account_ref: string | null; items: AgentHolding[]; account_positions: ReadPosition[] | null } | { ok: false; reason: string };
@@ -662,7 +700,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, streamTail: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, realMoney: null, disclosures: null, activity: null, holdings: null, ownerExit: null, catalogue: null, streamTail: null, streamRecords: null, alerts: null, passkeys: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

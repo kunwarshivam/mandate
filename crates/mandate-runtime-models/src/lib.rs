@@ -26,24 +26,32 @@
 //! output, which can only shrink a buy (MI-10). No `llm.` model is ever evaluated here: LLM
 //! opinions reach the core through the research pass.
 //!
+//! An unpinned research mandate pins its `quant.` models on its working universe instead
+//! ([DEC-2827](../../../docs/project/decisions/DEC-2827.md)), read at each tick from the agent
+//! stream's thesis records with the executor's own replay: a `Long` only on the one instrument a
+//! surviving thesis holds, an exit on any instrument a record admitted, each instrument's symbol its
+//! own registered snapshot's (DEC-2819).
+//!
 //! The runtime mounts the artifact store read-only, so [`Held`] stores nothing: it only confirms
 //! the data process already holds the closes object an observation will name (DEC-2385 item 5).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use mandate_accounting::InstrumentId;
-use mandate_bars::{closes_object, daily_dir, trusted_daily_closes};
+use mandate_bars::generations::{GENERATIONS_ROOT, daily_dir_at};
+use mandate_bars::{closes_object, trusted_daily_closes};
 use mandate_canon::{Value, parse};
-use mandate_daemon::models::{Evaluated, Models};
+use mandate_daemon::models::{Evaluated, Models, Streams};
 use mandate_daemon::{ArtifactSink, ModelsWiring};
 use mandate_domain::AssetClass;
 use mandate_journal::{ArtifactRef, ArtifactSource, Environment, StoredEvent, get_artifact};
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, evaluate};
+use mandate_research::{ReplayError, ThesisRecord, replay_theses};
 use mandate_runtime::RiskClock;
 use mandate_spec::context::JournaledFact;
-use mandate_spec::document::{Mandate, ModelId};
+use mandate_spec::document::{Mandate, ModelId, SignalModel};
 use mandate_spec::validate::RegisteredModel;
 use mandate_time::{ExchangeCalendar, UtcNanos};
 
@@ -76,10 +84,22 @@ pub fn registry(control: &[StoredEvent], environment: Environment) -> Option<Reg
     Some(registry)
 }
 
-/// The observation source of the closes stored under `bars`: only the cell's recording is named
-/// (DEC-2385 item 7), so any other root gives none.
+/// The observation `source` of the closes the workspace data process stores from Alpaca's IEX
+/// daily bars (DEC-846 item 3, DEC-2283 item 6).
+pub const IEX_SOURCE: &str = "alpaca_iex_daily_bars";
+
+/// The observation source of the closes stored under `bars`: the cell's recording, or the data
+/// process's IEX generations (DEC-2283 item 6, superseding DEC-2385 item 7); any other root gives
+/// none, so it wires no models.
 pub fn source(bars: &Path) -> Option<&'static str> {
-    (bars.file_name()? == OsStr::new(RECORDING)).then_some(RECORDED_SOURCE)
+    let name = bars.file_name()?;
+    if name == OsStr::new(RECORDING) {
+        Some(RECORDED_SOURCE)
+    } else if name == OsStr::new(GENERATIONS_ROOT) {
+        Some(IEX_SOURCE)
+    } else {
+        None
+    }
 }
 
 /// One pin the composer evaluates, with the symbol its daily dataset is stored under.
@@ -88,9 +108,24 @@ struct Pinned {
     symbol: String,
 }
 
+/// What the composer pins its quant models on.
+enum Pins {
+    /// A pinned mandate's instruments, fixed by its confirmed version.
+    Pinned(Vec<Pinned>),
+    /// An unpinned mandate's working universe, read at each tick (DEC-2827).
+    Working(Working),
+}
+
+/// A research deployment's quant models, and the store its instruments' registered snapshots are
+/// read from.
+struct Working {
+    models: Vec<SignalModel>,
+    artifacts: Box<dyn ArtifactSource>,
+}
+
 /// The deployment's pinned quant models over the stored daily closes.
 pub struct PinnedModels {
-    pinned: Vec<Pinned>,
+    pins: Pins,
     registry: Registry,
     calendar: ExchangeCalendar,
     bars: PathBuf,
@@ -130,7 +165,43 @@ impl PinnedModels {
             })
             .collect();
         (!pinned.is_empty()).then(|| Self {
-            pinned,
+            pins: Pins::Pinned(pinned),
+            registry,
+            calendar,
+            bars: bars.to_path_buf(),
+            source,
+        })
+    }
+
+    /// Every `quant.` model of the confirmed unpinned mandate `document`, pinned at each tick on
+    /// its working universe as the executor reads it (DEC-2827): a `Long` only on the one instrument
+    /// a surviving thesis holds, an exit on any instrument a thesis record admitted, each with the
+    /// symbol of its own latest snapshot registered on the control stream and read from
+    /// `artifacts` (DEC-2819). `None` for a pinned mandate, one with no `quant.` model or no model that admits
+    /// instruments, or as [`Self::new`].
+    pub fn working(
+        document: &Value,
+        registry: Registry,
+        bars: &Path,
+        artifacts: Box<dyn ArtifactSource>,
+    ) -> Option<Self> {
+        let mandate = Mandate::parse(document).ok()?;
+        if mandate.universe.pinned {
+            return None;
+        }
+        let source = source(bars)?;
+        let calendar = ExchangeCalendar::us_equities().ok()?;
+        let signal_models = &mandate.behavior.signal_models;
+        if !signal_models.iter().any(|model| model.admits_instruments) {
+            return None;
+        }
+        let models: Vec<SignalModel> = signal_models
+            .iter()
+            .filter(|model| model.id.as_str().starts_with("quant."))
+            .cloned()
+            .collect();
+        (!models.is_empty()).then(|| Self {
+            pins: Pins::Working(Working { models, artifacts }),
             registry,
             calendar,
             bars: bars.to_path_buf(),
@@ -140,36 +211,198 @@ impl PinnedModels {
 
     /// `pinned`'s output at `now`, or none for any refusal.
     fn one(&self, pinned: &Pinned, now: UtcNanos) -> Option<Evaluated> {
-        let dir = daily_dir(&self.bars, &pinned.symbol).ok()?;
+        self.said(pinned, now).map(|(evaluated, _)| evaluated)
+    }
+
+    /// `pinned`'s output at `now` and whether it is an exit, or none for any refusal.
+    fn said(&self, pinned: &Pinned, now: UtcNanos) -> Option<(Evaluated, bool)> {
+        let dir = daily_dir_at(&self.bars, &pinned.symbol, now).ok()?;
         let daily = DailyCloses {
             instrument_id: pinned.pin.instrument_id.clone(),
             closes: trusted_daily_closes(&dir, &pinned.symbol, now).ok()?,
         };
-        let (Evaluation::Long(output) | Evaluation::Exit(output)) =
-            evaluate(&pinned.pin, &self.registry, &self.calendar, &daily, now).ok()?
-        else {
-            return None;
-        };
+        let (output, exit) =
+            match evaluate(&pinned.pin, &self.registry, &self.calendar, &daily, now).ok()? {
+                Evaluation::Long(output) => (output, false),
+                Evaluation::Exit(output) => (output, true),
+                Evaluation::NoOutput(_) => return None,
+            };
         let closes = closes_object(&daily.closes, pinned.pin.instrument_id.as_str()).ok()?;
-        Some(Evaluated {
-            output: *output,
-            closes,
-            source: self.source.to_owned(),
-        })
+        Some((
+            Evaluated {
+                output: *output,
+                closes,
+                source: self.source.to_owned(),
+            },
+            exit,
+        ))
     }
 }
 
 impl Models for PinnedModels {
-    /// Each pin's output at the tick `at`, in order; a pin that gives none is left out.
-    fn evaluate(&self, at: RiskClock) -> Vec<Evaluated> {
+    /// Each pin's output at the tick `at`, in order; a pin that gives none is left out. A research
+    /// deployment's pins are read from `streams` at `at`, and only the outputs its working universe
+    /// lets through are kept.
+    fn evaluate(&self, at: RiskClock, streams: Streams<'_>) -> Vec<Evaluated> {
         let Ok(now) = UtcNanos::from_parts(at.secs(), 0) else {
             return Vec::new();
         };
-        self.pinned
-            .iter()
-            .filter_map(|pinned| self.one(pinned, now))
-            .collect()
+        match &self.pins {
+            Pins::Pinned(pinned) => pinned
+                .iter()
+                .filter_map(|pinned| self.one(pinned, now))
+                .collect(),
+            Pins::Working(working) => self.working_outputs(working, streams, now),
+        }
     }
+}
+
+impl PinnedModels {
+    /// The research deployment's outputs at `now`: each quant model on each instrument its thesis
+    /// records ever admitted, in instrument order, its `Long` kept only on the instrument it may
+    /// open in and its exit kept on any. Control rows that do not read give none.
+    fn working_outputs(
+        &self,
+        working: &Working,
+        streams: Streams<'_>,
+        now: UtcNanos,
+    ) -> Vec<Evaluated> {
+        let Some(control) = streams.control else {
+            return Vec::new();
+        };
+        let Some(symbols) = symbols(control, working.artifacts.as_ref()) else {
+            return Vec::new();
+        };
+        let open = if every_row_reads(control) {
+            openable(streams.agent, now)
+        } else {
+            None
+        };
+        let mut outputs = Vec::new();
+        for instrument in ever_admitted(streams.agent) {
+            let (Some(Some(symbol)), Ok(instrument_id)) =
+                (symbols.get(&instrument), InstrumentId::new(&instrument))
+            else {
+                continue;
+            };
+            let may_open = open.as_deref() == Some(instrument.as_str());
+            for model in &working.models {
+                let pinned = Pinned {
+                    pin: Pin {
+                        model: model.clone(),
+                        instrument_id: instrument_id.clone(),
+                    },
+                    symbol: symbol.clone(),
+                };
+                if let Some((evaluated, exit)) = self.said(&pinned, now)
+                    && (exit || may_open)
+                {
+                    outputs.push(evaluated);
+                }
+            }
+        }
+        outputs
+    }
+}
+
+/// Whether every control row reads as the executor reads one: a record with a payload, of the
+/// paper or the live environment (`ControlRecord::of_row`). One that does not holds the executor's
+/// openings, so it holds every `Long` here too.
+fn every_row_reads(control: &[StoredEvent]) -> bool {
+    control.iter().all(|row| {
+        matches!(row.environment.as_str(), "paper" | "live")
+            && parse(&row.body)
+                .ok()
+                .is_some_and(|body| body.get("payload").is_some())
+    })
+}
+
+/// The symbol of each instrument by asset id, from the latest `instrument_snapshot` registered on
+/// the control rows that names it, its object read from `artifacts` (DEC-523, DEC-2819 item 3):
+/// `None` for an instrument whose latest snapshot names no symbol. `None` overall when a snapshot's
+/// registration or object does not read or names no instrument, as the executor refuses every
+/// instrument then; such a snapshot is never passed over for an earlier one. The snapshot's other
+/// DEC-523 members are the executor's to check before any opening.
+fn symbols(
+    control: &[StoredEvent],
+    artifacts: &dyn ArtifactSource,
+) -> Option<BTreeMap<String, Option<String>>> {
+    let mut symbols = BTreeMap::new();
+    for row in control
+        .iter()
+        .filter(|row| row.event_type == "ConfigSnapshotRegistered")
+    {
+        let Some(payload) = parse(&row.body)
+            .ok()
+            .and_then(|body| body.get("payload").cloned())
+        else {
+            continue;
+        };
+        if payload.get("kind").and_then(Value::as_str) != Some("instrument_snapshot") {
+            continue;
+        }
+        let reference = ArtifactRef::parse(payload.get("content_hash")?.as_str()?)?;
+        let object = parse(&get_artifact(artifacts, &reference).ok()?).ok()?;
+        let instrument = object.get("instrument_id")?.as_str()?.to_owned();
+        let symbol = object
+            .get("symbol")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        symbols.insert(instrument, symbol);
+    }
+    Some(symbols)
+}
+
+/// The thesis records of the agent stream's `rows`, in stream order, each one that cannot be read
+/// an `Err` the replay stops at.
+fn thesis_records(
+    rows: &[StoredEvent],
+) -> impl Iterator<Item = Result<ThesisRecord<'_>, ReplayError>> {
+    rows.iter()
+        .filter(|row| {
+            matches!(
+                row.event_type.as_str(),
+                "ThesisProposed" | "ThesisRevised" | "ThesisInvalidated"
+            )
+        })
+        .map(|row| {
+            let payload = parse(&row.body)
+                .ok()
+                .and_then(|body| body.get("payload").cloned())
+                .ok_or(ReplayError::Unreadable { member: "payload" })?;
+            Ok(ThesisRecord {
+                event_type: row.event_type.as_str(),
+                payload,
+            })
+        })
+}
+
+/// The instrument a research agent may open in at `now`, as the executor reads it: the one a
+/// surviving thesis holds, when exactly one does and every record replays; else none.
+fn openable(rows: &[StoredEvent], now: UtcNanos) -> Option<String> {
+    let replayed = replay_theses(thesis_records(rows), now).ok()?;
+    let [entry] = replayed.active.as_slice() else {
+        return None;
+    };
+    Some(entry.instrument.as_str().to_owned())
+}
+
+/// Every instrument a thesis record on the agent stream's `rows` admitted, as the executor maps a
+/// held position's exits: each `ThesisProposed` or `ThesisRevised` with `admitted` true, whatever
+/// any other record says, so a record that cannot be read takes no instrument from an exit
+/// (`AGENTS.md` rule 13).
+fn ever_admitted(rows: &[StoredEvent]) -> BTreeSet<String> {
+    rows.iter()
+        .filter(|row| matches!(row.event_type.as_str(), "ThesisProposed" | "ThesisRevised"))
+        .filter_map(|row| {
+            let body = parse(&row.body).ok()?;
+            let payload = body.get("payload")?;
+            if payload.get("admitted") != Some(&Value::Bool(true)) {
+                return None;
+            }
+            Some(payload.get("instrument_id")?.as_str()?.to_owned())
+        })
+        .collect()
 }
 
 /// The artifact store as the read-only runtime sees it: a put stores nothing and succeeds only when
@@ -186,7 +419,7 @@ impl<A: ArtifactSource> ArtifactSink for Held<A> {
 /// `document` against the `environment`'s registrations on `control`, the closes under `bars`
 /// (the process's `MANDATE_BARS`), and [`Held`] over `artifacts`. `None`, which evaluates no
 /// model, when `bars` is unset or empty, or when [`registry`] or [`PinnedModels::new`] gives none.
-pub fn wiring<A: ArtifactSource + 'static>(
+pub fn wiring<A: ArtifactSource + Clone + 'static>(
     control: &[StoredEvent],
     environment: Environment,
     document: &Value,
@@ -194,7 +427,16 @@ pub fn wiring<A: ArtifactSource + 'static>(
     artifacts: A,
 ) -> Option<ModelsWiring> {
     let bars = Path::new(bars.filter(|root| !root.is_empty())?);
-    let models = PinnedModels::new(document, registry(control, environment)?, bars)?;
+    let registry = registry(control, environment)?;
+    let models = match PinnedModels::working(
+        document,
+        registry.clone(),
+        bars,
+        Box::new(artifacts.clone()),
+    ) {
+        Some(working) => working,
+        None => PinnedModels::new(document, registry, bars)?,
+    };
     Some(ModelsWiring {
         models: Box::new(models),
         artifacts: Box::new(Held(artifacts)),

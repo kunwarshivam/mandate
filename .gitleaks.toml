@@ -189,8 +189,8 @@ regexes = ['''^webauthn_challenge": "(?:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRW
 # credential bytes, not credentials. A passkey's credential id and public key are public by design
 # (identity spec §7.2). Allowed only as those exact values and only in the files that show a
 # passkey's enrolment, so another value there, or the same value anywhere else, is still reported.
-# A connect start's, a version confirmation's, a resume's and a Stop's `step_up_assertion` examples and the decoder's
-# tests carry the same kind of made-up authenticator data (E9-4, DEC-2126, DEC-2128, DEC-2140; allowlisted
+# A connect start's, a version confirmation's, a resume's, a Stop's, an acknowledgment request's and an acknowledgment's (DEC-2144)
+# `step_up_assertion` examples and the decoder's tests carry the same kind of made-up authenticator data (E9-4, DEC-2126, DEC-2128, DEC-2140; allowlisted
 # as DEC-89 allows a fixture): synthetic
 # WebAuthn test bytes, composed by hand as SHA-256("localhost") as the RP ID hash, the flags 0x05
 # and a 4-byte counter, never taken from a credential. Each file is named by its exact path, in the
@@ -211,6 +211,9 @@ paths = [
   '''^schemas/workspace-api/examples/commands\.stop-request\.valid\.json$''',
   '''^schemas/workspace-api/examples/commands\.stop-request\.invalid\.json$''',
   '''^crates/mandate-api/tests/step_up_assertion\.rs$''',
+  '''^crates/mandate-api/tests/acknowledge_request\.rs$''',
+  '''^schemas/workspace-api/examples/commands\.acknowledge-request\.json$''',
+  '''^schemas/workspace-api/examples/commands\.acknowledgment-request-request\.json$''',
   '''^docs/specs/reference-cases/journal\.yaml$''',
   '''^fixtures/refcases/journal\.json$''',
   '''^reference/journal/credentials\.py$''',

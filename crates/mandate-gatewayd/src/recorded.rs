@@ -12,7 +12,10 @@ use mandate_gateway::policy::EndpointPolicy;
 use mandate_gateway::provider::Delivery;
 use mandate_gateway::registry::{Locality, Reported};
 use mandate_gateway::{CallRequest, RateCaps, Settings};
-use mandate_research_run::recorded::{RecordedModel, RecordedReply, ScriptedTurn};
+use mandate_research_run::agentic::RunKind;
+use mandate_research_run::recorded::{
+    RecordedModel, RecordedReply, ScriptedTurn, memory_theses, shown_thesis,
+};
 use mandate_research_run::recorded_reply;
 
 /// The workspace's calls a minute, fixed whatever the entry pins, as the cell's gateway holds them
@@ -22,12 +25,13 @@ pub const WORKSPACE_RATE: u32 = 12;
 /// The calls a minute an agent may make beyond the turns one run of its entry may take (DEC-2316).
 pub const RATE_MARGIN: u32 = 2;
 
-/// What the service replays: the recorded reply, the scripted turns, and what the endpoint
-/// reports.
+/// What the service replays: the recorded reply, the scripted turns, a monitor run's reply when
+/// the recording has one, and what the endpoint reports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Replies {
     reply: RecordedReply,
     turns: Vec<ScriptedTurn>,
+    monitor_reply: Option<RecordedReply>,
     reported: Reported,
 }
 
@@ -36,17 +40,33 @@ impl Replies {
         Self {
             reply: model.reply.clone(),
             turns: model.turns.clone(),
+            monitor_reply: model.monitor_reply.clone(),
             reported: model.probe.clone(),
         }
     }
 
-    /// The reply `request` takes: an agentic call's scripted turn, the one after the turns its
-    /// transcript already holds, when the recording scripts one; else the recorded final reply.
+    /// The reply `request` takes: a `monitor` run's call the recording's monitor reply, when it has
+    /// one, naming the least thesis the call's memory showed, with no scripted turn (agent harness
+    /// spec §6.9); else an agentic call's scripted turn,
+    /// the one after the turns its transcript already holds, when the recording scripts one; else
+    /// the recorded final reply.
     pub fn reply_for(&self, request: &CallRequest) -> Recorded {
+        let monitor = self
+            .monitor_reply
+            .as_ref()
+            .filter(|_| request.run_kind.as_deref() == Some(RunKind::Monitor.as_str()));
         let scripted = request
             .run_kind
             .as_ref()
+            .filter(|_| monitor.is_none())
             .and_then(|_| self.turns.get(request.turns.len()));
+        let shown = memory_theses(&request.inputs);
+        let shown: Vec<&str> = shown.iter().map(String::as_str).collect();
+        let output = match monitor {
+            Some(reply) => shown_thesis(&reply.output, &shown),
+            None => self.reply.output.clone(),
+        };
+        let last = monitor.unwrap_or(&self.reply);
         let (latency_ms, body) = match scripted {
             Some(turn) => {
                 let calls: Vec<(&str, &str)> = turn
@@ -60,12 +80,12 @@ impl Replies {
                 )
             }
             None => (
-                self.reply.latency_ms,
+                last.latency_ms,
                 recorded_reply(
-                    &self.reply.output,
+                    &output,
                     self.reported.model.as_deref().unwrap_or_default(),
                     self.reported.provider.as_deref().unwrap_or_default(),
-                    self.reply.usage,
+                    last.usage,
                 ),
             ),
         };

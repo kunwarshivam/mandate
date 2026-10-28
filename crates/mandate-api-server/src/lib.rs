@@ -26,6 +26,8 @@
 //!   screen, a new mandate's confirm, deploy, and go-live, judged and recorded as the CLI records
 //!   them (DEC-2101). [`stepup`] is the port every step-up goes through, which counts no evidence
 //!   until E9-4 binds it; [`objects`] is the content-addressed store those routes add records to.
+//! - [`catalogue`]: the registered instruments and signal models a version may name, folded as
+//!   the create folds them (DEC-2136).
 //! - [`challenges`]: the step-up challenge route and the store of the challenges it issues, each
 //!   issued under the context `authorize` returned for its action's row (DEC-2103).
 //! - [`passkeys`]: one's own passkeys, the registration challenge and the list (§3.6, DEC-2124),
@@ -40,6 +42,8 @@
 //! - [`connect`]: the connect start, which commits the pending connection and issues the
 //!   single-use `state` the callback redeems (DEC-2623).
 //! - [`backtests`]: the backtest and evaluation reads' folds (DEC-1001, DEC-1002, DEC-1143).
+//! - [`cache`]: the journal port with each stream read once, then only past its head (DEC-2145).
+//! - [`folds`]: the account reads' folds, resumed past the rows they folded (DEC-2145 item 10).
 //! - [`journal_reads`]: the journal's audit reads, a stream's events page (§4.8.1, E12-6).
 //! - [`finish`]: the connect's finish, from the open request and the executor's check to
 //!   `plan_finish`'s answer (DEC-2342), [`finish_records`], the records it appends, and
@@ -56,7 +60,10 @@
 //! It never places, cancels, or sizes an order, and never calls a broker or a runtime (§1.4):
 //! `xtask/layers.toml` keeps it from every crate that could.
 
+pub mod alerts;
 pub mod backtests;
+pub mod cache;
+pub mod catalogue;
 pub mod challenges;
 pub mod clock;
 pub mod commands;
@@ -70,6 +77,7 @@ pub mod finish;
 pub mod finish_binding;
 pub mod finish_pass;
 pub mod finish_records;
+pub mod folds;
 pub mod http;
 pub mod journal;
 pub mod journal_reads;
