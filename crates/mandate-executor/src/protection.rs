@@ -193,6 +193,23 @@ fn protecting_agent(view: &ExecutorState, instrument: &InstrumentId) -> Option<A
         .filter(|agent| agent.0 != EVERY_AGENT)
 }
 
+/// What `breach` measures a mark against (DEC-2849 item 8b): the highest own stop of the legs
+/// resting in `instrument` ([`leg_stop`]), so a stop placed before a lower one is still watched,
+/// else the protection's recorded stop. `None` when nothing rests.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "pending E7-4 (DEC-2849 item 8b): breach measures marks against it"
+    )
+)]
+fn watched_stop(
+    _view: &ExecutorState,
+    _instrument: &InstrumentId,
+) -> Result<Option<Price>, ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-4" })
+}
+
 /// A resting leg's own stop: its request's, or, for a leg the broker created from a bracket, its
 /// entry's bracket's. `None` when neither recorded one, so such a leg is never read as the one
 /// triggered beside a leg whose stop is known.
@@ -6575,6 +6592,73 @@ mod sequence_tests {
         assert_eq!(
             fired_at(&mut executor, &ports, 144)?,
             watchdog_exit_of("agent-b", "5")
+        );
+        Ok(())
+    }
+
+    /// DEC-2849 item 8b (§5.4 under shared positions, I4): agent-a's risk exit of its ten
+    /// cancels only its own leg. Agent-b's leg for its five fits beside the exit within N = 15, so
+    /// it keeps resting, and the exit goes once agent-a's own cancel is confirmed.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn an_exit_cancels_only_its_own_agents_legs() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        bought_by_b(&mut executor)?;
+        leg_at(&mut executor, ("md-held-2-p1", "agent-b", "5"), "130")?;
+        let theirs = ClientOrderId::parse("md-held-2-p1")?;
+        assert_eq!(
+            crate::holders::exit_cancels(
+                &executor.state,
+                &aapl()?,
+                &AgentId("agent-a".to_owned()),
+                Qty::parse("10")?,
+            )?,
+            BTreeSet::from([ClientOrderId::parse(OCO)?])
+        );
+        executor.run(quote("139")?, &ports)?;
+        let started = executor.run(sell(EXIT, "10", "139", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(cancels(&started), vec![OCO], "never agent-b's leg");
+        let released = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            submissions(&released)
+                .iter()
+                .map(|order| order.qty)
+                .collect::<Vec<_>>(),
+            vec![Qty::parse("10")?],
+            "the exit goes beside agent-b's resting leg"
+        );
+        assert!(
+            executor
+                .state
+                .protection
+                .get(&aapl()?)
+                .is_some_and(|protection| protection.resting.contains(&theirs)),
+            "agent-b's leg still rests"
+        );
+        Ok(())
+    }
+
+    /// DEC-2849 item 8b: the watchdog measures a mark against the highest resting stop, not the
+    /// last one placed. Agent-a's leg at 145 rested before agent-b's at 140; a mark of 144 has
+    /// breached agent-a's stop, so the watchdog exits agent-a's ten.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn the_breach_watches_the_highest_resting_stop() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        bought_by_b(&mut executor)?;
+        leg_at(&mut executor, (OCO, "agent-a", "10"), "145")?;
+        leg_at(&mut executor, ("md-held-2-p1", "agent-b", "5"), "140")?;
+        assert_eq!(
+            super::watched_stop(&executor.state, &aapl()?)?,
+            Some(Price::parse("145")?)
+        );
+        assert_eq!(
+            fired_at(&mut executor, &ports, 144)?,
+            watchdog_exit_of("agent-a", "10")
         );
         Ok(())
     }

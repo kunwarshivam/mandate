@@ -2,7 +2,7 @@
 //! the owner's residual, the deficit, and what each agent may sell and protect. Every figure is a
 //! function of the executor's state, so a replay reaches the same (I8).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_num::{Qty, SignedQty};
@@ -289,6 +289,29 @@ pub(crate) fn leg_excess(
     Err(ExecutorError::Unimplemented { story: "E7-4" })
 }
 
+/// DEC-2849 item 8, §5.4 under shared positions: the resting protective orders an exit of `qty` by
+/// `agent` cancels before it sells. They are the agent's own legs and every leg no holder owns
+/// (unattributed, or `*`). Another holder's legs keep resting while they fit beside the exit: what
+/// they have left to sell (an OCO's two legs once, as the larger), every working sell and `qty`
+/// together within N. Otherwise they are cancelled too, so a rule-13 exit is never cut by another
+/// holder's legs (I4) and the sequence re-places them after it. An exit of no agent (`*`) cancels
+/// every leg.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "pending E7-4 (DEC-2849 item 8b): the exit sequence cancels what it names"
+    )
+)]
+pub(crate) fn exit_cancels(
+    _view: &ExecutorState,
+    _instrument: &InstrumentId,
+    _agent: &AgentId,
+    _qty: Qty,
+) -> Result<BTreeSet<ClientOrderId>, ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-4" })
+}
+
 /// I4's clip: N less every working sell in `instrument` as [`still_selling`] counts them, never
 /// below zero.
 pub(crate) fn available_to_sell(
@@ -471,8 +494,8 @@ mod tests {
     use proptest::prelude::*;
 
     use super::{
-        available_to_sell, coverage, coverages, holders, leg_excess, leg_gaps, sell_authority,
-        sub_ledger, uncovered,
+        available_to_sell, coverage, coverages, exit_cancels, holders, leg_excess, leg_gaps,
+        sell_authority, sub_ledger, uncovered,
     };
     use crate::error::ExecutorError;
     use crate::fold::{fees_charged, fill_applied, position_released};
@@ -739,6 +762,41 @@ mod tests {
                 }
             }
             exits
+        }
+
+        /// Item 8b's cancels for an exit of `q` by agent `a`, or by no agent for `None`: its own
+        /// live legs and every live leg of no holder; and every other holder's live legs as well
+        /// when what those have left (an OCO's pair once, as the larger), the working sells and
+        /// `q` pass the position. An exit of no agent cancels every live leg.
+        fn exit_cancels(&self, a: Option<u8>, q: i64) -> BTreeSet<ClientOrderId> {
+            let live: Vec<&Resting> = self
+                .resting
+                .iter()
+                .filter(|rest| rest.protective && rest.left() > 0)
+                .collect();
+            let Some(a) = a else {
+                return live.iter().map(|rest| rest.id.clone()).collect();
+            };
+            let (others, mine): (Vec<&Resting>, Vec<&Resting>) = live
+                .into_iter()
+                .partition(|rest| rest.agent.is_some_and(|b| b != a));
+            let mut by_order: BTreeMap<String, i64> = BTreeMap::new();
+            for rest in &others {
+                let key = rest
+                    .pair
+                    .clone()
+                    .unwrap_or_else(|| rest.id.as_str().to_owned());
+                let counted = by_order.entry(key).or_insert(0);
+                *counted = (*counted).max(rest.left());
+            }
+            let kept = by_order
+                .values()
+                .fold(0_i64, |sum, left| sum.saturating_add(*left));
+            let fits = kept.saturating_add(self.working).saturating_add(q) <= self.position();
+            mine.into_iter()
+                .chain(others.into_iter().filter(|_| !fits))
+                .map(|rest| rest.id.clone())
+                .collect()
         }
 
         /// Item 8's gaps: each holder's Pᵢ less its own legs and exits, where that is above zero.
@@ -1582,6 +1640,128 @@ mod tests {
                 leg_excess(&run.view, &at)?,
                 by(excess)?,
                 "{events:?}: excess"
+            );
+        }
+        Ok(())
+    }
+    /// The cancels each agent's exit of min(Lᵢ, N), and an exit of no agent of N, would make, as
+    /// the oracle computes them (DEC-2849 item 8b).
+    fn exit_cancels_are_the_oracles(run: &Run) -> Result<(), TestCaseError> {
+        let fail = |e: ExecutorError| TestCaseError::fail(e.to_string());
+        for (i, oracle) in &run.oracles {
+            let at = instrument(*i).map_err(fail)?;
+            let position = oracle.position();
+            let mut exits: Vec<(AgentId, Option<u8>, i64)> =
+                vec![(AgentId(EVERY_AGENT.to_owned()), None, position)];
+            for a in 0..AGENTS {
+                if oracle.lots(a) > 0 {
+                    exits.push((agent(a), Some(a), oracle.lots(a).min(position)));
+                }
+            }
+            for (who, a, q) in exits {
+                let qty = shares(q).map_err(fail)?;
+                prop_assert_eq!(
+                    exit_cancels(&run.view, &at, &who, qty).map_err(fail)?,
+                    oracle.exit_cancels(a, q),
+                    "{}'s exit of {} in {}",
+                    who.0,
+                    q,
+                    i
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// DEC-2849 item 8b (I4, I9), over the attribution fuzz's events with legs, OCOs, legs of no
+    /// holder, exits, cancels and fills: an exit cancels its own agent's legs and every leg no
+    /// holder owns, keeps another holder's legs while they fit beside it within N, and cancels
+    /// them too once they would not, so another holder's legs never cut it.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn exit_cancels_are_the_oracles_over_random_legs() -> Result<(), String> {
+        let mut runner = proptest::test_runner::TestRunner::new(ProptestConfig::with_cases(256));
+        runner
+            .run(&proptest::collection::vec(leg_event(), 1..60), |events| {
+                let mut run = Run::new();
+                for event in &events {
+                    run.apply(event)
+                        .map_err(|e| TestCaseError::fail(e.to_string()))?;
+                    exit_cancels_are_the_oracles(&run)?;
+                }
+                Ok(())
+            })
+            .map_err(|e| e.to_string())
+    }
+
+    /// One hand case for item 8b: its events, the exiting agent (`None` for no agent) and its
+    /// quantity, and the legs it cancels, by the order they rested in.
+    type ExitCase = (Vec<Event>, Option<u8>, i64, Vec<usize>);
+
+    /// DEC-2849 item 8b by hand. With agent 0's ten and agent 1's five each protected, agent 0's
+    /// exit of ten cancels only its own leg; a `*` leg beside them goes too. Once the owner has
+    /// sold three outside Mandate, agent 1's five no longer fit beside the ten within N = 12, so
+    /// they go as well; so do they beside agent 1's own working exit of two. An exit of no agent
+    /// cancels every leg. An OCO's two legs count once in what agent 1 keeps.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn an_exit_cancels_its_own_legs_and_keeps_anothers_that_fit() -> Result<(), ExecutorError> {
+        let at = instrument(0)?;
+        let two = || {
+            vec![
+                Event::Buy(0, 0, 10),
+                Event::Buy(1, 0, 5),
+                Event::Protect(0, 0, 10),
+                Event::Protect(1, 0, 5),
+            ]
+        };
+        let with = |more: Vec<Event>| {
+            let mut events = two();
+            events.extend(more);
+            events
+        };
+        let cases: Vec<ExitCase> = vec![
+            (two(), Some(0), 10, vec![0]),
+            (
+                with(vec![Event::Unattributed(0, 3, true)]),
+                Some(0),
+                10,
+                vec![0, 2],
+            ),
+            (with(vec![Event::OwnerSell(0, 3)]), Some(0), 10, vec![0, 1]),
+            (with(vec![Event::Exit(1, 0, 2, 0)]), Some(0), 10, vec![0, 1]),
+            (two(), None, 15, vec![0, 1]),
+            (
+                vec![
+                    Event::Buy(0, 0, 10),
+                    Event::Buy(1, 0, 5),
+                    Event::Protect(0, 0, 10),
+                    Event::Oco(1, 0, 5),
+                ],
+                Some(0),
+                10,
+                vec![0],
+            ),
+        ];
+        for (events, exiting, qty, cancelled) in cases {
+            let mut run = Run::new();
+            for event in &events {
+                run.apply(event)?;
+            }
+            let rested: Vec<ClientOrderId> = run
+                .oracles
+                .get(&0)
+                .map(|oracle| oracle.resting.iter().map(|rest| rest.id.clone()).collect())
+                .unwrap_or_default();
+            let want: BTreeSet<ClientOrderId> = cancelled
+                .into_iter()
+                .filter_map(|k| rested.get(k).cloned())
+                .collect();
+            let who = exiting.map_or_else(|| AgentId(EVERY_AGENT.to_owned()), agent);
+            assert_eq!(
+                exit_cancels(&run.view, &at, &who, shares(qty)?)?,
+                want,
+                "{events:?}: {exiting:?}'s exit of {qty}"
             );
         }
         Ok(())
