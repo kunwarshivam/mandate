@@ -223,6 +223,7 @@ fn world_with(setup: &Setup<'_>) -> World {
                     origin: APP.to_owned(),
                 },
                 keys: None,
+                cool_off_waiver: None,
             },
             cli_confirm: CliConfirm {
                 challenges: Arc::clone(&challenges),
