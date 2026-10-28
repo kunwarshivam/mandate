@@ -6507,6 +6507,78 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// `agent`'s bracket entry `entry` for `qty` AAPL with its stop at `stop`, filled, and the leg
+    /// the broker created for it placed as the instrument's protection: the leg's own request
+    /// records no stop, so its stop is the bracket's.
+    fn bracketed(
+        executor: &mut Executor,
+        (agent, entry, qty): (&str, &str, &str),
+        stop: &str,
+    ) -> Result<(), ExecutorError> {
+        committed(
+            executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(entry)),
+                ("agent", text(agent)),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text(qty)),
+                ("limit", text("150")),
+                ("order_class", text("bracket")),
+                ("take_profit", text("170")),
+                ("stop", text(stop)),
+                ("purpose", text("open")),
+            ],
+        )?;
+        committed(
+            executor,
+            "FillApplied",
+            vec![
+                ("fill_id", text(format!("f-{entry}"))),
+                ("client_order_id", text(entry)),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty_gross", text(qty)),
+                ("price", text("150")),
+            ],
+        )?;
+        committed(
+            executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(entry)), ("state", text("filled"))],
+        )?;
+        committed(
+            executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text(format!("{entry}-p1"))),
+                ("qty", text(qty)),
+                ("take_profit", text("170")),
+                ("stop", text(stop)),
+            ],
+        )
+    }
+
+    /// DEC-2849 item 7, R3's delta on #2865: a leg the broker created from a bracket has no stop
+    /// of its own, so its entry's bracket gives it. Agent-a's bracket at 140 was placed first and
+    /// agent-b's at 145 second; a mark of 144 breaches agent-b's, so the exit is agent-b's five.
+    #[test]
+    fn a_bracket_legs_stop_is_its_entrys() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = Executor::opened(&ports)?;
+        bracketed(&mut executor, ("agent-a", "md-ea", "10"), "140")?;
+        bracketed(&mut executor, ("agent-b", "md-eb", "5"), "145")?;
+        assert_eq!(
+            fired_at(&mut executor, &ports, 144)?,
+            watchdog_exit_of("agent-b", "5")
+        );
+        Ok(())
+    }
+
     /// DEC-2849 item 7, R3's major 2 on #2865: a leg that names no agent (`*`) over a position
     /// one agent holds falls back to that single holder: the exit is agent-a's ten, not `*`'s.
     #[test]
