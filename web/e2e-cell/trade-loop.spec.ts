@@ -195,7 +195,8 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     };
     page.on("response", read);
     const cells = own.getByRole("row").nth(1).getByRole("cell");
-    const figures = async () => [((await cells.nth(4).textContent()) ?? "").trim(), ((await cells.nth(5).textContent()) ?? "").trim()];
+    const cell = async (at: number) => ((await cells.nth(at).textContent({ timeout: 2_000 }).catch(() => null)) ?? "").trim();
+    const figures = async () => [await cell(4), await cell(5)];
     const shown = await until(page, "/positions", 60_000, async () => {
       const [value, pnl] = await figures();
       return served.value.has(value) && served.pnl.has(pnl);
