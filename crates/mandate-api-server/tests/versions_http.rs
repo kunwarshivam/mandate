@@ -2862,6 +2862,9 @@ fn without_the_waiver_a_fresh_passkey_is_still_step_up_missing() {
     assert!(w.held(&issued), "nothing is taken");
 }
 
+/// A request that tries to turn the waiver on: its target, its extra headers, and its body.
+type Smuggled = (String, Vec<(&'static str, &'static str)>, String);
+
 /// DEC-2146 item 2: nothing a request carries turns the waiver on: not a header, a query, a body
 /// member, or the evidence's own members. Each such confirm of a cooling passkey on a server
 /// started without the waiver commits nothing and keeps the challenge.
@@ -2873,7 +2876,7 @@ fn no_header_query_or_request_member_turns_the_waiver_on() {
     let plain = w.body(&issued, "passkey", Some(signed.json(CREDENTIAL)));
     let cookie = format!("{COOKIE_NAME}={}", w.cookie);
     let path = ws(&format!("/mandate-versions/{}/confirm", version("v1")));
-    let mut asks: Vec<(String, Vec<(&str, &str)>, String)> = Vec::new();
+    let mut asks: Vec<Smuggled> = Vec::new();
     for (name, value) in [
         ("X-Mandate-Cool-Off-Waiver", "true"),
         ("Mandate-Api-Passkey-Cool-Off-Waiver", "true"),
