@@ -28,10 +28,15 @@ describe("the data source (DEC-975)", () => {
     expect(api("http://localhost:4319", WS)).toEqual({ kind: "api", origin: "http://localhost:4319", workspaceId: WS });
   });
 
+  it("leaves the workspace to the session's memberships when none is named, and only then", () => {
+    expect(api("https://api.owlhead.ai", undefined)).toEqual({ kind: "api", origin: "https://api.owlhead.ai", workspaceId: null });
+    expect(api("https://api.owlhead.ai", "").kind).toBe("misconfigured");
+  });
+
   it("is misconfigured, never the fixtures, when the API is chosen and its origin or workspace does not parse", () => {
     for (const origin of ["", "api.owlhead.ai", "http://api.owlhead.ai", "https://api.owlhead.ai/v1", "https://api.owlhead.ai?x=1", "https://user:pw@api.owlhead.ai", "ftp://api.owlhead.ai", "javascript:alert(1)"])
       expect(api(origin, WS).kind, origin).toBe("misconfigured");
-    for (const workspace of [undefined, "", "../ws", "ws/1", "ws 1"]) expect(api("https://api.owlhead.ai", workspace).kind, String(workspace)).toBe("misconfigured");
+    for (const workspace of ["", "../ws", "ws/1", "ws 1"]) expect(api("https://api.owlhead.ai", workspace).kind, String(workspace)).toBe("misconfigured");
     for (const value of ["API", "Api", "live", "fixture"]) expect(readDataSource({ [DATA_SOURCE_ENV]: value }).kind, value).toBe("misconfigured");
   });
 

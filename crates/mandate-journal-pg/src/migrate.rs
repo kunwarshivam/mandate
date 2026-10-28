@@ -45,11 +45,18 @@ impl Migration {
 
 /// `migrations/`, in order, embedded at build time. A new migration is a new file and a new entry,
 /// never an edit.
-const MIGRATIONS: [Migration; 1] = [Migration {
-    version: 1,
-    file: "0001_journal.sql",
-    sql: include_str!("../../../migrations/0001_journal.sql"),
-}];
+const MIGRATIONS: [Migration; 2] = [
+    Migration {
+        version: 1,
+        file: "0001_journal.sql",
+        sql: include_str!("../../../migrations/0001_journal.sql"),
+    },
+    Migration {
+        version: 2,
+        file: "0002_news_reader_writes_only_news.sql",
+        sql: include_str!("../../../migrations/0002_news_reader_writes_only_news.sql"),
+    },
+];
 
 /// The journal schema's migrations, versions 1, 2, 3, … in order.
 pub fn migrations() -> &'static [Migration] {
