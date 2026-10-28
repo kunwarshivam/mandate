@@ -5,7 +5,7 @@
 //! rule 249 reads as at version 1, and §9.32's `StepUpAsserted` at version 1, with rule 252 at
 //! append and batch rule 253 in [`check_batch`]. Stream rule 254 is the writer's, as 251 is.
 //!
-//! v0.112 (DEC-2146) closes §9.38's `StepUpCoolOffWaived` at version 1, with rule 316 at append
+//! v0.113 (DEC-2146) closes §9.38's `StepUpCoolOffWaived` at version 1, with rule 316 at append
 //! and batch rule 317 in [`check_batch`], judged after rule 253. Stream rule 318 is the writer's, as
 //! 254 is.
 //!
