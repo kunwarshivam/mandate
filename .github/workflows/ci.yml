@@ -725,14 +725,19 @@ jobs:
           save-if: false
           cache-on-failure: true
       - run: cargo xtask ci cell-demo
-      # The web gesture's Playwright output when the job fails, so its cause can be read off the run
-      # rather than off the runner. Only the log: the same directory holds next dev's throwaway TLS
-      # key (DEC-2609 item 5).
+      # Each web spec's Playwright output when the job fails, so its cause can be read off the run
+      # rather than off the runner: the kill switch gesture's, the trade loop's (step 4, with the
+      # result it wrote, which names the first step it did not reach) and the journey's. Only these
+      # files: each spec's directory also holds next dev's throwaway TLS key (DEC-2609 item 5).
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: cell-demo-web-playwright
-          path: target/cell/web-gesture/playwright.log
+          path: |
+            target/cell/web-gesture/playwright.log
+            target/cell/web-trade-loop/playwright.log
+            target/cell/web-trade-loop/result.json
+            target/cell/web-journey/playwright.log
           if-no-files-found: ignore
           retention-days: 7
 
