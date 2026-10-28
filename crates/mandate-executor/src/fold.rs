@@ -1625,10 +1625,10 @@ fn protection_changed(
                     .remove(&(instrument.clone(), intent.clone()))
                     .map_or_else(Ladder::default, |lone| lone.ladder);
                 let cancelled = protective_orders_named(payload, "orders")?;
-                let kept = match state.exiting.get(&instrument) {
-                    Some(sequence) if sequence.intent == intent => sequence.kept.clone(),
-                    _ if cancelled.is_empty() => BTreeSet::new(),
-                    _ => state
+                let kept = if cancelled.is_empty() {
+                    BTreeSet::new()
+                } else {
+                    state
                         .protection
                         .get(&instrument)
                         .map(|protection| {
@@ -1639,7 +1639,7 @@ fn protection_changed(
                                 .cloned()
                                 .collect()
                         })
-                        .unwrap_or_default(),
+                        .unwrap_or_default()
                 };
                 state.exiting.insert(
                     instrument.clone(),
