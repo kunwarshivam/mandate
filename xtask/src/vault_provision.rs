@@ -19,10 +19,12 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::SocketAddrV4;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value;
 
+use crate::cell::await_active;
 use crate::gitops::WORKSPACE_NAMESPACE;
 use crate::mask;
 use crate::vault_init::{Kubectl, RECOVERY_NAMESPACE, RECOVERY_SECRET};
@@ -69,11 +71,13 @@ pub(crate) type Put<'a> = &'a dyn Fn(&str, &str) -> Result<(bool, String)>;
 
 /// What the step needs: `kubectl` against staging, and `mandate vault provision` and `mandate vault
 /// put` run against the vault with the given standard input, each answering whether it succeeded
-/// and what it printed: the Secrets, or one status line.
+/// and what it printed: the Secrets, or one status line; and a pause between the reads of the
+/// vault's status while it is not yet active.
 pub(crate) struct Steps<'a> {
     pub(crate) kubectl: Kubectl<'a>,
     pub(crate) provision: Provision<'a>,
     pub(crate) put: Put<'a>,
+    pub(crate) pause: &'a dyn Fn(Duration),
 }
 
 /// The name of an executor's Secret, as `mandate_vault::kube::secret_name` writes it: the
@@ -603,6 +607,10 @@ pub(crate) fn vault_provision(
         words.extend(["credentials: present", "kubernetes auth: present"]);
     } else {
         let keys = recovery_keys(steps)?;
+        await_active(
+            || in_vault(steps, &["bao", "status", "-format=json"], None).map(|(_, status)| status),
+            |pause| (steps.pause)(pause),
+        )?;
         let root = root(steps, &keys)?;
         let token = root.token.clone().unwrap_or_default();
         let stdin = format!("{token}\n");
@@ -711,6 +719,10 @@ mod tests {
         marker: Option<&'static str>,
         kubernetes_only_fails: bool,
         marker_apply_fails: bool,
+        /// How many reads of the vault's status answer it a standby before it is active.
+        standby_reads: u32,
+        status_reads: Cell<u32>,
+        paused: Cell<Duration>,
         calls: RefCell<Vec<(Vec<String>, Option<String>)>>,
         provisioned_with: RefCell<Vec<String>>,
         commands: RefCell<Vec<Vec<String>>>,
@@ -725,6 +737,14 @@ mod tests {
             ));
             let has = |word: &str| args.contains(&word);
             Ok(match args.first().copied().unwrap_or_default() {
+                "exec" if has("status") => {
+                    let read = self.status_reads.get() + 1;
+                    self.status_reads.set(read);
+                    let active = read > self.standby_reads;
+                    let status = json!({"initialized": true, "sealed": false,
+                        "storage_type": "raft", "ha_enabled": true, "is_self": active});
+                    (true, status.to_string())
+                }
                 "get" if has("secrets") => (true, self.present.join(" ")),
                 "get" if has("service") => (
                     true,
@@ -798,6 +818,7 @@ mod tests {
                     kubectl: &|args, stdin| self.kubectl(args, stdin),
                     provision: &provision,
                     put: &put,
+                    pause: &|pause| self.paused.set(self.paused.get() + pause),
                 },
                 connections,
                 self.model_key,
@@ -897,7 +918,41 @@ mod tests {
             ]
         );
         assert_eq!(fake.calls.borrow().len(), 3);
+        assert_eq!(
+            fake.status_reads.get(),
+            0,
+            "a provisioned vault is not waited on"
+        );
         assert!(fake.commands.borrow().is_empty());
+        Ok(())
+    }
+
+    /// A vault to provision that is not yet active is waited on, its status read again after each
+    /// pause, before any root generation begins (E21-32v); one that never becomes active stops the
+    /// step after sixty seconds with no root generated and nothing provisioned.
+    #[test]
+    fn the_step_waits_for_an_active_vault_and_stops_if_it_never_is() -> Result<()> {
+        let waited = Fake {
+            standby_reads: 2,
+            ..Fake::default()
+        };
+        waited.run(&["c1"])?;
+        assert_eq!(waited.status_reads.get(), 3);
+        assert_eq!(waited.paused.get(), Duration::from_secs(4));
+        assert!(waited.revoked(), "provisioned after the wait");
+        let never = Fake {
+            standby_reads: u32::MAX,
+            ..Fake::default()
+        };
+        assert!(never.run(&["c1"]).is_err());
+        assert_eq!(never.status_reads.get(), 31);
+        assert_eq!(never.paused.get(), Duration::from_secs(60));
+        assert!(
+            never.calls_with("sys/generate-root/attempt").is_empty(),
+            "no root generated"
+        );
+        assert!(never.commands.borrow().is_empty());
+        assert!(never.calls_with("apply").is_empty());
         Ok(())
     }
 

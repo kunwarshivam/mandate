@@ -1880,6 +1880,54 @@ fn vault_state(status: &str) -> Result<VaultState> {
     })
 }
 
+/// How long the cell waits, after unsealing, for the vault to answer as the active node (E21-32v):
+/// a raft node reports itself unsealed before it has won its election and loaded its token store,
+/// and refuses even the root token until then, so provisioning waits for it. A denial after that
+/// is a real one, never retried.
+const VAULT_ACTIVE_S: u64 = 60;
+/// How often the cell asks the vault's status while it waits for it to be active.
+const VAULT_ACTIVE_EVERY_S: u64 = 2;
+
+/// Whether a vault's `bao status -format=json` says it is unsealed, on raft, and the active node:
+/// HA off, or HA on with `is_self` true. A status missing either field is not active.
+fn vault_active(status: &str) -> Result<bool> {
+    if vault_state(status)? != VaultState::Unsealed {
+        return Ok(false);
+    }
+    let status: Value = serde_json::from_str(status).context("reading the vault's status")?;
+    Ok(match status["ha_enabled"].as_bool() {
+        Some(false) => true,
+        Some(true) => status["is_self"].as_bool() == Some(true),
+        None => false,
+    })
+}
+
+/// Asks `status` until the vault answers as active ([`vault_active`]), pausing
+/// [`VAULT_ACTIVE_EVERY_S`] between asks for no longer than [`VAULT_ACTIVE_S`] in all. A status
+/// that cannot be read or is not JSON, as `bao status` prints nothing on its standard output
+/// while it cannot find the leader, is asked again; one that names a dev server stops it at once.
+pub(crate) fn await_active(
+    mut status: impl FnMut() -> Result<String>,
+    mut pause: impl FnMut(Duration),
+) -> Result<()> {
+    let mut active = || -> Result<bool> {
+        match status() {
+            Ok(answer) if serde_json::from_str::<Value>(&answer).is_ok() => vault_active(&answer),
+            _ => Ok(false),
+        }
+    };
+    for _ in 0..VAULT_ACTIVE_S / VAULT_ACTIVE_EVERY_S {
+        if active()? {
+            return Ok(());
+        }
+        pause(Duration::from_secs(VAULT_ACTIVE_EVERY_S));
+    }
+    if active()? {
+        return Ok(());
+    }
+    bail!("the vault did not answer as the active node within {VAULT_ACTIVE_S} s of unsealing")
+}
+
 /// `bao` in the vault's pod, with `stdin` on its standard input, and its standard output, whatever
 /// its exit: `bao status` exits 2 for a sealed vault. Its output is never printed, since `operator
 /// init`'s holds the unseal key and the root token.
@@ -2024,7 +2072,11 @@ fn vault(kube_api: bool) -> Result<bool> {
         &format!("pod/{VAULT_POD}"),
         "--timeout=120s",
     ])?;
-    eprintln!("    vault: unsealed, on raft storage");
+    await_active(
+        || bao(&["status", "-format=json"], b"").map(|(_, status)| status),
+        sleep,
+    )?;
+    eprintln!("    vault: unsealed and active, on raft storage");
     Ok(fresh)
 }
 
@@ -7013,6 +7065,79 @@ mod tests {
         assert!(vault_state(&status(true, true, "inmem")).is_err());
         assert!(vault_state(r#"{"sealed": false, "storage_type": "raft"}"#).is_err());
         assert!(vault_state("not json").is_err());
+    }
+
+    /// The vault counts as active only unsealed, on raft, and the active node; the cell waits for
+    /// that, pausing between asks, for no longer than its bound, and a dev server stops the wait at
+    /// once.
+    #[test]
+    fn the_cell_waits_for_an_active_vault_within_its_bound() {
+        let status = |sealed: bool, ha: Option<bool>, is_self: Option<bool>, storage: &str| {
+            let mut status =
+                json!({"initialized": true, "sealed": sealed, "storage_type": storage});
+            if let Some(ha) = ha {
+                status["ha_enabled"] = json!(ha);
+            }
+            if let Some(is_self) = is_self {
+                status["is_self"] = json!(is_self);
+            }
+            status.to_string()
+        };
+        let standby = status(false, Some(true), Some(false), "raft");
+        let active = status(false, Some(true), Some(true), "raft");
+        assert!(vault_active(&active).unwrap());
+        assert!(vault_active(&status(false, Some(false), None, "raft")).unwrap());
+        assert!(!vault_active(&standby).unwrap());
+        assert!(!vault_active(&status(false, Some(true), None, "raft")).unwrap());
+        assert!(!vault_active(&status(false, None, Some(true), "raft")).unwrap());
+        assert!(!vault_active(&status(true, Some(true), Some(true), "raft")).unwrap());
+        assert!(vault_active(&status(false, Some(false), None, "inmem")).is_err());
+
+        let asks = |answers: Vec<Result<String>>| {
+            let mut answers = answers.into_iter();
+            let mut asked = 0_u32;
+            let mut waited = Duration::ZERO;
+            let outcome = await_active(
+                || {
+                    asked += 1;
+                    answers
+                        .next()
+                        .unwrap_or_else(|| Ok(status(false, Some(true), Some(false), "raft")))
+                },
+                |pause| waited += pause,
+            );
+            (outcome.is_ok(), asked, waited)
+        };
+        assert_eq!(
+            asks(vec![
+                Ok(standby.clone()),
+                Err(anyhow::anyhow!("the pod is restarting")),
+                Ok(String::new()),
+                Ok("Error checking leader status".to_owned()),
+                Ok(active.clone()),
+            ]),
+            (true, 5, Duration::from_secs(8)),
+            "standby, then unreadable, empty and not JSON, then active: provisioning goes on \
+             after four pauses"
+        );
+        assert_eq!(
+            asks(vec![Ok(active)]),
+            (true, 1, Duration::ZERO),
+            "an active vault is not waited on"
+        );
+        assert_eq!(
+            asks(Vec::new()),
+            (false, 31, Duration::from_secs(60)),
+            "a vault that never becomes active fails after sixty seconds, asked once more at the end"
+        );
+        assert_eq!(
+            asks(vec![
+                Ok(standby),
+                Ok(status(false, Some(false), None, "inmem"))
+            ]),
+            (false, 2, Duration::from_secs(2)),
+            "a dev server stops the wait at once"
+        );
     }
 
     /// The runtime image's context carries every file of the demo's research bundle and nothing

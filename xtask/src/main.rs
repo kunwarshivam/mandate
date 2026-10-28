@@ -2258,6 +2258,7 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
             kubectl: &in_cluster,
             provision: &|command, stdin| in_vault_cli(command, stdin),
             put: &|secret, stdin| in_vault_cli(&vault_provision::put_command(secret), stdin),
+            pause: &std::thread::sleep,
         },
         &listed,
         &model_key,
