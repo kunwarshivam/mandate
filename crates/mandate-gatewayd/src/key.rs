@@ -4,6 +4,7 @@
 //! start. The key is handed to the gateway's transport for the one upstream the routing lock names
 //! and to nothing else, and no `Debug`, error or code carries a byte of it.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use mandate_gateway::provider::{ProviderKey, SecretError, SecretSource};
@@ -40,11 +41,11 @@ impl KeyError {
     }
 }
 
-/// The provider's key for one upstream, read once. It answers [`SecretSource::provider_key`] for
-/// that upstream alone.
+/// The provider's key, read once, for the upstreams the start names. It answers
+/// [`SecretSource::provider_key`] for those upstreams alone.
 #[derive(Clone)]
 pub struct HeldKey {
-    upstream: String,
+    upstreams: BTreeSet<String>,
     key: ProviderKey,
 }
 
@@ -73,15 +74,23 @@ impl HeldKey {
         }
         let key = String::from_utf8(bytes.to_vec()).map_err(|_| KeyError::Malformed)?;
         Ok(Self {
-            upstream: upstream.to_owned(),
+            upstreams: BTreeSet::from([upstream.to_owned()]),
             key: ProviderKey::new(key),
         })
+    }
+
+    /// The same key, served for `upstream` too, with no new read: a live registry's entries may
+    /// route through more than one upstream (DEC-2216).
+    #[must_use]
+    pub fn with_upstream(mut self, upstream: &str) -> Self {
+        self.upstreams.insert(upstream.to_owned());
+        self
     }
 }
 
 impl SecretSource for HeldKey {
     fn provider_key(&self, upstream: &str) -> Result<ProviderKey, SecretError> {
-        if upstream == self.upstream {
+        if self.upstreams.contains(upstream) {
             Ok(self.key.clone())
         } else {
             Err(SecretError::Missing)
@@ -92,7 +101,7 @@ impl SecretSource for HeldKey {
 impl fmt::Debug for HeldKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HeldKey")
-            .field("upstream", &self.upstream)
+            .field("upstreams", &self.upstreams)
             .finish_non_exhaustive()
     }
 }

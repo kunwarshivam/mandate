@@ -313,8 +313,8 @@ pub(crate) const OWNER_ALERT_SENT: &str = "OwnerAlertSent";
 
 pub(crate) fn schema_version(event_type: &str) -> u64 {
     match event_type {
+        "GateDecided" => 3,
         "IntentReceived"
-        | "GateDecided"
         | "OrderSubmitted"
         | "OrderStateChanged"
         | "ProtectionChanged"
@@ -342,13 +342,13 @@ mod tests {
     fn the_executor_owns_each_account_draft_schema_version() {
         for event_type in [
             "IntentReceived",
-            "GateDecided",
             "OrderSubmitted",
             "AccountSnapshotRecorded",
             "FillApplied",
         ] {
             assert_eq!(schema_version(event_type), 2, "{event_type}");
         }
+        assert_eq!(schema_version("GateDecided"), 3, "DEC-2848");
         for event_type in [
             "LateFillApplied",
             "OrderRequestRecorded",

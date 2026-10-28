@@ -1,6 +1,6 @@
 //! The `mandate-datad` process: it stores the series before it answers ready, its `exec` probe
 //! answers over the probe socket, and on SIGTERM it drains and exits cleanly (DEC-994 item 5). It
-//! writes only under its store root and reaches no host.
+//! writes only under its store root, and the recording reaches no host.
 
 #![allow(
     clippy::disallowed_methods,
@@ -227,4 +227,70 @@ fn the_ready_process_has_stored_the_series_and_drains_on_sigterm() {
         "a stopped process is not ready"
     );
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// DEC-2283: the IEX source refuses to start without its arguments, on a store that is not an
+/// `alpaca-iex` root, and an unknown source is refused, each before reaching any host.
+#[test]
+fn the_iex_source_refuses_to_start_without_what_it_needs() {
+    let probe = scratch("iex-args").join("probe.sock");
+    let probe = probe.to_str().unwrap().to_owned();
+    let base = |extra: &[&str]| -> Vec<String> {
+        let mut args = vec!["run".to_owned(), "--probe".to_owned(), probe.clone()];
+        args.extend(extra.iter().map(|a| (*a).to_owned()));
+        args
+    };
+    let run = |args: Vec<String>| {
+        let output = Command::new(BIN).args(&args).output().unwrap();
+        (
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        )
+    };
+    assert_eq!(
+        run(base(&["--source", "alpaca-iex", "--workspace", "ws"])),
+        (Some(2), "iex_arguments_missing".to_owned())
+    );
+    assert_eq!(
+        run(base(&[
+            "--source",
+            "alpaca-iex",
+            "--workspace",
+            "ws",
+            "--store",
+            "/nowhere/cell-recorded",
+            "--artifacts",
+            "/nowhere",
+            "--vault-address",
+            "https://127.0.0.1:1",
+            "--vault-dir",
+            "/nowhere",
+        ])),
+        (
+            Some(2),
+            "data_start_failed: store_not_generations".to_owned()
+        )
+    );
+    assert_eq!(
+        run(base(&[
+            "--source",
+            "alpaca-iex",
+            "--workspace",
+            "ws",
+            "--store",
+            "/nowhere/alpaca-iex",
+            "--artifacts",
+            "/nowhere",
+            "--vault-address",
+            "https://127.0.0.1:1",
+            "--vault-dir",
+            "/nowhere",
+        ])),
+        (Some(2), "data_start_failed: vault_ca_unreadable".to_owned()),
+        "the CA is read before anything is asked of the vault"
+    );
+    assert_eq!(
+        run(base(&["--source", "sip"])),
+        (Some(2), "source_unknown".to_owned())
+    );
 }

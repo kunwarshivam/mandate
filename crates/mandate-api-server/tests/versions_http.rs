@@ -198,6 +198,7 @@ fn built_with(port: Port, with_store: bool, records: Vec<MembershipRecord>) -> F
         challenges: Arc::clone(&challenges),
         connect: None,
         reduction: Arc::default(),
+        folds: Arc::default(),
     };
     let f = Fixture {
         addr: serve(http::api(app, Drain::new())),

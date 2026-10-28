@@ -58,6 +58,27 @@ MUTANTS = {
                                              "        if not breached:\n            self.acc = 0.0"),
     "additive capital base": ("self.C, self.L = H1, E01, C1, L1", "self.C, self.L = H1, E01, self.C + d, L1"),
     "hard trigger latches on one quote": ("        if quote and (t - self.hard_first[key]).total_seconds() >= self.hard_wait():", "        if True:"),
+    "V-048 lets a route name the model's own pin": (
+        '    if any(kind != "ideate" and pin["id"] == sm["id"] for kind, pin in pins.items()):',
+        '    if False:'),
+    "V-048 offers an entry still evaluating": (
+        '(exact and e.get("status") == "offered")', '(exact and e.get("status") in ("offered", "evaluating"))'),
+    "V-048 ignores the pinned hash": (
+        'e["version"] == pin["version"] and e["content_hash"] == pin["content_hash"]', 'e["version"] == pin["version"]'),
+    "V-048 ignores the pinned version": (
+        'e["version"] == pin["version"] and e["content_hash"] == pin["content_hash"]', 'e["content_hash"] == pin["content_hash"]'),
+    "V-048 allows routes on any model": (
+        '            or any("routes" in s and not s["admits_instruments"] for s in sms):', '            or False:'),
+    "V-048 lets the own pin be any status": (
+        '            if exact and e.get("admits_instruments", False) and not offered:', '            if False:'),
+    "V-048 carries a pin from another run kind": (
+        '        offered = carried.get(kind) == pin or', '        offered = pin in carried.values() or'),
+    "V-048 carries from a previous version nobody confirmed": (
+        '    for p in (prev["behavior"]["signal_models"] if agents_current(prev, current) else []):',
+        '    for p in (prev["behavior"]["signal_models"] if isinstance(prev, dict) and "behavior" in prev else []):'),
+    "V-048 never carries a pin": ('        offered = carried.get(kind) == pin or', '        offered = False or'),
+    "V-048 ignores the shared harness": (
+        '                  and own is not None and e.get("harness") == own.get("harness")):', '                  ):'),
     "V-047 reads a stated policy's presence, not its value": (
         '    if ctx.get("independent_approval_required", False) and ctx.get("workspace_users", 1) < 2:',
         '    if "independent_approval_required" in ctx and ctx.get("workspace_users", 1) < 2:'),
@@ -457,7 +478,7 @@ UNASKED_MUTANTS = {
 
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
          "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_split_boundaries(400); fuzz_stepped_lift(300); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
-         "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
+         "fuzz_lineage(300); fuzz_pinning(400); fuzz_routes(1500); fuzz_autonomy(1500); "
          "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_delegated_rule_changes(2500); fuzz_client_ceiling(300); "
          "fuzz_review(400); fuzz_review_changes(400); fuzz_review_rules(400); "
          "fuzz_escalation(1500); fuzz_policy_quorum(500); fuzz_independence_floor(300); fuzz_drift(300); fuzz_ask_budget(600); fuzz_quiet_hours(400); fuzz_owner_controls(600); fuzz_content(200); fuzz_stop_limit_offset(300); "

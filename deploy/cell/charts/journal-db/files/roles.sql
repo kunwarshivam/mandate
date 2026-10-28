@@ -7,6 +7,9 @@ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_app') THEN
     CREATE ROLE mandate_journal_app NOLOGIN;
   END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_reader') THEN
+    CREATE ROLE mandate_journal_reader NOLOGIN;
+  END IF;
 END
 $$;
 GRANT mandate_journal_owner TO mandate_migrator WITH INHERIT FALSE;
@@ -16,6 +19,7 @@ REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 CREATE SCHEMA IF NOT EXISTS journal AUTHORIZATION mandate_journal_owner;
 GRANT USAGE ON SCHEMA journal TO mandate_journal_app;
+GRANT USAGE ON SCHEMA journal TO mandate_journal_reader;
 CREATE SCHEMA IF NOT EXISTS deploy AUTHORIZATION mandate_migrator;
 DO $$
 BEGIN
@@ -125,3 +129,12 @@ END
 $$;
 GRANT CONNECT ON DATABASE mandate TO mandate_exporter;
 ALTER ROLE mandate_exporter IN DATABASE mandate SET search_path = journal;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_data') THEN
+    CREATE ROLE mandate_data LOGIN IN ROLE mandate_journal_reader;
+  END IF;
+END
+$$;
+GRANT CONNECT ON DATABASE mandate TO mandate_data;
+ALTER ROLE mandate_data IN DATABASE mandate SET search_path = journal;

@@ -41,11 +41,12 @@ pub const UNJOURNALED: [Deferred; 4] = [
 
 /// The parts of the gate's checks whose facts the fold does not carry (DEC-2388 items 7 and 8):
 /// evaluated on what the context holds, so a refusal still refuses, and named, so none is ever
-/// reported passed. Each leaves this set only once its fact is folded from the journal.
-pub const UNSEEN: [Deferred; 10] = [
+/// reported passed. Each leaves this set only once its fact is folded from the journal: the
+/// re-entry cooldown left it once its last exit fills were read from the fold's counters, as the
+/// binding gate reads them (DEC-2851).
+pub const UNSEEN: [Deferred; 9] = [
     Deferred::AgentMode,
     Deferred::AgentEquity,
-    Deferred::ReentryCooldown,
     Deferred::Halt,
     Deferred::OtherOrders,
     Deferred::QuoteAsk,
@@ -103,7 +104,9 @@ impl Gate {
     /// The advisory pass of the opening `proposal` over the fold, with [`UNJOURNALED`] and
     /// [`UNSEEN`] deferred, or the reason it could not be evaluated: `rule_set_unavailable`,
     /// `facts_held` for a fact the fold holds, `working_orders_unseen` while any order of the
-    /// agent's works, whose cost the fold cannot see, and `gate_refused` when the gate refuses to
+    /// agent's works, whose cost the fold cannot see, the account's opening hold
+    /// (`account_traded`, `research_agent_traded`) once it has traded, as the binding gate holds
+    /// every opening then (DEC-2143, DEC-2819 item 4, DEC-2851), and `gate_refused` when the gate refuses to
     /// evaluate it or types it as anything but an opening or an increase, so a proposal labelled as
     /// adding risk is never judged as an exit, which defers nothing (DEC-2388 item 6). The mandate
     /// version in force in the fold must be the one this gate was built on: after an applied change
@@ -187,6 +190,17 @@ impl Gate {
         if !journaled.working().is_empty() {
             return Err(WORKING_ORDERS_UNSEEN);
         }
+        if let Some(hold) = journaled.opening_hold(self.mandate.universe.pinned) {
+            return Err(hold.code());
+        }
+        let last_exit_fill_at = if journaled.untraded() {
+            BTreeMap::new()
+        } else {
+            journaled
+                .counted(facts.now)
+                .ok_or(FACTS_HELD)?
+                .last_exit_fill_at
+        };
         let asset = AssetId::new(instrument).map_err(|_| GATE_REFUSED)?;
         let mut positions = BTreeMap::new();
         let mut market_values = BTreeMap::new();
@@ -267,7 +281,7 @@ impl Gate {
                 market_values,
                 working_orders: BTreeSet::new(),
                 instrument_groups: BTreeMap::new(),
-                last_exit_fill_at: BTreeMap::new(),
+                last_exit_fill_at,
                 orders_today: 0,
                 day_trades: DayTradeLedger::default(),
             },
@@ -302,16 +316,7 @@ impl Gate {
                 adv_20d: figures.as_ref().map(|f| f.adv_20d),
             },
             conduct: ConductState::default(),
-            universe: WorkingUniverse::Known {
-                instruments: self
-                    .mandate
-                    .universe
-                    .pinned_instruments
-                    .iter()
-                    .filter_map(|pinned| AssetId::new(pinned.asset_id.as_str()).ok())
-                    .collect(),
-                pinned: true,
-            },
+            universe: self.universe(),
             order: AdvisoryOrderFacts {
                 kind: ProposedKind::Plain,
                 tif: TimeInForce::Day,
@@ -325,10 +330,39 @@ impl Gate {
         Ok((context, figures, declared))
     }
 
+    /// The working universe check 2 reads (DEC-2841): a pinned mandate's pins, or an unpinned
+    /// mandate's working instrument alone, the one its single surviving thesis holds, as the plan
+    /// and the executor read it; none while that cannot be read, so every opening is denied
+    /// `not_in_working_universe`. Only an opening reaches the check, so no exit waits on it
+    /// (`AGENTS.md` rule 13).
+    fn universe(&self) -> WorkingUniverse {
+        let universe = &self.mandate.universe;
+        if universe.pinned {
+            return WorkingUniverse::Known {
+                instruments: universe
+                    .pinned_instruments
+                    .iter()
+                    .filter_map(|pinned| AssetId::new(pinned.asset_id.as_str()).ok())
+                    .collect(),
+                pinned: true,
+            };
+        }
+        WorkingUniverse::Known {
+            instruments: self
+                .facts
+                .working_instrument()
+                .and_then(|working| AssetId::new(&working).ok())
+                .into_iter()
+                .collect(),
+            pinned: false,
+        }
+    }
+
     /// The liquidity figures of `proposal`'s instrument at `now`, the fold's risk clock, read only
     /// for a proposal labelled an opening or an increase in a pinned US equity, by its symbol: the
-    /// stored bars are US equities' alone. An exit never reads them (`AGENTS.md` rule 13,
-    /// DEC-2274 item 3).
+    /// stored bars are US equities' alone. An unpinned mandate's working instrument names no symbol
+    /// here, so its figures are deferred to the binding gate, which reads its own (DEC-2841). An
+    /// exit never reads them (`AGENTS.md` rule 13, DEC-2274 item 3).
     fn figures(&self, proposal: &Proposal, now: UtcNanos) -> Option<LiquidityFacts> {
         if proposal.asset_class != AssetClass::UsEquity {
             return None;

@@ -17,6 +17,10 @@ pub(crate) enum Ty {
     /// Mandate spec §3's asset ID: `8-4-4-4-12` lowercase hexadecimal with hyphens (spec §9.3).
     AssetId,
     Ulid,
+    /// §9.1's `intent` (journal spec v0.108, DEC-2845): a ULID, or the executor's own exit's
+    /// intent of trading spec §2.3, exactly `w-{ulid}` or `k-{ulid}-{n}`, `n` from 0 to 999 with
+    /// no leading zero.
+    Intent,
     /// A journal decimal, normalized on the way in (spec §4.6).
     Decimal,
     Int,
@@ -65,6 +69,7 @@ pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Inv
         Ty::Ident => checked(is_ident(text()?)),
         Ty::AssetId => checked(is_asset_id(text()?)),
         Ty::Ulid => checked(is_ulid(text()?)),
+        Ty::Intent => checked(is_intent(text()?)),
         Ty::Decimal => DecStr::parse(text()?)
             .map(|d| Value::Str(d.as_str().to_owned()))
             .map_err(|_| non_canonical()),
@@ -189,6 +194,25 @@ pub(crate) fn is_ulid(s: &str) -> bool {
         && s.bytes().next().is_some_and(|b| b <= b'7')
 }
 
+/// §9.1's `intent`: a ULID, `w-` and a ULID (the triggered-stop watchdog's exit), or `k-`, a ULID,
+/// `-` and an ordinal from 0 to 999 written with no leading zero (a kill switch's flatten).
+pub(crate) fn is_intent(s: &str) -> bool {
+    if is_ulid(s) {
+        return true;
+    }
+    if let Some(event) = s.strip_prefix("w-") {
+        return is_ulid(event);
+    }
+    let Some((switch, n)) = s.strip_prefix("k-").and_then(|rest| rest.split_once('-')) else {
+        return false;
+    };
+    let ordinal = !n.is_empty()
+        && n.len() <= 3
+        && n.bytes().all(|b| b.is_ascii_digit())
+        && (n == "0" || !n.starts_with('0'));
+    is_ulid(switch) && ordinal
+}
+
 pub(crate) fn parse_digest_ref(s: &str) -> Option<Digest> {
     s.strip_prefix("sha256:").and_then(Digest::from_hex)
 }
@@ -218,7 +242,7 @@ static STREAM_OPENED_V1: Ty = Ty::Record(&[
 ]);
 
 pub(crate) static INTENT_RECEIVED_V1: Ty = Ty::Record(&[
-    ("intent_id", Ty::Ulid),
+    ("intent_id", Ty::Intent),
     ("agent_id", Ty::Ident),
     ("instrument_id", Ty::Str),
     ("side", Ty::Str),
@@ -248,7 +272,7 @@ pub(crate) const GATE_CHECK_IDS: &[&str] = &[
 ];
 
 pub(crate) static GATE_DECIDED_V1: Ty = Ty::Record(&[
-    ("intent_id", Ty::Ulid),
+    ("intent_id", Ty::Intent),
     ("verdict", Ty::Str),
     ("reason_code", Ty::Nullable(&Ty::Str)),
     ("data_profile", Ty::Str),

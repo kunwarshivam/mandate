@@ -19,6 +19,15 @@
 //! completes while it runs is added. Any failed write exits, fail closed, and the orchestrator
 //! restarts it. It drains on SIGTERM. `mandate-datad probe livez|readyz --probe <socket>` is its
 //! `exec` probe (DEC-994 item 5). This is the one place the host clock is read (ES-05).
+//!
+//! `mandate-datad run --source alpaca-iex --workspace <id> --store <root>/alpaca-iex --artifacts
+//! <root> --vault-address <address> --vault-dir <dir> --probe <socket>` is the hosted source
+//! (data-plane spec §3.8, DEC-2283): it reads the platform data key once as the bars reader, from
+//! the vault at `--vault-address` with the AppRole credentials and CA mounted in `--vault-dir`,
+//! and the workspace's control stream `ctl:<id>` read-only over Postgres (`MANDATE_JOURNAL_DSN`),
+//! again every [`series::REFRESH`]; at every pass it writes the generations due under `--store`
+//! and puts their closes objects in `--artifacts`. It logs counts and codes only. A refused key
+//! stops it, failed, and the orchestrator's restart reads the key again.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -27,6 +36,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use mandate_bars::generations;
+use mandate_datad::iex::key::{platform_key, vault_config};
+use mandate_datad::iex::pg::{Hosted, serve};
+use mandate_datad::iex::progress::{Judged, Progress};
+use mandate_datad::iex::worker::Edge;
 use mandate_datad::{Instrument, observation, series};
 use mandate_process::probe::{self, Probe, Status};
 use mandate_process::{Input, Kind, Lifecycle, State};
@@ -56,6 +70,36 @@ fn main() -> ExitCode {
             };
             let answer = probe::query(&socket, asked).map_or(1, |a| a.exit_status());
             ExitCode::from(answer)
+        }
+        Some("run") if flag("--source").as_deref() == Some("alpaca-iex") => {
+            let (Some(workspace), Some(store), Some(artifacts), Some(address), Some(dir)) = (
+                flag("--workspace"),
+                flag("--store"),
+                flag("--artifacts"),
+                flag("--vault-address"),
+                flag("--vault-dir"),
+            ) else {
+                eprintln!("iex_arguments_missing");
+                return ExitCode::from(2);
+            };
+            let target = IexTarget {
+                workspace,
+                store: PathBuf::from(store),
+                artifacts: PathBuf::from(artifacts),
+                address,
+                dir: PathBuf::from(dir),
+            };
+            match run_iex(&target, &socket) {
+                Ok(status) => ExitCode::from(status),
+                Err(code) => {
+                    eprintln!("data_start_failed: {code}");
+                    ExitCode::from(2)
+                }
+            }
+        }
+        Some("run") if flag("--source").is_some_and(|source| source != "recorded") => {
+            eprintln!("source_unknown");
+            ExitCode::from(2)
         }
         Some("run") => {
             let (Some(store), Some(artifacts), Some(instruments)) =
@@ -202,4 +246,94 @@ fn watch_terminate(terminate: Arc<AtomicBool>) -> std::io::Result<()> {
         terminate.store(true, Ordering::SeqCst);
     });
     Ok(())
+}
+
+/// Where the IEX source writes, for which workspace, and the vault it reads the key from.
+struct IexTarget {
+    workspace: String,
+    store: PathBuf,
+    artifacts: PathBuf,
+    address: String,
+    dir: PathBuf,
+}
+
+fn run_iex(target: &IexTarget, socket: &Path) -> Result<u8, &'static str> {
+    if !generations::is_generational(&target.store) {
+        return Err("store_not_generations");
+    }
+    let terminate = Arc::new(AtomicBool::new(false));
+    watch_terminate(Arc::clone(&terminate)).map_err(|_| "signal_unavailable")?;
+    let key = {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| "runtime_unavailable")?;
+        let config = vault_config(&target.address, &target.dir)?;
+        runtime.block_on(platform_key(&config, &target.dir, host_now()))?
+    };
+    let mut lifecycle = Lifecycle::new(Kind::Service, LIVENESS, host_now());
+    let status = Status::new(lifecycle.snapshot());
+    probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
+    let progress = Arc::new(Progress::default());
+    let _worker = {
+        let (target, terminate, progress) = (
+            IexTarget {
+                workspace: target.workspace.clone(),
+                store: target.store.clone(),
+                artifacts: target.artifacts.clone(),
+                address: target.address.clone(),
+                dir: target.dir.clone(),
+            },
+            Arc::clone(&terminate),
+            Arc::clone(&progress),
+        );
+        thread::spawn(move || {
+            let hosted = Hosted {
+                workspace: target.workspace.clone(),
+                store: target.store.clone(),
+                artifacts: target.artifacts.clone(),
+            };
+            let served = std::env::var("MANDATE_JOURNAL_DSN")
+                .map_err(|_| "journal_dsn_missing")
+                .and_then(|dsn| {
+                    serve(
+                        &hosted,
+                        &dsn,
+                        key,
+                        &terminate,
+                        &progress,
+                        Edge {
+                            now: &host_now,
+                            pause: &|| thread::sleep(TICK),
+                            log: &mut |line| eprintln!("{line}"),
+                        },
+                    )
+                });
+            if let Err(code) = served {
+                eprintln!("data_worker_failed: {code}");
+                progress.stopped();
+            }
+        })
+    };
+    loop {
+        if let State::Exited(exit) = lifecycle.state() {
+            status.publish(lifecycle.snapshot());
+            eprintln!("{}", exit.code());
+            return Ok(exit.exit_status());
+        }
+        let now = host_now();
+        if terminate.load(Ordering::SeqCst) {
+            lifecycle.observe(now, Input::DrainRequested);
+            lifecycle.observe(now, Input::Settled);
+            continue;
+        }
+        let input = match progress.judged(now) {
+            Judged::Failed => Input::Failed,
+            Judged::Starting | Judged::Passing => Input::Heartbeat,
+            Judged::Started => Input::StartupPassed,
+        };
+        lifecycle.observe(now, input);
+        status.publish(lifecycle.snapshot());
+        thread::sleep(TICK);
+    }
 }

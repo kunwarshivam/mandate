@@ -2,7 +2,7 @@
 //! confirmed absence — resubmitted under the same id or abandoned.
 
 use mandate_accounting::{AssetClass, InstrumentId};
-use mandate_canon::Value;
+use mandate_canon::{Object, Value};
 use mandate_notify::OwnerAlertKind;
 use mandate_risk::GatePass;
 
@@ -330,9 +330,13 @@ fn gate(
     let (decision, _) = decide(batch, intent, GatePass::BeforeSubmission)?;
     let verdict = decision.verdict_name();
     if verdict == ALLOW || always || decision.crowded_denial() {
+        let episode = opens_episode(batch, intent, &decision);
         let decided = journal_decision(batch, intent, &decision, Vec::new())?;
         if let UNPRICED | SESSION_UNKNOWN = decision.reason_code() {
-            batch.notify(decided, OwnerAlertKind::ExitStalled);
+            batch.notify(decided.clone(), OwnerAlertKind::ExitStalled);
+        }
+        if let Some(kind) = episode {
+            batch.notify(decided, kind);
         }
     }
     if verdict == ALLOW
@@ -349,13 +353,39 @@ fn gate(
     Ok((verdict, decision.is_binding()))
 }
 
+/// DEC-2855: the owner alert a hold of `intent` raises, read before the hold is journaled. An
+/// opening held `protection_unattributed` or `attribution_deficit` begins an episode, and is
+/// alerted, only when no opening of its instrument is already held for that reason, itself included
+/// (item 3): every later hold of the episode raises nothing, and a replay finds the same.
+fn opens_episode(
+    batch: &Batch<'_, '_>,
+    intent: &IntentId,
+    decision: &PartialGateDecision,
+) -> Option<OwnerAlertKind> {
+    let kind = match (decision.verdict_name(), decision.reason_code()) {
+        (HOLD, "protection_unattributed") => OwnerAlertKind::ProtectionUnattributed,
+        (HOLD, "attribution_deficit") => OwnerAlertKind::AttributionDeficit,
+        _ => return None,
+    };
+    let instrument = |id: &IntentId| match batch.view.bodies.get(id) {
+        Some(IntentBody::Order { instrument, .. }) => Some(instrument),
+        _ => None,
+    };
+    let here = instrument(intent)?;
+    let open = batch.view.held.iter().any(|held| {
+        instrument(held) == Some(here)
+            && batch.view.hold_reasons.get(held).map(String::as_str) == Some(decision.reason_code())
+    });
+    (!open).then_some(kind)
+}
+
 fn journal_decision(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
     decision: &PartialGateDecision,
     mut extra: Vec<(&'static str, Value)>,
 ) -> Result<EventId, ExecutorError> {
-    let reason = if decision.is_binding() && decision.reason_code().is_empty() {
+    let reason = if decision.reason_code().is_empty() {
         Value::Null
     } else {
         text(decision.reason_code())
@@ -367,13 +397,29 @@ fn journal_decision(
         ("checks", decision.checks_value()?),
     ];
     pairs.extend(decision.binding_journal_fields()?);
-    if !decision.is_binding()
-        && let Some(sized) = decision.sized()
-    {
-        pairs.push(("sized_qty", text(sized.to_string())));
-    }
+    let sized = decision
+        .sized()
+        .map_or(Value::Null, |sized| text(sized.to_string()));
+    pairs.push(("sized_qty", sized));
     pairs.append(&mut extra);
-    batch.journal_with_refs("GateDecided", None, decision.config_refs(), pairs)
+    batch.journal_with_refs(
+        "GateDecided",
+        None,
+        decision.config_refs(),
+        own_members(pairs),
+    )
+}
+
+/// A `GateDecided`'s members at version 3 (journal spec §9.5, DEC-2848): `pairs`, with each of
+/// the executor's own `sized_qty`, `parked` and `held_long` that `pairs` does not set given as
+/// `null`, since the schema is closed and every member present.
+pub(crate) fn own_members(mut pairs: Vec<(&'static str, Value)>) -> Vec<(&'static str, Value)> {
+    for member in ["sized_qty", "parked", "held_long"] {
+        if !pairs.iter().any(|(name, _)| *name == member) {
+            pairs.push((member, Value::Null));
+        }
+    }
+    pairs
 }
 
 /// The coordinator's ruling D2: an exit still held past `max_intent_age_s` is journaled once more,
@@ -403,6 +449,43 @@ pub(crate) fn intent_of(
     let record = batch.view.intents.get(intent).ok_or_else(unknown)?;
     let body = batch.view.bodies.get(intent).ok_or_else(unknown)?;
     Ok((record.agent.clone(), body.clone()))
+}
+
+/// The references a gate record on `intent` names when no binding run bound it (DEC-2846): its
+/// agent's deployment's, for its instrument.
+pub(crate) fn intent_refs(
+    batch: &Batch<'_, '_>,
+    intent: &IntentId,
+) -> Result<Object, ExecutorError> {
+    let (agent, body) = intent_of(batch, intent)?;
+    let IntentBody::Order { instrument, .. } = &body else {
+        return Err(ExecutorError::Unimplemented { story: "E7-4" });
+    };
+    crate::gate::deployed_refs(batch.binding_gate(), batch.ports, &agent, instrument)
+}
+
+/// A held intent whose order the broker no longer has, gated again and sent again once allowed.
+fn gate_again(
+    batch: &mut Batch<'_, '_>,
+    intent: &IntentId,
+    id: &ClientOrderId,
+) -> Result<(), ExecutorError> {
+    if let (ALLOW, binding) = gate(batch, intent, false)? {
+        send_again(batch, id, binding)?;
+    }
+    Ok(())
+}
+
+/// `step`'s outcome for one intent among others, an input's re-gates at a tick or after an order's
+/// change: configuration that does not read for it holds that intent alone, which the next step
+/// decides again, and every other intent, protective order and kill switch of the input goes on
+/// (DEC-2846, `AGENTS.md` rule 13). The gate journals nothing before it reads the configuration
+/// ([`decide`] runs first), so nothing of the held intent is drafted.
+pub(crate) fn holds_alone(step: Result<(), ExecutorError>) -> Result<(), ExecutorError> {
+    match step {
+        Err(ExecutorError::BindingGateInputMissing) => Ok(()),
+        other => other,
+    }
 }
 
 /// An order's time in force: GTC for crypto, DAY otherwise; an exit's later rungs take the same.
@@ -866,7 +949,7 @@ pub(crate) fn resume(batch: &mut Batch<'_, '_>, stale_only: bool) -> Result<(), 
         if too_old(batch, &intent) {
             abandon(batch, &intent, "intent_too_old")?;
         } else if !stale_only {
-            gate_and_submit(batch, &intent)?;
+            holds_alone(gate_and_submit(batch, &intent))?;
         }
     }
     Ok(())
@@ -880,13 +963,13 @@ pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
     let held: Vec<IntentId> = batch.view.held.iter().cloned().collect();
     for intent in held {
         let id = ClientOrderId::for_intent(&intent)?;
-        held_long(batch, &intent)?;
+        holds_alone(held_long(batch, &intent))?;
         if too_old(batch, &intent) {
             abandon(batch, &intent, "intent_too_old")?;
         } else if !batch.view.orders.contains_key(&id) {
-            begin_and_submit(batch, &intent, false)?;
-        } else if let (ALLOW, binding) = gate(batch, &intent, false)? {
-            send_again(batch, &id, binding)?;
+            holds_alone(begin_and_submit(batch, &intent, false))?;
+        } else {
+            holds_alone(gate_again(batch, &intent, &id))?;
         }
     }
     Ok(())
