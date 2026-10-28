@@ -41,6 +41,10 @@ images:
   model-gateway: ""
   exporter: ""
   data: ""
+  # The news reader (E2-10, DEC-2084): the hosted workspace's news stream, staging's alone. It needs
+  # `api.workspace`, `news.follows`, and the staging vault's `platform/news-data-key` and
+  # `vault-approle-news-reader`; a released image only, never a local build.
+  news-reader: ""
   # The deployment manager (DEC-1172): the one pod with an API token, which starts the runtimes and
   # executors. Once named, those two render as its pod templates, never as Deployments.
   deploy-manager: ""
@@ -93,6 +97,15 @@ data:
   # bars from data.alpaca.markets under the platform's data key, read once from the vault
   # (DEC-2283), staging's alone, which lists no instrument.
   source: recorded
+
+# The news reader (E2-10, DEC-2084), rendered only with images.news-reader, in staging alone. Each
+# followed agent is `{agent, account}`: an agent whose theses and holdings it polls, and the broker
+# account its executor trades (DEC-2281). They are owner choices, so only the founder's overlay
+# names them, and the chart refuses an empty list, with which the reader is never ready. The user
+# agent is the contact the vendor sees, never a secret.
+news:
+  follows: []
+  userAgent: "Mandate news reader ops@owlhead.ai"
 
 # The workspace API server's settings (workspace API spec §3.11 item 2), each required once
 # images.api is named. None is a secret: the session signing key is made in the pod's memory at

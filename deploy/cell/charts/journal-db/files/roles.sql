@@ -138,3 +138,12 @@ END
 $$;
 GRANT CONNECT ON DATABASE mandate TO mandate_data;
 ALTER ROLE mandate_data IN DATABASE mandate SET search_path = journal;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_news_reader') THEN
+    CREATE ROLE mandate_news_reader LOGIN IN ROLE mandate_journal_app;
+  END IF;
+END
+$$;
+GRANT CONNECT ON DATABASE mandate TO mandate_news_reader;
+ALTER ROLE mandate_news_reader IN DATABASE mandate SET search_path = journal;

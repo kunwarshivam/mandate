@@ -18,7 +18,11 @@
   (each new item's typed record stored and journaled, a batch in doubt retried as the same bytes,
   a refused append stopping the reader), and the `mandate-news-reader` binary (`run` over Postgres
   and the HTTPS transport, or `--fixture` over an in-memory journal with no key; `probe` for `exec`
-  probes; the not-ready reason once on standard error as a code; SIGTERM drains). The parsed news item keeps the vendor's
+  probes; the not-ready reason once on standard error as a code; SIGTERM drains). The chart runs
+  it as `news-reader` in staging alone (DEC-2084): with `images.news-reader` and `news.follows`,
+  as `mandate_news_reader`, with its AppRole copied into its vault directory, the allowlist v3
+  ConfigMap `news-reader-allowlist`, the artifact store read-write, and egress to Postgres, the
+  vault and `data.alpaca.markets` alone; release ships it and promotion holds it. The parsed news item keeps the vendor's
   tickers in `mandate-sources`' `Draft`.
 - **Tests:** `crates/mandate-news-reader/tests/key.rs` (the vault's answer decides the key or why
   there is none; no byte of the key in any refusal, error or `Debug` output), `tests/vault.rs` (the
@@ -31,5 +35,7 @@
   journaled once, known times, skips, pages and pace, a retried batch and a refused append),
   `tests/properties.rs` (each version stored once and known times never going back, against the
   test's own ledger); `mandate-sources`' `tests/ingest.rs` (the vendor's tickers kept
-  as parsed).
-- **Run:** `cargo nextest run -p mandate-news-reader -p mandate-sources -p mandate-store`.
+  as parsed); `deploy/tests/test_cell.py`: the reader's staging launch, role, AppRole, allowlist,
+  store and egress, and no render outside staging, outside paper, or with no followed agent.
+- **Run:** `cargo nextest run -p mandate-news-reader -p mandate-sources -p mandate-store`; the
+  chart's with `uv run --directory python pytest ../deploy/tests` (helm required).

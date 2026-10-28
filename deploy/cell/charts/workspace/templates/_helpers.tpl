@@ -20,7 +20,9 @@ with the AppRole `mandate.vaultCopy` puts in its vault directory, and never name
 With `data.source` alpaca-iex the data process stores IEX bars (DEC-2283, DEC-2082): it reads the
 hosted workspace's control stream as its own journal role and Postgres, logs in to the vault as
 `bars-reader`, and reaches its data host; with `recorded` it holds no journal role, since it reads
-no stream. */ -}}
+no stream. The news reader's launch gains `--user-agent news.userAgent` and one `--follow
+<agent>=<account>` for each of `news.follows`, the agents whose theses and holdings it polls
+(DEC-2281 item 1, DEC-2084 item 5). */ -}}
 {{- define "mandate.processes" -}}
 {{- $all := (fromJson (.Files.Get "processes.json")).processes -}}
 {{- $out := list -}}
@@ -35,6 +37,13 @@ no stream. */ -}}
 {{- else -}}
 {{- $_ := set . "db_role" nil -}}
 {{- end -}}
+{{- end -}}
+{{- if eq .name "news-reader" -}}
+{{- $words := list "--user-agent" $.Values.news.userAgent -}}
+{{- range $.Values.news.follows -}}
+{{- $words = concat $words (list "--follow" (printf "%s=%s" .agent .account)) -}}
+{{- end -}}
+{{- $_ := set . "args" (concat .args $words) -}}
 {{- end -}}
 {{- if and (eq .name "model-gateway") $.Values.modelGateway.registry -}}
 {{- $_ := set . "args" (list "run" "--registry" "/run/mandate/model-gateway/registry.json" "--listen" "0.0.0.0:8080" "--probe" "/tmp/process.sock" "--vault-address" "{vault}" "--vault-dir" "/run/mandate/vault") -}}
@@ -177,11 +186,12 @@ fixed path. Who may write it is fixed here, by process type, not a value, so no 
 the control runs write ("rw"); the API server only reads, but its pod lays the store out before it
 starts ("seed": the pod's volume is writable, the server's own mount is not); the runtime, the
 deployment manager and the model gateway, for each agent's research cap (DEC-2272), read ("ro");
+the data process writes its datasets and the news reader each item's typed record ("rw", DEC-2084);
 every other process has no store at all. The model gateway writes only the research store
 ("mandate.researchArtifactsRole", DEC-2279), never this one.
 */}}
 {{- define "mandate.artifactsRole" -}}
-{{- $access := dict "api" "seed" "control" "rw" "runtime" "ro" "executor" "ro" "deploy-manager" "ro" "deploy-manager-research" "ro" "model-gateway" "ro" "data" "rw" -}}
+{{- $access := dict "api" "seed" "control" "rw" "runtime" "ro" "executor" "ro" "deploy-manager" "ro" "deploy-manager-research" "ro" "model-gateway" "ro" "data" "rw" "news-reader" "rw" -}}
 {{- get $access .p.name -}}
 {{- end -}}
 
@@ -403,6 +413,21 @@ managed paper workspaces (DEC-2283). */}}
 {{- end }}
 {{- if and $iex .root.Values.data.instruments }}
 {{- fail "data.instruments is the recorded series' list: data.source alpaca-iex stores the instruments the control stream registers (DEC-2082)" }}
+{{- end }}
+{{- end }}
+{{- /* The news reader (DEC-2084 items 2 and 5): staging's alone, since its key is the platform's
+paper news data key (DEC-2277), never a local cell, where with no key it is never ready; paper
+only, as its binary is; and with at least one followed agent, without which it refuses
+`no_follows` and is never ready. */}}
+{{- if eq .p.name "news-reader" }}
+{{- if or .root.Values.localImages (ne .root.Values.deploymentTier "staging") }}
+{{- fail (printf "images.news-reader runs the news reader in staging alone, and deploymentTier is %q: its key is the platform's paper news data key (DEC-2277, DEC-2084)" .root.Values.deploymentTier) }}
+{{- end }}
+{{- if ne .root.Values.environment "paper" }}
+{{- fail "images.news-reader needs environment paper: the news reader reads paper data alone (DEC-2277)" }}
+{{- end }}
+{{- if not .root.Values.news.follows }}
+{{- fail "news.follows, the agents the news reader follows, is required with images.news-reader: with none it refuses no_follows and is never ready (DEC-2281, DEC-2084)" }}
 {{- end }}
 {{- end }}
 {{- end -}}
