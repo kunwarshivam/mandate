@@ -209,6 +209,9 @@ struct Tails {
     latest_tick: Option<UtcNanos>,
     /// Whether the production fold has been fed the clock stream whole since it followed.
     clock_fed: bool,
+    /// Whether the production fold has been fed the agent stream from its first record since it
+    /// followed (DEC-2856 item 3).
+    agent_fed: bool,
     /// When the tails were last made due to read from the first record, in seconds.
     verified_at: Option<i64>,
 }
@@ -248,6 +251,7 @@ impl Default for Tails {
             clock: Tail::default(),
             latest_tick: None,
             clock_fed: false,
+            agent_fed: false,
             verified_at: None,
         }
     }
@@ -723,14 +727,26 @@ impl<S: Store> RuntimeProcess<S> {
 
     /// Reads the agent stream past the head it was last read to, and folds what follows into the
     /// outputs it journaled, its kept thesis records, and, for an unpinned mandate, the production
-    /// fold, which takes each record once (DEC-2852 item 4); whether it read.
+    /// fold, which takes each record once (DEC-2856); whether it read. On the read the production
+    /// fold first follows the account, the stream is read again from its first record, so the fold
+    /// takes every record, as the clock stream's is.
     fn read_agent(&mut self) -> bool {
         let Some(agent) = self.agent.clone() else {
             return false;
         };
+        let following = self
+            .wiring
+            .facts
+            .as_ref()
+            .is_some_and(crate::production::Facts::following);
+        if following && !self.tails.agent_fed {
+            self.tails.agent = Tail::keeping(thesis);
+            self.tails.outputs = Outputs::default();
+        }
         let Some(rows) = self.tails.agent.read(&self.store, &agent) else {
             return false;
         };
+        self.tails.agent_fed |= following;
         for row in &rows {
             self.tails.outputs.fold(row);
         }

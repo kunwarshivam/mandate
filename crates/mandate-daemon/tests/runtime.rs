@@ -3630,3 +3630,41 @@ fn the_host_is_handed_the_agent_streams_thesis_records_alone() {
     assert_eq!(handed, Some(vec![laid.event_id]));
     assert!(agent_rows(&rig).len() > 1);
 }
+
+/// DEC-2856 item 3: an unpinned mandate's thesis that the process read before the control stream
+/// named the account still reaches the production fold once it follows, so the working universe
+/// names its instrument; a fold fed only what followed its head would never take it.
+#[test]
+fn a_thesis_read_before_the_account_is_named_reaches_the_fold_once_it_follows() {
+    let following = Following::default();
+    let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+    facts.read_working_universe();
+    let mut process = RuntimeProcess::start(
+        following.clone(),
+        Wiring {
+            facts: Some(facts.clone()),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    thesis_on(
+        &following.rig,
+        ("01J8Z3MTHE5000000000000001", "01J8Z3MTHE5000000000000002"),
+        RESEARCH_SPY,
+        (&at(NOW - 60).to_string(), &at(NOW + 3_540).to_string()),
+    );
+    for n in 1..=3 {
+        tick(&following.rig, NOW + n);
+        process.step(at(NOW + n));
+    }
+    assert!(!facts.following());
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&following.rig, ACCOUNT);
+    for n in 4..=6 {
+        tick(&following.rig, NOW + n);
+        process.step(at(NOW + n));
+    }
+    assert!(facts.following());
+    assert_eq!(facts.working_instrument().as_deref(), Some(RESEARCH_SPY));
+}
