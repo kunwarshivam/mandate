@@ -116,7 +116,7 @@ fn a_refused_exit_sends_nothing_and_goes_at_the_next_pass() -> Result<(), Error>
     let broker = Paper::new(&journal);
     broker.resting(OPENING, "AAPL", "10", "150")?;
     broker.fill(OPENING, "150")?;
-    broker.resting("md-protect", "AAPL", "10", "147")?;
+    broker.resting_sell("md-protect", "AAPL", "10", "147")?;
     let mut process = start_allowing(&journal, &broker)?;
     let exit = format!("md-{EXIT}");
 

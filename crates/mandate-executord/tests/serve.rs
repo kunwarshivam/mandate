@@ -646,6 +646,36 @@ fn a_broker_without_later_checks_is_never_checked() -> Result<(), Error> {
     Ok(())
 }
 
+/// DEC-2842: a broker whose responses leave under a fifth of the rate budget degrades the
+/// connection (connections spec §8.2): the restriction first, then the state change with reason
+/// `rate_headroom`. A fifth or more restricts nothing.
+#[test]
+fn low_rate_headroom_degrades_the_connection() -> Result<(), Error> {
+    for (remaining, degraded) in [(39, true), (40, false)] {
+        let journal = idle_established()?;
+        let broker = Paper::new(&journal);
+        let exit = run_at(&journal, &broker, &[0, 60, 120, 180, 240], &|pass| {
+            if pass == 1 {
+                broker.report_rate_limit(200, remaining);
+            }
+        })?;
+        assert_eq!(exit, Ok(0));
+        let reasons: Vec<String> = journal
+            .payloads("ConnectionStateChanged")
+            .iter()
+            .map(|payload| member(payload, "reason"))
+            .collect();
+        if degraded {
+            assert_eq!(restriction_causes(&journal), ["connection_unavailable"]);
+            assert_eq!(reasons, ["rate_headroom"]);
+        } else {
+            assert!(restriction_causes(&journal).is_empty(), "{remaining}");
+            assert!(reasons.is_empty(), "{remaining}");
+        }
+    }
+    Ok(())
+}
+
 /// DEC-2840: a check whose account read is lost cannot run, so nothing is journaled for it and it
 /// stays due, tried again once a probe's interval later; it counts toward the connection's
 /// network failures, never as a pass or a failure.

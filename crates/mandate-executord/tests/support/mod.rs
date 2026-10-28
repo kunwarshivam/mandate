@@ -534,6 +534,8 @@ struct Books {
     refuse_account: Option<u16>,
     /// Whether the broker says it runs no later permission checks, as one not built yet.
     no_later_checks: bool,
+    /// The rate limit every response reports from now on, as the limit and what it leaves.
+    rate_limit: Option<(u32, u32)>,
     sequence: u64,
 }
 
@@ -578,9 +580,32 @@ impl Paper {
         Ok(())
     }
 
-    /// An order the broker already holds, accepted and resting, under our `client_order_id`.
+    /// A buy the broker already holds, accepted and resting, under our `client_order_id`.
     pub fn resting(
         &self,
+        client_order_id: &str,
+        instrument: &str,
+        qty: &str,
+        limit: &str,
+    ) -> Result<(), Error> {
+        self.resting_on(Side::Buy, client_order_id, instrument, qty, limit)
+    }
+
+    /// A sell resting at the broker, as a protective leg rests (R3's review of #2764): the sell
+    /// side of [`Self::resting`].
+    pub fn resting_sell(
+        &self,
+        client_order_id: &str,
+        instrument: &str,
+        qty: &str,
+        limit: &str,
+    ) -> Result<(), Error> {
+        self.resting_on(Side::Sell, client_order_id, instrument, qty, limit)
+    }
+
+    fn resting_on(
+        &self,
+        side: Side,
         client_order_id: &str,
         instrument: &str,
         qty: &str,
@@ -592,7 +617,7 @@ impl Paper {
             broker_order_id: format!("b{}", books.sequence),
             client_order_id: Some(client_order_id.to_owned()),
             instrument: InstrumentId::new(instrument)?,
-            side: Side::Buy,
+            side,
             qty: Qty::parse(qty)?,
             filled_qty: Qty::ZERO,
             limit_price: Some(Price::parse(limit)?),
@@ -661,6 +686,11 @@ impl Paper {
         self.books.borrow_mut().lose_answers = n;
     }
 
+    /// Every response from now on reports a rate limit of `limit` leaving `remaining` (DEC-2842).
+    pub fn report_rate_limit(&self, limit: u32, remaining: u32) {
+        self.books.borrow_mut().rate_limit = Some((limit, remaining));
+    }
+
     /// The broker says it runs no later permission checks from now on (DEC-2840).
     pub fn without_later_checks(&self) {
         self.books.borrow_mut().no_later_checks = true;
@@ -707,6 +737,13 @@ impl Broker for Paper {
 
     fn has_later_checks(&self) -> bool {
         !self.books.borrow().no_later_checks
+    }
+
+    fn rate_limit(&self) -> Option<mandate_alpaca::RateLimit> {
+        self.books
+            .borrow()
+            .rate_limit
+            .map(|(limit, remaining)| mandate_alpaca::RateLimit { limit, remaining })
     }
 
     /// The paper Alpaca connection's own later checks (DEC-2840), as the process's Alpaca broker
