@@ -329,7 +329,8 @@ the code:
    verifies, user verification shows in the flags, and the counter has not gone backwards: else
    `step_up_missing`. In a `dev` or `ci` cell started with `MANDATE_API_STEP_UP_COOL_OFF_WAIVER`
    `true` (refused at start in any other tier and for any other value), a cool-off that has not
-   ended does not refuse. The server then appends `StepUpCoolOffWaived` immediately after the
+   ended does not refuse on a route that appends the step-up's `StepUpAsserted` (DEC-2146 item 3).
+   The reply is the route's own, unchanged; only the journal shows the waiver. The server then appends `StepUpCoolOffWaived` immediately after the
    `StepUpAsserted` (journal spec §9.38, [DEC-2146](../project/decisions/DEC-2146.md)). Nothing a
    request carries turns this on;
 7. the submitted action's digest equals the challenge's: else `step_up_mismatch`.

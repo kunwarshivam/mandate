@@ -230,7 +230,7 @@ fn at<'a>(draft: &'a Draft, path: &[&str]) -> Option<&'a Value> {
 
 /// Batch rule 317 (§9.38): each `StepUpCoolOffWaived` follows, immediately, a `StepUpAsserted`
 /// (else its `event_type`) with the same cause (`causation_id`), actor (`actor.id`), challenge
-/// (`payload.challenge`) and credential (`payload.credential`). Each draft has already passed
+/// (`payload.challenge`), credential (`payload.credential`) and instant (`event_time`). Each draft has already passed
 /// `Draft::parse`, so rule 316 has held.
 fn check_waivers(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     for (i, draft) in drafts.iter().enumerate() {
@@ -250,6 +250,7 @@ fn check_waivers(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
             ("actor.id", &["actor", "id"][..]),
             ("payload.challenge", &["payload", "challenge"][..]),
             ("payload.credential", &["payload", "credential"][..]),
+            ("event_time", &["event_time"][..]),
         ] {
             if at(before, member) != at(draft, member) {
                 return refuse(path);
