@@ -52,6 +52,7 @@ import canceled
 import confirmations
 import credentials
 import step_up_assertions
+import cool_off_waivers
 import snapshots
 import stepped_up
 import connection_roles
@@ -4269,6 +4270,7 @@ def render(
     credentials_section: dict,
     credential_enrolled_v2_section: dict,
     step_up_assertions_section: dict,
+    cool_off_waivers_section: dict,
     account_closes_section: dict,
     connection_roles_section: dict,
     stepped_up_section: dict,
@@ -4335,6 +4337,7 @@ def render(
             "credentials": credentials_section,
             "credential_enrolled_v2": credential_enrolled_v2_section,
             "step_up_assertions": step_up_assertions_section,
+            "cool_off_waivers": cool_off_waivers_section,
             "account_closes": account_closes_section,
             "connection_roles": connection_roles_section,
             "stepped_up_records": stepped_up_section,
@@ -4432,6 +4435,7 @@ def main(argv: list[str] | None = None) -> int:
     credentials_section = credentials.build_section()
     credential_enrolled_v2_section = credentials.build_v2_section()
     step_up_assertions_section = step_up_assertions.build_section()
+    cool_off_waivers_section = cool_off_waivers.build_section()
     account_closes_section = account_closes.build_section()
     connection_roles_section = connection_roles.build_section()
     stepped_up_section = stepped_up.build_section()
@@ -4506,6 +4510,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += credentials.run_v2_mutants(credential_enrolled_v2_section)
     problems += step_up_assertions.check_section(step_up_assertions_section)
     problems += step_up_assertions.run_mutants(step_up_assertions_section)
+    problems += cool_off_waivers.check_section(cool_off_waivers_section)
+    problems += cool_off_waivers.run_mutants(cool_off_waivers_section)
     problems += connection_roles.check_section(connection_roles_section)
     problems += connection_roles.run_mutants(connection_roles_section)
     problems += marks.check_section(marks_section)
@@ -4626,6 +4632,7 @@ def main(argv: list[str] | None = None) -> int:
         credentials_section,
         credential_enrolled_v2_section,
         step_up_assertions_section,
+        cool_off_waivers_section,
         account_closes_section,
         connection_roles_section,
         stepped_up_section,
@@ -4855,6 +4862,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(step_up_assertions_section['batches'])} rule-253 batches, {len(step_up_assertions_section['streams'])} rule-254 streams, "
         f"{len(step_up_assertions.VALIDATOR_MUTANTS)} validator, {len(step_up_assertions.BATCH_MUTANTS)} batch, "
         f"{len(step_up_assertions.STREAM_MUTANTS)} stream and {len(step_up_assertions.vector_mutants(step_up_assertions_section))} vector mutants caught; "
+        f"{len(cool_off_waivers_section['invalid_drafts'])} invalid StepUpCoolOffWaived drafts, "
+        f"{len(cool_off_waivers_section['batches'])} rule-317 batches, {len(cool_off_waivers_section['streams'])} rule-318 streams, "
+        f"{len(cool_off_waivers.VALIDATOR_MUTANTS)} validator, {len(cool_off_waivers.BATCH_MUTANTS)} batch, "
+        f"{len(cool_off_waivers.STREAM_MUTANTS)} stream and {len(cool_off_waivers.vector_mutants(cool_off_waivers_section))} vector mutants caught; "
         f"{len(connection_roles_section['invalid_drafts'])} invalid and {len(connection_roles_section['valid_drafts'])} valid "
         f"connection-role drafts and {len(connection_roles_section['streams'])} rule-262 and rule-263 streams, "
         f"{len(connection_roles.VALIDATOR_MUTANTS)} validator, {len(connection_roles.STREAM_MUTANTS)} stream and "
