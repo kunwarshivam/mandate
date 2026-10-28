@@ -37,6 +37,9 @@ const FILL_MS = Number(process.env.OWLHEAD_CELL_FILL_MS ?? 120_000);
  */
 const APPROVER_SENTENCE = (JSON.parse(readFileSync(join(process.cwd(), "../fixtures/refcases/journal.json"), "utf8")) as { approval_deferrals: { approver_sentence: string } }).approval_deferrals.approver_sentence;
 
+/** The agent screen's fixed sentences for a section with nothing listed (`api-screens.tsx`'s `AgentActivity`), the only text a failure may quote from it. */
+const SECTION_STATES = ["Reading positions.", "This agent holds nothing.", "Not reported.", "Reading the journal.", "Not available to your role.", "Journal not reported.", "Nothing recorded yet."];
+
 const reached: Record<string, string> = {};
 const write = (extra: Record<string, string> = {}) => writeFileSync(RESULT, JSON.stringify({ ...reached, ...extra }));
 const step = (name: string, value = "ok") => {
@@ -159,12 +162,16 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     });
     const held = await until(page, `/agents/${AGENT}`, 30_000, async () => (await positions.count()) > 0 && (await journal.getByRole("listitem").count()) > 0);
     if (!held) {
-      const said = async (title: string) => {
+      /** What a section shows, never what it lists: the uploaded failure carries no position or record (`AGENTS.md`, no positions in logs). */
+      const showed = async (title: string) => {
         const region = page.getByRole("region", { name: title, exact: true });
         if ((await region.count()) === 0) return "absent";
-        return ((await region.first().textContent({ timeout: 2_000 }).catch(() => null)) ?? "unreadable").replace(/\s+/g, " ").slice(0, 240);
+        const listed = await region.first().getByRole("listitem").count();
+        if (listed > 0) return `${listed} listed`;
+        const text = (await region.first().textContent({ timeout: 2_000 }).catch(() => null)) ?? "";
+        return SECTION_STATES.find((state) => text.includes(state)) ?? "an unrecognized state";
       };
-      refuse(`the agent's screen showed the fill but no position or no journal record within 30 s, watched in place; positions: "${await said("This agent's positions")}"; journal: "${await said("Journal")}"; reads (status, route, ms): ${reads.slice(-6).join(", ") || "none"}`);
+      refuse(`the agent's screen showed the fill but no position or no journal record within 30 s, watched in place; positions: ${await showed("This agent's positions")}; journal: ${await showed("Journal")}; reads (status, route, ms): ${reads.slice(-6).join(", ") || "none"}`);
     }
     step("position");
     step("journal", String(await journal.getByRole("listitem").count()));
