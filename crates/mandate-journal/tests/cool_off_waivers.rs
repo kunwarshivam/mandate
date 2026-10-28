@@ -69,7 +69,7 @@ fn the_cool_off_waiver_section_holds_every_part() {
     for (part, at_least) in [
         ("invalid_drafts", 20),
         ("valid_drafts", 2),
-        ("batches", 11),
+        ("batches", 12),
         ("streams", 17),
     ] {
         let n = list(&section, part).len();
