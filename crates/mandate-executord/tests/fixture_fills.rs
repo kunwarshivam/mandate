@@ -709,3 +709,93 @@ fn an_asset_id_symbol_is_answered_by_its_ticker() -> Result<(), Error> {
     assert_eq!(submit(&mut broker, unknown)?.instrument.as_str(), "AAPL");
     Ok(())
 }
+
+/// The agent's bracket opening, filled on the filling fixture and reconciled ten passes a minute
+/// apart, then handed `owed` and run six passes more: the journal and every order the process
+/// adopted as `unknown` before `owed`.
+fn reconciled_then(
+    owed: &dyn Fn(&Journal) -> Result<(), Error>,
+) -> Result<(Journal, usize), Error> {
+    let (journal, mut process) = running(FixturePaper::filling(at(NOON)?), true)?;
+    for minute in 0..10 {
+        let now = format!("2026-09-21T15:{minute:02}:00Z");
+        pass(&journal, &mut process, &format!("t{minute}"), &now)?;
+    }
+    let unknown = journal
+        .payloads("OrderStateChanged")
+        .iter()
+        .filter(|payload| payload.get("state").and_then(Value::as_str) == Some("unknown"))
+        .count();
+    owed(&journal)?;
+    for minute in 10..16 {
+        let now = format!("2026-09-21T15:{minute:02}:00Z");
+        pass(&journal, &mut process, &format!("t{minute}"), &now)?;
+    }
+    Ok((journal, unknown))
+}
+
+/// The client order ids of the sells of 10 the process submitted.
+fn sells_of_ten(journal: &Journal) -> Vec<String> {
+    journal
+        .payloads("OrderSubmitted")
+        .iter()
+        .filter(|payload| {
+            payload.get("side").and_then(Value::as_str) == Some("sell")
+                && payload.get("qty").and_then(Value::as_str) == Some("10")
+        })
+        .filter_map(|payload| {
+            payload
+                .get("client_order_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+/// The fixture lists a filled bracket's two legs under its entry on every read, so reconciliation
+/// after reconciliation adopts neither leg as `unknown`, and a risk exit proposed after ten of
+/// them is allowed, goes out and fills: nothing holds it on `unknown_order_in_flight`
+/// (`AGENTS.md` rule 13), as the cell's trade loop relies on.
+#[test]
+fn a_filled_brackets_legs_never_read_unknown_and_a_risk_exit_goes_out() -> Result<(), Error> {
+    let exit = "01JINTENT0000000000000000C";
+    let (journal, unknown) = reconciled_then(&|journal| {
+        propose(journal, AGENT, exit, "sell", "10", "149", "risk_exit")
+    })?;
+    assert_eq!(unknown, 0, "no leg is adopted unknown");
+    assert_eq!(sells_of_ten(&journal), [format!("md-{exit}")]);
+    assert!(
+        journal
+            .payloads("GateDecided")
+            .iter()
+            .all(|gate| gate.get("reason_code").and_then(Value::as_str)
+                != Some("unknown_order_in_flight")),
+        "nothing holds on an unknown order"
+    );
+    assert!(
+        journal.payloads("FillApplied").iter().any(|fill| {
+            fill.get("side").and_then(Value::as_str) == Some("sell")
+                && fill.get("qty_gross").and_then(Value::as_str) == Some("10")
+        }),
+        "the exit fills"
+    );
+    Ok(())
+}
+
+/// And a kill switch applied after ten reconciliations flattens the agent's 10 shares.
+#[test]
+fn a_filled_brackets_kill_switch_flattens_after_many_reconciliations() -> Result<(), Error> {
+    let (journal, unknown) =
+        reconciled_then(&|journal| support::kill(journal, AGENT, "01JKILL00000000000000000AA"))?;
+    assert_eq!(unknown, 0, "no leg is adopted unknown");
+    assert_eq!(sells_of_ten(&journal).len(), 1, "the switch sells the 10");
+    assert!(
+        journal
+            .payloads("GateDecided")
+            .iter()
+            .all(|gate| gate.get("reason_code").and_then(Value::as_str)
+                != Some("unknown_order_in_flight")),
+        "nothing holds on an unknown order"
+    );
+    Ok(())
+}
