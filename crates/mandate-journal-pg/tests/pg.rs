@@ -15,6 +15,7 @@ mod conformance;
 mod support;
 
 use std::collections::BTreeSet;
+use std::str::FromStr;
 use std::time::Duration;
 
 use common::{edit, event_id, mark_draft, now, opened_draft, stream};
@@ -1211,4 +1212,158 @@ fn rows_from_a_trusted_head_read_only_the_rows_appended_since() {
         full,
         "from genesis, a full read"
     );
+}
+
+/// The news reader's role (DEC-2278 item 2, migration 0002), made once per cluster as the
+/// deployment's roles file makes it: a login role in the application role.
+const NEWS_ROLE: &str = "mandate_news_reader";
+/// The password the tests give the news reader's role, to log in as it.
+const NEWS_PASSWORD: &str = "news-reader-test";
+/// Migration 0002's refusal: a privilege the role does not have, with its own message.
+const NEWS_REFUSAL: &str = "writes only news streams";
+
+fn news_role(db: &TestDb) {
+    db.admin_execute(&format!(
+        "DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{NEWS_ROLE}') THEN
+        BEGIN
+            CREATE ROLE {NEWS_ROLE} LOGIN IN ROLE mandate_journal_app;
+        EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
+        END;
+    END IF;
+END
+$$;
+ALTER ROLE {NEWS_ROLE} PASSWORD '{NEWS_PASSWORD}'"
+    ));
+}
+
+/// The code and message of a statement's refusal.
+fn refusal(result: Result<(), sqlx::Error>) -> (String, String) {
+    match result {
+        Ok(()) => panic!("expected a refusal"),
+        Err(e) => {
+            let db = e
+                .as_database_error()
+                .unwrap_or_else(|| panic!("not a database error: {e}"));
+            (
+                db.code().map(|c| c.into_owned()).unwrap_or_default(),
+                db.message().to_owned(),
+            )
+        }
+    }
+}
+
+const ZERO: &str = "decode(repeat('00', 32), 'hex')";
+
+fn head(stream: &str) -> String {
+    format!(
+        "INSERT INTO stream_heads (stream_id, seq, hash, writer_epoch) VALUES ('{stream}', 0, {ZERO}, 1)"
+    )
+}
+
+fn first_event(stream: &str, event_id: &str) -> String {
+    format!(
+        "INSERT INTO event_ids (event_id, stream_id, seq) VALUES ('{event_id}', '{stream}', 1);
+         INSERT INTO events (stream_id, seq, event_id, event_type, schema_version, environment,
+                             recorded_at, prev_hash, hash, body)
+         VALUES ('{stream}', 1, '{event_id}', 'StreamOpened', 1, 'paper', 't', {ZERO},
+                 sha256('{{}}'::bytea), '{{}}'::bytea)"
+    )
+}
+
+/// As the news reader's role, its own news stream takes a head, an event and the head's advance;
+/// any other stream is refused, on an id, an event, a head, and a head's update, each with
+/// migration 0002's own refusal rather than the grants'.
+#[test]
+fn the_news_reader_role_writes_only_news_streams() {
+    let Some(db) = TestDb::new() else { return };
+    news_role(&db);
+    let news = db.pool_as(Some(NEWS_ROLE));
+    db.block_on(async {
+        run(&news, &head("news:ws_1")).await.unwrap();
+        run(&news, &first_event("news:ws_1", "news-e1")).await.unwrap();
+        run(
+            &news,
+            "UPDATE stream_heads SET seq = 1, hash = sha256('{}'::bytea), writer_epoch = 2
+             WHERE stream_id = 'news:ws_1'",
+        )
+        .await
+        .unwrap();
+        run(&db.app, &head("acct:ws_1:A")).await.unwrap();
+        for sql in [
+            head("acct:ws_1:B"),
+            head("ctl:ws_1"),
+            head("newsy:ws_1"),
+            "INSERT INTO event_ids (event_id, stream_id, seq) VALUES ('acct-e1', 'acct:ws_1:A', 1)"
+                .to_owned(),
+            first_event("agent:ws_1:a", "agent-e1"),
+            "UPDATE stream_heads SET writer_epoch = 9 WHERE stream_id = 'acct:ws_1:A'".to_owned(),
+        ] {
+            let (code, message) = refusal(run(&news, &sql).await);
+            assert_eq!(code, INSUFFICIENT_PRIVILEGE, "{sql}");
+            assert!(message.contains(NEWS_REFUSAL), "{sql}: {message}");
+        }
+        let heads: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM stream_heads WHERE stream_id NOT LIKE 'news:%' AND writer_epoch = 9",
+        )
+        .fetch_one(&db.admin)
+        .await
+        .unwrap();
+        assert_eq!(heads, 0, "the refused update changed nothing");
+    });
+}
+
+/// Logged in as the news reader, a SET ROLE to the application role does not lift the refusal:
+/// the session's user is still the news reader's.
+#[test]
+fn a_set_role_does_not_lift_the_news_reader_s_refusal() {
+    let Some(db) = TestDb::new() else { return };
+    news_role(&db);
+    let url = std::env::var("MANDATE_PG_URL").unwrap();
+    let login = PgConnectOptions::from_str(&url)
+        .unwrap()
+        .username(NEWS_ROLE)
+        .password(NEWS_PASSWORD);
+    let schema = db.schema.clone();
+    db.block_on(async {
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .after_connect(move |conn, _| {
+                let setup = format!("SET search_path TO {schema}; SET ROLE mandate_journal_app");
+                Box::pin(async move {
+                    conn.execute(sqlx::raw_sql(AssertSqlSafe(setup))).await?;
+                    Ok(())
+                })
+            })
+            .connect_with(login)
+            .await
+            .unwrap();
+        let (code, message) = refusal(run(&pool, &head("acct:ws_1:C")).await);
+        assert_eq!(code, INSUFFICIENT_PRIVILEGE);
+        assert!(message.contains(NEWS_REFUSAL), "{message}");
+        run(&pool, &head("news:ws_2")).await.unwrap();
+        pool.close().await;
+    });
+}
+
+/// Every other role is unaffected: the application role, the owner and a superuser append to any
+/// stream as before, through the journal itself.
+#[test]
+fn other_roles_write_every_stream_as_before() {
+    let Some(db) = TestDb::new() else { return };
+    news_role(&db);
+    db.block_on(async {
+        opened(&db.journal(), 2).await;
+        for (pool, stream) in [
+            (&db.app, "news:ws_1"),
+            (&db.app, "ctl:ws_1"),
+            (&db.owner, "agent:ws_1:b"),
+            (&db.admin, "acct:ws_1:D"),
+        ] {
+            run(pool, &head(stream))
+                .await
+                .unwrap_or_else(|e| panic!("{stream}: {e}"));
+        }
+    });
 }

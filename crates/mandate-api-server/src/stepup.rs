@@ -14,6 +14,7 @@ use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
 use crate::commands::{Event, Writer, caused_envelope};
+use crate::methods::CoolOffWaiver;
 use crate::objects::ObjectStore;
 use crate::routes::string;
 use crate::versions::object;
@@ -47,6 +48,18 @@ pub struct Asserted {
     credential: String,
     sign_count: u32,
     assertion: Vec<u8>,
+    waived: Option<CoolOffWaived>,
+}
+
+/// A test cell's waiver of the signing credential's enrolment cool-off (DEC-2146 items 3 and 4),
+/// carried only inside the [`Asserted`] whose `StepUpAsserted` it follows, so only the writer of
+/// that pair can journal it as `StepUpCoolOffWaived`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoolOffWaived {
+    /// The enrolment's `cool_off_ends`, after the instant the step-up was judged at.
+    pub cool_off_ends: UtcNanos,
+    /// The tier the server started in.
+    pub tier: CoolOffWaiver,
 }
 
 impl Asserted {
@@ -61,7 +74,19 @@ impl Asserted {
             credential,
             sign_count,
             assertion,
+            waived: None,
         }
+    }
+
+    /// This step-up, counted inside its credential's enrolment cool-off under `waived`.
+    pub(crate) fn with_waiver(self, waived: Option<CoolOffWaived>) -> Self {
+        Self { waived, ..self }
+    }
+
+    /// The cool-off this step-up was counted inside of, under a test cell's waiver; `None` for a
+    /// credential past its cool-off.
+    pub fn waived(&self) -> Option<CoolOffWaived> {
+        self.waived
     }
 
     /// The challenge's ULID text, the authorized event's `step_up.assertion_id`.
@@ -83,15 +108,23 @@ impl Asserted {
         &self.assertion
     }
 
-    /// The `StepUpAsserted` (journal spec §9.32) recording this step-up, written by `writer` and
-    /// caused by the event `causation` names (rule 253), with the assertion stored in `objects`
-    /// first; `None` when the store refuses it or the canonical form cannot hold the record.
+    /// The records of this step-up, written by `writer` and caused by the event `causation` names,
+    /// with the assertion stored in `objects` first: its `StepUpAsserted` (journal spec §9.32, rule
+    /// 253), then, for a step-up counted under a test cell's waiver, its `StepUpCoolOffWaived`
+    /// (§9.38, rule 317) under `waiver_id`, at the same `event_time` (DEC-2146 item 4). `None`
+    /// when the store refuses the assertion, the canonical form cannot hold a record, or a waived
+    /// step-up has no `waiver_id`.
+    ///
+    /// Rule 318 holds by construction: the verifier waives only the principal's own enrolled
+    /// credential whose `cool_off_ends` is after the instant it judged at, which is `writer`'s
+    /// `now`, and a challenge counts once.
     pub(crate) fn drafted(
         &self,
         objects: &dyn ObjectStore,
         writer: &Writer<'_>,
         causation: &str,
-    ) -> Option<Vec<u8>> {
+        waiver_id: Option<&str>,
+    ) -> Option<Vec<Vec<u8>>> {
         let stored = objects.put(&self.assertion).ok()?;
         let reference = string(&stored.to_string());
         let payload = object(vec![
@@ -110,7 +143,52 @@ impl Asserted {
             artifact_refs: vec![reference],
             config_refs: Vec::new(),
         };
-        caused_envelope(writer, &event, Some(causation))
+        let asserted = caused_envelope(writer, &event, Some(causation))?;
+        let Some(waived) = self.waived else {
+            return Some(vec![asserted]);
+        };
+        let payload = object(vec![
+            ("challenge", string(&self.challenge)),
+            ("credential", string(&self.credential)),
+            ("cool_off_ends", string(&waived.cool_off_ends.to_string())),
+            ("tier", string(waived.tier.as_str())),
+        ])?;
+        let event = Event {
+            event_type: "StepUpCoolOffWaived",
+            schema_version: 1,
+            payload,
+            artifact_refs: Vec::new(),
+            config_refs: Vec::new(),
+        };
+        let waiver = Writer {
+            event_id: waiver_id?,
+            ..*writer
+        };
+        Some(vec![
+            asserted,
+            caused_envelope(&waiver, &event, Some(causation))?,
+        ])
+    }
+}
+
+/// The operation §3.4 derives a waiver's `StepUpCoolOffWaived` id under: its assertion's
+/// `operation`, with `_cool_off_waived` for `_asserted`, so each route's waiver has its own id.
+pub(crate) fn waived_operation(operation: &str) -> Option<String> {
+    operation
+        .strip_suffix("_asserted")
+        .map(|stem| format!("{stem}_cool_off_waived"))
+}
+
+/// The id `derive` gives `asserted`'s waiver under [`waived_operation`] of `operation`: `Some(None)`
+/// for a step-up with no waiver, and `None` when a waived one's id does not derive.
+pub(crate) fn waiver_id(
+    asserted: &Asserted,
+    operation: &str,
+    derive: impl FnOnce(&str) -> Option<String>,
+) -> Option<Option<String>> {
+    match asserted.waived {
+        None => Some(None),
+        Some(_) => derive(&waived_operation(operation)?).map(Some),
     }
 }
 

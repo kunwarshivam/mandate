@@ -26,7 +26,7 @@ fn owed_exit() -> Result<(Journal, Paper, ExecutorProcess<Journal, Paper>), Erro
     let broker = Paper::new(&journal);
     broker.resting(OPENING, "AAPL", "10", "150")?;
     broker.fill(OPENING, "150")?;
-    broker.resting("md-protect", "AAPL", "10", "147")?;
+    broker.resting_sell("md-protect", "AAPL", "10", "147")?;
     let mut process = start_allowing(&journal, &broker)?;
     process.step(at("2026-09-21T15:00:00Z")?);
     if !process.ready() {

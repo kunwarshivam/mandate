@@ -294,7 +294,16 @@ pub(crate) fn payload(
     crate::acknowledgments::rules(event_type, &payload)?;
     crate::confirmations::rules(event_type, &payload, environment, actor, event_time)?;
     crate::real_money::rules(event_type, &payload, actor)?;
-    crate::credentials::rules(event_type, &payload, actor, event_time, causation_id)?;
+    crate::credentials::rules(
+        event_type,
+        &payload,
+        crate::credentials::Read {
+            actor,
+            event_time,
+            causation_id,
+            environment,
+        },
+    )?;
     crate::connection_roles::rules(event_type, actor, causation_id)?;
     let p = Payload(&payload);
     match event_type {
