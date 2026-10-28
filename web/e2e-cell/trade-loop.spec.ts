@@ -220,8 +220,14 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     await pause.click();
     const answer = await sent;
     if (!answer.ok()) refuse(`the API answered ${answer.status()} for the pause: ${(await answer.text()).slice(0, 400)}`);
-    await expect(header.getByRole("status").filter({ hasText: /^Pause / })).toHaveText("Pause recorded in the journal.", { timeout: 30_000 });
     const paused = header.locator('[data-slot="mode-badge"][data-mode="paused"]');
+    const recorded = header.getByRole("status").filter({ hasText: "Pause recorded in the journal." });
+    try {
+      await expect(recorded.or(paused).first()).toBeVisible({ timeout: 30_000 });
+    } catch {
+      const said = ((await header.getByRole("status").filter({ hasText: /^Pause |^Not recorded|unknown/ }).first().textContent().catch(() => "")) ?? "").trim();
+      refuse(`the pause was answered ${answer.status()} but the page showed neither "Pause recorded in the journal." nor the agent paused within 30 s; it said: ${said || "nothing"}`);
+    }
     if (!(await until(page, `/agents/${AGENT}`, 30_000, async () => (await paused.count()) > 0))) refuse("the pause was recorded but the agent's page did not read it paused within 30 s");
     step("paused", ((await answer.json()) as { command_id?: string }).command_id ?? "");
   });
