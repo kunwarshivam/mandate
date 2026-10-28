@@ -7638,7 +7638,12 @@ with the waiver, so they never write it. No reader but an auditor reads it.
 | `cool_off_ends` | `timestamp` | The credential's enrolment `cool_off_ends`, which the step-up came before |
 | `tier` | `dev` \| `ci` | The deployment tier the writer started in, by its own configuration |
 
-Its `causation_id` is the event the step-up authorized, the same as the `StepUpAsserted`'s.
+Its `causation_id` is the event the step-up authorized, the same as the `StepUpAsserted`'s. Its
+`event_time` is the `StepUpAsserted`'s too: the instant the verifier judged the step-up at.
+
+Only a route that appends the step-up's `StepUpAsserted` can count a waiver. The verifier returns
+the waiver as part of the assertion it returns, so a route that journals no assertion keeps the
+cool-off and answers `step_up_missing` (DEC-2146 item 3).
 
 **Consistency rule** (reason `schema`; the path is the member named):
 
@@ -7670,8 +7675,13 @@ Its `causation_id` is the event the step-up authorized, the same as the `StepUpA
      naming its `challenge` (`event_type`). A step-up inside a cool-off without its waiver no
      longer counts, so every passkey step-up with that credential is then `step_up_missing`.
 
-The writer judges rule 318 against its own fold before it appends, as it judges rule 254, with
-`event_time` the instant its verifier judged the step-up at.
+The writer judges rule 318 against its own fold before it appends, as it judges rule 254. Both
+records' `event_time` is the instant its verifier judged the step-up at, so rule 318 never refuses
+a waiver its own verifier granted. A step-up judged at or after `cool_off_ends` needs no waiver.
+
+A waiver names its tier by the writer's own configuration, which the journal cannot check. A
+`StepUpCoolOffWaived` in a staging or production cell's journal means that cell started with a test
+tier, a configuration DEC-2146 item 2 refuses everywhere but there.
 
 **No `JournaledFact`.** **Vectors**: `reference/journal`'s `cool_off_waivers` section holds:
 
