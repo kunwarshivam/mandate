@@ -221,6 +221,15 @@ Sign-in runs through lane SI's stub issuer (DEC-2100, DEC-1025).
   `--experimental-https` makes a local certificate with mkcert the first time, which may ask to
   trust its CA. Without sign-in, `web/` runs on its own fixtures at http://127.0.0.1:4317, as before.
 
+A dev or ci cell may waive a first passkey's 24-hour enrolment cool-off at step-up (DEC-2146), so
+the browser proofs of confirm, deploy, resume, stop and connect can step up with a passkey enrolled
+minutes earlier.
+- `api.stepUpCoolOffWaiver: true` sets the API's `MANDATE_API_STEP_UP_COOL_OFF_WAIVER=true`. It is
+  off by default.
+- Any other tier refuses it: the schema and the chart at render, and the API at its start.
+- Each waived step-up is journaled as `StepUpCoolOffWaived`, right after its `StepUpAsserted` (journal
+  spec §9.38).
+
 The session signing key is made in the pod's memory at each
 start. The interim `api` image carries a CA bundle found on the building host (`SSL_CERT_FILE`, else
 the usual Debian, Fedora, openSUSE or Alpine path), without which the server refuses to start; when `cell up` cannot install the workspace release, it prints the API pod's

@@ -124,6 +124,11 @@ api:
   # never holds it. Off until that Secret exists: staging provisions it, and the local cell turns it
   # on with `vaultBinding`, once `cargo xtask cell up` provisions both.
   connectFinish: false
+  # A dev or ci cell's waiver of a first passkey's 24-hour enrolment cool-off at step-up
+  # (MANDATE_API_STEP_UP_COOL_OFF_WAIVER, DEC-2146): each waived step-up is journaled as
+  # StepUpCoolOffWaived. Any other tier refuses it, in the schema, in the chart and at the API's
+  # start.
+  stepUpCoolOffWaiver: false
 
 # The workspace's shared artifact store (mandate documents, backtest reports), mounted at
 # /var/lib/mandate/artifacts. Which process may write it is fixed by the chart, never a value.

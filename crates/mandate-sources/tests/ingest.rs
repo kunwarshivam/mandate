@@ -105,6 +105,53 @@ fn a_news_page_becomes_records_from_structured_fields() {
     assert_eq!(text.excerpt, None);
 }
 
+/// DEC-2280 item 2: a parsed news item keeps the vendor's tickers as the vendor listed them, a
+/// ticker the tagging table does not know included, while its tags still resolve only the known
+/// ones; a filing's are its CIK table's.
+#[test]
+fn a_parsed_item_keeps_the_vendor_s_tickers_as_parsed() {
+    let tables = Tables::new();
+    let source = news_source();
+    let body = fixture("recorded/alpaca-news-page.json");
+    let page = alpaca_news_page(&tables.ctx(&source, at(RECEIVED), Capture::Live), &body).unwrap();
+    let tickers: Vec<Vec<&str>> = page
+        .drafts
+        .iter()
+        .map(|d| d.tickers().iter().map(Symbol::as_str).collect())
+        .collect();
+    assert_eq!(
+        tickers,
+        [vec!["MSFT"], vec!["AAPL", "MSFT"], vec!["AAPL", "ZZZZ"]]
+    );
+    let last = &page.drafts[2];
+    assert_eq!(last.tags(), &BTreeSet::from([asset(AAPL)]));
+    assert_eq!(last.source(), &source);
+    assert_eq!(last.allowlist_version(), AllowlistVersion(7));
+    assert_eq!(last.published_at(), at("2026-10-15T12:00:00Z"));
+    assert_eq!(last.vendor_version(), at("2026-10-15T12:00:00Z"));
+    assert_eq!(last.received_at(), at(RECEIVED));
+    let raw_item = br#"{"id":41000001,"headline":"Apple schedules its quarterly results call","author":"Staff","created_at":"2026-10-15T12:00:00Z","updated_at":"2026-10-15T12:00:00Z","summary":"The call is set for after the close.","content":"","url":"https://www.example-wire.com/news/41000001","symbols":["AAPL","ZZZZ"],"source":"benzinga","images":[]}"#;
+    assert_eq!(last.content(), &ContentHash::new(Digest::of(raw_item)));
+    assert_eq!(
+        last.text().headline.as_ref().unwrap().as_untrusted_str(),
+        "Apple schedules its quarterly results call"
+    );
+
+    let unsorted = br#"{"news":[{"id":7,"created_at":"2026-10-15T12:00:00Z","updated_at":"2026-10-15T12:00:00Z","symbols":["MSFT","AAPL","MSFT"]},{"id":8,"created_at":"2026-10-15T12:00:00Z","updated_at":"2026-10-15T12:00:00Z","symbols":[]}],"next_page_token":null}"#;
+    let page =
+        alpaca_news_page(&tables.ctx(&source, at(RECEIVED), Capture::Live), unsorted).unwrap();
+    let tickers: Vec<Vec<&str>> = page
+        .drafts
+        .iter()
+        .map(|d| d.tickers().iter().map(Symbol::as_str).collect())
+        .collect();
+    assert_eq!(
+        tickers,
+        [vec!["MSFT", "AAPL", "MSFT"], vec![]],
+        "as parsed: the vendor's order, a repeat, and none at all are kept as they came"
+    );
+}
+
 #[test]
 fn an_unknown_ticker_is_dropped_and_tags_resolve_as_of_knowledge_time() {
     let tables = Tables::new();
@@ -387,6 +434,11 @@ fn an_amended_filing_is_a_new_record_and_the_original_stays_readable() {
             doc.as_bytes(),
         )
         .unwrap();
+        assert_eq!(
+            draft.tickers(),
+            [Symbol::parse("AAPL").unwrap()],
+            "a filing's tickers are its CIK table's"
+        );
         store.ingest(draft).unwrap();
     }
     assert_eq!(store.records().len(), 3);
