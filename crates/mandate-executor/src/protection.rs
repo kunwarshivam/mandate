@@ -6489,6 +6489,24 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// DEC-2849 item 7: two legs at the same stop are breached together, so the exit is the
+    /// first placed's: agent-a's leg at 140 rested before agent-b's at 140, and a mark of 139
+    /// exits agent-a's ten.
+    #[test]
+    fn of_two_legs_at_one_stop_the_first_placed_is_exited() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        bought_by_b(&mut executor)?;
+        leg_at(&mut executor, (OCO, "agent-a", "10"), "140")?;
+        leg_at(&mut executor, ("md-held-2-p1", "agent-b", "5"), "140")?;
+        assert_eq!(
+            fired_at(&mut executor, &ports, 139)?,
+            watchdog_exit_of("agent-a", "10")
+        );
+        Ok(())
+    }
+
     /// DEC-2849 item 7, R3's major 2 on #2865: a leg that names no agent (`*`) over a position
     /// one agent holds falls back to that single holder: the exit is agent-a's ten, not `*`'s.
     #[test]
