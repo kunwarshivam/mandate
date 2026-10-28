@@ -170,16 +170,44 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     Ok(())
 }
 
-/// The agent whose resting protection covers `instrument`, as its first resting order names it:
-/// the watchdog's exit is that agent's own (DEC-2849 item 7). `None` for protection no agent's
-/// order rests for.
+/// The agent of the leg the breach triggered in `instrument`: the watchdog's exit is that agent's
+/// own (DEC-2849 item 7). Of the resting legs it is the one whose own stop ([`leg_stop`]) is
+/// highest, since a falling mark reaches that stop first and a breach of any lower stop breaches
+/// it too, and the first placed of those at that stop. `None` when that leg names no agent, or
+/// `*`.
 fn protecting_agent(view: &ExecutorState, instrument: &InstrumentId) -> Option<AgentId> {
-    let resting = view.protection.get(instrument)?.resting.first()?;
-    view.orders
-        .get(resting)?
+    let mut triggered: Option<(&Order, Option<Price>)> = None;
+    for id in &view.protection.get(instrument)?.resting {
+        let Some(order) = view.orders.get(id) else {
+            continue;
+        };
+        let stop = leg_stop(view, order);
+        if triggered.is_none_or(|(_, highest)| stop > highest) {
+            triggered = Some((order, stop));
+        }
+    }
+    triggered?
+        .0
         .agent
         .clone()
         .filter(|agent| agent.0 != EVERY_AGENT)
+}
+
+/// A resting leg's own stop: its request's, or, for a leg the broker created from a bracket, its
+/// entry's bracket's. `None` when neither recorded one, so such a leg is never read as the one
+/// triggered beside a leg whose stop is known.
+fn leg_stop(view: &ExecutorState, order: &Order) -> Option<Price> {
+    let request = |id: &ClientOrderId| view.details.get(id)?.request.as_ref();
+    request(&order.client_order_id)
+        .and_then(request_prices)
+        .map(|prices| prices.stop)
+        .or_else(|| {
+            let entry = order.client_order_id.protected_entry()?;
+            request(&entry)?
+                .bracket
+                .as_ref()
+                .map(|bracket| bracket.stop)
+        })
 }
 
 /// The lowest of the latest quote's mark and bid, if that quote is sane, and the last sane bid's
@@ -6317,6 +6345,207 @@ mod sequence_tests {
             "{:?}",
             cancels(&bound)
         );
+        Ok(())
+    }
+
+    /// Commits `agent`'s protective OCO `id` for `qty` AAPL with its stop at `stop`, accepted and
+    /// placed as the instrument's protection.
+    fn leg_at(
+        executor: &mut Executor,
+        (id, agent, qty): (&str, &str, &str),
+        stop: &str,
+    ) -> Result<(), ExecutorError> {
+        committed(
+            executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(id)),
+                ("agent", text(agent)),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text(qty)),
+                ("tif", text("gtc")),
+                ("purpose", text("protective")),
+                ("order_class", text("oco")),
+                ("take_profit", text("170")),
+                ("stop", text(stop)),
+            ],
+        )?;
+        committed(
+            executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(id)), ("state", text("accepted"))],
+        )?;
+        committed(
+            executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text(id)),
+                ("qty", text(qty)),
+                ("take_profit", text("170")),
+                ("stop", text(stop)),
+            ],
+        )
+    }
+
+    /// `agent-b`'s filled buy of 5 AAPL beside `held`'s ten of `agent-a`.
+    fn bought_by_b(executor: &mut Executor) -> Result<(), ExecutorError> {
+        committed(
+            executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text("md-held-2")),
+                ("agent", text("agent-b")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text("5")),
+                ("limit", text("150")),
+                ("purpose", text("open")),
+            ],
+        )?;
+        committed(
+            executor,
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-b")),
+                ("client_order_id", text("md-held-2")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty_gross", text("5")),
+                ("price", text("150")),
+            ],
+        )?;
+        committed(
+            executor,
+            "OrderStateChanged",
+            vec![
+                ("client_order_id", text("md-held-2")),
+                ("state", text("filled")),
+            ],
+        )
+    }
+
+    /// The watchdog's intents once a mark of `mark` has breached for `stop_watchdog_s`.
+    fn fired_at(
+        executor: &mut Executor,
+        ports: &Ports<'_>,
+        mark: u32,
+    ) -> Result<Vec<(String, String, String, String)>, ExecutorError> {
+        executor.run(observation(Some(mark), None, true, 0)?, ports)?;
+        let fired = executor.run(Input::Tick(RiskClock::from_secs(30)), ports)?;
+        Ok(watchdog_intents(&fired)
+            .into_iter()
+            .map(|(_, agent, purpose, qty)| (String::new(), agent, purpose, qty))
+            .collect())
+    }
+
+    /// The watchdog's single intent for `agent`'s `qty`, as [`fired_at`] reads it.
+    fn watchdog_exit_of(agent: &str, qty: &str) -> Vec<(String, String, String, String)> {
+        vec![(
+            String::new(),
+            agent.to_owned(),
+            "risk_exit".to_owned(),
+            qty.to_owned(),
+        )]
+    }
+
+    /// DEC-2849 item 7, R3's major 1 on #2865: the exit is the triggering leg's agent's. Agent-a's
+    /// leg at 140 was placed first, agent-b's at 145 second; a mark of 144 breaches agent-b's stop
+    /// and not agent-a's, so the exit is agent-b's five, never agent-a's ten.
+    #[test]
+    fn the_watchdog_exits_the_second_placed_leg_whose_stop_was_breached()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        bought_by_b(&mut executor)?;
+        leg_at(&mut executor, (OCO, "agent-a", "10"), "140")?;
+        leg_at(&mut executor, ("md-held-2-p1", "agent-b", "5"), "145")?;
+        assert_eq!(
+            fired_at(&mut executor, &ports, 144)?,
+            watchdog_exit_of("agent-b", "5")
+        );
+        Ok(())
+    }
+
+    /// DEC-2849 item 7, R3's major 1 on #2865: with agent-b's leg at 145 placed first and agent-a's
+    /// at 140 second, a mark of 139 breaches both, agent-b's first, the higher: the exit is agent-b's
+    /// five, whatever order they were placed in.
+    #[test]
+    fn the_watchdog_exits_the_highest_stop_whichever_leg_was_placed_first()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        bought_by_b(&mut executor)?;
+        leg_at(&mut executor, ("md-held-2-p1", "agent-b", "5"), "145")?;
+        leg_at(&mut executor, (OCO, "agent-a", "10"), "140")?;
+        assert_eq!(
+            fired_at(&mut executor, &ports, 139)?,
+            watchdog_exit_of("agent-b", "5")
+        );
+        Ok(())
+    }
+
+    /// DEC-2849 item 7, R3's major 2 on #2865: a leg that names no agent (`*`) over a position
+    /// one agent holds falls back to that single holder: the exit is agent-a's ten, not `*`'s.
+    #[test]
+    fn a_leg_of_no_agent_over_a_single_holders_lots_is_that_holders_exit()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        leg_at(&mut executor, ("md-adopted-p1", "*", "10"), "140")?;
+        assert_eq!(
+            fired_at(&mut executor, &ports, 139)?,
+            watchdog_exit_of("agent-a", "10")
+        );
+        Ok(())
+    }
+
+    /// DEC-2849 I4, R3's minor on #2865: a risk exit is never cut to the sell authority. Agent-a
+    /// holds ten and agent-b five; the owner sold three outside Mandate, so N is 12, the deficit 3
+    /// and agent-b's Sᵢ 2. Agent-b's risk exit of its five sells five, where a discretionary exit
+    /// would be trimmed to two. (R and D are never both above zero, D being max(0, −R); the
+    /// owner's residual above zero is the bound's case, `the_bound_sells_only_the_agents_lots_beside_the_owners`.)
+    #[test]
+    fn a_risk_exit_in_a_deficit_sells_its_lots_not_its_sell_authority() -> Result<(), ExecutorError>
+    {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        bought_by_b(&mut executor)?;
+        committed(
+            &mut executor,
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-owner")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty_gross", text("3")),
+                ("price", text("150")),
+            ],
+        )?;
+        let agent = AgentId("agent-b".to_owned());
+        let aapl = aapl()?;
+        assert_eq!(
+            crate::holders::sell_authority(&executor.state, &agent, &aapl)?,
+            Qty::parse("2")?,
+            "the deficit of three leaves agent-b two to sell at its discretion"
+        );
+        executor.run(quote("150")?, &ports)?;
+        let effects = executor.run(
+            sell_as("agent-b", EXIT, "5", "150", Purpose::RiskExit)?,
+            &ports,
+        )?;
+        let sold: Vec<Qty> = submissions(&effects)
+            .into_iter()
+            .filter(|order| order.side == Side::Sell)
+            .map(|order| order.qty)
+            .collect();
+        assert_eq!(sold, vec![Qty::parse("5")?], "{:?}", drafted(&effects));
         Ok(())
     }
 
