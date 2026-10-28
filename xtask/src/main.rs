@@ -510,11 +510,11 @@ fn ci(job: &str) -> Result<()> {
             }
             Ok(())
         }
-        "test-nextest" => {
+        "test-nextest" | "test-python" => {
             let partition = env::var(TEST_PARTITION_ENV).ok().filter(|s| !s.is_empty());
             test_part(job, partition.as_deref())
         }
-        "test-doc" | "test-rh-sim" | "test-python" => test_part(job, None),
+        "test-doc" | "test-rh-sim" => test_part(job, None),
         "pending" => pending(),
         "portable" => portable(),
         "select" => ci_select(),
@@ -649,7 +649,8 @@ fn portable() -> Result<()> {
 }
 
 /// One of [`TEST_PARTS`], over the crates the diff selects (DEC-1190); `partition`, a `K/N`
-/// counted from 1, runs only the nextest run's `K`th of `N` slices (DEC-871).
+/// counted from 1, runs only the `K`th of `N` slices of the nextest run (DEC-871) or of the
+/// Python tests (DEC-2646).
 fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
     match part {
         "test-nextest" => {
@@ -715,7 +716,7 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
             sh("cargo", &args)
         }
         "test-rh-sim" => rh_sim_tests(),
-        "test-python" => uv_tools(&["pytest", "-q"]),
+        "test-python" => uv_tools(&pytest_args(partition)?),
         other => bail!("unknown test part: {other}"),
     }
 }
@@ -868,19 +869,42 @@ fn nextest_args(partition: Option<&str>, packages: Option<&[String]>) -> Result<
     }
     args.extend(["--locked", "--no-tests=pass"].map(String::from));
     if let Some(partition) = partition {
-        let parsed = partition.split_once('/').and_then(|(k, n)| {
-            let plain = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-            if !plain(k) || !plain(n) || k.starts_with('0') || n.starts_with('0') {
-                return None;
-            }
-            Some((k.parse::<u32>().ok()?, n.parse::<u32>().ok()?))
-        });
-        match parsed {
-            Some((k, n)) if k <= n => args.push(format!("--partition=count:{k}/{n}")),
-            _ => bail!(
-                "{TEST_PARTITION_ENV} must be K/N with 1 <= K <= N, counted from 1; got {partition:?}"
-            ),
+        let (k, n) = partition_of(partition)?;
+        args.push(format!("--partition=count:{k}/{n}"));
+    }
+    Ok(args)
+}
+
+/// A test part's shard, [`TEST_PARTITION_ENV`]'s `K/N`: plain decimals with no leading zero,
+/// `1 <= K <= N`, counted from 1 (DEC-871). The nextest run and the Python tests read it alike.
+fn partition_of(partition: &str) -> Result<(u32, u32)> {
+    let parsed = partition.split_once('/').and_then(|(k, n)| {
+        let plain = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        if !plain(k) || !plain(n) || k.starts_with('0') || n.starts_with('0') {
+            return None;
         }
+        Some((k.parse::<u32>().ok()?, n.parse::<u32>().ok()?))
+    });
+    match parsed {
+        Some((k, n)) if k <= n => Ok((k, n)),
+        _ => bail!(
+            "{TEST_PARTITION_ENV} must be K/N with 1 <= K <= N, counted from 1; got {partition:?}"
+        ),
+    }
+}
+
+/// The pytest plugin that keeps one shard of the collected tests (DEC-2646): every shard collects
+/// the same tests and keeps every `N`-th of their sorted node ids from `K-1`, reading `K/N` from
+/// [`TEST_PARTITION_ENV`] itself (`python/mandate_tools/src/mandate_tools/pytest_shard.py`).
+const PYTEST_SHARD_PLUGIN: &str = "mandate_tools.pytest_shard";
+
+/// The pytest arguments of the Python tests, or of one shard of them when `partition` is given:
+/// the shard plugin loaded, `K/N` checked here first so a malformed one fails before pytest runs.
+fn pytest_args(partition: Option<&str>) -> Result<Vec<&'static str>> {
+    let mut args = vec!["pytest", "-q"];
+    if let Some(partition) = partition {
+        partition_of(partition)?;
+        args.extend(["-p", PYTEST_SHARD_PLUGIN]);
     }
     Ok(args)
 }
@@ -1436,6 +1460,10 @@ fn tofu_checks() -> Result<()> {
     if !unchecked.is_empty() {
         bail!("tofu:\n  {}", unchecked.join("\n  "));
     }
+    sh(
+        "python3",
+        &["deploy/tofu/modules/ci-runners/tests/manager_test.py"],
+    )?;
     Ok(())
 }
 
@@ -2235,6 +2263,7 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
             kubectl: &in_cluster,
             provision: &|command, stdin| in_vault_cli(command, stdin),
             put: &|secret, stdin| in_vault_cli(&vault_provision::put_command(secret), stdin),
+            pause: &std::thread::sleep,
         },
         &listed,
         &model_key,
@@ -6764,8 +6793,9 @@ const READ_LINES: &[(&str, &str)] = &[
 
 /// The repository scripts a workflow may run, by the exact command word that runs them, each only
 /// while its whole text, comments included, holds no cargo word, no `.cargo` and no `CARGO_`
-/// (DEC-873 item 2). `ci.yml` runs the first four and the credential guard (DEC-964), `merge.yml`
-/// the fifth, and `release.yml`'s `release-signing` job the release signer (DEC-2024).
+/// (DEC-873 item 2). `ci.yml` runs the documentation and service scripts and the credential guard
+/// (DEC-964), `merge.yml` runs the merge guard, `release.yml` runs the release signer (DEC-2024),
+/// and `runner-smoke.yml` runs the runner smoke script (DEC-2078).
 const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/docs-only.sh",
     ".github/scripts/docs-checks.sh",
@@ -6774,6 +6804,7 @@ const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/start-minio.sh",
     ".github/scripts/merge-approved.sh",
     ".github/scripts/release-sign.sh",
+    ".github/scripts/runner-smoke.sh",
     CREDENTIAL_GUARD,
 ];
 
@@ -6848,6 +6879,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
     "MANDATE_CELL_VARIANT",
+    "MANDATE_DEMO_LOOP_ELSEWHERE",
     "MANDATE_DEMO_WEB_REQUIRED",
     "MANDATE_GITOPS_REQUIRED",
     "MANDATE_MUTANT_SHARD",
@@ -14760,6 +14792,21 @@ mod tests {
         Ok(())
     }
 
+    /// The Python tests run whole with no partition, and one shard through the shard plugin with
+    /// one; a malformed `K/N` fails before pytest runs (DEC-2646).
+    #[test]
+    fn a_python_shard_loads_the_shard_plugin_and_checks_its_partition() -> Result<()> {
+        assert_eq!(super::pytest_args(None)?, ["pytest", "-q"]);
+        assert_eq!(
+            super::pytest_args(Some("3/4"))?,
+            ["pytest", "-q", "-p", "mandate_tools.pytest_shard"]
+        );
+        for bad in ["0/4", "5/4", "1/0", "01/4", "4", "a/4", "1/4/2", ""] {
+            assert!(super::pytest_args(Some(bad)).is_err(), "{bad:?}");
+        }
+        Ok(())
+    }
+
     /// A filtered nextest run runs exactly the filtered tests, and fails when they select none.
     #[test]
     fn a_filtered_nextest_run_refuses_to_select_nothing() -> Result<()> {
@@ -19253,6 +19300,39 @@ mod tests {
         ] {
             assert!(test.contains(&line), "`fast-test` has `{line}`");
         }
+        let python: Vec<&str> = workflow_job(&workflow, "fast-python")
+            .context("ci.yml has `fast-python`")?
+            .iter()
+            .map(|l| l.trim())
+            .collect();
+        let shards = python
+            .iter()
+            .find_map(|l| l.strip_prefix("shard: "))
+            .context("`fast-python` has a shard matrix (DEC-2646)")?;
+        let shards: Vec<String> = serde_json::from_str(shards)?;
+        let total = shards.len();
+        assert!(total > 1, "the Python tests are split: {shards:?}");
+        let expected: Vec<String> = (1..=total).map(|k| format!("{k}/{total}")).collect();
+        assert_eq!(
+            shards, expected,
+            "the Python shards are 1/N to N/N, each once"
+        );
+        for shard in &shards {
+            assert_eq!(
+                super::pytest_args(Some(shard))?,
+                ["pytest", "-q", "-p", super::PYTEST_SHARD_PLUGIN],
+                "{shard} loads the shard plugin"
+            );
+        }
+        let first = format!("save-if: ${{{{ matrix.shard == '1/{total}' }}}}");
+        for line in [
+            "fail-fast: false",
+            partition_env.as_str(),
+            "shared-key: fast-python",
+            first.as_str(),
+        ] {
+            assert!(python.contains(&line), "`fast-python` has `{line}`");
+        }
         let fast = workflow_job(&workflow, "fast").context("ci.yml has `fast`")?;
         let names: Vec<&str> = std::iter::once("select")
             .chain(FAST_CI_JOBS.iter().map(|(name, _)| *name))
@@ -19484,18 +19564,24 @@ mod tests {
         ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == \
         'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}";
 
-    /// DEC-2075: `select` runs on [`RUNNER_GUARD`] and hands it on as its `runner` output, and no
-    /// other line of any workflow names `CI_RUNNER`, so every job that reaches the self-hosted
-    /// runners does so through the one guard: directly, or through `select`'s output.
+    /// DEC-2078's canary reaches the runner label before `CI_RUNNER` is set, but only from the
+    /// founder-dispatched smoke on `main`; every other ref fails closed on a hosted runner.
+    const SMOKE_RUNNER_GUARD: &str = "${{ github.event_name == 'workflow_dispatch' && github.ref == \
+        'refs/heads/main' && 'mandate-ci-do' || 'ubuntu-24.04' }}";
+
+    /// DEC-2075, DEC-2076: `select` runs on GitHub's runners and hands [`RUNNER_GUARD`] on as its
+    /// `runner` output, and no other line of any workflow names `CI_RUNNER`, so every job that
+    /// reaches the self-hosted runners does so through `select`'s output or DEC-2078's one
+    /// dispatch-only canary guard.
     #[test]
-    fn only_the_fork_guard_reaches_the_self_hosted_runners() -> Result<()> {
+    fn only_the_event_guards_reach_the_self_hosted_runners() -> Result<()> {
         let root = repo_root()?;
         let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))?;
         let select = workflow_job(&workflow, "select").context("ci.yml has a `select` job")?;
         let has = |want: String| select.iter().any(|line| line.trim() == want);
         assert!(
-            has(format!("runs-on: {RUNNER_GUARD}")),
-            "`select` runs on the guard"
+            has("runs-on: ubuntu-24.04".to_owned()),
+            "`select` runs on GitHub's runners, so no job waits on the self-hosted pool (DEC-2076)"
         );
         assert!(
             has(format!("runner: {RUNNER_GUARD}")),
@@ -19510,16 +19596,15 @@ mod tests {
                 }
                 named = named.saturating_add(1);
                 assert!(
-                    code == format!("runs-on: {RUNNER_GUARD}")
-                        || code == format!("runner: {RUNNER_GUARD}"),
+                    code == format!("runner: {RUNNER_GUARD}"),
                     "{} names CI_RUNNER outside the guard: {code}",
                     path.display()
                 );
             }
         }
         assert_eq!(
-            named, 2,
-            "the guard is written out exactly twice, both in `select`"
+            named, 1,
+            "the guard is written out exactly once, as `select`'s output"
         );
         let allowed_runs_on = [
             "ubuntu-24.04",
@@ -19529,8 +19614,10 @@ mod tests {
             "${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}",
             "${{ needs.select.outputs.runner }}",
             "${{ needs.select.outputs.runner || 'ubuntu-24.04' }}",
-            RUNNER_GUARD,
+            SMOKE_RUNNER_GUARD,
         ];
+        let smoke_path = root.join(".github/workflows/runner-smoke.yml");
+        let mut smoke_guards = 0_usize;
         for path in files_by_extension(&root.join(".github/workflows"), &["yml", "yaml"])? {
             for line in fs::read_to_string(&path)?.lines() {
                 let code = line.split(" #").next().unwrap_or(line).trim();
@@ -19553,13 +19640,26 @@ mod tests {
                         path.display()
                     );
                 }
-                assert!(
-                    !code.contains("self-hosted") && !code.contains("mandate-ci-do"),
-                    "{}: names the self-hosted runners' labels directly: {code}",
-                    path.display()
-                );
+                if code.contains("self-hosted") || code.contains("mandate-ci-do") {
+                    assert_eq!(
+                        path,
+                        smoke_path,
+                        "{} names a self-hosted label outside the smoke workflow: {code}",
+                        path.display()
+                    );
+                    assert_eq!(
+                        code,
+                        format!("runs-on: {SMOKE_RUNNER_GUARD}"),
+                        "the smoke workflow names the label only through DEC-2078's event guard"
+                    );
+                    smoke_guards = smoke_guards.saturating_add(1);
+                }
             }
         }
+        assert_eq!(
+            smoke_guards, 1,
+            "the dispatch-only smoke guard is written out exactly once"
+        );
         for job in workflow_jobs(&workflow) {
             let lines = workflow_job(&workflow, job).context("a listed job")?;
             for line in lines.iter().map(|l| l.trim()) {

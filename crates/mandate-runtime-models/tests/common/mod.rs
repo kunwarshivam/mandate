@@ -66,6 +66,13 @@ impl Root {
         self.0.join("datasets").join(RECORDING)
     }
 
+    /// A bars root of the workspace data process's IEX generations (DEC-2283).
+    pub fn generations(&self) -> PathBuf {
+        self.0
+            .join("datasets")
+            .join(mandate_bars::generations::GENERATIONS_ROOT)
+    }
+
     pub fn artifacts(&self) -> PathBuf {
         self.0.join("artifacts")
     }

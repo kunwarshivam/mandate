@@ -11,9 +11,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use mandate_cli::vault::kubernetes_auth;
+use mandate_cli::vault::{kubernetes_auth, stopped_line};
 use mandate_vault::SourceError;
 use mandate_vault::kubernetes::KubernetesAuth;
+use mandate_vault::openbao::{ProvisionError, Refused};
 
 const CANARY: &str = "canary-71c4e0aa-operator-token-do-not-print";
 /// An address no vault listens on: the discard port on the loopback.
@@ -279,6 +280,7 @@ fn provisioning_writes_each_identitys_files_and_prints_only_their_names() {
         "secret-import",
         "model-gateway",
         "news-reader",
+        "bars-reader",
         "email-sender",
         "executor-c1",
         "executor-c2",
@@ -529,5 +531,27 @@ fn kubernetes_alone_on_the_dev_server_is_refused_outside_a_pod() {
         "denied",
         &out,
         "Kubernetes auth alone outside a pod",
+    );
+}
+
+/// A provisioning the vault refused names the request it refused after the refusal and its code;
+/// one stopped otherwise reads as the refusal and its code alone (E21-32v).
+#[test]
+fn a_stopped_provisioning_names_the_request_the_vault_refused() {
+    let refused = ProvisionError {
+        error: SourceError::Denied,
+        refused: Some(Refused {
+            method: "POST".to_owned(),
+            path: "sys/mounts/mandate".to_owned(),
+            status: 403,
+        }),
+    };
+    assert_eq!(
+        stopped_line(&refused),
+        "this identity's policy does not allow that (denied): POST /v1/sys/mounts/mandate answered 403"
+    );
+    assert_eq!(
+        stopped_line(&ProvisionError::from(SourceError::Unavailable)),
+        "the vault could not be reached (unavailable)"
     );
 }

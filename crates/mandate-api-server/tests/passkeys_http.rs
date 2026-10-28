@@ -134,6 +134,7 @@ fn fixture(rows: &Rows, challenges: Challenges) -> Fixture {
         challenges: Arc::new(challenges),
         connect: None,
         reduction: Arc::default(),
+        folds: Arc::default(),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

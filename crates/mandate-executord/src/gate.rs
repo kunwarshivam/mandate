@@ -118,6 +118,12 @@ fn limits(error: PortError) -> InputError {
 }
 
 impl DeployedGate {
+    /// The configuration this deployment's gate decisions are journaled under (journal spec §9).
+    #[must_use]
+    pub fn config_refs(&self) -> &BindingGateConfigRefs {
+        &self.config_refs
+    }
+
     /// `agent`'s deployment as the gate reads it, quoted from `feed`.
     ///
     /// # Errors

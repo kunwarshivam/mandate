@@ -37,8 +37,7 @@ use crate::documents::{Envelope, checked, envelope};
 use crate::http::{App, problem, problem_body, session_cookie, unauthenticated, with_type};
 use crate::members::ControlLookup;
 use crate::reads::{
-    AgentView, ApprovalView, Deployment, Filter, account_positions, account_ref, agent,
-    agent_orders, agent_positions, approvals, deployed, inbox,
+    AgentView, ApprovalView, Deployment, Filter, account_ref, agent, approvals, deployed, inbox,
 };
 use crate::session::Authenticated;
 
@@ -548,7 +547,7 @@ pub async fn one_agent(
         account
             .as_deref()
             .filter(|rows| !rows.is_empty())
-            .map_or(Value::Null, |rows| Value::Array(account_positions(rows))),
+            .map_or(Value::Null, |rows| Value::Array(app.folds.holdings(rows))),
     ));
     members.push((
         "openings_held",
@@ -673,7 +672,7 @@ pub async fn agent_orders_read(
     let (reference, rows) = account.map_or((Value::Null, Vec::new()), |(reference, rows)| {
         (string(&reference), rows)
     });
-    let orders = Value::Array(agent_orders(&rows, &deployment.0));
+    let orders = Value::Array(app.folds.orders(&rows, &deployment.0));
     let members = vec![
         ("agent_id", string(&deployment.0)),
         ("account_ref", reference),
@@ -710,12 +709,12 @@ pub async fn agent_positions_read(
     };
     let (reference, rows, holdings) = match account {
         Some((reference, rows)) => {
-            let holdings = Value::Array(account_positions(&rows));
+            let holdings = Value::Array(app.folds.holdings(&rows));
             (string(&reference), rows, holdings)
         }
         None => (Value::Null, Vec::new(), Value::Null),
     };
-    let Some(positions) = agent_positions(&rows, &deployment.0) else {
+    let Some(positions) = app.folds.positions(&rows, &deployment.0) else {
         return Refused::JournalUnavailable.response();
     };
     let members = vec![

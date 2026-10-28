@@ -5,7 +5,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use mandate_journal::{AppendOutcome, StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, StoredEvent, StreamId, TrustedStart};
 use mandate_journal_pg::PgJournal;
 use mandate_time::UtcNanos;
 
@@ -23,6 +23,11 @@ pub type Rows<'a> = Answer<'a, Vec<StoredEvent>>;
 pub trait Journal: Send + Sync {
     /// Every row of `stream`; an empty list when the stream has none.
     fn rows<'a>(&'a self, stream: &'a str) -> Rows<'a>;
+    /// The rows of `stream` from `start.from_seq` on, their chain checked from `start.prev_hash`
+    /// (journal spec §11), so a reader holding the stream up to `from_seq - 1` reads only what
+    /// followed, as soundly as [`Self::rows`] reads it whole (DEC-2847, DEC-2145). A first row
+    /// that does not chain from the held hash fails.
+    fn rows_from<'a>(&'a self, stream: &'a str, start: TrustedStart) -> Rows<'a>;
     /// A new writer epoch for `stream`, fencing any other writer.
     fn take_ownership<'a>(&'a self, stream: &'a str) -> Answer<'a, u64>;
     /// The `seq` of `stream`'s last row, 0 for none.
@@ -50,6 +55,16 @@ impl Journal for Postgres {
         Box::pin(async move {
             let id = StreamId::parse(stream).ok_or(JournalUnavailable)?;
             self.0.rows(&id).await.map_err(|_| JournalUnavailable)
+        })
+    }
+
+    fn rows_from<'a>(&'a self, stream: &'a str, start: TrustedStart) -> Rows<'a> {
+        Box::pin(async move {
+            let id = StreamId::parse(stream).ok_or(JournalUnavailable)?;
+            self.0
+                .rows_from(&id, start)
+                .await
+                .map_err(|_| JournalUnavailable)
         })
     }
 

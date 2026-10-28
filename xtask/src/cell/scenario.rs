@@ -2109,6 +2109,10 @@ pub fn run_in(name: &str) -> Result<String> {
                         Part::Grant(check) => (check.shows, &check.gap),
                         _ => continue,
                     };
+                    if !loop_read_here(env::var_os(LOOP_ELSEWHERE_ENV).as_deref()) {
+                        eprintln!("    not run  {shows}: {LOOP_ELSEWHERE}");
+                        continue;
+                    }
                     let seen = match (&failed, &looped, part) {
                         (None, Looped::Open, Part::Loop(check)) => {
                             Some(journaled(check, &mut linked))
@@ -2190,6 +2194,23 @@ const APPLIED_WITHIN: Duration = Duration::from_secs(90);
 /// research pass at the runtime's tick, or the executor's next reconciliation, with the Job's ten
 /// minutes in mind, since a link not seen stops the loop's later reads.
 const LINK_WITHIN: Duration = Duration::from_secs(60);
+
+/// Set where another job of the same run reads the research loop (CI's `cell-demo-web`, whose
+/// `cell-demo` sibling runs the same scenario and reads it): this run reads each link and the grant
+/// as `not run`, never failed, and spends none of their waits, so the web job stays inside its ten
+/// minutes by sharing the scenario's parts with its sibling rather than dropping one (DEC-464).
+const LOOP_ELSEWHERE_ENV: &str = "MANDATE_DEMO_LOOP_ELSEWHERE";
+
+/// What a run that leaves the research loop to its sibling prints for each of its parts.
+const LOOP_ELSEWHERE: &str =
+    "read by this run's cell-demo job, which runs the same scenario (DEC-464)";
+
+/// Whether this run reads the research loop: unless [`LOOP_ELSEWHERE_ENV`] is `1`, which CI sets
+/// only when the sibling job runs too; empty or any other value reads it here, so a selection
+/// without the sibling never leaves the loop unread.
+fn loop_read_here(elsewhere: Option<&std::ffi::OsStr>) -> bool {
+    elsewhere.is_none_or(|value| value != "1")
+}
 
 /// The variable a rehearsal sets to wait longer for each link, in whole seconds, up to
 /// [`LINK_WITHIN_MAX`]: the recorded news item arrives 900 seconds after the research agent is
@@ -2707,8 +2728,13 @@ pub enum TradeOutcome {
     NoTools(String),
     Failed(String),
     /// The loop stopped before any approval reached `web/`, and the API, read with the owner's
-    /// session, lists no approval of the agent in any state: the runtime proposed nothing, which
-    /// waits on E15-14's composer, not on `web/`.
+    /// session, lists no approval of the agent in any state: the runtime proposed nothing, not a
+    /// fault of `web/`. Among the plan's conditions, the runtime proposes the agent's equity
+    /// opening only in the regular session, outside its close window, on a crossover output that
+    /// is neither expired nor too old, with fresh facts and nothing held or working in the
+    /// instrument (`mandate-daemon`'s plan; the in-session loop is `runtime.rs`'s
+    /// `the_demo_envelope_decides_asks_and_proposes_once_granted_in_session`, #2637). A plan that
+    /// proposes nothing journals no decision, so no event points to one of those conditions.
     Unproposed(String),
     Ran(web::TradeLoop),
 }
@@ -2947,7 +2973,11 @@ pub fn trade_verdict(outcome: &TradeOutcome, required: Required) -> (&'static st
             "pending",
             format!(
                 "no approval request reached web/ ({why}), and the API lists none of the agent's: \
-                 the runtime proposed nothing, which waits on E15-14's composer"
+                 the runtime proposed nothing. Among other conditions, it proposes an equity \
+                 opening only in the regular session, outside its close window, on a fresh \
+                 crossover output; a gate or autonomy denial shows in the agent's DecisionMade and \
+                 GateDecided, and no decision at all points to the session, a stale output or fact, \
+                 or a held position"
             ),
             false,
         ),
@@ -4622,6 +4652,47 @@ mod tests {
             setup_verdict(&SetUpOutcome::AfterFailure, strict).0,
             "not run",
             "an earlier failure already fails the run"
+        );
+    }
+
+    /// CI's `cell-demo-web` leaves the research loop to `cell-demo`, which runs the same scenario
+    /// and reads it, only when `select` starts `cell-demo` too, and `cell-demo` never does, so every
+    /// link is still read in each run of the workflow (DEC-464); unset, empty or anything but `1`,
+    /// a run reads the loop itself.
+    #[test]
+    fn only_the_web_job_leaves_the_research_loop_to_its_sibling() {
+        assert!(loop_read_here(None));
+        assert!(loop_read_here(Some(std::ffi::OsStr::new(""))));
+        assert!(loop_read_here(Some(std::ffi::OsStr::new("0"))));
+        assert!(!loop_read_here(Some(std::ffi::OsStr::new("1"))));
+        let workflow = fs::read_to_string("../.github/workflows/ci.yml").unwrap();
+        let job = |name: &str| -> String {
+            let header = format!("  {name}:");
+            workflow
+                .lines()
+                .skip_while(|line| *line != header)
+                .skip(1)
+                .take_while(|line| line.is_empty() || line.starts_with("   "))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let (web, plain) = (job("cell-demo-web"), job("cell-demo"));
+        for (name, body) in [("cell-demo-web", &web), ("cell-demo", &plain)] {
+            assert!(
+                body.contains("timeout-minutes:") && body.contains("steps:"),
+                "{name} is read whole"
+            );
+        }
+        let setting = format!(
+            "{LOOP_ELSEWHERE_ENV}: ${{{{ needs.select.outputs.cell == 'true' && '1' || '' }}}}"
+        );
+        assert!(
+            web.contains(&setting),
+            "cell-demo-web leaves the loop only when cell-demo runs: {setting}"
+        );
+        assert!(
+            !plain.contains(LOOP_ELSEWHERE_ENV),
+            "cell-demo reads the loop itself"
         );
     }
 

@@ -499,7 +499,7 @@ fn day_started(rig: &Rig) {
     ));
 }
 
-fn risk_clock(process: &RuntimeProcess<Rig>) -> Option<i64> {
+fn risk_clock<S: Store>(process: &RuntimeProcess<S>) -> Option<i64> {
     process.state().risk_clock().map(|clock| clock.secs())
 }
 
@@ -1309,10 +1309,9 @@ fn a_tick_records_each_new_model_output_once_after_its_observation() {
         Some(ids(control)),
         "the host is handed the control rows (DEC-2827)"
     );
-    let agent = ids(agent_rows(&rig));
     assert!(
-        !handed_agent.is_empty() && agent.starts_with(&handed_agent),
-        "the host is handed the agent rows read for the tick: {handed_agent:?}"
+        handed_agent.is_empty() && !agent_rows(&rig).is_empty(),
+        "the host is handed the agent stream's thesis records alone, here none (DEC-2852 item 4)"
     );
     let (observed, output) = (
         positions(&rig, "ObservationRecorded"),
@@ -1514,12 +1513,16 @@ fn the_tick_runs_whatever_the_models_inputs_read() {
     assert_eq!(process.lifecycle().state(), State::Ready);
 
     rig.agent_extra.borrow_mut().clear();
+    drop(process);
+    let mut process = modelled(&rig, &host, &closes);
     tick(&rig, NOW + 11);
     process.step(at(NOW + 12));
     assert_eq!(
         count(&rig, "ModelOutputRecorded"),
         1,
-        "once readable, the output is recorded"
+        "once readable, the output is recorded: a journal that took the record away is read \
+         again whole at the next start or the next check, since a running process reads only \
+         what follows its head between them (DEC-2847 item 4, DEC-2852 item 6)"
     );
     assert_eq!(risk_clock(&process), Some(NOW + 11));
 }
@@ -3068,4 +3071,607 @@ fn a_research_deployments_granted_opening_is_proposed_on_its_working_instrument(
         .unwrap();
     assert_eq!(member(&payload, "instrument_id"), Some(SPY), "{payload:?}");
     assert_eq!(member(&payload, "side"), Some("buy"), "{payload:?}");
+}
+
+/// Mandate spec §5.3's re-entry cooldown over the process (lane DR's rehearsal, 2026-10-27): the
+/// agent's position was sold by its owner's exit in the second the tick reads, so the opening the
+/// crossover proposes is refused `reentry_cooldown` by the runtime's own dry run, reading the
+/// exit fill from the fold as the binding gate does. The owner is never asked to buy back what
+/// they just sold.
+#[test]
+fn an_owner_exit_just_filled_asks_nothing_inside_the_reentry_cooldown() {
+    let (rig, mut process) = demo_in_session();
+    let now = at(IN_SESSION);
+    for (order, side, purpose) in [("o1", "buy", "open"), ("o2", "sell", "owner_exit")] {
+        on_account(
+            &rig,
+            ACCOUNT,
+            "OrderRequestRecorded",
+            &format!(r#"{{"agent_id":"{AGENT}","purpose":"{purpose}","risk_clock":"{now}"}}"#),
+        );
+        on_account(
+            &rig,
+            ACCOUNT,
+            "OrderSubmitted",
+            &format!(
+                r#"{{"client_order_id":"{order}","instrument_id":"{SPY}","side":"{side}","risk_clock":"{now}"}}"#
+            ),
+        );
+        on_account(
+            &rig,
+            ACCOUNT,
+            "FillApplied",
+            &format!(
+                r#"{{"fill_id":"f-{order}","client_order_id":"{order}","instrument_id":"{SPY}","side":"{side}","qty_gross":"1","price":"579.95","trade_date":"{}","risk_clock":"{now}","fees":[]}}"#,
+                now.date()
+            ),
+        );
+        on_account(
+            &rig,
+            ACCOUNT,
+            "OrderStateChanged",
+            &format!(
+                r#"{{"client_order_id":"{order}","state":"filled","replaced_by":null,"ignored":false,"risk_clock":"{now}"}}"#
+            ),
+        );
+    }
+    for second in 1..4 {
+        tick(&rig, IN_SESSION + second);
+        process.step(at(IN_SESSION + second));
+    }
+    assert_eq!(count(&rig, "ApprovalRequested"), 0, "{:?}", kinds(&rig));
+    assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
+    let rows = agent_rows(&rig);
+    let decided = rows
+        .iter()
+        .find(|row| row.event_type == "DecisionMade")
+        .unwrap_or_else(|| panic!("the opening is decided and refused: {:?}", kinds(&rig)));
+    let payload = parse(&decided.body)
+        .unwrap()
+        .get("payload")
+        .cloned()
+        .unwrap();
+    assert_eq!(member(&payload, "dry_run"), Some("deny"), "{payload:?}");
+    assert_eq!(
+        member(&payload, "reason_code"),
+        Some("reentry_cooldown"),
+        "{payload:?}"
+    );
+}
+
+/// [`Rig`] read as a journal that follows each stream from a held head (DEC-2852): its
+/// `rows_from` hands only the records at and past the asked seq, and counts every record it hands,
+/// so a test sees how much a pass reads.
+#[derive(Clone, Default)]
+struct Following {
+    rig: Rig,
+    handed: Rc<Cell<usize>>,
+    /// Every read's first sequence number, in order.
+    starts: Rc<RefCell<Vec<u64>>>,
+    /// A read from the first record refused, as a store refuses a chain broken before the head.
+    whole_down: Rc<Cell<bool>>,
+}
+
+impl Store for Following {
+    fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
+        self.rig.take_ownership(stream)
+    }
+
+    fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
+        let rows = self.rig.rows(stream)?;
+        self.handed.set(self.handed.get() + rows.len());
+        Some(rows)
+    }
+
+    fn rows_from(
+        &self,
+        stream: &StreamId,
+        start: mandate_journal::TrustedStart,
+    ) -> Option<Vec<StoredEvent>> {
+        self.starts.borrow_mut().push(start.from_seq);
+        if self.whole_down.get() && start == mandate_journal::TrustedStart::GENESIS {
+            return None;
+        }
+        let since: Vec<StoredEvent> = self
+            .rig
+            .rows(stream)?
+            .into_iter()
+            .filter(|row| row.seq >= start.from_seq)
+            .collect();
+        self.handed.set(self.handed.get() + since.len());
+        Some(since)
+    }
+
+    fn append(
+        &mut self,
+        stream: &StreamId,
+        head: u64,
+        epoch: u64,
+        recorded_at: UtcNanos,
+        drafts: &[Vec<u8>],
+    ) -> AppendOutcome {
+        self.rig.append(stream, head, epoch, recorded_at, drafts)
+    }
+}
+
+/// DEC-2852: over a long run, a pass reads only what was appended since the last, never its
+/// streams' whole length: here the one tick each pass adds.
+#[test]
+fn a_long_run_reads_only_what_each_pass_appended() {
+    let following = Following::default();
+    let mut process = RuntimeProcess::start(following.clone(), wiring(), &config(), at(NOW));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    for second in 1..=2_000 {
+        tick(&following.rig, NOW + second);
+        let before = following.handed.get();
+        process.step(at(NOW + second));
+        let read = following.handed.get() - before;
+        assert_read(read, rechecks(1, second), &following, second);
+    }
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+
+    /// DEC-2852: a process that reads each stream only past its head journals exactly what one
+    /// reading every stream whole at every pass journals, whatever the interleaving of kill
+    /// switches, ticks, the executor pausing and resuming the agent, lost append answers, steps and
+    /// restarts, and folds to the same state. The whole reader is the plain
+    /// [`Rig`], whose records follow no chain, so every read of it is read again whole.
+    #[test]
+    fn reading_past_the_head_journals_what_reading_whole_streams_does(
+        ops in proptest::collection::vec((op(), any::<Option<bool>>()), 1..24),
+    ) {
+        let whole = Rig::default();
+        let following = Following::default();
+        for rig in [&whole, &following.rig] {
+            established(rig, CONNECTION, ACCOUNT_REF, 2);
+            reconciled(rig, ACCOUNT);
+        }
+        let mut second = NOW;
+        let mut by_whole = start(&whole, second);
+        let mut by_head =
+            RuntimeProcess::start(following.clone(), wiring(), &config(), at(second));
+        for (op, mode) in ops {
+            second += 1;
+            for rig in [&whole, &following.rig] {
+                if let Some(paused) = mode {
+                    let to = if paused { "paused" } else { "normal" };
+                    on_account(
+                        rig,
+                        ACCOUNT,
+                        "AgentModeApplied",
+                        &format!(r#"{{"agent":"{AGENT}","to":"{to}"}}"#),
+                    );
+                }
+                match op {
+                    Op::KillSwitch => kill_switch(rig),
+                    Op::Tick => tick(rig, second),
+                    Op::LoseAnswer => rig.lose_answers.set(1),
+                    Op::Step | Op::Restart => {}
+                }
+            }
+            match op {
+                Op::Step => {
+                    by_whole.step(at(second));
+                    by_head.step(at(second));
+                }
+                Op::Restart => {
+                    by_whole = start(&whole, second);
+                    by_head =
+                        RuntimeProcess::start(following.clone(), wiring(), &config(), at(second));
+                }
+                _ => {}
+            }
+        }
+        let bodies = |rig: &Rig| -> Vec<Vec<u8>> {
+            agent_rows(rig).into_iter().map(|row| row.body).collect()
+        };
+        prop_assert_eq!(bodies(&following.rig), bodies(&whole), "{:?}", kinds(&whole));
+        prop_assert_eq!(by_head.lifecycle().state(), by_whole.lifecycle().state());
+        prop_assert_eq!(by_head.state(), by_whole.state(), "the folded state, its risk clock and mode");
+    }
+}
+
+/// The production fold's answer for an opening in SPY: `Held::Unreadable` once a row it reads did
+/// not read, as journal spec §2's clock rule makes a tick earlier than the last.
+fn fold_unreadable(facts: &mandate_daemon::production::Facts) -> bool {
+    facts
+        .read(|journaled| {
+            matches!(
+                journaled.facts(SPY, mandate_daemon::production::FRESH),
+                Err(mandate_gate_context::Held::Unreadable)
+            )
+        })
+        .unwrap_or(false)
+}
+
+/// DEC-2852, #2828's review: a clock record that goes back holds the production fold, as a fold of
+/// the whole clock stream at every pass holds it, over a store that reads only past the head, whether the fold followed the account from the
+/// start or only after the clock had ticked, so no earlier record is left unfolded.
+#[test]
+fn a_clock_record_that_goes_back_holds_the_fold_as_a_whole_read_does() {
+    for follows_late in [false, true] {
+        let following = Following::default();
+        let rig = following.rig.clone();
+        if !follows_late {
+            established(&rig, CONNECTION, ACCOUNT_REF, 2);
+        }
+        let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+        let mut process = RuntimeProcess::start(
+            following.clone(),
+            Wiring {
+                facts: Some(facts.clone()),
+                ..wiring()
+            },
+            &config(),
+            at(NOW),
+        );
+        tick(&rig, NOW + 5);
+        tick(&rig, NOW + 3);
+        process.step(at(NOW + 6));
+        tick(&rig, NOW + 9);
+        process.step(at(NOW + 10));
+        if follows_late {
+            established(&rig, CONNECTION, ACCOUNT_REF, 2);
+            tick(&rig, NOW + 11);
+            process.step(at(NOW + 12));
+        }
+        assert!(
+            fold_unreadable(&facts),
+            "follows late: {follows_late}; the tick at +3 after +5 holds the fold"
+        );
+    }
+}
+
+/// A clock stream that cannot be read is asked once a pass, never again from its first record when
+/// no head was ever held.
+#[test]
+fn an_unreadable_clock_stream_is_asked_once_a_pass() {
+    let rig = Rig::default();
+    let mut process = start(&rig, NOW);
+    rig.clock_down.set(true);
+    rig.reads.borrow_mut().clear();
+    process.step(at(NOW + 1));
+    let asked = rig.reads.borrow().iter().filter(|s| *s == CLOCK).count();
+    assert_eq!(asked, 1, "{:?}", rig.reads.borrow());
+}
+
+/// DEC-2852: with the production fold wired and following the account, a pass still reads only
+/// what was appended since the last: the clock is read whole once, when the fold first follows,
+/// and never again.
+#[test]
+fn a_long_run_with_the_fold_following_reads_only_what_each_pass_appended() {
+    let following = Following::default();
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    let mut process = RuntimeProcess::start(
+        following.clone(),
+        Wiring {
+            facts: Some(unpinned()),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    tick(&following.rig, NOW + 1);
+    process.step(at(NOW + 1));
+    for second in 2..=1_000 {
+        tick(&following.rig, NOW + second);
+        let before = following.handed.get();
+        process.step(at(NOW + second));
+        let read = following.handed.get() - before;
+        assert_read(read, rechecks(1, second), &following, second);
+    }
+}
+
+/// The production fold of an unpinned mandate, which reads the agent stream at every pass.
+fn unpinned() -> mandate_daemon::production::Facts {
+    let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+    facts.read_working_universe();
+    facts
+}
+
+/// Whether the pass at `NOW + second` reads every stream again from its first record, the
+/// first pass having been at `NOW + first` (DEC-2852 item 6).
+fn rechecks(first: i64, second: i64) -> bool {
+    second > first && (second - first) % 60 == 0
+}
+
+/// A pass reads its own tick and nothing else, unless it is a check, which reads each stream
+/// whole: more than its tick, and no more than every record there is.
+fn assert_read(read: usize, check: bool, following: &Following, second: i64) {
+    if check {
+        let all = following.rig.clock.borrow().len() + following.rig.control.borrow().len();
+        assert!(
+            read > 1 && read <= all + following.rig.accounts.borrow().len() + 64,
+            "check pass {second} read {read} records, not each stream whole"
+        );
+    } else {
+        assert!(
+            read <= 1,
+            "pass {second} read {read} records, not only its own tick"
+        );
+    }
+}
+
+/// DEC-2852 item 6: a record at the held head that no longer reads as it did, as a rewrite
+/// that hashes its chain again leaves it, is found by the next check, at most `60` s of passes
+/// later, and the process fails rather than fold on (`AGENTS.md` rule 3): the pass that finds it
+/// hands no tick. Before the check, the process reads on past the head, as a tail does.
+#[test]
+fn a_rewritten_head_fails_the_process_at_the_next_check() {
+    for stream in [CONTROL, CLOCK, ACCOUNT] {
+        let following = Following::default();
+        established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+        reconciled(&following.rig, ACCOUNT);
+        let mut process = RuntimeProcess::start(following.clone(), wiring(), &config(), at(NOW));
+        for second in 1..=10 {
+            tick(&following.rig, NOW + second);
+            process.step(at(NOW + second));
+        }
+        rewrite_head(&following.rig, stream);
+        for second in 11..=60 {
+            process.step(at(NOW + second));
+            assert_eq!(
+                process.lifecycle().state(),
+                State::Ready,
+                "{stream} at {second}"
+            );
+        }
+        tick(&following.rig, NOW + 61);
+        process.step(at(NOW + 61));
+        assert_eq!(
+            process.lifecycle().state(),
+            State::Exited(Exit::CycleFailed),
+            "{stream}"
+        );
+        assert_eq!(risk_clock(&process), Some(NOW + 10), "{stream}");
+    }
+}
+
+/// DEC-2852 items 3 and 6: a check reads each stream from its first record and hands on only
+/// what follows the head, so the passes across several checks fold and tick exactly as the passes
+/// between them do: the risk clock is each pass's own tick, and the kept control stream is the
+/// stream, each record once.
+#[test]
+fn a_check_hands_on_only_what_follows_the_head() {
+    let following = Following::default();
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&following.rig, ACCOUNT);
+    let (host, closes) = (Host::default(), Closes::default());
+    let mut process = RuntimeProcess::start(
+        following.clone(),
+        Wiring {
+            models: Some(ModelsWiring {
+                models: Box::new(host.clone()),
+                artifacts: Box::new(closes),
+            }),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    for second in 1..=190 {
+        if second == 100 {
+            kill_switch(&following.rig);
+        }
+        tick(&following.rig, NOW + second);
+        process.step(at(NOW + second));
+        assert_eq!(risk_clock(&process), Some(NOW + second), "pass {second}");
+        let control: Vec<String> = following
+            .rig
+            .control
+            .borrow()
+            .iter()
+            .map(|row| row.event_id.clone())
+            .collect();
+        let handed = host
+            .handed
+            .borrow()
+            .last()
+            .cloned()
+            .map(|(control, _)| control);
+        assert_eq!(handed, Some(Some(control)), "pass {second}");
+    }
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// DEC-2852 item 6: a step back in time makes the check due at once, so a clock set back
+/// never defers it by the step.
+#[test]
+fn a_step_back_in_time_makes_the_check_due() {
+    let following = Following::default();
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    let mut process = RuntimeProcess::start(following.clone(), wiring(), &config(), at(NOW));
+    for second in [1, 61] {
+        tick(&following.rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    rewrite_head(&following.rig, CONTROL);
+    process.step(at(NOW + 62));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    process.step(at(NOW + 30));
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Exited(Exit::CycleFailed)
+    );
+}
+
+/// DEC-2852 items 3 and 6: a store that refuses every read past the head, as the plain [`Rig`]
+/// does, is read from the first record when a record follows the head, and that read too must
+/// hold the head, so a rewritten head fails the process on the pass a record lands after it, with
+/// no check due. The record here is the owner's kill switch: the process hands nothing, and the
+/// executor's gate holds its own kill path (DEC-2852 item 6).
+#[test]
+fn a_refused_read_past_the_head_that_no_longer_holds_it_fails_the_process() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    let mut process = RuntimeProcess::start(rig.clone(), wiring(), &config(), at(NOW));
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    rewrite_head(&rig, CONTROL);
+    kill_switch(&rig);
+    tick(&rig, NOW + 2);
+    process.step(at(NOW + 2));
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Exited(Exit::CycleFailed)
+    );
+    assert_eq!(risk_clock(&process), Some(NOW + 1));
+}
+
+/// Gives the last record of `stream` in `rig` another hash, as a rewrite that hashes the chain
+/// again leaves the record at a held head.
+fn rewrite_head(rig: &Rig, stream: &str) {
+    let rows = match stream {
+        CONTROL => &rig.control,
+        CLOCK => &rig.clock,
+        _ => &rig.accounts,
+    };
+    if let Some(head) = rows.borrow_mut().last_mut() {
+        head.hash = Digest::of(b"rewritten");
+    }
+}
+
+/// DEC-2852 item 6: once a check is due, a stream that will not read from its first record,
+/// as a chain broken before the head will not, is read only from its first record, so nothing
+/// past the head is read on a chain not verified again, and it is asked again each pass until it
+/// reads; then the tail reads past its head again.
+#[test]
+fn a_check_that_will_not_read_reads_nothing_past_the_head_until_it_does() {
+    let following = Following::default();
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&following.rig, ACCOUNT);
+    let mut process = RuntimeProcess::start(following.clone(), wiring(), &config(), at(NOW));
+    for second in 1..=60 {
+        tick(&following.rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    following.whole_down.set(true);
+    for second in 61..=70 {
+        tick(&following.rig, NOW + second);
+        following.starts.borrow_mut().clear();
+        process.step(at(NOW + second));
+        let starts = following.starts.borrow().clone();
+        assert!(
+            !starts.is_empty() && starts.iter().all(|&from| from == 1),
+            "pass {second} read {starts:?}"
+        );
+    }
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    following.whole_down.set(false);
+    tick(&following.rig, NOW + 71);
+    process.step(at(NOW + 71));
+    tick(&following.rig, NOW + 72);
+    following.starts.borrow_mut().clear();
+    process.step(at(NOW + 72));
+    let starts = following.starts.borrow().clone();
+    assert!(
+        !starts.is_empty() && starts.iter().all(|&from| from > 1),
+        "pass 72 read {starts:?}"
+    );
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+fn modelled_following(
+    following: &Following,
+    host: &Host,
+    closes: &Closes,
+) -> RuntimeProcess<Following> {
+    RuntimeProcess::start(
+        following.clone(),
+        Wiring {
+            models: Some(ModelsWiring {
+                models: Box::new(host.clone()),
+                artifacts: Box::new(closes.clone()),
+            }),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    )
+}
+
+/// DEC-2852 item 4: over a long run read past the head, with a check every minute and a restart,
+/// each distinct output the host answers is recorded once and no other, as a fold of the whole
+/// agent stream would record it: the journaled outputs are folded a record at a time. The oracle
+/// counts the agent stream's own records.
+#[test]
+fn a_long_run_records_each_output_once_across_checks_and_a_restart() {
+    let following = Following::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    let mut process = modelled_following(&following, &host, &closes);
+    let mut answered = BTreeSet::new();
+    for n in 1..=200 {
+        if n % 50 == 1 {
+            let as_of = NOW - 4 * 3_600 + (n / 50) * 3_600;
+            *host.answer.borrow_mut() = vec![daily(as_of)];
+            answered.insert(as_of);
+        }
+        if n == 120 {
+            process = modelled_following(&following, &host, &closes);
+        }
+        tick(&following.rig, NOW + n);
+        process.step(at(NOW + n));
+    }
+    assert_eq!(answered.len(), 4);
+    assert_eq!(count(&following.rig, "ModelOutputRecorded"), answered.len());
+    assert_eq!(count(&following.rig, "ObservationRecorded"), answered.len());
+}
+
+/// DEC-2852 item 4: the host is handed the agent stream's thesis records alone, the only records of
+/// it a port reads, and the only ones the process keeps.
+#[test]
+fn the_host_is_handed_the_agent_streams_thesis_records_alone() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    let mut process = modelled(&rig, &host, &closes);
+    let laid = row(AGENT_STREAM, 90, "ThesisProposed", "runtime", "{}");
+    rig.agent_extra.borrow_mut().push(laid.clone());
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    let handed = host.handed.borrow().last().cloned().map(|(_, agent)| agent);
+    assert_eq!(handed, Some(vec![laid.event_id]));
+    assert!(agent_rows(&rig).len() > 1);
+}
+
+/// DEC-2856 item 3: an unpinned mandate's thesis that the process read before the control stream
+/// named the account still reaches the production fold once it follows, so the working universe
+/// names its instrument; a fold fed only what followed its head would never take it.
+#[test]
+fn a_thesis_read_before_the_account_is_named_reaches_the_fold_once_it_follows() {
+    let following = Following::default();
+    let facts = mandate_daemon::production::Facts::new(CLOCK, AGENT);
+    facts.read_working_universe();
+    let mut process = RuntimeProcess::start(
+        following.clone(),
+        Wiring {
+            facts: Some(facts.clone()),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    thesis_on(
+        &following.rig,
+        ("01J8Z3MTHE5000000000000001", "01J8Z3MTHE5000000000000002"),
+        RESEARCH_SPY,
+        (&at(NOW - 60).to_string(), &at(NOW + 3_540).to_string()),
+    );
+    for n in 1..=3 {
+        tick(&following.rig, NOW + n);
+        process.step(at(NOW + n));
+    }
+    assert!(!facts.following());
+    established(&following.rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&following.rig, ACCOUNT);
+    for n in 4..=6 {
+        tick(&following.rig, NOW + n);
+        process.step(at(NOW + n));
+    }
+    assert!(facts.following());
+    assert_eq!(facts.working_instrument().as_deref(), Some(RESEARCH_SPY));
 }

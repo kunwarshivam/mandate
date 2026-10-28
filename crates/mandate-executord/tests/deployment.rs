@@ -11,6 +11,7 @@ mod support;
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+use std::time::Duration;
 
 use mandate_accounting::{AccountType, AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Value, to_canonical};
@@ -428,7 +429,9 @@ fn deployment(journal: &Journal, store: Artifacts) -> (Deployment, Rc<Cell<u32>>
     let reads = Rc::new(Cell::new(0));
     let rows = journal.clone();
     let sources = Sources {
-        rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+        rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+            mandate_store::Store::rows(&rows, stream)
+        }),
         artifacts: Box::new(store),
         quotes: Box::new(Quoting),
         liquidity: Box::new(Bars(Rc::clone(&reads))),
@@ -539,6 +542,11 @@ fn a_deployed_agent_is_answered_from_its_reviewed_artifacts() -> Result<(), Erro
         Ok(Some(_))
     ));
     assert_eq!(deployment.instruments(), BTreeSet::from([spy]));
+    assert_eq!(
+        Marked::every(&deployment),
+        Duration::from_secs(5),
+        "half the reviewed rule set's 10 s quote staleness (DEC-2844)"
+    );
     Ok(())
 }
 
@@ -788,7 +796,9 @@ fn an_unread_fact_holds_the_opening() -> Result<(), Error> {
     let unread = Deployment::new(
         &scope(),
         Sources {
-            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+                mandate_store::Store::rows(&rows, stream)
+            }),
             artifacts: Box::new(store),
             quotes: Box::new(Quoting),
             liquidity: Box::new(mandate_executord::deployment::Unread),
@@ -815,6 +825,41 @@ fn an_opening_the_deployment_does_not_cover_is_handed_no_protection() -> Result<
     Ok(())
 }
 
+/// DEC-2846: the references an exit's decision is journaled under are the agent's own deployment's
+/// of that instrument, all five of them: never another agent's deployment of the instrument, nor the
+/// agent's deployment of another.
+#[test]
+fn an_exits_references_are_the_agents_own_deployments_of_the_instrument() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    let (deployment, _) = deployment(&journal, store);
+    let refs = deployment
+        .config_refs(&agent(), &spy()?)
+        .ok_or("the deployed agent's references on SPY")?;
+    assert!(
+        [
+            &refs.fee_config,
+            &refs.trading_calendar,
+            &refs.instrument_snapshot,
+            &refs.rule_set,
+            &refs.mandate_version,
+        ]
+        .iter()
+        .all(|reference| reference.is_some()),
+        "all five: {refs:?}"
+    );
+    assert_eq!(
+        deployment.config_refs(&AgentId(OTHER_AGENT.to_owned()), &spy()?),
+        None,
+        "not another agent's"
+    );
+    assert_eq!(
+        deployment.config_refs(&agent(), &InstrumentId::new(AAPL_ID)?),
+        None,
+        "not another instrument's"
+    );
+    Ok(())
+}
+
 /// A run given the production deployment reads its ports from it in place of the fixture's, and
 /// keeps its broker's quote feed: the fixture's ports cover nothing and mark nothing, the
 /// deployed run's cover and mark the deployed instrument.
@@ -834,7 +879,9 @@ fn a_deployed_run_reads_its_ports_from_the_deployment() -> Result<(), Error> {
     let run = mandate_executord::run::fixture(broker()?, &scope())?.deployed(
         &scope(),
         mandate_executord::deployment::Production {
-            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+                mandate_store::Store::rows(&rows, stream)
+            }),
             artifacts: Box::new(store),
             liquidity: Box::new(mandate_executord::deployment::Unread),
         },
@@ -882,7 +929,9 @@ fn a_deployed_runs_gate_reads_the_runs_own_broker_facts() -> Result<(), Error> {
     let run = run.deployed(
         &scope(),
         mandate_executord::deployment::Production {
-            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+                mandate_store::Store::rows(&rows, stream)
+            }),
             artifacts: Box::new(store),
             liquidity: Box::new(Bars(Rc::new(Cell::new(0)))),
         },
@@ -957,7 +1006,9 @@ fn counted(journal: &Journal, store: Artifacts) -> (Deployment, Rc<Cell<u32>>, R
     let deployment = Deployment::new(
         &scope(),
         Sources {
-            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+                mandate_store::Store::rows(&rows, stream)
+            }),
             artifacts: Box::new(Counted {
                 store,
                 reads: Rc::clone(&reads),
@@ -1081,7 +1132,9 @@ fn a_quote_not_sane_holds_the_opening() -> Result<(), Error> {
         let deployment = Deployment::new(
             &scope(),
             Sources {
-                rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+                rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+                    mandate_store::Store::rows(&rows, stream)
+                }),
                 artifacts: Box::new(store),
                 quotes: Box::new(Insane(one_sided)),
                 liquidity: Box::new(Bars(Rc::new(Cell::new(0)))),
@@ -1233,7 +1286,9 @@ fn the_wired_gate_reads_the_deployment() -> Result<(), Error> {
     let (wiring, _) = Deployment::wired(
         fixture,
         &scope(),
-        Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+        mandate_executord::deployment::reading(move |stream: &StreamId| {
+            mandate_store::Store::rows(&rows, stream)
+        }),
         Box::new(store),
         (
             Box::new(Bars(Rc::new(Cell::new(0)))),
@@ -1267,7 +1322,7 @@ fn the_wired_gate_reads_the_deployment() -> Result<(), Error> {
 #[test]
 fn production_reads_the_mounted_store() -> Result<(), Error> {
     let none = || -> Result<mandate_executord::deployment::Rows, &'static str> {
-        Ok(Box::new(|_: &StreamId| None))
+        Ok(Box::new(|_: &StreamId, _| None))
     };
     let unset = mandate_executord::deployment::production(|_| None, none)?;
     assert!(unset.is_none());
@@ -1433,7 +1488,7 @@ fn a_deployment_not_read_in_full_is_read_again() -> Result<(), Error> {
 /// deployed SPY agent's opening, proposed on a journaled, untraded account, passes the binding gate
 /// on the deployment's reviewed artifacts, the executor's own fresh mark and the fixture's own
 /// facts, the scheduler ticking every five seconds (the cell's ticks every second); it is
-/// sent as a bracket under SPY's asset id, fills whole at its limit, and is booked as SPY's fill by
+/// sent as a bracket under SPY's asset id, fills whole at the ask it reaches, and is booked as SPY's fill by
 /// its asset id though the broker names it `SPY`. The bracket's stop rests at the broker as the
 /// position's protection, and every reconciliation after the fill is clean: nothing reads as
 /// another instrument's.
@@ -1548,7 +1603,7 @@ fn the_loop(variant: Variant) -> Result<(), Error> {
             fill.get("price").and_then(Value::as_str),
         ),
         (Some(SPY), Some("1"), Some("580.13")),
-        "SPY's fill, by its asset id, whole at the limit"
+        "SPY's fill, by its asset id, whole at the ask"
     );
     assert!(
         journal
@@ -1613,18 +1668,28 @@ type LoopProcess = mandate_executord::ExecutorProcess<
 /// `variant`'s deployment; a process over the deployed fixture run, started at
 /// `MONDAY`; and the fixture it trades on.
 fn trade_loop(variant: Variant) -> Result<(Journal, LoopProcess, FixturePaper), Error> {
+    trade_loop_quoting(variant, wall_clock)
+}
+
+/// [`trade_loop`] with the fixture quoting at `clock`'s instant.
+fn trade_loop_quoting(
+    variant: Variant,
+    clock: impl Fn() -> UtcNanos + 'static,
+) -> Result<(Journal, LoopProcess, FixturePaper), Error> {
     let (journal, store, _) = deployed_as(variant)?;
-    journaled(&journal)?;
+    journal.judge_appends();
     if variant.research {
         thesis(&journal, "th-1", SPY, None, "2026-09-21T20:00:00Z")?;
     }
-    let paper = mandate_executord::paper::FixturePaper::filling(at(MONDAY)?).quoting(wall_clock);
+    let paper = mandate_executord::paper::FixturePaper::filling(at(MONDAY)?).quoting(clock);
     let broker = mandate_executord::alpaca::AlpacaBroker::new(paper.clone())?;
     let rows = journal.clone();
     let run = mandate_executord::run::fixture(broker, &scope())?.deployed(
         &scope(),
         mandate_executord::deployment::Production {
-            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+                mandate_store::Store::rows(&rows, stream)
+            }),
             artifacts: Box::new(store),
             liquidity: Box::new(Bars(Rc::new(Cell::new(0)))),
         },
@@ -1670,7 +1735,9 @@ fn a_deployed_runs_broker_answers_by_asset_id() -> Result<(), Error> {
     let run = mandate_executord::run::fixture(inner, &scope())?.deployed(
         &scope(),
         mandate_executord::deployment::Production {
-            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            rows: mandate_executord::deployment::reading(move |stream: &StreamId| {
+                mandate_store::Store::rows(&rows, stream)
+            }),
             artifacts: Box::new(store),
             liquidity: Box::new(mandate_executord::deployment::Unread),
         },
@@ -2046,7 +2113,8 @@ fn a_research_agent_opens_once_then_holds_and_its_thesis_exit_sells() -> Result<
     let alerts = passes(&journal, &mut process, (60, 120))?;
     assert!(
         alerts.iter().any(|alert| alert.key == "opening_held"
-            && alert.subject.as_deref() == Some("01JINTENT0000000000000000B")),
+            && alert.subject.as_deref()
+                == Some(support::ulid("01JINTENT0000000000000000B").as_str())),
         "the second opening is held, named: {alerts:?}"
     );
     journal.write(
@@ -2352,7 +2420,7 @@ fn a_cold_start_resolves_the_same_with_every_research_object_gone_or_corrupted()
     mandate_artifacts_fs::FsArtifactStore::open(&dir)?;
     let root = dir.to_string_lossy().into_owned();
     let none = || -> Result<mandate_executord::deployment::Rows, &'static str> {
-        Ok(Box::new(|_: &StreamId| None))
+        Ok(Box::new(|_: &StreamId, _| None))
     };
     let production = mandate_executord::deployment::production(
         |name| {
@@ -2368,5 +2436,451 @@ fn a_cold_start_resolves_the_same_with_every_research_object_gone_or_corrupted()
         asked.borrow()
     );
     std::fs::remove_dir_all(&dir).ok();
+    Ok(())
+}
+
+/// `AGENTS.md` rule 13, lane DR's rehearsal of 2026-10-27: after the demo agent's opening fills, the
+/// owner's exit of the position at the market, unconfirmed, is received and sold, never lost.
+#[test]
+fn an_owner_exit_at_the_market_after_the_opening_fills_is_received_and_sold() -> Result<(), Error> {
+    owner_exit_after_the_opening(false)
+}
+
+/// `AGENTS.md` rule 13, lane DR's rehearsal of 2026-10-27: the same, with the quote feed gone quiet
+/// before the owner's exit, so the instrument is restricted `stale_mark` and no sane mark prices
+/// the exit: it is received and sold all the same, at the latest once a quote returns, never lost.
+#[test]
+fn an_owner_exit_at_the_market_while_the_mark_is_stale_is_received_and_sold() -> Result<(), Error> {
+    owner_exit_after_the_opening(true)
+}
+
+/// `AGENTS.md` rule 13 and the 2026-10-27 rehearsal: the owner's kill switch of the agent, issued
+/// on the control stream after the opening fills and copied to the agent's stream as the runtime
+/// copies it, a stop, the agent-scope `OwnerExitRequested` and the `KillSwitchActivated`, is
+/// applied on the account stream and sells the position, under the journal's own rules. In the
+/// cell its flatten's intent id, `k-{switch}-{n}`, was refused, and nothing sold (DEC-2845).
+#[test]
+fn the_owners_kill_switch_after_the_opening_fills_sells_the_position() -> Result<(), Error> {
+    let (journal, mut process, _paper) = trade_loop(Variant {
+        demo: true,
+        ..Variant::default()
+    })?;
+    for second in (5..120).step_by(5) {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(&journal, &format!("tl{second}"), &now)?;
+        process.step(at(&now)?);
+    }
+    let command = "01J0WNERCMD000000000000002";
+    journal.write(
+        CONTROL_STREAM,
+        command,
+        "OwnerCommandIssued",
+        1,
+        None,
+        object(vec![
+            ("agent", text(AGENT)),
+            ("bid", Value::Null),
+            ("bid_size", Value::Null),
+            ("command", text("kill_switch")),
+            ("floor", Value::Null),
+            ("release", Value::Null),
+            ("scope", text("agent")),
+            ("step_up", Value::Null),
+            ("subject", text(AGENT)),
+            (
+                "submitted_at",
+                Value::Int(mandate_canon::Int::new(1_790_006_520).ok_or("an int")?),
+            ),
+            ("user", text("u1")),
+            ("warning_shown", Value::Null),
+        ])?,
+    )?;
+    let agent = support::agent_stream(AGENT);
+    journal.write(
+        &agent,
+        "01J0WNERST0P000000000000002",
+        "AgentModeChanged",
+        1,
+        Some(command),
+        object(vec![
+            ("from", text("normal")),
+            ("lifecycle", text("normal")),
+            ("reason", text("kill_switch")),
+            ("to", text("stopped")),
+        ])?,
+    )?;
+    journal.write(
+        &agent,
+        "01J0WNEREX1T000000000000002",
+        "OwnerExitRequested",
+        1,
+        Some(command),
+        object(vec![
+            ("bid", Value::Null),
+            ("bid_size", Value::Null),
+            ("confirmed", Value::Bool(false)),
+            ("floor", Value::Null),
+            ("scope", text("agent")),
+            ("step_up", Value::Null),
+            ("step_up_status", text("absent")),
+            ("subject", text(AGENT)),
+            ("user", text("u1")),
+        ])?,
+    )?;
+    journal.write(
+        &agent,
+        "01J0WNERK1MM000000000000002",
+        "KillSwitchActivated",
+        1,
+        Some(command),
+        object(vec![
+            ("initiator", text("owner")),
+            ("mode_event", text("01J0WNERST0P000000000000002")),
+            ("scope", text("agent")),
+            ("subject", text(AGENT)),
+        ])?,
+    )?;
+    for second in (120..240).step_by(5) {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(&journal, &format!("tk{second}"), &now)?;
+        process.step(at(&now)?);
+    }
+    let types = journal.types(ACCOUNT_STREAM);
+    assert_eq!(
+        journal.switched(),
+        [AGENT],
+        "the switch is applied: {types:?}"
+    );
+    let sold = ["FillApplied", "LateFillApplied"].iter().any(|kind| {
+        journal
+            .payloads(kind)
+            .iter()
+            .any(|p| p.get("side").and_then(Value::as_str) == Some("sell"))
+    });
+    assert!(sold, "and its flatten sold: {types:?}");
+    let flat = journal
+        .payloads("BrokerPositionObserved")
+        .last()
+        .and_then(|p| {
+            p.get("broker_qty")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
+    assert_eq!(flat.as_deref(), Some("0"), "and nothing is left: {types:?}");
+    Ok(())
+}
+
+/// DEC-2853 (DR's cell run 3): the owner's kill switch after the opening fills prices its flatten
+/// from the latest mark the process holds, never from the bracket's stop. The sell goes within
+/// the first rung's 0.5% of the 580.11 bid the fixture quotes, not at the stop, and nothing is
+/// journaled `exit_unpriced`. With `frozen`, the feed answers no fresh quote from just before the
+/// switch on, so every read fails: the switch still applies and its flatten sells in the same pass
+/// as with the feed up, priced from the mark held from before. Nothing in the kill's path reads the
+/// feed. Answers the second of the pass the flatten first sold in.
+fn the_kill_switch_prices_from_the_held_mark(frozen: bool) -> Result<u32, Error> {
+    let stale: Rc<Cell<Option<UtcNanos>>> = Rc::new(Cell::new(None));
+    let clock = Rc::clone(&stale);
+    let (journal, mut process, _paper) = trade_loop_quoting(
+        Variant {
+            demo: true,
+            ..Variant::default()
+        },
+        move || clock.get().unwrap_or_else(wall_clock),
+    )?;
+    for second in (5..120).step_by(5) {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(&journal, &format!("tl{second}"), &now)?;
+        process.step(at(&now)?);
+    }
+    if frozen {
+        stale.set(Some(at("2026-09-21T15:00:00Z")?));
+    }
+    let command = "01J0WNERCMD000000000000002";
+    journal.write(
+        CONTROL_STREAM,
+        command,
+        "OwnerCommandIssued",
+        1,
+        None,
+        object(vec![
+            ("agent", text(AGENT)),
+            ("bid", Value::Null),
+            ("bid_size", Value::Null),
+            ("command", text("kill_switch")),
+            ("floor", Value::Null),
+            ("release", Value::Null),
+            ("scope", text("agent")),
+            ("step_up", Value::Null),
+            ("subject", text(AGENT)),
+            (
+                "submitted_at",
+                Value::Int(mandate_canon::Int::new(1_790_006_520).ok_or("an int")?),
+            ),
+            ("user", text("u1")),
+            ("warning_shown", Value::Null),
+        ])?,
+    )?;
+    let agent = support::agent_stream(AGENT);
+    journal.write(
+        &agent,
+        "01J0WNERST0P000000000000002",
+        "AgentModeChanged",
+        1,
+        Some(command),
+        object(vec![
+            ("from", text("normal")),
+            ("lifecycle", text("normal")),
+            ("reason", text("kill_switch")),
+            ("to", text("stopped")),
+        ])?,
+    )?;
+    journal.write(
+        &agent,
+        "01J0WNEREX1T000000000000002",
+        "OwnerExitRequested",
+        1,
+        Some(command),
+        object(vec![
+            ("bid", Value::Null),
+            ("bid_size", Value::Null),
+            ("confirmed", Value::Bool(false)),
+            ("floor", Value::Null),
+            ("scope", text("agent")),
+            ("step_up", Value::Null),
+            ("step_up_status", text("absent")),
+            ("subject", text(AGENT)),
+            ("user", text("u1")),
+        ])?,
+    )?;
+    journal.write(
+        &agent,
+        "01J0WNERK1MM000000000000002",
+        "KillSwitchActivated",
+        1,
+        Some(command),
+        object(vec![
+            ("initiator", text("owner")),
+            ("mode_event", text("01J0WNERST0P000000000000002")),
+            ("scope", text("agent")),
+            ("subject", text(AGENT)),
+        ])?,
+    )?;
+    let mut sold_at = None;
+    for second in (120..240).step_by(5) {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(&journal, &format!("tk{second}"), &now)?;
+        process.step(at(&now)?);
+        if sold_at.is_none() && !flatten_limits(&journal).is_empty() {
+            sold_at = Some(second);
+        }
+    }
+    let types = journal.types(ACCOUNT_STREAM);
+    assert_eq!(journal.switched(), [AGENT], "the switch applies: {types:?}");
+    let limits = flatten_limits(&journal);
+    let [limit] = limits.as_slice() else {
+        return Err(format!("one flatten sell: {limits:?} {types:?}").into());
+    };
+    let limit = Price::parse(limit)?;
+    assert!(
+        limit >= Price::parse("577.2")? && limit <= Price::parse("580.11")?,
+        "priced within the first rung's 0.5% of the 580.11 bid, not at the stop: {limit}"
+    );
+    let unpriced = journal
+        .payloads("ProtectionChanged")
+        .iter()
+        .filter(|p| p.get("action").and_then(Value::as_str) == Some("exit_unpriced"))
+        .count();
+    assert_eq!(unpriced, 0, "a marked flatten is not unpriced: {types:?}");
+    sold_at.ok_or_else(|| "the flatten never sold".into())
+}
+
+/// The limit of each sell the journal records submitted.
+fn flatten_limits(journal: &support::Journal) -> Vec<String> {
+    journal
+        .payloads("OrderSubmitted")
+        .iter()
+        .filter(|p| p.get("side").and_then(Value::as_str) == Some("sell"))
+        .filter_map(|p| {
+            p.get("limit_price")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+#[test]
+fn the_flatten_of_a_kill_switch_prices_from_the_held_mark() -> Result<(), Error> {
+    the_kill_switch_prices_from_the_held_mark(false).map(|_| ())
+}
+
+#[test]
+fn a_feed_down_at_the_kill_neither_delays_nor_fails_its_flatten() -> Result<(), Error> {
+    assert_eq!(
+        the_kill_switch_prices_from_the_held_mark(true)?,
+        the_kill_switch_prices_from_the_held_mark(false)?,
+        "the flatten sells in the same pass with the feed down as with it up"
+    );
+    Ok(())
+}
+
+fn owner_exit_after_the_opening(stale: bool) -> Result<(), Error> {
+    let frozen: Rc<Cell<Option<UtcNanos>>> = Rc::new(Cell::new(None));
+    let clock = Rc::clone(&frozen);
+    let (journal, mut process, _paper) = trade_loop_quoting(
+        Variant {
+            demo: true,
+            ..Variant::default()
+        },
+        move || clock.get().unwrap_or_else(wall_clock),
+    )?;
+    for second in (5..120).step_by(5) {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(&journal, &format!("tl{second}"), &now)?;
+        process.step(at(&now)?);
+    }
+    journal.write(
+        CONTROL_STREAM,
+        "01JOWNERCMD000000000000001",
+        "OwnerCommandIssued",
+        1,
+        None,
+        object(vec![
+            ("agent", text(AGENT)),
+            ("bid", Value::Null),
+            ("bid_size", Value::Null),
+            ("command", text("owner_exit")),
+            ("floor", Value::Null),
+            ("release", Value::Null),
+            ("scope", text("instrument")),
+            ("step_up", Value::Null),
+            ("subject", text(SPY)),
+            (
+                "submitted_at",
+                Value::Int(mandate_canon::Int::new(1_790_006_520).ok_or("an int")?),
+            ),
+            ("user", text("u1")),
+            ("warning_shown", Value::Null),
+        ])?,
+    )?;
+    if stale {
+        frozen.set(Some(UtcNanos::from_parts(wall_clock().secs() - 3_600, 0)?));
+    }
+    for second in [120, 125] {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(&journal, &format!("tc{second}"), &now)?;
+        process.step(at(&now)?);
+    }
+    journal.write(
+        &support::agent_stream(AGENT),
+        "01JOWNEXITREQ0000000000001",
+        "OwnerExitRequested",
+        1,
+        Some("command"),
+        object(vec![
+            ("bid", Value::Null),
+            ("bid_size", Value::Null),
+            ("confirmed", Value::Bool(false)),
+            ("floor", Value::Null),
+            ("scope", text("instrument")),
+            ("step_up", Value::Null),
+            ("step_up_status", text("absent")),
+            ("subject", text(SPY)),
+            ("user", text("u1")),
+        ])?,
+    )?;
+    journal.write(
+        &support::agent_stream(AGENT),
+        "01JOWNEXIT0000000000000001",
+        "IntentProposed",
+        1,
+        Some("01JOWNEXITREQ0000000000001"),
+        object(vec![
+            ("instrument_id", text(SPY)),
+            ("limit_price", Value::Null),
+            ("purpose", text("owner_exit")),
+            ("qty", text("1")),
+            ("side", text("sell")),
+            ("tif", text("day")),
+            ("type", text("market")),
+        ])?,
+    )?;
+    let mut alerts = Vec::new();
+    for second in (130..250).step_by(5) {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        let quiet = stale && second < 200;
+        frozen.set(
+            quiet
+                .then(|| UtcNanos::from_parts(wall_clock().secs() - 3_600, 0))
+                .transpose()?,
+        );
+        tick(&journal, &format!("tx{second}"), &now)?;
+        alerts.extend(process.step(at(&now)?));
+    }
+    let types = journal.types(ACCOUNT_STREAM);
+    if stale {
+        assert!(
+            journal
+                .payloads("InstrumentRestrictionChanged")
+                .iter()
+                .any(|p| {
+                    p.get("restriction").and_then(Value::as_str) == Some("stale_mark")
+                        && p.get("active") == Some(&Value::Bool(true))
+                }),
+            "the mark went stale: {types:?}"
+        );
+    }
+    let received: Vec<_> = journal
+        .payloads("IntentReceived")
+        .into_iter()
+        .filter(|p| p.get("purpose").and_then(Value::as_str) == Some("owner_exit"))
+        .collect();
+    assert_eq!(
+        received.len(),
+        1,
+        "the owner's exit is received: {types:?} alerts {:?}",
+        alerts.iter().map(|a| a.key).collect::<Vec<_>>()
+    );
+    let sold = ["FillApplied", "LateFillApplied"].iter().any(|kind| {
+        journal
+            .payloads(kind)
+            .iter()
+            .any(|p| p.get("side").and_then(Value::as_str) == Some("sell"))
+    });
+    assert!(sold, "and sold: {types:?}");
+    if stale {
+        let intent = support::ulid("01JOWNEXIT0000000000000001");
+        let rows: Vec<(String, Value)> = journal
+            .rows_of(ACCOUNT_STREAM)
+            .iter()
+            .filter_map(|row| {
+                let payload = mandate_canon::parse(&row.body)
+                    .ok()?
+                    .get("payload")?
+                    .clone();
+                Some((row.event_type.clone(), payload))
+            })
+            .collect();
+        let first = |found: &dyn Fn(&str, &Value) -> bool| {
+            rows.iter().position(|(kind, payload)| found(kind, payload))
+        };
+        let member = |payload: &Value, name: &str| {
+            payload.get(name).and_then(Value::as_str).map(str::to_owned)
+        };
+        let held = first(&|kind, payload| {
+            kind == "GateDecided"
+                && member(payload, "intent_id").as_deref() == Some(intent.as_str())
+                && member(payload, "verdict").as_deref() == Some("hold")
+        });
+        let alerted = first(&|kind, _| kind == "OwnerAlertSent");
+        let sent = first(&|kind, payload| {
+            kind == "OrderRequestRecorded"
+                && member(payload, "intent_id").as_deref() == Some(intent.as_str())
+        });
+        assert!(
+            held.is_some() && held < sent && alerted.is_some() && alerted < sent,
+            "the stale exit is held, journaled and alerted before it goes: held {held:?}, alerted \
+             {alerted:?}, sent {sent:?}: {types:?}"
+        );
+    }
     Ok(())
 }

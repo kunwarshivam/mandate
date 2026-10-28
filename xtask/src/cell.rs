@@ -1880,6 +1880,54 @@ fn vault_state(status: &str) -> Result<VaultState> {
     })
 }
 
+/// How long the cell waits, after unsealing, for the vault to answer as the active node (E21-32v):
+/// a raft node reports itself unsealed before it has won its election and loaded its token store,
+/// and refuses even the root token until then, so provisioning waits for it. A denial after that
+/// is a real one, never retried.
+const VAULT_ACTIVE_S: u64 = 60;
+/// How often the cell asks the vault's status while it waits for it to be active.
+const VAULT_ACTIVE_EVERY_S: u64 = 2;
+
+/// Whether a vault's `bao status -format=json` says it is unsealed, on raft, and the active node:
+/// HA off, or HA on with `is_self` true. A status missing either field is not active.
+fn vault_active(status: &str) -> Result<bool> {
+    if vault_state(status)? != VaultState::Unsealed {
+        return Ok(false);
+    }
+    let status: Value = serde_json::from_str(status).context("reading the vault's status")?;
+    Ok(match status["ha_enabled"].as_bool() {
+        Some(false) => true,
+        Some(true) => status["is_self"].as_bool() == Some(true),
+        None => false,
+    })
+}
+
+/// Asks `status` until the vault answers as active ([`vault_active`]), pausing
+/// [`VAULT_ACTIVE_EVERY_S`] between asks for no longer than [`VAULT_ACTIVE_S`] in all. A status
+/// that cannot be read or is not JSON, as `bao status` prints nothing on its standard output
+/// while it cannot find the leader, is asked again; one that names a dev server stops it at once.
+pub(crate) fn await_active(
+    mut status: impl FnMut() -> Result<String>,
+    mut pause: impl FnMut(Duration),
+) -> Result<()> {
+    let mut active = || -> Result<bool> {
+        match status() {
+            Ok(answer) if serde_json::from_str::<Value>(&answer).is_ok() => vault_active(&answer),
+            _ => Ok(false),
+        }
+    };
+    for _ in 0..VAULT_ACTIVE_S / VAULT_ACTIVE_EVERY_S {
+        if active()? {
+            return Ok(());
+        }
+        pause(Duration::from_secs(VAULT_ACTIVE_EVERY_S));
+    }
+    if active()? {
+        return Ok(());
+    }
+    bail!("the vault did not answer as the active node within {VAULT_ACTIVE_S} s of unsealing")
+}
+
 /// `bao` in the vault's pod, with `stdin` on its standard input, and its standard output, whatever
 /// its exit: `bao status` exits 2 for a sealed vault. Its output is never printed, since `operator
 /// init`'s holds the unseal key and the root token.
@@ -2024,7 +2072,11 @@ fn vault(kube_api: bool) -> Result<bool> {
         &format!("pod/{VAULT_POD}"),
         "--timeout=120s",
     ])?;
-    eprintln!("    vault: unsealed, on raft storage");
+    await_active(
+        || bao(&["status", "-format=json"], b"").map(|(_, status)| status),
+        sleep,
+    )?;
+    eprintln!("    vault: unsealed and active, on raft storage");
     Ok(fresh)
 }
 
@@ -2293,7 +2345,7 @@ const VAULT_DRILL_CONNECTIONS: [&str; 2] = ["demo-paper", "drill-other"];
 /// DEC-2020's rows) lets that role read that KV path. Written out here, not read from the crate:
 /// a connection's entries are under `x` and its id's hex (DEC-2060 item 3), `x64656d6f2d7061706572`
 /// for `demo-paper` and `x6472696c6c2d6f74686572` for `drill-other`.
-const VAULT_DRILL_READS: [(&str, &str, bool); 18] = [
+const VAULT_DRILL_READS: [(&str, &str, bool); 23] = [
     ("runtime", "connections/x64656d6f2d7061706572/token", false),
     (
         "runtime",
@@ -2347,6 +2399,15 @@ const VAULT_DRILL_READS: [(&str, &str, bool); 18] = [
         false,
     ),
     ("news-reader", "platform/alpaca-oauth-client-secret", false),
+    ("bars-reader", "platform/news-data-key", true),
+    ("bars-reader", "platform/model-provider-key", false),
+    ("bars-reader", "platform/email-credential", false),
+    ("bars-reader", "platform/alpaca-oauth-client-secret", false),
+    (
+        "bars-reader",
+        "connections/x64656d6f2d7061706572/token",
+        false,
+    ),
     (
         "executor-demo-paper",
         "connections/x64656d6f2d7061706572/code",
@@ -2355,11 +2416,11 @@ const VAULT_DRILL_READS: [(&str, &str, bool); 18] = [
 ];
 
 /// How many `mandate-*` policies the drill's scan must have read: one per process type (the API,
-/// the connection manager, the runtime, the secret import, the model gateway, the news reader and
-/// the email sender) and two per connection (its executor and its token exchange), for
+/// the connection manager, the runtime, the secret import, the model gateway, the news reader, the
+/// bars reader and the email sender) and two per connection (its executor and its token exchange), for
 /// [`VAULT_DRILL_CONNECTIONS`]. A scan that reads fewer, as one whose `bao policy list` failed,
 /// has proved nothing about wildcards.
-const VAULT_DRILL_POLICIES: usize = 11;
+const VAULT_DRILL_POLICIES: usize = 12;
 
 /// The only stanzas holding a wildcard that the vault drill admits, each in the one policy it may
 /// appear in: DEC-2349's one-segment `+` for a connection the web made after the vault was
@@ -3702,15 +3763,34 @@ fn login_roles(all: &[Value]) -> Vec<String> {
     roles
 }
 
+/// The read-only group (DEC-2082): a process whose `db_access` is `read`, the data process alone,
+/// logs in as a member of it, which may only select the journal's tables, since its binary does
+/// not itself refuse a write.
+const JOURNAL_READER: &str = "mandate_journal_reader";
+
+/// The group `role` is a member of: [`JOURNAL_READER`] for a process whose `db_access` is
+/// `read`, else `mandate_journal_app`.
+fn role_group(all: &[Value], role: &str) -> &'static str {
+    let read = all
+        .iter()
+        .any(|p| p["db_role"].as_str() == Some(role) && p["db_access"] == "read");
+    if read {
+        JOURNAL_READER
+    } else {
+        "mandate_journal_app"
+    }
+}
+
 /// The journal's roles (journal spec §6.1, infrastructure §3.5), run once at bootstrap as the
 /// superuser in the journal database: CloudNativePG runs it from the journal-db chart, and the
 /// Compose file's Postgres runs the same file. `mandate_journal_owner` owns the tables and only
 /// the migration role may become it; each process type logs in as its own role, a member of
-/// `mandate_journal_app`. Passwords are set elsewhere, from mounted files.
+/// `mandate_journal_app`, or of [`JOURNAL_READER`] when it only reads. Passwords are set
+/// elsewhere, from mounted files.
 pub fn roles_sql(all: &[Value]) -> String {
     let mut sql = format!(
         "-- {GENERATED}.\n\
-         DO $$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_owner') THEN\n    CREATE ROLE mandate_journal_owner NOLOGIN;\n  END IF;\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_app') THEN\n    CREATE ROLE mandate_journal_app NOLOGIN;\n  END IF;\nEND\n$$;\n\
+         DO $$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_owner') THEN\n    CREATE ROLE mandate_journal_owner NOLOGIN;\n  END IF;\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_journal_app') THEN\n    CREATE ROLE mandate_journal_app NOLOGIN;\n  END IF;\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{JOURNAL_READER}') THEN\n    CREATE ROLE {JOURNAL_READER} NOLOGIN;\n  END IF;\nEND\n$$;\n\
          GRANT mandate_journal_owner TO mandate_migrator WITH INHERIT FALSE;\n\
          REVOKE ALL ON DATABASE mandate FROM PUBLIC;\n\
          REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;\n\
@@ -3718,11 +3798,13 @@ pub fn roles_sql(all: &[Value]) -> String {
          REVOKE ALL ON SCHEMA public FROM PUBLIC;\n\
          CREATE SCHEMA IF NOT EXISTS journal AUTHORIZATION mandate_journal_owner;\n\
          GRANT USAGE ON SCHEMA journal TO mandate_journal_app;\n\
+         GRANT USAGE ON SCHEMA journal TO {JOURNAL_READER};\n\
          CREATE SCHEMA IF NOT EXISTS deploy AUTHORIZATION mandate_migrator;\n"
     );
     for role in login_roles(all) {
+        let group = role_group(all, &role);
         sql.push_str(&format!(
-            "DO $$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{role}') THEN\n    CREATE ROLE {role} LOGIN IN ROLE mandate_journal_app;\n  END IF;\nEND\n$$;\n\
+            "DO $$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{role}') THEN\n    CREATE ROLE {role} LOGIN IN ROLE {group};\n  END IF;\nEND\n$$;\n\
              GRANT CONNECT ON DATABASE mandate TO {role};\n\
              ALTER ROLE {role} IN DATABASE mandate SET search_path = journal;\n"
         ));
@@ -6230,8 +6312,13 @@ mod tests {
             "news-reader platform/model-provider-key denied",
             "news-reader connections/x64656d6f2d7061706572/token denied",
             "news-reader platform/alpaca-oauth-client-secret denied",
+            "bars-reader platform/news-data-key allowed",
+            "bars-reader platform/model-provider-key denied",
+            "bars-reader platform/email-credential denied",
+            "bars-reader platform/alpaca-oauth-client-secret denied",
+            "bars-reader connections/x64656d6f2d7061706572/token denied",
             "executor-demo-paper connections/x64656d6f2d7061706572/code denied",
-            "checked 11 mandate policies",
+            "checked 12 mandate policies",
         ];
         let probe = |lines: &[&str]| -> String {
             lines
@@ -6322,23 +6409,23 @@ mod tests {
             vault_drill_problems(&missing, VAULT_DRILL_POLICIES),
             ["want `model-gateway platform/model-provider-key allowed`, got `no answer`"]
         );
-        let unscanned = held.replace("checked 11 mandate policies", "checked 0 mandate policies");
+        let unscanned = held.replace("checked 12 mandate policies", "checked 0 mandate policies");
         assert_eq!(
             vault_drill_problems(&unscanned, VAULT_DRILL_POLICIES),
-            ["want `checked 11 mandate policies`, got `checked 0 mandate policies`"]
+            ["want `checked 12 mandate policies`, got `checked 0 mandate policies`"]
         );
-        let scanned_twice = format!("{held}{}", probe(&["checked 11 mandate policies"]));
+        let scanned_twice = format!("{held}{}", probe(&["checked 12 mandate policies"]));
         assert_eq!(
             vault_drill_problems(&scanned_twice, VAULT_DRILL_POLICIES),
             [
-                "want `checked 11 mandate policies`, got `checked 11 mandate policies` and \
-                 `checked 11 mandate policies`"
+                "want `checked 12 mandate policies`, got `checked 12 mandate policies` and \
+                 `checked 12 mandate policies`"
             ]
         );
         let no_scan = probe(&expected[..expected.len() - 1]);
         assert_eq!(
             vault_drill_problems(&no_scan, VAULT_DRILL_POLICIES),
-            ["want `checked 11 mandate policies`, got `no scan`"]
+            ["want `checked 12 mandate policies`, got `no scan`"]
         );
         let errored = held.replace(
             "executor-demo-paper connections/x64656d6f2d7061706572/token allowed",
@@ -6375,11 +6462,11 @@ mod tests {
     }
 
     /// Once `cell up` provisions for the role provisioner, the drill must read its three policies
-    /// too: fourteen, and eleven is a scan that missed some.
+    /// too: fifteen, and twelve is a scan that missed some.
     #[test]
     fn the_vault_drill_counts_the_provisioned_policies() {
-        assert_eq!(vault_drill_policies(false), 11);
-        assert_eq!(vault_drill_policies(true), 14);
+        assert_eq!(vault_drill_policies(false), 12);
+        assert_eq!(vault_drill_policies(true), 15);
         let scan = |n: usize| format!("[pod/vault-drill-1-x/probe] checked {n} mandate policies\n");
         let only_scan = |logs: &str, policies: usize| -> Vec<String> {
             vault_drill_problems(logs, policies)
@@ -6388,12 +6475,12 @@ mod tests {
                 .collect()
         };
         assert_eq!(
-            only_scan(&scan(14), vault_drill_policies(true)),
+            only_scan(&scan(15), vault_drill_policies(true)),
             Vec::<String>::new()
         );
         assert_eq!(
-            only_scan(&scan(11), vault_drill_policies(true)),
-            ["want `checked 14 mandate policies`, got `checked 11 mandate policies`"]
+            only_scan(&scan(12), vault_drill_policies(true)),
+            ["want `checked 15 mandate policies`, got `checked 12 mandate policies`"]
         );
     }
 
@@ -6761,7 +6848,10 @@ mod tests {
             .context("processes.json has no data process")?;
         assert_eq!(process["image"], DATA_PROCESS);
         assert_eq!(process["built"], true);
-        assert_eq!(process["db_role"], Value::Null);
+        assert_eq!(
+            process["db_role"], "mandate_data",
+            "the IEX source's own journal role, which the chart drops for the recorded source (DEC-2082)"
+        );
         assert_eq!(process["probe"][0], "/mandate-datad");
         Ok(())
     }
@@ -6990,6 +7080,79 @@ mod tests {
         assert!(vault_state(&status(true, true, "inmem")).is_err());
         assert!(vault_state(r#"{"sealed": false, "storage_type": "raft"}"#).is_err());
         assert!(vault_state("not json").is_err());
+    }
+
+    /// The vault counts as active only unsealed, on raft, and the active node; the cell waits for
+    /// that, pausing between asks, for no longer than its bound, and a dev server stops the wait at
+    /// once.
+    #[test]
+    fn the_cell_waits_for_an_active_vault_within_its_bound() {
+        let status = |sealed: bool, ha: Option<bool>, is_self: Option<bool>, storage: &str| {
+            let mut status =
+                json!({"initialized": true, "sealed": sealed, "storage_type": storage});
+            if let Some(ha) = ha {
+                status["ha_enabled"] = json!(ha);
+            }
+            if let Some(is_self) = is_self {
+                status["is_self"] = json!(is_self);
+            }
+            status.to_string()
+        };
+        let standby = status(false, Some(true), Some(false), "raft");
+        let active = status(false, Some(true), Some(true), "raft");
+        assert!(vault_active(&active).unwrap());
+        assert!(vault_active(&status(false, Some(false), None, "raft")).unwrap());
+        assert!(!vault_active(&standby).unwrap());
+        assert!(!vault_active(&status(false, Some(true), None, "raft")).unwrap());
+        assert!(!vault_active(&status(false, None, Some(true), "raft")).unwrap());
+        assert!(!vault_active(&status(true, Some(true), Some(true), "raft")).unwrap());
+        assert!(vault_active(&status(false, Some(false), None, "inmem")).is_err());
+
+        let asks = |answers: Vec<Result<String>>| {
+            let mut answers = answers.into_iter();
+            let mut asked = 0_u32;
+            let mut waited = Duration::ZERO;
+            let outcome = await_active(
+                || {
+                    asked += 1;
+                    answers
+                        .next()
+                        .unwrap_or_else(|| Ok(status(false, Some(true), Some(false), "raft")))
+                },
+                |pause| waited += pause,
+            );
+            (outcome.is_ok(), asked, waited)
+        };
+        assert_eq!(
+            asks(vec![
+                Ok(standby.clone()),
+                Err(anyhow::anyhow!("the pod is restarting")),
+                Ok(String::new()),
+                Ok("Error checking leader status".to_owned()),
+                Ok(active.clone()),
+            ]),
+            (true, 5, Duration::from_secs(8)),
+            "standby, then unreadable, empty and not JSON, then active: provisioning goes on \
+             after four pauses"
+        );
+        assert_eq!(
+            asks(vec![Ok(active)]),
+            (true, 1, Duration::ZERO),
+            "an active vault is not waited on"
+        );
+        assert_eq!(
+            asks(Vec::new()),
+            (false, 31, Duration::from_secs(60)),
+            "a vault that never becomes active fails after sixty seconds, asked once more at the end"
+        );
+        assert_eq!(
+            asks(vec![
+                Ok(standby),
+                Ok(status(false, Some(false), None, "inmem"))
+            ]),
+            (false, 2, Duration::from_secs(2)),
+            "a dev server stops the wait at once"
+        );
     }
 
     /// The runtime image's context carries every file of the demo's research bundle and nothing

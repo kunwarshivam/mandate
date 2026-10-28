@@ -74,14 +74,57 @@ impl fmt::Debug for OpenBaoConfig {
     }
 }
 
+/// A request the vault refused (E21-32v): its method, its path under `/v1/`, and its status. It
+/// never holds a body, a token, or a secret id: a path names only mounts, policies, roles, and
+/// keys.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refused {
+    pub method: String,
+    pub path: String,
+    pub status: u16,
+}
+
+impl fmt::Display for Refused {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} /v1/{} answered {}",
+            self.method, self.path, self.status
+        )
+    }
+}
+
+/// Why provisioning stopped: the refusal, and the request the vault refused when a refusal of the
+/// vault's own is what stopped it, so the provisioner's output names the status and the path
+/// (E21-32v). A refusal the provisioning expected and went past, a mount not there yet, is never
+/// named for a later failure.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{error}")]
+pub struct ProvisionError {
+    pub error: SourceError,
+    pub refused: Option<Refused>,
+}
+
+impl From<SourceError> for ProvisionError {
+    fn from(error: SourceError) -> Self {
+        Self {
+            error,
+            refused: None,
+        }
+    }
+}
+
 /// The HTTP client for one vault: TLS to the given CA only, no proxy, no redirect.
-struct Http {
+pub(crate) struct Http {
     client: reqwest::Client,
     address: String,
+    /// The last request's refusal, if the vault refused it, and what it was judged to mean; reset
+    /// at each request, so a request that never reached an answer leaves none.
+    last: Mutex<Option<(Refused, SourceError)>>,
 }
 
 impl Http {
-    fn new(config: &OpenBaoConfig) -> Result<Self, SourceError> {
+    pub(crate) fn new(config: &OpenBaoConfig) -> Result<Self, SourceError> {
         let rest = config
             .address
             .strip_prefix("https://")
@@ -106,7 +149,50 @@ impl Http {
         Ok(Self {
             client,
             address: config.address.clone(),
+            last: Mutex::new(None),
         })
+    }
+
+    /// Clears the last request's refusal, before a request that may never reach an answer.
+    pub(crate) fn forget(&self) {
+        if let Ok(mut last) = self.last.lock() {
+            *last = None;
+        }
+    }
+
+    /// Records the answer to `method` on `path`: its refusal, if `judged` is one, or none.
+    pub(crate) fn note(
+        &self,
+        method: &Method,
+        path: &str,
+        status: StatusCode,
+        judged: &Result<(), SourceError>,
+    ) {
+        let refused = judged.as_ref().err().map(|error| {
+            (
+                Refused {
+                    method: method.as_str().to_owned(),
+                    path: path.to_owned(),
+                    status: status.as_u16(),
+                },
+                error.clone(),
+            )
+        });
+        if let Ok(mut last) = self.last.lock() {
+            *last = refused;
+        }
+    }
+
+    /// `error` as provisioning reports it: with the last request's refusal when that refusal is
+    /// `error`, and with none otherwise.
+    pub(crate) fn explained(&self, error: SourceError) -> ProvisionError {
+        let refused = self
+            .last
+            .lock()
+            .ok()
+            .and_then(|last| last.clone())
+            .and_then(|(refused, judged)| (judged == error).then_some(refused));
+        ProvisionError { error, refused }
     }
 
     /// One request to `/v1/<path>`. The status maps to a refusal before any body is read, and
@@ -118,6 +204,8 @@ impl Http {
         token: Option<&SecretString>,
         body: Option<&Value>,
     ) -> Result<Option<Value>, SourceError> {
+        self.forget();
+        let asked = method.clone();
         let mut request = self
             .client
             .request(method, format!("{}/v1/{path}", self.address));
@@ -131,7 +219,9 @@ impl Http {
         }
         let response = request.send().await.map_err(|_| SourceError::Unavailable)?;
         let status = response.status();
-        refusal(status)?;
+        let judged = refusal(status);
+        self.note(&asked, path, status, &judged);
+        judged?;
         let bytes = response
             .bytes()
             .await
@@ -163,6 +253,7 @@ impl Http {
         body: &Value,
         judge: impl FnOnce(u16, &[u8]) -> Result<(), SourceError>,
     ) -> Result<Option<Value>, SourceError> {
+        self.forget();
         let mut request = self
             .client
             .post(format!("{}/v1/{path}", self.address))
@@ -178,7 +269,9 @@ impl Http {
             .await
             .map_err(|_| SourceError::Unavailable)?
             .to_vec();
-        if let Err(refused) = judge(status.as_u16(), &bytes) {
+        let judged = judge(status.as_u16(), &bytes);
+        self.note(&Method::POST, path, status, &judged);
+        if let Err(refused) = judged {
             bytes.zeroize();
             return Err(refused);
         }
@@ -472,6 +565,7 @@ pub fn kubernetes_login_path(
         | Identity::SecretImport
         | Identity::ModelGateway
         | Identity::NewsReader
+        | Identity::BarsReader
         | Identity::EmailSender
         | Identity::Provisioner => return Err(SourceError::Config),
     };
@@ -670,6 +764,13 @@ impl OpenBaoSource {
             .lock()
             .map(|at| *at)
             .map_err(|_| SourceError::Unavailable)
+    }
+
+    /// Ends this session: its token is revoked, so every later request with it is refused. A
+    /// process that reads one secret once ends its session right after, so no token able to read
+    /// that secret outlives the read (E2-22).
+    pub async fn end_session(&self) -> Result<(), SourceError> {
+        self.revoke_token().await
     }
 
     async fn revoke_token(&self) -> Result<(), SourceError> {
@@ -1154,6 +1255,7 @@ pub(crate) fn provisioned_identities(
         Identity::SecretImport,
         Identity::ModelGateway,
         Identity::NewsReader,
+        Identity::BarsReader,
         Identity::EmailSender,
     ];
     if provisioner {
@@ -1212,9 +1314,11 @@ pub async fn provision_kubernetes_auth(
     config: &OpenBaoConfig,
     operator_token: &SecretString,
     auth: &KubernetesAuth,
-) -> Result<(), SourceError> {
+) -> Result<(), ProvisionError> {
     let http = Http::new(config)?;
-    provision_kubernetes(&http, Some(operator_token), &config.mounts, auth).await
+    provision_kubernetes(&http, Some(operator_token), &config.mounts, auth)
+        .await
+        .map_err(|error| http.explained(error))
 }
 
 /// The policy [`provision`] writes for `identity`'s role: [`provisioner_policy`] for the role
@@ -1289,8 +1393,21 @@ pub async fn provision(
     operator_token: &SecretString,
     connections: &[ConnectionId],
     kubernetes: Option<&KubernetesAuth>,
-) -> Result<Vec<RoleCredentials>, SourceError> {
+) -> Result<Vec<RoleCredentials>, ProvisionError> {
     let http = Http::new(config)?;
+    provision_over(&http, config, operator_token, connections, kubernetes)
+        .await
+        .map_err(|error| http.explained(error))
+}
+
+/// [`provision`] over `http`.
+async fn provision_over(
+    http: &Http,
+    config: &OpenBaoConfig,
+    operator_token: &SecretString,
+    connections: &[ConnectionId],
+    kubernetes: Option<&KubernetesAuth>,
+) -> Result<Vec<RoleCredentials>, SourceError> {
     let token = Some(operator_token);
     let mounts = &config.mounts;
     let kv_mounted = http
@@ -1311,7 +1428,7 @@ pub async fn provision(
         )
         .await?;
     }
-    provision_fingerprints(&http, token, mounts).await?;
+    provision_fingerprints(http, token, mounts).await?;
     let auth_mounted = http
         .call(
             Method::GET,
@@ -1331,7 +1448,7 @@ pub async fn provision(
         .await?;
     }
     if let Some(auth) = kubernetes {
-        provision_kubernetes(&http, token, mounts, auth).await?;
+        provision_kubernetes(http, token, mounts, auth).await?;
     }
     let namespace = kubernetes.and_then(|auth| auth.namespace.as_deref());
     let mut credentials = Vec::new();

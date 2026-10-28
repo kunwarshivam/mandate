@@ -26,3 +26,4 @@ set_password mandate_scheduler journal-role-mandate-scheduler
 set_password mandate_dispatcher journal-role-mandate-dispatcher
 set_password mandate_gateway journal-role-mandate-gateway
 set_password mandate_exporter journal-role-mandate-exporter
+set_password mandate_data journal-role-mandate-data

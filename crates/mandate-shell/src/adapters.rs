@@ -1944,6 +1944,14 @@ mod tests {
         ) -> Option<mandate_executor::BindingGateInput> {
             None
         }
+
+        fn config_refs(
+            &self,
+            _agent: &mandate_executor::AgentId,
+            _instrument: &mandate_accounting::InstrumentId,
+        ) -> Option<mandate_executor::BindingGateConfigRefs> {
+            None
+        }
     }
 
     fn test_executor_context() -> Result<ExecutorContext, String> {
