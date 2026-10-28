@@ -185,7 +185,8 @@ fn an_agent_s_active_theses_and_held_instruments_are_followed() {
 }
 
 #[test]
-fn a_stream_its_fold_cannot_read_gives_none_of_its_instruments_and_says_so() {
+fn an_unreadable_thesis_stream_gives_none_of_its_instruments_and_an_unreadable_account_row_is_passed_over()
+ {
     let journal = Journal::default();
     thesis(&journal, "01THESISSPY", SPY, "2026-11-30T00:00:00Z");
     bought(&journal, "o1", QQQ, "2");
@@ -203,7 +204,11 @@ fn a_stream_its_fold_cannot_read_gives_none_of_its_instruments_and_says_so() {
         &rows(&journal, &account_name),
         t0(),
     );
-    assert_eq!(watched.assets, BTreeSet::from([SPY.to_owned()]));
+    assert_eq!(
+        watched.assets,
+        BTreeSet::from([QQQ.to_owned(), SPY.to_owned()]),
+        "a row the fold cannot read is passed over, and what is held still counts"
+    );
     assert!(watched.held_unreadable && !watched.theses_unreadable);
     journal.push(
         &format!("agent:{WS}:{AGENT}"),
@@ -214,4 +219,75 @@ fn a_stream_its_fold_cannot_read_gives_none_of_its_instruments_and_says_so() {
     let watched = followed(AGENT, &agent, &account_name, &[], t0());
     assert!(watched.theses_unreadable && !watched.held_unreadable);
     assert!(watched.assets.is_empty());
+}
+
+/// The gate context's fold refuses every corporate action (DEC-2378 item 7), so a split on a held
+/// instrument is reported and passed over: the instrument held before it, and one bought after it,
+/// are still polled, when news on a held position matters most.
+#[test]
+fn a_split_on_a_held_instrument_never_stops_its_polling() {
+    let journal = Journal::default();
+    thesis(&journal, "01THESISSPY", SPY, "2026-11-30T00:00:00Z");
+    bought(&journal, "o1", QQQ, "2");
+    let account_name = format!("acct:{WS}:{ACCOUNT}");
+    journal.push(
+        &account_name,
+        "CorporateActionApplied",
+        object(&[("instrument_id", s(QQQ)), ("kind", s("split"))]),
+    );
+    let agent = rows(&journal, &format!("agent:{WS}:{AGENT}"));
+    let watched = followed(
+        AGENT,
+        &agent,
+        &account_name,
+        &rows(&journal, &account_name),
+        t0(),
+    );
+    assert_eq!(
+        watched.assets,
+        BTreeSet::from([QQQ.to_owned(), SPY.to_owned()]),
+        "the thesis's and the held instrument both stay watched after a split"
+    );
+    assert!(watched.held_unreadable && !watched.theses_unreadable);
+    bought(&journal, "o2", AAPL, "1");
+    let after = followed(
+        AGENT,
+        &agent,
+        &account_name,
+        &rows(&journal, &account_name),
+        t0(),
+    );
+    assert_eq!(
+        after.assets,
+        BTreeSet::from([AAPL.to_owned(), QQQ.to_owned(), SPY.to_owned()]),
+        "the fold goes on past the split"
+    );
+}
+
+/// An account row whose body does not parse is reported and passed over, as a refused one is: the
+/// instrument the agent buys after it is still polled.
+#[test]
+fn an_account_row_whose_body_does_not_parse_never_stops_a_held_instrument_s_polling() {
+    let journal = Journal::default();
+    let account_name = format!("acct:{WS}:{ACCOUNT}");
+    journal.push(&account_name, "FeesCharged", object(&[]));
+    journal
+        .others
+        .borrow_mut()
+        .get_mut(&account_name)
+        .unwrap()
+        .last_mut()
+        .unwrap()
+        .body
+        .clone_from(&b"{not canonical".to_vec());
+    bought(&journal, "o1", QQQ, "2");
+    let watched = followed(
+        AGENT,
+        &[],
+        &account_name,
+        &rows(&journal, &account_name),
+        t0(),
+    );
+    assert_eq!(watched.assets, BTreeSet::from([QQQ.to_owned()]));
+    assert!(watched.held_unreadable);
 }

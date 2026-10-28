@@ -5,9 +5,11 @@
 //! the gate context's own fold of the account stream ([`Journaled::held`]): the agent's sub-ledger,
 //! as the executor computes it.
 //!
-//! Each fold is read on its own. A stream one of them cannot read gives none of its instruments and
-//! is reported, and the other's still count: news only ever leads to an opinion, so polling less
-//! adds no risk.
+//! Each fold is read on its own. An agent stream the thesis replay cannot read gives none of its
+//! instruments and is reported, and the held instruments still count. A row of the account stream
+//! the gate context's fold refuses (it refuses every `CorporateActionApplied`) is reported and
+//! passed over, and the fold goes on, so a split never stops a held instrument's polling: news
+//! only ever leads to an opinion, so polling more or less adds no risk.
 
 use std::collections::BTreeSet;
 
@@ -39,10 +41,9 @@ pub fn followed(
         Some(assets) => followed.assets.extend(assets),
         None => followed.theses_unreadable = true,
     }
-    match held(agent, account_stream, account_rows) {
-        Some(assets) => followed.assets.extend(assets),
-        None => followed.held_unreadable = true,
-    }
+    let (held, unreadable) = held(agent, account_stream, account_rows);
+    followed.assets.extend(held);
+    followed.held_unreadable = unreadable;
     followed
 }
 
@@ -77,24 +78,34 @@ fn theses(agent_rows: &[StoredEvent], at: UtcNanos) -> Option<BTreeSet<String>> 
     )
 }
 
-/// The instruments `agent` holds on `account_stream`, or `None` when a row its fold reads cannot
-/// be read.
+/// The instruments `agent` holds on `account_stream`, and whether a row its fold reads could not
+/// be read or was refused: such a row is passed over and the fold goes on, so the instruments
+/// still held after it are still polled.
 fn held(
     agent: &str,
     account_stream: &str,
     account_rows: &[StoredEvent],
-) -> Option<BTreeSet<String>> {
+) -> (BTreeSet<String>, bool) {
     let mut fold = Journaled::new(account_stream, "", agent);
+    let mut unreadable = false;
     for row in account_rows {
-        let payload = parse(&row.body)
+        let Some(payload) = parse(&row.body)
             .ok()
-            .and_then(|body| body.get("payload").cloned())?;
-        fold.fold(Row {
-            stream: &row.stream_id,
-            event_type: &row.event_type,
-            payload: &payload,
-        })
-        .ok()?;
+            .and_then(|body| body.get("payload").cloned())
+        else {
+            unreadable = true;
+            continue;
+        };
+        if fold
+            .fold(Row {
+                stream: &row.stream_id,
+                event_type: &row.event_type,
+                payload: &payload,
+            })
+            .is_err()
+        {
+            unreadable = true;
+        }
     }
-    Some(fold.held().into_keys().collect())
+    (fold.held().into_keys().collect(), unreadable)
 }

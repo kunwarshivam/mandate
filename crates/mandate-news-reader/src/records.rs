@@ -52,15 +52,17 @@ impl Writer {
     }
 
     /// The event id of the `ordinal`th draft of the batch appended at `head`: the news stream's
-    /// [`stream_event_id`] at this writer's epoch. A page holds at most fifty items, so an ordinal
-    /// past `u32::MAX` never occurs; it would read as `u32::MAX`.
-    pub fn event_id(&self, head: u64, ordinal: usize) -> String {
-        let ordinal = u32::try_from(ordinal).unwrap_or(u32::MAX);
-        stream_event_id(&self.stream(), self.epoch, head, ordinal)
+    /// [`stream_event_id`] at this writer's epoch, or `None` for an ordinal past `u32::MAX`, which
+    /// no id can name: a page holds at most fifty items, so it never occurs, and two drafts never
+    /// share an id.
+    pub fn event_id(&self, head: u64, ordinal: usize) -> Option<String> {
+        let ordinal = u32::try_from(ordinal).ok()?;
+        Some(stream_event_id(&self.stream(), self.epoch, head, ordinal))
     }
 
     /// The drafts of `records`, appended as one batch at `head`, each with `event_time` `at`.
-    /// `None` only for an integer the canonical form cannot hold, which nothing here writes.
+    /// `None` only for an integer the canonical form cannot hold, or an ordinal no event id can
+    /// name, which nothing here writes.
     pub fn drafts(&self, head: u64, at: UtcNanos, records: &[Record]) -> Option<Vec<Vec<u8>>> {
         let stream = self.stream();
         let envelope = Envelope {
@@ -77,10 +79,11 @@ impl Writer {
             .enumerate()
             .map(|(ordinal, record)| {
                 let (event_type, payload) = payload(&self.workspace, record)?;
+                let event_id = self.event_id(head, ordinal)?;
                 draft_bytes_with_clock(
                     &envelope,
                     &Fields {
-                        event_id: &self.event_id(head, ordinal),
+                        event_id: &event_id,
                         event_type,
                         schema_version: 1,
                         causation_id: None,

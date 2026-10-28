@@ -9,7 +9,8 @@
   - the quote feed's answers, which are not counted (the scheduled health probe, DEC-2837, reads
     the account every minute, so an idle executor notices);
   - Robinhood's connector, which folds every account-snapshot error into one `Unreadable`;
-  - the rate-limit headroom and contract-drift signals;
+  - contract drift, which only an MCP connection has (§8.1 check 7), so it comes with
+    Robinhood's later checks; rate-limit headroom degrades as `rate_headroom` (DEC-2842);
   - `credential_expired` and `refresh_failed`, which stay blocked on U-A3: Alpaca documents no
     token lifetime or refresh. A lost lease restricts as `lease_expired` (DEC-2839), and a failed
     later check as `check_failed` (DEC-2840);
