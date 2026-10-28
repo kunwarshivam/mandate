@@ -45,7 +45,7 @@ use mandate_identity_seal::Seal;
 use mandate_identity_testkit::{StaticLookup, membership, session};
 use mandate_journal::{ArtifactRef, ArtifactSource, Draft, StoredEvent, check_batch, get_artifact};
 use mandate_time::UtcNanos;
-use support_passkey::{CREDENTIAL, Signer, enrol, enrolled, unb64url};
+use support_passkey::{CREDENTIAL, OTHER_CREDENTIAL, Signer, enrol, enrolled, unb64url};
 
 const APP: &str = "https://app.owlhead.test";
 const T0: i64 = 1_791_000_000;
@@ -4117,4 +4117,89 @@ fn a_ci_cells_waived_resume_and_stop_with_a_fresh_passkey_commit_and_journal_the
         );
         assert!(!w.held(&issued), "{route}: the challenge is taken");
     }
+}
+
+/// DEC-2146 item 3: an acknowledgment appends its assertion, so it carries the waiver the same way.
+/// In a `ci` cell with the waiver, a fresh passkey's acknowledgment of a standing limit commits
+/// `OwnerAcknowledged`, its `StepUpAsserted`, then its `StepUpCoolOffWaived`.
+#[test]
+fn a_ci_cells_waived_acknowledgment_with_a_fresh_passkey_commits_and_journals_the_waiver() {
+    let w = passkeyed_in(Port::Waived(CoolOffWaiver::Ci), true, COOLING);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        &hold.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let reply = w.post_ack("acknowledgments", KEY_3, &body);
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    journals_the_waiver(
+        &w.f,
+        "OwnerAcknowledged",
+        "acknowledge",
+        "acknowledge_step_up_asserted",
+        KEY_3,
+        &issued,
+        "ci",
+    );
+    assert!(!w.held(&issued), "the challenge is taken");
+}
+
+/// DEC-2146 items 1 and 2: without the waiver, an acknowledgment signed with a passkey still in
+/// its cool-off is `step_up_missing`: nothing is appended, the challenge is kept, and the hold
+/// still stands in the list. Alice deploys with her cooled passkey, then enrols a second whose
+/// `cool_off_ends` is a day off.
+#[test]
+fn without_the_waiver_a_fresh_passkeys_acknowledgment_is_step_up_missing_and_the_hold_stands() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let fresh = Signer::es256();
+    w.f.store.put(&fresh.cose_key()).expect("the key");
+    let enrolment = enrolled(alice(), OTHER_CREDENTIAL, &fresh, 0, Some(COOLING));
+    seed_hosted(&w.f, "CredentialEnrolled", 2, &enrolment.to_string());
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = fresh.assert(&issued.bytes, 1);
+    let body = ack_body(
+        &hold.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(OTHER_CREDENTIAL)),
+    );
+    let before = control(&w.f).len();
+    refused(
+        &w.post_ack("acknowledgments", KEY_3, &body),
+        401,
+        ProblemCode::StepUpMissing,
+    );
+    assert_eq!(control(&w.f).len(), before, "nothing is appended");
+    assert!(w.held(&issued), "the challenge is kept");
+    assert_eq!(
+        listed(&list(&w, "?agent=agt_a&state=open")),
+        [hold.event_id.clone()],
+        "the hold still stands"
+    );
 }
