@@ -272,6 +272,25 @@ pub(crate) fn available_to_sell(
         .unwrap_or(Qty::ZERO))
 }
 
+/// I4 for the exits the executor raises for an agent itself (DEC-2849 item 7): the watchdog exit of
+/// its triggered protection, and its plain entry's bound exit. Each is that agent's own, sized
+/// min(Lᵢ, N), clipped to what is still available to sell ([`available_to_sell`]), so it never
+/// sells another holder's or the owner's shares (the founder's ruling of 2026-10-27).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "pending E7-4 (DEC-2849 item 7): the watchdog and the bound size on it"
+    )
+)]
+pub(crate) fn rule_13_size(
+    _view: &ExecutorState,
+    _agent: &AgentId,
+    _instrument: &InstrumentId,
+) -> Result<Qty, ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-4" })
+}
+
 /// Takes `quantity` of an account switch's close in `instrument` out of its holders, for
 /// [`ExecutorState::closed`] (DEC-2849 I5): out of the owner's positive residual first, then the
 /// agents' lots in [`coverages`]' order, largest first and ties by agent id. A fill that takes the
@@ -438,8 +457,8 @@ mod tests {
     use crate::payload::{object, text};
     use crate::state::{AccountSwitch, ExecutorState};
     use crate::types::{
-        AccountRef, AccountScope, AgentId, EventId, Order, OrderState, Purpose, RiskClock, Seq,
-        WorkspaceId,
+        AccountRef, AccountScope, AgentId, EventId, Mode, Order, OrderState, Purpose, RiskClock,
+        Seq, WorkspaceId,
     };
 
     const AGENTS: u8 = 3;
@@ -828,6 +847,118 @@ mod tests {
                 check(&run)?;
             }
         }
+    }
+
+    /// DEC-2849 item 7, I4: over the same random events, the size of every agent's own rule-13 exit
+    /// (its watchdog's, its bound's) is the oracle's min(Lᵢ, N, N less the working sells): never more
+    /// than its own lots, never the owner's or another holder's, and never past what is left.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn rule_13_sizes_are_the_oracles() -> Result<(), String> {
+        let mut runner = proptest::test_runner::TestRunner::new(ProptestConfig::with_cases(256));
+        runner
+            .run(&proptest::collection::vec(event(), 1..60), |events| {
+                let fail = |e: ExecutorError| TestCaseError::fail(e.to_string());
+                let n = |v: i64| shares(v).map_err(fail);
+                let mut run = Run::new();
+                for event in &events {
+                    run.apply(event).map_err(fail)?;
+                    for (i, oracle) in &run.oracles {
+                        let at = instrument(*i).map_err(fail)?;
+                        let left = oracle.position().saturating_sub(oracle.working);
+                        for a in 0..AGENTS {
+                            let want = n(oracle.lots(a).min(oracle.position()).min(left))?;
+                            prop_assert_eq!(
+                                super::rule_13_size(&run.view, &agent(a), &at).map_err(fail)?,
+                                want,
+                                "the rule-13 size of {} in {}",
+                                a,
+                                i
+                            );
+                            let mut stopped = run.view.clone();
+                            stopped.modes.insert(agent(a), Mode::Stopped);
+                            prop_assert_eq!(
+                                super::rule_13_size(&stopped, &agent(a), &at).map_err(fail)?,
+                                want,
+                                "stopped, {}'s exit is sized the same in {}",
+                                a,
+                                i
+                            );
+                        }
+                    }
+                }
+                Ok(())
+            })
+            .map_err(|e| e.to_string())
+    }
+
+    /// DEC-2849 item 7, I4, by hand: an agent's own rule-13 exit sells its own lots and no more.
+    /// Its 10 beside the owner's 4 is 10, never 14; after the owner sells 4 outside Mandate it is
+    /// the 6 left; beside another agent's 4, each is its own; and with 2 sold and 3 still working
+    /// from its 10, it is the 5 not yet selling. DEC-2849's worked example, 5 and 5 with the owner
+    /// selling 4 outside Mandate, is 5 for each (min(Lᵢ, N), never Sᵢ = 1); and another agent's
+    /// working sell of 3 leaves this agent's 10 the 7 not yet selling. A stopped agent is sized the
+    /// same: the size never reads the mode. Whether a stopped or killed agent's exit is held, and
+    /// how its own flatten clips its watchdog, are the watchdog's and the kill's (E7-4, the
+    /// implementation's own tests).
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn a_rule_13_exit_sells_its_own_lots_and_no_more() -> Result<(), ExecutorError> {
+        let at = instrument(0)?;
+        for (events, sizes) in [
+            (
+                vec![Event::Buy(0, 0, 10), Event::OwnerBuy(0, 4)],
+                vec![(0, 10)],
+            ),
+            (
+                vec![Event::Buy(0, 0, 10), Event::OwnerSell(0, 4)],
+                vec![(0, 6)],
+            ),
+            (
+                vec![Event::Buy(0, 0, 6), Event::Buy(1, 0, 4)],
+                vec![(0, 6), (1, 4)],
+            ),
+            (
+                vec![Event::Buy(0, 0, 10), Event::Sell(0, 0, 2, 3)],
+                vec![(0, 5)],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 5),
+                    Event::Buy(1, 0, 5),
+                    Event::OwnerSell(0, 4),
+                ],
+                vec![(0, 5), (1, 5)],
+            ),
+            (
+                vec![
+                    Event::Buy(0, 0, 10),
+                    Event::Buy(1, 0, 2),
+                    Event::Sell(1, 0, 2, 3),
+                ],
+                vec![(0, 7), (1, 0)],
+            ),
+        ] {
+            let mut run = Run::new();
+            for event in &events {
+                run.apply(event)?;
+            }
+            for (a, size) in sizes {
+                assert_eq!(
+                    super::rule_13_size(&run.view, &agent(a), &at)?,
+                    shares(size)?,
+                    "{events:?}: agent {a}"
+                );
+                let mut stopped = run.view.clone();
+                stopped.modes.insert(agent(a), Mode::Stopped);
+                assert_eq!(
+                    super::rule_13_size(&stopped, &agent(a), &at)?,
+                    shares(size)?,
+                    "{events:?}: agent {a}, stopped"
+                );
+            }
+        }
+        Ok(())
     }
 
     /// DEC-2849's worked example: A and B each hold 5, and the owner sells 4 outside Mandate.
