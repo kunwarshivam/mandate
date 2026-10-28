@@ -687,7 +687,7 @@ fn a_test_cell_starts_with_the_waiver_and_refuses_any_other_value() {
                 ("MANDATE_API_STEP_UP_COOL_OFF_WAIVER", "yes"),
             ],
         ));
-        assert_eq!(code, Some(1), "{tier}: {out}");
+        assert_eq!(code, Some(2), "{tier}: {out}");
         assert!(
             out.contains("MANDATE_API_STEP_UP_COOL_OFF_WAIVER"),
             "{tier}: the refusal names the setting: {out}"
