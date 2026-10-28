@@ -3500,9 +3500,10 @@ fn a_re_cover_leaves_a_held_brackets_shares_to_its_legs() {
 
 /// E1's boundary (DEC-532 item 1): only a bracket whose legs are still held is subtracted. Another
 /// agent's bracket that ended partly filled (4 of 10) has its OCO for those 4 already placed
-/// (DEC-346 item 6), so nothing of it is held. A risk exit of 2 cancels both resting OCOs, and
-/// once it fills, protection is re-placed for all 12 left: the OCO it cancelled covered the 4, and
-/// subtracting them again would leave 4 shares unprotected.
+/// (DEC-346 item 6), so nothing of it is held. A risk exit of 2 cancels only its own agent's OCO:
+/// the other agent's OCO for 4 fits beside it within the 14 and keeps resting (DEC-2849 item 8b).
+/// Once it fills, protection is re-placed for the 8 its agent still holds, so the 12 left are
+/// covered: 8 re-placed beside the 4 kept, none of them twice and none left unprotected.
 #[test]
 fn a_terminal_brackets_placed_oco_is_not_subtracted_again() {
     let ids = TestIds;
@@ -3543,11 +3544,10 @@ fn a_terminal_brackets_placed_oco_is_not_subtracted_again() {
         })
         .collect();
     cancelled.sort();
-    let mut expected = vec!["md-oco-1".to_owned(), oco];
-    expected.sort();
+    let expected = vec!["md-oco-1".to_owned()];
     assert_eq!(
         cancelled, expected,
-        "the exit cancels every resting protective order first (§5.4)"
+        "the exit cancels its own agent's OCO, never the other agent's {oco} (DEC-2849 item 8b)"
     );
     for id in expected {
         shell.run(
@@ -3573,8 +3573,9 @@ fn a_terminal_brackets_placed_oco_is_not_subtracted_again() {
 
     assert_eq!(
         re_placed(&done, None),
-        qty("12"),
-        "the 14 less the exit's 2; the ended bracket holds no legs, so nothing is subtracted"
+        qty("8"),
+        "the 14 less the exit's 2, less the other agent's 4 its kept OCO covers; the ended bracket \
+         holds no legs, so nothing more is subtracted"
     );
 }
 

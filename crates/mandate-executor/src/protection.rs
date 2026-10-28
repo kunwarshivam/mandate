@@ -47,12 +47,13 @@ use crate::types::{
 /// `stop_watchdog_s` already (DEC-260 (9)). A breach the watchdog has already fired on is spent:
 /// the next sane breaching mark starts a new one.
 pub(crate) fn breach(state: &mut ExecutorState, observation: &MarketObservation) {
-    let stop = state
+    let recorded = state
         .protection
         .get(&observation.instrument)
         .filter(|protection| !protection.resting.is_empty())
         .and_then(|protection| protection.prices)
         .map(|prices| prices.stop);
+    let stop = watched_stop(state, &observation.instrument).unwrap_or(recorded);
     let (true, Some(mark)) = (observation.sane, observation.mark) else {
         return;
     };
@@ -195,35 +196,49 @@ fn protecting_agent(view: &ExecutorState, instrument: &InstrumentId) -> Option<A
 
 /// What `breach` measures a mark against (DEC-2849 item 8b): the highest own stop of the legs
 /// resting in `instrument` ([`leg_stop`]), so a stop placed before a lower one is still watched,
-/// else the protection's recorded stop. `None` when nothing rests.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "pending E7-4 (DEC-2849 item 8b): breach measures marks against it"
-    )
-)]
+/// and never below the protection's recorded stop. `None` when nothing rests.
 fn watched_stop(
-    _view: &ExecutorState,
-    _instrument: &InstrumentId,
+    view: &ExecutorState,
+    instrument: &InstrumentId,
 ) -> Result<Option<Price>, ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-4" })
+    let Some(protection) = view
+        .protection
+        .get(instrument)
+        .filter(|protection| !protection.resting.is_empty())
+    else {
+        return Ok(None);
+    };
+    let highest = protection
+        .resting
+        .iter()
+        .filter_map(|id| view.orders.get(id))
+        .filter_map(|order| leg_stop(view, order))
+        .max();
+    Ok(highest.max(protection.prices.map(|prices| prices.stop)))
 }
 
 /// A resting leg's own stop: its request's, or, for a leg the broker created from a bracket, its
 /// entry's bracket's. `None` when neither recorded one, so such a leg is never read as the one
 /// triggered beside a leg whose stop is known.
 fn leg_stop(view: &ExecutorState, order: &Order) -> Option<Price> {
+    leg_prices(view, order).map(|prices| prices.stop)
+}
+
+/// A resting leg's own prices: its request's, or, for a leg the broker created from a bracket,
+/// its entry's bracket's.
+fn leg_prices(view: &ExecutorState, order: &Order) -> Option<ProtectionPrices> {
     let request = |id: &ClientOrderId| view.details.get(id)?.request.as_ref();
     request(&order.client_order_id)
         .and_then(request_prices)
-        .map(|prices| prices.stop)
         .or_else(|| {
             let entry = order.client_order_id.protected_entry()?;
             request(&entry)?
                 .bracket
                 .as_ref()
-                .map(|bracket| bracket.stop)
+                .map(|bracket| ProtectionPrices {
+                    stop: bracket.stop,
+                    take_profit: Some(bracket.take_profit),
+                })
         })
 }
 
@@ -512,7 +527,7 @@ pub(crate) fn reprotect_unpriced(
     let Some(sequence) = batch.view.exiting.get(&instrument).cloned() else {
         return Ok(());
     };
-    if &sequence.intent == intent && !rests(&batch.view, &instrument) {
+    if &sequence.intent == intent && !cancelling(&batch.view, &instrument, &sequence) {
         replace(batch, &instrument, &sequence)?;
     }
     Ok(())
@@ -907,8 +922,19 @@ pub(crate) fn rests(state: &ExecutorState, instrument: &InstrumentId) -> bool {
 /// and the cancel always agree (DEC-425 item 1).
 fn protection_holds(state: &ExecutorState, instrument: &InstrumentId) -> bool {
     state.exiting.get(instrument).is_some_and(|sequence| {
-        rests(state, instrument)
+        cancelling(state, instrument, sequence)
             && (!handed(state, sequence) || !matches!(fits(state, instrument), Ok(true)))
+    })
+}
+
+/// Whether a protective order `sequence` cancels still rests in `instrument`: any resting order
+/// but the other holders' legs it kept beside its exit (DEC-2849 item 8b).
+fn cancelling(state: &ExecutorState, instrument: &InstrumentId, sequence: &ExitSequence) -> bool {
+    state.protection.get(instrument).is_some_and(|protection| {
+        protection
+            .resting
+            .iter()
+            .any(|id| !sequence.kept.contains(id))
     })
 }
 
@@ -1069,6 +1095,7 @@ fn begin(
         instrument,
         limit,
         purpose,
+        qty,
         ..
     } = body
     else {
@@ -1104,21 +1131,53 @@ fn begin(
         return Ok(());
     };
     let passive = kept.is_some();
-    if !batch.view.exiting.contains_key(&instrument) {
-        let entry = match protection
+    let running = batch.view.exiting.get(&instrument).cloned();
+    let cancels: Vec<ClientOrderId> = match &running {
+        Some(sequence) => protection
             .resting
             .iter()
-            .find_map(ClientOrderId::protected_entry)
-        {
+            .filter(|id| !sequence.kept.contains(*id))
+            .cloned()
+            .collect(),
+        None if passive => protection.resting.clone(),
+        None => {
+            let beside = if waiting(&batch.view, &instrument).contains(intent) {
+                Qty::ZERO
+            } else {
+                qty
+            };
+            let named = holders::exit_cancels(&batch.view, &instrument, &agent, beside)?;
+            protection
+                .resting
+                .iter()
+                .filter(|id| named.contains(*id))
+                .cloned()
+                .collect()
+        }
+    };
+    if cancels.is_empty() {
+        return Ok(());
+    }
+    if running.is_none() {
+        let entry = match cancels.iter().find_map(ClientOrderId::protected_entry) {
             Some(entry) => entry,
             None => ClientOrderId::for_intent(intent)?,
+        };
+        let whole = cancels.len() == protection.resting.len();
+        let prices = if whole {
+            protection.prices
+        } else {
+            cancels
+                .iter()
+                .filter_map(|id| batch.view.orders.get(id))
+                .find_map(|order| leg_prices(&batch.view, order))
+                .or(protection.prices)
         };
         let mut pairs = vec![
             (
                 "orders",
                 text(
-                    protection
-                        .resting
+                    cancels
                         .iter()
                         .map(ClientOrderId::as_str)
                         .collect::<Vec<_>>()
@@ -1129,7 +1188,7 @@ fn begin(
             ("entry", text(entry.as_str())),
             ("agent", text(agent.0.clone())),
         ];
-        if let Some(prices) = protection.prices {
+        if let Some(prices) = prices {
             pairs.push(("stop", text(prices.stop.to_string())));
             if let Some(take_profit) = prices.take_profit {
                 pairs.push(("take_profit", text(take_profit.to_string())));
@@ -1151,7 +1210,7 @@ fn begin(
     if sized_around {
         return Ok(());
     }
-    for id in protection.resting {
+    for id in cancels {
         ask_cancel(batch, &id)?;
         batch.broker(BrokerRequest::Cancel {
             client_order_id: id,
@@ -1421,7 +1480,7 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     for (instrument, sequence) in sequences {
         if protection_holds(&batch.view, &instrument) {
             if !handed(&batch.view, &sequence) {
-                cancel_resting(batch, &instrument)?;
+                cancel_resting(batch, &instrument, &sequence.kept)?;
             }
             continue;
         }
@@ -2277,7 +2336,7 @@ fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(),
     if !handed_on || fits(&batch.view, instrument)? {
         return Ok(());
     }
-    cancel_resting(batch, instrument)
+    cancel_resting(batch, instrument, &BTreeSet::new())
 }
 
 /// Asks a cancel of every protective order resting in `instrument`, whoever placed it (§5.4),
@@ -2288,16 +2347,25 @@ fn overtaken(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(),
 /// outstanding until the broker reports the order in a state that can. So an exit waiting on that
 /// protection always waits on a cancel asked or outstanding, a refused cancel is asked again once
 /// its query finds the order still live, and a cancel is never asked again at every step (§5.7;
-/// DEC-425 item 1; #576's review, B1).
+/// DEC-425 item 1; #576's review, B1). Another holder's legs the sequence `kept` beside its exit
+/// are never asked (DEC-2849 item 8b).
 fn cancel_resting(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
+    kept: &BTreeSet<ClientOrderId>,
 ) -> Result<(), ExecutorError> {
     let resting: Vec<ClientOrderId> = batch
         .view
         .protection
         .get(instrument)
-        .map(|protection| protection.resting.clone())
+        .map(|protection| {
+            protection
+                .resting
+                .iter()
+                .filter(|id| !kept.contains(*id))
+                .cloned()
+                .collect()
+        })
         .unwrap_or_default();
     for id in resting {
         let outstanding = batch.view.orders.get(&id).is_none_or(|order| {
@@ -3497,6 +3565,7 @@ mod stub_tests {
                     prices: None,
                     passive: false,
                     ladder: crate::state::Ladder::default(),
+                    kept: Default::default(),
                 },
             );
         }
@@ -6600,7 +6669,6 @@ mod sequence_tests {
     /// cancels only its own leg. Agent-b's leg for its five fits beside the exit within N = 15, so
     /// it keeps resting, and the exit goes once agent-a's own cancel is confirmed.
     #[test]
-    #[ignore = "pending E7-4"]
     fn an_exit_cancels_only_its_own_agents_legs() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = tiered_ports(&config, &fees);
@@ -6644,7 +6712,6 @@ mod sequence_tests {
     /// last one placed. Agent-a's leg at 145 rested before agent-b's at 140; a mark of 144 has
     /// breached agent-a's stop, so the watchdog exits agent-a's ten.
     #[test]
-    #[ignore = "pending E7-4"]
     fn the_breach_watches_the_highest_resting_stop() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = tiered_ports(&config, &fees);
@@ -13092,6 +13159,7 @@ mod sequence_tests {
                     stepping: true,
                     ..crate::state::Ladder::default()
                 },
+                kept: Default::default(),
             },
         );
         executor.state.ladders.insert(
@@ -13164,6 +13232,7 @@ mod sequence_tests {
                 prices: None,
                 passive: false,
                 ladder: stepping,
+                kept: Default::default(),
             },
         );
         executor.state.ladders.insert(
@@ -16958,6 +17027,7 @@ mod remainder_pins {
                 prices: None,
                 passive: false,
                 ladder: stepped(false),
+                kept: Default::default(),
             },
         );
         state.ladders.insert(

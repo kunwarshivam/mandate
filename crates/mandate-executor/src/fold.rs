@@ -1624,6 +1624,23 @@ fn protection_changed(
                     .ladders
                     .remove(&(instrument.clone(), intent.clone()))
                     .map_or_else(Ladder::default, |lone| lone.ladder);
+                let cancelled = protective_orders_named(payload, "orders")?;
+                let kept = match state.exiting.get(&instrument) {
+                    Some(sequence) if sequence.intent == intent => sequence.kept.clone(),
+                    _ if cancelled.is_empty() => BTreeSet::new(),
+                    _ => state
+                        .protection
+                        .get(&instrument)
+                        .map(|protection| {
+                            protection
+                                .resting
+                                .iter()
+                                .filter(|id| !cancelled.contains(id))
+                                .cloned()
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                };
                 state.exiting.insert(
                     instrument.clone(),
                     ExitSequence {
@@ -1633,6 +1650,7 @@ fn protection_changed(
                         prices,
                         passive,
                         ladder,
+                        kept,
                     },
                 );
             }

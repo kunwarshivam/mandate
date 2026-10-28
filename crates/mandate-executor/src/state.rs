@@ -974,6 +974,10 @@ pub(crate) struct ExitSequence {
     pub(crate) passive: bool,
     /// Where the exit's price ladder stands, from its journaled rungs (§5.6).
     pub(crate) ladder: Ladder,
+    /// The protective orders resting at its start that it did not cancel: other holders' legs
+    /// that fit beside the exit (DEC-2849 item 8b). They never hold it back. Empty for a sequence
+    /// that cancelled every leg, as every one did before item 8b.
+    pub(crate) kept: BTreeSet<ClientOrderId>,
 }
 
 /// One re-placement before expiry as its `unprotected_start` journaled it (§5.4): the entry,

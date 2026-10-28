@@ -10,8 +10,8 @@ use mandate_num::{Qty, SignedQty};
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::protection::{long, remainders, sold, still_selling};
-use crate::state::ExecutorState;
-use crate::types::{AgentId, IntentBody, OrderState, Purpose};
+use crate::state::{EVERY_AGENT, ExecutorState};
+use crate::types::{AgentId, IntentBody, Order, OrderState, Purpose};
 
 /// An instrument's holders (DEC-2849's definitions).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -296,20 +296,63 @@ pub(crate) fn leg_excess(
 /// together within N. Otherwise they are cancelled too, so a rule-13 exit is never cut by another
 /// holder's legs (I4) and the sequence re-places them after it. An exit of no agent (`*`) cancels
 /// every leg.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "pending E7-4 (DEC-2849 item 8b): the exit sequence cancels what it names"
-    )
-)]
 pub(crate) fn exit_cancels(
-    _view: &ExecutorState,
-    _instrument: &InstrumentId,
-    _agent: &AgentId,
-    _qty: Qty,
+    view: &ExecutorState,
+    instrument: &InstrumentId,
+    agent: &AgentId,
+    qty: Qty,
 ) -> Result<BTreeSet<ClientOrderId>, ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-4" })
+    let legs: Vec<&Order> = view
+        .orders
+        .values()
+        .filter(|order| {
+            &order.instrument == instrument
+                && order.side == Side::Sell
+                && order.purpose == Purpose::Protective
+                && !order.state.is_terminal()
+                && order.state != OrderState::Intent
+                && order.qty > order.filled_qty
+        })
+        .collect();
+    if agent.0 == EVERY_AGENT {
+        return Ok(legs
+            .iter()
+            .map(|order| order.client_order_id.clone())
+            .collect());
+    }
+    let (others, own): (Vec<&Order>, Vec<&Order>) = legs.into_iter().partition(|order| {
+        order
+            .agent
+            .as_ref()
+            .is_some_and(|holder| holder != agent && holder.0 != EVERY_AGENT)
+    });
+    let mut by_order: BTreeMap<&str, Qty> = BTreeMap::new();
+    for order in &others {
+        let left = order.qty.checked_sub(order.filled_qty)?;
+        let counted = by_order.entry(oco_parent(order)).or_insert(Qty::ZERO);
+        *counted = (*counted).max(left);
+    }
+    let kept = by_order
+        .values()
+        .try_fold(Qty::ZERO, |sum, left| sum.checked_add(*left))?;
+    let fits = kept
+        .checked_add(still_selling(view, instrument)?)?
+        .checked_add(qty)?
+        <= long(view, instrument)?;
+    Ok(own
+        .into_iter()
+        .chain(others.into_iter().filter(|_| !fits))
+        .map(|order| order.client_order_id.clone())
+        .collect())
+}
+
+/// The id an OCO's or a bracket's leg counts under: its parent's, without the `-tp` or `-sl`
+/// (§2.3), so the pair counts once (I9); any other order's own.
+fn oco_parent(order: &Order) -> &str {
+    let id = order.client_order_id.as_str();
+    id.strip_suffix("-tp")
+        .or_else(|| id.strip_suffix("-sl"))
+        .unwrap_or(id)
 }
 
 /// I4's clip: N less every working sell in `instrument` as [`still_selling`] counts them, never
@@ -1678,7 +1721,6 @@ mod tests {
     /// holder owns, keeps another holder's legs while they fit beside it within N, and cancels
     /// them too once they would not, so another holder's legs never cut it.
     #[test]
-    #[ignore = "pending E7-4"]
     fn exit_cancels_are_the_oracles_over_random_legs() -> Result<(), String> {
         let mut runner = proptest::test_runner::TestRunner::new(ProptestConfig::with_cases(256));
         runner
@@ -1704,7 +1746,6 @@ mod tests {
     /// they go as well; so do they beside agent 1's own working exit of two. An exit of no agent
     /// cancels every leg. An OCO's two legs count once in what agent 1 keeps.
     #[test]
-    #[ignore = "pending E7-4"]
     fn an_exit_cancels_its_own_legs_and_keeps_anothers_that_fit() -> Result<(), ExecutorError> {
         let at = instrument(0)?;
         let two = || {
