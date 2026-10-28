@@ -1612,11 +1612,12 @@ fn a_second_running_agent_on_the_account_is_refused_at_deploy() {
 
 /// DEC-2809 item 2's edges, each judged before any V-rule: an agent running on another account
 /// does not hold this one; a connection established only at version 1 names no account; and a
-/// version-1 deployment, which names no connection the executor follows, holds no account. None of
+/// version-1 deployment, which names no connection the executor follows, holds no account; nor
+/// does a version-2 `ConnectionRequested` naming the account, which establishes nothing. None of
 /// them is refused `second_agent_on_account`, whatever the later checks answer.
 #[test]
 fn another_account_or_a_version_1_record_holds_no_account() {
-    let other = |establish_v2: bool, deployed_v2: bool, named: &str| {
+    let other_with = |establish_v2: bool, deployed_v2: bool, named: &str, requested: bool| {
         let f = fixture();
         let cookie = signed_in(&f, alice());
         seed_control_v2(&f, "ConnectionEstablished", &established_payload());
@@ -1642,6 +1643,15 @@ fn another_account_or_a_version_1_record_holds_no_account() {
                 r#"{"broker":"alpaca","connection_id":"conn_other","environment":"paper","scopes":["data","trading"]}"#,
             );
         }
+        if requested {
+            seed_control_v2(
+                &f,
+                "ConnectionRequested",
+                &format!(
+                    r#"{{"connection_id":"conn_other","account_ref":"{named}","broker":"alpaca","environment":"paper"}}"#
+                ),
+            );
+        }
         if deployed_v2 {
             let deployed = format!(
                 r#"{{"agent_id":"agt_a","connection_id":"conn_other","mandate_version":"{}","record_ref":"{}"}}"#,
@@ -1660,6 +1670,9 @@ fn another_account_or_a_version_1_record_holds_no_account() {
         let reply = deploy(&f, &cookie, KEY, &deploy_body("agt_b", "v1", EVIDENCE));
         String::from_utf8_lossy(&reply.body).contains("second_agent_on_account")
     };
+    let other = |establish_v2: bool, deployed_v2: bool, named: &str| {
+        other_with(establish_v2, deployed_v2, named, false)
+    };
     assert!(
         other(true, true, ACCOUNT),
         "the same account through a sibling connection is held"
@@ -1675,6 +1688,10 @@ fn another_account_or_a_version_1_record_holds_no_account() {
     assert!(
         !other(true, false, ACCOUNT),
         "a version-1 deployment holds no account"
+    );
+    assert!(
+        !other_with(false, true, ACCOUNT, true),
+        "a pending request naming the account is no establishment of it"
     );
 }
 

@@ -126,7 +126,9 @@ fn accounts(control: &[StoredEvent], connection: &str) -> BTreeSet<(String, Stri
 
 /// DEC-2809 item 2: whether an agent other than `agent`, with a version-2 or version-3
 /// `AgentDeployed` on a connection naming an account `connection` names, has no `AgentStopped`.
-/// The executor's risk fold reads one agent on an account (DEC-2804 item 8).
+/// The executor's risk fold reads one agent on an account (DEC-2804 item 8). Only those versions
+/// name a connection: a version-1 `AgentDeployed` has no `connection_id` (journal spec §9.24), so
+/// it names no account and is passed over by its missing member.
 pub fn another_on_account(control: &[StoredEvent], connection: &str, agent: &str) -> bool {
     let ours = accounts(control, connection);
     if ours.is_empty() {
@@ -139,7 +141,7 @@ pub fn another_on_account(control: &[StoredEvent], connection: &str, agent: &str
         .collect();
     control
         .iter()
-        .filter(|row| row.event_type == DEPLOYED && matches!(row.schema_version, 2 | 3))
+        .filter(|row| row.event_type == DEPLOYED)
         .filter_map(|row| Some((member(row, "agent_id")?, member(row, "connection_id")?)))
         .any(|(other, named)| {
             other != agent
