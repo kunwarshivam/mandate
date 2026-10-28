@@ -750,6 +750,26 @@ mod tests {
         AlpacaPaperHttp::new(credentials).map_err(|e| e.to_string())
     }
 
+    /// DEC-2842: the paper host's transport reports what its latest trading response recorded,
+    /// none before any.
+    #[test]
+    fn the_paper_transport_reports_its_latest_rate_limit() -> Result<(), String> {
+        let http = transport()?;
+        assert_eq!(TradingTransport::rate_limit(&http), None);
+        http.seen.record(&headers(&[
+            ("x-ratelimit-limit", "200"),
+            ("x-ratelimit-remaining", "12"),
+        ]));
+        assert_eq!(
+            TradingTransport::rate_limit(&http),
+            Some(RateLimit {
+                limit: 200,
+                remaining: 12
+            })
+        );
+        Ok(())
+    }
+
     /// A key pair travels as Alpaca's two key headers, both sensitive, and no `Authorization`.
     #[test]
     fn a_key_pair_is_sent_as_its_two_sensitive_headers() -> Result<(), String> {
