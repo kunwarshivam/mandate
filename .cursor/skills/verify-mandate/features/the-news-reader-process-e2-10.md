@@ -7,7 +7,8 @@
 - **Code:** `mandate-news-reader` (`crates/mandate-news-reader`): `src/key.rs` (the key read once
   from `platform/news-data-key`, refused `no_key`, `vault_unavailable`, `not_paper` or
   `news_key_malformed`; `vault_key` logs in by AppRole as the news reader with the role and secret
-  ids mounted beside the vault's CA, reads once, and ends the session), `src/follows.rs` (the followed agents, each checked at start:
+  ids mounted beside the vault's CA; `read_then_end` reads once and then ends the session, whatever
+  the read answered, refusing `vault_unavailable` for a session not ended), `src/follows.rs` (the followed agents, each checked at start:
   `no_follows`, `follow_malformed`), `src/tickers.rs` (each asset id's ticker from the latest
   `instrument_snapshot` registration on the control stream), `src/watch.rs` (the followed agents'
   active theses, through `mandate-research`'s `replay_theses`, and held instruments, through
@@ -21,7 +22,8 @@
   probes; the not-ready reason once on standard error as a code; SIGTERM drains). The parsed news item keeps the vendor's
   tickers in `mandate-sources`' `Draft`.
 - **Tests:** `crates/mandate-news-reader/tests/key.rs` (the vault's answer decides the key or why
-  there is none; no byte of the key in any refusal, error or `Debug` output), `tests/vault.rs` (the
+  there is none; no byte of the key in any refusal, error or `Debug` output;
+  one read, then one end of the session), `tests/vault.rs` (the
   login is the news reader's own mounted AppRole credentials, and without them or the CA no vault
   is reached), `tests/process.rs` (a start it cannot make refused with its code; no key or no
   follows: its code, live, not ready, and a drain on SIGTERM), `tests/follows.rs` (follows, tickers, the followed folds), `tests/poll.rs`

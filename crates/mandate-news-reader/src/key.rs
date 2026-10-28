@@ -67,15 +67,32 @@ pub async fn read_key<V: SecretSource>(vault: &V) -> Result<NewsAuth, KeyRefusal
     )
 }
 
+/// Reads the key once through `vault` by [`read_key`], then ends the session once with `end`,
+/// whatever the read answered, so its token outlives the read by no more than one request (E2-22).
+/// A session `end` does not end is [`KeyRefusal::VaultUnavailable`], and the key read through it
+/// is dropped.
+///
+/// # Errors
+/// [`read_key`]'s, or [`KeyRefusal::VaultUnavailable`] for a session not ended.
+pub async fn read_then_end<V: SecretSource>(
+    vault: &V,
+    end: impl AsyncFnOnce(&V) -> Result<(), SourceError>,
+) -> Result<NewsAuth, KeyRefusal> {
+    let key = read_key(vault).await;
+    let ended = end(vault).await;
+    let key = key?;
+    ended.map_err(|_| KeyRefusal::VaultUnavailable)?;
+    Ok(key)
+}
+
 /// Logs in to the vault at `address` by AppRole as [`Identity::NewsReader`], with the role and
-/// secret ids and the vault's CA mounted in `dir`, reads the key once by [`read_key`], then ends
-/// the session so its token outlives the read by no more than one request (E2-22). Credentials it
-/// cannot read, a login that fails, or a session the vault does not end is
+/// secret ids and the vault's CA mounted in `dir`, and reads the key once by [`read_then_end`],
+/// which ends the session after. Credentials it cannot read, or a login that fails, is
 /// [`KeyRefusal::VaultUnavailable`], as an outage; it logs in with nothing but the news reader's
 /// own mounted credentials.
 ///
 /// # Errors
-/// [`KeyRefusal`], as above and as [`read_key`]'s.
+/// [`KeyRefusal`], as above and as [`read_then_end`]'s.
 pub async fn vault_key(address: &str, dir: &Path, now: UtcNanos) -> Result<NewsAuth, KeyRefusal> {
     let unavailable = KeyRefusal::VaultUnavailable;
     let ca = read_mounted_ca(dir).map_err(|_| unavailable)?;
@@ -89,9 +106,5 @@ pub async fn vault_key(address: &str, dir: &Path, now: UtcNanos) -> Result<NewsA
     let vault = OpenBaoSource::login(&config, Identity::NewsReader, &role_id, &secret_id, now)
         .await
         .map_err(|_| unavailable)?;
-    let key = read_key(&vault).await;
-    let ended = vault.end_session().await;
-    let key = key?;
-    ended.map_err(|_| unavailable)?;
-    Ok(key)
+    read_then_end(&vault, OpenBaoSource::end_session).await
 }

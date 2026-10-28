@@ -2,8 +2,9 @@
 //! reader with the role and secret ids mounted beside the vault's CA, never by Kubernetes auth,
 //! which the vault offers only a connection's executor and token exchange. Without the news
 //! reader's own mounted credentials it reaches no vault at all, and every failure is
-//! `vault_unavailable`. The cell's vault drill logs in as the news reader against a real vault and
-//! checks what it may read.
+//! `vault_unavailable`. These tests reach no further than the login: the one read and the end of
+//! the session after it are `tests/key.rs`'s, through `read_then_end`. The cell's vault drill
+//! checks only the news reader's policy (`xtask/src/cell.rs`), not this login.
 
 #![allow(
     clippy::unwrap_used,
