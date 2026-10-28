@@ -531,6 +531,10 @@ export function RuntimeProvider({
       setResponses((map) => ({ ...map, [approvalId]: entry }));
       window.setTimeout(() => {
         const at = nowRef.current;
+        if (!reachable) {
+          setResponses((map) => ({ ...map, [approvalId]: { ...entry, phase: "undelivered", reason: "unreachable" } }));
+          return;
+        }
         if (silent) {
           setResponses((map) => ({ ...map, [approvalId]: { ...entry, phase: "unknown" } }));
           return;
@@ -549,7 +553,7 @@ export function RuntimeProvider({
         }, recordAfterMs * 0.75);
       }, recordAfterMs);
     },
-    [silent, recordAfterMs, change],
+    [reachable, silent, recordAfterMs, change],
   );
 
   const changeMandate = useCallback(
