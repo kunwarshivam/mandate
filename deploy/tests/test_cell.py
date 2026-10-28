@@ -891,8 +891,61 @@ def test_the_model_gateway_serves_the_recording_and_names_no_budget_of_its_own()
     for unset in ("modelGateway.workspace=", "modelGateway.deployment="):
         done = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", unset)
         assert done.returncode != 0 and "is required with images.model-gateway" in done.stderr, unset
-    hosted = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", "localImages=false")
-    assert hosted.returncode != 0 and "named only by the local cell's values" in hosted.stderr, hosted.stderr
+    hosted = helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+        "--set", "localImages=false", "--set", "deploymentTier=staging",
+    )
+    assert hosted.returncode != 0 and "a hosted model gateway starts live" in hosted.stderr, hosted.stderr
+    local = helm(CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), *LIVE_REGISTRY)
+    assert local.returncode != 0 and "the local cell serves the recorded bundle alone" in local.stderr, local.stderr
+
+
+LIVE_REGISTRY = ("--set-json", 'modelGateway.registry="{\\"entries\\":[]}"')
+LIVE_ARGS = [
+    "run", "--registry", "/run/mandate/model-gateway/registry.json", "--listen", "0.0.0.0:8080",
+    "--probe", "/tmp/process.sock", "--vault-address", "{vault}", "--vault-dir", "/run/mandate/vault",
+]
+
+
+def live_gateway(*extra: str):
+    return helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+        "--set", "localImages=false", "--set", "deploymentTier=staging", *LIVE_REGISTRY, *extra,
+    )
+
+
+def test_a_hosted_gateway_starts_live_from_the_registry_and_the_vault():
+    """DEC-2216 item 4, DEC-2081: in staging, with `modelGateway.registry` named, the gateway runs
+    the live start, never `--recorded`: the registry file mounted read-only from its ConfigMap,
+    the cell's vault, and the model gateway's AppRole and the vault's CA copied into its vault
+    directory, with the budgets the founder accepted rendered; any other hosted tier is refused."""
+    done = live_gateway()
+    assert done.returncode == 0, done.stderr
+    docs = documents(done.stdout)
+    gateway = next(w for w in workloads(docs) if w["metadata"]["name"] == "model-gateway")
+    container = first_container(gateway)
+    deployment = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "model-gateway")
+    namespace = re.search(r"https://vault\.([^.]+)\.svc:8200", " ".join(container["args"]))
+    assert namespace, container["args"]
+    expected = [a.replace("{vault}", namespace.group(0)) for a in LIVE_ARGS]
+    assert container["args"] == expected and "--recorded" not in container["args"]
+    mounts = {m["mountPath"]: m for m in container["volumeMounts"]}
+    assert mounts["/run/mandate/model-gateway"]["readOnly"] is True
+    assert mounts["/run/mandate/vault"]["readOnly"] is True
+    spec = deployment["spec"]["template"]["spec"]
+    assert deployment["spec"]["template"]["metadata"]["labels"].get("mandate.dev/egress-vault") == "true"
+    copy_step = next(i for i in spec["initContainers"] if i["name"] == "vault-credentials")
+    assert "/run/secrets/vault-model-gateway/model-gateway.role-id" in copy_step["command"]
+    volumes = {v["name"]: v for v in spec["volumes"]}
+    assert volumes["model-gateway-registry"]["configMap"]["name"] == "model-gateway-registry"
+    secrets = [s["secret"]["name"] for s in volumes["vault-sources"]["projected"]["sources"] if "secret" in s]
+    assert secrets == ["vault-approle-model-gateway"]
+    registry = next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "model-gateway-registry")
+    assert registry["data"] == {"registry.json": '{"entries":[]}'}
+    assert set(GATEWAY_BUDGETS) <= set(gateway_env(docs))
+    for tier in ("production", "dev"):
+        refused = live_gateway("--set", f"deploymentTier={tier}")
+        assert "runs the model gateway in staging alone" in refused.stderr, (tier, refused.stderr)
 
 
 def test_a_researching_runtime_calls_the_gateway_of_its_own_workspace_alone():
@@ -3992,6 +4045,11 @@ def tiers(docs: list[dict]) -> set[str]:
     return found
 
 
+# A hosted cell's model gateway starts live from a registry only staging names (DEC-2081), so a
+# render of another hosted tier with every image leaves the gateway's out.
+HOSTED_WITHOUT_GATEWAY = ["--set", "images.model-gateway="]
+
+
 def test_deployment_tier_is_set_from_values():
     hosted = CELL.parent / "hosted" / "values" / "cell1.yaml"
     api = ["--set", f"images.api={PLACEHOLDER.format('api')}"]
@@ -4003,7 +4061,7 @@ def test_deployment_tier_is_set_from_values():
         for pair in zip(images[0::2], images[1::2])
         if list(pair) not in (api, dispatcher)
         for arg in pair
-    ] + manager_workspace
+    ] + manager_workspace + HOSTED_WITHOUT_GATEWAY
     assert tiers(render(*without_api)) == {"production"}, "unset is production"
     assert tiers(render_all()) == {"ci"}, (
         "the local cell, its API server too, runs its own unsigned build as ci"
@@ -4019,7 +4077,7 @@ def test_deployment_tier_is_set_from_values():
         "api.appOrigin=https://app.example",
     ]
     with_api = [arg for s in api_block for arg in ("--set", s)]
-    assert tiers(render(*k3s, "-f", str(hosted), *images, *with_api)) == {"dev"}, (
+    assert tiers(render(*k3s, "-f", str(hosted), *images, *with_api, *HOSTED_WITHOUT_GATEWAY)) == {"dev"}, (
         "cell #1's API server takes the one tier too"
     )
     for refused in ("live", "prod", ""):

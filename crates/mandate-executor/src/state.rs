@@ -143,6 +143,9 @@ pub struct ExecutorState {
     pub(crate) last_submission: Option<Seq>,
     pub(crate) bodies: BTreeMap<IntentId, IntentBody>,
     pub(crate) held: BTreeSet<IntentId>,
+    /// Each held intent's reason code, from its last journaled hold: what tells whether an episode
+    /// of openings held for a reason is already open in an instrument (DEC-2855 item 3).
+    pub(crate) hold_reasons: BTreeMap<IntentId, String>,
     /// Held exits whose hold past `max_intent_age_s` was journaled and alerted, once (D2).
     pub(crate) held_long: BTreeSet<IntentId>,
     pub(crate) details: BTreeMap<ClientOrderId, OrderDetail>,
@@ -505,6 +508,7 @@ impl ExecutorState {
             last_submission: None,
             bodies: BTreeMap::new(),
             held: BTreeSet::new(),
+            hold_reasons: BTreeMap::new(),
             held_long: BTreeSet::new(),
             details: BTreeMap::new(),
             restrictions: BTreeMap::new(),

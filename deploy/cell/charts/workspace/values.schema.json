@@ -375,14 +375,15 @@
       }
     },
     "modelGateway": {
-      "description": "The model-gateway service's workspace and deployment, ids only, and its two monthly budgets, which only the local cell's values name (E21-62, DEC-2326)",
+      "description": "The model-gateway service's workspace and deployment, ids only, its two monthly budgets, and the live registry file a hosted cell starts it from (E21-62, DEC-2326, DEC-2081)",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "workspace",
         "deployment",
         "workspaceMonthlyUsd",
-        "deploymentMonthlyUsd"
+        "deploymentMonthlyUsd",
+        "registry"
       ],
       "properties": {
         "workspace": {
@@ -400,6 +401,10 @@
         "deploymentMonthlyUsd": {
           "type": "string",
           "pattern": "^$|^[0-9]{1,6}(\\.[0-9]{1,6})?$"
+        },
+        "registry": {
+          "type": "string",
+          "pattern": "^$|^\\{"
         }
       }
     },

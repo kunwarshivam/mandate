@@ -13,9 +13,9 @@ use mandate_executor::{
     AccountDeclaration, AccountScope, AcknowledgmentHandoff, ActivityCursor, AgentId,
     BindingGateSource, BrokerOrder, BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate,
     Command, ConnectionTrouble, ConnectorError, Effect, EventDraft, EventId, ExecutorConfig,
-    ExecutorError, ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot, IntentBody,
-    IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, MarketObservation, OrderState,
-    Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, SuspendReason, ThesisRow,
+    ExecutorError, ExecutorState, FoldedEvent, IdGen, Initiator, Input, InstrumentSnapshot,
+    IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, MarketObservation,
+    OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, SuspendReason, ThesisRow,
     WriterEpoch, fold, handle, limit_fills, recorded_fills,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
@@ -25,6 +25,7 @@ use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes_with_pii, object, text};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos, new_york_date_and_hour};
 
+use crate::establish::{Establishment, establishing, establishment};
 use crate::follow::{
     Following, Proposal, Switch, Unreadable, agents_of, bounded, folded, proposals, switches,
     theses,
@@ -34,6 +35,11 @@ use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
 use crate::risk::{RiskBook, RiskOpenings};
 use crate::robinhood::AccountReads;
+use crate::tail::{Checks, Tail};
+
+/// The alert, and the code, of a stream whose history no longer holds the head the process read it
+/// to (DEC-2854 item 4): a fixed key and no subject (`AGENTS.md` rule 6).
+const REWRITTEN: &str = "journal_rewritten";
 
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -291,6 +297,60 @@ pub struct ExecutorProcess<S, B> {
     /// When a due permission check last could not run, so it is tried again at most once every
     /// [`PROBE_EVERY_S`], as the probe reads (DEC-2840).
     check_tried: Option<UtcNanos>,
+    /// The streams each pass reads, each read only past the head it was last read to (DEC-2854).
+    tails: Tails,
+    /// The alerts of reads made between passes, for the establishment, raised with the next pass's.
+    deferred: Vec<Alert>,
+    /// Whether the alert of a stream that no longer holds its head was raised, so it is raised once.
+    rewritten: bool,
+    /// When the tails were last made to read their streams from the first record.
+    checks: Checks,
+}
+
+/// The scheduler's latest tick as the clock stream's tail keeps it: its instant, its `clock`
+/// text, and its record's event id.
+type Ticked = (UtcNanos, Option<String>, String);
+
+/// An agent stream's records of this environment, each folded once as it is first read, or the
+/// first that did not read (DEC-2854 item 2).
+type Folds = Result<Vec<FoldedEvent>, Unreadable>;
+
+/// The streams a pass reads (DEC-2854 item 2): the clock stream as its latest tick, the control
+/// stream kept whole, each followed agent's stream as its folded records, and the account stream
+/// as the records the establishment reads (journal spec rule 68).
+#[derive(Default)]
+struct Tails {
+    clock: Tail<Option<Ticked>>,
+    control: Tail<Vec<StoredEvent>>,
+    agents: BTreeMap<String, Tail<Folds>>,
+    account: Tail<Vec<StoredEvent>>,
+}
+
+impl Tails {
+    fn check(&mut self) {
+        self.clock.check();
+        self.control.check();
+        self.account.check();
+        for tail in self.agents.values_mut() {
+            tail.check();
+        }
+    }
+
+    /// Whether a check fell due and some stream has not read from its first record since.
+    fn refused(&self) -> bool {
+        self.clock.refused()
+            || self.control.refused()
+            || self.account.refused()
+            || self.agents.values().any(Tail::refused)
+    }
+
+    /// Whether some stream no longer holds the head its tail was read to.
+    fn broken(&self) -> bool {
+        self.clock.broken()
+            || self.control.broken()
+            || self.account.broken()
+            || self.agents.values().any(Tail::broken)
+    }
 }
 
 /// The most batches the risk book can owe in a row: each owed batch is reproduced by its folds or
@@ -368,6 +428,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             pending_risk: None,
             latest_tick: None,
             considered: None,
+            tails: Tails::default(),
+            checks: Checks::default(),
+            deferred: Vec::new(),
+            rewritten: false,
         };
         if config.environment != Environment::Paper {
             this.lifecycle.observe(now, Lifecycled::Failed);
@@ -467,7 +531,16 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// the pass hands the first tick it reads and `Input::Started`. Returns the alerts whose drafts
     /// committed.
     pub fn step(&mut self, now: UtcNanos) -> Vec<Alert> {
-        let mut alerts = self.stepped(now);
+        let mut alerts = std::mem::take(&mut self.deferred);
+        alerts.extend(self.stepped(now));
+        if self.tails.broken() && !self.rewritten {
+            self.rewritten = true;
+            alerts.push(Alert {
+                key: REWRITTEN,
+                subject: None,
+            });
+            self.lifecycle.observe(now, Lifecycled::Failed);
+        }
         alerts.extend(self.refusals.drain(..).map(|cause| Alert {
             key: "journal_refused_cause",
             subject: Some(cause),
@@ -482,6 +555,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             return alerts;
         }
         self.lifecycle.observe(now, Lifecycled::Heartbeat);
+        if self.checks.due(now) {
+            self.tails.check();
+        }
         if !self.settle_risk(now, &mut alerts) {
             return alerts;
         }
@@ -573,7 +649,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         {
             return alerts;
         }
-        if nothing_read && all_read && released && self.owes_nothing() {
+        if nothing_read && all_read && released && self.owes_nothing() && !self.tails.broken() {
             self.lifecycle.observe(now, Lifecycled::Completed);
         }
         self.probe(now);
@@ -835,36 +911,126 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// the clock stream holds none or cannot be read.
     fn tick(&mut self, alerts: &mut Vec<Alert>) -> Option<RiskClock> {
         let clock = self.clock.clone()?;
-        let rows = self.follow(&clock, alerts)?;
-        let (at, row) = rows
-            .iter()
-            .filter(|row| row.event_type == "ClockAdvanced")
-            .filter_map(|row| tick_of(row).map(|at| (at, row)))
-            .max_by_key(|(at, _)| *at)?;
-        self.latest_tick = clock_text(row).map(|clock| (clock, row.event_id.clone()));
+        let store = &self.store;
+        let read = self.tails.clock.follow(
+            |stream, start| store.rows_from(stream, start),
+            &clock,
+            |latest, row| {
+                if row.event_type == "ClockAdvanced"
+                    && let Some(at) = tick_of(row)
+                    && latest.as_ref().is_none_or(|(held, _, _)| at >= *held)
+                {
+                    *latest = Some((at, clock_text(row), row.event_id.clone()));
+                }
+            },
+        );
+        self.noted(&clock, read, alerts);
+        if !read {
+            return None;
+        }
+        let (at, text, event) = self.tails.clock.state.clone()?;
+        self.latest_tick = text.map(|clock| (clock, event));
         Some(RiskClock::from_secs(at.secs()))
     }
 
     /// The rows of a stream the process follows, or `None` when the store cannot read it. A stream
     /// that stops reading raises one opaque alert, and another only after it has read again
     /// (`AGENTS.md` rule 6: a fixed key and no subject), so a persistent failure is never silent.
-    fn follow(&mut self, stream: &StreamId, alerts: &mut Vec<Alert>) -> Option<Vec<StoredEvent>> {
-        let rows = self.store.rows(stream);
+    fn noted(&mut self, stream: &StreamId, read: bool, alerts: &mut Vec<Alert>) {
         let name = stream.as_str().to_owned();
-        match rows {
-            Some(_) => {
-                self.unreadable.remove(&name);
-            }
-            None => {
-                if self.unreadable.insert(name) {
-                    alerts.push(Alert {
-                        key: "stream_unreadable",
-                        subject: None,
-                    });
-                }
-            }
+        if read {
+            self.unreadable.remove(&name);
+        } else if self.unreadable.insert(name) {
+            alerts.push(Alert {
+                key: "stream_unreadable",
+                subject: None,
+            });
         }
-        rows
+    }
+
+    /// The control stream's records, read only past the head it was last read to (DEC-2854).
+    fn control_rows(&mut self, alerts: &mut Vec<Alert>) -> Option<Vec<StoredEvent>> {
+        let control = self.control.clone()?;
+        let store = &self.store;
+        let read = self.tails.control.follow(
+            |stream, start| store.rows_from(stream, start),
+            &control,
+            |kept, row| kept.push(row.clone()),
+        );
+        self.noted(&control, read, alerts);
+        read.then(|| self.tails.control.state.clone())
+    }
+
+    /// `stream`'s records of this environment, folded once each as the tail first reads them;
+    /// `None` when the stream cannot be read (DEC-2854).
+    fn agent_folds(&mut self, stream: &StreamId, alerts: &mut Vec<Alert>) -> Option<&Folds> {
+        let store = &self.store;
+        let environment = self.environment;
+        let tail = self
+            .tails
+            .agents
+            .entry(stream.as_str().to_owned())
+            .or_insert_with(|| Tail::new(Ok(Vec::new())));
+        let read = tail.follow(
+            |stream, start| store.rows_from(stream, start),
+            stream,
+            |kept, row| {
+                if row.environment != environment.as_str() {
+                    return;
+                }
+                if let Ok(rows) = kept {
+                    match folded(row) {
+                        Ok(row) => rows.push(row),
+                        Err(unreadable) => *kept = Err(unreadable),
+                    }
+                }
+            },
+        );
+        self.noted(stream, read, alerts);
+        if !read {
+            return None;
+        }
+        self.tails
+            .agents
+            .get(stream.as_str())
+            .map(|tail| &tail.state)
+    }
+
+    /// Where the account stream stands under rule 68 ([`establishment`]), over the account
+    /// stream's establishment records and the control stream, each read only past the head it was
+    /// last read to (DEC-2854 item 2). A stream whose history its tail no longer holds stops the
+    /// process before anything is handed.
+    ///
+    /// # Errors
+    /// `stream_unavailable` when a stream cannot be read, `journal_rewritten` when one no longer
+    /// holds its head, and [`establishment`]'s code.
+    pub fn establishment(&mut self, now: UtcNanos) -> Result<Establishment, &'static str> {
+        let account = self.account.clone().ok_or("stream_unavailable")?;
+        let store = &self.store;
+        let read = self.tails.account.follow(
+            |stream, start| store.rows_from(stream, start),
+            &account,
+            |kept, row| {
+                if establishing(row) {
+                    kept.push(row.clone());
+                }
+            },
+        );
+        let mut alerts = Vec::new();
+        self.noted(&account, read, &mut alerts);
+        let control = self.control_rows(&mut alerts);
+        self.deferred.extend(alerts);
+        if self.tails.broken() {
+            self.lifecycle.observe(now, Lifecycled::Failed);
+            return Err(REWRITTEN);
+        }
+        let control = control.filter(|_| read).ok_or("stream_unavailable")?;
+        establishment(
+            &self.tails.account.state,
+            &control,
+            self.state.scope(),
+            self.environment,
+        )
     }
 
     /// The kill switches of the account's agents that this stream has not applied, read from the
@@ -878,8 +1044,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// every opening and hands no acknowledgment, and every exit still goes (journal spec §9.28,
     /// DEC-2830).
     fn switches(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> Option<Followed> {
-        let control = self.control.clone()?;
-        let rows = self.follow(&control, alerts)?;
+        let rows = self.control_rows(alerts)?;
         let Ok(following) = agents_of(&rows, self.state.scope(), self.environment) else {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return None;
@@ -890,6 +1055,14 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             return None;
         }
         let workspace = self.state.scope().workspace.0.clone();
+        let streams: BTreeSet<String> = following
+            .agents
+            .keys()
+            .map(|agent| format!("agent:{workspace}:{}", agent.0))
+            .collect();
+        self.tails
+            .agents
+            .retain(|stream, _| streams.contains(stream));
         let mut pending = Vec::new();
         let mut proposed = Vec::new();
         let mut researched = Vec::new();
@@ -900,17 +1073,14 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 all_read = false;
                 continue;
             };
-            let Some(rows) = self.follow(&stream, alerts) else {
+            let Some(read) = self.agent_folds(&stream, alerts) else {
                 all_read = false;
                 continue;
             };
-            let read: Result<Vec<_>, _> = rows
-                .iter()
-                .filter(|row| row.environment == self.environment.as_str())
-                .map(folded)
-                .collect();
-            let Ok((held, asked, records)) =
-                read.and_then(|rows| Ok((switches(&rows)?, proposals(&rows)?, theses(&rows))))
+            let Ok((held, asked, records)) = read
+                .as_deref()
+                .map_err(|unreadable| *unreadable)
+                .and_then(|rows| Ok((switches(rows)?, proposals(rows)?, theses(rows))))
             else {
                 unreadable = true;
                 continue;
@@ -978,6 +1148,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             proposed.retain(|(_, proposal)| !proposal.purpose.adds_risk());
             Vec::new()
         });
+        if self.tails.refused() {
+            proposed.retain(|(_, proposal)| !proposal.purpose.adds_risk());
+        }
         Some(Followed {
             switches: pending,
             proposals: proposed,
@@ -1901,9 +2074,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
 
     /// Appends `drafts` as one batch on the account stream and folds what committed into the
     /// executor's fold and the risk book, answering [`Ran::Refused`] for a batch the journal
-    /// refused as invalid.
+    /// refused as invalid. Nothing is appended once a stream no longer holds the head the process
+    /// read it to, so nothing more is journaled or sent (DEC-2854 item 4).
     fn append(&mut self, now: UtcNanos, drafts: &[EventDraft]) -> Ran {
-        let Some(account) = self.account.clone() else {
+        let Some(account) = self.account.clone().filter(|_| !self.tails.broken()) else {
             return Ran::Stopped;
         };
         let Some(bytes) = self.bytes(drafts) else {
