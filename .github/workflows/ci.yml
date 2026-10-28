@@ -96,6 +96,8 @@ jobs:
   # one-line reasons `fast` and `full` print. It builds only xtask.
   select:
     if: ${{ !github.event.pull_request.draft }}
+    # DEC-2076: on GitHub's runners, so lint and the tests, which need no self-hosted runner, never
+    # wait on the self-hosted pool being up.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -111,11 +113,11 @@ jobs:
       cell_web: ${{ steps.select.outputs.cell_web }}
       reasons: ${{ steps.select.outputs.reasons }}
       # DEC-2065. Where the cell jobs run: the founder's self-hosted runners, named by the repository
-      # variable CI_RUNNER, but only for main's own runs and pull requests from this repository's
-      # branches. A fork's pull request, and any run while CI_RUNNER is unset, stays on GitHub's
+      # variable CI_RUNNER, but only for main's own pushes and dispatches and pull requests from this
+      # repository's branches (DEC-2075). A fork's pull request, and any run while CI_RUNNER is unset, stays on GitHub's
       # runners. A fork's pull request brings its own workflow, so this keeps honest runs off them;
       # what stops a fork is the approval setting and the runners' own job-started hook.
-      runner: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}
+      runner: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && vars.CI_RUNNER || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -279,15 +281,22 @@ jobs:
       - run: cargo xtask ci test-doc
       - run: cargo xtask ci test-rh-sim
 
-  # DEC-871. The Python tests, which took about two and a half minutes inside `test`; this job
-  # builds only xtask.
+  # DEC-871. The Python tests; this job builds only xtask.
   fast-python:
+    name: fast-python (${{ matrix.shard }})
     needs: select
     if: needs.select.outputs.python == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
+    # DEC-2646, DEC-464. pytest outgrew the ten-minute limit on main (740 tests, about 15 minutes in
+    # one job), so each shard runs every fourth of the sorted collected tests through
+    # `mandate_tools.pytest_shard`, and together they run every test once.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/4", "2/4", "3/4", "4/4"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -302,6 +311,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: fast-python
+          save-if: ${{ matrix.shard == '1/4' }}
       # The workspace chart's invariants (deploy/tests/test_cell.py) render it with helm, and the
       # hosted overlays' (test_gitops.py) build them with flux and check them with kubeconform, so
       # the required `fast` check holds them; without the tools they would skip (DEC-993 item 10,
@@ -320,6 +330,7 @@ jobs:
           tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
       - run: cargo xtask ci test-python
         env:
+          MANDATE_TEST_PARTITION: ${{ matrix.shard }}
           MANDATE_CELL_HELM_REQUIRED: "1"
           MANDATE_GITOPS_REQUIRED: "1"
 
@@ -632,17 +643,24 @@ jobs:
   # makes a machine without them fail the run, and MANDATE_CELL_REQUIRED an API that cannot be
   # asked, rather than either reading "not run". It holds no secret. Not required, as `cell-demo`
   # is not; it starts for the cell jobs' changes and for any change under `web/`. It restores
-  # `cell-demo`'s cache and saves none of its own.
+  # `cell-demo`'s cache and saves none of its own. MANDATE_DEMO_LOOP_ELSEWHERE leaves the research
+  # loop's links, and their waits, to `cell-demo`, which runs the same scenario and reads them, so
+  # this job's web drive fits its ten minutes without dropping a part (DEC-464). It is `1` only
+  # when `select` starts `cell-demo` too; on a web-only selection this job reads the loop itself.
+  # Its cap is fifteen minutes, the one exception to DEC-464's ten (DEC-2648): it runs only on
+  # main and is no required check, and in the regular session the trade loop's whole run comes on
+  # top of the cell's start, and a killed job would lose the failure upload below.
   cell-demo-web:
     needs: select
     if: needs.select.outputs.cell_web == 'true'
     runs-on: ${{ needs.select.outputs.runner }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
       MANDATE_CELL_REQUIRED: "1"
       MANDATE_DEMO_WEB_REQUIRED: "1"
+      MANDATE_DEMO_LOOP_ELSEWHERE: ${{ needs.select.outputs.cell == 'true' && '1' || '' }}
       NEXT_TELEMETRY_DISABLED: "1"
       DO_NOT_TRACK: "1"
     steps:
@@ -710,14 +728,19 @@ jobs:
           save-if: false
           cache-on-failure: true
       - run: cargo xtask ci cell-demo
-      # The web gesture's Playwright output when the job fails, so its cause can be read off the run
-      # rather than off the runner. Only the log: the same directory holds next dev's throwaway TLS
-      # key (DEC-2609 item 5).
+      # Each web spec's Playwright output when the job fails, so its cause can be read off the run
+      # rather than off the runner: the kill switch gesture's, the trade loop's (step 4, with the
+      # result it wrote, which names the first step it did not reach) and the journey's. Only these
+      # files: each spec's directory also holds next dev's throwaway TLS key (DEC-2609 item 5).
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: cell-demo-web-playwright
-          path: target/cell/web-gesture/playwright.log
+          path: |
+            target/cell/web-gesture/playwright.log
+            target/cell/web-trade-loop/playwright.log
+            target/cell/web-trade-loop/result.json
+            target/cell/web-journey/playwright.log
           if-no-files-found: ignore
           retention-days: 7
 

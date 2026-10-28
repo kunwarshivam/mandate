@@ -424,6 +424,26 @@ impl mandate_api_server::journal::Journal for MemJournal {
         })
     }
 
+    fn rows_from<'a>(
+        &'a self,
+        stream: &'a str,
+        start: mandate_journal::TrustedStart,
+    ) -> mandate_api_server::journal::Rows<'a> {
+        let failing = self.failing.lock().expect("unpoisoned").contains(stream);
+        let rows: Vec<_> = self
+            .rows_of(stream)
+            .into_iter()
+            .filter(|row| row.seq >= start.from_seq)
+            .collect();
+        Box::pin(async move {
+            if failing {
+                Err(mandate_api_server::journal::JournalUnavailable)
+            } else {
+                Ok(rows)
+            }
+        })
+    }
+
     fn take_ownership<'a>(
         &'a self,
         stream: &'a str,

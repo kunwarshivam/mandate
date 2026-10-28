@@ -279,6 +279,31 @@ impl PgJournal {
         Ok(rows)
     }
 
+    /// The events of `stream` from `start.from_seq` on, in `seq` order, after checking their chain
+    /// from `start` (journal spec §11 checks 1 to 5): a reader that verified the stream up to
+    /// `start.from_seq - 1` and holds that event's hash reads only what was appended since, as
+    /// soundly as [`Self::rows`] reads the whole stream. A first event whose `prev_hash` is not
+    /// `start.prev_hash` fails the chain.
+    pub async fn rows_from(
+        &self,
+        stream: &StreamId,
+        start: TrustedStart,
+    ) -> Result<Vec<StoredEvent>, PgError> {
+        let from = i64::try_from(start.from_seq).unwrap_or(i64::MAX);
+        let rows = sqlx::query(sql(format!(
+            "SELECT {COLUMNS} FROM events WHERE stream_id = $1 AND seq >= $2 ORDER BY seq"
+        )))
+        .bind(stream.as_str())
+        .bind(from)
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(decode_event)
+        .collect::<Result<Vec<_>, _>>()?;
+        check(stream.as_str(), &rows, start)?;
+        Ok(rows)
+    }
+
     /// The event stored under `event_id` in any stream, after checking its bytes, columns, and hash
     /// (journal spec §11 checks 1, 2, and 4).
     pub async fn event(&self, event_id: &str) -> Result<Option<StoredEvent>, PgError> {

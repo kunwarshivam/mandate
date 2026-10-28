@@ -403,6 +403,7 @@ fn no_platform_identity_has_a_kubernetes_policy() {
         Identity::SecretImport,
         Identity::ModelGateway,
         Identity::NewsReader,
+        Identity::BarsReader,
         Identity::EmailSender,
         Identity::Provisioner,
     ] {

@@ -1014,3 +1014,14 @@ fn retaining_the_deployed_agents_drops_every_other_cap_and_mark() {
         Err(MeterRefusal::BudgetExhausted)
     );
 }
+
+/// An evaluation's reservation reads back from its journaled payload, so a restarted meter counts
+/// the spend of a gate against the caps (DEC-2216).
+#[test]
+fn an_evaluations_reservation_reads_back_from_its_payload() {
+    let reserved = MeterRecord::Reserved(reservation(1, None, Purpose::Evaluation, "7.2", day(27)));
+    assert_eq!(
+        MeterRecord::from_journal("MeterReserved", reserved.event_id(), &reserved.payload()),
+        Some(reserved)
+    );
+}

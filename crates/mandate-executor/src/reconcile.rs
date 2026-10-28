@@ -1068,7 +1068,27 @@ pub(crate) mod tests {
             ports: &Ports<'_>,
             keep: usize,
         ) -> Result<Vec<Effect>, ExecutorError> {
-            let effects = handle(&mut self.state, input, ports, &ALLOWING_BINDING_GATE)?;
+            self.run_binding(input, ports, keep, &ALLOWING_BINDING_GATE)
+        }
+
+        /// [`Self::run`] with `binding_gate` as the deployment's configuration.
+        pub(crate) fn run_with(
+            &mut self,
+            input: Input,
+            ports: &Ports<'_>,
+            binding_gate: &dyn crate::ports::BindingGateSource,
+        ) -> Result<Vec<Effect>, ExecutorError> {
+            self.run_binding(input, ports, usize::MAX, binding_gate)
+        }
+
+        fn run_binding(
+            &mut self,
+            input: Input,
+            ports: &Ports<'_>,
+            keep: usize,
+            binding_gate: &dyn crate::ports::BindingGateSource,
+        ) -> Result<Vec<Effect>, ExecutorError> {
+            let effects = handle(&mut self.state, input, ports, binding_gate)?;
             let mut kept = 0;
             for effect in &effects {
                 if let Effect::Journal(draft) = effect {
@@ -1634,21 +1654,50 @@ pub(crate) mod tests {
                         .and_then(Value::as_str)
                         .map(str::to_owned)
                 };
-                field("verdict").zip(field("reason_code"))
+                field("verdict").map(|verdict| (verdict, field("reason_code").unwrap_or_default()))
             }
             _ => None,
         })
     }
 
+    /// Ten AAPL bought and filled by `agent-a`'s order, so they are its lots (DEC-2849).
     fn filled_ten(executor: &mut Executor) -> Result<(), ExecutorError> {
+        executor.commit_one(
+            "OrderSubmitted",
+            object(vec![
+                ("client_order_id", Value::Str("md-ten".to_owned())),
+                ("agent", Value::Str("agent-a".to_owned())),
+                ("instrument", Value::Str("AAPL".to_owned())),
+                ("side", Value::Str("buy".to_owned())),
+                ("qty", Value::Str("10".to_owned())),
+                ("limit", Value::Str("150".to_owned())),
+                ("purpose", Value::Str("open".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
         executor.commit_one(
             "FillApplied",
             object(vec![
                 ("fill_id", Value::Str("f-0".to_owned())),
+                ("client_order_id", Value::Str("md-ten".to_owned())),
                 ("instrument", Value::Str("AAPL".to_owned())),
                 ("side", Value::Str("buy".to_owned())),
                 ("qty_gross", Value::Str("10".to_owned())),
                 ("price", Value::Str("150".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
+        executor.commit_one(
+            "OrderStateChanged",
+            object(vec![
+                ("client_order_id", Value::Str("md-ten".to_owned())),
+                ("state", Value::Str("filled".to_owned())),
                 (
                     "risk_clock",
                     crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
@@ -1665,6 +1714,263 @@ pub(crate) mod tests {
                 crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
             )])?,
         )
+    }
+
+    /// An unattributed fill of `qty` AAPL on `side`, the owner's own trade outside Mandate.
+    fn owners_fill(
+        executor: &mut Executor,
+        id: &str,
+        side: &str,
+        qty: &str,
+        at: i64,
+    ) -> Result<(), ExecutorError> {
+        executor.commit_one(
+            "FillApplied",
+            object(vec![
+                ("fill_id", Value::Str(id.to_owned())),
+                ("instrument", Value::Str("AAPL".to_owned())),
+                ("side", Value::Str(side.to_owned())),
+                ("qty_gross", Value::Str(qty.to_owned())),
+                ("price", Value::Str("150".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(at))?,
+                ),
+            ])?,
+        )
+    }
+
+    /// The `OwnerAlertSent` drafts in `effects`, each as its payload's members.
+    fn owner_alerts(effects: &[Effect]) -> Vec<(EventId, Option<EventId>, Value)> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "OwnerAlertSent" => Some((
+                    draft.event_id.clone(),
+                    draft.causation_id.clone(),
+                    draft.payload.clone(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The event id of the `GateDecided` in `effects`.
+    fn decided_id(effects: &[Effect]) -> Option<EventId> {
+        effects.iter().find_map(|effect| match effect {
+            Effect::Journal(draft) if draft.event_type == "GateDecided" => {
+                Some(draft.event_id.clone())
+            }
+            _ => None,
+        })
+    }
+
+    /// DEC-2855: the owner is alerted once per episode of openings held `attribution_deficit`. The
+    /// first held opening's `GateDecided` is the subject, and the alert carries only it, the kind
+    /// and a `null` command (`AGENTS.md` rule 6); a second opening held in the same episode raises
+    /// nothing. Once the owner buys the gap back the held openings go, the episode ends, and the
+    /// next deficit's first hold is alerted again. A replay of the journal reaches the same state.
+    #[test]
+    fn a_deficit_episode_alerts_the_owner_once() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        filled_ten(&mut executor)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        run_completed(&mut executor)?;
+        owners_fill(&mut executor, "f-owner-1", "sell", "5", 0)?;
+        let buy = |id: &str| intent(id, "agent-a", Side::Buy, Purpose::Open);
+        let first = executor.run(buy("01JABCDEFGHJKMNPQRSTVWXYZ3")?, &ports)?;
+        assert_eq!(
+            gate_decision(&first),
+            Some(("hold".to_owned(), "attribution_deficit".to_owned()))
+        );
+        let subject = decided_id(&first).ok_or_else(|| ExecutorError::NotInterpreted {
+            what: "no GateDecided".to_owned(),
+            story: "E6-15",
+        })?;
+        let raised = owner_alerts(&first);
+        assert_eq!(raised.len(), 1, "one alert for the episode's first hold");
+        let (_, cause, payload) = raised
+            .first()
+            .ok_or_else(|| ExecutorError::NotInterpreted {
+                what: "no alert".to_owned(),
+                story: "E6-15",
+            })?;
+        assert_eq!(
+            cause.as_ref(),
+            Some(&subject),
+            "rule 119: caused by its subject"
+        );
+        assert_eq!(
+            payload,
+            &object(vec![
+                ("subject", Value::Str(subject.0.clone())),
+                ("kind", Value::Str("attribution_deficit".to_owned())),
+                ("owner_command", Value::Null),
+            ])?,
+            "nothing about the instrument, a quantity or a price"
+        );
+        let second = executor.run(buy("01JABCDEFGHJKMNPQRSTVWXYZ4")?, &ports)?;
+        assert_eq!(
+            gate_decision(&second),
+            Some(("hold".to_owned(), "attribution_deficit".to_owned()))
+        );
+        assert!(
+            owner_alerts(&second).is_empty(),
+            "the same episode alerts once"
+        );
+
+        owners_fill(&mut executor, "f-owner-2", "buy", "5", 0)?;
+        let released = executor.run(Input::Tick(crate::types::RiskClock::from_secs(1)), &ports)?;
+        assert_eq!(
+            submitted(&released),
+            2,
+            "both openings go once the gap is bought back"
+        );
+        assert!(executor.state.hold_reasons.is_empty(), "the episode ended");
+
+        owners_fill(&mut executor, "f-owner-3", "sell", "5", 1)?;
+        let next = executor.run(buy("01JABCDEFGHJKMNPQRSTVWXYZ5")?, &ports)?;
+        assert_eq!(owner_alerts(&next).len(), 1, "a new episode alerts again");
+
+        let mut replayed = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        for event in &executor.journal {
+            fold(&mut replayed, event)?;
+        }
+        assert_eq!(replayed.hold_reasons, executor.state.hold_reasons);
+        assert_eq!(replayed.held, executor.state.held);
+        Ok(())
+    }
+
+    /// A buy of 5 `instrument` by `agent-a` to open, as intent `id`.
+    fn opening_in(id: &str, instrument: &str) -> Result<Input, ExecutorError> {
+        Ok(Input::Intent(IntentHandoff {
+            intent_id: IntentId(EventId(id.to_owned())),
+            agent: AgentId("agent-a".to_owned()),
+            tif: Some(TimeInForce::Day),
+            body: IntentBody::Order {
+                instrument: InstrumentId::new(instrument)?,
+                side: Side::Buy,
+                qty: Qty::parse("5")?,
+                limit: Some(Price::parse("150")?),
+                purpose: Purpose::Open,
+                protection: None,
+            },
+            confirmation: None,
+        }))
+    }
+
+    /// A protective leg resting in `instrument` that no agent can be named for (§5.4).
+    fn ownerless_leg(
+        executor: &mut Executor,
+        id: &str,
+        instrument: &str,
+    ) -> Result<(), ExecutorError> {
+        let leg = crate::types::Order {
+            client_order_id: ClientOrderId::parse(id)?,
+            intent_id: None,
+            agent: None,
+            instrument: InstrumentId::new(instrument)?,
+            side: Side::Sell,
+            qty: Qty::parse("10")?,
+            filled_qty: Qty::ZERO,
+            state: OrderState::Accepted,
+            attempt: 1,
+            purpose: Purpose::Protective,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        };
+        executor
+            .state
+            .orders
+            .insert(leg.client_order_id.clone(), leg);
+        Ok(())
+    }
+
+    /// The kinds of the owner alerts in `effects`, each with the `GateDecided` it names.
+    fn alerted(effects: &[Effect]) -> Vec<(String, bool)> {
+        let subject = decided_id(effects).map(|id| Value::Str(id.0));
+        owner_alerts(effects)
+            .into_iter()
+            .map(|(_, _, payload)| {
+                (
+                    payload
+                        .get("kind")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned(),
+                    payload.get("subject") == subject.as_ref(),
+                )
+            })
+            .collect()
+    }
+
+    /// DEC-2855 for `protection_unattributed`, and each reason and instrument its own episode: an
+    /// ownerless leg in AAPL holds a first opening, alerted once, and a second, not alerted. A
+    /// deficit in AAPL then holds an opening `attribution_deficit`, a new episode of its own reason,
+    /// and an ownerless leg in MSFT holds an opening there, a new episode of its own instrument:
+    /// each alerted once, its alert naming its own hold.
+    #[test]
+    fn each_reason_and_instrument_is_its_own_episode() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        filled_ten(&mut executor)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        run_completed(&mut executor)?;
+        ownerless_leg(&mut executor, "md-leg-aapl", "AAPL")?;
+        let held = |reason: &str| Some(("hold".to_owned(), reason.to_owned()));
+        let unattributed = || vec![("protection_unattributed".to_owned(), true)];
+        let first = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY10", "AAPL")?, &ports)?;
+        assert_eq!(gate_decision(&first), held("protection_unattributed"));
+        assert_eq!(alerted(&first), unattributed());
+        let second = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY11", "AAPL")?, &ports)?;
+        assert_eq!(gate_decision(&second), held("protection_unattributed"));
+        assert!(alerted(&second).is_empty(), "the same episode alerts once");
+
+        owners_fill(&mut executor, "f-owner-1", "sell", "5", 0)?;
+        let deficit = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY12", "AAPL")?, &ports)?;
+        assert_eq!(gate_decision(&deficit), held("attribution_deficit"));
+        assert_eq!(
+            alerted(&deficit),
+            vec![("attribution_deficit".to_owned(), true)],
+            "another reason in the same instrument is another episode"
+        );
+
+        ownerless_leg(&mut executor, "md-leg-msft", "MSFT")?;
+        let other = executor.run(opening_in("01JABCDEFGHJKMNPQRSTVWXY13", "MSFT")?, &ports)?;
+        assert_eq!(gate_decision(&other), held("protection_unattributed"));
+        assert_eq!(
+            alerted(&other),
+            unattributed(),
+            "another instrument is another episode"
+        );
+        Ok(())
     }
 
     /// The coordinator's ruling on #174 (comment 5857742391), rule 3: on a stream that has

@@ -6,6 +6,7 @@ use std::env;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+#[cfg(target_os = "linux")]
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;

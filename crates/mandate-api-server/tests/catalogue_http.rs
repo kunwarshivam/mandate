@@ -120,6 +120,7 @@ fn built(with_store: bool) -> Fixture {
         challenges: Arc::new(Challenges::default()),
         connect: None,
         reduction: Arc::default(),
+        folds: Arc::default(),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

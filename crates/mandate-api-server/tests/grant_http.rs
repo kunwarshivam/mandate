@@ -252,6 +252,7 @@ fn world_with(setup: &Setup<'_>) -> World {
         challenges: Arc::clone(&challenges),
         connect: None,
         reduction: Arc::default(),
+        folds: Arc::default(),
     };
     let w = World {
         addr: serve(http::api(app, Drain::new())),

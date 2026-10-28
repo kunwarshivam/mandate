@@ -1072,12 +1072,11 @@ fn a_version_1_mark_is_no_verdict_and_moves_nothing() {
     assert!(snapshot.instrument_restrictions.is_empty(), "30 s is fresh");
 }
 
-/// `RiskState` holds one position, so a sane BTC/USD mark at 57990 moves MC-R20's E to
-/// 10000 + 0.1 × (57990 − 60000) = 9799, and a mark naming a second instrument is one the fold
-/// cannot step without pricing BTC's position at it (DEC-2308 item 4): the view becomes
-/// unreadable, holding openings and no exit.
+/// A sane BTC/USD mark at 57990 moves MC-R20's E to 10000 + 0.1 × (57990 − 60000) = 9799. A mark
+/// naming another instrument, whose lots the agent does not hold, steps nothing: the view reads on,
+/// its E unmoved (DEC-2849 item 2, DEC-2804 item 9).
 #[test]
-fn a_mark_for_a_second_instrument_makes_the_view_unreadable() {
+fn a_mark_for_another_instrument_steps_nothing() {
     let case = case("MC-R20");
     let mandate = case_mandate(&case);
     let mut fold = open_case(&case, &mandate, &Crypto);
@@ -1102,22 +1101,22 @@ fn a_mark_for_a_second_instrument_makes_the_view_unreadable() {
         true,
         "crypto",
     );
+    let before = fold.view().clone();
     assert_eq!(fold.fold(&other).unwrap(), vec![]);
-    assert_eq!(
-        unreadable(fold.view()),
-        (UnreadableCause::RefusedToDecide, 2)
-    );
-    assert_eq!(fold.view().mode(), AgentMode::ExitsOnly);
-    assert!(fold.view().holds(OrderPath::Opening));
-    for path in EXITS.into_iter().chain([OrderPath::KillSwitch]) {
-        assert!(!fold.view().holds(path), "{path:?} is never held (rule 13)");
-    }
+    let (RiskView::Readable { snapshot, head }, RiskView::Readable { snapshot: was, .. }) =
+        (fold.view(), &before)
+    else {
+        panic!("readable: {:?}", fold.view());
+    };
+    assert_eq!((snapshot, *head), (was, 3));
+    assert_eq!(snapshot.agent_equity.to_string(), "9799");
 }
 
 /// MC-R20 opens holding BTC/USD, bound at open, so a first mark naming ETH/USD at 59000 is never
-/// read as BTC's price (which would make E 9900): the view becomes unreadable (DEC-2310 item 1).
+/// read as BTC's price (which would make E 9900): it steps nothing (DEC-2310 item 1, DEC-2849
+/// item 2).
 #[test]
-fn a_held_openings_first_mark_for_another_instrument_makes_the_view_unreadable() {
+fn a_held_openings_first_mark_for_another_instrument_steps_nothing() {
     let case = case("MC-R20");
     let mandate = case_mandate(&case);
     let mut fold = open_case(&case, &mandate, &Crypto);
@@ -1129,16 +1128,15 @@ fn a_held_openings_first_mark_for_another_instrument_makes_the_view_unreadable()
         true,
         "crypto",
     );
+    let opened = fold.view().clone();
     assert_eq!(fold.fold(&other).unwrap(), vec![]);
-    assert_eq!(
-        unreadable(fold.view()),
-        (UnreadableCause::RefusedToDecide, 1)
-    );
-    assert_eq!(fold.view().mode(), AgentMode::ExitsOnly);
-    assert!(fold.view().holds(OrderPath::Opening));
-    for path in EXITS.into_iter().chain([OrderPath::KillSwitch]) {
-        assert!(!fold.view().holds(path), "{path:?} is never held (rule 13)");
-    }
+    let (RiskView::Readable { snapshot, head }, RiskView::Readable { snapshot: was, .. }) =
+        (fold.view(), &opened)
+    else {
+        panic!("readable: {:?}", fold.view());
+    };
+    assert_eq!((snapshot, *head), (was, 2));
+    assert_eq!(snapshot.agent_equity.to_string(), "10000");
 }
 
 /// A held opening, or a fold opened past seq 1, must name its instrument: the first could otherwise
@@ -2058,6 +2056,93 @@ fn a_record_the_fold_would_not_have_produced_makes_the_view_unreadable() {
     );
 }
 
+/// DEC-2849 I7, one fold per followed agent (item 3): a risk record or mode record another
+/// agent's fold owed, naming that agent, steps nothing in this one, even beside a record of this
+/// fold's from the same cause. Read anywhere, the fold's view and what it owes
+/// are those of a fold that never saw it (a record naming this fold's agent that it never returned
+/// stays `not_reproduced`: `a_record_the_fold_would_not_have_produced_makes_the_view_unreadable`).
+#[test]
+fn another_agents_risk_record_steps_nothing() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let (_, rows) = mc_r01_journaled(&mandate, &calendar);
+    let mut records: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| {
+            row.event_type.starts_with("Risk") || row.event_type == "AgentModeApplied"
+        })
+        .map(|(index, _)| index)
+        .collect();
+    records.sort_by_key(|index| rows[*index].event_type.clone());
+    records.dedup_by_key(|index| rows[*index].event_type.clone());
+    assert!(
+        records
+            .iter()
+            .any(|index| rows[*index].event_type == "AgentModeApplied"),
+        "a mode record, which names its `agent`"
+    );
+    assert!(!records.is_empty(), "the walk journals records");
+    let mut checked = 0;
+    for at in 1..rows.len() {
+        for &record in &records {
+            let body = String::from_utf8(rows[record].body.clone()).unwrap();
+            let key = [r#""agent_id":""#, r#""agent":""#]
+                .into_iter()
+                .find(|key| body.contains(key))
+                .unwrap();
+            let start = body.find(key).unwrap() + key.len();
+            let end = start + body[start..].find('"').unwrap();
+            let others = format!("{}{}{}", &body[..start], "agent-other", &body[end..]);
+            let mut seen = open_case(&case, &mandate, &calendar);
+            let mut unseen = open_case(&case, &mandate, &calendar);
+            for row in &rows[..at] {
+                seen.fold(row).unwrap();
+                unseen.fold(row).unwrap();
+            }
+            let foreign = StoredEvent {
+                seq: rows[at - 1].seq + 1,
+                body: others.into_bytes(),
+                ..rows[record].clone()
+            };
+            assert_eq!(seen.fold(&foreign).unwrap(), Vec::new());
+            let mut next = unseen.clone();
+            let shifted: Vec<StoredEvent> = rows[at..]
+                .iter()
+                .map(|row| StoredEvent {
+                    seq: row.seq + 1,
+                    ..row.clone()
+                })
+                .collect();
+            for row in &shifted {
+                seen.fold(row).unwrap();
+            }
+            for row in &rows[at..] {
+                next.fold(row).unwrap();
+            }
+            let snapshot = |view: &RiskView| match view {
+                RiskView::Readable { snapshot, .. } => Some(snapshot.clone()),
+                RiskView::Unreadable { .. } => None,
+            };
+            assert!(snapshot(seen.view()).is_some(), "still readable");
+            assert_eq!(
+                (
+                    snapshot(seen.view()),
+                    seen.owed().cloned().collect::<Vec<_>>()
+                ),
+                (
+                    snapshot(next.view()),
+                    next.owed().cloned().collect::<Vec<_>>()
+                ),
+                "{} naming another agent, read after row {at}",
+                rows[record].event_type
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0);
+}
+
 /// A crash between a cause and its records leaves them owed at the head: the restarted fold reads
 /// the stream to its end and names exactly the records to append next (R3).
 #[test]
@@ -2668,9 +2753,9 @@ fn rows_from_before_the_deployment_are_not_the_agents() {
     );
 }
 
-/// The opening's own second is the agent's: a mark of another instrument there fails closed, and
-/// on a bound fold a mark before it, of the bound instrument or another, steps nothing before the
-/// instrument is checked (DEC-2804 item 3, DEC-2308 item 4). A mark in that second prices the
+/// The opening's own second is the agent's: on a bound fold a mark before it, of the bound
+/// instrument or another, steps nothing (DEC-2804 item 3), and a mark of another instrument in it
+/// steps nothing too (DEC-2849 item 2). A mark in that second prices the
 /// flat fold, and a fill and a fee there are the agent's (DEC-2834).
 #[test]
 fn the_opening_second_is_the_agents_and_a_bound_fold_skips_earlier_marks() {
@@ -2708,9 +2793,9 @@ fn the_opening_second_is_the_agents_and_a_bound_fold_skips_earlier_marks() {
     fold.fold(&mark(4, ETH, OPENED, "50", true, "regular"))
         .unwrap();
     assert_eq!(
-        unreadable(fold.view()),
-        (UnreadableCause::RefusedToDecide, 3),
-        "a mark at the opening second is the agent's, and names another instrument"
+        readable_head(fold.view()),
+        4,
+        "a mark at the opening second naming another instrument steps nothing"
     );
 
     let mut at_opening = bound();
@@ -3341,9 +3426,10 @@ fn an_unpriced_fill_is_held_until_the_first_counted_sane_mark_prices_it() {
     assert_eq!(restarted.view(), fold.view());
 }
 
-/// DEC-2834 item 4: while unpriced, a mark naming another instrument is refused at once, for good.
+/// DEC-2849 item 2: while unpriced, a mark naming another instrument steps nothing and does not
+/// price the fold, and the bound instrument's first counted sane mark still does.
 #[test]
-fn a_mark_of_another_instrument_while_unpriced_is_refused() {
+fn a_mark_of_another_instrument_while_unpriced_steps_nothing() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
     for row in own_order(2, AGENT, "o-1", XYZ, "buy", "10") {
@@ -3353,17 +3439,10 @@ fn a_mark_of_another_instrument_while_unpriced_is_refused() {
         .unwrap();
     fold.fold(&mark(5, ETH, AT_2, "90", true, "regular"))
         .unwrap();
-    assert_eq!(
-        unreadable(fold.view()),
-        (UnreadableCause::RefusedToDecide, 4)
-    );
+    assert_eq!(unreadable(fold.view()), (UnreadableCause::Unpriced, 5));
     fold.fold(&mark(6, XYZ, AT_2, "90", true, "regular"))
         .unwrap();
-    assert_eq!(
-        unreadable(fold.view()),
-        (UnreadableCause::RefusedToDecide, 4),
-        "refused for good"
-    );
+    assert_eq!(equity(fold.view()), "9900", "10000 − 1000 + 10 × 90");
 }
 
 /// One input to a flat fold: an own buy or sell at 100, a tick, or an XYZ mark at a bid, sane or
@@ -3640,4 +3719,105 @@ fn a_mark_in_the_opening_second_prices_a_fill_held_there() {
     fold.fold(&mark(5, XYZ, OPENED, "90", true, "regular"))
         .unwrap();
     assert_eq!(equity(fold.view()), "9900");
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+    /// DEC-2849 item 2: another instrument's marks change nothing in a fold. The same inputs,
+    /// journaled with and without an ETH mark after each input, end in the same snapshot and the
+    /// same journaled records.
+    #[test]
+    fn another_instruments_marks_change_nothing(
+        inputs in proptest::collection::vec(flat_input(), 1..25),
+        bids in proptest::collection::vec(1_u16..=500, 25),
+    ) {
+        let timed = flat_rows(&inputs, false);
+        let (records, view, _, _) = fold_flat(&timed);
+        let (interleaved, with_others) = fold_flat_with(&timed, &bids);
+        proptest::prop_assert_eq!(records, interleaved);
+        let (RiskView::Readable { snapshot, .. }, RiskView::Readable { snapshot: want, .. }) =
+            (&with_others, &view)
+        else {
+            return Err(proptest::test_runner::TestCaseError::fail(format!(
+                "both read: {with_others:?} {view:?}"
+            )));
+        };
+        proptest::prop_assert_eq!(snapshot, want);
+    }
+}
+
+/// [`fold_flat`] on a fold bound to XYZ at opening, as the executor daemon opens every fold
+/// (DEC-2804 item 2), with an ETH mark at a bid from `bids` journaled after each input's batch and
+/// its records, at the input's clock: the records journaled and the view at the end.
+fn fold_flat_with(timed: &[(String, Flat)], bids: &[u16]) -> (Vec<(String, Value)>, RiskView) {
+    let mandate = mandate();
+    let mut fold = AccountRiskFold::open(
+        ACCOUNT,
+        1,
+        AGENT,
+        &mandate,
+        &opening(),
+        Some(XYZ),
+        &Wall,
+        TripwireState::default(),
+    )
+    .unwrap();
+    let (mut seq, mut held, mut orders) = (2_u64, 0_u32, 0_u32);
+    let mut records = Vec::new();
+    for ((clock, input), bid) in timed.iter().zip(bids.iter().cycle()) {
+        let mut rows = Vec::new();
+        match input {
+            Flat::Buy(qty) | Flat::Sell(qty) => {
+                let buy = matches!(input, Flat::Buy(_));
+                if !buy && u32::from(*qty) > held {
+                    continue;
+                }
+                if buy {
+                    held += u32::from(*qty);
+                } else {
+                    held -= u32::from(*qty);
+                }
+                orders += 1;
+                let order = format!("o-{orders}");
+                let (side, qty) = (if buy { "buy" } else { "sell" }, qty.to_string());
+                rows.extend(own_order(seq, AGENT, &order, XYZ, side, &qty));
+                rows.push(fill(
+                    seq + 2,
+                    &order,
+                    XYZ,
+                    (side, &qty, "100"),
+                    clock,
+                    COMMISSION,
+                ));
+            }
+            Flat::Tick => rows.push(tick(seq, clock)),
+            Flat::Mark(bid, sane, regular) => {
+                let session = if *regular { "regular" } else { "pre_market" };
+                rows.push(mark(seq, XYZ, clock, &bid.to_string(), *sane, session));
+            }
+        }
+        for row in rows {
+            let appends = fold.fold(&row).unwrap();
+            seq = row.seq + 1;
+            for append in &appends {
+                let record = appended(seq, append);
+                let body = parse(&record.body).unwrap();
+                records.push((
+                    record.event_type.clone(),
+                    body.get("payload").unwrap().clone(),
+                ));
+                fold.fold(&record).unwrap();
+                seq += 1;
+            }
+        }
+        let other = mark(seq, ETH, clock, &bid.to_string(), true, "regular");
+        assert_eq!(
+            fold.fold(&other).unwrap(),
+            Vec::new(),
+            "another instrument's mark"
+        );
+        seq += 1;
+    }
+    (records, fold.view().clone())
 }

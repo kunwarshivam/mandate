@@ -28,6 +28,8 @@ pub enum SourceError {
     CredentialFile,
     #[error("the vault has no role for this login yet")]
     RoleMissing,
+    #[error("the vault's key-value mount is still finishing the upgrade it starts when enabled")]
+    KvUpgrading,
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
 }
@@ -47,6 +49,7 @@ impl SourceError {
             Self::Config => "config",
             Self::CredentialFile => "credential_file",
             Self::RoleMissing => "role_missing",
+            Self::KvUpgrading => "kv_upgrading",
             Self::Unimplemented { .. } => "unimplemented",
         }
     }

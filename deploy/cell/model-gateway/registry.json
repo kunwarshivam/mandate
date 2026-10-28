@@ -1,0 +1,79 @@
+{
+  "entries": [
+    {
+      "endpoint": {
+        "cached_per_million": "0.1",
+        "host": "openrouter.ai",
+        "id": "openrouter:google-vertex/global:llm.research_sonnet",
+        "input_per_million": "2",
+        "output_per_million": "10",
+        "price_table": "openrouter /api/v1/models/anthropic/claude-sonnet-5.5/endpoints read 2026-10-27",
+        "region": "global",
+        "reported_provider": "Google",
+        "upstream": "google-vertex/global"
+      },
+      "entry": {
+        "agentic": "v0_2",
+        "deadline_ms": 120000,
+        "max_output_tokens": 2000,
+        "model_id": "llm.research_sonnet",
+        "model_name": "anthropic/claude-sonnet-5.5",
+        "model_version": "1.0.0",
+        "provider": "anthropic",
+        "seed": 7,
+        "snapshot": "claude-sonnet-5-5"
+      },
+      "status": "evaluating"
+    },
+    {
+      "endpoint": {
+        "cached_per_million": "0.01",
+        "host": "openrouter.ai",
+        "id": "openrouter:google-vertex/global:llm.research_haiku",
+        "input_per_million": "0.1",
+        "output_per_million": "0.5",
+        "price_table": "openrouter /api/v1/models/anthropic/claude-haiku-5.5/endpoints read 2026-10-27",
+        "region": "global",
+        "reported_provider": "Google",
+        "upstream": "google-vertex/global"
+      },
+      "entry": {
+        "agentic": "v0_2",
+        "deadline_ms": 120000,
+        "max_output_tokens": 2000,
+        "model_id": "llm.research_haiku",
+        "model_name": "anthropic/claude-haiku-5.5",
+        "model_version": "1.0.0",
+        "provider": "anthropic",
+        "seed": 7,
+        "snapshot": "claude-haiku-5-5"
+      },
+      "status": "evaluating"
+    },
+    {
+      "endpoint": {
+        "cached_per_million": "0.2",
+        "host": "openrouter.ai",
+        "id": "openrouter:azure:llm.research_terra",
+        "input_per_million": "2",
+        "output_per_million": "12",
+        "price_table": "openrouter /api/v1/models/openai/gpt-5.6-terra/endpoints read 2026-10-27",
+        "region": "global",
+        "reported_provider": "Azure",
+        "upstream": "azure"
+      },
+      "entry": {
+        "agentic": "v0_2",
+        "deadline_ms": 120000,
+        "max_output_tokens": 2000,
+        "model_id": "llm.research_terra",
+        "model_name": "openai/gpt-5.6-terra",
+        "model_version": "1.0.0",
+        "provider": "openai",
+        "seed": 7,
+        "snapshot": "gpt-5.6-terra"
+      },
+      "status": "evaluating"
+    }
+  ]
+}

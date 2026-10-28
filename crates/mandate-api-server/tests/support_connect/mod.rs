@@ -293,6 +293,7 @@ fn fixture_bound(
         challenges: Arc::clone(&challenges),
         connect: connect.clone(),
         reduction: Arc::default(),
+        folds: Arc::default(),
     };
     journal
         .streams

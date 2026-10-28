@@ -88,6 +88,11 @@ dispatcher:
 # CI cell lists any.
 data:
   instruments: []
+  # Where its bars come from (DEC-2082): `recorded`, the listed instruments' recorded series, the
+  # local and CI cell's alone; or `alpaca-iex`, each registered US-equity instrument's settled IEX
+  # bars from data.alpaca.markets under the platform's data key, read once from the vault
+  # (DEC-2283), staging's alone, which lists no instrument.
+  source: recorded
 
 # The workspace API server's settings (workspace API spec §3.11 item 2), each required once
 # images.api is named. None is a secret: the session signing key is made in the pod's memory at
@@ -207,9 +212,10 @@ runtime:
   owner: ""
   research: ""
 
-# The local cell's second deployment manager (DEC-2070): the research agent's own workspace, as a
-# ULID, whose runtime and executor it starts, as the first starts the hosted workspace's. Empty, it
-# does not render; `cargo xtask cell demo` names it, and only a dev or ci cell may.
+# The second deployment manager (DEC-2070): the research agent's own workspace, as a ULID, whose
+# runtime and executor it starts, as the first starts the hosted workspace's. Empty, it does not
+# render; `cargo xtask cell demo` names it. Only a dev or ci cell may, or staging beside the model
+# gateway (DEC-2080); production never.
 deployManager:
   researchWorkspace: ""
 
@@ -225,6 +231,10 @@ modelGateway:
   deployment: ""
   workspaceMonthlyUsd: ""
   deploymentMonthlyUsd: ""
+  # The live registry file (DEC-2216 item 4, DEC-2081), strict JSON: a hosted cell's alone, and
+  # staging's alone among them. Named, the gateway starts live from it and the vault; empty, it
+  # serves the recorded bundle, which only the local cell's image carries.
+  registry: ""
 
 # The broker every executor runs over (DEC-2306 item 1): `fixture`, the in-process fixture paper
 # broker, or `alpaca-paper`, Alpaca's paper trading host under the vault lease on its connection,
