@@ -311,7 +311,6 @@ pub(crate) fn exit_cancels(
                 && order.purpose == Purpose::Protective
                 && !order.state.is_terminal()
                 && order.state != OrderState::Intent
-                && order.qty > order.filled_qty
         })
         .collect();
     if agent.0 == EVERY_AGENT {

@@ -6665,6 +6665,53 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// DEC-2849 item 8b: a sequence that keeps another holder's leg records the exiting agent's own
+    /// prices, never the last placed protection's. Agent-a's OCO at 170 over 140 rested before
+    /// agent-b's leg at 170 over 130; agent-a's exit of four keeps agent-b's leg, and its start
+    /// records agent-a's stop of 140, at which its remaining six are re-placed.
+    #[test]
+    fn a_partial_exit_sequence_takes_its_own_agents_prices() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        bought_by_b(&mut executor)?;
+        leg_at(&mut executor, ("md-held-2-p1", "agent-b", "5"), "130")?;
+        executor.run(quote("139")?, &ports)?;
+        let started = executor.run(sell(EXIT, "4", "139", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(cancels(&started), vec![OCO]);
+        let start = protection_drafts(&started)
+            .into_iter()
+            .find(|draft| {
+                draft.payload.get("action").and_then(Value::as_str) == Some("unprotected_start")
+            })
+            .ok_or_else(|| missing("the sequence's start"))?;
+        assert_eq!(
+            start.payload.get("stop").and_then(Value::as_str),
+            Some("140"),
+            "agent-a's own stop, not agent-b's 130"
+        );
+        Ok(())
+    }
+
+    /// DEC-2849 item 8b: a passive exit still cancels every leg, another holder's included. It is
+    /// placed as its own OCO's take-profit and re-protects the rest of the position around it
+    /// (§5.4), so a leg it kept would cover those shares twice.
+    #[test]
+    fn a_passive_exit_cancels_every_leg() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        bought_by_b(&mut executor)?;
+        leg_at(&mut executor, ("md-held-2-p1", "agent-b", "5"), "130")?;
+        executor.run(quote("150")?, &ports)?;
+        let asked = executor.run(sell(EXIT, "4", "160", Purpose::DiscretionaryExit)?, &ports)?;
+        let mut cancelled = cancels(&asked);
+        cancelled.sort_unstable();
+        assert_eq!(cancelled, vec!["md-held-1-p1", "md-held-2-p1"]);
+        assert_eq!(actions(&asked), vec!["passive_start"]);
+        Ok(())
+    }
+
     /// DEC-2849 item 8b (§5.4 under shared positions, I4): agent-a's risk exit of its ten
     /// cancels only its own leg. Agent-b's leg for its five fits beside the exit within N = 15, so
     /// it keeps resting, and the exit goes once agent-a's own cancel is confirmed.
