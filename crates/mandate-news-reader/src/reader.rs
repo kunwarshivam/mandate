@@ -7,7 +7,8 @@
 //! nothing, fetches nothing, and stays not ready, with the reason's code
 //! ([`NewsReader::not_ready`]). It never retries the key read. Otherwise it takes a newer epoch,
 //! fencing every earlier reader, and folds its stream for the item ids it holds and the last
-//! `knowledge_at`.
+//! `knowledge_at`; a stored item whose body, `item_id` or `knowledge_at` it cannot read leaves it
+//! not ready, `news_stream_unreadable`, fetching and writing nothing (DEC-2281 item 3).
 //!
 //! **A step.** A step asks the vendor for at most one page ([`crate::poll`]), so the allowlist's pace
 //! is the only limit on requests. A round asks from the last `knowledge_at`, or 48 hours back for
@@ -186,7 +187,10 @@ impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
             this.lifecycle.observe(now, Input::Failed);
             return this;
         };
-        this.replay(&rows);
+        if this.replay(&rows).is_none() {
+            this.not_ready = Some("news_stream_unreadable");
+            return this;
+        }
         this.lifecycle.observe(
             now,
             Input::Replayed {
@@ -357,22 +361,24 @@ impl<S: Store, A: ArtifactStore, T: Transport> NewsReader<S, A, T> {
         Some(assets)
     }
 
-    /// The item ids the stream holds and its last `knowledge_at`, and its head.
-    fn replay(&mut self, rows: &[StoredEvent]) {
+    /// The item ids the stream holds and its last `knowledge_at`, and its head; `None` when a
+    /// `NewsItemStored` row's body, `item_id` or `knowledge_at` cannot be read, since the held ids
+    /// or the last known time would then be short (DEC-2281 item 3).
+    fn replay(&mut self, rows: &[StoredEvent]) -> Option<()> {
         for row in rows {
             self.head = row.seq;
             if row.event_type != "NewsItemStored" {
                 continue;
             }
-            let body = parse(&row.body).ok();
-            let payload = body.as_ref().and_then(|b| b.get("payload"));
-            let member = |name: &str| payload.and_then(|p| p.get(name)).and_then(Value::as_str);
-            if let Some(item_id) = member("item_id") {
-                self.held.insert(item_id.to_owned());
-            }
-            let known = member("knowledge_at").and_then(|k| UtcNanos::parse(k).ok());
-            self.last_known = self.last_known.max(known);
+            let body = parse(&row.body).ok()?;
+            let payload = body.get("payload")?;
+            let member = |name: &str| payload.get(name).and_then(Value::as_str);
+            let item_id = member("item_id")?;
+            let known = UtcNanos::parse(member("knowledge_at")?).ok()?;
+            self.held.insert(item_id.to_owned());
+            self.last_known = self.last_known.max(Some(known));
         }
+        Some(())
     }
 }
 
