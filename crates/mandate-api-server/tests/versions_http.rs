@@ -2780,7 +2780,6 @@ fn journals_the_waiver(
 /// confirmation with a passkey still in its 24-hour cool-off commits, and journals the waiver
 /// after its assertion, naming the cell's tier.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_test_cells_waived_confirm_with_a_fresh_passkey_commits_and_journals_the_waiver() {
     for (waiver, tier) in [(CoolOffWaiver::Ci, "ci"), (CoolOffWaiver::Dev, "dev")] {
         let w = passkeyed_in(Port::Waived(waiver), false, COOLING);
@@ -2809,7 +2808,6 @@ fn a_test_cells_waived_confirm_with_a_fresh_passkey_commits_and_journals_the_wai
 /// DEC-2146 item 3: a deployment is a route that appends its assertion, so it carries the waiver
 /// the same way.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_ci_cells_waived_deploy_with_a_fresh_passkey_commits_and_journals_the_waiver() {
     let w = passkeyed_in(Port::Waived(CoolOffWaiver::Ci), true, COOLING);
     w.funded();
@@ -2959,7 +2957,6 @@ fn the_waiver_writes_nothing_for_a_passkey_past_its_cool_off() {
 /// `OwnerCommandIssued` with the evidence, then its `StepUpAsserted`, then its
 /// `StepUpCoolOffWaived`.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_ci_cells_waived_resume_and_stop_with_a_fresh_passkey_commit_and_journal_the_waiver() {
     for (route, kind, confirms, body) in [
         (

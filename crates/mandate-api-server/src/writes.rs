@@ -42,7 +42,7 @@ use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
 use crate::session::Authenticated;
-use crate::stepup::{Action, Asserted, Judged, Unverified, journaled};
+use crate::stepup::{Action, Asserted, Judged, Unverified, journaled, waiver_id};
 use crate::versions::stored;
 
 /// The `Idempotency-Key` request header (§3.4).
@@ -270,15 +270,15 @@ async fn commit_with(
     let assertion = match asserted {
         Some((asserted, operation)) => {
             match assertion_draft(app, gate, &issued, asserted, operation) {
-                Some(assertion) => Some(assertion),
+                Some(assertion) => assertion,
                 None => return Refused::JournalUnavailable.response(),
             }
         }
-        None => None,
+        None => Vec::new(),
     };
     let batch: Vec<&[u8]> = std::iter::once(bytes.as_slice())
         .chain(alert.as_deref())
-        .chain(assertion.as_deref())
+        .chain(assertion.iter().map(Vec::as_slice))
         .collect();
     match appended_batch_at(app, reader, (&text, &batch), gate.now, None).await {
         Settled::Stored(row) => accepted(command.id_member(), &row, gate.now, dropped, status),
@@ -292,16 +292,20 @@ async fn commit_with(
 }
 
 /// The `StepUpAsserted` recording the passkey step-up that authorized `issued`, its id derived under
-/// `operation`, its raw assertion stored first. `None` when no id derives, no store is bound, or
-/// the store refuses it.
+/// `operation`, its raw assertion stored first, then its `StepUpCoolOffWaived` when a test cell
+/// waived the cool-off (DEC-2146 item 4). `None` when no id derives, no store is bound, or the
+/// store refuses it.
 fn assertion_draft(
     app: &App,
     gate: &Gate,
     issued: &Issued<'_>,
     asserted: &Asserted,
     operation: &str,
-) -> Option<Vec<u8>> {
+) -> Option<Vec<Vec<u8>>> {
     let (_, id) = derived_for(gate, issued.workspace, operation)?;
+    let waiver = waiver_id(asserted, operation, |operation| {
+        derived_for(gate, issued.workspace, operation).map(|(_, id)| id)
+    })?;
     let writer = Writer {
         workspace: issued.workspace,
         principal: issued.principal,
@@ -309,7 +313,12 @@ fn assertion_draft(
         environment: issued.environment,
         now: issued.now,
     };
-    asserted.drafted(app.objects.as_deref()?, &writer, issued.event_id)
+    asserted.drafted(
+        app.objects.as_deref()?,
+        &writer,
+        issued.event_id,
+        waiver.as_deref(),
+    )
 }
 
 /// The operation §3.4 derives a resume's `StepUpAsserted` id under ([DEC-2128] item 3).
@@ -604,7 +613,6 @@ async fn granted(app: &App, gate: &Gate, reader: &Reader, asked: &Asked<'_>) -> 
             Refused::JournalUnavailable.response()
         }
         Err(Unverified::Code(code)) => problem(StatusCode::UNAUTHORIZED, problem_body(code)),
-        Err(Unverified::Unimplemented { story }) => invalid(vec![Unverified::unimplemented(story)]),
     }
 }
 
@@ -938,18 +946,12 @@ async fn stepped(
                     now: gate.now,
                 };
                 match forwarded.assertion {
-                    Some(assertion) => {
-                        match app
-                            .step_up
-                            .asserted(evidence, Some(assertion), &action, &judged)
-                        {
-                            Ok(asserted) => asserted.map(Some),
-                            Err(Unverified::Unimplemented { story }) => {
-                                return invalid(vec![Unverified::unimplemented(story)]);
-                            }
-                            Err(Unverified::Code(_)) => None,
-                        }
-                    }
+                    Some(assertion) => app
+                        .step_up
+                        .asserted(evidence, Some(assertion), &action, &judged)
+                        .ok()
+                        .flatten()
+                        .map(Some),
                     None => app
                         .step_up
                         .verify(evidence, &action, &judged)

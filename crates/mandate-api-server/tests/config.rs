@@ -510,7 +510,6 @@ fn a_release_build_refuses_any_set_page_in_every_tier() {
 /// DEC-2146 item 2: the waiver is exactly `true`, and only a `dev` or `ci` tier starts with it,
 /// each waiving as its own tier. Unset is no waiver, in every tier.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_waiver_of_true_starts_only_in_dev_and_ci_and_unset_waives_nothing() {
     let on = Some(OsStr::new("true"));
     assert_eq!(cool_off_waiver(Tier::Dev, on), Ok(Some(CoolOffWaiver::Dev)));
@@ -523,7 +522,6 @@ fn a_waiver_of_true_starts_only_in_dev_and_ci_and_unset_waives_nothing() {
 /// DEC-2146 item 2: staging, production, and a tier unset or unknown (which reads as production)
 /// refuse the waiver at start, naming the setting alone, so a misconfigured cell fails closed.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_waiver_outside_dev_and_ci_refuses_the_start() {
     let refused = Err(StartRefusal::Setting {
         name: COOL_OFF_WAIVER,
@@ -547,7 +545,6 @@ fn a_waiver_outside_dev_and_ci_refuses_the_start() {
 /// DEC-2146 item 2: any value but exactly `true` refuses the start, in a test tier too, and a
 /// value that is not UTF-8 is still a value set.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_waiver_of_any_other_value_refuses_the_start_in_every_tier() {
     let refused = Err(StartRefusal::Setting {
         name: COOL_OFF_WAIVER,

@@ -224,10 +224,7 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
             name: reduction::INGRESS_PEERS,
         })?;
     let ingress = reduction::ingress_peers(ingress_setting.as_deref())?;
-    let waiver = match env::var_os(COOL_OFF_WAIVER) {
-        Some(value) => cool_off_waiver(tier, Some(&value))?,
-        None => None,
-    };
+    let waiver = cool_off_waiver(tier, env::var_os(COOL_OFF_WAIVER).as_deref())?;
     let start = Start {
         settings,
         key,

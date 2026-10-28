@@ -43,7 +43,7 @@ use crate::routes::{
     self, Reader, Refused, Unreadable, authorized, enveloped, path_refused, string,
 };
 use crate::session::{Authenticated, Random};
-use crate::stepup::{Action, Asserted, Judged, Unverified, journaled};
+use crate::stepup::{Action, Asserted, Judged, Unverified, journaled, waiver_id};
 use crate::versions::object;
 use crate::writes::{
     Gate, appended_batch_at, derived_for, id_text, principal_text, repeated, strictly, unknown,
@@ -356,12 +356,9 @@ async fn started(
             &action,
             &judged,
         )
-        .map_err(|unverified| match unverified {
-            Unverified::Code(ProblemCode::JournalUnavailable) => unavailable(),
-            Unverified::Code(code) => coded(StatusCode::UNAUTHORIZED, code),
-            Unverified::Unimplemented { story } => {
-                Box::new(invalid(vec![Unverified::unimplemented(story)]))
-            }
+        .map_err(|Unverified::Code(code)| match code {
+            ProblemCode::JournalUnavailable => unavailable(),
+            code => coded(StatusCode::UNAUTHORIZED, code),
         })?;
     if request.environment == Wire::Live {
         gated(app, &reader, &gate, Gated::Connect)
@@ -371,12 +368,12 @@ async fn started(
     planned(&reader, &ids, &request, evidence)?;
     let assertion = match &asserted {
         Some(asserted) => {
-            Some(assertion_drafted(app, &gate, &reader, &ids, asserted).ok_or_else(unavailable)?)
+            assertion_drafted(app, &gate, &reader, &ids, asserted).ok_or_else(unavailable)?
         }
-        None => None,
+        None => Vec::new(),
     };
     let batch: Vec<&[u8]> = std::iter::once(draft.as_slice())
-        .chain(assertion.as_deref())
+        .chain(assertion.iter().map(Vec::as_slice))
         .collect();
     let judged_head = reader.control.last().map(|row| row.seq);
     match appended_batch_at(app, &reader, (&ids.event, &batch), gate.now, judged_head).await {
@@ -427,17 +424,21 @@ fn unavailable() -> Box<Response> {
 }
 
 /// The `StepUpAsserted` a passkey start appends after its request (journal spec §9.32, DEC-2126
-/// item 3), its raw assertion first stored as an artifact: caused by the request, by the same
-/// user, under an id derived from the key. `None` when the store is absent or refuses the bytes,
-/// or for a value the canonical form cannot hold.
+/// item 3), its raw assertion first stored as an artifact, then its `StepUpCoolOffWaived` when a
+/// test cell waived the cool-off (DEC-2146 item 4): caused by the request, by the same user, under
+/// ids derived from the key. `None` when the store is absent or refuses the bytes, or for a value
+/// the canonical form cannot hold.
 fn assertion_drafted(
     app: &App,
     gate: &Gate,
     reader: &Reader,
     ids: &Ids,
     asserted: &Asserted,
-) -> Option<Vec<u8>> {
+) -> Option<Vec<Vec<u8>>> {
     let (_, event_id) = derived_for(gate, &reader.workspace, ASSERTED_OPERATION)?;
+    let waiver = waiver_id(asserted, ASSERTED_OPERATION, |operation| {
+        derived_for(gate, &reader.workspace, operation).map(|(_, id)| id)
+    })?;
     let writer = Writer {
         workspace: &reader.workspace,
         principal: &ids.principal,
@@ -445,7 +446,12 @@ fn assertion_drafted(
         environment: "paper",
         now: gate.now,
     };
-    asserted.drafted(app.objects.as_deref()?, &writer, &ids.event)
+    asserted.drafted(
+        app.objects.as_deref()?,
+        &writer,
+        &ids.event,
+        waiver.as_deref(),
+    )
 }
 
 /// The `ConnectionRequested` version 2 this start appends (DEC-2621 item 1).
