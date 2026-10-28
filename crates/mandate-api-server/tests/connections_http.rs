@@ -88,6 +88,7 @@ fn fixture() -> Fixture {
         challenges: Arc::default(),
         connect: None,
         reduction: Arc::default(),
+        folds: Arc::default(),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

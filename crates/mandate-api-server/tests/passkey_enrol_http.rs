@@ -214,6 +214,7 @@ fn fixture_with(rows: &Rows, answer: Unverified, stores: bool) -> Fixture {
         challenges: Arc::clone(&challenges),
         connect: None,
         reduction: Arc::default(),
+        folds: Arc::default(),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),
