@@ -4,10 +4,24 @@
 //! write alike.
 //!
 //! - [`instruments`]: the workspace's registered US-equity instruments, at most 50.
+//! - [`pg`]: the worker over Postgres, the bars transport and the store.
+//! - [`progress`]: what the worker tells the probe loop, so a slow fetch never misses a heartbeat.
+//! - [`registrations`]: the control stream read incrementally, and its snapshot objects kept.
 //! - [`schedule`]: when a daily or minute generation is due, and a workspace's own offsets.
+//! - [`key`]: the platform data key, read once through the vault as the bars reader.
+//! - [`pass`]: one pass at the clock, reporting counts and codes only.
+//! - [`worker`]: the worker loop, over the journal read, clock and pause the binary hands it.
+//! - [`source`]: the [`generation::BarsSource`] over the batched fetch and its transport.
 //! - [`generation`]: writing generations whole or not at all, `CONFIRM`, retention, and the closes
 //!   object the runtime's observation names.
 
 pub mod generation;
 pub mod instruments;
+pub mod key;
+pub mod pass;
+pub mod pg;
+pub mod progress;
+pub mod registrations;
 pub mod schedule;
+pub mod source;
+pub mod worker;
