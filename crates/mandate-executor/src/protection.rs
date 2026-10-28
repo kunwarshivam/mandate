@@ -6583,7 +6583,7 @@ mod sequence_tests {
     /// of its own, so its entry's bracket gives it. Agent-a's bracket at 140 was placed first and
     /// agent-b's at 145 second; a mark of 144 breaches agent-b's, so the exit is agent-b's five.
     #[test]
-    fn a_bracket_legs_stop_is_its_entrys() -> Result<(), ExecutorError> {
+    fn a_bracket_legs_stop_is_its_entry_s() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = tiered_ports(&config, &fees);
         let mut executor = Executor::opened(&ports)?;
