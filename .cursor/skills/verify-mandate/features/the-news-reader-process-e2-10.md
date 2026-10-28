@@ -11,10 +11,19 @@
   `instrument_snapshot` registration on the control stream), `src/watch.rs` (the followed agents'
   active theses, through `mandate-research`'s `replay_theses`, and held instruments, through
   `mandate-gate-context`'s `Journaled::held`), `src/poll.rs` (a round's tickers in chunks the fetcher takes, a page
-  cap per chunk, a pause after an idle or failed round). The parsed news item keeps the vendor's
+  cap per chunk, a pause after an idle or failed round), `src/records.rs` (`StreamOpened` and
+  `NewsItemStored` as drafts with deterministic ids, timed `local`), `src/reader.rs`
+  (`NewsReader`: one writer epoch, the stream folded at start, one page a step), `src/items.rs`
+  (each new item's typed record stored and journaled, a batch in doubt retried as the same bytes,
+  a refused append stopping the reader). The parsed news item keeps the vendor's
   tickers in `mandate-sources`' `Draft`.
 - **Tests:** `crates/mandate-news-reader/tests/key.rs` (the vault's answer decides the key or why
   there is none; no byte of the key in any refusal, error or `Debug` output), `tests/follows.rs` (follows, tickers, the followed folds), `tests/poll.rs`
-  (chunks, pages, cap, cooldown); `mandate-sources`' `tests/ingest.rs` (the vendor's tickers kept
+  (chunks, pages, cap, cooldown), `tests/start.rs` (not ready and why, paper only, the epoch and
+  the fold at start), `tests/rounds.rs` (what is asked as theses and holdings change, counted
+  gaps, chunking, the page cap and the pause end to end), `tests/reader.rs` (items stored and
+  journaled once, known times, skips, pages and pace, a retried batch and a refused append),
+  `tests/properties.rs` (each version stored once and known times never going back, against the
+  test's own ledger); `mandate-sources`' `tests/ingest.rs` (the vendor's tickers kept
   as parsed).
-- **Run:** `cargo nextest run -p mandate-news-reader -p mandate-sources`.
+- **Run:** `cargo nextest run -p mandate-news-reader -p mandate-sources -p mandate-store`.
